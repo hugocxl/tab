@@ -9,31 +9,31 @@ crates. Behavior is 1:1 unless listed under "Intentionally changed".
 
 ## Server (`tabd`)
 
-- [ ] Starts from the app or CLI when not running; Unix socket in the profile folder; single instance per profile (lock file)
-- [ ] Projects: create, rename, delete, list; Home project (always first, can't be deleted); failed status when the folder is gone
-- [ ] Worktree projects: parent/child, branch name, parent color, auto-discovery of worktrees made outside Tab, show/hide per project, prune when deleted outside Tab (no panes, no history)
-- [ ] Sessions: create in a project (optional directory and command), attach/detach, shared size, ownership (first attached client), end, discard, exit reasons
-- [ ] Session persistence: screen and history saved in the background; survives program exit and server restart; ended sessions removed after 7 days
-- [ ] History: byte budget per session (default 16 MiB), paging, search (plain text, case-insensitive, optional case-sensitive)
-- [ ] Screen frames: changed rows only, merged, one in flight per client, acks; full screen on resize
-- [ ] Terminal colors set by the app (theme, overrides, cursor style/blink)
-- [ ] Clear screen (Cmd+K) through the engine, form feed at a semantic prompt
-- [ ] Kitty graphics placements sent to clients
-- [ ] Metadata events: title, directory, bell, clipboard write (OSC 52), input modes, cursor blinking, progress (OSC 9;4), foreground process name
-- [ ] Shell integration (zsh, fish automatic; bash opt-in): prompts marks, cwd, command exit; prompt jumping and command output selection
-- [ ] Environment: TERM, COLORTERM, TERM_PROGRAM, TAB_SERVER_ID, TAB_SESSION_ID, LANG fallback; login shells; default shell setting
-- [ ] Server settings: default shell, history budget, shell integration; `server.json`; `settings get|set`
-- [ ] Stop / stop-if-idle / restart; stop refuses while terminals run unless forced
-- [ ] Git: summary, branches, remote branches, changes (conflicts, staged, unstaged, untracked), stage/unstage/discard, commit/amend, diff, raw diff, log, status, repo info, init, pull/push/fetch, checkout, cherry-pick, revert, delete branch (local, remote), watch working tree — `GitService` implemented with tests; waiting for core wiring and app verification
+- [x] Starts from the app or CLI when not running; Unix socket in the profile folder; single instance per profile (lock file)
+- [ ] Projects: create, rename, delete, list; Home project (always first, can't be deleted); failed status when the folder is gone — server side implemented with tests (catalog in `sessions/catalog.json`, retry-safe receipts, paging, deletes end the project's sessions); the failed status is the app's (the protocol carries no project status)
+- [ ] Worktree projects: parent/child, branch name, parent color, auto-discovery of worktrees made outside Tab, show/hide per project, prune when deleted outside Tab (no panes, no history) — server side implemented (`WorktreeCatalog`, `setWorktreesVisible`, `pruneWorktree` refuses worktrees with sessions or saved output); discovery is app-driven as in Codesh (`git worktrees` + `worktree register` + `pruneWorktree`)
+- [ ] Sessions: create in a project (optional directory and command), attach/detach, shared size, ownership (first attached client), end, discard, exit reasons — server implemented with end-to-end tests; needs app verification
+- [x] Session persistence: screen and history saved in the background; survives program exit and server restart; ended sessions removed after 7 days
+- [x] History: byte budget per session (default 16 MiB), paging, search (plain text, case-insensitive, optional case-sensitive)
+- [x] Screen frames: changed rows only, merged, one in flight per client, acks; full screen on resize
+- [ ] Terminal colors set by the app (theme, overrides, cursor style/blink) — server implemented (`setTerminalColors`, applied to attached and new sessions); needs app verification
+- [ ] Clear screen (Cmd+K) through the engine, form feed at a semantic prompt — server implemented (`clearScreen` request and session `clear`); needs app verification
+- [ ] Kitty graphics placements sent to clients — server sends changed graphics in frames and snapshots; needs app verification
+- [ ] Metadata events: title, directory, bell, clipboard write (OSC 52), input modes, cursor blinking, progress (OSC 9;4), foreground process name — server implemented (foreground process via `tcgetpgrp` + `proc_name`); needs app verification
+- [ ] Shell integration (zsh, fish automatic; bash opt-in): prompts marks, cwd, command exit; prompt jumping and command output selection — server installs the scripts into the profile and sets `ZDOTDIR`/`XDG_DATA_DIRS`/`TAB_SHELL_INTEGRATION_DIR`; prompt jumping is the app's
+- [x] Environment: TERM, COLORTERM, TERM_PROGRAM, TAB_SERVER_ID, TAB_SESSION_ID, LANG fallback; login shells; default shell setting
+- [x] Server settings: default shell, history budget, shell integration; `server.json`; `settings get|set`
+- [x] Stop / stop-if-idle / restart; stop refuses while terminals run unless forced
+- [ ] Git: summary, branches, remote branches, changes (conflicts, staged, unstaged, untracked), stage/unstage/discard, commit/amend, diff, raw diff, log, status, repo info, init, pull/push/fetch, checkout, cherry-pick, revert, delete branch (local, remote), watch working tree — `GitService` implemented with tests; wired into `tabd`; waiting for app verification
 - [ ] Worktrees: list, create (new or existing branch, default/template/folder location), register existing, remove (with files), checkout PR, inspect removal (uncommitted changes), setup/teardown hooks from `.tab/worktree.json` and `~/.config/tab/worktree.json` with env vars and 5-minute limit — implemented in `GitService` + `Hooks/` with tests (catalog side through `WorktreeCatalog`); location choice is the app's; receipts are in memory, not durable across server restarts
 - [ ] Pull requests via `gh`: number for a branch, info, list — implemented (also create, merge, close, checkout, update branch, diff) with a fake `gh` in tests
 - [ ] Files: list, read, read bytes, write, stat, mkdir, rename, delete, watch (FSEvents), folders listing for remote project pickers — `FilesService` implemented with tests; folders listing is the core's `listFolders`
 - [ ] Search: file list (`rg --files` or `git ls-files`), content search (`rg`, case and regex toggles, 200 matches per file) — implemented in `Search/` with tests
-- [ ] Exec: run a program in a project folder without a shell, cancellable
-- [ ] Uploads: chunked file upload into a temp folder (remote drops and pastes)
-- [ ] AI agent detection: 12 providers from JSON manifests; working/blocked/idle; one unread event per session; read/ack/claim; works with no app attached — `AgentDetector` + `AgentStateTracker` implemented with the Rust fixtures; events, read/ack/claim are the core's
-- [ ] Mobile access: opt-in TLS listener (port 7419), self-signed cert, one-time 5-minute pairing code with QR payload and addresses, per-device tokens stored hashed, revoke, disable disconnects; phones can't manage access, settings, stop, or exec — `RemoteAccess` implemented with TLS pairing tests; core must serve `.mobile` streams as already authenticated
-- [ ] Logging to `server.log`; `TAB_DIR` profile override
+- [x] Exec: run a program in a project folder without a shell, cancellable
+- [x] Uploads: chunked file upload into a temp folder (remote drops and pastes)
+- [ ] AI agent detection: 12 providers from JSON manifests; working/blocked/idle; one unread event per session; read/ack/claim; works with no app attached — `AgentDetector` + `AgentStateTracker` implemented with the Rust fixtures; events, read/ack/claim implemented in the core (one unread event per session, first desktop app claims); detection runs on the session queue
+- [ ] Mobile access: opt-in TLS listener (port 7419), self-signed cert, one-time 5-minute pairing code with QR payload and addresses, per-device tokens stored hashed, revoke, disable disconnects; phones can't manage access, settings, stop, or exec — `RemoteAccess` implemented with TLS pairing tests; the core serves `.mobile` streams as already authenticated and refuses phone-forbidden requests (tested)
+- [x] Logging to `server.log`; `TAB_DIR` profile override
 
 ## Client library and CLI (`tab`)
 
