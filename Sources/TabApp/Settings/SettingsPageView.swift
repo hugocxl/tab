@@ -43,6 +43,8 @@ final class SettingsPageView: ThemedView {
     var bindingDraft: BindingDraft?
     var codepointDraft: CodepointDraft?
     var profileName = ""
+    /// The project whose pull request prompt the AI page edits.
+    var promptProject: String?
 
     private(set) var navigation: NavigationPill!
     let titleLabel = makeLabel("", font: AppFont.title)

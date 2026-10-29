@@ -12,7 +12,7 @@ struct SidebarSnapshot: Equatable {
     struct GroupEntry: Equatable {
         var project: ProjectId
         var title: String
-        var hint: String?
+        var hasWorktrees: Bool
         var hasIcon: Bool
         var canCreateWorktree: Bool
         var cards: [CardEntry]
@@ -37,21 +37,15 @@ struct SidebarSnapshot: Equatable {
             return CardEntry(target: .tab(entry.tab),
                              data: ActivityCardData.make(project: project, tab: tab, primary: false, model: model))
         }
-        let projectHints = ShortcutId.projects
-        groups = listing.groups.enumerated().compactMap { index, group in
+        groups = listing.groups.compactMap { group in
             guard let project = model.state.project(group.project) else { return nil }
-            var hint: String?
-            if index < projectHints.count, let held = model.shortcutHints,
-               let chord = model.settings.keymap.chord(projectHints[index]), chord.modifiers == held {
-                hint = ShortcutCatalog.displayChord(chord.key)
-            }
             let cards = group.cards.compactMap { card -> CardEntry? in
                 guard let target = model.state.project(card.project) else { return nil }
                 return CardEntry(target: .project(card.project),
                                  data: ActivityCardData.make(project: target, tab: nil, primary: card.primary, model: model))
             }
             return GroupEntry(
-                project: project.id, title: model.title(of: project), hint: hint,
+                project: project.id, title: model.title(of: project), hasWorktrees: group.hasWorktrees,
                 hasIcon: model.projectIcon(project.id) != nil,
                 canCreateWorktree: project.status == .available && (model.git[project.id]?.isRepository ?? false),
                 cards: cards, creating: model.worktreeCreations[project.id] ?? []

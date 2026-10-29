@@ -17,6 +17,11 @@ final class WorkspaceView: ThemedView {
     private var livePanelWidth: CGFloat?
     private var subscription: AnyCancellable?
     private var lastPanelLayout: (RightPanelKind?, CGFloat)?
+    private let sidebarToggle = SidebarToggleSlot()
+    /// The Agents panel while it pops up beside the collapsed sidebar.
+    private weak var agentsPopup: NSView?
+    private var agentsPopupLeading: NSLayoutConstraint?
+    private var popupMonitor: Any?
 
     init(model: AppModel, sidebar: SidebarViewController) {
         self.model = model
@@ -39,9 +44,11 @@ final class WorkspaceView: ThemedView {
             }
             self.needsLayout = true
         }
+        sidebarToggle.button.action = { [weak model] _ in model?.toggleSidebar() }
         subscription = model.changes.sink { [weak self] changes in self?.modelChanged(changes) }
         splits.reload()
         syncPanel()
+        syncAgentsPopup()
         updateBanner()
     }
 
@@ -64,8 +71,72 @@ final class WorkspaceView: ThemedView {
         }
         if !changes.isDisjoint(with: [.panel, .settings, .state]) {
             syncPanel()
+            syncAgentsPopup()
         }
         needsLayout = true
+    }
+
+    // MARK: Agents popup
+
+    /// Pops the Agents panel up at the bottom left of the workspace while
+    /// it is open with the sidebar collapsed, as Codesh's popup placement:
+    /// 300pt wide, at most 380pt tall, closed by Escape or a click elsewhere.
+    private func syncAgentsPopup() {
+        let appearance = model.appearance
+        let shown = model.agentsPopupOpen && appearance.agentsPanelVisible
+            && AgentsPanelPlacement(appearance, sidebarExpanded: appearance.sidebarExpanded) == .popup
+        guard shown else {
+            if let popup = agentsPopup, popup.superview === self { popup.removeFromSuperview() }
+            agentsPopup = nil
+            agentsPopupLeading = nil
+            stopPopupMonitor()
+            return
+        }
+        let controller = model.agentsPanel
+        let panel = controller.view
+        controller.placement = .popup
+        guard panel.superview !== self else { return }
+        panel.removeFromSuperview()
+        panel.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(panel)
+        let leading = panel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: sidebarWidth + Metrics.gutter)
+        NSLayoutConstraint.activate([
+            leading,
+            panel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Metrics.gutter),
+            panel.widthAnchor.constraint(equalToConstant: Self.agentsPopupWidth),
+        ])
+        panel.shadow = Self.popupShadow
+        agentsPopup = panel
+        agentsPopupLeading = leading
+        startPopupMonitor()
+    }
+
+    static let agentsPopupWidth: CGFloat = 300
+
+    private static var popupShadow: NSShadow {
+        let shadow = NSShadow()
+        shadow.shadowColor = NSColor.black.withAlphaComponent(0.35)
+        shadow.shadowBlurRadius = 16
+        shadow.shadowOffset = NSSize(width: 0, height: -4)
+        return shadow
+    }
+
+    private func startPopupMonitor() {
+        guard popupMonitor == nil else { return }
+        popupMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
+            MainActor.assumeIsolated {
+                guard let self, let popup = self.agentsPopup, event.window === self.window else { return }
+                let point = popup.convert(event.locationInWindow, from: nil)
+                if !popup.bounds.contains(point) { self.model.closeAgentsPopup() }
+            }
+            return event
+        }
+    }
+
+    private func stopPopupMonitor() {
+        guard let popupMonitor else { return }
+        NSEvent.removeMonitor(popupMonitor)
+        self.popupMonitor = nil
     }
 
     /// Shows the right panel the model asks for, following the project.
@@ -100,13 +171,18 @@ final class WorkspaceView: ThemedView {
     }
 
     var sidebarWidth: CGFloat {
-        model.appearance.sidebarExpanded ? (liveSidebarWidth ?? model.sidebarWidth) : SidebarViewController.collapsedWidth
+        model.appearance.sidebarExpanded ? (liveSidebarWidth ?? model.sidebarWidth) : 0
     }
 
     override func layout() {
         super.layout()
         let sidebarWidth = self.sidebarWidth
+        let expanded = model.appearance.sidebarExpanded
+        sidebar.view.isHidden = !expanded
         sidebar.view.frame = NSRect(x: 0, y: 0, width: sidebarWidth, height: bounds.height)
+        sidebarToggle.reserve = max(sidebar.trafficLightsEnd - 2 * Metrics.gutter, 0)
+        splits.sidebarToggle = expanded ? nil : sidebarToggle
+        agentsPopupLeading?.constant = sidebarWidth + Metrics.gutter
         var right = bounds.width
         if let kind = shownPanel {
             let width = min(livePanelWidth ?? model.rightPanelWidth(kind), max(bounds.width - sidebarWidth - 240, RightPanelKind.minimumWidth))
@@ -120,6 +196,35 @@ final class WorkspaceView: ThemedView {
         splits.frame = NSRect(x: sidebarWidth, y: 0, width: max(right - sidebarWidth, 0), height: bounds.height)
         let bannerWidth = min(splits.frame.width - 32, 520)
         banner.frame = NSRect(x: splits.frame.midX - bannerWidth / 2, y: 40, width: bannerWidth, height: 32)
+    }
+}
+
+/// The sidebar toggle as the top-left card shows it while the sidebar is
+/// collapsed: past the window buttons, then the 28pt chrome button.
+final class SidebarToggleSlot: NSView {
+    let button = ChromeButton(.panelLeft, label: "Show Sidebar")
+    var reserve: CGFloat = 0 {
+        didSet {
+            guard reserve != oldValue else { return }
+            invalidateIntrinsicContentSize()
+            superview?.needsLayout = true
+        }
+    }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        addSubview(button)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override var isFlipped: Bool { true }
+    override var mouseDownCanMoveWindow: Bool { false }
+    override var intrinsicContentSize: NSSize { NSSize(width: reserve + ChromeButton.side, height: ChromeButton.side) }
+
+    override func layout() {
+        super.layout()
+        button.frame = NSRect(x: reserve, y: 0, width: ChromeButton.side, height: ChromeButton.side)
     }
 }
 

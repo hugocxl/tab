@@ -71,14 +71,14 @@ public final class CardRow: ThemedView {
         let inset = Metrics.gutter * 1.5
         var constraints = [
             text.leadingAnchor.constraint(equalTo: leadingAnchor, constant: inset),
-            heightAnchor.constraint(greaterThanOrEqualToConstant: 42),
+            heightAnchor.constraint(greaterThanOrEqualToConstant: 36),
         ]
         if let control {
             control.translatesAutoresizingMaskIntoConstraints = false
             addSubview(control)
             if stacked {
                 constraints += [
-                    text.topAnchor.constraint(equalTo: topAnchor, constant: 11),
+                    text.topAnchor.constraint(equalTo: topAnchor, constant: 10),
                     text.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -inset),
                     control.topAnchor.constraint(equalTo: text.bottomAnchor, constant: Metrics.controlGap),
                     control.leadingAnchor.constraint(equalTo: leadingAnchor, constant: inset),
@@ -92,7 +92,7 @@ public final class CardRow: ThemedView {
                     control.leadingAnchor.constraint(greaterThanOrEqualTo: text.trailingAnchor, constant: 16),
                     control.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset + 2),
                     control.centerYAnchor.constraint(equalTo: centerYAnchor),
-                    control.topAnchor.constraint(greaterThanOrEqualTo: topAnchor, constant: 8),
+                    control.topAnchor.constraint(greaterThanOrEqualTo: topAnchor, constant: 10),
                 ]
                 control.setContentCompressionResistancePriority(.required, for: .horizontal)
                 control.setContentHuggingPriority(.required, for: .horizontal)
@@ -147,7 +147,7 @@ public final class SectionHeader: ThemedView {
         NSLayoutConstraint.activate([
             label.leadingAnchor.constraint(equalTo: leadingAnchor),
             label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
-            label.topAnchor.constraint(equalTo: topAnchor, constant: 18),
+            label.topAnchor.constraint(equalTo: topAnchor, constant: 24),
             label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
         ])
         setAccessibilityElement(true)
@@ -170,7 +170,7 @@ public final class NoteLabel: ThemedView {
     public let isError: Bool
 
     public init(_ text: String, error: Bool = false) {
-        label = makeLabel(text, font: AppFont.small)
+        label = makeLabel(text, font: AppFont.footnote)
         label.alignment = .left
         label.lineBreakMode = .byWordWrapping
         label.maximumNumberOfLines = 0
@@ -179,7 +179,7 @@ public final class NoteLabel: ThemedView {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         addSubview(label)
-        label.pinEdges(to: self, insets: NSEdgeInsets(top: 6, left: Metrics.gutter * 1.5, bottom: 6, right: Metrics.gutter * 1.5))
+        label.pinEdges(to: self, insets: NSEdgeInsets(top: 8, left: Metrics.gutter * 1.5, bottom: 8, right: Metrics.gutter * 1.5))
     }
 
     public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }

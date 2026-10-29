@@ -49,7 +49,7 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
             page.topAnchor.constraint(equalTo: root.topAnchor),
             page.bottomAnchor.constraint(equalTo: root.bottomAnchor),
         ])
-        sidebar.onSelect = { [weak self] category, section in self?.select(category, section: section) }
+        sidebar.onSelect = { [weak self] category, section in self?.select(category, section: section, toggles: true) }
         sidebar.serverTile.onClick = { [weak self] in self?.select(.server, section: nil) }
         sidebar.search.onChange = { [weak self] text in
             self?.page.query = text
@@ -79,11 +79,12 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
         store.reloadTerminal()
     }
 
-    /// Opens a page, or one of its sections. Clicking the open category
-    /// again expands or collapses its sections.
-    public func select(_ category: SettingsCategory, section: String?) {
+    /// Opens a page, or one of its sections, with its sections listed in
+    /// the sidebar. A sidebar click on the open category (`toggles`)
+    /// expands or collapses its sections instead.
+    public func select(_ category: SettingsCategory, section: String?, toggles: Bool = false) {
         let searching = !page.query.isEmpty
-        if section == nil && category == page.category && !searching && page.section == nil {
+        if toggles && section == nil && category == page.category && !searching && page.section == nil {
             page.expanded = page.expanded == category ? nil : category
         } else {
             page.expanded = category

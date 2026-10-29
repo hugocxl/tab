@@ -17,6 +17,12 @@ final class SplitContainerView: ThemedView {
     private var trackingAreasByDivider: [NSTrackingArea] = []
     private var shownTab: TabId?
 
+    /// The sidebar toggle, shown in the top-left card while the sidebar is
+    /// collapsed.
+    var sidebarToggle: NSView? {
+        didSet { if sidebarToggle !== oldValue { needsLayout = true } }
+    }
+
     init(model: AppModel) {
         self.model = model
         super.init(frame: .zero)
@@ -69,6 +75,7 @@ final class SplitContainerView: ThemedView {
     override func layout() {
         super.layout()
         emptyView.frame = content
+        defer { placeSidebarToggle() }
         guard let tab else {
             dividers = []
             updateDividerTracking()
@@ -86,6 +93,18 @@ final class SplitContainerView: ThemedView {
             dividers = SplitGeometry.dividers(layout, in: content, scale: scale)
         }
         updateDividerTracking()
+    }
+
+    /// Leads the top-left card's header, or the empty card, with the
+    /// sidebar toggle.
+    private func placeSidebarToggle() {
+        let topLeft: PaneId? = tab?.zoomed ?? cards.first { _, card in
+            abs(card.frame.minX - content.minX) < 0.5 && abs(card.frame.minY - content.minY) < 0.5
+        }?.key
+        let owner = emptyView.isHidden ? topLeft : nil
+        for (id, card) in cards where id != owner && card.leadingView != nil { card.leadingView = nil }
+        if emptyView.isHidden { emptyView.leadingView = nil }
+        if let owner { cards[owner]?.leadingView = sidebarToggle } else if !emptyView.isHidden { emptyView.leadingView = sidebarToggle }
     }
 
     // MARK: Gutters
@@ -220,46 +239,61 @@ final class DropPreviewView: ThemedView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
-/// A project with no panes: a card saying so, with how to open one.
+/// A project with no panes, as Codesh draws it in the pane card frame: the
+/// window glyph, "Nothing open in <project>", a hint and New Terminal; or
+/// that the folder is missing.
 final class EmptyProjectView: ThemedView {
+    var onNewTerminal: (() -> Void)?
+    /// The sidebar toggle at the header position while the sidebar is collapsed.
+    var leadingView: NSView? {
+        didSet {
+            guard leadingView !== oldValue else { return }
+            if let oldValue, oldValue.superview === self { oldValue.removeFromSuperview() }
+            if let leadingView { addSubview(leadingView) }
+            needsLayout = true
+        }
+    }
+
     private let glyph = NSImageView()
-    private let title = makeLabel("No terminal", font: AppFont.system(15, weight: .semibold))
-    private let project = makeLabel("", font: AppFont.body)
-    private let hint = makeLabel("", font: AppFont.small)
+    private let title = makeLabel("", font: AppFont.system(14, weight: .semibold))
+    private let message = makeLabel("", font: AppFont.small)
+    private let button = PillButton("New Terminal", style: .primary)
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
         layer?.cornerRadius = Metrics.cardRadius
-        layer?.borderWidth = 1
+        layer?.borderWidth = Metrics.border
         layer?.cornerCurve = .continuous
-        glyph.image = AppIcon.terminal.image(size: 28)
-        for label in [title, project, hint] { label.alignment = .center }
-        let stack = NSStackView(views: [glyph, title, project, hint])
+        glyph.image = AppIcon.appWindow.image(size: 28)
+        message.alignment = .center
+        message.lineBreakMode = .byWordWrapping
+        message.maximumNumberOfLines = 0
+        message.preferredMaxLayoutWidth = 360
+        button.action = { [weak self] in self?.onNewTerminal?() }
+        let stack = NSStackView(views: [glyph, title, message, button])
         stack.orientation = .vertical
-        stack.spacing = 6
-        stack.setCustomSpacing(10, after: glyph)
+        stack.spacing = 16
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
         NSLayoutConstraint.activate([
             stack.centerXAnchor.constraint(equalTo: centerXAnchor),
             stack.centerYAnchor.constraint(equalTo: centerYAnchor),
             stack.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor, constant: -32),
+            message.widthAnchor.constraint(lessThanOrEqualToConstant: 360),
         ])
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     func update(project: Project, model: AppModel) {
-        self.project.stringValue = model.title(of: project)
-        let chord = model.settings.keymap.chord(project.home ? .newHomeTab : .newTab)?.display ?? ""
-        if project.status == .missing {
-            title.stringValue = "Folder not found"
-            hint.stringValue = "\(project.directory.rawValue) is gone. Remove the project from its menu."
-        } else {
-            title.stringValue = "No terminal"
-            hint.stringValue = chord.isEmpty ? "Open a terminal from the sidebar." : "Press \(chord) to open a terminal."
-        }
+        let missing = project.status == .missing
+        title.stringValue = missing ? "Project folder is missing" : "Nothing open in \(project.name)"
+        message.stringValue = missing
+            ? "This project’s folder could not be found. Remove the project from the sidebar to clear its tabs."
+            : "Open a terminal to start working in this project."
+        button.isHidden = missing
+        onNewTerminal = { [weak model] in model?.newTerminal(in: project.id) }
     }
 
     override var wantsUpdateLayer: Bool { true }
@@ -270,11 +304,17 @@ final class EmptyProjectView: ThemedView {
     }
 
     override func themeDidChange() {
-        glyph.contentTintColor = theme.fgDim
-        title.textColor = theme.fgMuted
-        project.textColor = theme.fgMuted
-        hint.textColor = theme.fgDim
+        glyph.contentTintColor = theme.fgMuted
+        title.textColor = theme.fg
+        message.textColor = theme.fgMuted
         needsDisplay = true
+    }
+
+    override func layout() {
+        super.layout()
+        guard let leadingView else { return }
+        let size = leadingView.intrinsicContentSize
+        leadingView.frame = CGRect(x: Metrics.gutter, y: ((Metrics.headerHeight - size.height) / 2).rounded(), width: size.width, height: size.height)
     }
 
     override func mouseDown(with event: NSEvent) {}

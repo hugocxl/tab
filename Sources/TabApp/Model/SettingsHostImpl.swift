@@ -106,6 +106,12 @@ public final class SettingsHostImpl: SettingsHost {
         SpeechRecorder.languages()
     }
 
+    public func aiPromptProjects() -> [SettingsProject] {
+        model.state.projects
+            .filter { !$0.home && $0.parentId == nil }
+            .map { SettingsProject(id: $0.id.description, name: $0.name) }
+    }
+
     public func backupState() throws -> Data {
         try BackupStateMerge.backup(model.state)
     }

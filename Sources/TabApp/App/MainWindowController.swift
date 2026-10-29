@@ -22,8 +22,12 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, A
     private(set) lazy var dictation = DictationController(host: self)
     private var subscriptions: Set<AnyCancellable> = []
 
-    /// The window buttons' top-left corner and the gap after them.
-    static let trafficLights = CGPoint(x: 16, y: 19)
+    /// The window buttons' top-left corner, centring them on the 36pt
+    /// header row 8pt from the top, as Codesh places them.
+    static let trafficLights = CGPoint(x: 2 * Metrics.gutter, y: Metrics.gutter + (Metrics.headerHeight - 14) / 2)
+    /// The space between the window buttons' origins, as AppKit first
+    /// lays them out.
+    private var windowButtonStep: CGFloat?
 
     public init(model: AppModel) {
         self.model = model
@@ -123,14 +127,20 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, A
         let height = Self.trafficLights.y * 2 + close.frame.height
         let frame = NSRect(x: 0, y: window.frame.height - height, width: window.frame.width, height: height)
         if container.frame != frame { container.frame = frame }
+        if windowButtonStep == nil, let minimize = window.standardWindowButton(.miniaturizeButton) {
+            windowButtonStep = minimize.frame.minX - close.frame.minX
+        }
+        let step = windowButtonStep ?? close.frame.width + 6
         var x = Self.trafficLights.x
+        var end = x
         for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
             guard let button = window.standardWindowButton(kind) else { continue }
             let origin = NSPoint(x: x, y: (height - button.frame.height) / 2)
             if button.frame.origin != origin { button.setFrameOrigin(origin) }
-            x += button.frame.width + 6
+            end = x + button.frame.width
+            x += step
         }
-        sidebar.trafficLightsEnd = x + 2
+        sidebar.trafficLightsEnd = end + 7
     }
 
     // MARK: NSWindowDelegate

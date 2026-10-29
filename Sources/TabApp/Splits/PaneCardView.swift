@@ -37,7 +37,8 @@ final class PaneCardView: HoverView {
     /// is collapsed and this card is top-left.
     var leadingView: NSView? {
         didSet {
-            oldValue?.removeFromSuperview()
+            guard leadingView !== oldValue else { return }
+            if let oldValue, oldValue.superview === header { oldValue.removeFromSuperview() }
             if let leadingView { header.addSubview(leadingView) }
             needsLayout = true
         }
@@ -190,7 +191,7 @@ final class PaneCardView: HoverView {
         let height = Metrics.headerHeight
         var x = gutter
         if let leadingView {
-            let size = leadingView.fittingSize
+            let size = leadingView.intrinsicContentSize
             leadingView.frame = CGRect(x: x, y: ((height - size.height) / 2).rounded(), width: size.width, height: size.height)
             x += size.width + Metrics.controlGap
         }

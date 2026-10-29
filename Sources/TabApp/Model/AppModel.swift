@@ -91,6 +91,11 @@ public final class AppModel {
     public var shortcutHints: ChordModifiers? {
         didSet { if shortcutHints != oldValue { notify(.state) } }
     }
+    /// The Agents panel's popup is open: its left placement while the
+    /// sidebar is collapsed. Not saved, as in Codesh.
+    public var agentsPopupOpen = false {
+        didSet { if agentsPopupOpen != oldValue { notify(.panel) } }
+    }
     /// Worktree names being created, by parent project.
     public internal(set) var worktreeCreations: [ProjectId: [String]] = [:]
     /// Worktree projects being removed.

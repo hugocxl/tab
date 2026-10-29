@@ -57,10 +57,10 @@ final class SidebarItem: HoverView {
             constraints += [
                 tile.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Metrics.gutter),
                 tile.centerYAnchor.constraint(equalTo: centerYAnchor),
-                label.leadingAnchor.constraint(equalTo: tile.trailingAnchor, constant: Metrics.gutter),
+                label.leadingAnchor.constraint(equalTo: tile.trailingAnchor, constant: 12),
             ]
         } else {
-            constraints.append(label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Metrics.gutter * 4))
+            constraints.append(label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 34))
         }
         NSLayoutConstraint.activate(constraints)
         setAccessibilityElement(true)

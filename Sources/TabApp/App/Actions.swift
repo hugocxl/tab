@@ -97,14 +97,25 @@ final class Actions {
         return true
     }
 
-    private func toggleAgentsPanel() {
+    /// Shows the Agents panel where it is placed and gives it the keyboard;
+    /// hides it when it is shown and already has the keyboard, as Codesh.
+    func toggleAgentsPanel() {
         let appearance = model.appearance
-        if appearance.agentsPanelDock == .right && !appearance.agentsPanelDetached {
+        let placement = AgentsPanelPlacement(appearance, sidebarExpanded: appearance.sidebarExpanded)
+        if placement == .right {
             model.toggleRightPanel(.agents)
             return
         }
-        model.updateAppearance { $0.agentsPanelVisible.toggle() }
+        let panel = model.agentsPanel
+        let shown = appearance.agentsPanelVisible && (placement != .popup || model.agentsPopupOpen)
+        if shown && panel.hasFocus {
+            model.hideAgentsPanel()
+            return
+        }
+        if !appearance.agentsPanelVisible { model.updateAppearance { $0.agentsPanelVisible = true } }
+        if placement == .popup { model.agentsPopupOpen = true }
         model.notify(.panel)
+        DispatchQueue.main.async { panel.focus() }
     }
 
     func clearSidebarFilter() {

@@ -296,7 +296,7 @@ enum ManageParser {
         case ("session", "read-screen"): (["--lines"], ["--saved"])
         case ("session", "history"): (["--before", "--limit"], ["--saved"])
         case ("session", "search"): (["--before", "--limit"], ["--saved", "--ignore-case"])
-        case ("session", "wait"): (["--text", "--timeout-ms"], ["--exit", "--ignore-case"])
+        case ("session", "wait"): (["--text", "--timeout", "--timeout-ms"], ["--exit", "--ignore-case"])
         case ("worktree", "create"): (["--branch", "--base", "--directory"], ["--existing", "--hooks"])
         case ("worktree", "checkout-pr"): (["--name", "--directory"], ["--hooks"])
         case ("exec", _): (["--timeout-ms"], [])
@@ -370,8 +370,7 @@ enum ManageParser {
         case "send-keys":
             return .keys(session: session, bytes: try key(argument()))
         case "wait":
-            return .wait(session: session, until: try until(options),
-                         timeoutMs: try options.number("--timeout-ms", default: 30000, 1 ... 3_600_000))
+            return .wait(session: session, until: try until(options), timeoutMs: try waitTimeout(options))
         case "read-screen":
             return .readScreen(session: session, lines: try options.number("--lines", default: 50,
                                                                             1 ... Int(Limits.maxRows)),
@@ -406,6 +405,21 @@ enum ManageParser {
                         rows: try options.number("--rows", default: 24, 1 ... Limits.maxRows))
         return .create(project: project.first, directory: options.values["--directory"], size: size,
                        command: options.literal == nil ? nil : command)
+    }
+
+    /// `--timeout SECONDS` or `--timeout-ms N`, 30 seconds by default and at most an hour.
+    static func waitTimeout(_ options: Options) throws -> UInt32 {
+        let maximum: UInt32 = 3_600_000
+        guard let seconds = options.values["--timeout"] else {
+            return try options.number("--timeout-ms", default: 30000, 1 ... maximum)
+        }
+        guard options.values["--timeout-ms"] == nil else {
+            throw CLIError("--timeout and --timeout-ms cannot be combined")
+        }
+        guard let value = Double(seconds), value.isFinite, value > 0, value * 1000 <= Double(maximum) else {
+            throw CLIError("invalid value for --timeout; use seconds, at most 3600")
+        }
+        return max(1, UInt32((value * 1000).rounded()))
     }
 
     static func until(_ options: Options) throws -> CLIWaitUntil {

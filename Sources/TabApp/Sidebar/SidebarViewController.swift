@@ -4,9 +4,10 @@ import TabCore
 import TabProtocol
 
 /// The project sidebar: the top row beside the window buttons, Home
-/// terminals and projects with their worktree cards, and the footer with the
-/// host filter, Add Project and New Browser. It rebuilds only when what it
-/// shows changed.
+/// terminals and projects with their worktree cards, the docked Agents
+/// panel, and the footer with the host filter, Add Project and New Browser.
+/// A collapsed sidebar is hidden, as in Codesh; its toggle moves into the
+/// top-left pane. It rebuilds only when what it shows changed.
 @MainActor
 final class SidebarViewController: NSViewController {
     unowned let model: AppModel
@@ -20,7 +21,6 @@ final class SidebarViewController: NSViewController {
     private let newTerminal = ChromeButton(.plus, label: "New Terminal")
     private let filesButton = ChromeButton(.folder, label: "Files")
     private let sourceControlButton = ChromeButton(.gitBranch, label: "Source Control")
-    private let agentsButton = ChromeButton(.sparkles, label: "Agents")
     private let scroll = ScrollView()
     private let list = NSStackView()
     private let footer = FlippedView()
@@ -30,15 +30,23 @@ final class SidebarViewController: NSViewController {
     private let filterField = SearchField(placeholder: "Filter")
     private let resizeHandle = SidebarResizeHandle()
     private var snapshot: SidebarSnapshot?
+    /// The Agents panel while it is docked at the bottom.
+    private weak var dockedAgents: NSView?
     private var subscription: AnyCancellable?
     private var filterShown = false
 
     /// Where the window buttons end, from the window's left edge.
     var trafficLightsEnd: CGFloat = 78 {
-        didSet { if trafficLightsEnd != oldValue { root.needsLayout = true } }
+        didSet {
+            guard trafficLightsEnd != oldValue else { return }
+            root.needsLayout = true
+            root.superview?.needsLayout = true
+        }
     }
 
-    static let collapsedWidth: CGFloat = 44
+    /// The window's title bar band the list starts below.
+    static let titleBarHeight: CGFloat = 32
+    static let footerHeight: CGFloat = Metrics.gutter * 2 + ChromeButton.side
 
     init(model: AppModel) {
         self.model = model
@@ -62,11 +70,11 @@ final class SidebarViewController: NSViewController {
             list.bottomAnchor.constraint(equalTo: scroll.content.bottomAnchor),
         ])
         scroll.translatesAutoresizingMaskIntoConstraints = true
-        root.addSubview(topRow)
         root.addSubview(scroll)
+        root.addSubview(topRow)
         root.addSubview(footer)
         root.addSubview(resizeHandle)
-        for button in [toggle, newTerminal, filesButton, sourceControlButton, agentsButton] { topRow.addSubview(button) }
+        for button in [toggle, newTerminal, filesButton, sourceControlButton] { topRow.addSubview(button) }
         for button in [hostButton, addButton, browserButton] { footer.addSubview(button) }
         filterField.translatesAutoresizingMaskIntoConstraints = true
         filterField.isHidden = true
@@ -76,7 +84,6 @@ final class SidebarViewController: NSViewController {
         newTerminal.action = { [weak self] _ in self?.model.newTerminal() }
         filesButton.action = { [weak self] _ in self?.model.toggleRightPanel(.files) }
         sourceControlButton.action = { [weak self] _ in self?.model.toggleRightPanel(.sourceControl) }
-        agentsButton.action = { [weak self] _ in self?.model.toggleRightPanel(.agents) }
         hostButton.action = { [weak self] button in self?.model.remoteController.toggleHostMenu(relativeTo: button) }
         hostButton.menuProvider = { [weak self] in self?.filterMenu() }
         addButton.action = { [weak self] button in self?.actions?.addProject(anchor: button) }
@@ -123,10 +130,38 @@ final class SidebarViewController: NSViewController {
         let panel = model.rightPanel
         filesButton.isOn = panel == .files
         sourceControlButton.isOn = panel == .sourceControl
-        agentsButton.isOn = panel == .agents
-        agentsButton.isHidden = !model.appearance.agentsPanelVisible && panel != .agents
+        toggle.toolTip = isExpanded ? "Hide Sidebar" : "Show Sidebar"
         filterField.isHidden = !(snapshot.filterShown || !model.nameFilter.isEmpty) || !isExpanded
+        updateAgentsDock()
         root.needsLayout = true
+    }
+
+    /// Docks the Agents panel at the bottom of the expanded sidebar while
+    /// it is shown on the left; other placements take the view back.
+    private func updateAgentsDock() {
+        let appearance = model.appearance
+        let docked = isExpanded && appearance.agentsPanelVisible
+            && AgentsPanelPlacement(appearance, sidebarExpanded: true) == .sidebar
+        guard docked else {
+            if let panel = dockedAgents, panel.superview === root { panel.removeFromSuperview() }
+            dockedAgents = nil
+            return
+        }
+        let controller = model.agentsPanel
+        let panel = controller.view
+        controller.placement = .sidebar
+        guard panel.superview !== root else { return }
+        panel.removeFromSuperview()
+        panel.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(panel, positioned: .below, relativeTo: resizeHandle)
+        let inset = Metrics.radiusMedium
+        NSLayoutConstraint.activate([
+            panel.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: inset),
+            panel.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -inset),
+            panel.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -(Self.footerHeight + inset)),
+            panel.topAnchor.constraint(greaterThanOrEqualTo: root.topAnchor, constant: Self.titleBarHeight + Metrics.headerHeight),
+        ])
+        dockedAgents = panel
     }
 
     private func rebuild(_ snapshot: SidebarSnapshot) {
@@ -134,13 +169,9 @@ final class SidebarViewController: NSViewController {
             list.removeArrangedSubview(view)
             view.removeFromSuperview()
         }
-        list.edgeInsets = isExpanded ? NSEdgeInsets(top: 10, left: 8, bottom: 6, right: 0) : NSEdgeInsets(top: 4, left: 5, bottom: 6, right: 5)
-        list.alignment = isExpanded ? .leading : .centerX
-        if isExpanded {
-            buildExpanded(snapshot)
-        } else {
-            buildCollapsed(snapshot)
-        }
+        list.edgeInsets = NSEdgeInsets(top: 10, left: Metrics.gutter, bottom: 6, right: 0)
+        guard isExpanded else { return }
+        buildExpanded(snapshot)
     }
 
     private func add(_ view: NSView, fill: Bool = true) {
@@ -162,9 +193,10 @@ final class SidebarViewController: NSViewController {
             stack.orientation = .vertical
             stack.spacing = 2
             stack.alignment = .leading
-            stack.edgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 4, right: 0)
+            stack.edgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: group.hasWorktrees ? 4 : 0, right: 0)
             let header = headerView(group)
             stack.addArrangedSubview(header)
+            stack.setCustomSpacing(0, after: header)
             header.translatesAutoresizingMaskIntoConstraints = false
             header.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
             for card in group.cards {
@@ -184,26 +216,6 @@ final class SidebarViewController: NSViewController {
         let addRow = AddProjectRow()
         addRow.onClick = { [weak self] view in self?.actions?.addProject(anchor: view) }
         add(addRow)
-    }
-
-    private func buildCollapsed(_ snapshot: SidebarSnapshot) {
-        for group in snapshot.groups {
-            guard let project = model.state.project(group.project) else { continue }
-            let tile = ProjectTile(
-                project: project, title: group.title, icon: model.projectIcon(project.id),
-                active: model.currentProject.id == project.id || model.currentProject.parentId == project.id,
-                hint: group.hint
-            )
-            tile.onClick = { [weak self] in
-                guard let self else { return }
-                self.model.selectProject(self.model.preferredWorktree(project.id))
-            }
-            tile.menuProvider = { [weak self, weak tile] in self?.projectMenu(project.id, anchor: tile) }
-            add(tile, fill: false)
-        }
-        let addTile = ChromeButton(.plus, label: "Add Project", side: 34)
-        addTile.action = { [weak self] view in self?.actions?.addProject(anchor: view) }
-        add(addTile, fill: false)
     }
 
     private enum HintKind { case tabs }
@@ -232,7 +244,7 @@ final class SidebarViewController: NSViewController {
     private func headerView(_ group: SidebarSnapshot.GroupEntry) -> NSView {
         guard let project = model.state.project(group.project) else { return NSView() }
         let header = ProjectHeaderRow(
-            project: project, title: group.title, icon: model.projectIcon(project.id), hint: group.hint,
+            project: project, title: group.title, icon: model.projectIcon(project.id),
             remoteName: model.serverName(project.serverId), canCreateWorktree: group.canCreateWorktree
         )
         header.onGear = { [weak self] anchor in
@@ -419,54 +431,29 @@ final class SidebarViewController: NSViewController {
 
     fileprivate func layoutRoot() {
         let bounds = root.bounds
-        let expanded = isExpanded
-        let top: CGFloat = Metrics.gutter
         let rowHeight = Metrics.headerHeight
-        if expanded {
-            topRow.frame = CGRect(x: 0, y: top, width: bounds.width, height: rowHeight)
-            let mid = (rowHeight - 26) / 2
-            toggle.frame = CGRect(x: max(trafficLightsEnd, Metrics.gutter), y: mid, width: 26, height: 26)
-            var right = bounds.width - 6
-            for button in [sourceControlButton, filesButton, newTerminal] {
-                right -= 26
-                button.frame = CGRect(x: right, y: mid, width: 26, height: 26)
-                right -= 2
-            }
-            if !agentsButton.isHidden {
-                right -= 26
-                agentsButton.frame = CGRect(x: right, y: mid, width: 26, height: 26)
-            }
-            newTerminal.isHidden = false
-            let footerHeight: CGFloat = 40
-            footer.frame = CGRect(x: 0, y: bounds.height - footerHeight, width: bounds.width, height: footerHeight)
-            hostButton.frame = CGRect(x: Metrics.gutter, y: 7, width: 26, height: 26)
-            browserButton.frame = CGRect(x: bounds.width - 8 - 26, y: 7, width: 26, height: 26)
-            addButton.frame = CGRect(x: bounds.width - 8 - 26 - 4 - 26, y: 7, width: 26, height: 26)
-            filterField.frame = CGRect(x: Metrics.gutter + 26 + 6, y: 6, width: max(addButton.frame.minX - 6 - (Metrics.gutter + 32), 0), height: 28)
-            let scrollTop = top + rowHeight
-            scroll.frame = CGRect(x: 0, y: scrollTop, width: bounds.width, height: max(footer.frame.minY - scrollTop, 0))
-            resizeHandle.isHidden = false
-            resizeHandle.frame = CGRect(x: bounds.width - 3, y: 0, width: 6, height: bounds.height)
-        } else {
-            let column = bounds.width
-            let x = (column - 26) / 2
-            topRow.frame = CGRect(x: 0, y: top + rowHeight + 4, width: column, height: 4 * 30)
-            var y: CGFloat = 0
-            for button in [toggle, filesButton, sourceControlButton, agentsButton] where !button.isHidden {
-                button.frame = CGRect(x: x, y: y, width: 26, height: 26)
-                y += 30
-            }
-            topRow.frame.size.height = y
-            newTerminal.isHidden = true
-            let footerHeight: CGFloat = 3 * 30 + 8
-            footer.frame = CGRect(x: 0, y: bounds.height - footerHeight, width: column, height: footerHeight)
-            hostButton.frame = CGRect(x: x, y: 4, width: 26, height: 26)
-            addButton.frame = CGRect(x: x, y: 34, width: 26, height: 26)
-            browserButton.frame = CGRect(x: x, y: 64, width: 26, height: 26)
-            let scrollTop = topRow.frame.maxY + 6
-            scroll.frame = CGRect(x: 0, y: scrollTop, width: column, height: max(footer.frame.minY - scrollTop, 0))
-            resizeHandle.isHidden = true
+        let side = ChromeButton.side
+        let step = side + ChromeButton.gap
+        topRow.frame = CGRect(x: 0, y: Metrics.gutter, width: bounds.width, height: rowHeight)
+        let mid = (rowHeight - side) / 2
+        toggle.frame = CGRect(x: max(trafficLightsEnd, Metrics.gutter), y: mid, width: side, height: side)
+        var right = bounds.width
+        for button in [sourceControlButton, filesButton, newTerminal] {
+            right -= step
+            button.frame = CGRect(x: right, y: mid, width: side, height: side)
         }
+        let footerHeight = Self.footerHeight
+        footer.frame = CGRect(x: 0, y: bounds.height - footerHeight, width: bounds.width, height: footerHeight)
+        let y = Metrics.gutter
+        hostButton.frame = CGRect(x: Metrics.gutter, y: y, width: side, height: side)
+        browserButton.frame = CGRect(x: bounds.width - side, y: y, width: side, height: side)
+        addButton.frame = CGRect(x: browserButton.frame.minX - ChromeButton.gap - side, y: y, width: side, height: side)
+        let filterX = hostButton.frame.maxX + ChromeButton.gap
+        filterField.frame = CGRect(x: filterX, y: y, width: max(addButton.frame.minX - ChromeButton.gap - filterX, 0), height: side)
+        let scrollTop = Self.titleBarHeight
+        let bottom = dockedAgents.map { $0.frame.minY } ?? footer.frame.minY
+        scroll.frame = CGRect(x: 0, y: scrollTop, width: bounds.width, height: max(bottom - scrollTop, 0))
+        resizeHandle.frame = CGRect(x: bounds.width - 3, y: 0, width: 6, height: bounds.height)
     }
 }
 

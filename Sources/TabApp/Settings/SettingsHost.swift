@@ -41,6 +41,19 @@ public struct BrowserImportSource: Equatable, Sendable {
     }
 }
 
+/// A project whose pull request prompt Settings can override: a top-level
+/// project (worktrees use their parent's prompt).
+public struct SettingsProject: Equatable, Sendable {
+    /// The project id, the key under `ai.projectPrPrompts`.
+    public var id: String
+    public var name: String
+
+    public init(id: String, name: String) {
+        self.id = id
+        self.name = name
+    }
+}
+
 /// A dictation language the system recognizer offers.
 public struct DictationLanguage: Equatable, Sendable {
     /// Such as `en-US`.
@@ -115,6 +128,9 @@ public protocol SettingsHost: AnyObject {
     func installedAIProviders() -> [String]
     /// The on-device dictation languages.
     func dictationLanguages() -> [DictationLanguage]
+    /// The projects that can have their own pull request prompt, in sidebar
+    /// order.
+    func aiPromptProjects() -> [SettingsProject]
     /// The local projects with their layouts and workspaces, as the backup
     /// stores them (`state.json`'s configuration).
     func backupState() throws -> Data
@@ -134,6 +150,7 @@ public final class PreviewSettingsHost: SettingsHost {
     public private(set) var openedFiles: [URL] = []
     public private(set) var serverActions: [String] = []
     public var state = Data("{}".utf8)
+    public var projects: [SettingsProject] = []
 
     public init() {}
 
@@ -183,5 +200,6 @@ public final class PreviewSettingsHost: SettingsHost {
 
     public func installedAIProviders() -> [String] { [] }
     public func dictationLanguages() -> [DictationLanguage] { [] }
+    public func aiPromptProjects() -> [SettingsProject] { projects }
     public func backupState() throws -> Data { state }
 }

@@ -42,8 +42,8 @@ public final class FilesPanelController: NSViewController, NSTableViewDataSource
     private let header = NativePanelHeader(icon: .folder, title: "Files")
     private let editArea = NSStackView()
     private let editLabel = makeLabel("", font: AppFont.footnote)
-    private var newItemField: InlineNameField?
-    private var renameField: InlineNameField?
+    private(set) var newItemField: InlineNameField?
+    private(set) var renameField: InlineNameField?
     private let statusLabel = makeLabel("", font: AppFont.footnote)
     let table = FilesTableView()
     private let scroll = NSScrollView()

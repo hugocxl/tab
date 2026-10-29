@@ -196,6 +196,7 @@ public enum SettingsCatalog {
         SettingItem("ai-commit-push", "Push after committing", "Push the branch once an AI commit is made.", .ai, "Commit"),
         SettingItem("ai-create-pr-provider", "Pull request provider", "AI CLI that drafts pull requests. Auto uses the first installed provider.", .ai, "Create Pull Request"),
         SettingItem("ai-create-pr-prompt", "Pull request prompt", "AI drafts the title, summary, branch name, and target branch. You review them before Tab commits, pushes, and opens the pull request. An empty prompt uses the default.", .ai, "Create Pull Request"),
+        SettingItem("ai-project-pr-prompt", "Project pull request prompt", "Instructions for one project's pull requests, used instead of the pull request prompt above. Its worktrees use it too. Empty uses the general prompt.", .ai, "Create Pull Request"),
         // Backup
         SettingItem("backup-export", "Export backup", "Save settings, themes, projects, workspaces, and terminal layouts to a .tab file.", .backup, "Backup & Restore"),
         SettingItem("backup-restore", "Restore backup", "Choose a .tab backup. It is restored the next time Tab opens, with a recovery copy in the Backups folder.", .backup, "Backup & Restore"),

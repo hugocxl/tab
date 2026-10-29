@@ -275,7 +275,7 @@ public final class Slider: ThemedView {
             track.leadingAnchor.constraint(equalTo: leadingAnchor),
             track.centerYAnchor.constraint(equalTo: centerYAnchor),
             track.heightAnchor.constraint(equalToConstant: 20),
-            track.widthAnchor.constraint(equalToConstant: Metrics.sliderWidth - 52),
+            track.widthAnchor.constraint(equalToConstant: Metrics.sliderWidth),
             valueLabel.leadingAnchor.constraint(equalTo: track.trailingAnchor, constant: 8),
             valueLabel.trailingAnchor.constraint(equalTo: trailingAnchor),
             valueLabel.centerYAnchor.constraint(equalTo: centerYAnchor),

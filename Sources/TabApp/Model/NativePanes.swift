@@ -235,12 +235,15 @@ extension AppModel: AgentsPanelHost, AgentSessionsHost {
     }
 
     public func hideAgentsPanel() {
+        agentsPopupOpen = false
         updateAppearance { $0.agentsPanelVisible = false }
+        focusActiveContent()
         notify(.panel)
     }
 
     public func closeAgentsPopup() {
-        notify(.panel)
+        agentsPopupOpen = false
+        focusActiveContent()
     }
 
     public func agentsPanelPlacementDidChange() {

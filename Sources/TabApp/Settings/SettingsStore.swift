@@ -633,6 +633,24 @@ public final class SettingsStore {
         return saved.isEmpty ? action.defaultPrompt : saved
     }
 
+    /// The pull request prompt saved for `project`, empty when it uses the
+    /// general one.
+    public func projectPRPrompt(_ project: String) -> String {
+        settings.ai.projectPrPrompts[project]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    /// Saves `project`'s own pull request prompt; an empty one goes back to
+    /// the general prompt.
+    public func setProjectPRPrompt(_ project: String, _ prompt: String) {
+        let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        attempt("ai-project-pr-prompt") {
+            settings.ai = try Settings.saveAIEntry(
+                in: dirs.settings, table: "projectPrPrompts", key: project, value: trimmed.isEmpty ? nil : trimmed
+            )
+            applySettings()
+        }
+    }
+
     public func setCommitChoices(_ choices: CommitChoices) {
         attempt("ai-commit-include-unstaged") {
             settings.ai = try Settings.saveCommitChoices(choices, in: dirs.settings)

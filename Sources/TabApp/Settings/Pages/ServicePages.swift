@@ -229,6 +229,7 @@ extension SettingsPageView {
             let control = vstack([prompt, restore], alignment: .trailing)
             prompt.widthAnchor.constraint(equalTo: control.widthAnchor).isActive = true
             b.row(action.promptSetting, control, stacked: true)
+            if action == .createPullRequest { buildProjectPrompt(b) }
             if action == .commit {
                 let choices = store.settings.ai.commit
                 b.row("ai-commit-include-unstaged", b.toggle("ai-commit-include-unstaged", choices.includeUnstaged) { [store] value in
@@ -243,6 +244,32 @@ extension SettingsPageView {
                 })
             }
         }
+    }
+
+    /// One project's own pull request prompt, chosen from a pop-up.
+    private func buildProjectPrompt(_ b: SettingsPageBuilder) {
+        let id = "ai-project-pr-prompt"
+        let projects = store.host?.aiPromptProjects() ?? []
+        guard let project = projects.first(where: { $0.id == promptProject }) ?? projects.first else {
+            b.row(id, NoteLabel("Add a project to give it its own prompt."), stacked: true)
+            return
+        }
+        let picker = b.popUp(id, projects.map { PopUp.Item(id: $0.id, title: $0.name) }, selected: project.id) { [weak self] in
+            self?.promptProject = $0
+            self?.reload()
+        }
+        let saved = store.projectPRPrompt(project.id)
+        let prompt = InsetTextField(
+            value: saved, placeholder: "Uses the pull request prompt above",
+            label: "\(project.name) pull request prompt", width: nil, height: 88, multiline: true
+        )
+        prompt.onCommit = { [store] in store.setProjectPRPrompt(project.id, $0) }
+        let reset = b.button("Use General Prompt", enabled: !saved.isEmpty) { [store] in
+            store.setProjectPRPrompt(project.id, "")
+        }
+        let control = vstack([picker, prompt, reset], alignment: .trailing)
+        prompt.widthAnchor.constraint(equalTo: control.widthAnchor).isActive = true
+        b.row(id, control, stacked: true)
     }
 
     // MARK: Backup

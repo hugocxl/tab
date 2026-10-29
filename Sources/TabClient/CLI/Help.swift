@@ -64,7 +64,8 @@ public enum CLIHelp {
       read-screen [id] [--lines N] [--saved]
       history [id] [--before CURSOR] [--limit N] [--saved]
       search [id] <text> [--ignore-case] [--before CURSOR] [--limit N] [--saved]
-      wait [id] --text TEXT [--ignore-case] | --exit [--timeout-ms N]
+      wait [id] --text TEXT [--ignore-case] | --exit
+           [--timeout SECONDS | --timeout-ms N]
       end [id] --yes                   End the process, keeping saved output
       discard [id] --yes               End the process and delete saved output
 
@@ -75,7 +76,7 @@ public enum CLIHelp {
     Session IDs are UUIDs; a unique start of one, of at least 4 characters, works.
     Inside a Tab terminal, the ID defaults to that terminal and the project to its
     project. Wait prints the first visible line containing TEXT, or how the session
-    ended; it fails after the timeout (default 30000ms, maximum 3600000ms).
+    ended; it fails after the timeout (default 30 seconds, maximum 3600).
     Use exec in COMMAND when --exit should wait for that program to finish.
     Read-screen and wait briefly attach to a live terminal; --saved reads its last
     checkpoint instead and also works after it ends. They never close app panes.

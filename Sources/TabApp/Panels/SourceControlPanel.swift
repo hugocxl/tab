@@ -244,6 +244,12 @@ public final class SourceControlController: NSViewController, NSTableViewDataSou
         change(.commit(message: messageField.string, stageAll: false, amend: amend), committed: true)
     }
 
+    /// Checks or clears Amend, as clicking the box does.
+    func setAmend(_ on: Bool) {
+        amendBox.state = on ? .on : .off
+        toggleAmend()
+    }
+
     @objc private func toggleAmend() {
         guard !isBusy else {
             amendBox.state = amend ? .on : .off

@@ -148,6 +148,8 @@ final class ArgumentTests: XCTestCase {
                        .session(.wait(session: id, until: .text("ready", ignoreCase: true), timeoutMs: 30000)))
         XCTAssertEqual(try action(["session", "wait", "--exit", "--timeout-ms", "500"]),
                        .session(.wait(session: nil, until: .exit, timeoutMs: 500)))
+        XCTAssertEqual(try action(["session", "wait", "--exit", "--timeout", "2.5"]),
+                       .session(.wait(session: nil, until: .exit, timeoutMs: 2500)))
         XCTAssertEqual(try action(["session", "list", "--all", "--project", "App"]),
                        .session(.list(project: "App", all: true)))
         XCTAssertEqual(try action(["session", "discard", id, "--yes"]), .session(.discard(id)))
@@ -177,6 +179,8 @@ final class ArgumentTests: XCTestCase {
             ["session", "send-keys", "abcd", "F99"], ["session", "history", "abcd", "--limit", "501"],
             ["session", "wait", "abcd"], ["session", "wait", "--text", "a", "--exit"],
             ["session", "wait", "--exit", "--ignore-case"], ["session", "wait", "--exit", "--timeout-ms", "3600001"],
+            ["session", "wait", "--exit", "--timeout", "3601"], ["session", "wait", "--exit", "--timeout", "0"],
+            ["session", "wait", "--exit", "--timeout", "1", "--timeout-ms", "5"],
             ["session", "search", "abcd", String(repeating: "x", count: 257)], ["session", "search", "abcd", ""],
             ["session", "attach"], ["session", "send", "not-hex!", "x"],
         ] {

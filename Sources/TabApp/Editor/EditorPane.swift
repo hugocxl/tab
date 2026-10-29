@@ -45,7 +45,7 @@ public final class EditorPaneController: NSViewController, NSTextViewDelegate, N
     private var wrapsLines = false
 
     private let background = ThemedBackground(color: { $0.card })
-    private let banner = DiskChangeBanner()
+    let banner = DiskChangeBanner()
     private let message = NativeMessageView("Loading…")
     private let scroll = NSScrollView()
     let textView = EditorTextView()
@@ -77,6 +77,12 @@ public final class EditorPaneController: NSViewController, NSTextViewDelegate, N
 
     /// The editor's text.
     public var text: String { textView.string }
+
+    /// Why the file isn't shown, such as a binary or too large file.
+    var messageText: String? {
+        guard case .message(let text) = state else { return nil }
+        return text
+    }
 
     public override func loadView() {
         let theme = host?.theme ?? .shared

@@ -2,8 +2,9 @@ import AppKit
 import TabCore
 import TabProtocol
 
-/// A glyph button for chrome rows: muted, brighter under the pointer, and
-/// on a soft pill while its panel is open.
+/// A glyph button for chrome rows, as Codesh's: a 28pt box with an 8pt
+/// radius, muted, brighter under the pointer, and on the surface pill while
+/// its panel is open.
 final class ChromeButton: HoverView {
     var icon: AppIcon { didSet { needsDisplay = true } }
     var action: ((ChromeButton) -> Void)?
@@ -12,7 +13,7 @@ final class ChromeButton: HoverView {
     let side: CGFloat
     let glyphSize: CGFloat
 
-    init(_ icon: AppIcon, label: String, side: CGFloat = 26, glyph: CGFloat = Metrics.glyph, action: ((ChromeButton) -> Void)? = nil) {
+    init(_ icon: AppIcon, label: String, side: CGFloat = ChromeButton.side, glyph: CGFloat = Metrics.glyph, action: ((ChromeButton) -> Void)? = nil) {
         self.icon = icon
         self.side = side
         glyphSize = glyph
@@ -26,13 +27,19 @@ final class ChromeButton: HoverView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    /// The sidebar chrome's button box.
+    static let side: CGFloat = 28
+    /// The space after each chrome button.
+    static let gap: CGFloat = 4
+
     override var intrinsicContentSize: NSSize { NSSize(width: side, height: side) }
     override var mouseDownCanMoveWindow: Bool { false }
 
     override func draw(_ dirtyRect: NSRect) {
         if isOn || isHovered {
-            (isOn ? theme.selection : theme.hover).setFill()
-            NSBezierPath(roundedRect: bounds, xRadius: Metrics.radiusMedium, yRadius: Metrics.radiusMedium).fill()
+            (isOn ? theme.surface : theme.hover).setFill()
+            let radius = side >= Self.side ? Metrics.radiusLarge : Metrics.radiusMedium
+            NSBezierPath(roundedRect: bounds, xRadius: radius, yRadius: radius).fill()
         }
         guard let image = icon.image(size: glyphSize) else { return }
         let color = isOn || isHovered ? theme.fg : theme.fgMuted
@@ -95,7 +102,9 @@ final class SidebarCardView: HoverView {
     private let prLabel = makeLabel("", font: AppFont.footnote)
     private let dot = ActivityGlyph()
 
-    static let height: CGFloat = 46
+    /// 1pt border, 6pt padding, the 18pt headline, a 3pt gap and the 13pt
+    /// second line, as Codesh lays the card out.
+    static let height: CGFloat = 48
 
     init(data: ActivityCardData, hint: String?) {
         self.data = data
@@ -200,19 +209,21 @@ final class SidebarCardView: HoverView {
 
     override func layout() {
         super.layout()
-        let left: CGFloat = 10
-        let right = bounds.width - 10
-        lead.frame = CGRect(x: left, y: 6, width: 18, height: 18)
+        let inset = Metrics.border + 10
+        let top = Metrics.border + 6
+        let left = inset
+        let right = bounds.width - inset
+        lead.frame = CGRect(x: left, y: top, width: 18, height: 18)
         var x = left + 18 + 6
         let headlineHeight = headline.intrinsicContentSize.height
-        let line1Y = (6 + 9 - headlineHeight / 2).rounded()
+        let line1Y = (top + 9 - headlineHeight / 2).rounded()
         if let shellLabel {
             let width = min(shellLabel.textWidth, right - x)
             shellLabel.frame = CGRect(x: x, y: line1Y, width: width, height: headlineHeight)
             x += width + 6
         }
         headline.frame = CGRect(x: x, y: line1Y, width: max(right - x, 0), height: headlineHeight)
-        let line2Center: CGFloat = 6 + 18 + 3 + 7
+        let line2Center: CGFloat = top + 18 + 3 + 6.5
         let smallHeight = nameLabel.intrinsicContentSize.height
         let y2 = (line2Center - smallHeight / 2).rounded()
         dot.frame = CGRect(x: right - 12, y: line2Center - 6, width: 12, height: 12)
@@ -305,7 +316,8 @@ final class PrimaryBadge: ThemedView {
     }
 }
 
-/// A project's header: icon, name, and its settings and New Worktree buttons.
+/// A project's header, as Codesh's 28pt row: its icon when it has one, the
+/// name in 12pt semibold, and the settings and New Worktree buttons.
 final class ProjectHeaderRow: HoverView {
     let project: ProjectId
     var onGear: ((NSView) -> Void)?
@@ -314,20 +326,18 @@ final class ProjectHeaderRow: HoverView {
     var menuProvider: (() -> NSMenu?)?
 
     private let iconView = NSImageView()
-    private let hint: HintBadge?
     private let titleLabel: NSTextField
     private let remote: NSImageView?
-    private let gear = ChromeButton(.settings, label: "Project Settings", side: 20, glyph: 14)
+    private let gear = ChromeButton(.settings, label: "Project Settings", side: 20, glyph: 12)
     private let plus: ChromeButton?
     private let missing: Bool
 
     static let height: CGFloat = 28
 
-    init(project: Project, title: String, icon: NSImage?, hint: String?, remoteName: String?, canCreateWorktree: Bool) {
+    init(project: Project, title: String, icon: NSImage?, remoteName: String?, canCreateWorktree: Bool) {
         self.project = project.id
         missing = project.status == .missing
         titleLabel = makeLabel(title, font: AppFont.system(12, weight: .semibold))
-        self.hint = hint.map(HintBadge.init)
         if let remoteName, !project.isRemoteHome {
             let view = NSImageView(image: AppIcon.network.image(size: 10) ?? NSImage())
             view.toolTip = "Remote project on \(remoteName)"
@@ -335,7 +345,7 @@ final class ProjectHeaderRow: HoverView {
         } else {
             remote = nil
         }
-        plus = canCreateWorktree ? ChromeButton(.plus, label: "New Worktree", side: 20, glyph: 14) : nil
+        plus = canCreateWorktree ? ChromeButton(.plus, label: "New Worktree", side: 20, glyph: 12) : nil
         super.init(frame: .zero)
         iconView.image = icon
         iconView.imageScaling = .scaleProportionallyUpOrDown
@@ -343,7 +353,6 @@ final class ProjectHeaderRow: HoverView {
         iconView.layer?.cornerRadius = Metrics.radiusSmall
         iconView.layer?.masksToBounds = true
         for view in [iconView, titleLabel, gear] as [NSView] { addSubview(view) }
-        if let hint = self.hint { addSubview(hint) }
         if let remote { addSubview(remote) }
         if let plus { addSubview(plus) }
         gear.action = { [weak self] button in self?.onGear?(button) }
@@ -363,29 +372,29 @@ final class ProjectHeaderRow: HoverView {
 
     override func layout() {
         super.layout()
-        var x: CGFloat = 10
+        let padding: CGFloat = 10
+        let gap: CGFloat = 4
+        var x = padding
         let middle = bounds.height / 2
-        if let hint {
-            hint.frame = CGRect(x: x, y: middle - 8, width: 16, height: 16)
-            x += 16 + 6
-        } else if iconView.image != nil {
+        if iconView.image != nil {
             iconView.frame = CGRect(x: x, y: middle - 8, width: 16, height: 16)
-            x += 16 + 6
+            x += 16 + gap
         } else {
             iconView.frame = .zero
         }
-        var right = bounds.width - 6
+        var right = bounds.width - padding
         if let plus {
             right -= 20
             plus.frame = CGRect(x: right, y: middle - 10, width: 20, height: 20)
         }
         right -= 20
         gear.frame = CGRect(x: right, y: middle - 10, width: 20, height: 20)
-        right -= 4
+        right -= gap
         if let remote {
-            right -= 14
-            remote.frame = CGRect(x: right, y: middle - 7, width: 14, height: 14)
-            right -= 4
+            right -= 18
+            remote.frame = CGRect(x: right, y: middle - 9, width: 18, height: 18)
+            remote.imageAlignment = .alignCenter
+            right -= gap
         }
         let height = titleLabel.intrinsicContentSize.height
         titleLabel.frame = CGRect(x: x, y: (middle - height / 2).rounded(), width: max(right - x, 0), height: height)
@@ -479,64 +488,4 @@ final class AddProjectRow: HoverView {
         onClick?(self)
         return true
     }
-}
-
-/// A project as a 28pt tile in the collapsed sidebar: its icon or initial.
-final class ProjectTile: HoverView {
-    let project: ProjectId
-    var onClick: (() -> Void)?
-    var menuProvider: (() -> NSMenu?)?
-    private let icon: NSImage?
-    private let initial: String
-    private let active: Bool
-    private let hint: String?
-
-    init(project: Project, title: String, icon: NSImage?, active: Bool, hint: String?) {
-        self.project = project.id
-        self.icon = icon
-        initial = Project.initial(title).uppercased()
-        self.active = active
-        self.hint = hint
-        super.init(frame: .zero)
-        toolTip = title
-        alphaValue = project.status == .missing ? 0.5 : 1
-    }
-
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    override var intrinsicContentSize: NSSize { NSSize(width: 34, height: 34) }
-    override var mouseDownCanMoveWindow: Bool { false }
-
-    override func draw(_ dirtyRect: NSRect) {
-        let tile = bounds.insetBy(dx: 3, dy: 3)
-        if let hint {
-            theme.accent.setFill()
-            NSBezierPath(roundedRect: tile, xRadius: 7, yRadius: 7).fill()
-            let text = NSAttributedString(string: hint, attributes: [.font: AppFont.system(18, weight: .bold), .foregroundColor: theme.bg])
-            let size = text.size()
-            text.draw(at: NSPoint(x: tile.midX - size.width / 2, y: tile.midY - size.height / 2))
-        } else if let icon {
-            icon.draw(in: tile, from: .zero, operation: .sourceOver, fraction: isHovered ? 0.85 : 1, respectFlipped: true, hints: nil)
-        } else {
-            theme.surface.setFill()
-            NSBezierPath(roundedRect: tile, xRadius: Metrics.radiusMedium, yRadius: Metrics.radiusMedium).fill()
-            let text = NSAttributedString(string: initial, attributes: [.font: AppFont.system(13, weight: .bold), .foregroundColor: theme.fg])
-            let size = text.size()
-            text.draw(at: NSPoint(x: tile.midX - size.width / 2, y: tile.midY - size.height / 2))
-        }
-        if active {
-            theme.accent.setStroke()
-            let ring = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.75, dy: 0.75), xRadius: 9, yRadius: 9)
-            ring.lineWidth = 1.5
-            ring.stroke()
-        }
-    }
-
-    override func mouseDown(with event: NSEvent) {}
-
-    override func mouseUp(with event: NSEvent) {
-        if bounds.contains(convert(event.locationInWindow, from: nil)) { onClick?() }
-    }
-
-    override func menu(for event: NSEvent) -> NSMenu? { menuProvider?() }
 }
