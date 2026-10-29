@@ -1,0 +1,121 @@
+{
+ "id": "omp",
+ "version": "2026.10.14.1",
+ "min_engine_version": 1,
+ "updated_at": "2026-10-14T00:00:00Z",
+ "aliases": [
+  "oh-my-pi"
+ ],
+ "rules": [
+  {
+   "id": "osc_title_blocked",
+   "state": "blocked",
+   "priority": 300,
+   "region": "osc_title",
+   "regex": [
+    "^π !(?: |$)"
+   ]
+  },
+  {
+   "id": "osc_title_working",
+   "state": "working",
+   "priority": 150,
+   "region": "osc_title",
+   "regex": [
+    "^π [\\x{2800}-\\x{28FF}○◔◑◕●\\\\|/:-](?: |$)"
+   ]
+  },
+  {
+   "id": "osc_title_idle",
+   "state": "idle",
+   "priority": 150,
+   "region": "osc_title",
+   "visible_idle": true,
+   "regex": [
+    "^π >(?: |$)"
+   ]
+  },
+  {
+   "id": "osc_progress_working",
+   "state": "working",
+   "priority": 120,
+   "region": "osc_progress",
+   "regex": [
+    "^4;1;-1$"
+   ]
+  },
+  {
+   "id": "working_row",
+   "state": "working",
+   "priority": 100,
+   "region": "whole_recent",
+   "visible_working": true,
+   "line_regex": [
+    "^\\s*⎋ \\S.*$"
+   ]
+  },
+  {
+   "id": "headless_working",
+   "state": "working",
+   "priority": 100,
+   "region": "bottom_non_empty_lines(1)",
+   "visible_working": true,
+   "line_regex": [
+    "^\\s*Working\\.\\.\\.\\s*$"
+   ]
+  },
+  {
+   "id": "legacy_working_row",
+   "state": "working",
+   "priority": 100,
+   "region": "bottom_non_empty_lines(12)",
+   "visible_working": true,
+   "line_regex": [
+    "^\\s*[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] Working… \\[esc\\]\\s*$"
+   ]
+  },
+  {
+   "id": "status_line_working",
+   "state": "working",
+   "priority": 100,
+   "region": "bottom_non_empty_lines(12)",
+   "visible_working": true,
+   "line_regex": [
+    "^\\s*[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] \\d+[smh] · "
+   ]
+  },
+  {
+   "id": "approval_footer",
+   "state": "blocked",
+   "priority": 200,
+   "region": "whole_recent",
+   "contains": [
+    "to navigate, ⏎ to select, ⎋ to deny"
+   ]
+  },
+  {
+   "id": "approval_selector",
+   "state": "blocked",
+   "priority": 200,
+   "region": "whole_recent",
+   "contains": [
+    "Allow tool:"
+   ],
+   "line_regex": [
+    "^\\s*│?\\s*(?:❯\\s*)?Approve\\s*│?\\s*$",
+    "^\\s*│?\\s*(?:❯\\s*)?Deny\\s*│?\\s*$",
+    "navigate\\s+⏎ select\\s+⎋ cancel"
+   ]
+  },
+  {
+   "id": "status_line_idle",
+   "state": "idle",
+   "priority": 90,
+   "region": "bottom_non_empty_lines(12)",
+   "visible_idle": true,
+   "line_regex": [
+    "^\\s*π · "
+   ]
+  }
+ ]
+}

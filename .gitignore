@@ -1,0 +1,9 @@
+.build/
+build/
+vendor/GhosttyVT.xcframework/
+vendor/ghostty-vt/lib/
+vendor/ghostty-src/
+*.xcodeproj
+*.xcworkspace
+.DS_Store
+.swiftpm/
