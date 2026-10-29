@@ -79,6 +79,23 @@ final class SidebarListingTests: XCTestCase {
         XCTAssertEqual(model.sidebarListing.groups.first { $0.project == app }?.cards.map(\.project), [app])
     }
 
+    func testCyclingFromHomeStartsAtTheFirstProjectInEitherDirection() async throws {
+        let first = try XCTUnwrap(model.addProject(try ModelFixtures.folder("first")))
+        _ = model.addProject(try ModelFixtures.folder("second"))
+        let last = try XCTUnwrap(model.addProject(try ModelFixtures.folder("last")))
+        model.selectProject(model.state.home.id)
+        model.cycleProject(forward: false)
+        XCTAssertEqual(model.currentProject.id, first)
+        model.cycleProject(forward: false)
+        XCTAssertEqual(model.currentProject.id, last, "previous wraps after reaching a listed project")
+        model.selectProject(model.state.home.id)
+        model.cycleProject(forward: true)
+        XCTAssertEqual(model.currentProject.id, first)
+        model.selectProject(model.state.home.id)
+        model.cycleCard(forward: false)
+        XCTAssertEqual(model.currentProject.id, last, "previous card starts at the end when Home has no terminal")
+    }
+
     func testCardHeadlinesReadTerminalTitles() {
         XCTAssertEqual(ActivityCardData.idleDirectory("hugo@mac:~/repos/codesh"), "codesh")
         XCTAssertEqual(ActivityCardData.idleDirectory("(mini) ~/repos/vitruve"), "vitruve")

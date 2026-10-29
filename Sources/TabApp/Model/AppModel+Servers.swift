@@ -277,7 +277,9 @@ extension AppModel {
                         updater.reconcile()
                     }
                 }
-            case .remoteAccess, .unknown: break
+            case .remoteAccess:
+                if server.isLocal { notify(.remoteAccess) }
+            case .unknown: break
             }
         case .sessionMetadata(let session, let metadata):
             sessionMetadata(server, session, metadata)

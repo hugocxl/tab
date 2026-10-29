@@ -409,7 +409,7 @@ final class ActionsPanelView: ThemedView {
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         for index in state.actions.indices where rowFrame(index).contains(point) {
-            (window as? PaletteWindow)?.controller?.clickAction(index)
+            controller?.clickAction(index)
             return
         }
     }

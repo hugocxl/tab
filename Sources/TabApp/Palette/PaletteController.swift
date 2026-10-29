@@ -24,7 +24,8 @@ protocol PaletteDataSource: AnyObject {
 final class PaletteController: NSObject, NSTextFieldDelegate {
     weak var source: PaletteDataSource?
     private weak var parent: NSWindow?
-    private var window: PaletteWindow?
+    private var root: PaletteRootView?
+    private weak var previousResponder: NSResponder?
     private var stack: [PageState] = []
     private var panel: PalettePanelView?
     private var actions: ActionsState?
@@ -32,7 +33,7 @@ final class PaletteController: NSObject, NSTextFieldDelegate {
     /// The key that opens a row's actions, from the keymap.
     var actionsChord: KeyChord? = try? KeyChord("cmd-k")
 
-    var isOpen: Bool { window != nil }
+    var isOpen: Bool { root != nil }
     var page: PalettePage? { stack.last?.spec.page }
     var query: String { stack.last?.query ?? "" }
     var depth: Int { stack.count }
@@ -61,7 +62,7 @@ final class PaletteController: NSObject, NSTextFieldDelegate {
         actions = nil
         pushState(.root)
         if page != .root { pushState(page) }
-        if window == nil { showWindow() }
+        if root == nil { showWindow() }
         reload(resetScroll: true)
     }
 
@@ -99,15 +100,15 @@ final class PaletteController: NSObject, NSTextFieldDelegate {
     }
 
     func close() {
-        guard let window else { return }
+        guard let root else { return }
         actions = nil
-        parent?.removeChildWindow(window)
-        window.orderOut(nil)
-        self.window = nil
+        root.removeFromSuperview()
+        self.root = nil
         panel = nil
         stack = []
         source?.closed()
-        parent?.makeKey()
+        parent?.makeFirstResponder(previousResponder)
+        previousResponder = nil
     }
 
     /// Asks the source again for the current page's content.
@@ -145,14 +146,8 @@ final class PaletteController: NSObject, NSTextFieldDelegate {
     // MARK: Window
 
     private func showWindow() {
-        guard let parent else { return }
-        let window = PaletteWindow(contentRect: parent.frame, styleMask: [.borderless], backing: .buffered, defer: false)
-        window.isOpaque = false
-        window.backgroundColor = .clear
-        window.hasShadow = false
-        window.isReleasedWhenClosed = false
-        window.appearance = AppTheme.shared.nsAppearance
-        window.controller = self
+        guard let parent, let content = parent.contentView else { return }
+        previousResponder = parent.firstResponder
         let root = PaletteRootView()
         root.onDismiss = { [weak self] in self?.close() }
         let panel = PalettePanelView()
@@ -163,19 +158,19 @@ final class PaletteController: NSObject, NSTextFieldDelegate {
         panel.list.onClick = { [weak self] row in self?.click(row) }
         root.addSubview(panel)
         root.panel = panel
-        window.contentView = root
-        window.setFrame(parent.frame, display: false)
-        parent.addChildWindow(window, ordered: .above)
-        window.makeKeyAndOrderFront(nil)
-        window.makeFirstResponder(panel.header.field)
-        self.window = window
+        root.frame = content.bounds
+        root.autoresizingMask = [.width, .height]
+        root.wantsLayer = true
+        root.layer?.cornerRadius = 10
+        root.layer?.masksToBounds = true
+        content.addSubview(root)
+        parent.makeFirstResponder(panel.header.field)
+        self.root = root
         self.panel = panel
     }
 
     /// Follows the main window when it moves or resizes.
     func parentFrameChanged() {
-        guard let window, let parent else { return }
-        window.setFrame(parent.frame, display: true)
         layoutPanel()
     }
 
@@ -188,13 +183,17 @@ final class PaletteController: NSObject, NSTextFieldDelegate {
         let selected = state.selectedItem.flatMap { $0.disabled ? nil : $0 }
         panel.footer.configure(primary: selected?.primaryTitle, actionsEnabled: selected != nil)
         if let row = state.selectedRow { panel.list.reveal(row, top: resetScroll) }
-        panel.actionsPanel = actions.map { ActionsPanelView(state: $0) }
+        panel.actionsPanel = actions.map { state in
+            let view = ActionsPanelView(state: state)
+            view.controller = self
+            return view
+        }
         layoutPanel()
     }
 
     private func layoutPanel() {
-        guard let panel, let root = window?.contentView, let state = stack.last else { return }
-        let height = state.height
+        guard let panel, let root, let state = stack.last else { return }
+        let height = min(state.height, max(root.bounds.height - PaletteLayout.top - 8, 120))
         let width = min(PaletteLayout.width, root.bounds.width - 16)
         panel.frame = NSRect(x: ((root.bounds.width - width) / 2).rounded(), y: PaletteLayout.top, width: width, height: height)
         panel.needsLayout = true
@@ -398,24 +397,6 @@ struct ActionsState {
     var selected = 0
     /// A destructive action waits for a second Return.
     var armed = false
-}
-
-/// The transparent window over the main window holding the backdrop and the
-/// palette panel; it takes the keyboard while the palette shows.
-final class PaletteWindow: NSPanel {
-    weak var controller: PaletteController?
-
-    override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { false }
-
-    override func sendEvent(_ event: NSEvent) {
-        if event.type == .keyDown, let controller, MainActor.assumeIsolated({ controller.handleKey(event) }) { return }
-        super.sendEvent(event)
-    }
-
-    override func cancelOperation(_ sender: Any?) {
-        MainActor.assumeIsolated { controller?.dismiss() }
-    }
 }
 
 /// The 30% black backdrop; a click outside the panel closes the palette.

@@ -62,6 +62,8 @@ final class KeyDispatcher {
     /// Command-clicks may drag panes.
     var commandMouseDown: ((NSEvent) -> Bool)?
     private var mouseMonitor: Any?
+    /// Routes palette keys before the pane and app shortcuts.
+    var paletteKeyDown: ((NSEvent) -> Bool?)?
 
     init(model: AppModel, actions: Actions) {
         self.model = model
@@ -88,6 +90,7 @@ final class KeyDispatcher {
     /// Handles a key press in the main window; false lets it through.
     func handle(_ event: NSEvent) -> Bool {
         guard event.window === window, let window else { return false }
+        if let handled = paletteKeyDown?(event) { return handled }
         let pane = model.activePane.flatMap { model.panes.controller(for: $0) }
         let editingText = window.firstResponder is NSTextView && !(pane?.hasFocus ?? false)
         let paneTakes = !editingText && (pane?.handleKeyFirst(event) ?? false)

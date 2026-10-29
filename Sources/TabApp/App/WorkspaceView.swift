@@ -9,6 +9,7 @@ final class WorkspaceView: ThemedView {
     unowned let model: AppModel
     let sidebar: SidebarViewController
     let splits: SplitContainerView
+    private let material = NSVisualEffectView()
     private let panelHost = RightPanelHostView()
     private let banner = BannerView()
     private var shownPanel: RightPanelKind?
@@ -28,6 +29,10 @@ final class WorkspaceView: ThemedView {
         self.sidebar = sidebar
         splits = SplitContainerView(model: model)
         super.init(frame: .zero)
+        material.material = .underWindowBackground
+        material.blendingMode = .behindWindow
+        material.state = .active
+        addSubview(material)
         addSubview(sidebar.view)
         addSubview(splits)
         addSubview(panelHost)
@@ -50,6 +55,7 @@ final class WorkspaceView: ThemedView {
         syncPanel()
         syncAgentsPopup()
         updateBanner()
+        syncVibrancy()
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -61,7 +67,20 @@ final class WorkspaceView: ThemedView {
         layer?.backgroundColor = theme.bg.cgColor
     }
 
+    private func syncVibrancy() {
+        let enabled = model.terminalVibrancy > 0
+        material.isHidden = !enabled
+        window?.isOpaque = !enabled
+        window?.backgroundColor = enabled ? .clear : theme.bg
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        syncVibrancy()
+    }
+
     private func modelChanged(_ changes: Set<ModelChange>) {
+        if changes.contains(.settings) { syncVibrancy() }
         if changes.contains(.state) || changes.contains(.settings) {
             splits.reload()
         }
@@ -177,6 +196,7 @@ final class WorkspaceView: ThemedView {
     override func layout() {
         super.layout()
         let sidebarWidth = self.sidebarWidth
+        material.frame = NSRect(x: sidebarWidth, y: 0, width: max(bounds.width - sidebarWidth, 0), height: bounds.height)
         let expanded = model.appearance.sidebarExpanded
         sidebar.view.isHidden = !expanded
         sidebar.view.frame = NSRect(x: 0, y: 0, width: sidebarWidth, height: bounds.height)

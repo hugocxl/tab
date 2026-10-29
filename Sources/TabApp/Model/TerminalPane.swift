@@ -27,6 +27,7 @@ final class TerminalPane: PaneContentController {
         server = context.project.serverId
         project = context.project.id
         model = context.model
+        fontSize = context.model.terminalFontSizes[pane.description]
         host = TerminalHostView()
         view = host
         refresh()
@@ -136,7 +137,7 @@ final class TerminalPane: PaneContentController {
             old.detach()
         }
         let controller = TerminalSessionController(
-            session: sessionId, backend: client.terminalBackend, settings: model.terminalSettings,
+            session: sessionId, backend: client.terminalBackend, settings: effectiveSettings(model.terminalSettings),
             palette: palette(), remote: !server.isLocal, directory: nil, cachedGrid: lastGrid
         )
         controller.view.basePadding = 2
@@ -187,7 +188,19 @@ final class TerminalPane: PaneContentController {
     func progressChanged() { titleDidChange?() }
 
     func apply(settings: TerminalSettings) {
-        session?.apply(settings: settings, palette: palette())
+        session?.apply(settings: effectiveSettings(settings), palette: palette(options: settings.options))
+        if let session {
+            fontSize = session.view.fontSize
+            if let model { session.view.shortcuts = Self.shortcuts(model.settings.keymap) }
+        }
+    }
+
+    private func effectiveSettings(_ settings: TerminalSettings) -> TerminalSettings {
+        var effective = settings
+        if effective.options.copyOnSelect == nil {
+            effective.options.copyOnSelect = model?.settings.clipboard.copyOnSelect ?? false
+        }
+        return effective
     }
 
     private func statusText() -> String {
@@ -200,12 +213,16 @@ final class TerminalPane: PaneContentController {
         }
     }
 
-    private func palette() -> TerminalPalette {
-        let theme = AppTheme.shared
-        return TerminalPalette(
-            scheme: theme.scheme, options: model?.terminalSettings.options ?? TerminalOptions(),
+    private func palette(options: TerminalOptions? = nil) -> TerminalPalette {
+        let theme = model?.theme ?? AppTheme.shared
+        let options = options ?? model?.terminalSettings.options ?? TerminalOptions()
+        var palette = TerminalPalette(
+            scheme: theme.scheme, options: options,
             dark: !theme.palette.isLight, background: RGBColor(theme.card)
         )
+        let vibrancy = theme.accessibility.allowsVibrancy ? Double(min(max(options.backgroundVibrancy, 0), 100)) / 100 : 0
+        palette.backgroundOpacity *= 1 - vibrancy
+        return palette
     }
 
     /// The terminal's shortcuts as the keymap binds them.
@@ -261,6 +278,8 @@ extension TerminalPane: TerminalSessionControllerDelegate {
 
     func terminalSession(_ session: TerminalSessionController, didChangeFontSize size: Double) {
         fontSize = size
+        model?.terminalFontSizes[pane.description] = size
+        model?.scheduleSave()
     }
 
     func terminalSessionRequestsReload(_ session: TerminalSessionController) {

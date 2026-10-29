@@ -56,7 +56,14 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, A
         sidebar.actions = self
         actions.window = self
         keys.window = window
-        keys.commandMouseDown = { [weak self] event in self?.workspace.splits.handleCommandMouseDown(event) ?? false }
+        keys.commandMouseDown = { [weak self] event in
+            guard let self, !self.palette.isOpen else { return false }
+            return self.workspace.splits.handleCommandMouseDown(event)
+        }
+        keys.paletteKeyDown = { [weak self] event in
+            guard let self, self.palette.isOpen else { return nil }
+            return self.palette.handleKey(event)
+        }
         keys.install()
         palette.source = paletteSource
         paletteSource.palette = palette
@@ -90,7 +97,12 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, A
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
         placeWindowButtons()
+        workspace.layoutSubtreeIfNeeded()
         model.focusActiveContent()
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.window?.isKeyWindow == true, !self.palette.isOpen else { return }
+            self.model.focusActiveContentIfIdle()
+        }
         for problem in model.loadProblems { showToast(problem, error: true) }
     }
 
@@ -167,7 +179,6 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, A
     }
 
     public func windowDidResignKey(_ notification: Notification) {
-        guard !palette.isOpen else { return }
         model.windowDidChangeActive(false)
     }
 
@@ -306,20 +317,19 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, A
 
     // MARK: Quitting
 
-    /// Ends every terminal on every connected server, then quits.
+    /// Ends this Mac's terminals, then quits without another confirmation.
     func endAllSessionsAndQuit() {
+        guard let main = model.connections[.local]?.main, model.connectionState(.local).isReady else {
+            model.report("Connect to the server before ending all sessions.")
+            return
+        }
         Task {
-            let confirmed = await confirm(
-                title: "End all sessions and quit?",
-                message: "Every terminal on this Mac's server and connected servers ends, and their programs stop.",
-                confirm: "End All and Quit", destructive: true
-            )
-            guard confirmed else { return }
-            for server in model.knownServers {
-                guard let main = model.connections[server]?.main, let sessions = try? await main.sessions() else { continue }
-                for session in sessions { try? await main.endSession(session.id) }
+            do {
+                for session in try await main.sessions() { try await main.endSession(session.id) }
+                NSApp.terminate(nil)
+            } catch {
+                model.report("Could not end all sessions: \(error.localizedDescription)")
             }
-            NSApp.terminate(nil)
         }
     }
 

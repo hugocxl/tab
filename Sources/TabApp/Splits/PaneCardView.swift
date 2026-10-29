@@ -106,6 +106,7 @@ final class PaneCardView: HoverView {
             needsLayout = true
         }
         refreshHeader()
+        needsDisplay = true
     }
 
     func refreshHeader() {
@@ -171,7 +172,11 @@ final class PaneCardView: HoverView {
     override var wantsUpdateLayer: Bool { true }
 
     override func updateLayer() {
-        layer?.backgroundColor = theme.card.cgColor
+        let terminal = model?.state.pane(pane).map { PaneKind($0.content) == .terminal } ?? false
+        let alpha = terminal ? 1 - (model?.terminalVibrancy ?? 0) : 1
+        layer?.backgroundColor = terminal && alpha < 1 ? NSColor.clear.cgColor : theme.card.cgColor
+        header.wantsLayer = true
+        header.layer?.backgroundColor = theme.card.withAlphaComponent(alpha).cgColor
         layer?.borderColor = theme.cardBorder.cgColor
     }
 

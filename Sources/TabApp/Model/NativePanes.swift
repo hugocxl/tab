@@ -275,12 +275,21 @@ extension AppModel: AgentsPanelHost, AgentSessionsHost {
     /// The running agents of every connected server, for the Agents panel.
     /// Servers come in project order, so equal rows keep their places.
     func updateAgentsPanel() {
+        var ordering = listingBuilder()
+        ordering.appearance.sidebarHost = .all
+        try? ordering.state.selectWorkspace(nil)
+        let parents = ordering.listedParents()
+        let ordered = state.projects.filter(\.home) + parents.flatMap { parent in
+            [parent] + ordering.children(of: parent.id)
+        }
+        var seenProjects = Set<ProjectId>()
+        let projects = (ordered + state.projects).filter { seenProjects.insert($0.id).inserted }
         var seen = Set<ServerId>()
-        let listed = state.projects.map(\.serverId).filter { seen.insert($0).inserted }
+        let listed = projects.map(\.serverId).filter { seen.insert($0).inserted }
         let servers = listed + connections.keys.filter { !seen.contains($0) }.sorted { $0.description < $1.description }
         let sources = servers.compactMap { connections[$0] }.map { connection in
             let server = connection.id
-            let panes = state.projects.filter { $0.serverId == server }.flatMap { project in
+            let panes = projects.filter { $0.serverId == server }.flatMap { project in
                 project.tabs.flatMap(\.panes).compactMap { pane -> AgentPaneInfo? in
                     guard let session = pane.content.session else { return nil }
                     let parent = project.parentId.flatMap { state.project($0) }

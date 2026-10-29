@@ -146,8 +146,17 @@ extension AppModel {
     /// Gives the keyboard to the active pane's content.
     public func focusActiveContent() {
         guard let pane = activePane else { return }
-        DispatchQueue.main.async { [weak self] in
-            MainActor.assumeIsolated { self?.controller(for: pane)?.focusContent() }
+        Task { [weak self] in
+            for attempt in 0..<100 {
+                guard let self, self.activePane == pane, let controller = self.controller(for: pane) else { return }
+                if attempt > 0 {
+                    guard let window = self.presenter?.window, window.isKeyWindow,
+                          window.firstResponder == nil || window.firstResponder === window else { return }
+                }
+                controller.focusContent()
+                guard controller is EditorPaneContent, !controller.hasFocus else { return }
+                try? await Task.sleep(for: .milliseconds(50))
+            }
         }
     }
 
@@ -291,8 +300,9 @@ extension AppModel {
         let current: SidebarListing.Target = currentProject.home
             ? activeTab.map { .tab($0.id) } ?? .project(currentProject.id)
             : .project(currentProject.id)
-        let index = targets.firstIndex(of: current) ?? -1
-        let next = forward ? (index + 1) % targets.count : (index - 1 + targets.count) % targets.count
+        let next = targets.firstIndex(of: current).map { index in
+            forward ? (index + 1) % targets.count : (index - 1 + targets.count) % targets.count
+        } ?? (forward ? 0 : targets.count - 1)
         select(targets[next])
     }
 
@@ -301,8 +311,9 @@ extension AppModel {
         let projects = navigationProjects
         guard !projects.isEmpty else { return }
         let current = currentProject.parentId ?? currentProject.id
-        let index = projects.firstIndex(of: current) ?? -1
-        let next = forward ? (index + 1) % projects.count : (index - 1 + projects.count) % projects.count
+        let next = projects.firstIndex(of: current).map { index in
+            forward ? (index + 1) % projects.count : (index - 1 + projects.count) % projects.count
+        } ?? 0
         selectProject(preferredWorktree(projects[next]))
     }
 

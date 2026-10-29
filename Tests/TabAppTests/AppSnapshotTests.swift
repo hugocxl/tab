@@ -43,14 +43,11 @@ final class AppSnapshotTests: XCTestCase {
         try render(window.contentView, to: output + "/window.png")
         controller.openPalette(.root)
         try? await Task.sleep(nanoseconds: 200_000_000)
-        if let palette = NSApp.windows.first(where: { $0 is PaletteWindow && $0.isVisible }) {
-            try render(palette.contentView, to: output + "/palette.png")
-        }
+        XCTAssertTrue(window.contentView?.subviews.contains { $0 is PaletteRootView } == true)
+        try render(window.contentView, to: output + "/palette.png")
         controller.openPalette(.themes)
         try? await Task.sleep(nanoseconds: 200_000_000)
-        if let palette = NSApp.windows.first(where: { $0 is PaletteWindow && $0.isVisible }) {
-            try render(palette.contentView, to: output + "/themes.png")
-        }
+        try render(window.contentView, to: output + "/themes.png")
         model.connection(.local)?.disconnect()
     }
 

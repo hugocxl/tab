@@ -15,8 +15,17 @@ public final class SettingsHostImpl: SettingsHost {
     public init(model: AppModel) {
         self.model = model
         subscription = model.changes.sink { [weak self] changes in
-            guard let self, changes.contains(.activity) else { return }
-            self.store?.updateServerState(self.serverState)
+            guard let self else { return }
+            if changes.contains(.activity) { self.store?.updateServerState(self.serverState) }
+            if changes.contains(.remoteAccess) { self.refreshRemoteAccess() }
+        }
+    }
+
+    private func refreshRemoteAccess() {
+        Task { [weak self] in
+            guard let self, let client = try? local(), let access = try? await client.remoteAccess(),
+                  model.connections[.local]?.main === client else { return }
+            store?.updateRemoteAccess(access)
         }
     }
 
@@ -113,6 +122,6 @@ public final class SettingsHostImpl: SettingsHost {
     }
 
     public func backupState() throws -> Data {
-        try BackupStateMerge.backup(model.state)
+        try BackupStateMerge.backup(model.state, terminalFontSizes: model.terminalFontSizes)
     }
 }

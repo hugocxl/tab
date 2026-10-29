@@ -61,3 +61,39 @@ final class ThemeTests: XCTestCase {
         }
     }
 }
+
+@MainActor
+final class ThemeTerminalIntegrationTests: XCTestCase {
+    func testVibrancyAndAppPreferencesReachExistingTerminalPanes() async throws {
+        let dirs = try ModelFixtures.profile()
+        let identity = ServerId()
+        let home = ProjectDescriptor.home(directory: ServerPath(NSHomeDirectory()))
+        let server = ModelFakeServer(identity: identity, catalog: CatalogPage(server: identity, home: home.id, revision: 1, projects: [home]))
+        let model = ModelFixtures.model(dirs, server: server)
+        model.start()
+        defer { model.connection(.local)?.disconnect() }
+        _ = await ModelFixtures.wait { model.state.serverIdentity(.local) != nil }
+        model.newHomeTerminal()
+        let id = try XCTUnwrap(model.activePane)
+        let pane = try XCTUnwrap(model.controller(for: id) as? TerminalPane)
+        let created = await ModelFixtures.wait { pane.session != nil }
+        XCTAssertTrue(created)
+        var terminal = TerminalSettings()
+        terminal.options.backgroundOpacity = 0.5
+        terminal.options.backgroundVibrancy = 60
+        model.apply(terminalSettings: terminal)
+        let view = try XCTUnwrap(pane.session?.view)
+        let expected = model.theme.accessibility.allowsVibrancy ? 0.2 : 0.5
+        XCTAssertEqual(view.palette.backgroundOpacity, expected, accuracy: 0.0001)
+        var settings = model.settings
+        settings.clipboard.copyOnSelect = true
+        settings.keymap = try Keymap.fromOverrides([ShortcutId.copy.rawValue: "cmd-shift-c"])
+        model.apply(settings: settings)
+        XCTAssertEqual(view.settings.options.copyOnSelect, true)
+        XCTAssertEqual(view.shortcuts[try KeyChord("cmd-shift-c")], .copy)
+        XCTAssertNil(view.shortcuts[try KeyChord("cmd-c")])
+        terminal.options.copyOnSelect = false
+        model.apply(terminalSettings: terminal)
+        XCTAssertEqual(view.settings.options.copyOnSelect, false, "the terminal override wins over the app preference")
+    }
+}

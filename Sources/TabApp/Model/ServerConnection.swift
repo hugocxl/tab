@@ -81,6 +81,7 @@ public final class ServerConnection {
     private let backoff: @Sendable (Int) -> TimeInterval
     private var task: Task<Void, Never>?
     private var eventTask: Task<Void, Never>?
+    private var sideEventTask: Task<Void, Never>?
     private var failures = 0
     private var generation = 0
 
@@ -123,6 +124,8 @@ public final class ServerConnection {
         task = nil
         eventTask?.cancel()
         eventTask = nil
+        sideEventTask?.cancel()
+        sideEventTask = nil
         main?.close()
         side?.close()
         main = nil
@@ -183,6 +186,21 @@ public final class ServerConnection {
                 }
             }
         }
+        if side !== main {
+            let sideEvents = side.events
+            sideEventTask = Task { [weak self] in
+                for await event in sideEvents {
+                    guard let self, generation == self.generation else { return }
+                    switch event {
+                    case .gitChanged, .filesChanged: self.onEvent?(self, event)
+                    case .disconnected:
+                        self.dropped(generation: generation)
+                        return
+                    default: break
+                    }
+                }
+            }
+        }
         setState(.ready)
         onReady?(self)
     }
@@ -201,7 +219,11 @@ public final class ServerConnection {
 
     private func dropped(generation: Int) {
         guard generation == self.generation else { return }
+        eventTask?.cancel()
         eventTask = nil
+        sideEventTask?.cancel()
+        sideEventTask = nil
+        main?.close()
         side?.close()
         main = nil
         side = nil

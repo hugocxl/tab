@@ -14,6 +14,8 @@ public enum ModelChange: Hashable, Sendable {
     case settings
     /// The right panel opened, closed or changed width.
     case panel
+    /// The local server changed mobile pairing or access.
+    case remoteAccess
 }
 
 /// The window's UI, as the model needs it: dialogs, the palette, toasts.
@@ -124,11 +126,15 @@ public final class AppModel {
     var localSessionCount = 0
     let notifier: Notifier
     var windowActive = true
+    /// Font overrides belong to panes and survive app and server restarts.
+    var terminalFontSizes: [String: Double] = [:]
+    private var themeObservations: Set<AnyCancellable> = []
 
     private var pending: Set<ModelChange> = []
     private var flushScheduled = false
     private var saveWork: DispatchWorkItem?
     var referencesWork: DispatchWorkItem?
+    private var activationRefresh: Task<Void, Never>?
     private var savedAppearance: Appearance
 
     /// Loads the profile: a waiting backup first, then settings, terminal
@@ -178,6 +184,11 @@ public final class AppModel {
         self.settings = settings
         savedAppearance = settings.appearance
         self.state = state
+        if let data = try? Data(contentsOf: dirs.state),
+           let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let sizes = root["terminalFontSizes"] as? [String: Double] {
+            terminalFontSizes = sizes.filter { $0.value.isFinite && (1...256).contains($0.value) }
+        }
         loadProblems = problems
         self.notifier = notifier ?? Notifier()
         connectorOverride = connectorFactory
@@ -191,6 +202,12 @@ public final class AppModel {
         browserProfiles.notify = { [weak self] message, isError in self?.presenter?.showToast(message, error: isError) }
         iconCache.onChange = { [weak self] _ in self?.notify(.activity) }
         recordNavigation()
+        theme.$accessibility.dropFirst().sink { [weak self] _ in
+            DispatchQueue.main.async { [weak self] in self?.refreshTerminalAppearance() }
+        }.store(in: &themeObservations)
+        theme.$palette.dropFirst().sink { [weak self] _ in
+            DispatchQueue.main.async { [weak self] in self?.refreshTerminalAppearance() }
+        }.store(in: &themeObservations)
     }
 
     private static func emergencyState() -> AppState {
@@ -309,6 +326,7 @@ public final class AppModel {
         flushScheduled = false
         let changed = pending
         pending = []
+        if !changed.isDisjoint(with: [.state, .settings]) { updateAgentsPanel() }
         if !changed.isEmpty { changes.send(changed) }
     }
 
@@ -338,7 +356,12 @@ public final class AppModel {
         saveWork?.cancel()
         saveWork = nil
         do {
-            try AppStateStore.save(state, to: dirs.state)
+            let ids = Set(state.projects.flatMap(\.tabs).flatMap(\.panes).map { $0.id.description })
+            terminalFontSizes = terminalFontSizes.filter { ids.contains($0.key) }
+            let encoded = try AppStateStore.encode(state)
+            var root = try JSONSerialization.jsonObject(with: encoded) as? [String: Any] ?? [:]
+            root["terminalFontSizes"] = terminalFontSizes
+            try AtomicFile.write(JSONSerialization.data(withJSONObject: root, options: [.sortedKeys, .prettyPrinted]), to: dirs.state)
         } catch {
             report(error)
         }
@@ -372,16 +395,39 @@ public final class AppModel {
             serversDidChange(old: servers)
             remoteServers.sync(settings.servers)
         }
+        for (_, controller) in panes.all {
+            (controller as? TerminalPane)?.apply(settings: terminalSettings)
+        }
         notify(.settings)
         notify(.state)
     }
 
     /// Applies new terminal settings to every terminal.
     public func apply(terminalSettings: TerminalSettings, preview: Bool = false) {
-        if !preview { self.terminalSettings = terminalSettings }
+        if !preview {
+            if self.terminalSettings.fontSize != terminalSettings.fontSize {
+                terminalFontSizes.removeAll()
+                scheduleSave()
+            }
+            self.terminalSettings = terminalSettings
+        }
+        notify(.settings)
         for (_, controller) in panes.all {
             (controller as? TerminalPane)?.apply(settings: terminalSettings)
         }
+    }
+
+    /// Refreshes translucent terminal colors after appearance or accessibility changes.
+    private func refreshTerminalAppearance() {
+        for (_, controller) in panes.all {
+            (controller as? TerminalPane)?.apply(settings: terminalSettings)
+        }
+        notify(.settings)
+    }
+
+    /// The native material is available only when accessibility permits it.
+    var terminalVibrancy: Double {
+        theme.accessibility.allowsVibrancy ? Double(min(max(terminalSettings.options.backgroundVibrancy, 0), 100)) / 100 : 0
     }
 
     // MARK: Visibility
@@ -448,8 +494,41 @@ public final class AppModel {
         edit { try $0.setWindowBounds(bounds) }
     }
 
+    /// Reloads hand-edited preferences and missing-folder status when returning to the app.
+    private func refreshProfile() {
+        activationRefresh?.cancel()
+        let originalSettings = settings
+        let originalTerminal = terminalSettings
+        let settingsFile = dirs.settings
+        let terminalFile = dirs.terminalSettings
+        activationRefresh = Task { [weak self] in
+            let loaded = await Task.detached(priority: .utility) {
+                (Result { try Settings.load(settingsFile) }, Result { try TerminalSettings.load(terminalFile) })
+            }.value
+            guard !Task.isCancelled, let self else { return }
+            if self.settings == originalSettings {
+                switch loaded.0 {
+                case .success(let settings):
+                    if settings != self.settings { self.apply(settings: settings) }
+                case .failure(let error): self.report("settings.json: \(error.localizedDescription)")
+                }
+            }
+            if self.terminalSettings == originalTerminal {
+                switch loaded.1 {
+                case .success(let settings):
+                    if settings != self.terminalSettings { self.apply(terminalSettings: settings) }
+                case .failure(let error): self.report("terminal.json: \(error.localizedDescription)")
+                }
+            }
+            self.edit { $0.refreshProjectStatuses() }
+        }
+    }
+
     public func windowDidChangeActive(_ active: Bool) {
         windowActive = active
-        if active { acknowledgeFocusedActivity() }
+        if active {
+            acknowledgeFocusedActivity()
+            refreshProfile()
+        }
     }
 }
