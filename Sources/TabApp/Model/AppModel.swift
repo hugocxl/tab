@@ -82,6 +82,9 @@ public final class AppModel {
     var shownPanes: Set<PaneId> = []
     var deliveredNotifications: [ServerId: Set<UInt64>] = [:]
     var gitRefreshing: Set<ProjectId> = []
+    /// The project whose working tree the shell watches, and on which side
+    /// connection.
+    var gitWatch: (project: ProjectId, connection: ObjectIdentifier)?
     var rightPanels: [RightPanelKind: RightPanelContent] = [:]
     var editorLocations: [PaneId: (line: Int, column: Int)] = [:]
     var projectIcons: [ProjectId: NSImage?] = [:]
@@ -288,6 +291,7 @@ public final class AppModel {
         flushClosures()
         recordNavigation()
         syncVisible()
+        syncGitWatch()
         notify(.state)
     }
 

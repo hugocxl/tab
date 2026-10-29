@@ -163,6 +163,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, A
 
     public func windowDidBecomeKey(_ notification: Notification) {
         model.windowDidChangeActive(true)
+        model.focusActiveContentIfIdle()
     }
 
     public func windowDidResignKey(_ notification: Notification) {

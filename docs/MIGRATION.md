@@ -58,13 +58,13 @@ crates. Behavior is 1:1 unless listed under "Intentionally changed".
 
 ## App: window, sidebar, projects
 
-- [ ] One main window; restores projects, panes, window frame and state on launch; never opens a terminal by itself — implemented (`AppModel`, `MainWindowController`; restore tested with a fake server; launched with a real `tabd`: a restored Home pane attached and ran)
+- [x] One main window; restores projects, panes, window frame and state on launch; never opens a terminal by itself — implemented (`AppModel`, `MainWindowController`; restore tested with a fake server; launched with a real `tabd`: a restored Home pane attached and ran)
 - [ ] Sidebar: Home terminals as cards above projects; projects with worktrees always expanded beneath; activity cards (name, agent glyph and state, relative age; running agent title / latest session / open PR / last commit; branch, PRIMARY badge, PR number); drag to reorder; Ctrl+1–9 jump with modifier hints; Cmd+B toggle; collapsed mode — implemented (`SidebarViewController`, `SidebarListing`, `ActivityCardData`; ordering/filter tests; offscreen render compared with `sidebar.png`); collapsed mode is a 44pt icon column
-- [ ] Sidebar footer: host selector (All, Local, server), name filter (Escape clears, keeps parents of matching worktrees), Add Project, New Browser — implemented; host button opens the Remote Servers host menu, right click has host/workspace filters and Filter by Name
+- [x] Sidebar footer: host selector (All, Local, server), name filter (Escape clears, keeps parents of matching worktrees), Add Project, New Browser — implemented; host button opens the Remote Servers host menu, right click has host/workspace filters and Filter by Name
 - [ ] Sidebar top row: sidebar toggle, Files and Source Control toggles tinted when open — implemented; window buttons placed at (16, 19) on that row
 - [ ] Workspaces: create, rename, delete; project in any number of workspaces; filter the sidebar; Remote Servers fixed workspace listing remote Homes — implemented (sidebar host button menu, project menu, palette Switch Workspace)
 - [ ] Projects: add via Add Project / Cmd+O / palette Open Project page (search folders by name, type a path to browse, Tab completes, Return opens, Cmd+Return adds, Cmd+K actions, Choose in Finder…, Change Search Location…), Add Project on <server>…; rename; project menu (rename, workspaces, show worktrees, copy path, remove); project icon from `.icns`/`.ico`/`icon|logo` PNG in root or assets/resources/public/packaging, skipping git-ignored (`ProjectIconCache`/`ProjectIconFinder` implemented with tests); missing folder shows failed and can only be removed; remove ends terminals — app side implemented (sidebar menus, palette Open Project page, `TextPrompt` rename)
-- [ ] Home: always first, Cmd+N opens a terminal there, standalone terminal tabs with their own splits — implemented
+- [x] Home: always first, Cmd+N opens a terminal there, standalone terminal tabs with their own splits — implemented
 - [ ] Project order shared by every filter; local before remote; next/previous project (Ctrl+] / Ctrl+[); back/forward navigation (Cmd+Ctrl+Left/Right) — implemented (`NavigationHistory` tested)
 - [ ] New Terminal in Project… (Cmd+Shift+N): local and remote projects, switches workspace, connects a remote server and opens its Home — implemented (palette page)
 - [ ] Switch Worktree… (Cmd+Opt+W): current first then recent (or sidebar order per setting), filter, rename/remove per row, New Worktree… at the bottom — implemented (palette page)
@@ -74,12 +74,12 @@ crates. Behavior is 1:1 unless listed under "Intentionally changed".
 
 ## App: panes and splits
 
-- [ ] Single split layout per project (zero when empty); Home tabs exempt; new panes split right of the focused pane and splits equalize; close moves focus to a neighbor; background opens never steal focus — implemented (`SplitContainerView`)
-- [ ] Pane cards: 8px gutter, 10px radius, 1px border, 36px header with title and actions shown on the active or hovered card; terminals draw no inner focus border — implemented (`PaneCardView`; gutter math tested; render compared with `window-panes.png`)
+- [x] Single split layout per project (zero when empty); Home tabs exempt; new panes split right of the focused pane and splits equalize; close moves focus to a neighbor; background opens never steal focus — implemented (`SplitContainerView`)
+- [x] Pane cards: 8px gutter, 10px radius, 1px border, 36px header with title and actions shown on the active or hovered card; terminals draw no inner focus border — implemented (`PaneCardView`; gutter math tested; render compared with `window-panes.png`)
 - [ ] Split right/down (Cmd+D / Cmd+Shift+D), close (Cmd+W), close all of the project's panes (Cmd+Shift+W), focus by direction (Cmd+Opt+Arrows), zoom (Cmd+Shift+Return), equalize (Cmd+Ctrl+=), drag the gutter to resize, Cmd-drag a pane to swap or dock on an edge — implemented (`SplitGeometry`, `DropTargets` tested)
-- [ ] New terminal pane (Cmd+T) in the project folder or the focused pane's folder (setting) — implemented
+- [x] New terminal pane (Cmd+T) in the project folder or the focused pane's folder (setting) — implemented
 - [ ] Closing a terminal: ends it unless another pane in any app shows it; confirm when a program other than the shell runs (setting); Detach Terminal; close-as-detach setting; offline close waits for reconnect — implemented (`TerminalPane.willClose`, pending discards replayed on reconnect)
-- [ ] Existing Terminals (Cmd+Opt+T): project's sessions this app isn't showing, owner app, open in a new pane — implemented (palette page)
+- [x] Existing Terminals (Cmd+Opt+T): project's sessions this app isn't showing, owner app, open in a new pane — implemented (palette page)
 - [ ] End All Sessions and Quit; quitting never ends terminals; "server offline" keeps last screens and replays edits and closes on reconnect — implemented; offline tested with a fake server
 - [ ] Pane kinds: terminal, editor, diff, browser, Remote Servers, with per-kind titles; editor/diff/servers panes reuse an existing pane for the same target — implemented through `PaneRegistry` factories
 

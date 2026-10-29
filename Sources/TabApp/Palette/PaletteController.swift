@@ -137,7 +137,7 @@ final class PaletteController: NSObject, NSTextFieldDelegate {
 
     func setQuery(_ query: String) {
         guard !stack.isEmpty else { return }
-        stack[stack.count - 1].query = query
+        stack[stack.count - 1].queryChanged(query)
         panel?.header.field.stringValue = query
         refresh()
     }
@@ -204,7 +204,7 @@ final class PaletteController: NSObject, NSTextFieldDelegate {
 
     func controlTextDidChange(_ notification: Notification) {
         guard let field = notification.object as? NSTextField, !stack.isEmpty else { return }
-        stack[stack.count - 1].query = field.stringValue
+        stack[stack.count - 1].queryChanged(field.stringValue)
         actions = nil
         refresh()
         if let row = stack.last?.selectedRow { panel?.list.reveal(row, top: true) }

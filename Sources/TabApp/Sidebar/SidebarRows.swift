@@ -161,7 +161,9 @@ final class SidebarCardView: HoverView {
         alphaValue = data.unavailable ? 0.5 : 1
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
-        setAccessibilityLabel("\(text) \(data.name)")
+        let parts = [shell?.stringValue, text, data.name, data.branch, data.primary ? "primary" : nil,
+                     data.pullRequest.map { "pull request \($0)" }]
+        setAccessibilityLabel(parts.compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", "))
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }

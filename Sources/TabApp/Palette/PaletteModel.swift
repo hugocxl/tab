@@ -246,6 +246,9 @@ public struct PageState {
     public private(set) var rows: [PaletteRow] = []
     public var query = ""
     private var selectedId: String?
+    /// Whether the user picked the selection since the query last changed;
+    /// until then it follows the first row as results arrive.
+    private var picked = false
     public private(set) var counts = (sections: 0, items: 0)
 
     public init(spec: PageSpec, content: PageContent = PageContent()) {
@@ -272,8 +275,8 @@ public struct PageState {
         PaletteLayout.height(sections: counts.sections, items: counts.items, list: showsRows)
     }
 
-    /// Replaces the content, keeping the selection on its item when it is
-    /// still there. Returns whether the rows changed.
+    /// Replaces the content, keeping a picked selection on its item when it
+    /// is still there. Returns whether the rows changed.
     @discardableResult
     public mutating func setContent(_ content: PageContent) -> Bool {
         if self.content.sameAppearance(content) {
@@ -282,9 +285,15 @@ public struct PageState {
         }
         self.content = content
         rebuildRows()
-        if let selectedId, isSelectable(selectedId) { return true }
+        if picked, let selectedId, isSelectable(selectedId) { return true }
         selectedId = firstSelectable()
         return true
+    }
+
+    /// The query changed: the selection follows the first row again.
+    public mutating func queryChanged(_ query: String) {
+        self.query = query
+        picked = false
     }
 
     public var selected: String? { content.status == .ready ? selectedId : nil }
@@ -318,6 +327,7 @@ public struct PageState {
     public mutating func select(_ id: String) -> Bool {
         guard isSelectable(id) else { return false }
         selectedId = id
+        picked = true
         return true
     }
 
@@ -336,6 +346,7 @@ public struct PageState {
         }
         guard selectedId != selectable[next] else { return false }
         selectedId = selectable[next]
+        picked = true
         return true
     }
 

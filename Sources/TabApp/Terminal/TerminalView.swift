@@ -155,6 +155,7 @@ public final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation
         cursorBlinks = palette.cursorBlink ?? true
         super.init(frame: .zero)
         wantsLayer = true
+        clipsToBounds = true
         layerContentsRedrawPolicy = .onSetNeedsDisplay
         registerForDraggedTypes([.fileURL, .string, .png, .tiff])
         scrollbar.onScroll = { [weak self] offset in

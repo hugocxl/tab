@@ -11,7 +11,9 @@ else
     BUNDLE_ID="com.hugocorta.tab-dev"; APP_NAME="Tab Dev"
 fi
 
-(cd "$ROOT" && swift build -c "$CONFIG" --product TabDesktop --product tabd --product tab)
+for product in TabDesktop tabd tab; do
+    (cd "$ROOT" && swift build -c "$CONFIG" --product "$product")
+done
 BIN="$ROOT/.build/$CONFIG"
 APP="$ROOT/build/$CONFIG/$APP_NAME.app"
 rm -rf "$APP"

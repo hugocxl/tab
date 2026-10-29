@@ -126,6 +126,10 @@ final class TerminalPane: PaneContentController {
         }
         let identity = ObjectIdentifier(client)
         if let session, session.session == sessionId, backend == identity { return }
+        let responder = host.window?.firstResponder
+        let unfocused = responder == nil || responder === host.window
+        let hadFocus = responder === host || (session.map { responder === $0.view } ?? false)
+            || unfocused && model.activePane == pane
         if let old = session {
             lastGrid = old.view.grid
             fontSize = old.view.fontSize
@@ -143,6 +147,7 @@ final class TerminalPane: PaneContentController {
         session = controller
         backend = identity
         host.content = controller.containerView
+        if hadFocus { host.window?.makeFirstResponder(controller.view) }
         host.status = nil
         if visible {
             attachWhenLaidOut(controller)

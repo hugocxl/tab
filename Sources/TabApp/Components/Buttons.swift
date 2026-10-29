@@ -120,8 +120,10 @@ public final class PillButton: HoverView {
 
     public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    public override var acceptsFirstResponder: Bool { isEnabled }
-    public override var canBecomeKeyView: Bool { isEnabled }
+    /// Like `NSButton`, it takes the keyboard only with Full Keyboard Access,
+    /// so the window never gives a button the focus a pane should have.
+    public override var acceptsFirstResponder: Bool { isEnabled && NSApp.isFullKeyboardAccessEnabled }
+    public override var canBecomeKeyView: Bool { acceptsFirstResponder }
 
     public override func themeDidChange() {
         switch style {

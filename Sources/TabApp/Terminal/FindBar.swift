@@ -70,6 +70,7 @@ public final class FindBar: NSView, NSTextFieldDelegate {
     public override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
+        clipsToBounds = true
         fieldBox.wantsLayer = true
         fieldBox.layer?.cornerRadius = 6
         fieldBox.layer?.borderWidth = 1
@@ -142,7 +143,7 @@ public final class FindBar: NSView, NSTextFieldDelegate {
 
     public override func draw(_ dirtyRect: NSRect) {
         style.background.setFill()
-        dirtyRect.fill()
+        bounds.fill()
         style.border.setFill()
         CGRect(x: 0, y: bounds.height - 1, width: bounds.width, height: 1).fill()
     }

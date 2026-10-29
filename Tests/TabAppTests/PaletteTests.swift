@@ -31,6 +31,18 @@ final class PaletteTests: XCTestCase {
         XCTAssertNil(page.selected, "no selection while a status shows")
     }
 
+    /// Folder matches arrive after the query changed; Return must open the
+    /// match, not the "Choose in Finder…" row that was first a moment before.
+    func testLateResultsTakeTheSelectionUntilTheUserPicks() {
+        var page = PageState(spec: PageSpec(.root, placeholder: ""), content: .items([item("finder")]))
+        page.queryChanged("/tmp/proj")
+        page.setContent(.items([item("folder"), item("finder")]))
+        XCTAssertEqual(page.selected, "folder")
+        page.moveSelection(1)
+        page.setContent(.items([item("folder2"), item("folder"), item("finder")]))
+        XCTAssertEqual(page.selected, "finder", "a picked row stays picked")
+    }
+
     /// Heights come from row counts: header, sections, rows, list insets and
     /// footer, capped at 480pt plus the border.
     func testHeightsComeFromRowCounts() {

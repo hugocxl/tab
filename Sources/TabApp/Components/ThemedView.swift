@@ -65,6 +65,19 @@ open class HoverView: ThemedView {
         )
         addTrackingArea(area)
         hoverArea = area
+        syncHover()
+    }
+
+    /// Clears a stale hover: moving or resizing the view away from a still
+    /// pointer sends no exited event.
+    public func syncHover() {
+        guard isHovered else { return }
+        guard let window, !isHiddenOrHasHiddenAncestor, NSApp.isActive else {
+            isHovered = false
+            return
+        }
+        let point = convert(window.mouseLocationOutsideOfEventStream, from: nil)
+        if !visibleRect.contains(point) { isHovered = false }
     }
 
     open override func mouseEntered(with event: NSEvent) { isHovered = true }

@@ -81,6 +81,7 @@ extension AppModel {
                     (controller as? TerminalPane)?.connectionChanged()
                 }
                 refreshGit(server: server)
+                syncGitWatch()
                 nativeReconnected(server)
                 if pendingRemoteHomes.remove(server) != nil { openRemoteHome(on: server) }
             } catch {
@@ -160,6 +161,8 @@ extension AppModel {
         }
     }
 
+    /// Sends the current session references before the closes: the server
+    /// keeps a terminal its requester still lists as shown.
     func flushClosures(_ server: ServerId) async {
         guard let main = connections[server]?.main else { return }
         for operation in state.pendingCancellations(server) {
@@ -171,6 +174,12 @@ extension AppModel {
             edit { $0.completeCancellation(server, operation) }
         }
         edit { $0.prepareCloses(server) }
+        guard !state.pendingDiscards(server).isEmpty else { return }
+        do {
+            try await main.syncSessionReferences(owner: nil, revision: 0, sessions: state.sessionReferences(server))
+        } catch {
+            return
+        }
         for session in state.pendingDiscards(server) {
             guard let operation = state.closeOperation(server, session) else { continue }
             do {
@@ -307,8 +316,11 @@ extension AppModel {
     /// A terminal's program ended: its panes close everywhere.
     func sessionEnded(_ server: ServerId, _ session: SessionId) {
         connections[server]?.progress[session] = nil
-        guard !sessionPanes(server, session).isEmpty else { return }
+        let closing = sessionPanes(server, session)
+        guard !closing.isEmpty else { return }
+        let hadFocus = activePane.map(closing.contains) ?? false
         edit { try $0.closeSessionPanes(server: server, session: session) }
+        if hadFocus { focusActiveContent() }
     }
 
     // MARK: Git
@@ -319,6 +331,20 @@ extension AppModel {
         for project in state.projects where project.serverId == server && !project.home && project.status == .available {
             refreshGit(project.id)
         }
+    }
+
+    /// Watches the current project's working tree on its side connection,
+    /// so its card follows changes made in a shell, as Codesh's `sync_git`.
+    /// The server keeps one watch per connection; a new connection needs it
+    /// again.
+    func syncGitWatch() {
+        let project = currentProject
+        guard !project.home, project.status == .available, let side = sideClient(for: project.id) else { return }
+        let connection = ObjectIdentifier(side as AnyObject)
+        if let gitWatch, gitWatch.project == project.id, gitWatch.connection == connection { return }
+        gitWatch = (project.id, connection)
+        let id = project.id
+        Task { _ = try? await side.git(GitRequest(project: id, action: .watch)) }
     }
 
     public func refreshGit(_ project: ProjectId) {

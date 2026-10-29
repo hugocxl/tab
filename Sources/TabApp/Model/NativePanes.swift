@@ -273,8 +273,12 @@ extension AppModel: AgentsPanelHost, AgentSessionsHost {
     }
 
     /// The running agents of every connected server, for the Agents panel.
+    /// Servers come in project order, so equal rows keep their places.
     func updateAgentsPanel() {
-        let sources = connections.values.map { connection in
+        var seen = Set<ServerId>()
+        let listed = state.projects.map(\.serverId).filter { seen.insert($0).inserted }
+        let servers = listed + connections.keys.filter { !seen.contains($0) }.sorted { $0.description < $1.description }
+        let sources = servers.compactMap { connections[$0] }.map { connection in
             let server = connection.id
             let panes = state.projects.filter { $0.serverId == server }.flatMap { project in
                 project.tabs.flatMap(\.panes).compactMap { pane -> AgentPaneInfo? in

@@ -151,6 +151,13 @@ extension AppModel {
         }
     }
 
+    /// Gives the keyboard to the active pane when nothing in the window has
+    /// it, such as when the window first becomes key after launch.
+    public func focusActiveContentIfIdle() {
+        guard let window = presenter?.window, window.firstResponder == nil || window.firstResponder === window else { return }
+        focusActiveContent()
+    }
+
     /// Focuses the pane on `direction` of the active one (Cmd+Opt+Arrows).
     public func focus(_ direction: Direction) {
         guard let pane = activePane, let neighbor = state.neighbor(of: pane, direction) else { return }
