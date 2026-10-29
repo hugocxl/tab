@@ -90,11 +90,11 @@ public final class RemoteFolderBrowser: ThemedView {
     }
 
     private func open(_ folder: ServerPath) {
+        loading?.cancel()
         guard folder.rawValue.hasPrefix("/") else {
             show(error: "Enter an absolute path")
             return
         }
-        loading?.cancel()
         spinner.isHidden = false
         status.stringValue = "Loading…"
         status.textColor = theme.fgMuted

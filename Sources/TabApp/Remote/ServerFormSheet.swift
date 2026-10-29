@@ -130,6 +130,7 @@ final class ServerFormSheet: SheetWindow {
             field.onChange = { [weak self] _ in self?.formChanged() }
         }
         password.onCommit = nil
+        password.onChange = { [weak self] in self?.formChanged() }
         groupPopUp.onChange = { [weak self] _ in
             guard let self else { return }
             self.newGroupField.isHidden = self.groupPopUp.selectedId != Self.newGroupID

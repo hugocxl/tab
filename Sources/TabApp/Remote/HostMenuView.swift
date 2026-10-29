@@ -156,7 +156,7 @@ final class HostMenuView: ThemedView {
     private let stack = NSStackView()
     private let scroll = ScrollView()
     private var rows: [ServerId: HostMenuServerRow] = [:]
-    private var layoutKey: [String] = []
+    private var layoutKey: [String]?
     private var subscription: AnyCancellable?
     private var heightConstraint: NSLayoutConstraint?
     /// The popover grows to its content, up to this height.

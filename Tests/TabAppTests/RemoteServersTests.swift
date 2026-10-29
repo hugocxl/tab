@@ -174,7 +174,7 @@ final class RemoteServerGroupingTests: XCTestCase {
 
 /// Stands in for the shell.
 @MainActor
-private final class FakeRemoteHost: RemoteServersHost {
+final class FakeRemoteHost: RemoteServersHost {
     var remoteServersWindow: NSWindow? { nil }
     let settingsURL: URL
     var sshProxy: ProxyCommand?
@@ -282,6 +282,58 @@ final class RemoteServersModelTests: XCTestCase {
         XCTAssertNil(model.status(of: id)?.detail)
     }
 
+    func testDisconnectCancelsAScheduledReconnect() throws {
+        let entry = ServerEntry(name: "Dev", ssh: "devbox")
+        let host = FakeRemoteHost(settingsURL: folder.appendingPathComponent("settings.json"))
+        let model = RemoteServersModel(entries: [entry], askpass: askpass, tools: unreachableTools())
+        model.host = host
+        host.snapshots[entry.id] = RemoteConnectionSnapshot(.reconnecting(attempt: 3), failure: .disconnected)
+        let controller = RemoteServersController(model: model)
+        XCTAssertTrue(try XCTUnwrap(controller.serverMenu(entry.id)).items.contains { $0.title == "Disconnect" })
+        model.disconnect([entry.id])
+        XCTAssertEqual(host.disconnects, [entry.id])
+        host.snapshots[entry.id] = .offline
+        model.disconnect([entry.id])
+        XCTAssertEqual(host.disconnects, [entry.id])
+    }
+
+    func testARefusedSavedPasswordIsForgottenByTestConnection() async throws {
+        let entry = ServerEntry(name: "Dev", ssh: "me@devbox", passwordLogin: true)
+        try askpass.setPassword("refused-secret", for: entry.id.description)
+        let tools = RemoteServersModel.Tools(
+            connect: { _ in
+                throw ClientError.remote(RemoteFailure(reason: .authenticationFailed, destination: "devbox", detail: ""))
+            }, run: { _, _ in "" }, login: { _ in "me@devbox" }
+        )
+        let model = RemoteServersModel(entries: [entry], askpass: askpass, tools: tools)
+        let form = ServerForm(entry)
+        model.testConnection(form, id: entry.id)
+        for _ in 0..<100 where model.testResult(for: form) == .testing {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        guard case .failed? = model.testResult(for: form) else { return XCTFail("The login must fail") }
+        XCTAssertFalse(askpass.hasPassword(for: entry.id.description))
+    }
+
+    func testConnectionResultsCannotApproveChangedCredentials() async throws {
+        let model = RemoteServersModel(entries: [], askpass: askpass, tools: unreachableTools())
+        var form = ServerForm()
+        form.host = "devbox"
+        model.testConnection(form, id: nil)
+        for _ in 0..<100 where model.testResult(for: form) == .testing {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertNotNil(model.testResult(for: form))
+        form.identityFile = "/different/key"
+        XCTAssertNil(model.testResult(for: form))
+        form.identityFile = ""
+        form.passwordLogin = true
+        XCTAssertNil(model.testResult(for: form))
+        form.passwordLogin = false
+        form.password = "different-secret"
+        XCTAssertNil(model.testResult(for: form))
+    }
+
     func testOnlyTheFirstServerNeedingAPasswordAsks() {
         let plain = ServerEntry(name: "A", ssh: "a")
         let first = ServerEntry(name: "B", ssh: "b", passwordLogin: true)
@@ -328,6 +380,30 @@ final class RemoteServersModelTests: XCTestCase {
         XCTAssertTrue(model.selection.isEmpty)
         XCTAssertEqual(host.forgotten, [id])
         XCTAssertEqual(host.lists.count, 5)
+    }
+
+    func testBulkGroupingAndForgetPreserveUnrelatedSettings() throws {
+        let url = folder.appendingPathComponent("settings.json")
+        try Data(#"{"futureSetting":{"keep":"unchanged"}}"#.utf8).write(to: url)
+        let host = FakeRemoteHost(settingsURL: url)
+        let model = RemoteServersModel(entries: [], askpass: askpass, tools: unreachableTools())
+        model.host = host
+        var form = ServerForm()
+        form.host = "first"
+        let first = try model.save(form, id: nil)
+        form.host = "second"
+        let second = try model.save(form, id: nil)
+        try model.move([first, second], toGroup: "Work")
+        XCTAssertEqual(try Settings.load(url).servers.map(\.group), ["Work", "Work"])
+        try model.regroup([first, second], as: "Renamed")
+        XCTAssertEqual(model.groups, ["Renamed"])
+        try model.regroup([first, second], as: nil)
+        XCTAssertEqual(model.entries.count, 2, "deleting a group keeps its servers")
+        try model.forget([first, second])
+        XCTAssertTrue(try Settings.load(url).servers.isEmpty)
+        XCTAssertEqual(host.forgotten, [first, second])
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        XCTAssertEqual(json["futureSetting"] as? [String: String], ["keep": "unchanged"])
     }
 
     func testTestConnectionExplainsAMissingInstall() async throws {

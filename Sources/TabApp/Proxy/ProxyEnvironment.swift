@@ -32,6 +32,10 @@ public enum ProxyEnvironment {
         guard let proxy, proxy.global, let port = NWEndpoint.Port(rawValue: UInt16(clamping: proxy.port)) else {
             return configuration
         }
+        if proxy.bypassHosts.contains("*") {
+            configuration.proxyConfigurations = []
+            return configuration
+        }
         let endpoint = NWEndpoint.hostPort(host: NWEndpoint.Host(proxy.host), port: port)
         var route: ProxyConfiguration
         switch proxy.kind {

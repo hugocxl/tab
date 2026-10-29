@@ -64,6 +64,19 @@ final class ProxyTests: XCTestCase {
         XCTAssertFalse(error.contains("hunter2"))
     }
 
+    func testBackupsCannotExportOrRestoreProxyCredentials() throws {
+        let dirs = TabDirs(root: folder)
+        try proxy().save(to: dirs.proxy)
+        let archive = try BackupArchive.collect(from: dirs, state: nil)
+        XCTAssertNil(archive.files["proxy.json"])
+        XCTAssertFalse(archive.files.values.contains { String(decoding: $0, as: UTF8.self).contains("secret") })
+        var injected = archive
+        injected.files["proxy.json"] = try Data(contentsOf: dirs.proxy)
+        XCTAssertThrowsError(try BackupArchive(data: injected.encoded())) {
+            XCTAssertEqual($0 as? BackupArchive.Failure, .unsafePath("proxy.json"))
+        }
+    }
+
     func testNewTerminalsFollowTheWholeAppChoiceUnlessThePaneChose() throws {
         let model = ProxyModel(file: folder.appendingPathComponent("proxy.json"))
         let pane = PaneId()
@@ -108,6 +121,9 @@ final class ProxyTests: XCTestCase {
         XCTAssertEqual(ProxyEnvironment.excludedDomain(".corp.example"), "corp.example")
         XCTAssertNil(ProxyEnvironment.excludedDomain("10.0.0.0/8"))
         XCTAssertNil(ProxyEnvironment.excludedDomain("*"))
+        var bypassAll = proxy()
+        bypassAll.bypass = "*"
+        XCTAssertTrue(ProxyEnvironment.sessionConfiguration(bypassAll).proxyConfigurations.isEmpty)
     }
 }
 
@@ -117,6 +133,75 @@ final class ProxyTunnelTests: XCTestCase {
 
     private func settings(_ kind: ProxyKind, port: UInt16) -> ProxySettings {
         ProxySettings(kind: kind, host: "127.0.0.1", port: Int(port), username: "me", password: "secret")
+    }
+
+    func testProxyCommandRunsTheTunnelWithoutStartingTheApp() throws {
+        let executable = Bundle(for: Self.self).bundleURL.deletingLastPathComponent().appendingPathComponent("TabDesktop")
+        guard Executable.isExecutableFile(executable) else { throw XCTSkip("TabDesktop is not built") }
+        for kind in ProxyKind.allCases {
+            let server = try FakeServer { socket in
+                if kind == .http {
+                    let request = try FakeServer.readHeader(socket)
+                    try FakeServer.write(socket, Array("HTTP/1.1 200 OK\r\n\r\n".utf8) + self.banner)
+                    return request
+                }
+                var request = try FakeServer.read(socket, 4)
+                try FakeServer.write(socket, [5, 0])
+                let destination = try FakeServer.read(socket, 5)
+                request += destination + (try FakeServer.read(socket, Int(destination[4]) + 2))
+                try FakeServer.write(socket, [5, 0, 0, 1, 127, 0, 0, 1, 0, 22] + self.banner)
+                return request
+            }
+            let proxy = settings(kind, port: server.port)
+            let process = Process()
+            process.executableURL = executable
+            process.arguments = [ProxyTunnel.argument, "box.example", "22"]
+            var environment = ProcessInfo.processInfo.environment
+            environment[ProxyTunnel.settingsVariable] = String(decoding: try JSONEncoder().encode(proxy), as: UTF8.self)
+            process.environment = environment
+            let input = Pipe()
+            let output = Pipe()
+            let errors = Pipe()
+            process.standardInput = input
+            process.standardOutput = output
+            process.standardError = errors
+            let done = DispatchSemaphore(value: 0)
+            process.terminationHandler = { _ in done.signal() }
+            try process.run()
+            defer { if process.isRunning { process.terminate() } }
+            try input.fileHandleForWriting.write(contentsOf: Data("ping".utf8))
+            try input.fileHandleForWriting.close()
+            guard done.wait(timeout: .now() + 15) == .success else {
+                process.terminate()
+                return XCTFail("\(kind) tunnel did not finish")
+            }
+            XCTAssertEqual(process.terminationStatus, 0, String(decoding: errors.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self))
+            XCTAssertEqual(output.fileHandleForReading.readDataToEndOfFile(), Data(banner + Array("ping".utf8)))
+            XCTAssertFalse(try server.result().isEmpty)
+        }
+    }
+
+    func testMalformedDestinationsCannotInjectAConnectHeader() throws {
+        XCTAssertThrowsError(try ProxyTunnel.connect(settings(.http, port: 1), host: "box\r\nInjected: header", port: 22)) {
+            XCTAssertEqual("\($0)", "invalid destination")
+        }
+        XCTAssertThrowsError(try ProxyTunnel.connect(settings(.socks5, port: 1), host: "box", port: 0)) {
+            XCTAssertEqual("\($0)", "invalid destination")
+        }
+    }
+
+    func testSOCKS5RejectsAnInvalidAuthenticationVersion() throws {
+        let server = try FakeServer { socket in
+            _ = try FakeServer.read(socket, 4)
+            try FakeServer.write(socket, [5, 2])
+            _ = try FakeServer.read(socket, 11)
+            try FakeServer.write(socket, [2, 0])
+            return []
+        }
+        XCTAssertThrowsError(try ProxyTunnel.connect(settings(.socks5, port: server.port), host: "box", port: 22)) {
+            XCTAssertTrue("\($0)".contains("refused the user name or password"))
+        }
+        _ = try server.result()
     }
 
     func testHTTPProxiesTunnelWithBasicAuthAndKeepTheFirstBytes() throws {
@@ -196,18 +281,34 @@ private final class FakeServer: @unchecked Sendable {
         let bound = withUnsafePointer(to: &address) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(listener, $0, length) }
         }
-        guard bound == 0, listen(listener, 1) == 0 else { throw TunnelError("listen failed") }
+        guard bound == 0, listen(listener, 1) == 0 else {
+            let message = String(cString: strerror(errno))
+            close(listener)
+            throw TunnelError("listen failed: \(message)")
+        }
         _ = withUnsafeMutablePointer(to: &address) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(listener, $0, &length) }
         }
         port = UInt16(bigEndian: address.sin_port)
         Thread { [self] in
+            var ready = pollfd(fd: listener, events: Int16(POLLIN), revents: 0)
+            guard poll(&ready, 1, 10_000) == 1 else {
+                outcome = .failure(TunnelError("the test proxy did not receive a connection"))
+                close(listener)
+                done.signal()
+                return
+            }
             let client = accept(listener, nil, nil)
             defer {
                 close(client)
                 close(listener)
                 done.signal()
             }
+            var timeout = timeval(tv_sec: 10, tv_usec: 0)
+            setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+            setsockopt(client, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+            var noSigpipe: Int32 = 1
+            setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &noSigpipe, socklen_t(MemoryLayout<Int32>.size))
             do {
                 outcome = .success(try serve(client))
                 var buffer = [UInt8](repeating: 0, count: 64)
@@ -223,7 +324,7 @@ private final class FakeServer: @unchecked Sendable {
     }
 
     func result() throws -> [UInt8] {
-        _ = done.wait(timeout: .now() + 10)
+        guard done.wait(timeout: .now() + 15) == .success else { throw TunnelError("the test proxy did not finish") }
         return try outcome.get()
     }
 

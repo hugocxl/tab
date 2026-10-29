@@ -29,6 +29,7 @@ public final class RemoteServersModel {
     private var versionsThere: [ServerId: String] = [:]
     private var versionReads: Set<ServerId> = []
     private var testGeneration = 0
+    private var testedForm: ServerForm?
     let tools: Tools
 
     /// How the model reaches a server outside the shell's connections;
@@ -177,7 +178,9 @@ public final class RemoteServersModel {
 
     /// Hangs up, without ending terminals there.
     public func disconnect(_ ids: [ServerId]) {
-        for id in ids where stopping[id] == nil && status(of: id)?.state != .offline {
+        for id in ids {
+            guard stopping[id] == nil, let status = status(of: id),
+                  status.state != .offline || status.waitingToRetry else { continue }
             host?.disconnectRemoteServer(id)
         }
         changes.send()
@@ -305,6 +308,9 @@ public final class RemoteServersModel {
                 _ = try await run(try await connector.target(), try RemoteInstall.command(version: version))
                 result = .success(())
             } catch {
+                if case .remote(let failure) = ClientError.wrapping(error), failure.reason == .authenticationFailed {
+                    self?.askpass.forgetPassword(for: id.description)
+                }
                 result = .failure(error)
             }
             guard let self, self.entry(id) != nil else { return }
@@ -347,12 +353,13 @@ public final class RemoteServersModel {
 
     /// The last test's result, if it tried this form.
     public func testResult(for form: ServerForm) -> ConnectionTest? {
-        guard let test, test.key == form.probeKey else { return nil }
+        guard let test, test.key == form.probeKey, testedForm == form else { return nil }
         return test.result
     }
 
     public func clearTest() {
         testGeneration += 1
+        testedForm = nil
         guard test != nil else { return }
         test = nil
         changes.send()
@@ -368,6 +375,7 @@ public final class RemoteServersModel {
         testGeneration += 1
         let generation = testGeneration
         let key = form.probeKey
+        testedForm = form
         let entry: ServerEntry
         do {
             entry = try form.entry(id: id)
@@ -403,19 +411,7 @@ public final class RemoteServersModel {
     /// Runs `command` there through the same login as the bridge and returns
     /// what it printed; a failure throws the last line of its output.
     nonisolated static func run(_ command: String, on target: SSHTarget) async throws -> String {
-        let process = try target.process(remote: command)
-        let output = Pipe()
-        process.standardOutput = output
-        process.standardError = output
-        process.standardInput = FileHandle.nullDevice
-        return try await Task.detached {
-            try process.run()
-            let data = output.fileHandleForReading.readDataToEndOfFile()
-            process.waitUntilExit()
-            let text = String(decoding: data, as: UTF8.self)
-            guard process.terminationStatus == 0 else { throw RemoteInstallError.failed(lastLine(text)) }
-            return text
-        }.value
+        try await RemoteServer.run(command, on: target)
     }
 }
 
@@ -454,6 +450,10 @@ struct TestProbe: Sendable {
             do {
                 _ = try await tools.run(target, try RemoteInstall.command(version: version))
             } catch {
+                if typedPassword == nil, let savedPasswordOwner,
+                   case .remote(let failure) = ClientError.wrapping(error), failure.reason == .authenticationFailed {
+                    askpass.forgetPassword(for: savedPasswordOwner)
+                }
                 return .installFailed(error.localizedDescription)
             }
         }
@@ -470,6 +470,10 @@ struct TestProbe: Sendable {
     private func explain(_ error: ClientError, target: SSHTarget, owner: String) async -> ConnectionTest {
         guard case .remote(let failure) = error else { return .failed(error.description) }
         switch failure.reason {
+        case .authenticationFailed:
+            if typedPassword == nil, let savedPasswordOwner {
+                askpass.forgetPassword(for: savedPasswordOwner)
+            }
         case .hostKeyUnknown:
             if let offered = askpass.offeredHostKey(for: owner) { return .untrustedHost(offered) }
         case .notInstalled:

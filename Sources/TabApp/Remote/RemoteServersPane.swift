@@ -47,17 +47,27 @@ final class RemoteServersPaneView: ThemedView {
         column.spacing = 16
         column.translatesAutoresizingMaskIntoConstraints = false
         scroll.content.addSubview(column)
-        let width = column.widthAnchor.constraint(equalToConstant: Self.contentWidth)
+        let width = column.widthAnchor.constraint(equalTo: scroll.content.widthAnchor, constant: -48)
         width.priority = .defaultHigh
         NSLayoutConstraint.activate([
             width,
-            column.widthAnchor.constraint(lessThanOrEqualTo: scroll.content.widthAnchor, constant: -48),
+            column.widthAnchor.constraint(lessThanOrEqualToConstant: Self.contentWidth),
+            column.leadingAnchor.constraint(greaterThanOrEqualTo: scroll.content.leadingAnchor, constant: 24),
+            column.trailingAnchor.constraint(lessThanOrEqualTo: scroll.content.trailingAnchor, constant: -24),
             column.centerXAnchor.constraint(equalTo: scroll.content.centerXAnchor),
             column.topAnchor.constraint(equalTo: scroll.content.topAnchor, constant: 24),
             column.bottomAnchor.constraint(equalTo: scroll.content.bottomAnchor, constant: -24),
         ])
         addSubview(scroll)
         scroll.pinEdges(to: self)
+        let header = DialogParts.row([
+            makeLabel("Remote Servers", font: AppFont.title),
+            DialogParts.spacer(),
+            search,
+            PillButton("Add Server…") { [weak self] in self?.controller.editServer(nil) },
+        ], spacing: 12)
+        search.widthAnchor.constraint(equalToConstant: 220).isActive = true
+        add(header)
         search.onChange = { [weak self] _ in
             guard let self else { return }
             self.model.selection.retain(self.shownIDs)
@@ -89,15 +99,7 @@ final class RemoteServersPaneView: ThemedView {
     }
 
     private func rebuild(_ servers: [RemoteServerStatus]) {
-        column.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        let header = DialogParts.row([
-            makeLabel("Remote Servers", font: AppFont.title),
-            DialogParts.spacer(),
-            search,
-            PillButton("Add Server…") { [weak self] in self?.controller.editServer(nil) },
-        ], spacing: 12)
-        search.widthAnchor.constraint(equalToConstant: 220).isActive = true
-        add(header)
+        column.arrangedSubviews.dropFirst().forEach { $0.removeFromSuperview() }
         guard !servers.isEmpty else {
             add(emptyState("No remote servers yet", "Add a computer you reach over SSH to work with its projects here."))
             return
@@ -165,7 +167,7 @@ private final class SelectionBar: ThemedView {
             let connect = PillButton("Connect") { model.connect(ids) }
             connect.isEnabled = selected.contains { $0.state == .offline }
             let disconnect = PillButton("Disconnect") { model.disconnect(ids) }
-            disconnect.isEnabled = selected.contains { $0.state.isLive }
+            disconnect.isEnabled = selected.contains { $0.state.isLive || $0.waitingToRetry }
             let move = PillButton("Move to Group…")
             move.action = { [weak move] in
                 guard let move else { return }
@@ -253,8 +255,12 @@ private final class PaneServerRow: HoverView {
         let dot = StatusDot()
         dot.glyph = server.glyph
         let name = makeLabel(server.entry.name, font: AppFont.bodyMedium)
+        name.lineBreakMode = .byTruncatingTail
+        name.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         let badge = Badge(server.label.uppercased())
         let destination = makeLabel(server.entry.destination, font: AppFont.footnote, color: AppTheme.shared.fgMuted)
+        destination.lineBreakMode = .byTruncatingMiddle
+        destination.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         var lines: [NSView] = [DialogParts.row([name, badge]), destination]
         var errorLabel: NSTextField?
         if let detail = server.detail {

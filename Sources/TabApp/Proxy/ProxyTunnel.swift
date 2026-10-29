@@ -40,6 +40,10 @@ public enum ProxyTunnel {
     /// A connected socket to `host:port` through `proxy`, or straight there
     /// when `proxy` bypasses it, ready for the caller's bytes.
     static func connect(_ proxy: ProxySettings, host: String, port: UInt16) throws -> Int32 {
+        try proxy.validate()
+        guard port > 0, !host.isEmpty,
+              !host.unicodeScalars.contains(where: { $0.properties.isWhitespace || $0.properties.generalCategory == .control })
+        else { throw TunnelError("invalid destination") }
         if proxy.bypasses(host) { return try open(host, port) }
         let socket = try open(proxy.host, UInt16(clamping: proxy.port))
         do {
@@ -171,7 +175,8 @@ public enum ProxyTunnel {
                 throw TunnelError("the proxy user name or password is too long")
             }
             try writeAll(socket, [1, UInt8(user.count)] + user + [UInt8(password.count)] + password)
-            guard try readExact(socket, 2)[1] == 0 else {
+            let authentication = try readExact(socket, 2)
+            guard authentication[0] == 1, authentication[1] == 0 else {
                 throw TunnelError("the proxy refused the user name or password")
             }
         default:
@@ -194,7 +199,7 @@ public enum ProxyTunnel {
         request += [UInt8(port >> 8), UInt8(port & 0xFF)]
         try writeAll(socket, request)
         let reply = try readExact(socket, 4)
-        guard reply[0] == 5 else { throw TunnelError("the proxy doesn't speak SOCKS5") }
+        guard reply[0] == 5, reply[2] == 0 else { throw TunnelError("the proxy doesn't speak SOCKS5") }
         guard reply[1] == 0 else {
             throw TunnelError("the proxy refused \(host):\(port): \(socks5Failure(reply[1]))")
         }

@@ -159,9 +159,10 @@ enum DialogParts {
 
 /// A secure field styled like `InsetTextField`.
 @MainActor
-final class InsetSecureField: ThemedView {
+final class InsetSecureField: ThemedView, NSTextFieldDelegate {
     let field = NSSecureTextField()
     var onCommit: (() -> Void)?
+    var onChange: (() -> Void)?
 
     init(placeholder: String, label: String) {
         super.init(frame: .zero)
@@ -174,6 +175,7 @@ final class InsetSecureField: ThemedView {
         field.translatesAutoresizingMaskIntoConstraints = false
         field.setAccessibilityLabel(label)
         field.target = self
+        field.delegate = self
         field.action = #selector(commit)
         addSubview(field)
         NSLayoutConstraint.activate([
@@ -192,6 +194,8 @@ final class InsetSecureField: ThemedView {
     }
 
     @objc private func commit() { onCommit?() }
+
+    func controlTextDidChange(_ notification: Notification) { onChange?() }
 
     override func themeDidChange() {
         field.textColor = theme.fg

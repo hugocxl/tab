@@ -11,6 +11,30 @@ public enum RemoteServer {
     /// How long a failed ssh gets to exit and finish its error output.
     static let exitTimeout: TimeInterval = 1
 
+    /// Runs a command through the same transport as the bridge, retaining
+    /// typed SSH failures so a refused password can be forgotten.
+    public static func run(_ command: String, on target: SSHTarget) async throws -> String {
+        let process = try target.process(remote: command)
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = output
+        process.standardInput = FileHandle.nullDevice
+        return try await blocking {
+            try process.run()
+            let data = output.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            let text = String(decoding: data, as: UTF8.self)
+            if process.terminationStatus == 255 {
+                let (reason, detail) = Bridge.explain(Bridge.Exit(status: 255, stderr: text), printed: [])
+                throw ClientError.remote(RemoteFailure(reason: reason, destination: target.description, detail: detail))
+            }
+            guard process.terminationStatus == 0 else {
+                throw RemoteInstallError.failed(Bridge.lastLine(Array(data)))
+            }
+            return text
+        }
+    }
+
     /// Connects to the server on `target` through its bridge. ssh prompts only
     /// through the target's askpass program, so logging in otherwise needs
     /// ssh-agent, a key or a certificate, and the host key must be trusted.
@@ -263,21 +287,7 @@ public enum RemoteInstall {
     @discardableResult
     public static func install(on target: SSHTarget, version: String = Release.version,
                                replace: Bool = false) async throws -> String {
-        let process = try target.process(remote: try command(version: version, replace: replace))
-        let output = Pipe()
-        process.standardOutput = output
-        process.standardError = output
-        process.standardInput = FileHandle.nullDevice
-        return try await blocking {
-            try process.run()
-            let data = output.fileHandleForReading.readDataToEndOfFile()
-            process.waitUntilExit()
-            let text = String(decoding: data, as: UTF8.self)
-            guard process.terminationStatus == 0 else {
-                throw RemoteInstallError.failed(Bridge.lastLine(Array(text.utf8)))
-            }
-            return text
-        }
+        try await RemoteServer.run(try command(version: version, replace: replace), on: target)
     }
 }
 

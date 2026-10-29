@@ -149,7 +149,7 @@ public final class RemoteServersController {
             case .reconnect: self?.model.reconnect(ids)
             }
         }
-        let live = members.filter(\.state.isLive).map(\.id)
+        let live = members.filter { $0.state.isLive || $0.waitingToRetry }.map(\.id)
         guard !live.isEmpty else { return }
         builder.add(live.count == 1 ? "Disconnect" : "Disconnect \(live.count) Servers") { [weak self] in
             self?.model.disconnect(live)
