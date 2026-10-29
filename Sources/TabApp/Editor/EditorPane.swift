@@ -153,6 +153,12 @@ public final class EditorPaneController: NSViewController, NSTextViewDelegate, N
 
     public override func viewDidAppear() {
         super.viewDidAppear()
+        didShow()
+    }
+
+    /// The pane is on screen again, or for the first time: watches the
+    /// project's files and reads the file if it isn't yet.
+    public func didShow() {
         host?.watchProjectFiles()
         if case .loading = state, !requested { load() }
     }

@@ -82,6 +82,11 @@ final class DiffDocumentTests: XCTestCase {
         XCTAssertEqual(request, GitDiffRequest(path: "a.swift", staged: true, lineLimit: DiffPaneController.lineLimit, context: 1_000_000))
         pane.gitChanged()
         XCTAssertEqual(transport.gitRequests.count, 1, "a hidden diff waits until it is shown")
+        pane.didShow()
+        await settle { transport.gitRequests.count == 3 }
+        XCTAssertEqual(transport.gitRequests.filter { if case .diff = $0 { return true } else { return false } }.count, 2,
+                       "a diff that changed while hidden reads again when shown")
+        XCTAssertTrue(transport.gitRequests.contains(.watch), "a shown diff watches its repository")
         XCTAssertTrue(DiffPaneController.existing(project: host.nativeProject.id, path: "a.swift", staged: true) === pane)
         XCTAssertNil(DiffPaneController.existing(project: host.nativeProject.id, path: "a.swift", staged: false))
     }

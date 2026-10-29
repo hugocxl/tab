@@ -101,13 +101,13 @@ extension ProjectPanelContent where Controller == SourceControlController {
             let controller = SourceControlController(host: host)
             controller.drawsCard = false
             return (controller, host)
-        }, onShow: { $0.gitChanged() }, onFocus: { $0.focusMessage() })
+        }, onShow: { $0.didShow() }, onFocus: { $0.focusMessage() })
     }
 }
 
 /// An editor pane in a pane card.
 @MainActor
-public final class EditorPaneContent: PaneContentController {
+public final class EditorPaneContent: PaneContentController, EditorLocationReceiver {
     public let controller: EditorPaneController
     private let host: EditorHost
     public var titleDidChange: (() -> Void)?
@@ -122,7 +122,13 @@ public final class EditorPaneContent: PaneContentController {
     public var title: String { controller.paneTitle }
     public var icon: NSImage? { nil }
     public func focusContent() { controller.focus() }
-    public func didShow() {}
+    public func didShow() { controller.didShow() }
+
+    /// Puts the caret at `line` and `column`, once the file is read.
+    public func reveal(line: Int?, column: Int?) {
+        guard let line else { return }
+        controller.go(line: line, column: column ?? 1)
+    }
     public func didHide() {}
 
     public func willClose() async -> Bool {
@@ -148,7 +154,7 @@ public final class DiffPaneContent: PaneContentController {
     public var title: String { PaneContent.diff(path: controller.path, staged: controller.staged).nativeTitle ?? controller.path }
     public var icon: NSImage? { nil }
     public func focusContent() { controller.view.window?.makeFirstResponder(controller.rowsView) }
-    public func didShow() {}
+    public func didShow() { controller.didShow() }
     public func didHide() {}
     public func willClose() async -> Bool { true }
 }

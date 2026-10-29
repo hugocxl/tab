@@ -133,6 +133,13 @@ public final class SourceControlController: NSViewController, NSTableViewDataSou
         if stale || model.status == nil { refresh() }
     }
 
+    /// The panel is on screen again, or for the first time: watches the
+    /// repository and reads its status.
+    public func didShow() {
+        host?.watchRepository()
+        refresh()
+    }
+
     // MARK: Events from the app
 
     /// The repository changed on the server: refreshes when shown, else on
@@ -145,8 +152,14 @@ public final class SourceControlController: NSViewController, NSTableViewDataSou
         refresh()
     }
 
-    /// The side connection opened again.
-    public func reconnected() { gitChanged() }
+    /// The side connection opened again: its repository watch is gone.
+    public func reconnected() {
+        guard isViewLoaded, view.window != nil else {
+            stale = true
+            return
+        }
+        didShow()
+    }
 
     /// Puts the caret in the commit message.
     public func focusMessage() {

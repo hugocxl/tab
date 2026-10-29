@@ -129,7 +129,21 @@ public final class DiffPaneController: NSViewController {
         refresh()
     }
 
-    public func reconnected() { gitChanged() }
+    /// The side connection opened again: its repository watch is gone.
+    public func reconnected() {
+        guard isViewLoaded, view.window != nil else {
+            stale = true
+            return
+        }
+        didShow()
+    }
+
+    /// The pane is on screen again, or for the first time: watches the
+    /// repository and reads the diff if it changed while hidden.
+    public func didShow() {
+        host?.watchRepository()
+        if stale || document == nil { refresh() }
+    }
 
     public func themeDidChange() {
         let theme = background.theme

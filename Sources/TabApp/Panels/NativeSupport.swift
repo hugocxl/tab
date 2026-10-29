@@ -54,6 +54,17 @@ public protocol NativeHost: AnyObject {
                  completion: @escaping (Bool) -> Void)
 }
 
+extension NativeHost {
+    /// Asks the project's server to report repository changes as
+    /// `gitChanged`, as Codesh does for the current project. A server keeps
+    /// one repository watch per connection, so the latest project shown wins.
+    public func watchRepository() {
+        guard let transport = nativeTransport else { return }
+        let request = GitRequest(project: nativeProject.id, action: .watch)
+        Task { _ = try? await transport.git(request) }
+    }
+}
+
 /// Readable server errors shared by the native panels and panes.
 public enum NativeErrors {
     /// The server's message without its protocol code, with missing files,

@@ -49,11 +49,13 @@ class LiveServerTestCase: XCTestCase {
     var client: ServerClient!
     var host: LiveNativeHost!
     private var eventTask: Task<Void, Never>?
+    private var windows: [NSWindow] = []
     var onFilesChanged: ((FileChanges) -> Void)?
     var onGitChanged: (() -> Void)?
 
     override func setUp() async throws {
-        root = URL(fileURLWithPath: "/tmp/tabp-\(UUID().uuidString.prefix(6))", isDirectory: true)
+        let root = URL(fileURLWithPath: "/tmp/tabp-\(UUID().uuidString.prefix(6))", isDirectory: true)
+        self.root = root
         repo = root.appendingPathComponent("repo", isDirectory: true)
         try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
         try git("init", "-q", "-b", "main")
@@ -89,11 +91,21 @@ class LiveServerTestCase: XCTestCase {
         }
     }
 
+    /// Safe after a failed or skipped `setUp`: stops a server that started
+    /// without a connection through its pid file.
     override func tearDown() async throws {
         eventTask?.cancel()
-        if let client {
+        windows.forEach { $0.close() }
+        windows.removeAll()
+        guard let root: URL = root else { return }
+        if let client: ServerClient = client {
             _ = try? await client.stopServer(force: true)
             client.close()
+        } else {
+            let pidFile = TabDirs(root: root.appendingPathComponent("p")).serverPid
+            if let text = try? String(contentsOf: pidFile, encoding: .utf8), let pid = Int32(text.trimmingCharacters(in: .whitespacesAndNewlines)), pid > 0 {
+                kill(pid, SIGKILL)
+            }
         }
         try? FileManager.default.removeItem(at: root)
     }
@@ -126,7 +138,9 @@ class LiveServerTestCase: XCTestCase {
         return String(decoding: data, as: UTF8.self)
     }
 
-    /// Hosts a controller's view in an offscreen window so it lays out and appears.
+    /// Hosts a controller's view in an offscreen window, kept until
+    /// `tearDown`, so it lays out, appears and stays shown.
+    @discardableResult
     func show(_ controller: NSViewController, size: NSSize) -> NSWindow {
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -134,6 +148,7 @@ class LiveServerTestCase: XCTestCase {
         window.setContentSize(size)
         window.appearance = host.theme.nsAppearance
         controller.view.layoutSubtreeIfNeeded()
+        windows.append(window)
         return window
     }
 }
@@ -143,7 +158,7 @@ class LiveServerTestCase: XCTestCase {
 final class PanelsLiveServerTests: LiveServerTestCase {
     func testFilesPanelCreatesRenamesDeletesAndFollowsTheDisk() async throws {
         let panel = FilesPanelController(host: host)
-        _ = show(panel, size: NSSize(width: 300, height: 600))
+        show(panel, size: NSSize(width: 300, height: 600))
         host.watchProjectFiles()
         onFilesChanged = { [weak panel] in panel?.filesChanged($0) }
         panel.ensureRoot()
@@ -175,7 +190,7 @@ final class PanelsLiveServerTests: LiveServerTestCase {
         try write("README.md", "# Demo\nchanged\n")
         try write("new.txt", "new\n")
         let panel = SourceControlController(host: host)
-        _ = show(panel, size: NSSize(width: 300, height: 600))
+        show(panel, size: NSSize(width: 300, height: 600))
         panel.refresh()
         await settle { panel.model.status != nil }
         XCTAssertEqual(panel.model.paths(in: .changes), ["README.md"])
@@ -215,7 +230,7 @@ final class PanelsLiveServerTests: LiveServerTestCase {
 
     func testSourceControlRefreshesWhenTheWorkingTreeChanges() async throws {
         let panel = SourceControlController(host: host)
-        _ = show(panel, size: NSSize(width: 300, height: 600))
+        show(panel, size: NSSize(width: 300, height: 600))
         onGitChanged = { [weak panel] in panel?.gitChanged() }
         _ = try await client.git(GitRequest(project: host.nativeProject.id, action: .watch))
         panel.refresh()
@@ -229,7 +244,7 @@ final class PanelsLiveServerTests: LiveServerTestCase {
     func testDiffShowsWorkingTreeAndStagedChangesAndRefreshes() async throws {
         try write("Sources/App.swift", "import Foundation\n\nlet answer = 43\n")
         let diff = DiffPaneController(host: host, path: "Sources/App.swift", staged: false)
-        _ = show(diff, size: NSSize(width: 700, height: 400))
+        show(diff, size: NSSize(width: 700, height: 400))
         diff.refresh()
         await settle { diff.document != nil }
         let document = try XCTUnwrap(diff.document)
@@ -243,7 +258,7 @@ final class PanelsLiveServerTests: LiveServerTestCase {
 
         try git("add", "Sources/App.swift")
         let staged = DiffPaneController(host: host, path: "Sources/App.swift", staged: true)
-        _ = show(staged, size: NSSize(width: 700, height: 400))
+        show(staged, size: NSSize(width: 700, height: 400))
         staged.refresh()
         await settle { staged.document != nil }
         XCTAssertEqual(staged.document?.diff.additions, 2)
@@ -251,7 +266,7 @@ final class PanelsLiveServerTests: LiveServerTestCase {
 
     func testEditorOpensSavesReloadsAndRefusesBinaries() async throws {
         let editor = EditorPaneController(host: host, path: "Sources/App.swift")
-        _ = show(editor, size: NSSize(width: 700, height: 400))
+        show(editor, size: NSSize(width: 700, height: 400))
         editor.viewDidAppear()
         await settle { editor.text.contains("answer") }
         XCTAssertEqual(editor.text, "import Foundation\n\nlet answer = 42\n")
@@ -284,7 +299,7 @@ final class PanelsLiveServerTests: LiveServerTestCase {
 
         try Data([0x89, 0x50, 0x4E, 0x47, 0x00, 0x01, 0xFF, 0xFE]).write(to: repo.appendingPathComponent("logo.png"))
         let binary = EditorPaneController(host: host, path: "logo.png")
-        _ = show(binary, size: NSSize(width: 400, height: 300))
+        show(binary, size: NSSize(width: 400, height: 300))
         binary.viewDidAppear()
         await settle { binary.messageText != nil }
         XCTAssertNotNil(binary.messageText, "binary files are refused")

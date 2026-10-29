@@ -180,8 +180,11 @@ public final class AgentsPanelController: NSViewController, NSWindowDelegate {
 
     /// Shows the agents of `sources`: every server's activity and the panes
     /// this app shows.
+    /// Rebuilds the rows only when the running agents changed.
     public func update(_ sources: [AgentsPanelSource]) {
-        agents = AgentsPanelModel.runningAgents(sources)
+        let running = AgentsPanelModel.runningAgents(sources)
+        guard running != agents else { return }
+        agents = running
         reload()
     }
 
