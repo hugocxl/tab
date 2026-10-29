@@ -19,7 +19,7 @@ let package = Package(
 
         // Shared basics: ids, folders, shortcut catalog, settings model, themes,
         // split layouts, workspaces, fuzzy matching, binary codec helpers.
-        .target(name: "TabCore", swiftSettings: swift5),
+        .target(name: "TabCore", resources: [.copy("Resources/Themes")], swiftSettings: swift5),
 
         // Messages, framing, screen rows and their binary codec.
         .target(name: "TabProtocol", dependencies: ["TabCore"], swiftSettings: swift5),
@@ -55,7 +55,7 @@ let package = Package(
         .target(
             name: "TabApp",
             dependencies: ["TabClient", "TabCore", "TabProtocol"],
-            resources: [.copy("Resources/Themes"), .copy("Resources/Icons")],
+            resources: [.copy("Resources/Icons")],
             swiftSettings: swift5
         ),
         .executableTarget(name: "Tab", dependencies: ["TabApp"], swiftSettings: swift5),
