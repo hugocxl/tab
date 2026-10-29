@@ -39,7 +39,35 @@ public enum ConnectionOrigin: Sendable, Equatable {
     case mobile(DeviceId)
 }
 
+/// The catalog operations Git worktree actions need. The core implements it
+/// next to `ProjectLocator`.
+public protocol WorktreeCatalog: ProjectLocator {
+    /// The project's descriptor. Throws `ErrorCode.unknownProject` for unknown ids.
+    func project(_ id: ProjectId) throws -> ProjectDescriptor
+    /// The worktree projects whose `parentId` is `parent`.
+    func children(of parent: ProjectId) -> [ProjectDescriptor]
+    /// Adds a worktree project (`kind == .worktree`, `parentId` set) made or
+    /// registered by a worktree action, and announces the catalog change.
+    func addWorktreeProject(_ project: ProjectDescriptor) throws
+    /// Ends `project`'s sessions, and any other session whose folder is
+    /// inside `directory`, before the worktree's files are removed.
+    func endSessions(project: ProjectId, directory: String) throws
+    /// Removes a worktree project after its files were removed, and announces
+    /// the catalog change.
+    func removeWorktreeProject(_ project: ProjectId) throws
+}
+
 // MARK: - Provided by the services
+
+/// Lets the core refuse changes that would race a worktree action in progress.
+public protocol WorktreeOperationGuard: AnyObject, Sendable {
+    /// Throws while a worktree action involves any of `projects`, so the
+    /// catalog doesn't rename, delete or prune them meanwhile.
+    func checkMutation(of projects: [ProjectId]) throws
+    /// Throws when `directory` is inside a worktree being removed, so no new
+    /// session starts there.
+    func checkSession(directory: String) throws
+}
 
 /// Git operations for a project, run with the `git` and `gh` executables.
 public protocol GitServiceProtocol: AnyObject, Sendable {
