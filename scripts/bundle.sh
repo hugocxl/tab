@@ -16,7 +16,7 @@ BIN="$ROOT/.build/$CONFIG"
 APP="$ROOT/build/$CONFIG/$APP_NAME.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$BIN/TabDesktop" "$APP/Contents/MacOS/Tab"; cp "$BIN/tabd" "$BIN/tab" "$APP/Contents/MacOS/"
+cp "$BIN/TabDesktop" "$BIN/tabd" "$BIN/tab" "$APP/Contents/MacOS/"
 # SwiftPM resource bundles sit beside the executables.
 for bundle in "$BIN"/*.bundle; do
     [ -d "$bundle" ] && cp -R "$bundle" "$APP/Contents/Resources/"
