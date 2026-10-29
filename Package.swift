@@ -17,12 +17,12 @@ let package = Package(
         // Ghostty's VT library, built by scripts/build-ghostty.sh.
         .binaryTarget(name: "GhosttyVT", path: "vendor/GhosttyVT.xcframework"),
 
-        // Shared basics: ids, folders, shortcut catalog, settings model, themes,
-        // split layouts, workspaces, fuzzy matching, binary codec helpers.
-        .target(name: "TabCore", resources: [.copy("Resources/Themes")], swiftSettings: swift5),
+        // Messages, framing, screen rows and their binary codec. No dependencies.
+        .target(name: "TabProtocol", swiftSettings: swift5),
 
-        // Messages, framing, screen rows and their binary codec.
-        .target(name: "TabProtocol", dependencies: ["TabCore"], swiftSettings: swift5),
+        // Shared app basics: folders, shortcut catalog, settings model, themes,
+        // split layouts, app state, fuzzy matching. Re-exports TabProtocol's ids.
+        .target(name: "TabCore", dependencies: ["TabProtocol"], resources: [.copy("Resources/Themes")], swiftSettings: swift5),
 
         // The Ghostty terminal and the PTY, used only by the server.
         .target(
@@ -61,7 +61,7 @@ let package = Package(
         .executableTarget(name: "Tab", dependencies: ["TabApp"], swiftSettings: swift5),
 
         .testTarget(name: "TabCoreTests", dependencies: ["TabCore"], swiftSettings: swift5),
-        .testTarget(name: "TabProtocolTests", dependencies: ["TabProtocol"], swiftSettings: swift5),
+        .testTarget(name: "TabProtocolTests", dependencies: ["TabProtocol"], exclude: ["Fixtures"], swiftSettings: swift5),
         .testTarget(name: "TabTerminalTests", dependencies: ["TabTerminal"], swiftSettings: swift5),
         .testTarget(name: "TabServerTests", dependencies: ["TabServer"], swiftSettings: swift5),
         .testTarget(name: "TabClientTests", dependencies: ["TabClient", "TabServer"], swiftSettings: swift5),
