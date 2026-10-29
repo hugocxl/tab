@@ -58,30 +58,30 @@ crates. Behavior is 1:1 unless listed under "Intentionally changed".
 
 ## App: window, sidebar, projects
 
-- [ ] One main window; restores projects, panes, window frame and state on launch; never opens a terminal by itself
-- [ ] Sidebar: Home terminals as cards above projects; projects with worktrees always expanded beneath; activity cards (name, agent glyph and state, relative age; running agent title / latest session / open PR / last commit; branch, PRIMARY badge, PR number); drag to reorder; Ctrl+1–9 jump with modifier hints; Cmd+B toggle; collapsed mode
-- [ ] Sidebar footer: host selector (All, Local, server), name filter (Escape clears, keeps parents of matching worktrees), Add Project, New Browser
-- [ ] Sidebar top row: sidebar toggle, Files and Source Control toggles tinted when open
-- [ ] Workspaces: create, rename, delete; project in any number of workspaces; filter the sidebar; Remote Servers fixed workspace listing remote Homes
-- [ ] Projects: add via Add Project / Cmd+O / palette Open Project page (search folders by name, type a path to browse, Tab completes, Return opens, Cmd+Return adds, Cmd+K actions, Choose in Finder…, Change Search Location…), Add Project on <server>…; rename; project menu (rename, workspaces, show worktrees, copy path, remove); project icon from `.icns`/`.ico`/`icon|logo` PNG in root or assets/resources/public/packaging, skipping git-ignored; missing folder shows failed and can only be removed; remove ends terminals
-- [ ] Home: always first, Cmd+N opens a terminal there, standalone terminal tabs with their own splits
-- [ ] Project order shared by every filter; local before remote; next/previous project (Ctrl+] / Ctrl+[); back/forward navigation (Cmd+Ctrl+Left/Right)
-- [ ] New Terminal in Project… (Cmd+Shift+N): local and remote projects, switches workspace, connects a remote server and opens its Home
-- [ ] Switch Worktree… (Cmd+Opt+W): current first then recent (or sidebar order per setting), filter, rename/remove per row, New Worktree… at the bottom
-- [ ] New Worktree… (Cmd+Opt+N): name, new branch from base or existing branch, Default/Template/Folder location, per-project remembered choice, hooks review and enable, failure semantics
-- [ ] Remove Worktree and Files…: warns about uncommitted changes, runs teardown, ends terminals
-- [ ] Window title, full screen (Cmd+Ctrl+F), default window size setting
+- [ ] One main window; restores projects, panes, window frame and state on launch; never opens a terminal by itself — implemented (`AppModel`, `MainWindowController`; restore tested with a fake server; launched with a real `tabd`: a restored Home pane attached and ran)
+- [ ] Sidebar: Home terminals as cards above projects; projects with worktrees always expanded beneath; activity cards (name, agent glyph and state, relative age; running agent title / latest session / open PR / last commit; branch, PRIMARY badge, PR number); drag to reorder; Ctrl+1–9 jump with modifier hints; Cmd+B toggle; collapsed mode — implemented (`SidebarViewController`, `SidebarListing`, `ActivityCardData`; ordering/filter tests; offscreen render compared with `sidebar.png`); collapsed mode is a 44pt icon column
+- [ ] Sidebar footer: host selector (All, Local, server), name filter (Escape clears, keeps parents of matching worktrees), Add Project, New Browser — implemented; host button opens the Remote Servers host menu, right click has host/workspace filters and Filter by Name
+- [ ] Sidebar top row: sidebar toggle, Files and Source Control toggles tinted when open — implemented; window buttons placed at (16, 19) on that row
+- [ ] Workspaces: create, rename, delete; project in any number of workspaces; filter the sidebar; Remote Servers fixed workspace listing remote Homes — implemented (sidebar host button menu, project menu, palette Switch Workspace)
+- [ ] Projects: add via Add Project / Cmd+O / palette Open Project page (search folders by name, type a path to browse, Tab completes, Return opens, Cmd+Return adds, Cmd+K actions, Choose in Finder…, Change Search Location…), Add Project on <server>…; rename; project menu (rename, workspaces, show worktrees, copy path, remove); project icon from `.icns`/`.ico`/`icon|logo` PNG in root or assets/resources/public/packaging, skipping git-ignored (`ProjectIconCache`/`ProjectIconFinder` implemented with tests); missing folder shows failed and can only be removed; remove ends terminals — app side implemented (sidebar menus, palette Open Project page, `TextPrompt` rename)
+- [ ] Home: always first, Cmd+N opens a terminal there, standalone terminal tabs with their own splits — implemented
+- [ ] Project order shared by every filter; local before remote; next/previous project (Ctrl+] / Ctrl+[); back/forward navigation (Cmd+Ctrl+Left/Right) — implemented (`NavigationHistory` tested)
+- [ ] New Terminal in Project… (Cmd+Shift+N): local and remote projects, switches workspace, connects a remote server and opens its Home — implemented (palette page)
+- [ ] Switch Worktree… (Cmd+Opt+W): current first then recent (or sidebar order per setting), filter, rename/remove per row, New Worktree… at the bottom — implemented (palette page)
+- [ ] New Worktree… (Cmd+Opt+N): name, new branch from base or existing branch, Default/Template/Folder location, per-project remembered choice, hooks review and enable, failure semantics — implemented (`NewWorktreeDialog`)
+- [ ] Remove Worktree and Files…: warns about uncommitted changes, runs teardown, ends terminals — implemented (`confirmRemoveWorktree`)
+- [ ] Window title, full screen (Cmd+Ctrl+F), default window size setting — implemented
 
 ## App: panes and splits
 
-- [ ] Single split layout per project (zero when empty); Home tabs exempt; new panes split right of the focused pane and splits equalize; close moves focus to a neighbor; background opens never steal focus
-- [ ] Pane cards: 8px gutter, 10px radius, 1px border, 36px header with title and actions shown on the active or hovered card; terminals draw no inner focus border
-- [ ] Split right/down (Cmd+D / Cmd+Shift+D), close (Cmd+W), close all of the project's panes (Cmd+Shift+W), focus by direction (Cmd+Opt+Arrows), zoom (Cmd+Shift+Return), equalize (Cmd+Ctrl+=), drag the gutter to resize, Cmd-drag a pane to swap or dock on an edge
-- [ ] New terminal pane (Cmd+T) in the project folder or the focused pane's folder (setting)
-- [ ] Closing a terminal: ends it unless another pane in any app shows it; confirm when a program other than the shell runs (setting); Detach Terminal; close-as-detach setting; offline close waits for reconnect
-- [ ] Existing Terminals (Cmd+Opt+T): project's sessions this app isn't showing, owner app, open in a new pane
-- [ ] End All Sessions and Quit; quitting never ends terminals; "server offline" keeps last screens and replays edits and closes on reconnect
-- [ ] Pane kinds: terminal, editor, diff, browser, Remote Servers, with per-kind titles; editor/diff/servers panes reuse an existing pane for the same target
+- [ ] Single split layout per project (zero when empty); Home tabs exempt; new panes split right of the focused pane and splits equalize; close moves focus to a neighbor; background opens never steal focus — implemented (`SplitContainerView`)
+- [ ] Pane cards: 8px gutter, 10px radius, 1px border, 36px header with title and actions shown on the active or hovered card; terminals draw no inner focus border — implemented (`PaneCardView`; gutter math tested; render compared with `window-panes.png`)
+- [ ] Split right/down (Cmd+D / Cmd+Shift+D), close (Cmd+W), close all of the project's panes (Cmd+Shift+W), focus by direction (Cmd+Opt+Arrows), zoom (Cmd+Shift+Return), equalize (Cmd+Ctrl+=), drag the gutter to resize, Cmd-drag a pane to swap or dock on an edge — implemented (`SplitGeometry`, `DropTargets` tested)
+- [ ] New terminal pane (Cmd+T) in the project folder or the focused pane's folder (setting) — implemented
+- [ ] Closing a terminal: ends it unless another pane in any app shows it; confirm when a program other than the shell runs (setting); Detach Terminal; close-as-detach setting; offline close waits for reconnect — implemented (`TerminalPane.willClose`, pending discards replayed on reconnect)
+- [ ] Existing Terminals (Cmd+Opt+T): project's sessions this app isn't showing, owner app, open in a new pane — implemented (palette page)
+- [ ] End All Sessions and Quit; quitting never ends terminals; "server offline" keeps last screens and replays edits and closes on reconnect — implemented; offline tested with a fake server
+- [ ] Pane kinds: terminal, editor, diff, browser, Remote Servers, with per-kind titles; editor/diff/servers panes reuse an existing pane for the same target — implemented through `PaneRegistry` factories
 
 ## App: terminal view
 
@@ -101,33 +101,33 @@ crates. Behavior is 1:1 unless listed under "Intentionally changed".
 
 ## App: command palette
 
-- [ ] Cmd+Shift+P: root search across commands, files (2+ chars, See all), branches, worktrees, projects, terminals; recent commands; keycaps; Return, Cmd+Return secondary, Cmd+K actions, Escape back/close, Backspace back when empty; 740pt wide, 480pt tall, 72pt from top layout
-- [ ] Pages: Go to File (Cmd+P), Find in Files (Cmd+Shift+F, Aa and .* toggles, grouped results), Open Project (Cmd+O), New Terminal in Project (Cmd+Shift+N), Switch Worktree (Cmd+Opt+W), Existing Terminals (Cmd+Opt+T), Switch Branch…, New Branch…, Changes… (Return opens diff, Cmd+K stage/unstage/discard), Change Theme (Cmd+Shift+K), custom Commands
+- [ ] Cmd+Shift+P: root search across commands, files (2+ chars, See all), branches, worktrees, projects, terminals; recent commands; keycaps; Return, Cmd+Return secondary, Cmd+K actions, Escape back/close, Backspace back when empty; 740pt wide, 480pt tall, 72pt from top layout — implemented (`PaletteController`, `PaletteSource`; ranking and page tests; render compared with `palette.png`)
+- [ ] Pages: Go to File (Cmd+P), Find in Files (Cmd+Shift+F, Aa and .* toggles, grouped results), Open Project (Cmd+O), New Terminal in Project (Cmd+Shift+N), Switch Worktree (Cmd+Opt+W), Existing Terminals (Cmd+Opt+T), Switch Branch…, New Branch…, Changes… (Return opens diff, Cmd+K stage/unstage/discard), Change Theme (Cmd+Shift+K), custom Commands — implemented; plus Commit/Create Pull Request with AI and Check for Updates on the root page
 
 ## App: native panels
 
-- [ ] Files panel (Cmd+E): tree pinned right, New File/Folder, Collapse All, Refresh, context menu (open, rename, delete, copy absolute/relative path, reveal in Finder), follows disk changes, shares the right spot with Source Control
-- [ ] Editor pane: syntax highlighting for common languages, unsaved marker, save prompts on close/quit, reload on disk change or offer to keep yours, refuses binary and very large files, open at line:column
-- [ ] Source Control panel (Cmd+Y): branch header with Refresh, Conflicts/Staged/Changes/Untracked groups, stage/unstage/discard per file, Stage All/Unstage All, commit message with Cmd+Return, Amend, refresh on changes
-- [ ] Diff pane: working tree or staged diff for a file, refreshes on changes, long diffs cut short
-- [ ] Agents panel (Cmd+Opt+A): rows grouped by state or by project with counts (setting), Return opens pane; docked at sidebar bottom (resizable), popup when collapsed, Move to Right (resizable, remembered), Detach (floating, remembered frame), reattach
-- [ ] Agent Sessions panel: titlebar history button and View menu toggle, per local project directory, search titles/IDs/providers, provider multi-select filter with counts, grouped by recency, Up/Down/Return resume in a new terminal with the provider's resume command, Tab to filters, Escape semantics, resize, batched background loading, Refresh; providers Claude Code, Codex, Copilot, Droid, Pi, Oh My Pi, Xal with their JSONL locations and `CLAUDE_CONFIG_DIR` / `CODEX_HOME`
+- [ ] Files panel (Cmd+E): tree pinned right, New File/Folder, Collapse All, Refresh, context menu (open, rename, delete, copy absolute/relative path, reveal in Finder), follows disk changes, shares the right spot with Source Control — `FilesPanelController` + `FilesTree` (Codesh tree tests ported) implemented with inline naming, keyboard navigation and `reveal(path:)`; `ProjectPanelContent.files` adapts it to `RightPanelContent`; needs shell wiring (hosts, `watch`, `filesChanged` routing) and app verification
+- [ ] Editor pane: syntax highlighting for common languages, unsaved marker, save prompts on close/quit, reload on disk change or offer to keep yours, refuses binary and very large files, open at line:column — `EditorPaneController` (NSTextView, line numbers, incremental highlighting, Cmd+S/Cmd+F, wrap toggle, `go(line:column:)`, `confirmClose` for quit) and `EditorPaneContent` implemented with tests; needs shell wiring and app verification
+- [ ] Source Control panel (Cmd+Y): branch header with Refresh, Conflicts/Staged/Changes/Untracked groups, stage/unstage/discard per file, Stage All/Unstage All, commit message with Cmd+Return, Amend, refresh on changes — `SourceControlController` + `SourceControlModel` implemented with tests (commit errors as toasts, AI message hook via the host); `ProjectPanelContent.sourceControl` adapts it; needs shell wiring and app verification
+- [ ] Diff pane: working tree or staged diff for a file, refreshes on changes, long diffs cut short — `DiffPaneController` (unified/split, drawn rows only, horizontal scroll) + `DiffDocument` implemented with tests; `DiffPaneContent` adapts it; needs shell wiring and app verification
+- [ ] Agents panel (Cmd+Opt+A): rows grouped by state or by project with counts (setting), Return opens pane; docked at sidebar bottom (resizable), popup when collapsed, Move to Right (resizable, remembered), Detach (floating, remembered frame), reattach — `AgentsPanelController` + `AgentsPanelModel` implemented with tests; needs shell wiring and app verification
+- [ ] Agent Sessions panel: titlebar history button and View menu toggle, per local project directory, search titles/IDs/providers, provider multi-select filter with counts, grouped by recency, Up/Down/Return resume in a new terminal with the provider's resume command, Tab to filters, Escape semantics, resize, batched background loading, Refresh; providers Claude Code, Codex, Copilot, Droid, Pi, Oh My Pi, Xal with their JSONL locations and `CLAUDE_CONFIG_DIR` / `CODEX_HOME` — `AgentSessionsController` + `AgentSessionCatalog` (port of `files.rs`/`parse.rs` with the Rust tests) implemented; titlebar button and View menu are the shell's; needs app verification
 - [ ] Notifications: macOS notification when an agent needs attention or finishes, not for the visible pane or detached terminals, click jumps to the pane, looking clears everywhere, only one app notifies (claim)
 
 ## App: browser
 
-- [ ] Browser panes with WKWebView: New Browser Tab (Cmd+Opt+B), sidebar button, palette, `tab browser open`, Cmd-click terminal links (setting), popups open as new panes
-- [ ] Address bar with search engine and history suggestions, Cmd+L, reload, back/forward (Cmd+[ / Cmd+]), find on page, zoom, copy address, Web Inspector, open in another browser, switch profile, external schemes open in their apps
-- [ ] Profiles: separate cookies, data, history, logins; default profile setting; manage in Settings → Browser; import history, bookmarks and cookies from another browser (Safari, Chrome, Firefox)
-- [ ] Remembers address and profile across restarts; Enable built-in browser setting; home page setting
-- [ ] Browser automation over `app.sock`: open, list, read, click, fill, type, wait, wait-for-navigation, snapshot (interactive elements with selectors), screenshot, close, navigate, evaluate
+- [ ] Browser panes with WKWebView: New Browser Tab (Cmd+Opt+B), sidebar button, palette, `tab browser open`, Cmd-click terminal links (setting), popups open as new panes — `BrowserPaneController` implemented (popups through `BrowserHost.openBrowserPane`); entry points are the shell's; needs app verification
+- [ ] Address bar with search engine and history suggestions, Cmd+L, reload, back/forward (Cmd+[ / Cmd+]), find on page, zoom, copy address, Web Inspector, open in another browser, switch profile, external schemes open in their apps — implemented in `BrowserToolbar`/`BrowserPaneController`; Web Inspector uses WebKit's private `_inspector` when present, else points to Safari's Develop menu (pages are inspectable); needs app verification
+- [ ] Profiles: separate cookies, data, history, logins; default profile setting; manage in Settings → Browser; import history, bookmarks and cookies from another browser (Safari, Chrome, Firefox) — `BrowserProfiles` (per-profile `WKWebsiteDataStore`, `browser-history.json`) and `BrowserImport` (Safari, Chromium family with Keychain decryption, Firefox) implemented; parsing and decryption tested, real browser data not tried; Settings forwarding is the shell's
+- [ ] Remembers address and profile across restarts; Enable built-in browser setting; home page setting — pane reports `BrowserPane` state through the host and honors `BrowserSettings`; persistence is the shell's
+- [ ] Browser automation over `app.sock`: open, list, read, click, fill, type, wait, wait-for-navigation, snapshot (interactive elements with selectors), screenshot, close, navigate, evaluate — `BrowserAutomation.handle(command:args:)` implements every `BrowserCommand`, tested against a real `WKWebView`; the shell's placeholder `BrowserAutomation` in `Model/AppSocketHandler.swift` must go
 
 ## App: remote servers
 
-- [ ] Host menu in the sidebar footer with per-server state; popover: Add Server… (host, user, port, identity file, password login, custom SSH command, group), Test Connection, install Tab there when missing (same version into `~/.local/bin`), version mismatch explanation, edit, connect/disconnect/reconnect, restart or stop its server, forget (removes its projects here), groups
-- [ ] Manage Remote Servers… pane: servers by group, checkboxes with Shift-range, Select all, bulk connect/disconnect/regroup/forget, group headings connect/rename/delete
-- [ ] Add Project → Remote browses the server's folders
-- [ ] Remote projects marked with server and path; remote Home per server; offline servers never show projects as failed; auto-reconnect with backoff that stops when a login or host key needs you; password prompt kept in memory
+- [ ] Host menu in the sidebar footer with per-server state; popover: Add Server… (host, user, port, identity file, password login, custom SSH command, group), Test Connection, install Tab there when missing (same version into `~/.local/bin`), version mismatch explanation, edit, connect/disconnect/reconnect, restart or stop its server, forget (removes its projects here), groups — implemented in `TabApp/Remote` (`RemoteServersController.toggleHostMenu`, `ServerFormSheet`, `RemoteServersModel`, server/group/move menus, `hostFilterMenu`) with tests; checked in offscreen renders; needs wiring into the sidebar footer and app verification
+- [ ] Manage Remote Servers… pane: servers by group, checkboxes with Shift-range, Select all, bulk connect/disconnect/regroup/forget, group headings connect/rename/delete — implemented (`RemoteServersPaneController`, `ServerSelection`) with tests; needs registering as the `.servers` pane kind
+- [ ] Add Project → Remote browses the server's folders — `RemoteFolderBrowser` implemented (lists through the server's `listFolders`); needs the shell to show it
+- [ ] Remote projects marked with server and path; remote Home per server; offline servers never show projects as failed; auto-reconnect with backoff that stops when a login or host key needs you; password prompt kept in memory — `RemoteServerConnector` (proxy, askpass, `passwordNeeded` stops the shell's backoff, refused passwords forgotten) and `PasswordSheet` implemented with tests; the shell's `connectorFactory` must use `RemoteServersModel.connector(for:)`
 - [ ] Remote terminals: drops and pastes upload first; Cmd-click remote file offers read-only copy; Git and files run on the server
 
 ## App: settings window
@@ -143,16 +143,16 @@ crates. Behavior is 1:1 unless listed under "Intentionally changed".
 - [ ] Mobile: allow mobile devices, port, Show Pairing Code (QR), paired phones with Revoke
 - [ ] AI: command-line tools per provider, prompts for commit and PR text, per-project PR prompts, commit choices (include unstaged, push)
 - [ ] Backup & Restore: Export… `.tab` file (settings, terminal, themes, server settings, remote server list, local projects with layouts); Choose file… restores on next launch with a recovery copy in `Backups/`; existing projects kept and matched layouts applied; excludes live sessions, paired devices, remote projects, project files, proxy
-- [ ] Proxy: Set Up Proxy… from a terminal's menu (HTTP or SOCKS5, login, bypass list), Use for the whole app (new terminals, downloads, SSH), Apply Proxy per terminal (restart in same folder, proxy icon), env vars http_proxy/https_proxy/all_proxy/no_proxy; stored in `proxy.json`, never backed up
+- [ ] Proxy: Set Up Proxy… from a terminal's menu (HTTP or SOCKS5, login, bypass list), Use for the whole app (new terminals, downloads, SSH), Apply Proxy per terminal (restart in same folder, proxy icon), env vars http_proxy/https_proxy/all_proxy/no_proxy; stored in `proxy.json`, never backed up — implemented in `TabApp/Proxy` (`ProxyModel`, `ProxyController`, sheet, `ProxyEnvironment`, `ProxyTunnel` as ssh's ProxyCommand) with tests; `main` must call `ProxyTunnel.runIfRequested()`; needs app verification
 
 ## App: other
 
-- [ ] Menu bar built from the shortcut catalog: Tab (About, Settings, Install Command Line Tool…, End All Sessions and Quit), File, Edit (Select Command Output), View (Toggle Agent Sessions, Toggle Voice Recording), Window, Help
-- [ ] Install Command Line Tool… links `~/.local/bin/tab` to the bundle's copy
-- [ ] `tab://pair` URL scheme and `tab <folder>` single-instance handoff over `app.sock`
-- [ ] Dictation (Cmd+Shift+I): on-device SFSpeechRecognizer into the active live terminal, Finish/Cancel, pause releases the mic, 10-minute cap, one session at a time, language setting, send after recording
-- [ ] AI actions: generate commit message and PR text with the configured CLI tool and prompts (runs locally; needs the folder locally)
-- [ ] Updates from GitHub Releases `update.json`: install now when the new version speaks the running server's protocol (server replaced once idle, or now with "Also restart the server"), otherwise wait for terminals to end or confirm ending them; verified download; old bundle kept until its server exits
+- [ ] Menu bar built from the shortcut catalog: Tab (About, Settings, Install Command Line Tool…, End All Sessions and Quit), File, Edit (Select Command Output), View (Toggle Agent Sessions, Toggle Voice Recording), Window, Help — implemented (`MenuBarBuilder`)
+- [ ] Install Command Line Tool… links `~/.local/bin/tab` to the bundle's copy — implemented (`CommandLineInstaller.installAndReport`) with tests; menu item and palette command wired
+- [ ] `tab://pair` URL scheme and `tab <folder>` single-instance handoff over `app.sock` — implemented (`AppDelegate`, `AppSocketHandler`, `SingleInstance`; handoff tested)
+- [ ] Dictation (Cmd+Shift+I): on-device SFSpeechRecognizer into the active live terminal, Finish/Cancel, pause releases the mic, 10-minute cap, one session at a time, language setting, send after recording — implemented in `TabApp/Voice` (`DictationController`, indicator, `SpeechRecorder`) with state-machine tests; wired to Cmd+Shift+I in the shell; needs Info.plist usage strings and app verification
+- [ ] AI actions: generate commit message and PR text with the configured CLI tool and prompts (runs locally; needs the folder locally) — implemented in `TabApp/AI` (`AIActionsController`, 12 providers, bounded process) with tests; prompt is passed as an argument like Codesh; wired: Source Control's commit message and palette commands
+- [ ] Updates from GitHub Releases `update.json`: install now when the new version speaks the running server's protocol (server replaced once idle, or now with "Also restart the server"), otherwise wait for terminals to end or confirm ending them; verified download; old bundle kept until its server exits — implemented in `TabApp/Updater` (`UpdaterController`, manifest, decision table, verified download, ditto + atomic swap, sheet, 6-hour checks, team-ID check) with tests; not tried with a signed release
 - [ ] Themes: app chrome and terminal colored by the chosen theme; dark `#111111` / warm `#d5cec7` default; vibrancy material for the terminal when enabled
 - [ ] Accessibility: labels on controls; Reduce Transparency and Increase Contrast disable vibrancy
 - [ ] Diagnostics and profiler hooks removed unless needed for the renderer

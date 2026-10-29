@@ -1,0 +1,251 @@
+import AppKit
+import Combine
+import TabCore
+
+/// The window's content: the sidebar, the current project's split layout,
+/// and the right panel pinned beside it like Files in the reference window.
+@MainActor
+final class WorkspaceView: ThemedView {
+    unowned let model: AppModel
+    let sidebar: SidebarViewController
+    let splits: SplitContainerView
+    private let panelHost = RightPanelHostView()
+    private let banner = BannerView()
+    private var shownPanel: RightPanelKind?
+    private var shownPanelProject: ProjectId?
+    private var liveSidebarWidth: CGFloat?
+    private var livePanelWidth: CGFloat?
+    private var subscription: AnyCancellable?
+    private var lastPanelLayout: (RightPanelKind?, CGFloat)?
+
+    init(model: AppModel, sidebar: SidebarViewController) {
+        self.model = model
+        self.sidebar = sidebar
+        splits = SplitContainerView(model: model)
+        super.init(frame: .zero)
+        addSubview(sidebar.view)
+        addSubview(splits)
+        addSubview(panelHost)
+        addSubview(banner)
+        sidebar.onResize = { [weak self] width in
+            self?.liveSidebarWidth = width
+            self?.needsLayout = true
+        }
+        panelHost.onResize = { [weak self] width in
+            guard let self else { return }
+            self.livePanelWidth = width
+            if width == nil, let kind = self.shownPanel {
+                self.model.setRightPanelWidth(kind, self.panelHost.frame.width)
+            }
+            self.needsLayout = true
+        }
+        subscription = model.changes.sink { [weak self] changes in self?.modelChanged(changes) }
+        splits.reload()
+        syncPanel()
+        updateBanner()
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override var wantsUpdateLayer: Bool { true }
+    override var mouseDownCanMoveWindow: Bool { true }
+
+    override func updateLayer() {
+        layer?.backgroundColor = theme.bg.cgColor
+    }
+
+    private func modelChanged(_ changes: Set<ModelChange>) {
+        if changes.contains(.state) || changes.contains(.settings) {
+            splits.reload()
+        }
+        if changes.contains(.activity) || changes.contains(.state) {
+            splits.refreshHeaders()
+            updateBanner()
+        }
+        if !changes.isDisjoint(with: [.panel, .settings, .state]) {
+            syncPanel()
+        }
+        needsLayout = true
+    }
+
+    /// Shows the right panel the model asks for, following the project.
+    private func syncPanel() {
+        let kind = model.rightPanel
+        if kind != shownPanel {
+            if let old = shownPanel { model.rightPanelContent(old)?.didHide() }
+            panelHost.content = kind.flatMap { model.rightPanelContent($0) }?.view
+            shownPanel = kind
+            shownPanelProject = nil
+            if let kind { model.rightPanelContent(kind)?.didShow() }
+        }
+        guard let kind, let content = model.rightPanelContent(kind) else { return }
+        let project = model.currentProject
+        if shownPanelProject != project.id {
+            shownPanelProject = project.id
+            content.projectDidChange(project.home && (kind == .files || kind == .sourceControl) ? nil : project)
+        }
+    }
+
+    private func updateBanner() {
+        let server = model.currentProject.serverId
+        switch model.connectionState(server) {
+        case .reconnecting:
+            banner.show("\(server.isLocal ? "This Mac's server" : model.serverName(server) ?? "The server") is offline. Reconnecting…",
+                        action: "Retry") { [weak self] in self?.model.connection(server)?.retryNow() }
+        case .needsUser(let message):
+            banner.show(message, action: "Try Again") { [weak self] in self?.model.connection(server)?.retryNow() }
+        case .ready, .connecting, .idle:
+            banner.hide()
+        }
+    }
+
+    var sidebarWidth: CGFloat {
+        model.appearance.sidebarExpanded ? (liveSidebarWidth ?? model.sidebarWidth) : SidebarViewController.collapsedWidth
+    }
+
+    override func layout() {
+        super.layout()
+        let sidebarWidth = self.sidebarWidth
+        sidebar.view.frame = NSRect(x: 0, y: 0, width: sidebarWidth, height: bounds.height)
+        var right = bounds.width
+        if let kind = shownPanel {
+            let width = min(livePanelWidth ?? model.rightPanelWidth(kind), max(bounds.width - sidebarWidth - 240, RightPanelKind.minimumWidth))
+            panelHost.isHidden = false
+            panelHost.frame = NSRect(x: bounds.width - Metrics.gutter - width, y: Metrics.gutter, width: width,
+                                     height: max(bounds.height - 2 * Metrics.gutter, 0))
+            right = panelHost.frame.minX
+        } else {
+            panelHost.isHidden = true
+        }
+        splits.frame = NSRect(x: sidebarWidth, y: 0, width: max(right - sidebarWidth, 0), height: bounds.height)
+        let bannerWidth = min(splits.frame.width - 32, 520)
+        banner.frame = NSRect(x: splits.frame.midX - bannerWidth / 2, y: 40, width: bannerWidth, height: 32)
+    }
+}
+
+/// The right panel's frame: a card with the panel color and its left edge
+/// as a resize handle.
+final class RightPanelHostView: ThemedView {
+    var content: NSView? {
+        didSet {
+            oldValue?.removeFromSuperview()
+            guard let content else { return }
+            content.frame = bounds
+            content.autoresizingMask = [.width, .height]
+            addSubview(content, positioned: .below, relativeTo: handle)
+        }
+    }
+
+    var onResize: ((CGFloat?) -> Void)?
+    private let handle = PanelResizeHandle()
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.cornerRadius = Metrics.cardRadius
+        layer?.cornerCurve = .continuous
+        layer?.borderWidth = 1
+        layer?.masksToBounds = true
+        addSubview(handle)
+        handle.onDrag = { [weak self] delta in
+            guard let self else { return }
+            guard let delta else {
+                self.onResize?(nil)
+                return
+            }
+            let start = self.handle.startWidth
+            self.onResize?(min(max(start - delta, RightPanelKind.minimumWidth), RightPanelKind.maximumWidth))
+        }
+        handle.onBegin = { [weak self] in self?.handle.startWidth = self?.frame.width ?? 0 }
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override var wantsUpdateLayer: Bool { true }
+
+    override func updateLayer() {
+        layer?.backgroundColor = NativeStyle.panel(theme).cgColor
+        layer?.borderColor = theme.cardBorder.cgColor
+    }
+
+    override func layout() {
+        super.layout()
+        handle.frame = NSRect(x: 0, y: 0, width: 5, height: bounds.height)
+    }
+}
+
+/// A vertical edge dragged horizontally; reports the pointer's travel.
+final class PanelResizeHandle: NSView {
+    var onDrag: ((CGFloat?) -> Void)?
+    var onBegin: (() -> Void)?
+    var startWidth: CGFloat = 0
+
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .resizeLeftRight)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard let window else { return }
+        onBegin?()
+        let start = event.locationInWindow.x
+        while let next = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]) {
+            onDrag?(next.locationInWindow.x - start)
+            if next.type == .leftMouseUp { break }
+        }
+        onDrag?(nil)
+    }
+}
+
+/// A banner over the workspace, such as "server offline", with an action.
+final class BannerView: ThemedView {
+    private let label = makeLabel("", font: AppFont.system(12, weight: .medium))
+    private let button = PillButton("Retry")
+    private var action: (() -> Void)?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.cornerRadius = 8
+        layer?.borderWidth = 1
+        isHidden = true
+        label.translatesAutoresizingMaskIntoConstraints = true
+        button.translatesAutoresizingMaskIntoConstraints = true
+        addSubview(label)
+        addSubview(button)
+        button.action = { [weak self] in self?.action?() }
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    func show(_ message: String, action title: String, _ action: @escaping () -> Void) {
+        label.stringValue = message
+        button.title = title
+        self.action = action
+        isHidden = false
+        needsLayout = true
+    }
+
+    func hide() { isHidden = true }
+
+    override var wantsUpdateLayer: Bool { true }
+
+    override func updateLayer() {
+        layer?.backgroundColor = theme.raised.cgColor
+        layer?.borderColor = theme.cardBorder.cgColor
+    }
+
+    override func themeDidChange() {
+        label.textColor = theme.warning
+        needsDisplay = true
+    }
+
+    override func layout() {
+        super.layout()
+        let size = button.intrinsicContentSize
+        button.frame = NSRect(x: bounds.width - size.width - 4, y: (bounds.height - size.height) / 2, width: size.width, height: size.height)
+        let height = label.intrinsicContentSize.height
+        label.frame = NSRect(x: 12, y: (bounds.height - height) / 2, width: max(button.frame.minX - 20, 0), height: height)
+    }
+}

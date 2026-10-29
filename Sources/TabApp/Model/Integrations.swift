@@ -1,0 +1,272 @@
+import AppKit
+import TabClient
+import TabCore
+import TabProtocol
+
+extension AppModel {
+    /// How `server` is reached: the test override, this computer's socket,
+    /// or the Remote Servers model's SSH connector.
+    func connector(_ server: ServerId, _ entry: ServerEntry?) -> ServerConnector? {
+        if let connectorOverride { return connectorOverride(server, entry) }
+        if server.isLocal {
+            var local = LocalServer(dirs: dirs)
+            if let app = Executable.currentURL(), Executable.containingBundle(of: app) != nil {
+                local.hostApp = app
+            }
+            return LocalConnector(server: local)
+        }
+        guard let entry else { return nil }
+        return remoteServers.connector(for: entry)
+    }
+
+    /// Starts the parts that run beside the window: updates and AI tools.
+    func startIntegrations() {
+        updater.start()
+        Task { await ai.refreshProviders() }
+    }
+
+    /// Every connection change: Remote Servers redraws and the updater
+    /// checks whether it can install.
+    func integrationsConnectionChanged(_ connection: ServerConnection) {
+        remoteServers.connectionsDidChange()
+        if connection.id.isLocal { updater.reconcile() }
+    }
+
+    /// The environment of a new terminal: the proxy when it applies.
+    func creationEnvironment(_ pane: PaneId, server: ServerId) -> (environment: [String: String], proxied: Bool) {
+        let supports = connections[server]?.main?.supportsSessionEnvironment ?? false
+        return proxy.creationEnvironment(for: pane, localServer: server.isLocal, serverSupportsEnvironment: supports)
+    }
+}
+
+// MARK: Remote servers
+
+extension AppModel: RemoteServersHost {
+    public var remoteServersWindow: NSWindow? { presenter?.window }
+    public var settingsURL: URL { dirs.settings }
+    public var sshProxy: ProxyCommand? { try? proxy.sshCommand() }
+
+    public func remoteConnection(_ server: ServerId) -> RemoteConnectionSnapshot {
+        guard let connection = connections[server] else { return .offline }
+        return RemoteConnectionSnapshot(connection.state, failure: connection.lastFailure)
+    }
+
+    public func connectRemoteServer(_ server: ServerId, fresh: Bool) {
+        if fresh { connections.removeValue(forKey: server)?.disconnect() }
+        guard let connection = connection(server) else { return }
+        if case .needsUser = connection.state { connection.retryNow() } else { connection.start() }
+    }
+
+    public func disconnectRemoteServer(_ server: ServerId) {
+        connections[server]?.disconnect()
+    }
+
+    public func remoteServerAPI(_ server: ServerId) -> ServerAPI? {
+        connections[server]?.main
+    }
+
+    public func remoteServerListDidChange(_ servers: [ServerEntry]) {
+        var updated = settings
+        updated.servers = servers
+        apply(settings: updated)
+    }
+
+    public func forgetProjects(on servers: [ServerId]) {
+        edit { state in
+            for server in servers { try state.forgetServer(server) }
+        }
+        for server in servers { connections.removeValue(forKey: server)?.disconnect() }
+    }
+
+    public func openRemoteHome(on server: ServerId) {
+        connectOnDemand(server)
+        guard let home = state.serverHome(server) else {
+            pendingRemoteHomes.insert(server)
+            return
+        }
+        newTerminal(in: home.id)
+    }
+
+    public func addRemoteProject(on server: ServerId) {
+        presenter?.showRemoteFolderBrowser(server)
+    }
+
+    public func showRemoteServersPane() {
+        showServersPane()
+    }
+
+    public func showRemoteError(_ message: String) {
+        report(message)
+    }
+}
+
+// MARK: Proxy
+
+extension AppModel: ProxyHost {
+    public var proxyWindow: NSWindow? { presenter?.window }
+
+    public var localServerSupportsProxy: Bool {
+        connections[.local]?.main?.supportsSessionEnvironment ?? true
+    }
+
+    public func restartTerminal(_ pane: PaneId) {
+        Task {
+            guard await controller(for: pane)?.willClose() ?? true else { return }
+            guard let server = state.paneServer(pane), let old = state.pane(pane)?.content.session,
+                  let projectId = state.paneProject(pane), let project = state.project(projectId) else { return }
+            let directory = (panes.controller(for: pane) as? TerminalPane)?.directory ?? project.directory
+            var created: PaneId?
+            edit { state in
+                created = try state.restartTerminal(pane)
+                if let created { _ = state.prepareCreation(created, directory: directory) }
+            }
+            panes.remove(pane)
+            endSessions([old], on: server)
+            if let created { focusPane(created) }
+        }
+    }
+
+    public func proxyDidChange(_ model: ProxyModel) {
+        updater.setSessionConfiguration(model.sessionConfiguration())
+        for entry in settings.servers where connections[entry.id] != nil {
+            connections.removeValue(forKey: entry.id)?.disconnect()
+            connectOnDemand(entry.id)
+        }
+        notify(.settings)
+    }
+
+    public func showProxyNotice(_ message: String) {
+        presenter?.showToast(message, error: false)
+    }
+}
+
+extension ServerAPI {
+    /// Whether the server can start terminals with an environment.
+    var supportsSessionEnvironment: Bool {
+        (self as? ServerClient)?.supports(.sessionEnvironment) ?? true
+    }
+}
+
+// MARK: AI
+
+/// Git and files of a project through the shell's side connection.
+struct ServerAPIRepository: RepositoryGit {
+    let api: ServerAPI
+
+    func git(_ action: GitAction, project: ProjectId) async throws -> GitReply {
+        try await api.git(GitRequest(project: project, action: action))
+    }
+
+    func readFile(_ path: String, project: ProjectId) async -> String? {
+        guard case .content(let content)? = try? await api.files(FilesRequest(project: project, action: .read(ServerPath(path))))
+        else { return nil }
+        return content.content
+    }
+}
+
+extension AppModel: AIActionsHost {
+    public var aiSettings: AISettings { settings.ai }
+
+    public func aiContext(for project: ProjectId) -> AIProjectContext? {
+        guard let target = state.project(project) else { return nil }
+        let info = git[project]
+        return AIProjectContext(
+            summary: info?.summary, hasPullRequest: info.map { $0.pullRequest != nil },
+            connected: connectionState(target.serverId).isReady, gitBusy: false,
+            localDirectory: target.serverId.isLocal ? URL(fileURLWithPath: target.directory.rawValue) : nil,
+            promptProject: target.parentId ?? target.id, name: title(of: target)
+        )
+    }
+
+    public func aiRepository(for project: ProjectId) -> RepositoryGit? {
+        sideClient(for: project).map { ServerAPIRepository(api: $0) }
+    }
+
+    public func saveAICommitChoices(_ choices: CommitChoices, provider: AIProvider) {
+        do {
+            var updated = settings
+            updated.ai = try Settings.saveCommitChoices(choices, in: dirs.settings)
+            updated.ai.providers["commit"] = provider.id
+            _ = try Settings.saveAIEntry(in: dirs.settings, table: "providers", key: "commit", value: provider.id)
+            apply(settings: updated)
+        } catch {
+            report(error)
+        }
+    }
+
+    public var aiSheetWindow: NSWindow? { presenter?.window }
+
+    public func aiActionsDidChange(project: ProjectId) {
+        notify(.activity)
+    }
+
+    public func aiAction(_ action: RepositoryAction, in project: ProjectId, didFinish result: AIActionResult) {
+        switch result {
+        case .failed(let title, let detail):
+            report(detail.isEmpty ? title : "\(title): \(detail)")
+        case .succeeded(let title, _, let url):
+            presenter?.showToast(title, error: false)
+            if let url, let link = URL(string: url) { NSWorkspace.shared.open(link) }
+        }
+        gitChanged(project)
+    }
+
+    /// A commit message for `project`'s changes from the configured AI tool.
+    func generateCommitMessage(_ project: ProjectId) async throws -> String {
+        guard case .available(let provider) = ai.availability(.commit, project: project),
+              let context = aiContext(for: project), let directory = context.localDirectory,
+              let branch = context.summary?.branch, let git = aiRepository(for: project)
+        else { throw ModelError("No AI tool can write a commit message here.") }
+        let plan = try await RepositoryActions.prepare(git, project: project, action: .commit, choices: settings.ai.commit,
+                                                       branch: branch, head: context.summary?.head)
+        let configured = RepositoryActions.configuredPrompt(.commit, settings: settings.ai, promptProject: context.promptProject)
+        let prompt = RepositoryActions.prompt(plan, instructions: RepositoryActions.instructions(configured: configured, additional: ""))
+        let output = try await Task.detached(priority: .userInitiated) {
+            try provider.generate(prompt: prompt, in: directory)
+        }.value
+        guard case .commit(let message) = try RepositoryActions.parseDraft(plan, output: output) else {
+            throw ModelError("The AI tool did not write a commit message.")
+        }
+        return message
+    }
+}
+
+// MARK: Updates
+
+extension AppModel: UpdaterHost {
+    public var updateWindow: NSWindow? { presenter?.window }
+
+    public var localServerBuild: BuildInfo? { connections[.local]?.main?.server.build }
+
+    public var runningSessionCount: Int { localSessionCount }
+
+    public func endAllSessions() async throws {
+        guard let main = connections[.local]?.main else { throw ModelError("This Mac's server is not running.") }
+        _ = try await main.stopServer(force: true)
+    }
+
+    public func stopLocalServerIfIdle() async -> Bool {
+        guard let main = connections[.local]?.main else { return true }
+        let sessions = (try? await main.sessions()) ?? []
+        guard sessions.isEmpty else { return false }
+        return (try? await main.stopServer(force: false)) ?? false
+    }
+
+    public func prepareToQuitForUpdate() -> Bool {
+        saveNow()
+        browserProfiles.saveHistories()
+        return !openEditors.contains(where: \.isDirty)
+    }
+
+    public func quitForUpdate() {
+        NSApp.terminate(nil)
+    }
+
+    public func updaterStatusDidChange(_ status: UpdaterStatus) {
+        notify(.settings)
+    }
+
+    public func announceUpdate(version: String) {
+        presenter?.showToast("Tab \(version) is ready to install.", error: false)
+    }
+}
