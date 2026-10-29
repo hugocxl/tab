@@ -24,37 +24,37 @@ crates. Behavior is 1:1 unless listed under "Intentionally changed".
 - [ ] Environment: TERM, COLORTERM, TERM_PROGRAM, TAB_SERVER_ID, TAB_SESSION_ID, LANG fallback; login shells; default shell setting
 - [ ] Server settings: default shell, history budget, shell integration; `server.json`; `settings get|set`
 - [ ] Stop / stop-if-idle / restart; stop refuses while terminals run unless forced
-- [ ] Git: summary, branches, remote branches, changes (conflicts, staged, unstaged, untracked), stage/unstage/discard, commit/amend, diff, raw diff, log, status, repo info, init, pull/push/fetch, checkout, cherry-pick, revert, delete branch (local, remote), watch working tree
-- [ ] Worktrees: list, create (new or existing branch, default/template/folder location), register existing, remove (with files), checkout PR, inspect removal (uncommitted changes), setup/teardown hooks from `.tab/worktree.json` and `~/.config/tab/worktree.json` with env vars and 5-minute limit
-- [ ] Pull requests via `gh`: number for a branch, info, list
-- [ ] Files: list, read, read bytes, write, stat, mkdir, rename, delete, watch (FSEvents), folders listing for remote project pickers
-- [ ] Search: file list (`rg --files` or `git ls-files`), content search (`rg`, case and regex toggles, 200 matches per file)
+- [ ] Git: summary, branches, remote branches, changes (conflicts, staged, unstaged, untracked), stage/unstage/discard, commit/amend, diff, raw diff, log, status, repo info, init, pull/push/fetch, checkout, cherry-pick, revert, delete branch (local, remote), watch working tree — `GitService` implemented with tests; waiting for core wiring and app verification
+- [ ] Worktrees: list, create (new or existing branch, default/template/folder location), register existing, remove (with files), checkout PR, inspect removal (uncommitted changes), setup/teardown hooks from `.tab/worktree.json` and `~/.config/tab/worktree.json` with env vars and 5-minute limit — implemented in `GitService` + `Hooks/` with tests (catalog side through `WorktreeCatalog`); location choice is the app's; receipts are in memory, not durable across server restarts
+- [ ] Pull requests via `gh`: number for a branch, info, list — implemented (also create, merge, close, checkout, update branch, diff) with a fake `gh` in tests
+- [ ] Files: list, read, read bytes, write, stat, mkdir, rename, delete, watch (FSEvents), folders listing for remote project pickers — `FilesService` implemented with tests; folders listing is the core's `listFolders`
+- [ ] Search: file list (`rg --files` or `git ls-files`), content search (`rg`, case and regex toggles, 200 matches per file) — implemented in `Search/` with tests
 - [ ] Exec: run a program in a project folder without a shell, cancellable
 - [ ] Uploads: chunked file upload into a temp folder (remote drops and pastes)
-- [ ] AI agent detection: 12 providers from JSON manifests; working/blocked/idle; one unread event per session; read/ack/claim; works with no app attached
-- [ ] Mobile access: opt-in TLS listener (port 7419), self-signed cert, one-time 5-minute pairing code with QR payload and addresses, per-device tokens stored hashed, revoke, disable disconnects; phones can't manage access, settings, stop, or exec
+- [ ] AI agent detection: 12 providers from JSON manifests; working/blocked/idle; one unread event per session; read/ack/claim; works with no app attached — `AgentDetector` + `AgentStateTracker` implemented with the Rust fixtures; events, read/ack/claim are the core's
+- [ ] Mobile access: opt-in TLS listener (port 7419), self-signed cert, one-time 5-minute pairing code with QR payload and addresses, per-device tokens stored hashed, revoke, disable disconnects; phones can't manage access, settings, stop, or exec — `RemoteAccess` implemented with TLS pairing tests; core must serve `.mobile` streams as already authenticated
 - [ ] Logging to `server.log`; `TAB_DIR` profile override
 
 ## Client library and CLI (`tab`)
 
-- [ ] Local connection, starting `tabd` from beside the executable; handshake with version negotiation; reconnect with replay of pending closes
-- [ ] Remote connection over SSH: `ssh <dest> tab stdio`, custom SSH command prefix, identity file, port, user, password login (askpass kept in memory), host-key and auth failures reported, exponential reconnect that stops when it needs the user
-- [ ] Requests with replies, events, per-session grid cache (rows, cursor, history pages)
-- [ ] `tab` (no args): opens the folder-less terminal UI → NOT PORTED (see below); prints help instead
-- [ ] `tab <folder>`: opens the folder in the app (selecting or adding its project), starting the app if needed
-- [ ] `tab server start|status|stop [--force]`
-- [ ] `tab project list|add|rename|delete [--json] [--yes]`
-- [ ] `tab session list [--all]|create [--directory] [-- cmd]|send|send-keys|read-screen [--lines] [--saved]|history|search|wait --text/--exit [--timeout]|end|discard`; inside a Tab terminal, session commands default to that terminal and `create` to its project
-- [ ] `tab worktree list|create|checkout-pr|register|remove [--hooks]`
-- [ ] `tab settings get|set`
-- [ ] `tab activity list [--json]|ack <event-id>`
-- [ ] `tab git ...`, `tab files ...` raw JSON actions
-- [ ] `tab exec <project> -- <program> [args]`
-- [ ] `tab mobile [enable [--port]|disable|pair [--address]|revoke <id>]`
-- [ ] `tab browser open|list|read|click|fill|type|wait|wait-for-navigation|snapshot|screenshot|close|...` through `app.sock`
-- [ ] `tab install-skills [--dir]`
-- [ ] `tab stdio`
-- [ ] `--host <dest>` first; `--json`; `--yes`; exit codes and `tab: <message>` errors; `TAB_DIR`
+- [ ] Local connection, starting `tabd` from beside the executable; handshake with version negotiation; reconnect with replay of pending closes — implemented (`LocalServer`, `ServerClient`, `Reconnector`, `PendingCloses`, `ServerHost` for app-hosted starts); unit-tested against a fake server; end-to-end test waits for a working `tabd`
+- [ ] Remote connection over SSH: `ssh <dest> tab stdio`, custom SSH command prefix, identity file, port, user, password login (askpass kept in memory), host-key and auth failures reported, exponential reconnect that stops when it needs the user — implemented (`SSHTarget`, `RemoteServer`, `Bridge`, `AskpassServer`, `RemoteInstall`); failures tested with fake ssh programs; bridge tested end to end through `tab stdio` with a stand-in server
+- [ ] Requests with replies, events, per-session grid cache (rows, cursor, history pages) — implemented (`ServerClient`, `RunGrid`), unit-tested
+- [x] `tab` (no args): opens the folder-less terminal UI → NOT PORTED (see below); prints help instead
+- [ ] `tab <folder>`: opens the folder in the app (selecting or adding its project), starting the app if needed — implemented (`{"type":"open","path":…}` over `app.sock`, `open -a`, server fallback); needs the app side
+- [ ] `tab server start|status|stop [--force]` — implemented
+- [ ] `tab project list|add|rename|delete [--json] [--yes]` — implemented
+- [ ] `tab session list [--all]|create [--directory] [-- cmd]|send|send-keys|read-screen [--lines] [--saved]|history|search|wait --text/--exit [--timeout]|end|discard`; inside a Tab terminal, session commands default to that terminal and `create` to its project — implemented (UUID session IDs or unique prefixes; `TAB_SESSION_ID`/`TAB_SERVER_ID`)
+- [ ] `tab worktree list|create|checkout-pr|register|remove [--hooks]` — implemented; default folder is `~/.tab/worktrees/<project>/<name>` (the app's per-project location setting isn't read yet)
+- [ ] `tab settings get|set` — implemented
+- [ ] `tab activity list [--json]|ack <event-id>` — implemented
+- [ ] `tab git ...`, `tab files ...` raw JSON actions — implemented (protocol `{"type":…}` JSON)
+- [ ] `tab exec <project> -- <program> [args]` — implemented
+- [ ] `tab mobile [enable [--port]|disable|pair [--address]|revoke <id>]` — implemented; QR encoder (byte mode, level M, versions 1–10) matches Core Image module for module
+- [ ] `tab browser open|list|read|click|fill|type|wait|wait-for-navigation|snapshot|screenshot|close|...` through `app.sock` — CLI side implemented with every Codesh action (`BrowserCommand` lists the app commands and arguments); needs the app side
+- [x] `tab install-skills [--dir]`
+- [ ] `tab stdio` — implemented, ready line `TAB-STDIO/1`; verified with a stand-in server
+- [x] `--host <dest>` first; `--json`; `--yes`; exit codes and `tab: <message>` errors; `TAB_DIR`
 
 ## App: window, sidebar, projects
 
