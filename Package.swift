@@ -39,7 +39,7 @@ let package = Package(
             resources: [.copy("Resources/Detection"), .copy("Resources/Shell")],
             swiftSettings: swift5
         ),
-        .executableTarget(name: "tabd", dependencies: ["TabServer"], swiftSettings: swift5),
+        .executableTarget(name: "tabd", dependencies: ["TabServer", "TabCore", "TabProtocol"], swiftSettings: swift5),
 
         // Connects to a server, starting a local one if needed, or over SSH.
         .target(name: "TabClient", dependencies: ["TabCore", "TabProtocol"], swiftSettings: swift5),

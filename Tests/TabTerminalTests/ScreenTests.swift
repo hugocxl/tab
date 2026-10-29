@@ -140,4 +140,31 @@ final class ScreenTests: XCTestCase {
         try terminal.setDefaults(light)
         XCTAssertTrue(terminal.takePtyOutput().isEmpty)
     }
+
+    func testThemeQueriesIncludePaletteOverridesAndCursorDefaultsReset() throws {
+        let terminal = try makeTerminal()
+        terminal.feed("\u{1b}]4;200;?\u{07}")
+        let original = terminal.takePtyOutput()
+        var colors = TerminalTheme(
+            foreground: ThemeColor(17, 34, 51), background: ThemeColor(68, 85, 102),
+            cursor: ThemeColor(119, 136, 153), ansi: Array(repeating: ThemeColor(170, 187, 204), count: 16),
+            palette: [200: ThemeColor(221, 238, 255)], cursorStyle: .bar, cursorBlink: false)
+        try terminal.setDefaults(colors)
+        terminal.feed("\u{1b}]10;?\u{07}\u{1b}]11;?\u{07}\u{1b}]12;?\u{07}\u{1b}]4;1;?\u{07}\u{1b}]4;200;?\u{07}")
+        let replies = String(decoding: terminal.takePtyOutput(), as: UTF8.self)
+        for color in ["rgb:1111/2222/3333", "rgb:4444/5555/6666", "rgb:7777/8888/9999",
+                      "rgb:aaaa/bbbb/cccc", "rgb:dddd/eeee/ffff"] {
+            XCTAssertTrue(replies.contains(color), replies.debugDescription)
+        }
+        XCTAssertEqual(try terminal.cursor().shape, .bar)
+        XCTAssertFalse(try terminal.cursorBlinking())
+        colors.palette = [:]
+        colors.cursorStyle = nil
+        colors.cursorBlink = nil
+        try terminal.setDefaults(colors)
+        terminal.feed("\u{1b}]4;200;?\u{07}")
+        XCTAssertEqual(terminal.takePtyOutput(), original)
+        XCTAssertEqual(try terminal.cursor().shape, .block)
+        XCTAssertTrue(try terminal.cursorBlinking())
+    }
 }

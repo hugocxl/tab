@@ -112,6 +112,7 @@ final class HooksTests: XCTestCase {
     }
 
     func testHooksShareOneTimeLimit() throws {
+        XCTAssertEqual(WorktreeHooks.limit, 300)
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("tab-hooks-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }

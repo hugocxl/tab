@@ -12,7 +12,7 @@ enum CLI {
         case .version:
             Output.line("tab \(Release.version)")
         case .buildInfo:
-            Output.json(try JSONValue(encoding: BuildInfo(version: Release.version)))
+            FileHandle.standardOutput.write(try JSONEncoder().encode(BuildInfo(version: Release.version)))
         case .askpass:
             throw CLIError("tab --askpass answers ssh's prompts for the Tab app; it isn't run by hand")
         case .open(let folder):

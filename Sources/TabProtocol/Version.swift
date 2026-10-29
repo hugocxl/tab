@@ -114,6 +114,8 @@ public enum Limits {
 
 /// Update metadata, stable across protocol versions.
 public struct BuildInfo: Hashable, Codable, Sendable {
+    /// Frozen metadata for updaters predating protocol negotiation.
+    public static let compatibility: UInt64 = 21
     /// The app version, e.g. `1.4.0`.
     public var version: String
     /// Protocol versions this build speaks.
@@ -122,6 +124,24 @@ public struct BuildInfo: Hashable, Codable, Sendable {
     public init(version: String, protocolVersions: [ProtocolVersion] = ProtocolVersion.supported) {
         self.version = version
         self.protocolVersions = protocolVersions
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case version, compatibility, `protocol`, protocolVersions
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        version = try container.decode(String.self, forKey: .version)
+        protocolVersions = try container.decodeIfPresent([ProtocolVersion].self, forKey: .protocol)
+            ?? container.decodeIfPresent([ProtocolVersion].self, forKey: .protocolVersions) ?? []
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(version, forKey: .version)
+        try container.encode(Self.compatibility, forKey: .compatibility)
+        try container.encode(protocolVersions, forKey: .protocol)
     }
 
     /// Whether this build and `other` share a protocol version, so they can talk.

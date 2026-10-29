@@ -1,5 +1,7 @@
 import Darwin
 import Foundation
+import TabCore
+import TabProtocol
 import TabServer
 
 // `tabd --socket PATH --settings PATH --log PATH`, with `TAB_DIR` selecting
@@ -10,9 +12,28 @@ func fail(_ message: String, code: Int32) -> Never {
     exit(code)
 }
 
+let arguments = Array(CommandLine.arguments.dropFirst())
+switch arguments {
+case ["--build-info"]:
+    do {
+        FileHandle.standardOutput.write(try JSONEncoder().encode(BuildInfo(version: Release.version)))
+        exit(0)
+    } catch {
+        fail("\(error)", code: 1)
+    }
+case ["--version"], ["-V"]:
+    print("tabd \(Release.version)")
+    exit(0)
+case ["--help"], ["-h"]:
+    print("Usage: tabd [--socket PATH --settings PATH --log PATH]\n       tabd --help | --version | --build-info")
+    exit(0)
+default:
+    break
+}
+
 let configuration: ServerConfiguration
 do {
-    configuration = try ServerConfiguration.parse(Array(CommandLine.arguments.dropFirst()))
+    configuration = try ServerConfiguration.parse(arguments)
 } catch {
     fail("\(error)", code: 2)
 }

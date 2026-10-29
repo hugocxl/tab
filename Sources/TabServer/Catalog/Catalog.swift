@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import TabCore
 import TabProtocol
@@ -175,8 +176,9 @@ final class Catalog: @unchecked Sendable {
         guard let project = state.projects[id], project.kind == .worktree, !state.deleting.contains(id),
               let parent = project.parentId.flatMap({ state.projects[$0] }), parent.directory.isDirectory
         else { return false }
-        return !FileManager.default.fileExists(atPath: project.directory.rawValue)
-            && !state.sessions.values.contains { $0.info.project == id }
+        var info = stat()
+        guard stat(project.directory.rawValue, &info) != 0, errno == ENOENT || errno == ENOTDIR else { return false }
+        return !state.sessions.values.contains { $0.info.project == id }
     }
 
     func deleting() -> [ProjectId] {

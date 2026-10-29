@@ -86,6 +86,21 @@ final class CatalogTests: XCTestCase {
         XCTAssertNoThrow(try catalog.project(used.id), "a worktree with history stays")
     }
 
+    func testAnInaccessibleWorktreeIsNotMistakenForADeletedOne() throws {
+        let catalog = try open()
+        let parent = ProjectDescriptor.new(directory: try folder("repo"))
+        _ = try catalog.mutate(ProjectIntent(mutation: .create(parent)))
+        let directory = try folder("restricted/tree")
+        let project = ProjectDescriptor(directory: directory, name: "tree", kind: .worktree, parentId: parent.id)
+        try catalog.addWorktree(project)
+        let restricted = root.appendingPathComponent("restricted").path
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: restricted)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: restricted) }
+        XCTAssertTrue(catalog.prunableWorktrees(of: parent.id).isEmpty)
+        _ = try catalog.mutate(ProjectIntent(mutation: .pruneWorktree(project.id)))
+        XCTAssertNoThrow(try catalog.project(project.id))
+    }
+
     func testPagesFollowTheRevision() throws {
         let catalog = try open()
         for index in 0..<(Limits.catalogPageSize + 2) {
