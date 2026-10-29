@@ -1,0 +1,1 @@
+{"body":{"request":{"action":{"query":{"caseSensitive":true,"maxMatchesPerFile":200,"query":"foo(","regex":false},"type":"searchContent"},"project":"01000000-0000-4000-8000-000000000001"},"type":"files"},"id":4,"type":"request"}

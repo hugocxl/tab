@@ -1,0 +1,1 @@
+{"body":{"state":{"devices":[{"connected":true,"id":"07000000-0000-4000-8000-000000000007","lastSeen":2,"name":"Phone","pairedAt":1}],"pairingExpiresAt":99,"revision":2,"settings":{"enabled":true,"port":7419},"status":{"message":"port busy","type":"failed"}},"type":"remoteAccess"},"id":8,"type":"reply"}
