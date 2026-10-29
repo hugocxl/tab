@@ -52,9 +52,13 @@ final class PTYTests: XCTestCase {
         XCTAssertEqual(pty.exitReason(), .exited(code: 3))
     }
 
+    /// zsh never reopens its terminal, so it only has one when the spawn
+    /// made the PTY its controlling terminal.
     func testProgramGetsAControllingTerminalEnvironmentAndDirectory() throws {
         let script = ": </dev/tty && echo ctty-ok; echo \"$TAB_TEST\"; pwd -P"
-        let pty = try PTY(spawning: request(script, environment: ["TAB_TEST": "value"]))
+        let pty = try PTY(spawning: SpawnRequest(
+            program: "/bin/zsh", arguments: ["-f", "-c", script], environment: ["TAB_TEST": "value"],
+            workingDirectory: NSTemporaryDirectory(), size: Size(cols: 80, rows: 24)))
         let output = try start(pty)
         wait(for: [output.closed], timeout: 10)
         XCTAssertTrue(output.text.contains("ctty-ok"), output.text)
@@ -84,6 +88,32 @@ final class PTYTests: XCTestCase {
         try pty.kill()
         wait(for: [output.closed], timeout: 10)
         XCTAssertEqual(try pty.waitForExit(), .signaled(signal: SIGHUP))
+    }
+
+    func testControlCInterruptsTheForegroundProgram() throws {
+        let pty = try PTY(spawning: SpawnRequest(
+            program: "/bin/zsh", arguments: ["-f", "-c", "echo ready; sleep 30"],
+            workingDirectory: NSTemporaryDirectory(), size: Size(cols: 80, rows: 24)))
+        let output = try start(pty)
+        waitFor("ready", in: output)
+        XCTAssertEqual(tcgetpgrp(pty.masterFD), pty.pid)
+        try pty.write(Data([0x03]))
+        wait(for: [output.closed], timeout: 10)
+        XCTAssertEqual(try pty.waitForExit(), .signaled(signal: SIGINT))
+    }
+
+    func testProgramIsFoundOnThePath() throws {
+        let pty = try PTY(spawning: SpawnRequest(
+            program: "true", workingDirectory: NSTemporaryDirectory(), size: Size(cols: 80, rows: 24)))
+        XCTAssertEqual(try pty.waitForExit(), .exited(code: 0))
+    }
+
+    func testMissingDirectoryFailsToSpawn() {
+        XCTAssertThrowsError(try PTY(spawning: SpawnRequest(
+            program: "/bin/sh", workingDirectory: "/nonexistent/folder", size: Size(cols: 80, rows: 24)))) {
+            XCTAssertEqual(($0 as? PTYError)?.step, .spawn)
+            XCTAssertEqual(($0 as? PTYError)?.code, ENOENT)
+        }
     }
 
     func testMissingProgramFailsToSpawn() {

@@ -195,7 +195,9 @@ extension ClientConnection {
             try remote.write(settings)
             return .remoteAccess(remote.state())
         case .startPairing(let hosts):
-            return .pairing(try remote().startPairing(hosts: hosts))
+            let offer = try remote().startPairing(hosts: hosts)
+            lock.withLock { pairingCode = offer.invite.code }
+            return .pairing(offer)
         case .cancelPairing:
             let remote = try remote()
             remote.cancelPairing()

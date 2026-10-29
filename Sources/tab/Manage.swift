@@ -53,6 +53,9 @@ enum Manage {
     static func stop(_ client: ServerClient, force: Bool, json: Bool) async throws {
         let stopped = force ? try await client.stopServer(force: true) : try await client.stopServerIfIdle()
         guard stopped else { throw CLIError("server has running terminals; use --force to end them") }
+        guard await client.waitUntilClosed(timeout: 20) else {
+            throw CLIError("the server is still stopping; its terminals haven't ended yet")
+        }
         Output.ok(json: json)
     }
 

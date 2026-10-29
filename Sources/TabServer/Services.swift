@@ -129,6 +129,8 @@ public protocol RemoteAccessProtocol: AnyObject, Sendable {
     func write(_ settings: RemoteAccessSettings) throws
     func startPairing(hosts: [String]) throws -> PairingOffer
     func cancelPairing()
+    /// Cancels the code only if it is still the one offered.
+    func cancelPairing(code: Data)
     func pair(_ request: PairRequest) throws -> Paired
     func authenticate(_ credential: DeviceCredential) throws -> DeviceId
     func revoke(_ device: DeviceId) throws

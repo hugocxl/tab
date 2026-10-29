@@ -191,6 +191,18 @@ final class RemoteAccessTests: XCTestCase {
         XCTAssertEqual(try remote.authenticate(paired.credential), paired.credential.device)
     }
 
+    /// A client that leaves cancels its own code, never one asked for later.
+    func testAClosedClientCancelsOnlyItsOwnCode() throws {
+        let (remote, _) = try listening(RecordingAcceptor())
+        let first = try remote.startPairing(hosts: ["127.0.0.1"])
+        let second = try remote.startPairing(hosts: ["127.0.0.1"])
+        remote.cancelPairing(code: first.code)
+        XCTAssertNotNil(remote.state().pairingExpiresAt)
+        remote.cancelPairing(code: second.code)
+        XCTAssertNil(remote.state().pairingExpiresAt)
+        XCTAssertThrowsError(try remote.pair(PairRequest(code: second.code, name: "Phone")))
+    }
+
     func testPairingNeedsAccessOnAndListening() throws {
         let remote = makeRemote()
         XCTAssertThrowsError(try remote.startPairing(hosts: []))

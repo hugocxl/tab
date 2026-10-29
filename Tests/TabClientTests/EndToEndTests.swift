@@ -125,6 +125,60 @@ final class EndToEndTests: XCTestCase {
         try await client.endSession(info.id)
     }
 
+    /// A zsh session reports its prompts through Tab's shell integration and
+    /// runs commands under job control: the foreground program is seen and
+    /// Ctrl+C interrupts it.
+    func testZshPromptsReachTheClientAndControlCInterrupts() async throws {
+        let zdotdir = root.appendingPathComponent("zdotdir")
+        try FileManager.default.createDirectory(at: zdotdir, withIntermediateDirectories: true)
+        let inherited = ProcessInfo.processInfo.environment["ZDOTDIR"]
+        setenv("ZDOTDIR", zdotdir.path, 1)
+        defer {
+            if let inherited { setenv("ZDOTDIR", inherited, 1) } else { unsetenv("ZDOTDIR") }
+        }
+        let client = try await startServer()
+        let home = try await home(client)
+        try await client.writeServerSettings(ServerSettingsDoc(defaultShell: "/bin/zsh"))
+        let info = try await client.createSession(CreateSession(project: home, directory: ServerPath(root.path),
+                                                                size: Size(cols: 80, rows: 24)))
+        let attachment = try await client.attach(session: info.id, size: Size(cols: 80, rows: 24))
+        let reached = Steps()
+        let channel = attachment.channel
+        func prompted() throws {
+            reached.add("a prompt mark reaches the client")
+            try client.sendInput(channel: channel, .bytes(Data("sleep 30\r".utf8)))
+        }
+        if !attachment.snapshot.prompts.isEmpty { try prompted() }
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            group.addTask {
+                for await event in attachment.events {
+                    switch event {
+                    case .frame(let frame):
+                        try client.ack(channel: channel, seq: frame.seq)
+                    case .metadata(.screenPrompts(_, let rows)) where !rows.isEmpty && reached.count == 0:
+                        try prompted()
+                    case .metadata(.foregroundProcess(let process))
+                        where process.name == "sleep" && !process.isShell && reached.count == 1:
+                        reached.add("the foreground program is seen")
+                        try client.sendInput(channel: channel, .bytes(Data([0x03])))
+                    case .metadata(.foregroundProcess(let process)) where process.isShell && reached.count == 2:
+                        reached.add("Ctrl+C returns to the shell")
+                        return
+                    default:
+                        continue
+                    }
+                }
+            }
+            group.addTask { try await Task.sleep(nanoseconds: 15_000_000_000) }
+            defer { group.cancelAll() }
+            try await group.next()
+        }
+        XCTAssertEqual(reached.all, ["a prompt mark reaches the client", "the foreground program is seen",
+                                     "Ctrl+C returns to the shell"])
+        try await client.detach(channel: attachment.channel)
+        try await client.endSession(info.id)
+    }
+
     func testTheCommandLineDrivesTheSameServer() async throws {
         let tab = try product(Executable.cli)
         let client = try await startServer()
@@ -178,4 +232,14 @@ final class EndToEndTests: XCTestCase {
         XCTAssertEqual(remote.server.server, client?.server.server, "the bridge reaches the same server")
         try await remote.ping()
     }
+}
+
+/// Steps an end-to-end test reached, shared with the task that reads events.
+private final class Steps: @unchecked Sendable {
+    private let lock = NSLock()
+    private var steps: [String] = []
+
+    func add(_ step: String) { lock.withLock { steps.append(step) } }
+    var count: Int { lock.withLock { steps.count } }
+    var all: [String] { lock.withLock { steps } }
 }

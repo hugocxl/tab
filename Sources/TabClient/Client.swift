@@ -128,6 +128,27 @@ public final class ServerClient: @unchecked Sendable {
         state.addCloseHandler(handler)
     }
 
+    /// Waits until the connection closes, such as when a stopping server has
+    /// ended its terminals and gone; false after `timeout`.
+    public func waitUntilClosed(timeout: TimeInterval) async -> Bool {
+        let closed = AsyncStream<Void> { continuation in
+            onClose { _ in continuation.finish() }
+        }
+        return await withTaskGroup(of: Bool.self) { group in
+            group.addTask {
+                for await _ in closed {}
+                return !Task.isCancelled
+            }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(max(timeout, 0) * 1_000_000_000))
+                return false
+            }
+            let first = await group.next() ?? false
+            group.cancelAll()
+            return first
+        }
+    }
+
     // MARK: Requests
 
     /// Sends `body` and returns the server's reply; an `error` reply throws

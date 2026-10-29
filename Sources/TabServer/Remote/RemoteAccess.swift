@@ -183,6 +183,14 @@ public final class RemoteAccess: RemoteAccessProtocol, @unchecked Sendable {
         if had { changed() }
     }
 
+    public func cancelPairing(code: Data) {
+        lock.lock()
+        let current = offer?.code == code
+        if current { offer = nil }
+        lock.unlock()
+        if current { changed() }
+    }
+
     public func pair(_ request: PairRequest) throws -> Paired {
         let refused = ServiceError(.unauthorized, "The pairing code is wrong or expired")
         guard request.code.count == 16, (try? Validation.deviceName(request.name)) != nil else { throw refused }

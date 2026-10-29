@@ -28,6 +28,9 @@ final class ClientConnection: @unchecked Sendable {
     private var watchesCatalog = false
     private var watchesActivity = false
     private var colors: TerminalColors?
+    /// The pairing code this client asked for, cancelled when it leaves, so a
+    /// code shown by a closed `tab mobile pair` or app stops working.
+    var pairingCode: Data?
     private var sentMetadata: [SessionId: SessionMetadata] = [:]
     private var sentProgress: [SessionId: SessionProgress] = [:]
 
@@ -91,6 +94,7 @@ final class ClientConnection: @unchecked Sendable {
             return detached
         }
         guard let detached else { return }
+        if let code = lock.withLock({ pairingCode }) { server.services.remote?.cancelPairing(code: code) }
         for channel in detached { channel.owner.detach(channel.attachment) }
         jobs.cancelAll()
         outbox.close()

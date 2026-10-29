@@ -79,35 +79,127 @@ public final class PTY {
         close(masterFD)
     }
 
+    /// Forks a child that leads a new session with the PTY as its controlling
+    /// terminal (`setsid` + `TIOCSCTTY`, as `login_tty` does), then execs.
+    /// `posix_spawn` can't: it opens files before `setsid`, so only programs
+    /// that reopen their terminal (sh, bash) got one, and zsh ran without job
+    /// control or Ctrl+C. Everything the child uses is prepared before the
+    /// fork and the child makes only async-signal-safe calls. A failure
+    /// before the exec comes back through a close-on-exec pipe.
     private static func spawn(_ request: SpawnRequest, slave: String) throws -> pid_t {
-        var actions: posix_spawn_file_actions_t?
-        posix_spawn_file_actions_init(&actions)
-        defer { posix_spawn_file_actions_destroy(&actions) }
-        posix_spawn_file_actions_addopen(&actions, 0, slave, O_RDWR, 0)
-        posix_spawn_file_actions_adddup2(&actions, 0, 1)
-        posix_spawn_file_actions_adddup2(&actions, 0, 2)
-        posix_spawn_file_actions_addchdir_np(&actions, request.workingDirectory)
-
-        var attributes: posix_spawnattr_t?
-        posix_spawnattr_init(&attributes)
-        defer { posix_spawnattr_destroy(&attributes) }
-        let flags = POSIX_SPAWN_SETSID | POSIX_SPAWN_CLOEXEC_DEFAULT | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK
-        posix_spawnattr_setflags(&attributes, Int16(flags))
-        var defaults = sigset_t()
-        sigfillset(&defaults)
-        posix_spawnattr_setsigdefault(&attributes, &defaults)
-        var mask = sigset_t()
-        sigemptyset(&mask)
-        posix_spawnattr_setsigmask(&attributes, &mask)
-
+        guard let program = executable(request.program) else { throw PTYError(.spawn, code: ENOENT) }
         let argv = CStrings([request.argv0 ?? request.program] + request.arguments)
         let envp = CStrings(request.environment.map { "\($0.key)=\($0.value)" })
-        var pid: pid_t = 0
-        let result = request.program.contains("/")
-            ? posix_spawn(&pid, request.program, &actions, &attributes, argv.pointers, envp.pointers)
-            : posix_spawnp(&pid, request.program, &actions, &attributes, argv.pointers, envp.pointers)
-        guard result == 0 else { throw PTYError(.spawn, code: result) }
+        let paths = CStrings([program, slave, request.workingDirectory])
+        guard let programPath = paths.pointers[0], let slavePath = paths.pointers[1],
+              let directory = paths.pointers[2] else { throw PTYError(.spawn, code: EINVAL) }
+        var report: [Int32] = [-1, -1]
+        guard pipe(&report) == 0 else { throw PTYError(.spawn) }
+        defer { close(report[0]) }
+        _ = fcntl(report[0], F_SETFD, FD_CLOEXEC)
+        _ = fcntl(report[1], F_SETFD, FD_CLOEXEC)
+        let descriptors = descriptorLimit()
+
+        let pid = argv.pointers.withUnsafeBufferPointer { arguments in
+            envp.pointers.withUnsafeBufferPointer { environment in
+                let pid = Fork.call()
+                if pid == 0 {
+                    child(program: programPath, argv: arguments.baseAddress!, envp: environment.baseAddress!,
+                          slave: slavePath, directory: directory, report: report[1], descriptors: descriptors)
+                }
+                return pid
+            }
+        }
+        let forkError = errno
+        close(report[1])
+        guard pid > 0 else { throw PTYError(.spawn, code: forkError) }
+        if let code = childFailure(report[0]) {
+            var status: Int32 = 0
+            while waitpid(pid, &status, 0) < 0, errno == EINTR {}
+            throw PTYError(.spawn, code: code)
+        }
         return pid
+    }
+
+    /// The `errno` the child reported before its exec, or nil once the exec
+    /// closed the pipe.
+    private static func childFailure(_ descriptor: Int32) -> Int32? {
+        var code: Int32 = 0
+        var received = 0
+        let size = MemoryLayout<Int32>.size
+        while received < size {
+            let count = withUnsafeMutableBytes(of: &code) { bytes in
+                read(descriptor, bytes.baseAddress! + received, size - received)
+            }
+            if count < 0, errno == EINTR { continue }
+            guard count > 0 else { break }
+            received += count
+        }
+        return received == 0 ? nil : code
+    }
+
+    /// The forked child. Never returns.
+    private static func child(program: UnsafePointer<CChar>, argv: UnsafePointer<UnsafeMutablePointer<CChar>?>,
+                              envp: UnsafePointer<UnsafeMutablePointer<CChar>?>, slave: UnsafePointer<CChar>,
+                              directory: UnsafePointer<CChar>, report: Int32, descriptors: Int32) -> Never {
+        var mask = sigset_t()
+        sigemptyset(&mask)
+        sigprocmask(SIG_SETMASK, &mask, nil)
+        var action = sigaction()
+        action.__sigaction_u.__sa_handler = SIG_DFL
+        var signal: Int32 = 1
+        while signal < NSIG {
+            if signal != SIGKILL && signal != SIGSTOP { sigaction(signal, &action, nil) }
+            signal += 1
+        }
+        guard setsid() >= 0 else { childFailed(report) }
+        let terminal = open(slave, O_RDWR)
+        guard terminal >= 0 else { childFailed(report) }
+        guard ioctl(terminal, UInt(TIOCSCTTY), 0 as CInt) == 0 else { childFailed(report) }
+        guard dup2(terminal, 0) >= 0, dup2(terminal, 1) >= 0, dup2(terminal, 2) >= 0 else { childFailed(report) }
+        var descriptor: Int32 = 3
+        while descriptor < descriptors {
+            if descriptor != report { close(descriptor) }
+            descriptor += 1
+        }
+        guard chdir(directory) == 0 else { childFailed(report) }
+        execve(program, argv, envp)
+        childFailed(report)
+    }
+
+    private static func childFailed(_ report: Int32) -> Never {
+        var code = errno
+        _ = withUnsafeBytes(of: &code) { Darwin.write(report, $0.baseAddress, $0.count) }
+        _exit(127)
+    }
+
+    /// `program` itself when it has a slash, else the first executable of
+    /// that name in this process's `PATH`, as `posix_spawnp` looks it up.
+    static func executable(_ program: String) -> String? {
+        guard !program.isEmpty else { return nil }
+        if program.contains("/") { return program }
+        let search = ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
+        for folder in search.split(separator: ":", omittingEmptySubsequences: false) {
+            let path = (folder.isEmpty ? "." : String(folder)) + "/" + program
+            if access(path, X_OK) == 0 { return path }
+        }
+        return nil
+    }
+
+    /// The child closes every descriptor below this: past the highest one
+    /// open now, with room for any that another thread opens before the fork
+    /// (new descriptors take the lowest free numbers), within the limit.
+    private static func descriptorLimit() -> Int32 {
+        var limit = rlimit()
+        let ceiling = getrlimit(RLIMIT_NOFILE, &limit) == 0 ? Int32(clamping: limit.rlim_cur) : Int32(OPEN_MAX)
+        let size = MemoryLayout<proc_fdinfo>.stride
+        let bytes = proc_pidinfo(getpid(), PROC_PIDLISTFDS, 0, nil, 0)
+        guard bytes > 0 else { return ceiling }
+        var descriptors = [proc_fdinfo](repeating: proc_fdinfo(), count: Int(bytes) / size + 64)
+        let filled = proc_pidinfo(getpid(), PROC_PIDLISTFDS, 0, &descriptors, Int32(descriptors.count * size))
+        guard filled > 0 else { return ceiling }
+        let highest = descriptors.prefix(Int(filled) / size).map(\.proc_fd).max() ?? 2
+        return min(ceiling, highest + 257)
     }
 
     /// Starts a thread that blocks on `read(2)` and hands every chunk to
@@ -235,7 +327,7 @@ public final class PTY {
     }
 }
 
-/// NUL-terminated C strings kept alive for a `posix_spawn` call.
+/// NUL-terminated C strings kept alive while a child is started.
 private final class CStrings {
     let pointers: [UnsafeMutablePointer<CChar>?]
 
@@ -248,4 +340,19 @@ private final class CStrings {
             free(pointer)
         }
     }
+}
+
+/// `fork(2)`, which Swift marks unavailable in favor of `posix_spawn`; the
+/// PTY needs it to give the child its controlling terminal.
+private enum Fork {
+    private typealias Function = @convention(c) () -> pid_t
+
+    private static let function: Function = {
+        guard let symbol = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "fork") else {
+            fatalError("fork is missing from libSystem")
+        }
+        return unsafeBitCast(symbol, to: Function.self)
+    }()
+
+    static func call() -> pid_t { function() }
 }

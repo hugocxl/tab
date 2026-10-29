@@ -355,6 +355,7 @@ public final class Server: @unchecked Sendable {
 
     func requestStop(force: Bool) -> ReplyBody {
         if !force, hasSessions { return .serverBusy }
+        refuseNewSessions()
         scheduleStop()
         return .serverStopping
     }
@@ -372,9 +373,16 @@ public final class Server: @unchecked Sendable {
     }
 
     func requestRestart() -> ReplyBody {
+        refuseNewSessions()
         broadcast(.serverRestarting)
         scheduleStop()
         return .serverRestarting
+    }
+
+    /// Once a stop is accepted, a session created before the server goes
+    /// would only be ended with it, so creation fails instead.
+    private func refuseNewSessions() {
+        sessionLock.withLock { stopping = true }
     }
 
     /// Stops after the reply had a moment to go out.
