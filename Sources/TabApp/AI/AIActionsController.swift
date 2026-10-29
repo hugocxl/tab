@@ -191,6 +191,7 @@ public final class AIActionsController {
                 let output = try await Task.detached(priority: .userInitiated) {
                     try provider.generate(prompt: prompt, in: directory, cancellation: cancellation)
                 }.value
+                guard !cancellation.isCancelled else { throw AIActionError("Cancelled") }
                 let draft = try RepositoryActions.parseDraft(plan, output: output)
                 result = await RepositoryActions.apply(git, plan: plan, draft: draft, report: report)
             } catch {

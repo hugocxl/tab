@@ -43,6 +43,15 @@ public struct Installation: Equatable, Sendable {
     /// Unpacks a verified download next to the installed app and checks the
     /// app inside: same team, same bundle identifier, the expected version.
     public func prepare(archive: URL, manifest: UpdateManifest) throws -> PreparedUpdate {
+        let lock = try replacementLock()
+        defer { lock.unlock() }
+        try UpdateDownloader.verify(archive, sha256: manifest.sha256, size: manifest.size)
+        if archive.pathExtension.lowercased() == "dmg" {
+            let requirement = "anchor apple generic and certificate leaf[subject.OU] = \"\(team)\""
+            guard CodeSignature.isValid(archive, requirement: requirement, nested: false) else {
+                throw UpdateError.invalidBundle("The update disk image isn't signed by the same developer as this app.")
+            }
+        }
         let staging = directory.appendingPathComponent(Self.stagingPrefix + UUID().uuidString, isDirectory: true)
         do {
             try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: false)
@@ -53,7 +62,10 @@ public struct Installation: Equatable, Sendable {
             let candidate = staging.appendingPathComponent(bundle.lastPathComponent, isDirectory: true)
             try Self.extract(archive, appName: bundle.lastPathComponent, to: candidate)
             try verifyApp(candidate, version: manifest.version)
-            return PreparedUpdate(manifest: manifest, installation: self, staging: staging)
+            var verified = manifest
+            verified.protocolVersions = try BundledBuild.check(in: candidate.appendingPathComponent("Contents/MacOS"),
+                                                               version: manifest.version).protocolVersions
+            return PreparedUpdate(manifest: verified, installation: self, staging: staging)
         } catch {
             try? FileManager.default.removeItem(at: staging)
             throw error
@@ -90,7 +102,11 @@ public struct Installation: Equatable, Sendable {
         guard CodeSignature.isValid(app, requirement: requirement) else {
             throw UpdateError.invalidBundle("The update isn't signed by the same developer as this app.")
         }
+        for name in [Executable.app, Executable.cli, Executable.server] {
+            try Self.run("/usr/bin/lipo", [app.appendingPathComponent("Contents/MacOS/" + name).path, "-verify_arch", "arm64"])
+        }
         try Self.checkContents(app, version: version)
+        _ = try BundledBuild.check(in: app.appendingPathComponent("Contents/MacOS"), version: version)
     }
 
     /// The parts of a bundle the signature doesn't vouch for by itself.
@@ -104,12 +120,19 @@ public struct Installation: Equatable, Sendable {
         guard info["CFBundleShortVersionString"] as? String == version else {
             throw UpdateError.invalidBundle("The update's version doesn't match the update feed.")
         }
+        guard info["CFBundleExecutable"] as? String == Executable.app else {
+            throw UpdateError.invalidBundle("The update has an unexpected app executable.")
+        }
         let executables = app.appendingPathComponent("Contents/MacOS")
         for name in [Executable.app, Executable.server, Executable.cli]
             where !Executable.isExecutableFile(executables.appendingPathComponent(name))
         {
             throw UpdateError.invalidBundle("The update is missing \(name).")
         }
+    }
+
+    func replacementLock() throws -> FileLock {
+        try FileLock.tryLock(directory.appendingPathComponent(".tab-bundle-update.lock"))
     }
 
     /// Whether `url` is one of this installation's staging folders.
@@ -123,6 +146,8 @@ public struct Installation: Equatable, Sendable {
     /// Removes old bundles kept for servers that have since exited, and
     /// downloads that were never installed, except `keeping`.
     public func cleanUp(keeping: URL? = nil) {
+        guard let lock = try? replacementLock() else { return }
+        defer { lock.unlock() }
         guard let entries = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else { return }
         for entry in entries where owns(entry) && entry.standardizedFileURL != keeping?.standardizedFileURL {
             let previous = entry.appendingPathComponent(PreparedUpdate.previousName)
@@ -173,12 +198,19 @@ public struct PreparedUpdate: Equatable, Sendable {
     func validate() throws {
         guard installation.owns(staging) else { throw UpdateError.install("The staged update moved. Check for updates again.") }
         try installation.verifyApp(candidate, version: version)
+        try installation.verifyApp(installation.bundle, version: Release.version)
+        let build = try BundledBuild.check(in: candidate.appendingPathComponent("Contents/MacOS"), version: version)
+        guard build.protocolVersions == manifest.protocolVersions else {
+            throw UpdateError.invalidBundle("The staged update metadata changed. Check for updates again.")
+        }
     }
 
     /// Swaps the staged app in, keeping the old one in the staging folder
     /// until its server exits, and starts the new app once this one quits.
     /// On failure the installed app is left as it was.
     public func install(processIdentifier: pid_t = getpid()) throws {
+        let lock = try installation.replacementLock()
+        defer { lock.unlock() }
         try validate()
         try BundleReplacement.replace(current: installation.bundle, next: candidate, backup: backup) {
             try Self.relaunch(installation.bundle, after: processIdentifier)
@@ -206,6 +238,8 @@ public struct PreparedUpdate: Equatable, Sendable {
 
     /// Removes the download unless an old bundle waits there for its server.
     public func discard() {
+        guard let lock = try? installation.replacementLock() else { return }
+        defer { lock.unlock() }
         guard installation.owns(staging), !FileManager.default.fileExists(atPath: backup.path) else { return }
         try? FileManager.default.removeItem(at: staging)
     }
@@ -230,14 +264,18 @@ public enum BundleReplacement {
         do {
             try then()
         } catch {
-            try? move(current, to: next, failure: "")
-            try? move(backup, to: current, failure: "")
+            do {
+                try move(current, to: next, failure: "Could not move the new app aside")
+                try move(backup, to: current, failure: "Could not restore the previous app")
+            } catch {
+                throw UpdateError.install("Could not relaunch or restore the previous app. The previous app is at \(backup.path).")
+            }
             throw error
         }
     }
 
     private static func move(_ source: URL, to destination: URL, failure: String) throws {
-        guard rename(source.path, destination.path) == 0 else {
+        guard renamex_np(source.path, destination.path, UInt32(RENAME_EXCL)) == 0 else {
             throw UpdateError.install("\(failure): \(String(cString: strerror(errno)))")
         }
     }
@@ -259,13 +297,13 @@ enum CodeSignature {
     }
 
     /// Whether every piece of `bundle`'s code is intact and meets `requirement`.
-    static func isValid(_ bundle: URL, requirement text: String) -> Bool {
+    static func isValid(_ bundle: URL, requirement text: String, nested: Bool = true) -> Bool {
         var code: SecStaticCode?
         var requirement: SecRequirement?
         guard SecStaticCodeCreateWithPath(bundle as CFURL, [], &code) == errSecSuccess, let code,
               SecRequirementCreateWithString(text as CFString, [], &requirement) == errSecSuccess, let requirement
         else { return false }
-        let flags = SecCSFlags(rawValue: kSecCSCheckAllArchitectures | kSecCSStrictValidate | kSecCSCheckNestedCode)
+        let flags = SecCSFlags(rawValue: kSecCSStrictValidate | (nested ? kSecCSCheckAllArchitectures | kSecCSCheckNestedCode : 0))
         return SecStaticCodeCheckValidity(code, flags, requirement) == errSecSuccess
     }
 }
@@ -278,12 +316,12 @@ enum RunningProcesses {
         defer { free(resolved) }
         let prefix = String(cString: resolved) + "/"
         let count = proc_listallpids(nil, 0)
-        guard count > 0 else { return false }
+        guard count > 0 else { return true }
         var pids = [pid_t](repeating: 0, count: Int(count) * 2)
         let filled = pids.withUnsafeMutableBytes { buffer in
             proc_listallpids(buffer.baseAddress, Int32(buffer.count))
         }
-        guard filled > 0 else { return false }
+        guard filled > 0 else { return true }
         var path = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
         for pid in pids.prefix(Int(filled)) where pid > 0 {
             let length = proc_pidpath(pid, &path, UInt32(path.count))

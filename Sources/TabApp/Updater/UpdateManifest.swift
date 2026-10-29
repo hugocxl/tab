@@ -2,34 +2,22 @@ import Foundation
 import TabCore
 import TabProtocol
 
-/// The newest release as `update.json` describes it, published with every
-/// GitHub release of Tab:
-///
-/// ```json
-/// {
-///   "version": "1.2.0",
-///   "url": "https://github.com/hugocxl/tab/releases/download/v1.2.0/Tab-1.2.0.zip",
-///   "sha256": "<64 hex digits>",
-///   "size": 48213112,
-///   "minimumSystemVersion": "14.0",
-///   "protocolVersions": [1]
-/// }
-/// ```
-///
-/// `protocolVersion` (one number) is read when `protocolVersions` is absent.
-/// Unknown keys are ignored so the feed can grow.
+/// A release from Codesh's schema-1 `update.json` format, selecting the
+/// `macos-aarch64` platform asset. The earlier flat Tab format remains
+/// readable for existing pending records and feeds.
 public struct UpdateManifest: Codable, Equatable, Sendable {
     public var version: String
     /// The signed app as a `.zip` (or `.dmg`) in the release's own assets.
     public var url: URL
-    /// The SHA-256 of the download, lowercase hex.
+    /// The SHA-256 of the download, lowercase hex. Empty when the macOS
+    /// platform feed relies on size and Developer ID signature verification.
     public var sha256: String
     /// The download's size in bytes, when the feed states it.
     public var size: Int64?
     /// The oldest macOS the release runs on, such as `14.0`.
     public var minimumSystemVersion: String?
-    /// The protocol versions the release's app and server speak; empty when
-    /// the feed doesn't say, which counts as needing a new server.
+    /// The verified bundle's protocol versions, filled after preparing it.
+    /// Feed hints alone never authorize preserving a running server.
     public var protocolVersions: [ProtocolVersion]
 
     public init(
@@ -49,15 +37,37 @@ public struct UpdateManifest: Codable, Equatable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case version, url, sha256, size, minimumSystemVersion, protocolVersions, protocolVersion
+        case version, url, sha256, size, minimumSystemVersion, protocolVersions, protocolVersion, schema, platforms
+    }
+
+    private struct Asset: Decodable {
+        var url: URL
+        var size: Int64
+        var sha256: String?
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         version = try container.decode(String.self, forKey: .version)
-        url = try container.decode(URL.self, forKey: .url)
-        sha256 = try container.decode(String.self, forKey: .sha256).lowercased()
-        size = try container.decodeIfPresent(Int64.self, forKey: .size)
+        if container.contains(.schema) || container.contains(.platforms) {
+            guard try container.decode(Int.self, forKey: .schema) == 1 else {
+                throw UpdateError.invalidFeed("Unsupported update feed")
+            }
+            let platforms = try container.decode([String: Asset].self, forKey: .platforms)
+            guard let asset = platforms["macos-aarch64"] else {
+                throw UpdateError.invalidFeed("No update for this platform")
+            }
+            url = asset.url
+            sha256 = asset.sha256?.lowercased() ?? ""
+            size = asset.size
+            guard url.absoluteString == "\(UpdateFeed.releases)/v\(version)/Tab-\(version)-arm64.dmg" else {
+                throw UpdateError.invalidFeed("Unexpected update download location")
+            }
+        } else {
+            url = try container.decode(URL.self, forKey: .url)
+            sha256 = try container.decode(String.self, forKey: .sha256).lowercased()
+            size = try container.decodeIfPresent(Int64.self, forKey: .size)
+        }
         minimumSystemVersion = try container.decodeIfPresent(String.self, forKey: .minimumSystemVersion)
         if let versions = try container.decodeIfPresent([ProtocolVersion].self, forKey: .protocolVersions) {
             protocolVersions = versions
@@ -82,7 +92,12 @@ public struct UpdateManifest: Codable, Equatable, Sendable {
 /// Where updates come from and what a feed may contain.
 public enum UpdateFeed {
     /// The latest release's feed.
-    public static let url = URL(string: "https://github.com/hugocxl/tab/releases/latest/download/update.json")!
+    public static var url: URL { url(channel: Release.channel) }
+
+    static func url(channel: ReleaseChannel) -> URL {
+        let path = channel == .beta ? "download/beta" : "latest/download"
+        return URL(string: "https://github.com/hugocxl/tab/releases/\(path)/update.json")!
+    }
     /// Every download must come from the release's own assets.
     public static let releases = "https://github.com/hugocxl/tab/releases/download"
     /// The largest feed read.
@@ -102,6 +117,8 @@ public enum UpdateFeed {
         let manifest: UpdateManifest
         do {
             manifest = try JSONDecoder().decode(UpdateManifest.self, from: data)
+        } catch let error as UpdateError {
+            throw error
         } catch {
             throw UpdateError.invalidFeed("The update feed can't be read")
         }
@@ -134,7 +151,10 @@ public enum UpdateFeed {
         else {
             throw UpdateError.invalidFeed("Unexpected update download location")
         }
-        guard manifest.sha256.count == 64, manifest.sha256.allSatisfy(\.isHexDigit) else {
+        guard (manifest.sha256.isEmpty && manifest.size != nil)
+            || (manifest.sha256.count == 64 && manifest.sha256.utf8.allSatisfy({
+                (48...57).contains($0) || (97...102).contains($0) || (65...70).contains($0)
+            })) else {
             throw UpdateError.invalidFeed("Invalid update checksum")
         }
         if let size = manifest.size, size <= 0 || size > maximumDownloadSize {

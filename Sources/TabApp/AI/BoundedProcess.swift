@@ -45,6 +45,10 @@ enum BoundedProcess {
     /// Blocks until the program is done; call it off the main thread.
     static func run(program: String, arguments: [String], environment: [String: String], directory: String,
                     timeout: TimeInterval, limit: Int, cancellation: AICancellation) throws -> Output {
+        guard !cancellation.isCancelled else { throw Failure.cancelled }
+        guard !([program, directory] + arguments + environment.flatMap { [$0.key, $0.value] }).contains(where: { $0.contains("\0") }) else {
+            throw Failure.io("Process arguments contain a null byte")
+        }
         let pid: pid_t
         let pipes: [Int32]
         (pid, pipes) = try spawn(program: program, arguments: arguments, environment: environment, directory: directory)
@@ -63,21 +67,21 @@ enum BoundedProcess {
                 readers.leave()
             }
         }
-        let deadline = Date().addingTimeInterval(timeout)
+        let deadline = ProcessInfo.processInfo.systemUptime + timeout
         var exitStatus: Int32?
-        var exitedAt: Date?
+        var exitedAt: TimeInterval?
         var outcome: Result<Int32, Failure>?
         while outcome == nil {
             if cancellation.isCancelled {
                 outcome = .failure(.cancelled)
-            } else if Date() >= deadline {
+            } else if ProcessInfo.processInfo.systemUptime >= deadline {
                 outcome = .failure(.timedOut)
             } else if collector.overflowed {
                 outcome = .failure(.tooLarge)
             } else if let error = collector.error {
                 outcome = .failure(.io(error))
             } else if let status = exitStatus, let exitedAt {
-                if readers.wait(timeout: .now()) == .success || Date().timeIntervalSince(exitedAt) >= exitGrace {
+                if readers.wait(timeout: .now()) == .success || ProcessInfo.processInfo.systemUptime - exitedAt >= exitGrace {
                     outcome = .success(status)
                 }
             }
@@ -87,14 +91,14 @@ enum BoundedProcess {
                 let result = waitpid(pid, &status, WNOHANG)
                 if result == pid {
                     exitStatus = status
-                    exitedAt = Date()
+                    exitedAt = ProcessInfo.processInfo.systemUptime
                     continue
                 } else if result < 0 && errno != EINTR {
                     outcome = .failure(.io(String(cString: strerror(errno))))
                     break
                 }
             }
-            _ = readers.wait(timeout: .now() + 0.025)
+            Thread.sleep(forTimeInterval: 0.025)
         }
         killpg(pid, SIGKILL)
         if exitStatus == nil {

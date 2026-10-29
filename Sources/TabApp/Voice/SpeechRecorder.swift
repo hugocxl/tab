@@ -26,6 +26,7 @@ public final class SpeechRecorder: DictationRecorder {
 
     public var onEvent: ((DictationEvent) -> Void)?
     private let language: String
+    private let model: String
     private var engine: AVAudioEngine?
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
@@ -38,8 +39,29 @@ public final class SpeechRecorder: DictationRecorder {
     private var configurationObserver: NSObjectProtocol?
 
     /// - Parameter language: a locale such as `en-US`, or empty for the system's.
-    public init(language: String) {
+    public init(language: String, model: String = "") {
         self.language = language
+        self.model = model
+    }
+
+    /// Builds the on-device request without acquiring the microphone. A
+    /// nonempty model selects a compiled Apple Speech language model file.
+    func recognitionRequest() throws -> SFSpeechAudioBufferRecognitionRequest {
+        let request = SFSpeechAudioBufferRecognitionRequest()
+        request.shouldReportPartialResults = true
+        request.requiresOnDeviceRecognition = true
+        request.addsPunctuation = true
+        guard !model.isEmpty else { return request }
+        let path = (model as NSString).expandingTildeInPath
+        let url = URL(fileURLWithPath: path)
+        let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+        guard path.hasPrefix("/"), values?.isRegularFile == true,
+              (values?.fileSize ?? 0) > 0, FileManager.default.isReadableFile(atPath: path)
+        else {
+            throw DictationError("Choose a readable compiled Apple Speech language model in Settings → General → Voice, or leave it blank to use the system model.")
+        }
+        request.customizedLanguageModel = SFSpeechLanguageModel.Configuration(languageModel: url)
+        return request
     }
 
     public func start() {
@@ -147,10 +169,7 @@ public final class SpeechRecorder: DictationRecorder {
             throw DictationError("On-device speech recognition is unavailable for this language. Choose another dictation language.")
         }
         recognizer.defaultTaskHint = .dictation
-        let request = SFSpeechAudioBufferRecognitionRequest()
-        request.shouldReportPartialResults = true
-        request.requiresOnDeviceRecognition = true
-        request.addsPunctuation = true
+        let request = try recognitionRequest()
         self.request = request
         engine = AVAudioEngine()
         task = recognizer.recognitionTask(with: request, resultHandler: Self.resultHandler { [weak self] text, isFinal, error in

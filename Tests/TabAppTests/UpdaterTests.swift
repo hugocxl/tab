@@ -102,7 +102,7 @@ final class UpdaterTests: XCTestCase {
 
         XCTAssertEqual(UpdateDecision.step(for: .install(restartServer: false), compatible: true, sessions: 4), .install(stopServer: false))
         XCTAssertEqual(UpdateDecision.step(for: .install(restartServer: true), compatible: true, sessions: 4), .install(stopServer: true))
-        XCTAssertEqual(UpdateDecision.step(for: .install(restartServer: false), compatible: false, sessions: 4), .install(stopServer: true))
+        XCTAssertEqual(UpdateDecision.step(for: .install(restartServer: false), compatible: false, sessions: 4), .wait)
         XCTAssertEqual(UpdateDecision.step(for: .endSessions, compatible: false, sessions: 4), .install(stopServer: true))
         XCTAssertEqual(UpdateDecision.step(for: .waitForSessions, compatible: false, sessions: 4), .wait)
         XCTAssertEqual(UpdateDecision.step(for: .waitForSessions, compatible: false, sessions: 0), .install(stopServer: true))
@@ -157,16 +157,31 @@ final class UpdaterTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: backup.appendingPathComponent("tabd"), encoding: .utf8), "old")
     }
 
+    func testReplacementRefusesToOverwriteAnExistingBackup() throws {
+        let root = try temporaryFolder()
+        let current = root.appendingPathComponent("current.app")
+        let next = root.appendingPathComponent("next.app")
+        let backup = root.appendingPathComponent("previous.app")
+        for (path, text) in [(current, "current"), (next, "next"), (backup, "previous")] {
+            try FileManager.default.createDirectory(at: path, withIntermediateDirectories: true)
+            try Data(text.utf8).write(to: path.appendingPathComponent("marker"))
+        }
+        XCTAssertThrowsError(try BundleReplacement.replace(current: current, next: next, backup: backup))
+        for (path, text) in [(current, "current"), (next, "next"), (backup, "previous")] {
+            XCTAssertEqual(try String(contentsOf: path.appendingPathComponent("marker"), encoding: .utf8), text)
+        }
+    }
+
     func testCleanupKeepsBundlesWhoseServerStillRuns() throws {
         let folder = try temporaryFolder()
         let installation = Installation(bundle: folder.appendingPathComponent("Tab.app"), team: "TESTTEAM00")
         let busy = folder.appendingPathComponent(".tab-update-busy/previous.app")
         let idle = folder.appendingPathComponent(".tab-update-idle/previous.app")
         let kept = folder.appendingPathComponent(".tab-update-pending")
-        for path in [busy, idle, kept] {
+        for path in [installation.bundle, busy.deletingLastPathComponent(), idle, kept] {
             try FileManager.default.createDirectory(at: path, withIntermediateDirectories: true)
         }
-        let server = busy.appendingPathComponent("Contents/MacOS/sleeper")
+        let server = installation.bundle.appendingPathComponent("Contents/MacOS/sleeper")
         try FileManager.default.createDirectory(at: server.deletingLastPathComponent(), withIntermediateDirectories: true)
         try FileManager.default.copyItem(at: URL(fileURLWithPath: "/bin/sleep"), to: server)
         let sign = Process()
@@ -181,6 +196,8 @@ final class UpdaterTests: XCTestCase {
         try process.run()
         defer { process.terminate() }
         Thread.sleep(forTimeInterval: 0.2)
+        try FileManager.default.moveItem(at: installation.bundle, to: busy)
+        try FileManager.default.createDirectory(at: installation.bundle, withIntermediateDirectories: true)
 
         installation.cleanUp(keeping: kept)
         XCTAssertTrue(FileManager.default.fileExists(atPath: busy.path))

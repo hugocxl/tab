@@ -15,7 +15,7 @@ public struct UpdateDownloader: Sendable {
         configuration.timeoutIntervalForResource = 600
         configuration.httpAdditionalHeaders = (configuration.httpAdditionalHeaders ?? [:])
             .merging(["User-Agent": "Tab/\(Release.version)"]) { _, new in new }
-        session = URLSession(configuration: configuration)
+        session = URLSession(configuration: configuration, delegate: UpdateRedirectPolicy(), delegateQueue: nil)
     }
 
     public init(session: URLSession) {
@@ -23,45 +23,51 @@ public struct UpdateDownloader: Sendable {
     }
 
     /// The release that replaces this build, if any.
-    public func latest(current: String = Release.version) async throws -> UpdateManifest? {
-        var request = URLRequest(url: UpdateFeed.url)
+    public func latest(current: String = Release.version, feedURL: URL = UpdateFeed.url) async throws -> UpdateManifest? {
+        var request = URLRequest(url: feedURL)
         request.cachePolicy = .reloadIgnoringLocalCacheData
-        let data: Data
-        let response: URLResponse
-        do {
-            (data, response) = try await session.data(for: request)
-        } catch {
-            throw UpdateError.download(error.localizedDescription)
-        }
+        let (bytes, response) = try await session.bytes(for: request)
+        defer { bytes.task.cancel() }
         try Self.checkStatus(response)
+        var data = Data()
+        for try await byte in bytes {
+            guard data.count < UpdateFeed.maximumFeedSize else { throw UpdateError.invalidFeed("The update feed is too large") }
+            data.append(byte)
+        }
         return try UpdateFeed.parse(data, current: current)
     }
 
-    /// Downloads the release into `directory` and verifies its size and
-    /// checksum; a file that fails is removed.
+    /// Streams a bounded release into `directory`, then verifies its size
+    /// and checksum. No partial or rejected download is kept.
     public func download(_ manifest: UpdateManifest, into directory: URL) async throws -> URL {
-        let temporary: URL
-        let response: URLResponse
-        do {
-            (temporary, response) = try await session.download(for: URLRequest(url: manifest.url))
-        } catch {
-            throw UpdateError.download(error.localizedDescription)
-        }
         let destination = directory.appendingPathComponent("update." + manifest.url.pathExtension.lowercased())
-        do {
-            try? FileManager.default.removeItem(at: destination)
-            try FileManager.default.moveItem(at: temporary, to: destination)
-        } catch {
-            try? FileManager.default.removeItem(at: temporary)
-            throw UpdateError.download(error.localizedDescription)
+        var complete = false
+        defer { if !complete { try? FileManager.default.removeItem(at: destination) } }
+        try? FileManager.default.removeItem(at: destination)
+        guard FileManager.default.createFile(atPath: destination.path, contents: nil) else {
+            throw UpdateError.download("Could not create the download file")
         }
-        do {
-            try Self.checkStatus(response)
-            try Self.verify(destination, sha256: manifest.sha256, size: manifest.size)
-        } catch {
-            try? FileManager.default.removeItem(at: destination)
-            throw error
+        let output = try FileHandle(forWritingTo: destination)
+        defer { try? output.close() }
+        let (bytes, response) = try await session.bytes(for: URLRequest(url: manifest.url))
+        defer { bytes.task.cancel() }
+        try Self.checkStatus(response)
+        let limit = min(manifest.size ?? UpdateFeed.maximumDownloadSize, UpdateFeed.maximumDownloadSize)
+        var count: Int64 = 0
+        var buffer = Data()
+        for try await byte in bytes {
+            count += 1
+            guard count <= limit else { throw UpdateError.sizeMismatch }
+            buffer.append(byte)
+            if buffer.count == 65_536 {
+                try output.write(contentsOf: buffer)
+                buffer.removeAll(keepingCapacity: true)
+            }
         }
+        try output.write(contentsOf: buffer)
+        try output.synchronize()
+        try Self.verify(destination, sha256: manifest.sha256, size: manifest.size)
+        complete = true
         return destination
     }
 
@@ -71,6 +77,10 @@ public struct UpdateDownloader: Sendable {
         let actualSize = (attributes?[.size] as? NSNumber)?.int64Value ?? -1
         if let size, actualSize != size { throw UpdateError.sizeMismatch }
         guard actualSize <= UpdateFeed.maximumDownloadSize else { throw UpdateError.sizeMismatch }
+        guard !expected.isEmpty else {
+            guard size != nil else { throw UpdateError.checksumMismatch }
+            return
+        }
         guard try sha256(of: file) == expected.lowercased() else { throw UpdateError.checksumMismatch }
     }
 
@@ -97,5 +107,18 @@ public struct UpdateDownloader: Sendable {
         guard (200..<300).contains(http.statusCode) else {
             throw UpdateError.download("the server answered \(http.statusCode)")
         }
+    }
+}
+
+/// GitHub redirects assets to its CDN; HTTPS downloads must stay HTTPS.
+private final class UpdateRedirectPolicy: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    func urlSession(_ session: URLSession, task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest,
+                    completionHandler: @escaping (URLRequest?) -> Void) {
+        guard task.originalRequest?.url?.scheme != "https" || request.url?.scheme == "https" else {
+            completionHandler(nil)
+            return
+        }
+        completionHandler(request)
     }
 }

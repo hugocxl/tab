@@ -1,4 +1,6 @@
 import Foundation
+import TabCore
+import TabProtocol
 import XCTest
 @testable import TabApp
 
@@ -43,6 +45,60 @@ final class CLIInstallTests: XCTestCase {
 
         let leftovers = try fm.contentsOfDirectory(atPath: destination.deletingLastPathComponent().path)
         XCTAssertFalse(leftovers.contains { $0.hasPrefix(".tab-link-") })
+    }
+
+    func testFakeBundleInstallsWithOverriddenHomeAndRejectsChangedBuilds() throws {
+        let folder = URL(fileURLWithPath: "/tmp/tab-cli-test").appendingPathComponent(UUID().uuidString)
+        let macOS = folder.appendingPathComponent("Tab.app/Contents/MacOS")
+        let home = folder.appendingPathComponent("home")
+        try FileManager.default.createDirectory(at: macOS, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let original = ProcessInfo.processInfo.environment["HOME"]
+        setenv("HOME", home.path, 1)
+        defer {
+            if let original { setenv("HOME", original, 1) } else { unsetenv("HOME") }
+        }
+        let expected = BuildInfo(version: "1.0.0")
+        let json = String(decoding: try JSONEncoder().encode(expected), as: UTF8.self)
+        for name in ["tab", "tabd"] {
+            let tool = macOS.appendingPathComponent(name)
+            let script = "#!/bin/sh\nif [ \"$1\" = --build-info ]; then printf '%s' '\(json)'; else printf 'tab fixture'; fi\n"
+            try script.write(to: tool, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: tool.path)
+        }
+        let target = macOS.appendingPathComponent("tab")
+        let link = try CommandLineInstaller.installBundledTool(target: target, home: URL(fileURLWithPath: ProcessInfo.processInfo.environment["HOME"]!), expected: expected)
+        XCTAssertEqual(link.path, home.appendingPathComponent(".local/bin/tab").path)
+        XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: link.path), target.path)
+        let process = Process()
+        process.executableURL = link
+        process.arguments = ["--help"]
+        let output = Pipe()
+        process.standardOutput = output
+        try process.run()
+        let answer = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        XCTAssertEqual(process.terminationStatus, 0)
+        XCTAssertEqual(String(decoding: answer, as: UTF8.self), "tab fixture")
+        XCTAssertEqual(CommandLineInstaller.message(for: .success(link), path: link.deletingLastPathComponent().path).1,
+                       "Installed \(link.path).\n\nRun tab --help in your terminal.")
+        XCTAssertThrowsError(try CommandLineInstaller.installBundledTool(target: target, home: home, expected: BuildInfo(version: "2.0.0"))) { error in
+            XCTAssertEqual((error as? CommandLineInstaller.InstallError)?.description,
+                           "The installed app changed. Reopen it before installing the command line tool.")
+        }
+        XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: link.path), target.path)
+        XCTAssertThrowsError(try CommandLineInstaller.installedTool(executable: macOS.appendingPathComponent("Tab")))
+    }
+
+    func testCorruptReceiptAndDirectoryTargetsCannotReplaceACommand() throws {
+        let target = root.appendingPathComponent("tool")
+        let destination = root.appendingPathComponent("bin/tab")
+        try Data("tool".utf8).write(to: target)
+        try CommandLineInstaller.installLink(target: target, destination: destination)
+        try Data("bad receipt".utf8).write(to: destination.deletingLastPathComponent().appendingPathComponent(".tab-cli-link.json"))
+        XCTAssertThrowsError(try CommandLineInstaller.installLink(target: target, destination: destination))
+        XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: destination.path), target.path)
+        XCTAssertThrowsError(try CommandLineInstaller.installLink(target: root, destination: destination))
     }
 
     func testOnlyAnInstalledBundleIsLinked() throws {

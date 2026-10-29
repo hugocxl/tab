@@ -58,7 +58,7 @@ public final class DictationController {
 
     /// - Parameter makeRecorder: the recorder for the settings; tests pass a fake.
     public init(host: DictationHost?,
-                makeRecorder: @escaping @MainActor (VoiceSettings) -> DictationRecorder = { SpeechRecorder(language: $0.language) },
+                makeRecorder: @escaping @MainActor (VoiceSettings) -> DictationRecorder = { SpeechRecorder(language: $0.language, model: $0.model) },
                 now: @escaping () -> Date = Date.init) {
         self.host = host
         self.makeRecorder = makeRecorder

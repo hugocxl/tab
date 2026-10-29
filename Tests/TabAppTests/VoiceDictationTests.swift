@@ -1,5 +1,6 @@
 import AppKit
 import TabCore
+import Speech
 import XCTest
 @testable import TabApp
 
@@ -176,6 +177,38 @@ final class VoiceDictationControllerTests: XCTestCase {
 
     private func settle() async {
         for _ in 0..<5 { await Task.yield() }
+    }
+
+    func testSettingsReachTheRecorderWithoutUsingTheMicrophone() throws {
+        host.voiceSettings = VoiceSettings(language: "es-ES", model: "/tmp/spanish.model", autoSend: true)
+        var received: VoiceSettings?
+        let recorder = FakeRecorder()
+        let controller = DictationController(host: host, makeRecorder: {
+            received = $0
+            return recorder
+        })
+        controller.start()
+        defer { controller.cancel() }
+        XCTAssertEqual(received?.language, "es-ES")
+        XCTAssertEqual(received?.model, "/tmp/spanish.model")
+        XCTAssertEqual(received?.autoSend, true)
+        XCTAssertTrue(recorder.started)
+    }
+
+    func testChosenModelIsAppliedToTheOnDeviceRequestAndMissingFilesFail() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("voice-model-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let model = folder.appendingPathComponent("custom.lm")
+        try Data("model fixture".utf8).write(to: model)
+        let request = try SpeechRecorder(language: "es-ES", model: model.path).recognitionRequest()
+        XCTAssertTrue(request.requiresOnDeviceRecognition)
+        XCTAssertEqual(request.customizedLanguageModel?.languageModel, model)
+        let system = try SpeechRecorder(language: "").recognitionRequest()
+        XCTAssertTrue(system.requiresOnDeviceRecognition)
+        XCTAssertNil(system.customizedLanguageModel)
+        XCTAssertThrowsError(try SpeechRecorder(language: "", model: folder.path).recognitionRequest())
+        XCTAssertThrowsError(try SpeechRecorder(language: "", model: model.path + ".missing").recognitionRequest())
     }
 
     func testDictationNeedsALiveTerminal() {

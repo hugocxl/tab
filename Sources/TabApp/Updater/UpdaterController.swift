@@ -64,6 +64,7 @@ public final class UpdaterController {
 
     private weak var host: UpdaterHost?
     private let record: URL
+    private let serverStartupLock: URL
     private var downloader: UpdateDownloader
     private var installation: Installation?
     private var timer: Timer?
@@ -78,6 +79,7 @@ public final class UpdaterController {
     public init(host: UpdaterHost, dirs: TabDirs, configuration: URLSessionConfiguration = .ephemeral) {
         self.host = host
         record = dirs.root.appendingPathComponent("pending-update.json")
+        serverStartupLock = dirs.root.appendingPathComponent("server.startup-lock")
         downloader = UpdateDownloader(configuration: configuration)
     }
 
@@ -147,14 +149,19 @@ public final class UpdaterController {
     public func showUpdateSheet() {
         guard let prepared, !isBusy, sheet == nil, let host else { return }
         let sessions = host.runningSessionCount
-        let compatible = UpdateDecision.isCompatible(prepared.manifest, with: host.localServerBuild)
+        guard let server = host.localServerBuild else { return }
+        let compatible = UpdateDecision.isCompatible(prepared.manifest, with: server)
         let offer = UpdateDecision.offer(compatible: compatible, scheduled: scheduled, sessions: sessions)
         let sheet = UpdateSheet(version: prepared.version, offer: offer)
         self.sheet = sheet
         sheet.present(on: host.updateWindow) { [weak self] choice in
             guard let self else { return }
             self.sheet = nil
-            guard self.prepared?.version == prepared.version else { return }
+            guard self.prepared?.version == prepared.version, self.host?.localServerBuild == server else { return }
+            if choice == .waitForSessions {
+                self.setScheduled(true)
+                return
+            }
             let sessions = self.host?.runningSessionCount ?? sessions
             self.perform(UpdateDecision.step(for: choice, compatible: compatible, sessions: sessions))
         }
@@ -297,12 +304,21 @@ public final class UpdaterController {
     /// Replaces the app and relaunches. `stopServer` ends every terminal
     /// first; `whenIdle` stops the server only if nothing runs there.
     private func install(stopServer: Bool, whenIdle: Bool) {
-        guard let prepared, let host, !isBusy else { return }
+        guard let prepared, let host, !isBusy, host.localServerBuild != nil else { return }
+        guard stopServer || whenIdle || UpdateDecision.isCompatible(prepared.manifest, with: host.localServerBuild) else {
+            setScheduled(true)
+            return
+        }
         guard host.prepareToQuitForUpdate() else { return }
         status = .installing(version: prepared.version)
         let record = record
+        let serverStartupLock = serverStartupLock
         task = Task { [weak self] in
             do {
+                let lease = try await Task.detached(priority: .userInitiated) {
+                    try FileLock.tryLock(serverStartupLock)
+                }.value
+                defer { lease.unlock() }
                 try await Task.detached(priority: .userInitiated) { try prepared.validate() }.value
                 if whenIdle {
                     guard await host.stopLocalServerIfIdle() else {
@@ -312,6 +328,14 @@ public final class UpdaterController {
                     }
                 } else if stopServer {
                     try await host.endAllSessions()
+                } else {
+                    guard UpdateDecision.isCompatible(prepared.manifest, with: host.localServerBuild) else {
+                        self?.task = nil
+                        self?.scheduled = true
+                        PendingUpdateRecord.save(prepared, scheduled: true, to: record)
+                        self?.refreshStatus()
+                        return
+                    }
                 }
                 try await Task.detached(priority: .userInitiated) {
                     try prepared.install()

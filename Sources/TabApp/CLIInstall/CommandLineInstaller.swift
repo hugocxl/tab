@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import TabCore
+import TabProtocol
 
 /// Install Command Line Tool…: links `~/.local/bin/tab` to the `tab` inside
 /// the running app's bundle, so the CLI always matches the app.
@@ -59,9 +60,20 @@ public enum CommandLineInstaller {
 
     /// Links `<home>/.local/bin/tab` to the running bundle's `tab`.
     static func install(executable: URL? = Executable.currentURL(),
-                        home: URL = FileManager.default.homeDirectoryForCurrentUser) throws -> URL {
+                        home: URL = URL(fileURLWithPath: ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory())) throws -> URL {
         guard let executable else { throw InstallError("This app's executable was not found.") }
         let target = try installedTool(executable: executable)
+        return try installBundledTool(target: target, home: home)
+    }
+
+    /// Installs only a CLI and server matching the app that requested it.
+    static func installBundledTool(target: URL, home: URL, expected: BuildInfo = BuildInfo(version: Release.version)) throws -> URL {
+        do {
+            let build = try BundledBuild.check(in: target.deletingLastPathComponent(), version: expected.version)
+            guard build == expected else { throw InstallError("Build changed") }
+        } catch {
+            throw InstallError("The installed app changed. Reopen it before installing the command line tool.")
+        }
         let destination = home.appendingPathComponent(".local/bin/tab")
         if target.standardizedFileURL != destination.standardizedFileURL {
             try installLink(target: target, destination: destination)
@@ -97,7 +109,7 @@ public enum CommandLineInstaller {
     /// other file or link is left alone. The receipt beside it records which
     /// targets were ours.
     static func installLink(target: URL, destination: URL) throws {
-        guard target.path.hasPrefix("/"), Executable.isExecutableFile(target) || FileManager.default.isReadableFile(atPath: target.path) else {
+        guard target.path.hasPrefix("/"), ((try? target.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true) else {
             throw InstallError("The bundled tab executable is missing.")
         }
         let folder = destination.deletingLastPathComponent()
@@ -106,8 +118,8 @@ public enum CommandLineInstaller {
         defer { lock.unlock() }
         let receipt = folder.appendingPathComponent(".tab-cli-link.json")
         var managed: [String] = []
-        if let data = try? Data(contentsOf: receipt) {
-            managed = (try? JSONDecoder().decode([String].self, from: data)) ?? []
+        if FileManager.default.fileExists(atPath: receipt.path) {
+            managed = try JSONDecoder().decode([String].self, from: Data(contentsOf: receipt))
         }
         var info = stat()
         var previous: (device: dev_t, inode: ino_t, target: String)?

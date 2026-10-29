@@ -60,6 +60,38 @@ final class ProjectIconsTests: XCTestCase {
         XCTAssertEqual(image?.representations.first?.pixelsWide, 48)
     }
 
+    func testArtworkLocationsAndFormatsInARealGitRepository() async throws {
+        let root = URL(fileURLWithPath: "/tmp/tab-project-icons-test").appendingPathComponent(UUID().uuidString)
+        let fm = FileManager.default
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: root) }
+        try git(["init", "-q"], in: root)
+        try Data("ignored.ico\n".utf8).write(to: root.appendingPathComponent(".gitignore"))
+        let png = try pngData(side: 64)
+        var icns = Data("icns".utf8) + Data(bigEndian(UInt32(16 + png.count)))
+        icns += Data("ic07".utf8) + Data(bigEndian(UInt32(8 + png.count))) + png
+        var ico = Data([0, 0, 1, 0, 1, 0, 64, 64, 0, 0, 1, 0, 32, 0])
+        let size = UInt32(png.count).littleEndian
+        ico += withUnsafeBytes(of: size) { Data($0) }
+        ico += Data([22, 0, 0, 0]) + png
+        try ico.write(to: root.appendingPathComponent("ignored.ico"))
+        for directory in ["", "assets", "resources", "public", "packaging"] {
+            let folder = directory.isEmpty ? root : root.appendingPathComponent(directory)
+            try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+            for (name, data) in [("Product.icns", icns), ("favicon.ico", ico), ("icon.png", png), ("logo.png", png)] {
+                let file = folder.appendingPathComponent(name)
+                try data.write(to: file)
+                let relative = directory.isEmpty ? name : "\(directory)/\(name)"
+                let lister = LocalProjectLister(root: root)
+                let candidates = await ProjectIconFinder.candidates(list: { lister.list($0) })
+                XCTAssertEqual(candidates, [relative])
+                let image = await ProjectIconFinder.findLocal(root: root)
+                XCTAssertNotNil(image, relative)
+                try fm.removeItem(at: file)
+            }
+        }
+    }
+
     func testPNGsMustSayTheyAreIconsAndVariantsRankLast() {
         XCTAssertNil(ProjectIconFinder.rank("screenshot.png", depth: 0))
         XCTAssertNotNil(ProjectIconFinder.rank("screenshot.ico", depth: 0))

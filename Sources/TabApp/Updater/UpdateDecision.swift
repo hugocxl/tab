@@ -63,7 +63,8 @@ public enum UpdateDecision {
     public static func step(for choice: UpdateChoice, compatible: Bool, sessions: Int) -> UpdateStep {
         switch choice {
         case .install(let restartServer):
-            return .install(stopServer: restartServer || !compatible)
+            if !compatible && !restartServer { return sessions == 0 ? .install(stopServer: true) : .wait }
+            return .install(stopServer: restartServer)
         case .endSessions:
             return .install(stopServer: true)
         case .waitForSessions:
