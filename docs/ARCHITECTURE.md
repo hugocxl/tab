@@ -40,7 +40,7 @@ tab browser ──app.sock──▶ Tab.app (browser automation)
 | `TabClient` | Connect to a server: local socket (starting tabd), SSH remote (`tab stdio`), handshake, requests with replies, events, per-session grid cache, reconnect. | TabCore, TabProtocol |
 | `tab` | The CLI: server, project, session, worktree, settings, activity, git, files, exec, mobile, browser, install-skills, stdio, `tab <folder>`. | TabClient |
 | `TabApp` | The AppKit app: window, sidebar, splits, terminal view, panels, palette, settings window, browser, dialogs, notifications, updater, dictation. | TabClient |
-| `Tab` | App executable main. | TabApp |
+| `TabDesktop` | App executable main, installed in the bundle as `Tab`. | TabApp |
 
 Rules: a module never imports one to its right in the table except as listed.
 Apps never include server code; they only speak the protocol.

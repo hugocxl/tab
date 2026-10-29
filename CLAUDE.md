@@ -9,7 +9,7 @@ Guidance for AI coding agents working in this repository.
   silicon. Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) before any change
   and keep [docs/MIGRATION.md](docs/MIGRATION.md) current: it is the 1:1
   feature inventory and the definition of done.
-- One SwiftPM package. Executables: `Tab` (the app), `tabd` (the server),
+- One SwiftPM package. Executables: `TabDesktop` (the app, bundled as `Tab`), `tabd` (the server),
   `tab` (the CLI). Libraries: `TabCore`, `TabProtocol`, `TabTerminal`,
   `TabServer`, `TabClient`, `TabApp`. Keep the dependency graph in
   `Package.swift` and the architecture document in sync.

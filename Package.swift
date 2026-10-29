@@ -9,7 +9,7 @@ let package = Package(
     name: "Tab",
     platforms: [.macOS(.v14)],
     products: [
-        .executable(name: "Tab", targets: ["Tab"]),
+        .executable(name: "TabDesktop", targets: ["TabDesktop"]),
         .executable(name: "tabd", targets: ["tabd"]),
         .executable(name: "tab", targets: ["tab"]),
     ],
@@ -58,7 +58,7 @@ let package = Package(
             resources: [.copy("Resources/Icons")],
             swiftSettings: swift5
         ),
-        .executableTarget(name: "Tab", dependencies: ["TabApp"], swiftSettings: swift5),
+        .executableTarget(name: "TabDesktop", dependencies: ["TabApp"], swiftSettings: swift5),
 
         .testTarget(name: "TabCoreTests", dependencies: ["TabCore"], swiftSettings: swift5),
         .testTarget(name: "TabProtocolTests", dependencies: ["TabProtocol"], exclude: ["Fixtures"], swiftSettings: swift5),
