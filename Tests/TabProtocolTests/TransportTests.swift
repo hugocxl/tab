@@ -217,3 +217,20 @@ final class LockedBox<Value>: @unchecked Sendable {
         }
     }
 }
+
+extension TransportTests {
+    /// A replaced server that closes late must not remove the socket file a
+    /// newer server bound at the same path.
+    func testClosingAReplacedListenerKeepsTheNewerSocketFile() throws {
+        let path = "/tmp/tab-\(UInt32.random(in: 0...UInt32.max)).sock"
+        defer { unlink(path) }
+        let stale = try UnixSocketListener(path: path)
+        unlink(path)
+        let fresh = try UnixSocketListener(path: path)
+        stale.close()
+        var info = stat()
+        XCTAssertEqual(lstat(path, &info), 0, "the newer server's socket file was removed")
+        fresh.close()
+        XCTAssertNotEqual(lstat(path, &info), 0, "the owner removes its own socket file")
+    }
+}

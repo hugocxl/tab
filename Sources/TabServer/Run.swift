@@ -164,8 +164,11 @@ public final class ServerRunner: @unchecked Sendable {
         server.endAllSessions()
         server.closeConnections()
         signalSources.forEach { $0.cancel() }
+        var held = stat()
+        let pidIdentity: (device: dev_t, inode: ino_t)? =
+            fstat(lockFile.fileDescriptor, &held) == 0 ? (held.st_dev, held.st_ino) : nil
         lockFile.unlock()
-        unlink(server.configuration.dirs.serverPid.path)
+        removeOwnedFile(server.configuration.dirs.serverPid.path, identity: pidIdentity)
         ServerLog.info("server stopped")
         lock.withLock { finished = true }
         stopped.signal()

@@ -186,6 +186,9 @@ public final class UnixSocketListener: @unchecked Sendable {
     private let wakeWrite: Int32
     private let lock = NSLock()
     private var isClosed = false
+    /// The identity of the socket file this listener created, so that closing
+    /// never removes a file a newer server bound at the same path.
+    private let fileIdentity: (device: dev_t, inode: ino_t)?
 
     public init(path: String) throws {
         self.path = path
@@ -225,6 +228,8 @@ public final class UnixSocketListener: @unchecked Sendable {
         descriptor = fd
         wakeRead = pipe[0]
         wakeWrite = pipe[1]
+        var bound = stat()
+        fileIdentity = lstat(path, &bound) == 0 ? (bound.st_dev, bound.st_ino) : nil
     }
 
     deinit {
@@ -269,8 +274,18 @@ public final class UnixSocketListener: @unchecked Sendable {
         guard !wasClosed else { return }
         var byte: UInt8 = 1
         _ = Darwin.write(wakeWrite, &byte, 1)
-        unlink(path)
+        removeOwnedFile(path, identity: fileIdentity)
     }
+}
+
+/// Removes `path` only while it is still the file identified by `identity`.
+public func removeOwnedFile(_ path: String, identity: (device: dev_t, inode: ino_t)?) {
+    guard let identity else { return }
+    var current = stat()
+    guard lstat(path, &current) == 0, current.st_dev == identity.device, current.st_ino == identity.inode else {
+        return
+    }
+    unlink(path)
 }
 
 private struct UnixSocketAddress {
