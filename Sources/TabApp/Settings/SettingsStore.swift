@@ -25,6 +25,7 @@ public final class SettingsStore {
     public private(set) var serverBusy = false
     public private(set) var remoteAccess: RemoteAccessState?
     public private(set) var pairing: PairingOffer?
+    public private(set) var pairingBusy = false
     public private(set) var mobileBusy = false
     public private(set) var backupBusy = false
     public private(set) var backupStatus = ""
@@ -33,6 +34,8 @@ public final class SettingsStore {
     /// Fires after anything the window shows changed.
     public let changes = PassthroughSubject<Void, Never>()
     private var activation: NSObjectProtocol?
+    private var serverWrite: Task<Void, Never>?
+    private var pairingRevision = 0
 
     /// Loads `settings.json` and `terminal.json` from `dirs`. A file that
     /// does not load leaves the defaults in place and its problem on the page.
@@ -290,11 +293,12 @@ public final class SettingsStore {
 
     /// Changes one terminal preference by its Settings id and saves it.
     public func setTerminal(_ id: String, _ value: String) {
-        attempt(Self.terminalRow(id)) {
+        let saved = attempt(Self.terminalRow(id)) {
             var next = terminal
             try next.setPreference(id, value)
             try saveTerminal(next)
         }
+        if !saved { host?.previewTerminalSettings(terminal) }
     }
 
     /// The row a terminal preference's problems show on.
@@ -346,20 +350,33 @@ public final class SettingsStore {
         var defaults = TerminalSettings()
         defaults.diagnostics = terminal.diagnostics
         return terminal != defaults || settings.panes.newPaneDirectory != .project
+            || settings.clipboard != ClipboardSettings()
     }
 
     /// Returns every Terminal page setting, key bindings included, to its
     /// default.
     public func resetTerminal() {
         attempt("terminal-reset") {
-            try saveTerminal(TerminalSettings())
-            if settings.panes.newPaneDirectory != .project {
-                var next = settings
-                next.panes.newPaneDirectory = .project
-                try next.savePanes(to: dirs.settings)
-                settings = next
-                applySettings()
+            let previous = try Data(contentsOf: dirs.terminalSettings)
+            let previousApp = try Data(contentsOf: dirs.settings)
+            let defaults = TerminalSettings()
+            let current = try Settings.load(dirs.settings)
+            var next = current
+            next.panes.newPaneDirectory = .project
+            next.clipboard = ClipboardSettings()
+            do {
+                try defaults.save(to: dirs.terminalSettings)
+                if next.panes != current.panes { try next.savePanes(to: dirs.settings) }
+                if next.clipboard != current.clipboard { try next.saveClipboard(to: dirs.settings) }
+            } catch {
+                try AtomicFile.write(previous, to: dirs.terminalSettings)
+                try AtomicFile.write(previousApp, to: dirs.settings)
+                throw error
             }
+            terminal = defaults
+            settings = next
+            host?.terminalSettingsDidChange(defaults)
+            applySettings()
             errors = errors.filter { SettingsCatalog.item($0.key)?.category != .terminal }
         }
     }
@@ -484,30 +501,53 @@ public final class SettingsStore {
 
     /// Saves a server setting from its field or switch.
     public func setServer(_ id: String, _ value: String) {
-        guard var next = serverSettings else { return }
+        guard let current = serverSettings, let host else { return }
+        do {
+            _ = try Self.serverSetting(current, id: id, value: value)
+        } catch {
+            return refuseVoid(id, Self.message(error))
+        }
+        let previous = serverWrite
+        serverWrite = Task { [weak self] in
+            await previous?.value
+            guard let self, serverState == .running, let current = serverSettings else { return }
+            do {
+                let next = try Self.serverSetting(current, id: id, value: value)
+                try await host.writeServerSettings(next)
+                serverSettings = next
+                errors[id] = nil
+            } catch {
+                errors[id] = Self.message(error)
+            }
+            changed()
+        }
+    }
+
+    /// Applies one field to the last settings accepted by the server, so
+    /// queued edits cannot overwrite each other or retain a failed edit.
+    private static func serverSetting(_ current: ServerSettingsDoc, id: String, value: String) throws -> ServerSettingsDoc {
+        var next = current
         let text = value.trimmingCharacters(in: .whitespaces)
         switch id {
         case "default-shell":
             if text.isEmpty {
                 next.defaultShell = nil
             } else {
-                guard text.hasPrefix("/") else { return refuseVoid(id, "Enter the absolute path of a shell, such as /bin/zsh.") }
+                guard text.hasPrefix("/") else { throw SettingsError(id, "Enter the absolute path of a shell, such as /bin/zsh.") }
                 next.defaultShell = ServerPath(text)
             }
         case "history-budget":
             guard let mebibytes = UInt64(text), mebibytes <= 65536 else {
-                return refuseVoid(id, "Enter a whole number of MiB from 0 to 65536.")
+                throw SettingsError(id, "Enter a whole number of MiB from 0 to 65536.")
             }
             next.historyBudgetBytes = mebibytes * 1024 * 1024
         case "shell-integration":
             next.shellIntegration = text == "true"
         default:
-            return
+            throw SettingsError(id, "Unknown server setting.")
         }
-        let previous = serverSettings
-        serverSettings = next
-        run(id) { host in try await host.writeServerSettings(next) } then: {}
-        if previous == nil { changed() }
+        try next.validate()
+        return next
     }
 
     /// Stops or restarts the server after the user confirmed.
@@ -553,12 +593,14 @@ public final class SettingsStore {
     }
 
     public func setMobileEnabled(_ enabled: Bool) {
+        guard !mobileBusy else { return }
         guard var settings = remoteAccess?.settings else { return }
         settings.enabled = enabled
         writeRemoteAccess("mobile-access", settings)
     }
 
     public func setMobilePort(_ text: String) {
+        guard !mobileBusy else { return }
         guard var settings = remoteAccess?.settings else { return }
         guard let port = UInt16(text.trimmingCharacters(in: .whitespaces)), port >= 1024 else {
             return refuseVoid("mobile-port", "Enter a port from 1024 to 65535.")
@@ -568,31 +610,50 @@ public final class SettingsStore {
     }
 
     private func writeRemoteAccess(_ id: String, _ settings: RemoteAccessSettings) {
-        mobileBusy = true
-        changed()
-        run(id) { host in try await host.writeRemoteAccess(settings) } then: { [weak self] in
-            self?.mobileBusy = false
-            self?.loadRemoteAccess()
-        }
-    }
-
-    public func startPairing() {
         guard let host else { return }
         mobileBusy = true
         changed()
         Task { [weak self] in
             do {
-                self?.pairing = try await host.startPairing()
-                self?.errors["mobile-pair"] = nil
+                try await host.writeRemoteAccess(settings)
+                self?.remoteAccess = try await host.readRemoteAccess()
+                self?.errors[id] = nil
             } catch {
-                self?.errors["mobile-pair"] = Self.message(error)
+                self?.errors[id] = Self.message(error)
             }
             self?.mobileBusy = false
             self?.changed()
         }
     }
 
+    public func startPairing() {
+        guard let host, !mobileBusy else { return }
+        pairingRevision += 1
+        let revision = pairingRevision
+        pairingBusy = true
+        mobileBusy = true
+        changed()
+        Task { [weak self] in
+            guard self?.pairingRevision == revision else { return }
+            do {
+                let offer = try await host.startPairing()
+                guard self?.pairingRevision == revision else { return }
+                self?.pairing = offer
+                self?.errors["mobile-pair"] = nil
+            } catch {
+                guard self?.pairingRevision == revision else { return }
+                self?.errors["mobile-pair"] = Self.message(error)
+            }
+            self?.pairingBusy = false
+            self?.mobileBusy = false
+            self?.changed()
+        }
+    }
+
     public func cancelPairing() {
+        pairingRevision += 1
+        if pairingBusy { mobileBusy = false }
+        pairingBusy = false
         pairing = nil
         changed()
         guard let host else { return }

@@ -13,10 +13,12 @@ final class SettingsControlsTests: XCTestCase {
     private var host: PreviewSettingsHost!
 
     override func setUp() async throws {
+        _ = NSApplication.shared
         root = FileManager.default.temporaryDirectory.appendingPathComponent("tab-controls-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         dirs = TabDirs(root: root)
         host = PreviewSettingsHost()
+        host.languages = [DictationLanguage(id: "en-US", name: "English (United States)")]
         host.remoteAccess = RemoteAccessState(revision: 1, settings: RemoteAccessSettings(enabled: true), status: .listening)
         host.projects = [SettingsProject(id: "11111111-1111-1111-1111-111111111111", name: "demo")]
     }
@@ -88,9 +90,19 @@ final class SettingsControlsTests: XCTestCase {
             slider.value = next
             slider.onCommit?(next)
         case let field as InsetTextField:
+            guard field.field.isEnabled else { return false }
+            if rowId == "browser-profiles" { return false }
             let numeric = Double(field.stringValue) != nil || Double(field.field.placeholderString ?? "") != nil
             field.stringValue = numeric ? "1000" : (field.stringValue.isEmpty ? "qa-value" : field.stringValue + "-qa")
             if rowId.contains("folder") || rowId.contains("template") { field.stringValue = "~/qa-worktrees" }
+            if rowId == "worktree-template" { field.stringValue = "../{base-dir}.{branch}" }
+            if rowId == "default-shell" { field.stringValue = "/bin/bash" }
+            if rowId == "mobile-port" { field.stringValue = "7420" }
+            if rowId == "browser-home-page" { field.stringValue = "https://example.com" }
+            if rowId == "font-feature" { field.stringValue = "ss01" }
+            if ["palette", "background", "foreground", "cursor-color", "cursor-text", "selection-foreground", "selection-background"].contains(rowId) {
+                field.stringValue = "#123456"
+            }
             field.commit()
         default:
             return false
@@ -108,13 +120,15 @@ final class SettingsControlsTests: XCTestCase {
         var silent: [String] = []
         for category in SettingsCategory.allCases {
             page.category = category
+            page.section = nil
             page.reload()
             let rowIds = try XCTUnwrap(page.lastBuild).groups.flatMap(\.blocks).compactMap { block -> String? in
                 if case .row(let row) = block { return row.id }
                 return nil
             }
             for rowId in rowIds {
-                for index in 0 ..< 8 {
+                page.section = SettingsCatalog.item(rowId)?.section
+                for index in 0 ..< 16 {
                     page.reload()
                     guard let row = page.lastBuild?.groups.flatMap(\.blocks).lazy.compactMap({ block -> CardRow? in
                         if case .row(let row) = block, row.id == rowId { return row }
@@ -124,7 +138,9 @@ final class SettingsControlsTests: XCTestCase {
                     guard found.indices.contains(index) else { break }
                     let before = snapshot()
                     guard actuate(found[index], rowId: rowId) else { continue }
-                    try await Task.sleep(nanoseconds: 2_000_000)
+                    if category == .server || category == .mobile {
+                        try await Task.sleep(nanoseconds: 2_000_000)
+                    }
                     let paths = written(since: before)
                     let key = index == 0 ? rowId : "\(rowId)#\(index)"
                     if paths.isEmpty && store.errors[rowId] == nil {
@@ -143,20 +159,26 @@ final class SettingsControlsTests: XCTestCase {
         XCTAssertEqual(silent, [], "these controls changed nothing")
 
         let expected: [String: String] = [
-            "close-behavior": "settings.json:closeBehavior",
-            "confirm-running-process": "settings.json:confirmRunningProcess",
-            "width": "settings.json:windowSize.width",
-            "height": "settings.json:windowSize.height",
+            "close-behavior": "settings.json:window.closeBehavior",
+            "confirm-process": "settings.json:window.confirmRunningProcess",
+            "width": "settings.json:window.defaultSize.width",
+            "height": "settings.json:window.defaultSize.height",
             "voice-auto-send": "settings.json:voice.autoSend",
-            "font-ligatures": "terminal.json:fontLigatures",
+            "font-ligatures": "terminal.json:font.features",
             "browser-enabled": "settings.json:browser.enabled",
             "ai-commit-push": "settings.json:ai.commit.push",
             "ai-project-pr-prompt#1": "settings.json:ai.projectPrPrompts.11111111-1111-1111-1111-111111111111",
-            "mobile-enabled": "remote",
+            "mobile-access": "remote",
             "default-shell": "server",
         ]
         for (row, path) in expected {
             XCTAssertTrue(report[row]?.contains(path) ?? false, "\(row) wrote \(report[row] ?? []) instead of \(path)")
         }
+        XCTAssertEqual(try Settings.load(dirs.settings), store.settings)
+        XCTAssertEqual(try TerminalSettings.load(dirs.terminalSettings), store.terminal)
+        XCTAssertEqual(host.appliedSettings.last, store.settings)
+        XCTAssertEqual(host.appliedTerminal.last, store.terminal)
+        XCTAssertEqual(store.serverSettings, host.serverSettings)
+        XCTAssertEqual(store.remoteAccess?.settings, host.remoteAccess.settings)
     }
 }

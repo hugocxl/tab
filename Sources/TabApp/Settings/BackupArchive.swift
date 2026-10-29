@@ -1,5 +1,6 @@
 import Foundation
 import TabCore
+import TabProtocol
 
 /// A `.tab` backup: one JSON document holding the profile's configuration
 /// files, each base64-encoded under its path. It carries settings, terminal
@@ -54,18 +55,18 @@ public struct BackupArchive: Equatable, Sendable {
         var files: [String: Data] = [:]
         let manager = FileManager.default
         for (name, url) in [("settings.json", dirs.settings), ("terminal.json", dirs.terminalSettings), ("server.json", dirs.serverSettings)] {
-            if let data = try? Data(contentsOf: url) { files[name] = data }
+            guard manager.fileExists(atPath: url.path) else { continue }
+            files[name] = try Data(contentsOf: url)
         }
         if files["settings.json"] == nil { files["settings.json"] = try JSONEncoder().encode(Settings()) }
         if let state { files["state.json"] = state }
-        if let names = try? manager.contentsOfDirectory(atPath: dirs.themes.path) {
+        if manager.fileExists(atPath: dirs.themes.path) {
+            let names = try manager.contentsOfDirectory(atPath: dirs.themes.path)
             for name in names.sorted() where !name.hasPrefix(".") {
                 let url = dirs.themes.appendingPathComponent(name)
                 var isDirectory: ObjCBool = false
-                guard manager.fileExists(atPath: url.path, isDirectory: &isDirectory), !isDirectory.boolValue,
-                      let data = try? Data(contentsOf: url)
-                else { continue }
-                files["\(themesFolder)/\(name)"] = data
+                guard manager.fileExists(atPath: url.path, isDirectory: &isDirectory), !isDirectory.boolValue else { continue }
+                files["\(themesFolder)/\(name)"] = try Data(contentsOf: url)
             }
         }
         let archive = BackupArchive(files: files)
@@ -147,11 +148,19 @@ public struct BackupArchive: Equatable, Sendable {
         do {
             try Settings.decode(settings).validate()
             if let terminal = files["terminal.json"] { _ = try TerminalSettings.decode(terminal) }
+            if let state = files["state.json"] { _ = try AppStateStore.decode(state) }
             for name in ["server.json", "state.json"] {
                 guard let data = files[name] else { continue }
                 guard (try? JSONSerialization.jsonObject(with: data)) is [String: Any] else {
                     throw SettingsError(name, "is not a JSON object")
                 }
+            }
+            if let data = files["server.json"] {
+                let defaults = try JSONSerialization.jsonObject(with: JSONEncoder().encode(ServerSettingsDoc())) as? [String: Any] ?? [:]
+                let values = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+                let merged = defaults.merging(values) { _, new in new }
+                let server = try JSONDecoder().decode(ServerSettingsDoc.self, from: JSONSerialization.data(withJSONObject: merged))
+                try server.validate()
             }
         } catch let error as Failure {
             throw error
@@ -219,7 +228,7 @@ public struct BackupArchive: Equatable, Sendable {
             archive.files["state.json"] = try mergeState(imported, try? Data(contentsOf: stateURL))
         }
         let stamp = ISO8601DateFormatter.string(from: now, timeZone: .current, formatOptions: [.withFullDate, .withTime])
-        let recovery = dirs.backups.appendingPathComponent("pre-import-\(stamp)", isDirectory: true)
+        let recovery = dirs.backups.appendingPathComponent("pre-import-\(stamp)-\(UUID().uuidString)", isDirectory: true)
         try manager.createDirectory(at: recovery, withIntermediateDirectories: true)
         let replacesThemes = archive.files.keys.contains { $0.hasPrefix(themesFolder + "/") }
         var replaced = archive.files.keys.filter { !$0.hasPrefix(themesFolder + "/") }
@@ -229,14 +238,29 @@ public struct BackupArchive: Equatable, Sendable {
             guard manager.fileExists(atPath: current.path) else { continue }
             try manager.copyItem(at: current, to: recovery.appendingPathComponent(path))
         }
-        if replacesThemes {
-            try? manager.removeItem(at: dirs.themes)
-            try manager.createDirectory(at: dirs.themes, withIntermediateDirectories: true)
+        do {
+            if replacesThemes {
+                if manager.fileExists(atPath: dirs.themes.path) { try manager.removeItem(at: dirs.themes) }
+                try manager.createDirectory(at: dirs.themes, withIntermediateDirectories: true)
+            }
+            for (path, data) in archive.files.sorted(by: { $0.key < $1.key }) {
+                try AtomicFile.write(data, to: dirs.root.appendingPathComponent(path))
+            }
+            try manager.removeItem(at: pending)
+        } catch {
+            let failure = error
+            do {
+                for path in replaced {
+                    let destination = dirs.root.appendingPathComponent(path)
+                    let original = recovery.appendingPathComponent(path)
+                    if manager.fileExists(atPath: destination.path) { try manager.removeItem(at: destination) }
+                    if manager.fileExists(atPath: original.path) { try manager.copyItem(at: original, to: destination) }
+                }
+            } catch {
+                throw Failure.invalid("Restore failed and could not roll back: \(error.localizedDescription). Your original files are in \(recovery.path).")
+            }
+            throw failure
         }
-        for (path, data) in archive.files.sorted(by: { $0.key < $1.key }) {
-            try AtomicFile.write(data, to: dirs.root.appendingPathComponent(path))
-        }
-        try manager.removeItem(at: pending)
         return recovery
     }
 }

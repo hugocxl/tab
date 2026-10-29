@@ -109,7 +109,7 @@ public enum SettingsCatalog {
         SettingItem("worktree-folder", "Default worktree folder", "Worktrees go in <folder>/<project>/<name>. Leave both location settings empty to use ~/.tab/worktrees.", .general, "Worktrees"),
         SettingItem("voice-auto-send", "Send after recording", "Press Return after inserting standalone voice dictation into the terminal.", .general, "Voice"),
         SettingItem("voice-language", "Dictation language", "Choose an installed on-device speech language.", .general, "Voice"),
-        SettingItem("voice-model", "Offline voice model", "Path to a local speech model. Leave empty to use the system recognizer.", .general, "Voice"),
+        SettingItem("voice-model", "Offline voice model", "Path to a local multilingual Whisper model. Used by Linux dictation. macOS uses the system recognizer.", .general, "Voice"),
         // Appearance
         SettingItem("light-theme", "Light theme", "Colors for the interface and terminals when macOS uses light appearance.", .appearance, "Themes"),
         SettingItem("dark-theme", "Dark theme", "Colors for the interface and terminals when macOS uses dark appearance.", .appearance, "Themes"),

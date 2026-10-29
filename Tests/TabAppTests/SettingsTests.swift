@@ -172,7 +172,11 @@ final class SettingsTests: XCTestCase {
         try Data("background = #000000\nforeground = #ffffff\n".utf8).write(to: dirs.themes.appendingPathComponent("Mine"))
         try Data(#"{"shell":"/bin/zsh"}"#.utf8).write(to: dirs.serverSettings)
         try Data(#"{"secret":true}"#.utf8).write(to: dirs.proxy)
-        host.state = Data(#"{"projects":[{"name":"a"},{"name":"b"}]}"#.utf8)
+        var state = try AppState.bootstrap()
+        let project = root.appendingPathComponent("project", isDirectory: true)
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        _ = try state.addProject(server: .local, directory: project.path)
+        host.state = try AppStateStore.encode(state)
 
         let file = root.appendingPathComponent("export.tab")
         store.exportBackup(to: file)

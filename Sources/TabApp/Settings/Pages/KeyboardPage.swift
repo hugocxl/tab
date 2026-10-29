@@ -13,8 +13,8 @@ extension SettingsPageView {
                 var controls: [NSView] = [recorder]
                 if !keymap.isDefault(name) {
                     let reset = b.button("↺", style: .plain) { [store] in
-                        store.setError(rowId, nil)
-                        store.setBinding(name, nil)
+                        let error = store.setBinding(name, nil)
+                        store.setError(rowId, error)
                     }
                     reset.toolTip = "Reset to \(shortcut.defaultChord?.display ?? "no shortcut")"
                     reset.setAccessibilityLabel("Reset \(shortcut.label)")

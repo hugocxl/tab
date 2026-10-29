@@ -291,6 +291,7 @@ extension SettingsPageView {
         let well = ColorWell(color: color.flatMap { if case .rgb(let rgb) = $0 { return rgb } else { return nil } }) { [store] rgb in
             store.setTerminal(id, rgb.hex)
         }
+        well.setAccessibilityLabel(SettingsCatalog.item(id)?.label ?? id)
         let field = b.field(id, color?.description ?? "", placeholder: "Theme", width: 130, monospaced: true) { [store] in
             store.setTerminal(id, $0)
         }
@@ -310,8 +311,11 @@ extension SettingsPageView {
                 label.alignment = .right
                 label.widthAnchor.constraint(equalToConstant: 18).isActive = true
                 let well = ColorWell(color: palette[index]) { [store] rgb in store.setTerminal(id, rgb.hex) }
-                let field = InsetTextField(value: palette[index]?.hex ?? "", placeholder: "Theme", label: "ANSI color \(index)", width: 84, monospaced: true)
-                field.onCommit = { [store] in store.setTerminal(id, $0) }
+                well.setAccessibilityLabel("ANSI color \(index)")
+                let field = b.field(id, palette[index]?.hex ?? "", placeholder: "Theme", width: 84,
+                                    label: "ANSI color \(index)", monospaced: true) { [store] in
+                    store.setTerminal(id, $0)
+                }
                 cells.append(hstack([label, well, field], spacing: 4))
             }
             lines.append(hstack(cells))

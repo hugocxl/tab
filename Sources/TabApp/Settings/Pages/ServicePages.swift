@@ -30,6 +30,7 @@ extension SettingsPageView {
     private func profileList(_ b: SettingsPageBuilder) -> NSView {
         let defaultId = store.settings.browser.defaultProfile
         var rows: [NSView] = [NoteLabel("Each profile keeps its own cookies, cache, history, and logins. Pick a profile per tab from the browser toolbar.")]
+        var renameButtons: [PillButton] = []
         for profile in store.browserProfiles {
             let name = makeLabel(profile.name, font: AppFont.body, color: theme.fg)
             var controls: [NSView] = [name]
@@ -40,11 +41,13 @@ extension SettingsPageView {
                     store.updateBrowser("browser-profiles") { $0.defaultProfile = profile.id }
                 })
             }
-            controls.append(b.button("Rename to Name Below", enabled: !profileName.trimmingCharacters(in: .whitespaces).isEmpty) { [weak self] in
+            let rename = b.button("Rename to Name Below", enabled: !profileName.trimmingCharacters(in: .whitespaces).isEmpty) { [weak self] in
                 guard let self else { return }
                 store.renameBrowserProfile(profile.id, profileName)
                 profileName = ""
-            })
+            }
+            renameButtons.append(rename)
+            controls.append(rename)
             controls.append(b.button("Clear Data") { [weak self] in
                 self?.confirm(
                     "Clear data for “\(profile.name)”?",
@@ -61,10 +64,13 @@ extension SettingsPageView {
                     ) { self?.store.deleteBrowserProfile(profile.id) }
                 })
             }
-            rows.append(hstack(controls, spacing: 6))
+            rows.append(vstack([hstack(Array(controls.prefix(2)), spacing: 6), hstack(Array(controls.dropFirst(2)), spacing: 6)]))
         }
         let name = b.field("browser-profiles", profileName, placeholder: "Profile name") { [weak self] in self?.profileName = $0 }
-        name.onChange = { [weak self] in self?.profileName = $0 }
+        name.onChange = { [weak self] text in
+            self?.profileName = text
+            for button in renameButtons { button.isEnabled = !text.trimmingCharacters(in: .whitespaces).isEmpty }
+        }
         let add = b.button("Add Profile") { [weak self] in
             guard let self else { return }
             store.addBrowserProfile(fields["browser-profiles"]?.stringValue ?? profileName)
@@ -139,8 +145,12 @@ extension SettingsPageView {
             b.note("mobile-access", store.errors["mobile-access"] ?? "Loading mobile access…", error: store.errors["mobile-access"] != nil)
             return
         }
-        b.row("mobile-access", b.toggle("mobile-access", state.settings.enabled) { [store] in store.setMobileEnabled($0) })
-        b.row("mobile-port", b.field("mobile-port", String(state.settings.port)) { [store] in store.setMobilePort($0) })
+        let enabled = b.toggle("mobile-access", state.settings.enabled) { [store] in store.setMobileEnabled($0) }
+        enabled.isEnabled = !store.mobileBusy
+        b.row("mobile-access", enabled)
+        let port = b.field("mobile-port", String(state.settings.port)) { [store] in store.setMobilePort($0) }
+        port.field.isEnabled = !store.mobileBusy
+        b.row("mobile-port", port)
         let (status, failed) = Self.status(state)
         b.row("mobile-status", makeLabel(status, font: AppFont.body, color: failed ? theme.danger : theme.fgMuted))
         b.row("mobile-pair", pairing(b, state), stacked: store.pairing != nil)
@@ -221,8 +231,9 @@ extension SettingsPageView {
             b.row(action.providerSetting, b.popUp(action.providerSetting, items, selected: current) { [store] in
                 store.setAIProvider(action, $0)
             })
-            let prompt = InsetTextField(value: store.prompt(action), label: SettingsCatalog.item(action.promptSetting)?.label ?? "Prompt", width: nil, height: 88, multiline: true)
-            prompt.onCommit = { [store] in store.setAIPrompt(action, $0) }
+            let prompt = b.field(action.promptSetting, store.prompt(action), width: nil, height: 88, multiline: true) { [store] in
+                store.setAIPrompt(action, $0)
+            }
             let restore = b.button("Restore Default", enabled: store.prompt(action) != action.defaultPrompt) { [store] in
                 store.setAIPrompt(action, action.defaultPrompt)
             }
@@ -259,11 +270,10 @@ extension SettingsPageView {
             self?.reload()
         }
         let saved = store.projectPRPrompt(project.id)
-        let prompt = InsetTextField(
-            value: saved, placeholder: "Uses the pull request prompt above",
-            label: "\(project.name) pull request prompt", width: nil, height: 88, multiline: true
-        )
-        prompt.onCommit = { [store] in store.setProjectPRPrompt(project.id, $0) }
+        let prompt = b.field(id, saved, placeholder: "Uses the pull request prompt above", width: nil, height: 88,
+                             multiline: true, label: "\(project.name) pull request prompt") { [store] in
+            store.setProjectPRPrompt(project.id, $0)
+        }
         let reset = b.button("Use General Prompt", enabled: !saved.isEmpty) { [store] in
             store.setProjectPRPrompt(project.id, "")
         }
@@ -311,8 +321,15 @@ extension SettingsPageView {
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
         let finish: (NSApplication.ModalResponse) -> Void = { [weak self] response in
-            guard response == .OK, let url = panel.url else { return }
-            self?.store.restoreBackup(from: url)
+            guard let self, response == .OK, let url = panel.url else { return }
+            do {
+                let archive = try BackupArchive.read(url)
+                confirm("Restore backup on next launch?", archive.summary, "Restore on Next Launch") { [weak self] in
+                    self?.store.restoreBackup(from: url)
+                }
+            } catch {
+                store.setError("backup-restore", SettingsStore.message(error))
+            }
         }
         if let window { panel.beginSheetModal(for: window, completionHandler: finish) } else { finish(panel.runModal()) }
     }

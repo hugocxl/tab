@@ -60,8 +60,11 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
             .sink { [weak self] in self?.scheduleReload() }
             .store(in: &observations)
         store.theme.$palette
-            .sink { [weak self] _ in self?.window?.appearance = self?.store.theme.nsAppearance }
+            .sink { [weak self] _ in self?.scheduleReload() }
             .store(in: &observations)
+        store.loadServerSettings()
+        store.loadRemoteAccess()
+        store.refreshBrowserProfiles()
         reload()
     }
 
@@ -121,6 +124,7 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
 
     /// Rebuilds the sidebar and page from the store.
     public func reload() {
+        window?.appearance = store.theme.nsAppearance
         let searching = !page.query.isEmpty
         var hidden: Set<String> = []
         if store.terminal.diagnostics.isEmpty { hidden.insert("Migration") }
@@ -132,9 +136,17 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
         )
         sidebar.serverTile.state = store.serverState
         page.reload()
+        if (store.pairing != nil || store.pairingBusy) && page.lastBuild?.rowIds.contains("mobile-pair") != true {
+            store.cancelPairing()
+        }
     }
 
     public func windowDidBecomeKey(_ notification: Notification) {
         store.reloadTerminal()
+    }
+
+    public func windowWillClose(_ notification: Notification) {
+        page.commitEdits()
+        if store.pairing != nil || store.pairingBusy { store.cancelPairing() }
     }
 }

@@ -59,6 +59,7 @@ final class SettingsPageView: ThemedView {
     init(store: SettingsStore) {
         self.store = store
         super.init(frame: .zero)
+        theme = store.theme
         translatesAutoresizingMaskIntoConstraints = false
         navigation = NavigationPill(
             back: { [weak self] in self?.step(-1) },
@@ -126,6 +127,12 @@ final class SettingsPageView: ThemedView {
 
     private var pendingScrollReset = false
 
+    /// Saves an unfinished field or slider drag when Settings closes.
+    func commitEdits() {
+        for field in fields.values { field.commit() }
+        for slider in lastBuild?.sliders ?? [] { slider.endDrag() }
+    }
+
     /// Rebuilds the page from the store, keeping the scroll position and the
     /// field being edited.
     func reload() {
@@ -156,6 +163,7 @@ final class SettingsPageView: ThemedView {
         }
         lastBuild = builder
         fields = builder.fields
+        applyTheme(to: self)
 
         scroll.scrollOffset = offset
         guard let (id, _) = editing, let field = fields[id], let window else { return }
@@ -166,6 +174,13 @@ final class SettingsPageView: ThemedView {
         {
             editor.setSelectedRange(editingSelection)
         }
+    }
+
+    /// Gives rebuilt controls the store's theme, including persistent
+    /// controls after a macOS appearance change has finished publishing.
+    private func applyTheme(to view: NSView) {
+        if let view = view as? ThemedView { view.theme = theme }
+        for child in view.subviews { applyTheme(to: child) }
     }
 
     private func rebuildHeader() {

@@ -132,16 +132,16 @@ crates. Behavior is 1:1 unless listed under "Intentionally changed".
 
 ## App: settings window
 
-- [ ] Separate window like System Settings: sidebar with search across labels, grouped inset cards; works offline; changes apply immediately; Edit in… opens the section's JSON file; hand edits to `terminal.json` reload when the app activates, errors shown and last good values kept
+- [x] Separate window like System Settings: sidebar with search across labels, grouped inset cards; works offline; changes apply immediately; Edit in… opens the section's JSON file; hand edits to `terminal.json` reload when the app activates, errors shown and last good values kept
 - [ ] General: closing behavior (end or detach), confirm when a program runs, open files with (Tab editor or another app), default window size, worktree default location (default/template/folder), voice (language, offline model, send after recording)
-- [ ] Appearance: light and dark theme pickers following macOS appearance, ~490 bundled themes plus custom `themes/`, sidebar width, order worktree switcher by recent use, agents panel rows grouping
-- [ ] Keyboard: every shortcut with key glyphs, record a new one, Reset when changed, conflicts refused, saved under `keymap`
-- [ ] Commands: custom commands (name, command, optional shortcut) run in a new pane
-- [ ] Terminal: everything in the terminal view list above, with sliders previewing while dragging, pixel/percent units, key bindings recorder with actions (send text, …), disable built-ins, Reset terminal settings with confirmation
-- [ ] Browser: enable, open terminal links in browser, default profile, search engine, home page, profiles, import
-- [ ] Server: default shell, history budget, shell integration, stop and restart with confirmation
+- [x] Appearance: light and dark theme pickers following macOS appearance, ~490 bundled themes plus custom `themes/`, sidebar width, order worktree switcher by recent use, agents panel rows grouping
+- [x] Keyboard: every shortcut with key glyphs, record a new one, Reset when changed, conflicts refused, saved under `keymap`
+- [x] Commands: custom commands (name, command, optional shortcut) run in a new pane
+- [x] Terminal: everything in the terminal view list above, with sliders previewing while dragging, pixel/percent units, key bindings recorder with actions (send text, …), disable built-ins, Reset terminal settings with confirmation
+- [x] Browser: enable, open terminal links in browser, default profile, search engine, home page, profiles, import
+- [x] Server: default shell, history budget, shell integration, stop and restart with confirmation
 - [ ] Mobile: allow mobile devices, port, Show Pairing Code (QR), paired phones with Revoke
-- [ ] AI: command-line tools per provider, prompts for commit and PR text, per-project PR prompts, commit choices (include unstaged, push)
+- [x] AI: command-line tools per provider, prompts for commit and PR text, per-project PR prompts, commit choices (include unstaged, push)
 - [ ] Backup & Restore: Export… `.tab` file (settings, terminal, themes, server settings, remote server list, local projects with layouts); Choose file… restores on next launch with a recovery copy in `Backups/`; existing projects kept and matched layouts applied; excludes live sessions, paired devices, remote projects, project files, proxy
 - [ ] Proxy: Set Up Proxy… from a terminal's menu (HTTP or SOCKS5, login, bypass list), Use for the whole app (new terminals, downloads, SSH), Apply Proxy per terminal (restart in same folder, proxy icon), env vars http_proxy/https_proxy/all_proxy/no_proxy; stored in `proxy.json`, never backed up — implemented in `TabApp/Proxy` (`ProxyModel`, `ProxyController`, sheet, `ProxyEnvironment`, `ProxyTunnel` as ssh's ProxyCommand) with tests; `main` must call `ProxyTunnel.runIfRequested()`; needs app verification
 

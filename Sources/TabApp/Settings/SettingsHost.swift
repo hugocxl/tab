@@ -149,8 +149,10 @@ public final class PreviewSettingsHost: SettingsHost {
     public private(set) var previews: [TerminalSettings] = []
     public private(set) var openedFiles: [URL] = []
     public private(set) var serverActions: [String] = []
-    public var state = Data("{}".utf8)
+    public var state: Data?
     public var projects: [SettingsProject] = []
+    public var languages: [DictationLanguage] = []
+    public var importSources: [BrowserImportSource] = []
 
     public init() {}
 
@@ -195,11 +197,14 @@ public final class PreviewSettingsHost: SettingsHost {
     }
     public func deleteBrowserProfile(_ id: String) async throws { profiles.removeAll { $0.id == id && !id.isEmpty } }
     public func clearBrowserProfileData(_ id: String) async throws {}
-    public func browserImportSources() -> [BrowserImportSource] { [] }
+    public func browserImportSources() -> [BrowserImportSource] { importSources }
     public func importBrowserData(from source: BrowserImportSource, cookies: Bool) async throws {}
 
     public func installedAIProviders() -> [String] { [] }
-    public func dictationLanguages() -> [DictationLanguage] { [] }
+    public func dictationLanguages() -> [DictationLanguage] { languages }
     public func aiPromptProjects() -> [SettingsProject] { projects }
-    public func backupState() throws -> Data { state }
+    public func backupState() throws -> Data {
+        if let state { return state }
+        return try AppStateStore.encode(AppState.bootstrap())
+    }
 }

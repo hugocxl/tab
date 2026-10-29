@@ -218,6 +218,8 @@ final class SettingsSidebar: ThemedView {
     /// Shows the categories with `selected` highlighted (none while
     /// searching) and the sections of `expanded`.
     func reload(selected: SettingsCategory?, section: String?, expanded: SettingsCategory?, hiddenSections: Set<String>) {
+        search.theme = theme
+        serverTile.theme = theme
         list.arrangedSubviews.forEach { $0.removeFromSuperview() }
         items = []
         for category in SettingsCategory.allCases {
@@ -228,6 +230,7 @@ final class SettingsSidebar: ThemedView {
                 list.addArrangedSubview(spacer)
             }
             let item = SidebarItem(category: category, section: nil)
+            item.theme = theme
             item.isSelected = category == selected && section == nil
             item.onClick = { [weak self] in self?.onSelect?(category, nil) }
             list.addArrangedSubview(item)
@@ -236,6 +239,7 @@ final class SettingsSidebar: ThemedView {
             guard category == expanded else { continue }
             for name in category.sections where !hiddenSections.contains(name) {
                 let sub = SidebarItem(category: category, section: name)
+                sub.theme = theme
                 sub.isSelected = category == selected && section == name
                 sub.onClick = { [weak self] in self?.onSelect?(category, name) }
                 list.addArrangedSubview(sub)

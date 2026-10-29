@@ -26,6 +26,7 @@ final class SettingsPageBuilder {
     private let items: [String: SettingItem]
     private(set) var groups: [Group] = []
     private(set) var fields: [String: InsetTextField] = [:]
+    private(set) var sliders: [Slider] = []
     private(set) var rowIds: [String] = []
     private(set) var unknownIds: [String] = []
 
@@ -56,8 +57,11 @@ final class SettingsPageBuilder {
     /// Adds a row for `id` with its catalog label; `label` replaces it, such
     /// as for a custom command's name.
     @discardableResult
-    func row(_ id: String, _ control: NSView?, stacked: Bool = false, label: String? = nil, description: String? = nil) -> CardRow? {
+    func row(_ id: String, _ makeControl: @autoclosure () -> NSView?, stacked: Bool = false, label: String? = nil, description: String? = nil) -> CardRow? {
         guard shows(id), let item = items[id] else { return nil }
+        let control = makeControl()
+        control?.setAccessibilityHelp(description ?? item.description)
+        if control?.accessibilityLabel() == nil { control?.setAccessibilityLabel(label ?? item.label) }
         let row = CardRow(
             id: id,
             label: label ?? item.label,
@@ -97,14 +101,19 @@ final class SettingsPageBuilder {
         _ value: String,
         placeholder: String = "",
         width: CGFloat? = Metrics.controlWidth,
+        height: CGFloat? = nil,
+        multiline: Bool = false,
+        label: String? = nil,
         monospaced: Bool = false,
         commit: @escaping (String) -> Void
     ) -> InsetTextField {
         let field = InsetTextField(
             value: value,
             placeholder: placeholder,
-            label: items[id]?.label ?? id,
+            label: label ?? items[id]?.label ?? id,
             width: width,
+            height: height,
+            multiline: multiline,
             monospaced: monospaced
         )
         field.onCommit = commit
@@ -143,6 +152,7 @@ final class SettingsPageBuilder {
         let slider = Slider(value: value, range: range, step: step, suffix: suffix, label: items[id]?.label ?? id)
         slider.onPreview = preview
         slider.onCommit = commit
+        sliders.append(slider)
         return slider
     }
 
