@@ -33,6 +33,13 @@ scripts/validate.sh             # what every change must pass before it is finis
 
 Run `scripts/validate.sh` before finishing. Warnings are errors.
 
+## Releasing
+
+Every commit pushed to `main` ships as a new tagged version. After pushing,
+run `scripts/tag-release.sh X.Y.Z` on the pushed `main` and check that the
+Release workflow succeeds. Bump the patch for fixes and the minor version for
+new features or visible changes; use `--beta` only when asked.
+
 ## Dependencies
 
 No third-party packages. Only Apple frameworks and the vendored libghostty-vt.
