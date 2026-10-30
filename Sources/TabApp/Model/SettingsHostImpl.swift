@@ -111,10 +111,6 @@ public final class SettingsHostImpl: SettingsHost {
         model.ai.installed.map(\.id)
     }
 
-    public func dictationLanguages() -> [DictationLanguage] {
-        SpeechRecorder.languages()
-    }
-
     public func aiPromptProjects() -> [SettingsProject] {
         model.state.projects
             .filter { !$0.home && $0.parentId == nil }

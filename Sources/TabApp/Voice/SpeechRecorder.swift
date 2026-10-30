@@ -25,8 +25,6 @@ public final class SpeechRecorder: DictationRecorder {
     static let finalization: TimeInterval = 2
 
     public var onEvent: ((DictationEvent) -> Void)?
-    private let language: String
-    private let model: String
     private var engine: AVAudioEngine?
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
@@ -38,29 +36,14 @@ public final class SpeechRecorder: DictationRecorder {
     private var finalizationTimer: Timer?
     private var configurationObserver: NSObjectProtocol?
 
-    /// - Parameter language: a locale such as `en-US`, or empty for the system's.
-    public init(language: String, model: String = "") {
-        self.language = language
-        self.model = model
-    }
+    public init() {}
 
-    /// Builds the on-device request without acquiring the microphone. A
-    /// nonempty model selects a compiled Apple Speech language model file.
-    func recognitionRequest() throws -> SFSpeechAudioBufferRecognitionRequest {
+    /// The on-device request, built without acquiring the microphone.
+    static func recognitionRequest() -> SFSpeechAudioBufferRecognitionRequest {
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
         request.requiresOnDeviceRecognition = true
         request.addsPunctuation = true
-        guard !model.isEmpty else { return request }
-        let path = (model as NSString).expandingTildeInPath
-        let url = URL(fileURLWithPath: path)
-        let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
-        guard path.hasPrefix("/"), values?.isRegularFile == true,
-              (values?.fileSize ?? 0) > 0, FileManager.default.isReadableFile(atPath: path)
-        else {
-            throw DictationError("Choose a readable compiled Apple Speech language model in Settings → General → Voice, or leave it blank to use the system model.")
-        }
-        request.customizedLanguageModel = SFSpeechLanguageModel.Configuration(languageModel: url)
         return request
     }
 
@@ -69,8 +52,8 @@ public final class SpeechRecorder: DictationRecorder {
             do {
                 try await Self.authorize()
                 guard let self, !self.stopped else { return }
-                let locale = await Task.detached(priority: .userInitiated) { [language] in
-                    Self.locale(for: language)
+                let locale = await Task.detached(priority: .userInitiated) {
+                    Self.systemLocale()
                 }.value
                 guard !self.stopped else { return }
                 try self.begin(locale: locale)
@@ -136,24 +119,12 @@ public final class SpeechRecorder: DictationRecorder {
         }
     }
 
-    /// The installed on-device languages, by name, for Settings → General → Voice.
-    nonisolated public static func languages() -> [DictationLanguage] {
-        installedLanguages().map { DictationLanguage(id: $0.id, name: $0.name) }
-    }
-
-    nonisolated static func installedLanguages() -> [(id: String, name: String, preferred: Bool)] {
+    /// The installed on-device language that follows the system's.
+    nonisolated static func systemLocale() -> String? {
         let ids = SFSpeechRecognizer.supportedLocales()
             .filter { SFSpeechRecognizer(locale: $0)?.supportsOnDeviceRecognition == true }
             .map(\.identifier)
-        let system = DictationLocale.system(ids, preferences: Locale.preferredLanguages)
-        return ids
-            .map { (id: $0, name: Locale.current.localizedString(forIdentifier: $0) ?? $0, preferred: $0 == system) }
-            .sorted { $0.name.lowercased() < $1.name.lowercased() }
-    }
-
-    nonisolated static func locale(for requested: String) -> String? {
-        let candidates = installedLanguages().map { DictationLocale.Candidate(id: $0.id, preferred: $0.preferred) }
-        return DictationLocale.select(candidates, requested: requested)?.id
+        return DictationLocale.select(ids, preferences: Locale.preferredLanguages)
     }
 
     // MARK: Recording
@@ -166,10 +137,10 @@ public final class SpeechRecorder: DictationRecorder {
             throw DictationError("This language is unavailable for speech recognition")
         }
         guard recognizer.supportsOnDeviceRecognition, recognizer.isAvailable else {
-            throw DictationError("On-device speech recognition is unavailable for this language. Choose another dictation language.")
+            throw DictationError("On-device speech recognition is unavailable for this language. Add another in System Settings → Keyboard → Dictation.")
         }
         recognizer.defaultTaskHint = .dictation
-        let request = try recognitionRequest()
+        let request = Self.recognitionRequest()
         self.request = request
         engine = AVAudioEngine()
         task = recognizer.recognitionTask(with: request, resultHandler: Self.resultHandler { [weak self] text, isFinal, error in

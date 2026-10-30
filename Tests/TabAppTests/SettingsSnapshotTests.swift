@@ -18,7 +18,6 @@ final class SettingsSnapshotTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         let host = PreviewSettingsHost()
         host.profiles.append(BrowserProfileSummary(id: "work", name: "Work"))
-        host.languages = [DictationLanguage(id: "en-US", name: "English (United States)")]
         host.importSources = [BrowserImportSource(name: "Safari", supportsCookies: false), BrowserImportSource(name: "Chrome", supportsCookies: true)]
         host.projects = [SettingsProject(id: "demo", name: "Tab")]
         host.remoteAccess = RemoteAccessState(revision: 1, settings: RemoteAccessSettings(enabled: true), status: .listening)

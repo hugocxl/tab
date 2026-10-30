@@ -203,11 +203,6 @@ struct DictationTranscript {
 enum DictationLocale {
     static let fallback = "en-US"
 
-    struct Candidate: Equatable {
-        var id: String
-        var preferred: Bool
-    }
-
     /// The base language, with the old codes Apple still uses mapped.
     static func base(_ locale: String) -> String {
         let id = locale.split(whereSeparator: { $0 == "-" || $0 == "_" }).first.map(String.init) ?? ""
@@ -219,20 +214,11 @@ enum DictationLocale {
         }
     }
 
-    /// The exact locale asked for; else, for a bare language such as `de`,
-    /// its preferred or first region; else the system's choice, US English,
-    /// or the first one.
-    static func select(_ available: [Candidate], requested: String) -> Candidate? {
-        let normalized = { (id: String) in id.replacingOccurrences(of: "_", with: "-").lowercased() }
-        let wanted = normalized(requested)
-        if let exact = available.first(where: { normalized($0.id) == wanted }) { return exact }
-        if !wanted.isEmpty && !wanted.contains("-") {
-            let matching = available.filter { base($0.id).lowercased() == base(wanted).lowercased() }
-            if let match = matching.first(where: \.preferred) ?? matching.first { return match }
-        }
-        return available.first(where: \.preferred)
-            ?? available.first(where: { normalized($0.id) == normalized(fallback) })
-            ?? available.first
+    /// The system's language among `available`; else US English, or the
+    /// first one.
+    static func select(_ available: [String], preferences: [String]) -> String? {
+        if let system = system(available, preferences: preferences) { return system }
+        return available.contains(fallback) ? fallback : available.sorted().first
     }
 
     /// The system's language among `available`, as the user's preferred

@@ -19,15 +19,6 @@ extension SettingsModel {
         b.row("worktree-folder", b.field("worktree-folder", settings.worktrees.defaultLocation.parentPath, placeholder: TabDirs.defaultWorktreeFolder) { [store] in
             store.setWorktreeLocation("worktree-folder", $0)
         })
-        b.row("voice-auto-send", b.toggle("voice-auto-send", settings.voice.autoSend) { [store] in store.setVoiceAutoSend($0) })
-        var languages = [Choice(id: "", title: "System language")]
-        let available = store.host?.dictationLanguages() ?? []
-        languages += available.map { Choice(id: $0.id, title: $0.name) }
-        if !settings.voice.language.isEmpty && !available.contains(where: { $0.id == settings.voice.language }) {
-            languages.append(Choice(id: settings.voice.language, title: settings.voice.language))
-        }
-        b.row("voice-language", b.popUp("voice-language", languages, selected: settings.voice.language) { [store] in store.setVoiceLanguage($0) })
-        b.row("voice-model", b.field("voice-model", settings.voice.model, placeholder: "System model") { [store] in store.setVoiceModel($0) })
     }
 
     static func number(_ value: Double) -> String {

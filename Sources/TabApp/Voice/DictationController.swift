@@ -31,12 +31,9 @@ public protocol DictationHost: AnyObject {
     /// The view the overlay floats over, at its bottom center: the window's
     /// content area.
     var dictationOverlayContainer: NSView? { get }
-    /// The voice section of the current settings.
-    var voiceSettings: VoiceSettings { get }
     /// Types `text` into `target` as a paste (bracketed when its program asks
-    /// for that), then Return when `sendReturn`. Throws when it can't be
-    /// delivered.
-    func insertDictation(_ text: String, sendReturn: Bool, into target: DictationTarget) async throws
+    /// for that). Throws when it can't be delivered.
+    func insertDictation(_ text: String, into target: DictationTarget) async throws
     /// Shows an error banner.
     func showDictationError(_ message: String)
     /// The overlay closed: give the terminal its focus back.
@@ -48,7 +45,7 @@ public protocol DictationHost: AnyObject {
 @MainActor
 public final class DictationController {
     public weak var host: DictationHost?
-    private let makeRecorder: @MainActor (VoiceSettings) -> DictationRecorder
+    private let makeRecorder: @MainActor () -> DictationRecorder
     private let now: () -> Date
 
     private var session: Session?
@@ -59,12 +56,11 @@ public final class DictationController {
         var state: DictationState
         var view: DictationIndicatorView
         var clock: Timer?
-        var autoSend: Bool
     }
 
-    /// - Parameter makeRecorder: the recorder for the settings; tests pass a fake.
+    /// - Parameter makeRecorder: tests pass a fake.
     public init(host: DictationHost?,
-                makeRecorder: @escaping @MainActor (VoiceSettings) -> DictationRecorder = { SpeechRecorder(language: $0.language, model: $0.model) },
+                makeRecorder: @escaping @MainActor () -> DictationRecorder = { SpeechRecorder() },
                 now: @escaping () -> Date = Date.init) {
         self.host = host
         self.makeRecorder = makeRecorder
@@ -93,11 +89,9 @@ public final class DictationController {
             host.showDictationError("Open a live terminal before starting dictation.")
             return
         }
-        let settings = host.voiceSettings
-        let recorder = makeRecorder(settings)
+        let recorder = makeRecorder()
         let view = DictationIndicatorView()
-        session = Session(target: target, recorder: recorder, state: DictationState(), view: view, clock: nil,
-                          autoSend: settings.autoSend)
+        session = Session(target: target, recorder: recorder, state: DictationState(), view: view, clock: nil)
         view.onCancel = { [weak self] in self?.cancel() }
         view.onPause = { [weak self] in self?.togglePause() }
         view.onFinish = { [weak self] in self?.finish() }
@@ -173,7 +167,7 @@ public final class DictationController {
 
     private func render() {
         guard let session else { return }
-        session.view.show(session.state, elapsed: session.state.elapsed(at: now()), autoSend: session.autoSend)
+        session.view.show(session.state, elapsed: session.state.elapsed(at: now()))
     }
 
     private func deliver(_ text: String, session: Session) {
@@ -181,10 +175,9 @@ public final class DictationController {
         guard let host else { return }
         guard host.dictationTarget == session.target else { return }
         let target = session.target
-        let sendReturn = session.autoSend
         Task { [weak self] in
             do {
-                try await host.insertDictation(text, sendReturn: sendReturn, into: target)
+                try await host.insertDictation(text, into: target)
             } catch {
                 self?.host?.showDictationError("Dictation delivery failed: \(error.localizedDescription)")
             }

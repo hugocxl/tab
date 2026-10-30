@@ -56,8 +56,6 @@ final class SettingsTests: XCTestCase {
         var settings = try Settings.load(path)
         settings.browser.openTerminalLinks = true
         try settings.saveBrowser(to: path)
-        settings.voice.language = "fr-FR"
-        try settings.saveVoice(to: path)
         settings.panes.newPaneDirectory = .current
         try settings.savePanes(to: path)
         try settings.setProjectSearchRoot("/code", in: path)
@@ -593,9 +591,7 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(settings.fontSize, 256)
     }
 
-    func testVoiceAndWindowValidation() {
-        XCTAssertThrowsError(try VoiceSettings(language: String(repeating: "x", count: 201)).validate())
-        XCTAssertThrowsError(try VoiceSettings(model: "a\0b").validate())
+    func testWindowValidation() {
         XCTAssertThrowsError(try WindowSettings(defaultSize: WindowSize(width: 600, height: 800)).validate())
         XCTAssertThrowsError(try WindowSettings(defaultSize: WindowSize(width: .infinity, height: 800)).validate())
         XCTAssertNoThrow(try WindowSettings().validate())

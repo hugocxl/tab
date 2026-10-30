@@ -166,28 +166,6 @@ public final class SettingsStore {
         }
     }
 
-    public func setVoiceAutoSend(_ enabled: Bool) {
-        updateVoice("voice-auto-send") { $0.autoSend = enabled }
-    }
-
-    public func setVoiceLanguage(_ language: String) {
-        updateVoice("voice-language") { $0.language = language }
-    }
-
-    public func setVoiceModel(_ path: String) {
-        updateVoice("voice-model") { $0.model = path }
-    }
-
-    private func updateVoice(_ id: String, _ change: (inout VoiceSettings) -> Void) {
-        attempt(id) {
-            var next = settings
-            change(&next.voice)
-            try next.saveVoice(to: dirs.settings)
-            settings = next
-            applySettings()
-        }
-    }
-
     // MARK: Appearance
 
     /// Changes appearance settings, saving only what changed so the main

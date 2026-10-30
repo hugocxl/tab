@@ -317,7 +317,6 @@ private final class SettingsWriteHost: SettingsHost {
     func browserImportSources() -> [BrowserImportSource] { [] }
     func importBrowserData(from source: BrowserImportSource, cookies: Bool) async throws {}
     func installedAIProviders() -> [String] { [] }
-    func dictationLanguages() -> [DictationLanguage] { [] }
     func aiPromptProjects() -> [SettingsProject] { [] }
     func backupState() throws -> Data { try base.backupState() }
 }

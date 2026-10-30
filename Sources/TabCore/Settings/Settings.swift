@@ -3,7 +3,6 @@ import Foundation
 /// The app's preferences, stored in `settings.json`. Every section tolerates
 /// missing and unknown keys, so files written by older or newer builds load.
 public struct Settings: Codable, Equatable, Sendable {
-    public var voice: VoiceSettings
     public var ai: AISettings
     public var commands: [CustomCommand]
     public var appearance: Appearance
@@ -19,7 +18,6 @@ public struct Settings: Codable, Equatable, Sendable {
     public var servers: [ServerEntry]
 
     public init() {
-        voice = VoiceSettings()
         ai = AISettings()
         commands = []
         appearance = Appearance()
@@ -37,7 +35,6 @@ public struct Settings: Codable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let defaults = Settings()
-        voice = try container.value(.voice, defaults.voice)
         ai = try container.value(.ai, defaults.ai)
         commands = try container.value(.commands, defaults.commands)
         appearance = try container.value(.appearance, defaults.appearance)
@@ -72,7 +69,6 @@ public struct Settings: Codable, Equatable, Sendable {
     }
 
     public func validate() throws {
-        try voice.validate()
         try browser.validate()
         try validateCommands()
         try ServerEntry.validate(servers)
@@ -98,11 +94,6 @@ public struct Settings: Codable, Equatable, Sendable {
 
     public func saveOpeners(to url: URL) throws {
         try saveSection("openers", openers, to: url)
-    }
-
-    public func saveVoice(to url: URL) throws {
-        try voice.validate()
-        try saveSection("voice", voice, to: url)
     }
 
     public func saveBrowser(to url: URL) throws {
@@ -362,36 +353,5 @@ struct AnyKey: CodingKey {
     init?(intValue: Int) {
         stringValue = String(intValue)
         self.intValue = intValue
-    }
-}
-
-public struct VoiceSettings: Codable, Equatable, Sendable {
-    /// The dictation language, such as `en-US`; empty follows the system.
-    public var language: String
-    /// An offline model's path; empty uses the system recognizer.
-    public var model: String
-    /// Presses Return after inserting the transcript.
-    public var autoSend: Bool
-
-    public init(language: String = "", model: String = "", autoSend: Bool = false) {
-        self.language = language
-        self.model = model
-        self.autoSend = autoSend
-    }
-
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        language = try container.value(.language, "")
-        model = try container.value(.model, "")
-        autoSend = try container.value(.autoSend, false)
-    }
-
-    public func validate() throws {
-        if model.utf8.count > 4096 || model.contains("\0") {
-            throw SettingsError("voice.model", "Invalid model path")
-        }
-        if language.utf8.count > 200 {
-            throw SettingsError("voice.language", "Language names must be at most 200 bytes")
-        }
     }
 }

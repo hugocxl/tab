@@ -10,6 +10,11 @@ Changelog.
 - Settings has a Changelog page listing what changed in every version, with
   the installed one marked.
 
+### Removed
+
+- The voice settings: dictation always uses the system's language and speech
+  model, and inserts what you said without pressing Return.
+
 ## 0.3.0 - 2026-10-30
 
 ### Changed

@@ -54,18 +54,6 @@ public struct SettingsProject: Equatable, Sendable {
     }
 }
 
-/// A dictation language the system recognizer offers.
-public struct DictationLanguage: Equatable, Sendable {
-    /// Such as `en-US`.
-    public var id: String
-    public var name: String
-
-    public init(id: String, name: String) {
-        self.id = id
-        self.name = name
-    }
-}
-
 /// What Settings needs from the rest of the app: the server, mobile access,
 /// browser profiles and the app model. Settings reads and writes
 /// `settings.json` and `terminal.json` itself and tells the host after each
@@ -126,8 +114,6 @@ public protocol SettingsHost: AnyObject {
 
     /// Ids of the AI command-line tools found on this Mac, such as `claude`.
     func installedAIProviders() -> [String]
-    /// The on-device dictation languages.
-    func dictationLanguages() -> [DictationLanguage]
     /// The projects that can have their own pull request prompt, in sidebar
     /// order.
     func aiPromptProjects() -> [SettingsProject]
@@ -151,7 +137,6 @@ public final class PreviewSettingsHost: SettingsHost {
     public private(set) var serverActions: [String] = []
     public var state: Data?
     public var projects: [SettingsProject] = []
-    public var languages: [DictationLanguage] = []
     public var importSources: [BrowserImportSource] = []
 
     public init() {}
@@ -201,7 +186,6 @@ public final class PreviewSettingsHost: SettingsHost {
     public func importBrowserData(from source: BrowserImportSource, cookies: Bool) async throws {}
 
     public func installedAIProviders() -> [String] { [] }
-    public func dictationLanguages() -> [DictationLanguage] { languages }
     public func aiPromptProjects() -> [SettingsProject] { projects }
     public func backupState() throws -> Data {
         if let state { return state }

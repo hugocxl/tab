@@ -16,7 +16,7 @@ final class BackupLaunchTests: XCTestCase {
         }
         var settings = Settings()
         settings.window.closeBehavior = .detach
-        settings.voice = VoiceSettings(language: "es-ES", model: "/models/spanish.lm", autoSend: true)
+        settings.browser.openTerminalLinks = true
         let remote = ServerEntry(name: "Production", ssh: "dev@box", port: 2222, group: "Team")
         settings.servers = [remote]
         try AtomicFile.write(JSONEncoder().encode(settings), to: source.settings)
@@ -62,7 +62,7 @@ final class BackupLaunchTests: XCTestCase {
         try exported.write(to: archiveURL)
         let archive = try BackupArchive.read(archiveURL)
         let expectedSettings = try Settings.decode(try XCTUnwrap(archive.files["settings.json"]))
-        XCTAssertEqual(expectedSettings.voice, settings.voice)
+        XCTAssertEqual(expectedSettings.browser, settings.browser)
         XCTAssertEqual(expectedSettings.servers, [remote])
         XCTAssertEqual(expectedSettings.window, settings.window)
         XCTAssertEqual(Set(archive.files.keys), ["settings.json", "terminal.json", "server.json", "state.json", "themes/Custom"])
@@ -79,7 +79,7 @@ final class BackupLaunchTests: XCTestCase {
             let destination = try ModelFixtures.profile()
             defer { try? FileManager.default.removeItem(at: destination.root) }
             var oldSettings = Settings()
-            oldSettings.voice.language = "fr-FR"
+            oldSettings.browser.homePage = "https://old.example"
             try AtomicFile.write(JSONEncoder().encode(oldSettings), to: destination.settings)
             var oldTerminal = TerminalSettings()
             oldTerminal.fontSize = 12

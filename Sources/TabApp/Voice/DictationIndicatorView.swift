@@ -26,7 +26,6 @@ final class DictationIndicatorView: ThemedView {
     private let hints = DictationHints()
     private let closeButton = PillButton("Close")
     private var state = DictationState()
-    private var autoSend = false
     private var focused = false
 
     init() {
@@ -82,10 +81,9 @@ final class DictationIndicatorView: ThemedView {
 
     // MARK: Showing state
 
-    func show(_ state: DictationState, elapsed: TimeInterval, autoSend: Bool) {
+    func show(_ state: DictationState, elapsed: TimeInterval) {
         let phaseChanged = state.phase != self.state.phase || state.error != self.state.error
         self.state = state
-        self.autoSend = autoSend
         clock.stringValue = DictationText.clock(elapsed)
         meter.level = state.phase == .recording ? state.level : 0
         chipLabel.stringValue = state.error ?? chipText
@@ -98,7 +96,7 @@ final class DictationIndicatorView: ThemedView {
         finishButton.isHidden = state.phase == .transcribing
         pauseButton.symbol = state.phase == .paused ? "play.fill" : "pause.fill"
         pauseButton.setAccessibilityLabel(state.phase == .paused ? "Resume" : "Pause")
-        hints.update(phase: state.phase, autoSend: autoSend)
+        hints.update(phase: state.phase)
         themeDidChange()
     }
 
@@ -295,12 +293,11 @@ private final class DictationButton: NSButton {
     }
 }
 
-/// The key hints pill: ⎋ Cancel, Space Pause or Resume, ⏎ Insert or Send.
+/// The key hints pill: ⎋ Cancel, Space Pause or Resume, ⏎ Insert.
 @MainActor
 private final class DictationHints: ThemedView {
     private let label = makeLabel("", font: AppFont.caption)
     private var phase = DictationPhase.starting
-    private var autoSend = false
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -311,9 +308,8 @@ private final class DictationHints: ThemedView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    func update(phase: DictationPhase, autoSend: Bool) {
+    func update(phase: DictationPhase) {
         self.phase = phase
-        self.autoSend = autoSend
         themeDidChange()
     }
 
@@ -321,7 +317,7 @@ private final class DictationHints: ThemedView {
         var hints: [(String, String)] = [("⎋", "Cancel")]
         if phase != .transcribing {
             hints.append(("Space", phase == .paused ? "Resume" : "Pause"))
-            hints.append(("⏎", autoSend ? "Send" : "Insert"))
+            hints.append(("⏎", "Insert"))
         }
         let text = NSMutableAttributedString()
         for (index, hint) in hints.enumerated() {

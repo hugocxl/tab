@@ -364,17 +364,12 @@ extension MainWindowController: DictationHost {
 
     public var dictationOverlayContainer: NSView? { window?.contentView }
 
-    public var voiceSettings: VoiceSettings { model.settings.voice }
-
-    public func insertDictation(_ text: String, sendReturn: Bool, into target: DictationTarget) async throws {
+    public func insertDictation(_ text: String, into target: DictationTarget) async throws {
         guard target == dictationTarget, let pane = model.activePane,
               let terminal = model.panes.controller(for: pane) as? TerminalPane, let session = terminal.session else {
             throw ModelError("The terminal is no longer there.")
         }
         session.view.pasteText(text)
-        if sendReturn, let id = model.state.pane(pane)?.content.session, let main = model.client(for: model.currentProject.id) {
-            try await main.writeInput(session: id, bytes: Data("\r".utf8))
-        }
     }
 
     public func showDictationError(_ message: String) {

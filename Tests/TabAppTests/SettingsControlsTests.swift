@@ -18,7 +18,6 @@ final class SettingsControlsTests: XCTestCase {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         dirs = TabDirs(root: root)
         host = PreviewSettingsHost()
-        host.languages = [DictationLanguage(id: "en-US", name: "English (United States)")]
         host.remoteAccess = RemoteAccessState(revision: 1, settings: RemoteAccessSettings(enabled: true), status: .listening)
         host.projects = [SettingsProject(id: "11111111-1111-1111-1111-111111111111", name: "demo")]
     }
@@ -112,19 +111,6 @@ final class SettingsControlsTests: XCTestCase {
         return true
     }
 
-    func testVoiceModelCanBeEditedAndCleared() throws {
-        let store = SettingsStore(dirs: dirs, host: host, theme: AppTheme(systemIsDark: true))
-        let page = SettingsModel(store: store)
-        page.select(.general)
-        let row = try XCTUnwrap(page.lastBuild?.rows.first { $0.id == "voice-model" })
-        guard case .text(let field) = row.control else { return XCTFail("voice-model is not a text field") }
-        XCTAssertTrue(field.enabled)
-        field.commit("/tmp/spanish.lm")
-        XCTAssertEqual(try Settings.load(dirs.settings).voice.model, "/tmp/spanish.lm")
-        field.commit("")
-        XCTAssertEqual(try Settings.load(dirs.settings).voice.model, "")
-    }
-
     func testEveryControlWritesItsSetting() async throws {
         let store = SettingsStore(dirs: dirs, host: host, theme: AppTheme(catalog: ThemeCatalog.load(customDirectory: nil), systemIsDark: true))
         store.loadServerSettings()
@@ -169,8 +155,6 @@ final class SettingsControlsTests: XCTestCase {
             "confirm-process": "settings.json:window.confirmRunningProcess",
             "width": "settings.json:window.defaultSize.width",
             "height": "settings.json:window.defaultSize.height",
-            "voice-auto-send": "settings.json:voice.autoSend",
-            "voice-model": "settings.json:voice.model",
             "font-ligatures": "terminal.json:font.features",
             "browser-enabled": "settings.json:browser.enabled",
             "ai-commit-push": "settings.json:ai.commit.push",

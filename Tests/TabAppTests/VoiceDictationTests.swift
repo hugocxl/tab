@@ -93,21 +93,11 @@ final class VoiceDictationStateTests: XCTestCase {
         XCTAssertEqual(transcript.update("one more"), "one two three one more")
     }
 
-    func testLanguageSelectionPrefersExactThenRegionThenSystem() {
-        let available = [
-            DictationLocale.Candidate(id: "de-AT", preferred: false),
-            DictationLocale.Candidate(id: "de-DE", preferred: false),
-            DictationLocale.Candidate(id: "en-US", preferred: false),
-            DictationLocale.Candidate(id: "fr-FR", preferred: true),
-            DictationLocale.Candidate(id: "nb-NO", preferred: false),
-        ]
-        XCTAssertEqual(DictationLocale.select(available, requested: "de_de")?.id, "de-DE")
-        XCTAssertEqual(DictationLocale.select(available, requested: "de")?.id, "de-AT")
-        XCTAssertEqual(DictationLocale.select(available, requested: "no")?.id, "nb-NO")
-        XCTAssertEqual(DictationLocale.select(available, requested: "es-ES")?.id, "fr-FR")
-        XCTAssertEqual(DictationLocale.select(available, requested: "")?.id, "fr-FR")
-        XCTAssertEqual(DictationLocale.select(available.map { .init(id: $0.id, preferred: false) }, requested: "")?.id, "en-US")
-        XCTAssertNil(DictationLocale.select([], requested: "en"))
+    func testLanguageSelectionPrefersTheSystemThenUSEnglish() {
+        let available = ["de-DE", "en-US", "fr-FR"]
+        XCTAssertEqual(DictationLocale.select(available, preferences: ["fr-FR"]), "fr-FR")
+        XCTAssertEqual(DictationLocale.select(available, preferences: ["ja-JP"]), "en-US")
+        XCTAssertNil(DictationLocale.select([], preferences: ["en-US"]))
     }
 
     func testSystemLanguageFollowsThePreferredLanguages() {
@@ -144,15 +134,14 @@ private final class FakeRecorder: DictationRecorder {
 private final class FakeDictationHost: DictationHost {
     var dictationTarget: DictationTarget? = DictationTarget(pane: "p1", attachment: "local/1/gen1")
     var dictationOverlayContainer: NSView? = NSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
-    var voiceSettings = VoiceSettings()
-    var inserted: [(String, Bool, DictationTarget)] = []
+    var inserted: [(String, DictationTarget)] = []
     var errors: [String] = []
     var ended = 0
     var failDelivery = false
 
-    func insertDictation(_ text: String, sendReturn: Bool, into target: DictationTarget) async throws {
+    func insertDictation(_ text: String, into target: DictationTarget) async throws {
         if failDelivery { throw DictationError("connection closed") }
-        inserted.append((text, sendReturn, target))
+        inserted.append((text, target))
     }
 
     func showDictationError(_ message: String) { errors.append(message) }
@@ -168,7 +157,7 @@ final class VoiceDictationControllerTests: XCTestCase {
     override func setUp() async throws {
         host = FakeDictationHost()
         recorders = []
-        controller = DictationController(host: host, makeRecorder: { [unowned self] _ in
+        controller = DictationController(host: host, makeRecorder: { [unowned self] in
             let recorder = FakeRecorder()
             recorders.append(recorder)
             return recorder
@@ -179,36 +168,8 @@ final class VoiceDictationControllerTests: XCTestCase {
         for _ in 0..<5 { await Task.yield() }
     }
 
-    func testSettingsReachTheRecorderWithoutUsingTheMicrophone() throws {
-        host.voiceSettings = VoiceSettings(language: "es-ES", model: "/tmp/spanish.model", autoSend: true)
-        var received: VoiceSettings?
-        let recorder = FakeRecorder()
-        let controller = DictationController(host: host, makeRecorder: {
-            received = $0
-            return recorder
-        })
-        controller.start()
-        defer { controller.cancel() }
-        XCTAssertEqual(received?.language, "es-ES")
-        XCTAssertEqual(received?.model, "/tmp/spanish.model")
-        XCTAssertEqual(received?.autoSend, true)
-        XCTAssertTrue(recorder.started)
-    }
-
-    func testChosenModelIsAppliedToTheOnDeviceRequestAndMissingFilesFail() throws {
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("voice-model-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: folder) }
-        let model = folder.appendingPathComponent("custom.lm")
-        try Data("model fixture".utf8).write(to: model)
-        let request = try SpeechRecorder(language: "es-ES", model: model.path).recognitionRequest()
-        XCTAssertTrue(request.requiresOnDeviceRecognition)
-        XCTAssertEqual(request.customizedLanguageModel?.languageModel, model)
-        let system = try SpeechRecorder(language: "").recognitionRequest()
-        XCTAssertTrue(system.requiresOnDeviceRecognition)
-        XCTAssertNil(system.customizedLanguageModel)
-        XCTAssertThrowsError(try SpeechRecorder(language: "", model: folder.path).recognitionRequest())
-        XCTAssertThrowsError(try SpeechRecorder(language: "", model: model.path + ".missing").recognitionRequest())
+    func testRecognitionStaysOnThisMac() {
+        XCTAssertTrue(SpeechRecorder.recognitionRequest().requiresOnDeviceRecognition)
     }
 
     func testDictationNeedsALiveTerminal() {
@@ -218,8 +179,7 @@ final class VoiceDictationControllerTests: XCTestCase {
         XCTAssertEqual(host.errors, ["Open a live terminal before starting dictation."])
     }
 
-    func testFinishedTextGoesToTheTargetAndSendsReturnWhenAsked() async {
-        host.voiceSettings.autoSend = true
+    func testFinishedTextGoesToTheTarget() async {
         controller.toggle()
         let recorder = recorders[0]
         XCTAssertTrue(recorder.started)
@@ -231,7 +191,6 @@ final class VoiceDictationControllerTests: XCTestCase {
         await settle()
         XCTAssertFalse(controller.isActive)
         XCTAssertEqual(host.inserted.map(\.0), ["ls -la"])
-        XCTAssertEqual(host.inserted.map(\.1), [true])
         XCTAssertEqual(host.ended, 1)
     }
 
