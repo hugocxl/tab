@@ -47,6 +47,8 @@ for bundle in "$BIN"/*.bundle; do
     [ -d "$bundle" ] && cp -R "$bundle" "$APP/Contents/Resources/"
 done
 cp "$ROOT/packaging/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
+# Settings → Changelog reads the repository's changelog from the bundle.
+cp "$ROOT/CHANGELOG.md" "$APP/Contents/Resources/CHANGELOG.md"
 sed -e "s/__BUNDLE_ID__/$BUNDLE_ID/g" -e "s/__APP_NAME__/$APP_NAME/g" -e "s/__VERSION__/$VERSION/g" \
     -e "s/__SHORT_VERSION__/$SHORT_VERSION/g" \
     -e "s/__BUILD_NUMBER__/$BUILD_NUMBER/g" \

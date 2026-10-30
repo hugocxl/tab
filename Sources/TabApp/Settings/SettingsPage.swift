@@ -10,6 +10,14 @@ struct SettingsPage: View {
     @Environment(\.settingsTheme) private var theme
 
     var body: some View {
+        if model.category == .changelog && !model.isSearching {
+            ChangelogPage(changelog: model.changelog, installed: Release.version)
+        } else {
+            settings
+        }
+    }
+
+    private var settings: some View {
         Form {
             ForEach(["application", "configuration"], id: \.self) { id in
                 if let message = model.store.errors[id] {

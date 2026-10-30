@@ -3,7 +3,7 @@ import TabCore
 
 /// A page of the Settings window, in sidebar order.
 public enum SettingsCategory: String, CaseIterable, Sendable {
-    case general, appearance, terminal, keyboard, commands, browser, server, mobile, ai, backup
+    case general, appearance, terminal, keyboard, commands, browser, server, mobile, ai, backup, changelog
 
     public var title: String {
         switch self {
@@ -17,6 +17,7 @@ public enum SettingsCategory: String, CaseIterable, Sendable {
         case .mobile: return "Mobile"
         case .ai: return "AI"
         case .backup: return "Backup & Restore"
+        case .changelog: return "Changelog"
         }
     }
 
@@ -34,6 +35,7 @@ public enum SettingsCategory: String, CaseIterable, Sendable {
         case .mobile: return ("iphone", 0x6BDB7E, 0x2FA84A, 0xFFFFFF)
         case .ai: return ("sparkles", 0xD07BFF, 0x9437F0, 0xFFFFFF)
         case .backup: return ("clock.arrow.circlepath", 0x9B9BA0, 0x5F5F64, 0xFFFFFF)
+        case .changelog: return ("list.bullet.rectangle.portrait.fill", 0xFFC94A, 0xF29D1B, 0xFFFFFF)
         }
     }
 
@@ -41,12 +43,12 @@ public enum SettingsCategory: String, CaseIterable, Sendable {
     var startsGroup: Bool { [.terminal, .browser, .backup].contains(self) }
 
     /// The file behind the page, for "Edit in …". Mobile access is managed
-    /// only here.
+    /// only here, and the changelog isn't a setting.
     public var configurationFile: String? {
         switch self {
         case .server: return "server.json"
         case .terminal: return "terminal.json"
-        case .mobile: return nil
+        case .mobile, .changelog: return nil
         default: return "settings.json"
         }
     }

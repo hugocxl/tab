@@ -15,6 +15,9 @@ git fetch --quiet --tags origin main
 [ "$(git rev-parse --abbrev-ref HEAD)" = main ] || { echo "Error: release from main" >&2; exit 1; }
 [ -z "$(git status --porcelain)" ] || { echo "Error: commit or stash your changes first" >&2; exit 1; }
 [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ] || { echo "Error: push main first, or pull it" >&2; exit 1; }
+# The changelog's newest version is the release, so the app lists it.
+LISTED="$(sed -n 's/^## \([^ ]*\).*/\1/p' CHANGELOG.md | head -1)"
+[ "$LISTED" = "$VERSION" ] || { echo "Error: CHANGELOG.md's newest version is ${LISTED:-missing}; add a $VERSION section first" >&2; exit 1; }
 
 if [ "${2:-}" = --beta ]; then
     TAG="v$VERSION-beta.$(git rev-list --count HEAD)"

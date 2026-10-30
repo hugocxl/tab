@@ -33,12 +33,30 @@ scripts/validate.sh             # what every change must pass before it is finis
 
 Run `scripts/validate.sh` before finishing. Warnings are errors.
 
+## Changelog
+
+Every commit updates [CHANGELOG.md](CHANGELOG.md) in the same commit. The app
+bundles the file and shows it in Settings → Changelog, so write it for users.
+
+- Each version is a `## X.Y.Z - YYYY-MM-DD` section, newest first, with
+  `### Added`, `### Changed`, `### Fixed` or `### Removed` groups of `- `
+  entries. Wrapped lines are indented two spaces. Inline Markdown only.
+- The newest section is the version the commit will be tagged as. If it is
+  not tagged yet (`git tag -l vX.Y.Z` is empty), add to it; otherwise start a
+  new section with the next version (see Releasing) and today's date.
+- Describe what changed for someone using Tab, in one sentence each: not file
+  names, refactors or test-only work. A commit with no visible change, such as
+  a CI fix, gets a short entry under `### Fixed` or `### Changed` all the same.
+- `ChangelogTests` checks the format and order, and `scripts/tag-release.sh`
+  refuses a version that isn't the changelog's newest.
+
 ## Releasing
 
 Every commit pushed to `main` ships as a new tagged version. After pushing,
 run `scripts/tag-release.sh X.Y.Z` on the pushed `main` and check that the
 Release workflow succeeds. Bump the patch for fixes and the minor version for
-new features or visible changes; use `--beta` only when asked.
+new features or visible changes; use `--beta` only when asked. X.Y.Z is the
+newest version in `CHANGELOG.md`.
 
 ## Dependencies
 

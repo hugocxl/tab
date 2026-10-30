@@ -98,7 +98,9 @@ The workflow notarizes with the API key. Without `APPLE_API_KEY_P8` it falls bac
 to `APPLE_ID` and `APPLE_APP_SPECIFIC_PASSWORD`, Codesh's secrets. Its signing
 keychain gets a random password per run. `GITHUB_TOKEN` is supplied by GitHub.
 
-To cut a release, push the validated commit to `main`, then:
+Each release's changes are listed in `CHANGELOG.md`, which the app shows in
+Settings → Changelog. `tag-release.sh` refuses a version that isn't the
+changelog's newest. To cut a release, push the validated commit to `main`, then:
 
 ```sh
 scripts/tag-release.sh 0.2.0          # stable: tags and pushes v0.2.0

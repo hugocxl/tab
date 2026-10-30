@@ -142,6 +142,7 @@ crates. Behavior is 1:1 unless listed under "Intentionally changed".
 - [x] Server: default shell, history budget, shell integration, stop and restart with confirmation
 - [x] Mobile: allow mobile devices, port, Show Pairing Code (QR), paired phones with Revoke
 - [x] AI: command-line tools per provider, prompts for commit and PR text, per-project PR prompts, commit choices (include unstaged, push)
+- [x] Changelog (Tab addition): every version from the bundled `CHANGELOG.md`, newest first, installed version marked, no "Edit in…"
 - [x] Backup & Restore: Export… `.tab` file (settings, terminal, themes, server settings, remote server list, local projects with layouts); Choose file… restores on next launch with a recovery copy in `Backups/`; existing projects kept and matched layouts applied; excludes live sessions, paired devices, remote projects, project files, proxy
 - [x] Proxy: Set Up Proxy… from a terminal's menu (HTTP or SOCKS5, login, bypass list), Use for the whole app (new terminals, downloads, SSH), Apply Proxy per terminal (restart in same folder, proxy icon), env vars http_proxy/https_proxy/all_proxy/no_proxy; stored in `proxy.json`, never backed up — implemented in `TabApp/Proxy` (`ProxyModel`, `ProxyController`, sheet, `ProxyEnvironment`, `ProxyTunnel` as ssh's ProxyCommand) with tests; `main` must call `ProxyTunnel.runIfRequested()`; needs app verification
 
@@ -165,4 +166,5 @@ crates. Behavior is 1:1 unless listed under "Intentionally changed".
 - Config files: `settings.json`, `terminal.json`, `server.json`, `state.json` instead of TOML. Themes keep Ghostty's format.
 - Dead settings removed: app layout mode, sidebar vibrancy and level, sidebar collapsed style, status bar visibility, tips visibility, tab-focused expansion. The sidebar is always opaque; there is no status bar.
 - Protocol: new JSON + binary protocol; not wire-compatible with Codesh servers.
+- Changelog: added. `CHANGELOG.md` lists every version and Settings → Changelog shows it from the app bundle, marking the installed version.
 - Releases: published from `vX.Y.Z` and `vX.Y.Z-beta.N` tags rather than every commit on `main`. Betas are the same app as stable releases and also follow the stable feed, so a stable release of a beta's version replaces it. `update.json` carries an Ed25519 signature the app requires.

@@ -23,6 +23,8 @@ final class SettingsModel: ObservableObject {
     var profileName = ""
     /// The project whose pull request prompt the AI page edits.
     var promptProject: String?
+    /// The bundled changelog, read when its page first opens.
+    private(set) lazy var changelog: Changelog? = Changelog.bundled()
 
     /// Saves of text fields being edited, run when Settings closes.
     private var pendingEdits: [String: () -> Void] = [:]
@@ -127,6 +129,7 @@ final class SettingsModel: ObservableObject {
         case .mobile: buildMobile(builder)
         case .ai: buildAI(builder)
         case .backup: buildBackup(builder)
+        case .changelog: break
         }
     }
 

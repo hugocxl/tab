@@ -51,7 +51,7 @@ final class SettingsTests: XCTestCase {
             page.select(category)
             let build = try XCTUnwrap(page.lastBuild)
             XCTAssertEqual(build.unknownIds, [], "\(category) shows rows missing from the catalog")
-            XCTAssertFalse(build.groups.isEmpty, "\(category) shows nothing")
+            XCTAssertTrue(category == .changelog || !build.groups.isEmpty, "\(category) shows nothing")
             shown.formUnion(build.rowIds)
         }
         let conditional: Set<String> = ["terminal-import-notes"]
@@ -273,5 +273,6 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(Set(listed), Set(SettingsCategory.allCases).subtracting([.server]))
         XCTAssertEqual(listed.count, Set(listed).count)
         XCTAssertEqual(SettingsSidebar.groups.map { $0.first }, [.general, .terminal, .browser, .backup])
+        XCTAssertEqual(SettingsSidebar.groups.last?.last, .changelog)
     }
 }
