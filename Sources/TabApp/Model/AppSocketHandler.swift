@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import TabClient
 import TabCore
 
@@ -15,8 +16,8 @@ public final class AppSocketHandler {
 
     /// Listens on the profile's `app.sock`.
     public func listen() throws {
+        guard server == nil else { return }
         let socket = model.dirs.appSocket
-        try? FileManager.default.removeItem(at: socket)
         server = try AppSocketServer(socket: socket) { [weak self] request in
             await self?.handle(request) ?? .failed("Tab is closing")
         }
@@ -25,7 +26,6 @@ public final class AppSocketHandler {
     public func close() {
         server?.close()
         server = nil
-        try? FileManager.default.removeItem(at: model.dirs.appSocket)
     }
 
     public func handle(_ request: AppRequest) async -> AppReply {
@@ -39,7 +39,7 @@ public final class AppSocketHandler {
                 return .failed(error.localizedDescription)
             }
         case .unknown(let type):
-            return .failed("unsupported request \(type); update Tab")
+            return .failed("unknown command \(type)")
         }
     }
 
@@ -61,20 +61,38 @@ public final class AppSocketHandler {
 /// One app per profile: a second launch hands its folder to the running app
 /// over `app.sock` and exits.
 public enum SingleInstance {
+    /// Takes the profile lock, or hands the launch to its owner. A missing
+    /// answer is an error, never permission to start another app.
+    public static func claim(folder: String?, dirs: TabDirs, patience: TimeInterval = 2) throws -> ProfileLock? {
+        try FileManager.default.createDirectory(at: dirs.root, withIntermediateDirectories: true,
+                                                attributes: [.posixPermissions: 0o700])
+        let descriptor = Darwin.open(dirs.root.appendingPathComponent("app.lock").path,
+                                     O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
+        guard descriptor >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        if flock(descriptor, LOCK_EX | LOCK_NB) == 0 { return ProfileLock(descriptor: descriptor) }
+        let code = errno
+        Darwin.close(descriptor)
+        guard code == EWOULDBLOCK else { throw POSIXError(POSIXErrorCode(rawValue: code) ?? .EIO) }
+        _ = try handOver(folder: folder, dirs: dirs, patience: patience)
+        return nil
+    }
+
     /// Hands `folder` (or nothing, to bring the window forward) to an app
-    /// already running in `dirs`. Returns whether one answered.
-    public static func handOver(folder: String?, dirs: TabDirs) -> Bool {
-        let socket = dirs.appSocket
-        guard FileManager.default.fileExists(atPath: socket.path) else { return false }
-        do {
-            _ = try AppSocket.call(socket: socket, .open(path: folder ?? ""), timeout: 2)
-            return true
-        } catch AppSocketError.notRunning {
-            return false
-        } catch AppSocketError.failed {
-            return true
-        } catch {
-            return false
+    /// already running in `dirs`, allowing its socket time to start.
+    public static func handOver(folder: String?, dirs: TabDirs, patience: TimeInterval = 2) throws -> Bool {
+        let deadline = ProcessInfo.processInfo.systemUptime + max(0, patience)
+        while true {
+            do {
+                let answer = try AppSocket.call(socket: dirs.appSocket, .open(path: folder ?? ""), timeout: max(0.001, patience))
+                guard answer == .bool(true) else { throw ModelError("unexpected reply") }
+                return true
+            } catch AppSocketError.notRunning where ProcessInfo.processInfo.systemUptime < deadline {
+                Thread.sleep(forTimeInterval: min(0.02, max(0, deadline - ProcessInfo.processInfo.systemUptime)))
+            } catch AppSocketError.failed(let message) where message != "invalid reply from Tab" {
+                return true
+            } catch {
+                throw ModelError("Tab is already running but did not answer: \(error.localizedDescription)")
+            }
         }
     }
 
@@ -88,5 +106,19 @@ public enum SingleInstance {
             }
         }
         return nil
+    }
+}
+
+/// Holds an app's profile for its lifetime. The lock file stays in place so
+/// later launches always contend for the same inode.
+public final class ProfileLock: @unchecked Sendable {
+    private let descriptor: Int32
+
+    fileprivate init(descriptor: Int32) {
+        self.descriptor = descriptor
+    }
+
+    deinit {
+        Darwin.close(descriptor)
     }
 }

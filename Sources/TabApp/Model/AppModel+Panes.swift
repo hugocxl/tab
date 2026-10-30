@@ -107,9 +107,16 @@ extension AppModel {
     /// Opens a browser pane in `project` (the current one by default).
     @discardableResult
     public func openBrowser(url: String? = nil, project: ProjectId? = nil, profile: String? = nil, select: Bool = true) -> PaneId? {
+        let browser: BrowserPane
+        do {
+            browser = try newBrowserState(url: url, profile: profile == "" ? nil : profile)
+        } catch {
+            report(error)
+            return nil
+        }
         let target = project ?? currentProject.id
         var opened: PaneId?
-        guard edit({ opened = try $0.openBrowser(target, BrowserPane(url: url, profile: profile), select: select).1 })
+        guard edit({ opened = try $0.openBrowser(target, browser, select: select).1 })
         else { return nil }
         if select { focusActiveContent() }
         return opened

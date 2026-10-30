@@ -11,7 +11,16 @@ extension AppModel {
     @discardableResult
     public func addProject(_ directory: String, server: ServerId = .local) -> ProjectId? {
         let path = server.isLocal ? URL(fileURLWithPath: directory).standardizedFileURL.path : directory
-        if let existing = state.projects.first(where: { $0.serverId == server && $0.directory.rawValue == path && !$0.home }) {
+        let canonical = server.isLocal ? URL(fileURLWithPath: path).resolvingSymlinksInPath().path : path
+        if let existing = state.projects.first(where: {
+            guard $0.serverId == server else { return false }
+            let saved = $0.directory.rawValue
+            return saved == path || (server.isLocal && URL(fileURLWithPath: saved).resolvingSymlinksInPath().path == canonical)
+        }) {
+            edit { state in
+                state.refreshProjectStatuses()
+                state.joinActiveWorkspace(existing.id)
+            }
             selectProject(existing.id)
             return existing.id
         }

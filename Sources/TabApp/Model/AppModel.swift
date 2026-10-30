@@ -397,6 +397,8 @@ public final class AppModel {
     public func apply(settings: Settings) {
         let servers = self.settings.servers
         self.settings = settings
+        browserProfiles.defaultProfileId = settings.browser.defaultProfile
+        for controller in browserProfiles.panes.all { controller.apply(settings: settings.browser) }
         savedAppearance = settings.appearance
         theme.setThemes(dark: settings.appearance.darkTheme, light: settings.appearance.lightTheme)
         if servers != settings.servers {

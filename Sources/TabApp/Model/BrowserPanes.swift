@@ -43,11 +43,18 @@ extension AppModel: BrowserHost {
 
     public func openBrowserPane(url: String, profile: String, from source: BrowserPaneController) {
         guard let pane = PaneId(source.tabId), let project = state.paneProject(pane) else {
-            openBrowser(url: url, profile: profile)
+            openBrowser(url: url, profile: profile.isEmpty ? BrowserProfiles.defaultName : profile)
             return
         }
         guard state.project(project) != nil else { return }
-        edit { _ = try $0.splitBrowser(pane, BrowserPane(url: url, profile: profile), focus: true) }
+        let browser: BrowserPane
+        do {
+            browser = try newBrowserState(url: url, profile: profile)
+        } catch {
+            report(error)
+            return
+        }
+        edit { _ = try $0.splitBrowser(pane, browser, focus: true) }
         focusActiveContent()
     }
 
@@ -81,17 +88,21 @@ extension AppModel: BrowserHost {
 
     public func openBrowserPane(url: String?, profile: String?, project: String?, worktree: String?, split: Bool) throws
         -> BrowserPaneController {
+        let browser = try newBrowserState(url: url, profile: profile)
         let target = try browserProject(project: project, worktree: worktree)
+        let select = project == nil && worktree == nil
+        let anchor = split ? shownPane(of: target) : nil
         var opened: PaneId?
         guard edit({ state in
-            if split, let active = state.window.activePane, state.paneProject(active) == target {
-                opened = try state.splitBrowser(active, BrowserPane(url: url, profile: profile), focus: false)
+            if let anchor {
+                opened = try state.splitBrowser(anchor, browser, focus: select)
             } else {
-                opened = try state.openBrowser(target, BrowserPane(url: url, profile: profile), select: false).1
+                opened = try state.openBrowser(target, browser, select: select).1
             }
         }), let opened, let controller = (controller(for: opened) as? BrowserPaneContent)?.controller else {
             throw ModelError("Could not open a browser pane")
         }
+        if select { focusActiveContent() }
         return controller
     }
 
@@ -109,7 +120,7 @@ extension AppModel: BrowserHost {
                     guard case .browser(let browser) = pane.content else { return nil }
                     let live = browserProfiles.panes.pane(pane.id.description)
                     return BrowserTab(tabId: pane.id.description, state: live?.state ?? browser,
-                                      active: state.window.activePane == pane.id)
+                                      active: shownPane(of: project.id) == pane.id)
                 }
             }
         }
@@ -129,22 +140,59 @@ extension AppModel: BrowserHost {
         return true
     }
 
-    /// The project `tab browser` names by project and worktree name, or the
-    /// current one.
-    private func browserProject(project: String?, worktree: String?) throws -> ProjectId {
-        guard project != nil || worktree != nil else { return currentProject.id }
-        let parent = try project.map { name -> Project in
-            guard let found = state.projects.first(where: {
-                $0.parentId == nil && ($0.name == name || $0.directory.rawValue == name || $0.id.description == name)
-            }) else { throw ModelError("no project named \(name)") }
-            return found
+    /// Resolves creation settings before the pane is saved or shown.
+    func newBrowserState(url: String?, profile: String?) throws -> BrowserPane {
+        guard settings.browser.enabled else { throw ModelError("the built-in browser is disabled") }
+        let chosen = try browserProfiles.profiles.first { $0.id == profile } ?? browserProfiles.resolve(profile)
+        return BrowserPane(url: url ?? settings.browser.homeURL, profile: chosen.id)
+    }
+
+    /// The pane a project shows in its selected tab, even in the background.
+    func shownPane(of project: ProjectId) -> PaneId? {
+        if project == currentProject.id { return activePane }
+        guard let selected = state.window.selectedTab[project],
+              let tab = state.project(project)?.tabs.first(where: { $0.id == selected }) else { return nil }
+        return state.shownPane(tab) ?? tab.layout.leaves.first
+    }
+
+    /// Resolves IDs, names and canonical paths, preferring the current family
+    /// before searching all worktrees, as Codesh's `resolve_target` does.
+    func browserProject(project: String?, worktree: String?) throws -> ProjectId {
+        let root = try project.map { name in
+            try uniqueBrowserProject(state.projects.filter { Self.browserNames($0, name) },
+                                     missing: "no project named '\(name)'",
+                                     ambiguous: "project '\(name)' is ambiguous; pass its ID")
         }
-        if let worktree {
-            guard let found = state.projects.first(where: {
-                $0.parentId != nil && $0.name == worktree && (parent == nil || $0.parentId == parent?.id)
-            }) else { throw ModelError("no worktree named \(worktree)") }
-            return found.id
+        guard let name = worktree else { return root ?? currentProject.id }
+        let family = root ?? currentProject.parentId ?? currentProject.id
+        let nearby = state.projects.filter {
+            ($0.id == family || $0.parentId == family) && Self.browserNamesWorktree($0, name)
         }
-        return parent?.id ?? currentProject.id
+        if nearby.count == 1 || root != nil {
+            return try uniqueBrowserProject(nearby, missing: "no worktree named '\(name)'",
+                                            ambiguous: "worktree '\(name)' is ambiguous; pass its ID")
+        }
+        return try uniqueBrowserProject(state.projects.filter {
+            $0.parentId != nil && Self.browserNamesWorktree($0, name)
+        }, missing: "no worktree named '\(name)'",
+           ambiguous: "worktree '\(name)' is ambiguous across projects; pass --project to disambiguate")
+    }
+
+    private func uniqueBrowserProject(_ candidates: [Project], missing: String, ambiguous: String) throws -> ProjectId {
+        guard let first = candidates.first else { throw ModelError(missing) }
+        guard candidates.count == 1 else { throw ModelError(ambiguous) }
+        return first.id
+    }
+
+    private static func browserNames(_ project: Project, _ text: String) -> Bool {
+        if project.id.description == text || project.name == text { return true }
+        guard text.hasPrefix("/") else { return false }
+        if project.directory.rawValue == text { return true }
+        guard FileManager.default.fileExists(atPath: text) else { return false }
+        return URL(fileURLWithPath: text).resolvingSymlinksInPath().path == project.directory.rawValue
+    }
+
+    private static func browserNamesWorktree(_ project: Project, _ text: String) -> Bool {
+        browserNames(project, text) || URL(fileURLWithPath: project.directory.rawValue).lastPathComponent == text
     }
 }

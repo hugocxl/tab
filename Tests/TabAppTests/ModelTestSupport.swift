@@ -1,8 +1,22 @@
 import Foundation
+import AppKit
 import TabClient
 import TabCore
 import TabProtocol
 @testable import TabApp
+
+/// Records shell presentation without opening a window.
+@MainActor
+final class ModelTestPresenter: AppPresenter {
+    var window: NSWindow? { nil }
+    private(set) var broughtToFront = 0
+    private(set) var messages: [String] = []
+
+    func confirm(title: String, message: String, confirm: String, destructive: Bool) async -> Bool { true }
+    func showToast(_ message: String, error: Bool) { messages.append(message) }
+    func showRemoteFolderBrowser(_ server: ServerId) {}
+    func bringToFront() { broughtToFront += 1 }
+}
 
 /// A server that answers from memory and records what the app asked.
 final class ModelFakeServer: ServerAPI, TerminalBackend, @unchecked Sendable {

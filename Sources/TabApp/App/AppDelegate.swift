@@ -41,6 +41,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             try socket.listen()
         } catch {
             Log.app.error("app.sock: \(error.localizedDescription, privacy: .public)")
+            FileHandle.standardError.write(Data("Tab: app.sock: \(error.localizedDescription)\n".utf8))
+            exit(1)
         }
         self.socket = socket
         model.start()

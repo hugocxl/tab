@@ -48,6 +48,46 @@ final class AppKeyDispatchTests: XCTestCase {
         XCTAssertNil(MenuBarBuilder.keyEquivalent("unknown"))
     }
 
+    func testMenuTreeMatchesCodeshWithNativeAboutAndHelp() throws {
+        _ = NSApplication.shared
+        let model = AppModel(dirs: try ModelFixtures.profile())
+        let menu = MenuBarBuilder.build(keymap: Keymap(), actions: Actions(model: model),
+                                        available: Set(ShortcutFeature.allCases))
+        let app = Release.appName
+        XCTAssertEqual(menu.items.map(\.title), [app, "Edit", "File", "View", "Window", "Help"])
+        func titles(_ name: String) -> [String] {
+            menu.items.first { $0.title == name }?.submenu?.items.map { $0.isSeparatorItem ? "-" : $0.title } ?? []
+        }
+        XCTAssertEqual(titles(app), [
+            "About \(app)", "-", "Settings…", "Check for Updates…", "Install Command Line Tool…", "-",
+            "Services", "-", "Hide \(app)", "Hide Others", "Show All", "-", "Quit \(app)", "End All Sessions and Quit",
+        ])
+        XCTAssertEqual(titles("Edit"), [
+            "Cut", "Copy", "Paste", "Select All", "-", "Find…", "Find Next", "Find Previous", "-",
+            "Previous Prompt", "Next Prompt", "Select Command Output",
+        ])
+        XCTAssertEqual(titles("File"), [
+            "New Terminal", "New Browser Pane", "New Home Terminal", "New Terminal in Project…", "New Worktree…",
+            "Switch Worktree…", "Open Project…", "-", "Close Tab",
+        ])
+        XCTAssertEqual(titles("View"), [
+            "Command Palette…", "-", "Toggle Voice Recording", "-", "Toggle Sidebar", "Toggle Agents Panel",
+            "Toggle Agent Sessions", "Toggle Files", "Toggle Source Control", "Go to File…", "Find in Files…",
+            "Toggle Full Screen", "-", "Theme Picker", "-", "Increase Font Size", "Decrease Font Size",
+        ])
+        XCTAssertEqual(titles("Window"), [
+            "Minimize", "Zoom", "-", "Split Right", "Split Down", "Focus Pane Left", "Focus Pane Right", "Focus Pane Up",
+            "Focus Pane Down", "Toggle Pane Zoom", "Equalize Splits", "Close Pane", "Close Tab", "-", "Next Tab",
+            "Previous Tab", "-", "Previous Project", "Next Project", "-",
+        ] + (1...9).map { "Tab \($0)" } + ["-"] + (1...9).map { "Project \($0)" })
+        XCTAssertEqual(titles("Help"), ["\(app) Help"])
+        let limited = MenuBarBuilder.build(keymap: Keymap(), actions: Actions(model: model), available: [])
+        let limitedTitles = limited.items.flatMap { $0.submenu?.items.map(\.title) ?? [] }
+        for unavailable in ["Check for Updates…", "Install Command Line Tool…", "Toggle Voice Recording"] {
+            XCTAssertFalse(limitedTitles.contains(unavailable))
+        }
+    }
+
     func testNavigationHistoryGoesBackAndForwardOverLivePlaces() {
         var history = NavigationHistory()
         let (a, b, c) = (ProjectId(), ProjectId(), ProjectId())
@@ -72,24 +112,39 @@ final class AppSocketOpenTests: XCTestCase {
         model.start()
         _ = await ModelFixtures.wait { model.state.serverIdentity(.local) != nil }
         let handler = AppSocketHandler(model: model)
+        let presenter = ModelTestPresenter()
+        model.presenter = presenter
         let folder = try ModelFixtures.folder("opened")
 
         let reply = await handler.handle(.open(path: folder))
         XCTAssertEqual(reply, .ok(.bool(true)))
         let project = try XCTUnwrap(model.state.projects.first { $0.directory.rawValue == folder })
         XCTAssertEqual(model.currentProject.id, project.id)
+        XCTAssertEqual(presenter.broughtToFront, 1)
 
+        let workspace = try XCTUnwrap(model.createWorkspace("CLI"))
+        model.selectWorkspace(workspace)
         model.selectProject(model.state.home.id)
         _ = await handler.handle(.open(path: folder + "/"))
         XCTAssertEqual(model.state.projects.filter { $0.directory.rawValue == folder }.count, 1, "opening again selects it")
         XCTAssertEqual(model.currentProject.id, project.id)
+        XCTAssertEqual(model.state.window.workspace, workspace)
+        XCTAssertTrue(model.state.workspace(workspace)?.projects.contains(project.id) == true)
+        let alias = URL(fileURLWithPath: folder + "-alias")
+        try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: URL(fileURLWithPath: folder))
+        let aliased = await handler.handle(.open(path: alias.path))
+        XCTAssertEqual(aliased, .ok(.bool(true)))
+        XCTAssertEqual(model.currentProject.id, project.id)
+        XCTAssertEqual(model.state.projects.filter { !$0.home }.count, 1)
 
         let file = folder + "/file.txt"
         try Data().write(to: URL(fileURLWithPath: file))
         if case .ok = await handler.handle(.open(path: file)) { XCTFail("a file is not a project") }
         let empty = await handler.handle(.open(path: ""))
         XCTAssertEqual(empty, .ok(.bool(true)), "an empty path only brings the window")
-        if case .ok = await handler.handle(.unknown("future")) { XCTFail("unknown requests fail") }
+        XCTAssertEqual(presenter.broughtToFront, 5)
+        let unknown = await handler.handle(.unknown("future"))
+        XCTAssertEqual(unknown, .failed("unknown command future"))
         model.connection(.local)?.disconnect()
     }
 
@@ -101,12 +156,13 @@ final class AppSocketOpenTests: XCTestCase {
         let model = ModelFixtures.model(dirs, server: server)
         model.start()
         _ = await ModelFixtures.wait { model.state.serverIdentity(.local) != nil }
-        XCTAssertFalse(SingleInstance.handOver(folder: nil, dirs: dirs), "no app answers yet")
+        let instance = try XCTUnwrap(SingleInstance.claim(folder: nil, dirs: dirs))
+        defer { withExtendedLifetime(instance) {} }
         let handler = AppSocketHandler(model: model)
         try handler.listen()
         defer { handler.close() }
         let folder = try ModelFixtures.folder("handed")
-        let handed = await Task.detached { SingleInstance.handOver(folder: folder, dirs: dirs) }.value
+        let handed = try await Task.detached { try SingleInstance.claim(folder: folder, dirs: dirs) == nil }.value
         XCTAssertTrue(handed)
         let added = await ModelFixtures.wait { model.state.projects.contains { $0.directory.rawValue == folder } }
         XCTAssertTrue(added)

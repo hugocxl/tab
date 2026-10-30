@@ -19,6 +19,9 @@ final class Actions {
     /// Runs `id`; false when it does nothing here, so the key goes on.
     @discardableResult
     func perform(_ id: ShortcutId) -> Bool {
+        if let pane = model.activePane,
+           let browser = model.controller(for: pane) as? BrowserPaneContent,
+           browser.controller.perform(id) { return true }
         switch id {
         case .newTab: model.newTerminal()
         case .newHomeTab: model.newHomeTerminal()
