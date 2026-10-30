@@ -72,7 +72,6 @@ public struct Settings: Codable, Equatable, Sendable {
         try browser.validate()
         try validateCommands()
         try ServerEntry.validate(servers)
-        try window.validate()
     }
 
     public func server(_ id: ServerId) -> ServerEntry? { servers.first { $0.id == id } }
@@ -159,16 +158,6 @@ public struct Settings: Codable, Equatable, Sendable {
     }
 }
 
-public struct WindowSize: Codable, Equatable, Sendable {
-    public var width: Double
-    public var height: Double
-
-    public init(width: Double, height: Double) {
-        self.width = width
-        self.height = height
-    }
-}
-
 public enum CloseBehavior: String, Codable, Sendable, CaseIterable {
     /// Closing a terminal pane ends its terminal.
     case closeSession
@@ -177,17 +166,11 @@ public enum CloseBehavior: String, Codable, Sendable, CaseIterable {
 }
 
 public struct WindowSettings: Codable, Equatable, Sendable {
-    public var defaultSize: WindowSize
     /// Closing asks first while a program other than the shell runs.
     public var confirmRunningProcess: Bool
     public var closeBehavior: CloseBehavior
 
-    public init(
-        defaultSize: WindowSize = WindowSize(width: 1200, height: 800),
-        confirmRunningProcess: Bool = true,
-        closeBehavior: CloseBehavior = .closeSession
-    ) {
-        self.defaultSize = defaultSize
+    public init(confirmRunningProcess: Bool = true, closeBehavior: CloseBehavior = .closeSession) {
         self.confirmRunningProcess = confirmRunningProcess
         self.closeBehavior = closeBehavior
     }
@@ -195,17 +178,8 @@ public struct WindowSettings: Codable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let defaults = WindowSettings()
-        defaultSize = try container.value(.defaultSize, defaults.defaultSize)
         confirmRunningProcess = try container.value(.confirmRunningProcess, defaults.confirmRunningProcess)
         closeBehavior = try container.value(.closeBehavior, defaults.closeBehavior)
-    }
-
-    public func validate() throws {
-        for (name, value, minimum) in [("width", defaultSize.width, 640.0), ("height", defaultSize.height, 400.0)] {
-            guard value.isFinite, (minimum...16384).contains(value) else {
-                throw SettingsError("window.defaultSize.\(name)", "must be between \(Int(minimum)) and 16384")
-            }
-        }
     }
 }
 

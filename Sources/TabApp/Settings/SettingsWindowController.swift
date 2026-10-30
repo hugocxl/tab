@@ -5,7 +5,7 @@ import TabCore
 
 /// The Settings window: a small System Settings–style window whose SwiftUI
 /// content brings its own toolbar (back, forward, title) and sidebar search.
-/// It is 740pt wide with a 215pt sidebar and grows only in height.
+/// It has a fixed size with a 215pt sidebar; pages scroll.
 @MainActor
 public final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     public static let defaultSize = NSSize(width: 740, height: 580)
@@ -19,14 +19,12 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
         model = SettingsModel(store: store)
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: Self.defaultSize),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
             backing: .buffered,
             defer: true
         )
         window.title = "Settings"
         window.toolbarStyle = .unified
-        window.minSize = NSSize(width: Self.defaultSize.width, height: 480)
-        window.maxSize = NSSize(width: Self.defaultSize.width, height: .greatestFiniteMagnitude)
         window.isReleasedWhenClosed = false
         window.tabbingMode = .disallowed
         window.collectionBehavior.insert(.fullScreenNone)
@@ -36,11 +34,6 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
         hosting.sceneBridgingOptions = [.toolbars, .title]
         window.contentViewController = hosting
         window.setContentSize(Self.defaultSize)
-        // A new name: frames saved by the old, wider window would restore it.
-        window.setFrameAutosaveName("TabSettings")
-        if window.frame.width != Self.defaultSize.width {
-            window.setContentSize(NSSize(width: Self.defaultSize.width, height: window.contentLayoutRect.height))
-        }
         model.window = window
         store.theme.$palette
             .sink { [weak window] palette in window?.appearance = NSAppearance(named: palette.isLight ? .aqua : .darkAqua) }

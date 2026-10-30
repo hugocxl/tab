@@ -11,18 +11,12 @@ extension SettingsModel {
             store.setConfirmRunningProcess($0)
         })
         b.row("file-opener", fileOpenerPopUp(b))
-        b.row("width", b.field("width", Self.number(settings.window.defaultSize.width)) { [store] in store.setWindowSize("width", $0) })
-        b.row("height", b.field("height", Self.number(settings.window.defaultSize.height)) { [store] in store.setWindowSize("height", $0) })
         b.row("worktree-template", b.field("worktree-template", settings.worktrees.defaultLocation.pathTemplate, placeholder: WorktreeLocation.suggestedTemplate) { [store] in
             store.setWorktreeLocation("worktree-template", $0)
         })
         b.row("worktree-folder", b.field("worktree-folder", settings.worktrees.defaultLocation.parentPath, placeholder: TabDirs.defaultWorktreeFolder) { [store] in
             store.setWorktreeLocation("worktree-folder", $0)
         })
-    }
-
-    static func number(_ value: Double) -> String {
-        value == value.rounded() && abs(value) < 1e9 ? String(Int(value)) : String(value)
     }
 
     static let choosingApplication = "choose.application"

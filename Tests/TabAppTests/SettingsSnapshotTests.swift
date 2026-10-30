@@ -63,9 +63,6 @@ final class SettingsSnapshotTests: XCTestCase {
         try render(window.contentView, output, "mobile-pairing-qr")
         controller.search("font")
         try render(window.contentView, output, "search-font")
-        controller.select(.browser)
-        window.setContentSize(NSSize(width: SettingsWindowController.defaultSize.width, height: 480))
-        try render(window.contentView, output, "browser-short")
         let proxy = ProxySheet(model: ProxyModel(file: root.appendingPathComponent("proxy.json")), oldServer: false) { _ in }
         proxy.window.isReleasedWhenClosed = false
         proxy.window.setFrameOrigin(NSPoint(x: -20000, y: -20000))

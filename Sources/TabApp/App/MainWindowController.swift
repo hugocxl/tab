@@ -82,12 +82,15 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, A
 
     public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    /// A new window's size when no saved bounds fit a screen.
+    static let defaultSize = NSSize(width: 1200, height: 800)
+
     private static func initialFrame(_ model: AppModel) -> NSRect {
         if let bounds = model.state.window.bounds {
             let frame = NSRect(x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height)
             if NSScreen.screens.contains(where: { $0.visibleFrame.intersects(frame) }) { return frame }
         }
-        let size = model.settings.window.defaultSize
+        let size = defaultSize
         let screen = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
         let width = min(size.width, screen.width)
         let height = min(size.height, screen.height)

@@ -70,7 +70,7 @@ crates. Behavior is 1:1 unless listed under "Intentionally changed".
 - [ ] Switch Worktree… (Cmd+Opt+W): current first then recent (or sidebar order per setting), filter, rename/remove per row, New Worktree… at the bottom — implemented (palette page)
 - [ ] New Worktree… (Cmd+Opt+N): name, new branch from base or existing branch, Default/Template/Folder location, per-project remembered choice, hooks review and enable, failure semantics — implemented (`NewWorktreeDialog`)
 - [ ] Remove Worktree and Files…: warns about uncommitted changes, runs teardown, ends terminals — implemented (`confirmRemoveWorktree`)
-- [ ] Window title, full screen (Cmd+Ctrl+F), default window size setting — implemented
+- [ ] Window title, full screen (Cmd+Ctrl+F), new windows 1200×800pt centered when no saved bounds fit a screen — implemented
 
 ## App: panes and splits
 
@@ -132,8 +132,8 @@ crates. Behavior is 1:1 unless listed under "Intentionally changed".
 
 ## App: settings window
 
-- [x] Separate window like System Settings (SwiftUI, 740pt wide): sidebar search across labels, server tile, one row per page with gradient SF Symbol icons (no expandable sections), back/forward through visited pages, native grouped form with descriptions under each label; works offline; changes apply immediately; Edit in… opens the section's JSON file; hand edits to `terminal.json` reload when the app activates, errors shown and last good values kept
-- [ ] General: closing behavior (end or detach), confirm when a program runs, open files with (Tab editor or another app), default window size, worktree default location (default/template/folder)
+- [x] Separate window like System Settings (SwiftUI, fixed 740×580pt, not resizable): sidebar search across labels, server tile, one row per page with gradient SF Symbol icons (no expandable sections), back/forward through visited pages, native grouped form with descriptions under each label; works offline; changes apply immediately; Edit in… opens the section's JSON file; hand edits to `terminal.json` reload when the app activates, errors shown and last good values kept
+- [ ] General: closing behavior (end or detach), confirm when a program runs, open files with (Tab editor or another app), worktree default location (default/template/folder)
 - [x] Appearance: light and dark theme pickers following macOS appearance, ~490 bundled themes plus custom `themes/`, sidebar width, order worktree switcher by recent use, agents panel rows grouping
 - [x] Keyboard: every shortcut with key glyphs, record a new one, Reset when changed, conflicts refused, saved under `keymap`
 - [x] Commands: custom commands (name, command, optional shortcut) run in a new pane
@@ -165,6 +165,7 @@ crates. Behavior is 1:1 unless listed under "Intentionally changed".
 - Phone SDK (`codesh-mobile`, Swift/Kotlin bindings): not ported. The server's mobile access is ported, so existing phone clients need a Tab-speaking SDK later.
 - Config files: `settings.json`, `terminal.json`, `server.json`, `state.json` instead of TOML. Themes keep Ghostty's format.
 - Dead settings removed: app layout mode, sidebar vibrancy and level, sidebar collapsed style, status bar visibility, tips visibility, tab-focused expansion. The sidebar is always opaque; there is no status bar.
+- Default window size setting dropped: new windows open at 1200×800pt.
 - Voice settings dropped: dictation always uses the system's on-device language and the system model, and inserts the transcript without pressing Return.
 - Protocol: new JSON + binary protocol; not wire-compatible with Codesh servers.
 - Changelog: added. `CHANGELOG.md` lists every version and Settings → Changelog shows it from the app bundle, marking the installed version.

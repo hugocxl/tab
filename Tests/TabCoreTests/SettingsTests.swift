@@ -28,7 +28,6 @@ final class SettingsTests: XCTestCase {
         let path = try directory.write("settings.json", source)
         let settings = try Settings.load(path)
         XCTAssertFalse(settings.window.confirmRunningProcess)
-        XCTAssertEqual(settings.window.defaultSize, WindowSize(width: 1200, height: 800))
         XCTAssertEqual(settings.appearance.darkTheme, "Dracula")
         XCTAssertEqual(settings.appearance.lightTheme, "Tab Light")
         XCTAssertEqual(settings.browser.searchEngine, .duckDuckGo)
@@ -40,11 +39,7 @@ final class SettingsTests: XCTestCase {
 
     func testValuesOfTheWrongTypeAreErrorsNamingTheSetting() throws {
         let directory = try TemporaryDirectory()
-        let path = try directory.write("settings.json", #"{"window": {"defaultSize": {"width": 100, "height": 800}}}"#)
-        XCTAssertThrowsError(try Settings.load(path)) { error in
-            XCTAssertTrue("\(error)".contains("window.defaultSize.width"), "\(error)")
-        }
-        try directory.write("settings.json", #"{"window": {"confirmRunningProcess": "no"}}"#)
+        let path = try directory.write("settings.json", #"{"window": {"confirmRunningProcess": "no"}}"#)
         XCTAssertThrowsError(try Settings.load(path)) { error in
             XCTAssertTrue("\(error)".contains("confirmRunningProcess"), "\(error)")
         }
@@ -589,11 +584,5 @@ final class SettingsTests: XCTestCase {
         var settings = TerminalSettings()
         settings.zoom(300)
         XCTAssertEqual(settings.fontSize, 256)
-    }
-
-    func testWindowValidation() {
-        XCTAssertThrowsError(try WindowSettings(defaultSize: WindowSize(width: 600, height: 800)).validate())
-        XCTAssertThrowsError(try WindowSettings(defaultSize: WindowSize(width: .infinity, height: 800)).validate())
-        XCTAssertNoThrow(try WindowSettings().validate())
     }
 }

@@ -89,8 +89,6 @@ public enum SettingsCatalog {
         SettingItem("close-behavior", "When closing tabs or panes", "Close sessions unused by other panes, or detach to keep them running and reopen them from Existing Terminals.", .general, "Closing terminals"),
         SettingItem("confirm-process", "Confirm before closing a running process", "Ask before ending a running command. Detaching never requires confirmation.", .general, "Closing terminals"),
         SettingItem("file-opener", "Open files with", "Opens files you click in a terminal. Files open in the Tab editor or another application.", .general, "Files"),
-        SettingItem("width", "Default window width", "Width in points for a new workspace window when no saved bounds exist.", .general, "Window size"),
-        SettingItem("height", "Default window height", "Height in points for a new workspace window when no saved bounds exist.", .general, "Window size"),
         SettingItem("worktree-template", "Default worktree path template", "For example ../{base-dir}.{branch}. Must include {branch}; also supports {project-name}. Relative paths start in the project folder. Overrides the default folder.", .general, "Worktrees"),
         SettingItem("worktree-folder", "Default worktree folder", "Worktrees go in <folder>/<project>/<name>. Leave both location settings empty to use ~/.tab/worktrees.", .general, "Worktrees"),
         // Appearance

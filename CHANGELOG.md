@@ -10,10 +10,15 @@ Changelog.
 - Settings has a Changelog page listing what changed in every version, with
   the installed one marked.
 
+### Changed
+
+- The Settings window has a fixed size and no longer resizes.
+
 ### Removed
 
 - The voice settings: dictation always uses the system's language and speech
   model, and inserts what you said without pressing Return.
+- The default window size setting: new windows open at 1200×800 points.
 
 ## 0.3.0 - 2026-10-30
 

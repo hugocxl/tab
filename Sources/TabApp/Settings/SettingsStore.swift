@@ -138,20 +138,6 @@ public final class SettingsStore {
         }
     }
 
-    /// Saves the default window width or height from its field.
-    public func setWindowSize(_ id: String, _ text: String) {
-        attempt(id) {
-            guard let value = Double(text.trimmingCharacters(in: .whitespaces)) else {
-                throw SettingsError(id, "Enter a number of points.")
-            }
-            var next = settings
-            if id == "width" { next.window.defaultSize.width = value } else { next.window.defaultSize.height = value }
-            try next.saveWindow(to: dirs.settings)
-            settings = next
-            applySettings()
-        }
-    }
-
     public func setWorktreeLocation(_ id: String, _ text: String) {
         attempt(id) {
             var next = settings

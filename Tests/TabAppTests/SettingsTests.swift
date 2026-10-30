@@ -63,7 +63,7 @@ final class SettingsTests: XCTestCase {
         let search = try XCTUnwrap(page.lastBuild)
         XCTAssertTrue(search.rowIds.contains("font-family"))
         XCTAssertTrue(search.rowIds.contains("shortcut.increase_font_size"))
-        XCTAssertFalse(search.rowIds.contains("width"))
+        XCTAssertFalse(search.rowIds.contains("close-behavior"))
     }
 
     // MARK: Keyboard
@@ -121,15 +121,10 @@ final class SettingsTests: XCTestCase {
         try Data(#"{"futureSection": {"kept": true}}"#.utf8).write(to: dirs.settings)
         let store = makeStore()
         store.setCloseBehavior(.detach)
-        store.setWindowSize("width", "1400")
-        store.setWindowSize("height", "12")
         store.updateAppearance("agents-panel-grouping") { $0.agentsPanelGrouping = .worktrees }
 
         let saved = try Settings.load(dirs.settings)
         XCTAssertEqual(saved.window.closeBehavior, .detach)
-        XCTAssertEqual(saved.window.defaultSize.width, 1400)
-        XCTAssertEqual(saved.window.defaultSize.height, 800, "an invalid height is refused")
-        XCTAssertNotNil(store.errors["height"])
         XCTAssertEqual(saved.appearance.agentsPanelGrouping, .worktrees)
         let raw = try JSONSerialization.jsonObject(with: Data(contentsOf: dirs.settings)) as? [String: Any]
         XCTAssertNotNil(raw?["futureSection"])
@@ -242,7 +237,7 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(controller.model.title, "Search")
         controller.select(.general)
         XCTAssertEqual(controller.model.query, "", "opening a page ends the search")
-        XCTAssertTrue(controller.model.lastBuild?.rowIds.contains("width") ?? false)
+        XCTAssertTrue(controller.model.lastBuild?.rowIds.contains("close-behavior") ?? false)
     }
 
     func testBackAndForwardWalkVisitedPages() {

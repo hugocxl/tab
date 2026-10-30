@@ -153,8 +153,6 @@ final class SettingsControlsTests: XCTestCase {
         let expected: [String: String] = [
             "close-behavior": "settings.json:window.closeBehavior",
             "confirm-process": "settings.json:window.confirmRunningProcess",
-            "width": "settings.json:window.defaultSize.width",
-            "height": "settings.json:window.defaultSize.height",
             "font-ligatures": "terminal.json:font.features",
             "browser-enabled": "settings.json:browser.enabled",
             "ai-commit-push": "settings.json:ai.commit.push",
