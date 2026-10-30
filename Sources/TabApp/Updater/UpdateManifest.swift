@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import TabCore
 import TabProtocol
@@ -19,6 +20,8 @@ public struct UpdateManifest: Codable, Equatable, Sendable {
     /// The verified bundle's protocol versions, filled after preparing it.
     /// Feed hints alone never authorize preserving a running server.
     public var protocolVersions: [ProtocolVersion]
+    /// The release key's Ed25519 signature of `signedMessage`, base64.
+    public var signature: String?
 
     public init(
         version: String,
@@ -26,7 +29,8 @@ public struct UpdateManifest: Codable, Equatable, Sendable {
         sha256: String,
         size: Int64? = nil,
         minimumSystemVersion: String? = nil,
-        protocolVersions: [ProtocolVersion] = []
+        protocolVersions: [ProtocolVersion] = [],
+        signature: String? = nil
     ) {
         self.version = version
         self.url = url
@@ -34,10 +38,20 @@ public struct UpdateManifest: Codable, Equatable, Sendable {
         self.size = size
         self.minimumSystemVersion = minimumSystemVersion
         self.protocolVersions = protocolVersions
+        self.signature = signature
+    }
+
+    /// What the feed signature covers: everything that decides what is
+    /// downloaded and whether it may install.
+    public var signedMessage: Data {
+        let fields = ["tab-update-1", version, url.absoluteString, sha256, size.map(String.init) ?? "",
+                      minimumSystemVersion ?? ""]
+        return Data(fields.joined(separator: "\n").utf8)
     }
 
     enum CodingKeys: String, CodingKey {
         case version, url, sha256, size, minimumSystemVersion, protocolVersions, protocolVersion, schema, platforms
+        case signature
     }
 
     private struct Asset: Decodable {
@@ -76,6 +90,7 @@ public struct UpdateManifest: Codable, Equatable, Sendable {
         } else {
             protocolVersions = []
         }
+        signature = try container.decodeIfPresent(String.self, forKey: .signature)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -86,13 +101,19 @@ public struct UpdateManifest: Codable, Equatable, Sendable {
         try container.encodeIfPresent(size, forKey: .size)
         try container.encodeIfPresent(minimumSystemVersion, forKey: .minimumSystemVersion)
         try container.encode(protocolVersions, forKey: .protocolVersions)
+        try container.encodeIfPresent(signature, forKey: .signature)
     }
 }
 
 /// Where updates come from and what a feed may contain.
 public enum UpdateFeed {
-    /// The latest release's feed.
-    public static var url: URL { url(channel: Release.channel) }
+    /// The feeds this build updates from: a beta also follows the stable
+    /// releases that replace it.
+    public static var urls: [URL] { urls(channel: Release.channel) }
+
+    static func urls(channel: ReleaseChannel) -> [URL] {
+        channel == .beta ? [url(channel: .beta), url(channel: .stable)] : [url(channel: .stable)]
+    }
 
     static func url(channel: ReleaseChannel) -> URL {
         let path = channel == .beta ? "download/beta" : "latest/download"
@@ -100,18 +121,23 @@ public enum UpdateFeed {
     }
     /// Every download must come from the release's own assets.
     public static let releases = "https://github.com/hugocxl/tab/releases/download"
+    /// The public half of the release key that signs every feed.
+    /// Its raw Ed25519 public key.
+    public static let signingKey = Data(base64Encoded: "8WVjBhNEwftAdmvlgzdEwLfMm+iKxMYWGNGkilHPDGA=") ?? Data()
     /// The largest feed read.
     public static let maximumFeedSize = 65_536
     /// The largest download accepted.
     public static let maximumDownloadSize: Int64 = 2 * 1024 * 1024 * 1024
 
     /// The release that replaces `current`, or `nil` when the feed's release
-    /// isn't newer on this build's channel. Throws when the feed is broken
-    /// or points anywhere but the release's own assets.
+    /// doesn't replace it. Throws when the feed is broken, isn't signed by
+    /// `signingKey` (when given), or points anywhere but the release's own
+    /// assets.
     public static func parse(
         _ data: Data,
         current: String,
-        systemVersion: OperatingSystemVersion = ProcessInfo.processInfo.operatingSystemVersion
+        systemVersion: OperatingSystemVersion = ProcessInfo.processInfo.operatingSystemVersion,
+        signedBy signingKey: Data? = nil
     ) throws -> UpdateManifest? {
         guard data.count <= maximumFeedSize else { throw UpdateError.invalidFeed("The update feed is too large") }
         let manifest: UpdateManifest
@@ -129,6 +155,7 @@ public enum UpdateFeed {
             throw UpdateError.notARelease
         }
         guard next.isNewer(than: installed) else { return nil }
+        if let signingKey { try verifySignature(manifest, key: signingKey) }
         try validate(manifest)
         if let minimum = manifest.minimumSystemVersion {
             guard let required = parseSystemVersion(minimum) else {
@@ -139,6 +166,15 @@ public enum UpdateFeed {
             }
         }
         return manifest
+    }
+
+    static func verifySignature(_ manifest: UpdateManifest, key: Data) throws {
+        guard let key = try? Curve25519.Signing.PublicKey(rawRepresentation: key),
+              let text = manifest.signature, let signature = Data(base64Encoded: text),
+              key.isValidSignature(signature, for: manifest.signedMessage)
+        else {
+            throw UpdateError.invalidFeed("The update feed isn't signed with \(Release.appName)'s release key")
+        }
     }
 
     static func validate(_ manifest: UpdateManifest) throws {

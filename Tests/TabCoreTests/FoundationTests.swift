@@ -29,19 +29,28 @@ final class FuzzyTests: XCTestCase {
 }
 
 final class FoundationTests: XCTestCase {
-    func testReleasesReplaceOnlyOlderReleasesOfTheirChannel() {
+    func testBetasFollowTheirBuildAndGiveWayToTheirStableRelease() {
         XCTAssertTrue(ReleaseVersion.isNewer("2.0.0-beta.10", than: "2.0.0-beta.9"))
         XCTAssertTrue(ReleaseVersion.isNewer("2.1.0-beta.10", than: "2.0.0-beta.9"))
         XCTAssertFalse(ReleaseVersion.isNewer("2.0.0-beta.9", than: "2.0.0-beta.9"))
         XCTAssertTrue(ReleaseVersion.isNewer("2.0.10", than: "2.0.9"))
         XCTAssertTrue(ReleaseVersion.isNewer("3.0.0", than: "2.9.9"))
         XCTAssertFalse(ReleaseVersion.isNewer("2.0.0", than: "2.0.1"))
-        XCTAssertFalse(ReleaseVersion.isNewer("2.0.1", than: "2.0.0-beta.9"))
+        XCTAssertTrue(ReleaseVersion.isNewer("2.0.1", than: "2.0.0-beta.9"))
+        XCTAssertTrue(ReleaseVersion.isNewer("2.0.0", than: "2.0.0-beta.9"))
+        XCTAssertFalse(ReleaseVersion.isNewer("1.9.9", than: "2.0.0-beta.9"))
         XCTAssertFalse(ReleaseVersion.isNewer("2.0.0-beta.10", than: "2.0.0"))
+        XCTAssertFalse(ReleaseVersion.isNewer("3.0.0-beta.10", than: "2.0.0"))
         XCTAssertFalse(ReleaseVersion.isNewer("2.0.0-beta.10", than: "2.0.0-beta-0"))
         XCTAssertNil(ReleaseVersion("2.0.0-beta-1110"))
         XCTAssertNil(ReleaseVersion("2.0.0-beta.01"))
         XCTAssertNil(ReleaseVersion(Release.sourceVersion))
+        // A beta's full version lives beside the X.Y.Z macOS reads; bundles
+        // from before it have only the short version.
+        XCTAssertEqual(Release.version(ofBundle: ["CFBundleShortVersionString": "2.0.0", "TabVersion": "2.0.0-beta.9"]),
+                       "2.0.0-beta.9")
+        XCTAssertEqual(Release.version(ofBundle: ["CFBundleShortVersionString": "1.9.0"]), "1.9.0")
+        XCTAssertNil(Release.version(ofBundle: [:]))
     }
 
     func testProfileFoldersSeparateBuildsAndHonorTheOverride() throws {

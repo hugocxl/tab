@@ -10,12 +10,20 @@ public enum Release {
 
     /// This build's version: the bundle's when it has one.
     public static var version: String {
-        if let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
-           !version.isEmpty
-        {
-            return version
+        Bundle.main.infoDictionary.flatMap(version(ofBundle:)) ?? sourceVersion
+    }
+
+    /// The Info.plist key with a bundle's full version, such as
+    /// `1.2.0-beta.340`; `CFBundleShortVersionString` holds only `X.Y.Z`.
+    public static let versionKey = "TabVersion"
+
+    /// A bundle's full version from its Info.plist, read from `versionKey`
+    /// and, for bundles from before it, `CFBundleShortVersionString`.
+    public static func version(ofBundle info: [String: Any]) -> String? {
+        for key in [versionKey, "CFBundleShortVersionString"] {
+            if let version = info[key] as? String, !version.isEmpty { return version }
         }
-        return sourceVersion
+        return nil
     }
 
     /// Whether this is a debug build, which keeps its data in `Tab Dev`.
@@ -47,9 +55,12 @@ public enum ReleaseChannel: String, Sendable, Codable {
     case stable
 }
 
-/// A released version, in the order releases of its channel follow.
+/// A released version. Stable releases follow their `X.Y.Z` order; betas,
+/// `X.Y.Z-beta.N`, follow `N`, the commit count they were built from. A beta
+/// is replaced by a newer beta or by the stable release of its `X.Y.Z` or
+/// later; stable releases are never replaced by betas.
 public enum ReleaseVersion: Equatable, Sendable {
-    case beta(build: UInt64)
+    case beta(major: UInt64, minor: UInt64, patch: UInt64, build: UInt64)
     case stable(major: UInt64, minor: UInt64, patch: UInt64)
 
     public init?(_ version: String) {
@@ -70,7 +81,7 @@ public enum ReleaseVersion: Equatable, Sendable {
             return
         }
         guard !build.hasPrefix("0"), let number = Self.number(build) else { return nil }
-        self = .beta(build: number)
+        self = .beta(major: numbers[0], minor: numbers[1], patch: numbers[2], build: number)
     }
 
     public var channel: ReleaseChannel {
@@ -80,20 +91,21 @@ public enum ReleaseVersion: Equatable, Sendable {
         }
     }
 
-    /// Whether this release replaces `other`. Releases of different channels
-    /// never replace each other.
+    /// Whether this release replaces `other`.
     public func isNewer(than other: ReleaseVersion) -> Bool {
         switch (self, other) {
-        case let (.beta(build), .beta(other)):
+        case let (.beta(_, _, _, build), .beta(_, _, _, other)):
             return build > other
         case let (.stable(a, b, c), .stable(x, y, z)):
             return [x, y, z].lexicographicallyPrecedes([a, b, c])
-        default:
+        case let (.stable(a, b, c), .beta(x, y, z, _)):
+            return ![a, b, c].lexicographicallyPrecedes([x, y, z])
+        case (.beta, .stable):
             return false
         }
     }
 
-    /// Whether `target` is a newer release than `current` on the same channel.
+    /// Whether `target` is a release that replaces `current`.
     public static func isNewer(_ target: String, than current: String) -> Bool {
         guard let target = ReleaseVersion(target), let current = ReleaseVersion(current) else { return false }
         return target.isNewer(than: current)

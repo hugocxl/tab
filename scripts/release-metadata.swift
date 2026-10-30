@@ -1,4 +1,5 @@
-// Writes the schema-1 feed from the final DMG and its bundled build metadata.
+// Writes the schema-1 feed from the final DMG and its bundled build metadata,
+// signed with the release key in UPDATE_SIGNING_KEY (base64 Ed25519) when set.
 // Usage: swift scripts/release-metadata.swift <app> <dmg> <team-id|-> <output>
 import CryptoKit
 import Foundation
@@ -30,12 +31,12 @@ do {
     let team = CommandLine.arguments[3]
     let info = try PropertyListSerialization.propertyList(
         from: Data(contentsOf: app.appendingPathComponent("Contents/Info.plist")), format: nil) as! [String: Any]
-    guard let version = info["CFBundleShortVersionString"] as? String,
+    guard let version = (info["TabVersion"] ?? info["CFBundleShortVersionString"]) as? String,
           let minimum = info["LSMinimumSystemVersion"] as? String else {
         throw NSError(domain: "TabRelease", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing bundle version or minimum macOS"])
     }
-    try require(version.range(of: #"^[0-9]+\.[0-9]+\.[0-9]+$"#, options: .regularExpression) != nil,
-                "The updater needs an X.Y.Z release version")
+    try require(version.range(of: #"^[0-9]+\.[0-9]+\.[0-9]+(-beta\.[1-9][0-9]*)?$"#, options: .regularExpression) != nil,
+                "The updater needs an X.Y.Z or X.Y.Z-beta.N release version")
     try require(dmg.lastPathComponent == "Tab-\(version)-arm64.dmg", "Unexpected DMG filename")
     try require(team == "-" || team.range(of: #"^[A-Z0-9]{10}$"#, options: .regularExpression) != nil,
                 "Invalid Apple team identifier")
@@ -54,16 +55,22 @@ do {
     var hash = SHA256()
     while let data = try file.read(upToCount: 1024 * 1024), !data.isEmpty { hash.update(data: data) }
     let digest = hash.finalize().map { String(format: "%02x", $0) }.joined()
-    let asset: [String: Any] = [
-        "url": "https://github.com/hugocxl/tab/releases/download/v\(version)/\(dmg.lastPathComponent)",
-        "sha256": digest, "size": size,
-    ]
-    let manifest: [String: Any] = [
+    let url = "https://github.com/hugocxl/tab/releases/download/v\(version)/\(dmg.lastPathComponent)"
+    let asset: [String: Any] = ["url": url, "sha256": digest, "size": size]
+    var manifest: [String: Any] = [
         "schema": 1, "version": version, "platforms": ["macos-aarch64": asset],
         "buildInfo": server, "protocolVersions": versions,
         "teamID": team == "-" ? NSNull() : team as Any,
         "minimumSystemVersion": minimum,
     ]
+    // The same fields, in the same order, as UpdateManifest.signedMessage.
+    if let key = ProcessInfo.processInfo.environment["UPDATE_SIGNING_KEY"], !key.isEmpty {
+        guard let raw = Data(base64Encoded: key), let signer = try? Curve25519.Signing.PrivateKey(rawRepresentation: raw) else {
+            throw NSError(domain: "TabRelease", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid UPDATE_SIGNING_KEY"])
+        }
+        let message = ["tab-update-1", version, url, digest, String(size), minimum].joined(separator: "\n")
+        manifest["signature"] = try signer.signature(for: Data(message.utf8)).base64EncodedString()
+    }
     var data = try JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
     data.append(0x0a)
     try data.write(to: URL(fileURLWithPath: CommandLine.arguments[4]), options: .atomic)

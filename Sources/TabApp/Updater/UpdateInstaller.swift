@@ -32,9 +32,21 @@ public struct Installation: Equatable, Sendable {
         guard let team = CodeSignature.teamIdentifier(of: bundle) else {
             throw UpdateError.unavailable("Automatic updates require a Developer ID signed app.")
         }
+        guard canReplace(bundle) else {
+            throw UpdateError.unavailable(
+                "\(Release.appName) can't update itself because this account can't change \(bundle.path). "
+                    + "Ask an administrator to install the update, or keep \(Release.appName).app in a folder you own.")
+        }
         let installation = Installation(bundle: bundle, team: team)
         try installation.verifyApp(bundle, version: Release.version)
         return installation
+    }
+
+    /// Whether this process may move `bundle` aside and put another in its
+    /// place: the swap renames the bundle within its folder and stages the
+    /// update beside it, so both must be writable.
+    static func canReplace(_ bundle: URL) -> Bool {
+        access(bundle.deletingLastPathComponent().path, W_OK) == 0 && access(bundle.path, W_OK) == 0
     }
 
     var directory: URL { bundle.deletingLastPathComponent() }
@@ -111,13 +123,13 @@ public struct Installation: Equatable, Sendable {
 
     /// The parts of a bundle the signature doesn't vouch for by itself.
     static func checkContents(_ app: URL, version: String) throws {
-        guard let info = NSDictionary(contentsOf: app.appendingPathComponent("Contents/Info.plist")) else {
+        guard let info = NSDictionary(contentsOf: app.appendingPathComponent("Contents/Info.plist")) as? [String: Any] else {
             throw UpdateError.invalidBundle("The update has no Info.plist.")
         }
         guard info["CFBundleIdentifier"] as? String == Release.bundleIdentifier else {
             throw UpdateError.invalidBundle("The update has an unexpected bundle identifier.")
         }
-        guard info["CFBundleShortVersionString"] as? String == version else {
+        guard Release.version(ofBundle: info) == version else {
             throw UpdateError.invalidBundle("The update's version doesn't match the update feed.")
         }
         let appExecutable = try DesktopExecutable.name(in: app)

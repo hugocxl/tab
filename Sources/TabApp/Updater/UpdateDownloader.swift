@@ -22,9 +22,35 @@ public struct UpdateDownloader: Sendable {
         self.session = session
     }
 
-    /// The release that replaces this build, if any.
-    public func latest(current: String = Release.version, feedURL: URL = UpdateFeed.url) async throws -> UpdateManifest? {
-        var request = URLRequest(url: feedURL)
+    /// The newest release that replaces this build, if any, across `feedURLs`.
+    /// A feed that can't be read or trusted only fails the check when every
+    /// feed fails.
+    public func latest(
+        current: String = Release.version,
+        feedURLs: [URL] = UpdateFeed.urls,
+        signingKey: Data? = UpdateFeed.signingKey
+    ) async throws -> UpdateManifest? {
+        var newest: UpdateManifest?
+        var failure: Error?
+        var answered = false
+        for url in feedURLs {
+            do {
+                let manifest = try UpdateFeed.parse(try await feed(url), current: current, signedBy: signingKey)
+                answered = true
+                guard let manifest else { continue }
+                if let known = newest, !ReleaseVersion.isNewer(manifest.version, than: known.version) { continue }
+                newest = manifest
+            } catch {
+                // A feed that can't be trusted says more than one that can't be reached.
+                if failure == nil || (Self.isTransport(failure) && !Self.isTransport(error)) { failure = error }
+            }
+        }
+        if !answered, let failure { throw failure }
+        return newest
+    }
+
+    private func feed(_ url: URL) async throws -> Data {
+        var request = URLRequest(url: url)
         request.cachePolicy = .reloadIgnoringLocalCacheData
         let (bytes, response) = try await session.bytes(for: request)
         defer { bytes.task.cancel() }
@@ -34,7 +60,7 @@ public struct UpdateDownloader: Sendable {
             guard data.count < UpdateFeed.maximumFeedSize else { throw UpdateError.invalidFeed("The update feed is too large") }
             data.append(byte)
         }
-        return try UpdateFeed.parse(data, current: current)
+        return data
     }
 
     /// Streams a bounded release into `directory`, then verifies its size
@@ -100,6 +126,12 @@ public struct UpdateDownloader: Sendable {
             hasher.update(data: chunk)
         }
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func isTransport(_ error: Error?) -> Bool {
+        guard let error = error as? UpdateError else { return true }
+        if case .download = error { return true }
+        return false
     }
 
     private static func checkStatus(_ response: URLResponse) throws {

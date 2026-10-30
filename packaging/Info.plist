@@ -9,7 +9,8 @@
     <key>CFBundleName</key><string>__APP_NAME__</string>
     <key>CFBundleDisplayName</key><string>__APP_NAME__</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>__VERSION__</string>
+    <key>CFBundleShortVersionString</key><string>__SHORT_VERSION__</string>
+    <key>TabVersion</key><string>__VERSION__</string>
     <key>CFBundleVersion</key><string>__BUILD_NUMBER__</string>
     <key>CFBundleGetInfoString</key><string>__APP_NAME__ __VERSION__</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>

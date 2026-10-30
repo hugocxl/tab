@@ -17,8 +17,10 @@ final class UpdaterProcessTests: XCTestCase {
         let manifest = try XCTUnwrap(UpdateFeed.parse(data, current: "1.0.0"))
         XCTAssertEqual(manifest.size, 123)
         XCTAssertEqual(manifest.protocolVersions, [])
-        XCTAssertEqual(UpdateFeed.url(channel: .beta).path, "/hugocxl/tab/releases/download/beta/update.json")
-        XCTAssertEqual(UpdateFeed.url(channel: .stable).path, "/hugocxl/tab/releases/latest/download/update.json")
+        XCTAssertEqual(UpdateFeed.urls(channel: .beta).map(\.path), [
+            "/hugocxl/tab/releases/download/beta/update.json", "/hugocxl/tab/releases/latest/download/update.json",
+        ])
+        XCTAssertEqual(UpdateFeed.urls(channel: .stable).map(\.path), ["/hugocxl/tab/releases/latest/download/update.json"])
         feed["schema"] = 2
         XCTAssertThrowsError(try UpdateFeed.parse(JSONSerialization.data(withJSONObject: feed), current: "1.0.0"))
         feed["schema"] = 1
@@ -82,11 +84,19 @@ final class UpdaterProcessTests: XCTestCase {
         let fm = FileManager.default
         let hash = release.sha256
         let size = try XCTUnwrap(release.size)
-        let feed: [String: Any] = ["schema": 1, "version": "1.1.0", "platforms": ["macos-aarch64": [
-            "url": "https://github.com/hugocxl/tab/releases/download/v1.1.0/Tab-1.1.0-arm64.dmg",
-            "size": size, "sha256": hash,
-        ]]]
-        try JSONSerialization.data(withJSONObject: feed).write(to: root.appendingPathComponent("update.json"))
+        let key = Curve25519.Signing.PrivateKey()
+        func publish(_ version: String, as name: String, signedBy signer: Curve25519.Signing.PrivateKey? = nil) throws {
+            let url = "https://github.com/hugocxl/tab/releases/download/v\(version)/Tab-\(version)-arm64.dmg"
+            var feed: [String: Any] = ["schema": 1, "version": version, "platforms": ["macos-aarch64": [
+                "url": url, "size": size, "sha256": hash,
+            ]]]
+            let release = UpdateManifest(version: version, url: URL(string: url)!, sha256: hash, size: size)
+            feed["signature"] = try (signer ?? key).signature(for: release.signedMessage).base64EncodedString()
+            try JSONSerialization.data(withJSONObject: feed).write(to: root.appendingPathComponent(name))
+        }
+        try publish("1.1.0", as: "update.json")
+        try publish("1.1.0-beta.40", as: "beta.json")
+        try publish("1.2.0", as: "forged.json", signedBy: Curve25519.Signing.PrivateKey())
         try Data(repeating: 32, count: UpdateFeed.maximumFeedSize + 1).write(to: root.appendingPathComponent("oversize.json"))
         let server = try startHTTP(in: root)
         defer { server.process.terminate(); server.process.waitUntilExit() }
@@ -94,10 +104,33 @@ final class UpdaterProcessTests: XCTestCase {
         try fm.createDirectory(at: downloads, withIntermediateDirectories: true)
         var manifest = UpdateManifest(version: "1.1.0", url: server.url.appendingPathComponent("release.zip"), sha256: hash, size: size)
         let downloader = UpdateDownloader()
-        let latest = try await downloader.latest(current: "1.0.0", feedURL: server.url.appendingPathComponent("update.json"))
-        XCTAssertEqual(latest?.version, "1.1.0")
+        func latest(_ current: String, _ names: [String]) async throws -> String? {
+            try await downloader.latest(current: current, feedURLs: names.map { server.url.appendingPathComponent($0) },
+                                        signingKey: key.publicKey.rawRepresentation)?.version
+        }
+        let stable = try await latest("1.0.0", ["update.json"])
+        XCTAssertEqual(stable, "1.1.0")
+        // A beta follows both feeds and takes the newest release: a newer
+        // beta, or the stable release of its version.
+        let newerBeta = try await latest("1.1.0-beta.30", ["beta.json", "update.json"])
+        XCTAssertEqual(newerBeta, "1.1.0")
+        let olderLine = try await latest("1.0.0-beta.30", ["beta.json", "missing.json"])
+        XCTAssertEqual(olderLine, "1.1.0-beta.40")
+        let current = try await latest("1.1.0-beta.40", ["beta.json", "missing.json"])
+        XCTAssertNil(current)
+        // A forged feed is never chosen, and fails the check only when no feed can be trusted.
+        let trusted = try await latest("1.0.0", ["forged.json", "update.json"])
+        XCTAssertEqual(trusted, "1.1.0")
+        for names in [["forged.json"], ["missing.json", "forged.json"]] {
+            do {
+                _ = try await latest("1.0.0", names)
+                XCTFail("trusted a feed signed with another key")
+            } catch {
+                XCTAssertEqual(error as? UpdateError, .invalidFeed("The update feed isn't signed with \(Release.appName)'s release key"))
+            }
+        }
         do {
-            _ = try await downloader.latest(current: "1.0.0", feedURL: server.url.appendingPathComponent("oversize.json"))
+            _ = try await latest("1.0.0", ["oversize.json"])
             XCTFail("accepted an oversized feed")
         } catch {
             XCTAssertEqual(error as? UpdateError, .invalidFeed("The update feed is too large"))

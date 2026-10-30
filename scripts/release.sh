@@ -9,7 +9,9 @@ if [ "$(uname -s)" != Darwin ] || [ "$(uname -m)" != arm64 ]; then
     exit 1
 fi
 export MACOSX_DEPLOYMENT_TARGET=14.0
-export RELEASE_VERSION="${RELEASE_VERSION:-$(cat VERSION).$(git rev-list --count HEAD)}"
+# Releases are numbered by their tag (vX.Y.Z or vX.Y.Z-beta.N), never by default.
+: "${RELEASE_VERSION:?Set RELEASE_VERSION to the X.Y.Z or X.Y.Z-beta.N being released}"
+export RELEASE_VERSION
 IDENTITY="${CODESIGN_IDENTITY:--}"
 NOTARY_ARGS=()
 if [ -n "${NOTARY_KEYCHAIN_PROFILE:-}" ]; then
@@ -25,9 +27,12 @@ elif [ -n "${APPLE_ID:-}${APPLE_APP_SPECIFIC_PASSWORD:-}" ]; then
     : "${APPLE_TEAM_ID:?APPLE_TEAM_ID is required}"
     NOTARY_ARGS=(--apple-id "$APPLE_ID" --password "$APPLE_APP_SPECIFIC_PASSWORD" --team-id "$APPLE_TEAM_ID")
 fi
-if [ "${REQUIRE_NOTARIZATION:-0}" = 1 ] && { [ "$IDENTITY" = - ] || [ "${#NOTARY_ARGS[@]}" = 0 ]; }; then
-    echo "Error: this release requires a Developer ID identity and notarization credentials" >&2
+if [ "${REQUIRE_NOTARIZATION:-0}" = 1 ] && { [ "$IDENTITY" = - ] || [ "${#NOTARY_ARGS[@]}" = 0 ] || [ -z "${UPDATE_SIGNING_KEY:-}" ]; }; then
+    echo "Error: this release requires a Developer ID identity, notarization credentials and UPDATE_SIGNING_KEY" >&2
     exit 1
+fi
+if [ -z "${UPDATE_SIGNING_KEY:-}" ]; then
+    echo "==> No UPDATE_SIGNING_KEY: update.json is unsigned and installed apps will refuse it"
 fi
 if [ "$IDENTITY" = - ]; then
     echo "==> No CODESIGN_IDENTITY: using an ad-hoc signature; skipping signing with Developer ID, notarization and stapling"

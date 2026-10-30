@@ -2,7 +2,8 @@
 
 Tab ships one Apple silicon DMG and an `update.json` feed in each GitHub Release,
 following Codesh's schema-1 layout. macOS 14.0 is the minimum. No release script
-launches the GUI, creates a tag, pushes a commit, or publishes a release locally.
+launches the GUI, pushes a commit, or publishes a release locally; publishing is a
+tag push, which `scripts/tag-release.sh` makes.
 
 ## Build locally
 
@@ -11,14 +12,17 @@ Zig 0.17.0 for the pinned Ghostty VT build. There are no added package dependenc
 
 ```sh
 scripts/validate.sh
-scripts/release.sh
+RELEASE_VERSION=0.2.0 scripts/release.sh
 ```
 
-`VERSION` contains `X.Y`; the default version is `X.Y.<git commit count>`, matching
-Codesh's version convention. `RELEASE_VERSION=X.Y.Z` overrides this for a tag build.
-Only stable `X.Y.Z` release versions are packaged; the `v*` workflow rejects other
-tags. `CFBundleShortVersionString` is the full release version and `CFBundleVersion`
-is the checkout's commit count. Neither command edits source files to stamp a version.
+The release tag is the only source of a release's version: `vX.Y.Z` for a stable
+release, `vX.Y.Z-beta.N` for a beta, where `N` is the tagged commit's
+`git rev-list --count`, which orders betas. `release.sh` requires `RELEASE_VERSION`;
+the workflow sets it from the tag. Local bundles from `bundle.sh` without it are
+`X.Y.<commit count>` from `VERSION` (`X.Y`) and are never published.
+`CFBundleShortVersionString` is `X.Y.Z`, as macOS expects; the full version, with
+any `-beta.N`, is the `TabVersion` key, which the app and the updater read.
+`CFBundleVersion` is the commit count. Nothing edits source files to stamp a version.
 
 Outputs (existing local outputs are replaced):
 
@@ -30,8 +34,20 @@ Without `CODESIGN_IDENTITY`, the scripts explicitly report ad-hoc signing and sk
 Developer ID signing, notarization and stapling. Such builds are for local checks;
 the updater requires a Developer ID team and will not activate for them. With an
 identity but no notarization credentials, the script reports that notarization is
-skipped. `REQUIRE_NOTARIZATION=1` makes missing signing/notarization credentials an
-error, and the release workflow always sets it.
+skipped. `REQUIRE_NOTARIZATION=1` makes missing signing, notarization or feed
+signing credentials an error, and the release workflow always sets it.
+
+`UPDATE_SIGNING_KEY` is the base64 Ed25519 private key that signs `update.json`.
+Installed apps hold its public half (`UpdateFeed.signingKey`) and refuse feeds it
+didn't sign. Without it, `release.sh` writes an unsigned feed for local checks.
+The key lives in the maintainer's login keychain as "Tab update signing key":
+
+```sh
+export UPDATE_SIGNING_KEY="$(security find-generic-password -a tab-release -s 'Tab update signing key' -w)"
+```
+
+Back it up somewhere safe. Losing it means installed apps can't update until they
+are reinstalled by hand from a release with a new key.
 
 For signed local packaging, set `CODESIGN_IDENTITY` to the Developer ID Application
 certificate's name or SHA-1 identity from `security find-identity -v -p codesigning`.
@@ -60,52 +76,58 @@ SHA-256 and byte count. App and DMG Gatekeeper assessments run for notarized bui
 
 ## GitHub secrets and release tags
 
-Configure these repository secrets, using the same names as Codesh:
+The repository must be public: installed apps download the feed and the DMG
+without credentials. Set every secret at once with:
+
+```sh
+scripts/setup-release-secrets.sh DeveloperID.p12 AuthKey_KEYID.p8 <issuer-id> <team-id>
+```
 
 | Secret | Value |
 | --- | --- |
 | `DEVELOPER_ID_APPLICATION_CERTIFICATE` | Base64-encoded Developer ID Application `.p12`, including its private key |
 | `DEVELOPER_ID_APPLICATION_PASSWORD` | Password protecting that `.p12` |
-| `KEYCHAIN_PASSWORD` | A strong temporary signing-keychain password |
-| `APPLE_ID` | Apple developer account email |
-| `APPLE_APP_SPECIFIC_PASSWORD` | App-specific password for that account |
+| `APPLE_API_KEY_P8` | Base64-encoded App Store Connect API key (`.p8`) with the Developer role |
+| `APPLE_API_KEY_ID` | That key's ID |
+| `APPLE_API_ISSUER_ID` | The API keys' issuer ID |
 | `APPLE_TEAM_ID` | Ten-character Apple team ID |
+| `UPDATE_SIGNING_KEY` | The feed signing key, from the login keychain |
 
-Set them with `gh secret set`; examples:
+The workflow notarizes with the API key. Without `APPLE_API_KEY_P8` it falls back
+to `APPLE_ID` and `APPLE_APP_SPECIFIC_PASSWORD`, Codesh's secrets. Its signing
+keychain gets a random password per run. `GITHUB_TOKEN` is supplied by GitHub.
+
+To cut a release, push the validated commit to `main`, then:
 
 ```sh
-base64 < /path/to/DeveloperID.p12 | gh secret set DEVELOPER_ID_APPLICATION_CERTIFICATE --repo hugocxl/tab
-gh secret set DEVELOPER_ID_APPLICATION_PASSWORD --repo hugocxl/tab
-gh secret set KEYCHAIN_PASSWORD --repo hugocxl/tab
-gh secret set APPLE_ID --repo hugocxl/tab
-gh secret set APPLE_APP_SPECIFIC_PASSWORD --repo hugocxl/tab
-gh secret set APPLE_TEAM_ID --repo hugocxl/tab
+scripts/tag-release.sh 0.2.0          # stable: tags and pushes v0.2.0
+scripts/tag-release.sh 0.2.0 --beta   # beta: tags and pushes v0.2.0-beta.<commit count>
 ```
 
-`GITHUB_TOKEN` is supplied by GitHub automatically with release write permission;
-no personal access token is needed. The workflow uses Apple ID credentials; the
-profile/API-key alternatives are supported for local use.
+The workflow runs on GitHub's Apple silicon `xcode-27` runner with Xcode 27.1. It
+refuses tags that aren't on `main` and betas whose `N` isn't the commit count,
+builds Ghostty if uncached, runs `scripts/validate.sh`, imports the certificate into
+a temporary keychain, and calls `scripts/release.sh`.
 
-To cut a release, finish validation on the intended commit, choose `X.Y.Z` (normally
-`$(cat VERSION).$(git rev-list --count HEAD)`), and have the maintainer create and push
-`vX.Y.Z`. The workflow uses a full-history checkout on the Apple silicon `macos-15`
-runner, builds Ghostty if uncached, runs `scripts/validate.sh`, imports the certificate
-into a temporary keychain, and calls `scripts/release.sh`. It resolves
-`CODESIGN_IDENTITY` from the imported Developer ID Application certificate.
-
-It creates a draft release for the existing tag, uploads `Tab-X.Y.Z-arm64.dmg` and
-`update.json`, checks uploaded sizes, and publishes it as the latest stable release.
-A failed upload leaves a draft that can be retried. Already public releases are
-left immutable; fix problems in a new version. The temporary certificate/keychain
-are removed even on failure. Validation logs are retained as workflow artifacts.
+It creates a draft release for the tag, uploads `Tab-<version>-arm64.dmg` and
+`update.json`, checks uploaded sizes, and publishes it. A stable release becomes the
+latest release, and so the stable feed, unless a newer stable version already is. A
+beta is published as a prerelease, then its `update.json` replaces the one in the
+`beta` release, the beta feed, unless that names a newer beta. A failed upload
+leaves a draft that can be retried by re-running the workflow. Already public
+releases are left immutable; fix problems in a new version. The temporary
+certificate, key and keychain are removed even on failure. Validation logs are
+retained as workflow artifacts.
 
 ## How installed apps update
 
 Stable apps read
-`https://github.com/hugocxl/tab/releases/latest/download/update.json` on their
-automatic schedule and through Check for Updates. The current implementation checks
-hourly. Beta/local versions use the separate `releases/download/beta/update.json`
-channel; this workflow publishes stable releases only.
+`https://github.com/hugocxl/tab/releases/latest/download/update.json` hourly and
+through Check for Updates. Betas read `releases/download/beta/update.json` and the
+stable feed, and take the newest release that replaces them: a beta with a larger
+`N`, or a stable release of their `X.Y.Z` or later, which moves them to the stable
+channel. Stable apps never take betas. A feed that can't be reached is skipped
+while another answers.
 
 The generated schema is:
 
@@ -117,6 +139,7 @@ The generated schema is:
   "teamID": "ABCDEFGHIJ",
   "buildInfo": { "version": "0.1.28", "compatibility": 21, "protocol": [1] },
   "protocolVersions": [1],
+  "signature": "<base64 Ed25519 signature>",
   "platforms": {
     "macos-aarch64": {
       "url": "https://github.com/hugocxl/tab/releases/download/v0.1.28/Tab-0.1.28-arm64.dmg",
@@ -128,8 +151,10 @@ The generated schema is:
 ```
 
 Protocol/compatibility values come from the packaged executables, not constants in
-the release script. The updater requires a newer version on the same channel,
-the exact release asset URL and filename, supported macOS, and matching download
+the release script. `signature` covers, one per line, `tab-update-1`, the version,
+the DMG URL, its SHA-256, its size and the minimum macOS. The updater requires that
+signature from the release key, a version that replaces the installed one, the
+exact release asset URL and filename, supported macOS, and matching download
 size/checksum. It validates the DMG and nested app against the installed app's
 Apple team, the `com.hugocorta.tab` bundle identifier, arm64 executables and version.
 It then executes the verified `tab` and `tabd` with `--build-info` and requires them
@@ -141,6 +166,11 @@ Compatible releases can replace the app while preserving a running server; the
 server switches once idle or on explicit restart. Incompatible updates wait for
 terminals to end, or require explicit confirmation to end them. An old bundle is
 retained while its server still runs.
+
+Apps that can't update themselves say so in Check for Updates instead of
+downloading: debug builds, ad-hoc signed or unversioned builds, apps run from the
+DMG or translocated by Gatekeeper, and apps whose folder or bundle this account
+can't write, such as one an administrator installed in `/Applications`.
 
 ## Icons and verification
 

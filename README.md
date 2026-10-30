@@ -15,7 +15,7 @@ scripts/bundle.sh debug
 The development bundle is `build/debug/Tab Dev.app`. Each bundle contains
 `TabDesktop` (the app), `tab` (the CLI), and `tabd` (the server).
 
-For a local release package, run `scripts/release.sh`. Without signing credentials
+For a local release package, run `RELEASE_VERSION=X.Y.Z scripts/release.sh`. Without signing credentials
 it produces an ad-hoc signed app and DMG for local inspection. Distribution builds
 use Developer ID signing and Apple notarization; see [Releasing](docs/RELEASE.md).
 

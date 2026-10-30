@@ -26,6 +26,23 @@ final class PackagingManifestTests: XCTestCase {
         XCTAssertEqual(build["compatibility"] as? Int, 21)
     }
 
+    func testReleaseKeySignsTheFeedOfABetaThatTheUpdaterTrusts() throws {
+        let fixture = try Fixture(version: "1.2.3-beta.45")
+        defer { fixture.remove() }
+        let key = Curve25519.Signing.PrivateKey()
+        XCTAssertEqual(try fixture.generate(signingKey: key.rawRepresentation.base64EncodedString()), 0)
+        let data = try Data(contentsOf: fixture.output)
+        let manifest = try XCTUnwrap(UpdateFeed.parse(data, current: "1.2.3-beta.44",
+            systemVersion: OperatingSystemVersion(majorVersion: 14, minorVersion: 0, patchVersion: 0),
+            signedBy: key.publicKey.rawRepresentation))
+        XCTAssertEqual(manifest.url.absoluteString,
+            "https://github.com/hugocxl/tab/releases/download/v1.2.3-beta.45/Tab-1.2.3-beta.45-arm64.dmg")
+        XCTAssertThrowsError(try UpdateFeed.parse(data, current: "1.2.3-beta.44",
+            systemVersion: OperatingSystemVersion(majorVersion: 14, minorVersion: 0, patchVersion: 0),
+            signedBy: Curve25519.Signing.PrivateKey().publicKey.rawRepresentation))
+        XCTAssertNotEqual(try fixture.generate(signingKey: "not a key"), 0)
+    }
+
     func testMismatchedPackagedBuildsCannotProduceAFeed() throws {
         let fixture = try Fixture()
         defer { fixture.remove() }
@@ -41,18 +58,18 @@ final class PackagingManifestTests: XCTestCase {
         let output: URL
         let bytes = Data("final signed and stapled disk image bytes".utf8)
 
-        init() throws {
+        init(version: String = "1.2.3") throws {
             root = FileManager.default.temporaryDirectory.appendingPathComponent("tab-packaging-\(UUID().uuidString)")
             app = root.appendingPathComponent("Tab.app")
-            dmg = root.appendingPathComponent("Tab-1.2.3-arm64.dmg")
+            dmg = root.appendingPathComponent("Tab-\(version)-arm64.dmg")
             output = root.appendingPathComponent("update.json")
             try FileManager.default.createDirectory(at: app.appendingPathComponent("Contents/MacOS"), withIntermediateDirectories: true)
-            let info = ["CFBundleShortVersionString": "1.2.3", "LSMinimumSystemVersion": "14.0"]
+            let info = ["CFBundleShortVersionString": "1.2.3", "TabVersion": version, "LSMinimumSystemVersion": "14.0"]
             try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)
                 .write(to: app.appendingPathComponent("Contents/Info.plist"))
             try bytes.write(to: dmg)
-            try executable("tab", version: "1.2.3")
-            try executable("tabd", version: "1.2.3")
+            try executable("tab", version: version)
+            try executable("tabd", version: version)
         }
 
         func executable(_ name: String, version: String) throws {
@@ -62,7 +79,7 @@ final class PackagingManifestTests: XCTestCase {
             try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
         }
 
-        func generate() throws -> Int32 {
+        func generate(signingKey: String? = nil) throws -> Int32 {
             let repository = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
                 .deletingLastPathComponent().deletingLastPathComponent()
             let process = Process()
@@ -70,6 +87,10 @@ final class PackagingManifestTests: XCTestCase {
             process.arguments = [repository.appendingPathComponent("scripts/release-metadata.swift").path,
                 app.path, dmg.path, "ABCDEFGHIJ", output.path]
             process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            var environment = ProcessInfo.processInfo.environment
+            environment["UPDATE_SIGNING_KEY"] = signingKey
+            process.environment = environment
             try process.run()
             process.waitUntilExit()
             return process.terminationStatus

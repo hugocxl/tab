@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import TabCore
 import TabProtocol
 import XCTest
 @testable import TabApp
@@ -23,11 +24,11 @@ final class UpdaterTests: XCTestCase {
 
     private let sonoma = OperatingSystemVersion(majorVersion: 14, minorVersion: 2, patchVersion: 0)
 
-    func testUpdatesOnlyToANewerReleaseOfTheSameChannel() throws {
-        for version in ["2.0.0-beta.10", "2.1.0-beta.10"] {
+    func testBetasUpdateToNewerBetasAndTheirStableReleaseButStableNeverToBetas() throws {
+        for version in ["2.0.0-beta.10", "2.1.0-beta.10", "2.0.0", "3.0.0"] {
             XCTAssertNotNil(try UpdateFeed.parse(feed(version), current: "2.0.0-beta.9", systemVersion: sonoma), version)
         }
-        for version in ["2.0.0-beta.8", "2.0.0-beta.9", "2.0.0", "3.0.0"] {
+        for version in ["2.0.0-beta.8", "2.0.0-beta.9", "1.9.9"] {
             XCTAssertNil(try UpdateFeed.parse(feed(version), current: "2.0.0-beta.9", systemVersion: sonoma), version)
         }
         XCTAssertNotNil(try UpdateFeed.parse(feed("2.0.1"), current: "2.0.0", systemVersion: sonoma))
@@ -41,6 +42,49 @@ final class UpdaterTests: XCTestCase {
         for version in ["2.0.0-alpha.99", "2.0-beta.99", "2.x.0-beta.99", "2.0.0-beta.0", "2.0.0-beta.01"] {
             XCTAssertThrowsError(try UpdateFeed.parse(feed(version), current: "2.0.0-beta.9", systemVersion: sonoma), version)
         }
+    }
+
+    func testOnlyFeedsSignedWithTheReleaseKeyAreTrusted() throws {
+        let key = Curve25519.Signing.PrivateKey()
+        let other = Curve25519.Signing.PrivateKey()
+        let release = UpdateManifest(
+            version: "1.1.0", url: URL(string: "https://github.com/hugocxl/tab/releases/download/v1.1.0/Tab-1.1.0-arm64.dmg")!,
+            sha256: String(repeating: "a", count: 64), size: 123, minimumSystemVersion: "14.0")
+        func signed(_ manifest: UpdateManifest, by signer: Curve25519.Signing.PrivateKey) throws -> UpdateManifest {
+            var manifest = manifest
+            manifest.signature = try signer.signature(for: manifest.signedMessage).base64EncodedString()
+            return manifest
+        }
+        func parse(_ manifest: UpdateManifest) throws -> UpdateManifest? {
+            try UpdateFeed.parse(JSONEncoder().encode(manifest), current: "1.0.0", systemVersion: sonoma,
+                                 signedBy: key.publicKey.rawRepresentation)
+        }
+        XCTAssertEqual(try parse(signed(release, by: key))?.version, "1.1.0")
+        XCTAssertThrowsError(try parse(release))
+        XCTAssertThrowsError(try parse(signed(release, by: other)))
+        var garbled = try signed(release, by: key)
+        garbled.signature = "not base64"
+        XCTAssertThrowsError(try parse(garbled))
+        // Changing anything that decides what installs breaks the signature.
+        let tampered: [(inout UpdateManifest) -> Void] = [
+            { $0.sha256 = String(repeating: "b", count: 64) },
+            { $0.size = 124 },
+            { $0.minimumSystemVersion = "13.0" },
+            { $0.url = URL(string: "https://github.com/hugocxl/tab/releases/download/v1.1.0/Tab-1.1.0-arm64.zip")! },
+        ]
+        for change in tampered {
+            var manifest = try signed(release, by: key)
+            change(&manifest)
+            XCTAssertThrowsError(try parse(manifest)) { error in
+                XCTAssertEqual(error as? UpdateError, .invalidFeed("The update feed isn't signed with \(Release.appName)'s release key"))
+            }
+        }
+        var renamed = try signed(release, by: key)
+        renamed.version = "1.2.0"
+        XCTAssertThrowsError(try parse(renamed))
+        XCTAssertEqual(UpdateFeed.signingKey.count, 32)
+        XCTAssertThrowsError(try UpdateFeed.parse(JSONEncoder().encode(signed(release, by: key)), current: "1.0.0",
+                                                  systemVersion: sonoma, signedBy: Data()))
     }
 
     func testDecodingToleratesUnknownAndMissingOptionalKeys() throws {
@@ -174,6 +218,27 @@ final class UpdaterTests: XCTestCase {
         XCTAssertThrowsError(try BundleReplacement.replace(current: current, next: next, backup: backup))
         for (path, text) in [(current, "current"), (next, "next"), (backup, "previous")] {
             XCTAssertEqual(try String(contentsOf: path.appendingPathComponent("marker"), encoding: .utf8), text)
+        }
+    }
+
+    func testInstallationsThisAccountCannotChangeAreRefusedBeforeDownloading() throws {
+        let root = try temporaryFolder()
+        let current = root.appendingPathComponent("Tab.app")
+        let staging = root.appendingPathComponent(".tab-update-test")
+        let next = staging.appendingPathComponent("Tab.app")
+        for folder in [current, next] {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        }
+        XCTAssertTrue(Installation.canReplace(current))
+        // An app an administrator installed: its folder, or the bundle itself,
+        // is read-only to this account, and the swap fails exactly then.
+        for locked in [root, current] {
+            try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: locked.path)
+            defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: locked.path) }
+            XCTAssertFalse(Installation.canReplace(current), locked.lastPathComponent)
+            XCTAssertThrowsError(try BundleReplacement.replace(
+                current: current, next: next, backup: staging.appendingPathComponent("previous.app")))
+            XCTAssertTrue(FileManager.default.fileExists(atPath: current.path))
         }
     }
 

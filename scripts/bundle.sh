@@ -8,10 +8,16 @@ case "$CONFIG" in debug|release) ;; *) echo "Usage: $0 [debug|release]" >&2; exi
 source "$ROOT/scripts/swift-settings.sh"
 BUILD_NUMBER="$(git -C "$ROOT" rev-list --count HEAD 2>/dev/null || echo 0)"
 VERSION="${RELEASE_VERSION:-$(cat "$ROOT/VERSION").$BUILD_NUMBER}"
-if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "Error: expected an X.Y.Z release version, got $VERSION" >&2
+if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-beta\.([1-9][0-9]*))?$ ]]; then
+    echo "Error: expected an X.Y.Z or X.Y.Z-beta.N release version, got $VERSION" >&2
     exit 1
 fi
+# A beta's N is the commit count it was built from, which orders betas.
+if [ -n "${BASH_REMATCH[2]}" ] && [ "${BASH_REMATCH[2]}" != "$BUILD_NUMBER" ]; then
+    echo "Error: $VERSION must end in this commit's count, $BUILD_NUMBER" >&2
+    exit 1
+fi
+SHORT_VERSION="${VERSION%%-*}"
 if [ "$CONFIG" = "release" ]; then
     BUNDLE_ID="com.hugocorta.tab"; APP_NAME="Tab"
 else
@@ -33,6 +39,7 @@ for bundle in "$BIN"/*.bundle; do
 done
 cp "$ROOT/packaging/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 sed -e "s/__BUNDLE_ID__/$BUNDLE_ID/g" -e "s/__APP_NAME__/$APP_NAME/g" -e "s/__VERSION__/$VERSION/g" \
+    -e "s/__SHORT_VERSION__/$SHORT_VERSION/g" \
     -e "s/__BUILD_NUMBER__/$BUILD_NUMBER/g" \
     "$ROOT/packaging/Info.plist" > "$APP/Contents/Info.plist"
 plutil -lint "$APP/Contents/Info.plist"
