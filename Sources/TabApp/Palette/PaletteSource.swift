@@ -598,15 +598,12 @@ final class PaletteSource: PaletteDataSource {
 
     private func worktreeItems(_ parent: ProjectId, _ query: String, limit: Int) -> [PaletteItem] {
         guard let root = model.state.project(parent) else { return [] }
-        var projects = [root] + model.state.projects.filter { $0.parentId == parent }
-        if model.appearance.worktreeRecentOrder {
-            let recent = model.appearance.worktreeRecent
-            projects = projects.enumerated().sorted { left, right in
-                let leftRank = recent.firstIndex(of: left.element.id) ?? Int.max
-                let rightRank = recent.firstIndex(of: right.element.id) ?? Int.max
-                return leftRank != rightRank ? leftRank < rightRank : left.offset < right.offset
-            }.map(\.element)
-        }
+        let recent = model.appearance.worktreeRecent
+        var projects = ([root] + model.state.projects.filter { $0.parentId == parent }).enumerated().sorted { left, right in
+            let leftRank = recent.firstIndex(of: left.element.id) ?? Int.max
+            let rightRank = recent.firstIndex(of: right.element.id) ?? Int.max
+            return leftRank != rightRank ? leftRank < rightRank : left.offset < right.offset
+        }.map(\.element)
         if let index = projects.firstIndex(where: { $0.id == current.id }) {
             projects.insert(projects.remove(at: index), at: 0)
         }

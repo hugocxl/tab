@@ -134,7 +134,7 @@ crates. Behavior is 1:1 unless listed under "Intentionally changed".
 
 - [x] Separate window like System Settings (SwiftUI, fixed 740×580pt, not resizable): sidebar search across labels, server tile, one row per page with gradient SF Symbol icons (no expandable sections), back/forward through visited pages, native grouped form with descriptions under each label; works offline; changes apply immediately; Edit in… opens the section's JSON file; hand edits to `terminal.json` reload when the app activates, errors shown and last good values kept
 - [ ] General: closing behavior (end or detach), confirm when a program runs, open files with (Tab editor or another app), worktree default location (default/template/folder)
-- [x] Appearance: light and dark theme pickers following macOS appearance, ~490 bundled themes plus custom `themes/`, sidebar width, order worktree switcher by recent use, agents panel rows grouping
+- [x] Appearance: light and dark theme pickers following macOS appearance, ~490 bundled themes plus custom `themes/`, expand sidebar, agents panel rows grouping
 - [x] Keyboard: every shortcut with key glyphs, record a new one, Reset when changed, conflicts refused, saved under `keymap`
 - [x] Commands: custom commands (name, command, optional shortcut) run in a new pane
 - [x] Terminal: everything in the terminal view list above, with sliders previewing while dragging, pixel/percent units, key bindings recorder with actions (send text, …), disable built-ins, Reset terminal settings with confirmation
@@ -165,6 +165,7 @@ crates. Behavior is 1:1 unless listed under "Intentionally changed".
 - Phone SDK (`codesh-mobile`, Swift/Kotlin bindings): not ported. The server's mobile access is ported, so existing phone clients need a Tab-speaking SDK later.
 - Config files: `settings.json`, `terminal.json`, `server.json`, `state.json` instead of TOML. Themes keep Ghostty's format.
 - Dead settings removed: app layout mode, sidebar vibrancy and level, sidebar collapsed style, status bar visibility, tips visibility, tab-focused expansion. The sidebar is always opaque; there is no status bar.
+- Sidebar settings dropped: width (drag the sidebar's edge instead), expand worktrees when switching projects, unread worktree indicators, worktree switcher order (always current, then recent, then sidebar order).
 - Default window size setting dropped: new windows open at 1200×800pt.
 - Voice settings dropped: dictation always uses the system's on-device language and the system model, and inserts the transcript without pressing Return.
 - Protocol: new JSON + binary protocol; not wire-compatible with Codesh servers.

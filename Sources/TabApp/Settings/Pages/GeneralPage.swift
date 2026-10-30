@@ -77,23 +77,9 @@ extension SettingsModel {
         b.row("sidebar", b.toggle("sidebar", appearance.sidebarExpanded) { [store] value in
             store.updateAppearance("sidebar") { $0.sidebarExpanded = value }
         })
-        b.row("sidebar-width", b.slider(
-            "sidebar-width",
-            value: appearance.sidebarExpandedWidth ?? Metrics.sidebarExpandedWidth,
-            range: Metrics.sidebarMinimumWidth...Metrics.sidebarMaximumWidth,
-            step: 1
-        ) { [store] value in
-            store.updateAppearance("sidebar-width") { $0.sidebarExpandedWidth = value }
+        b.row("agents-panel", b.toggle("agents-panel", appearance.agentsPanelVisible) { [store] on in
+            store.updateAppearance("agents-panel") { $0.agentsPanelVisible = on }
         })
-        let toggles: [(String, Bool, WritableKeyPath<Appearance, Bool>)] = [
-            ("auto-expand-worktrees", appearance.autoExpandWorktrees, \.autoExpandWorktrees),
-            ("worktree-unread", appearance.worktreeShowUnread, \.worktreeShowUnread),
-            ("worktree-recent-order", appearance.worktreeRecentOrder, \.worktreeRecentOrder),
-            ("agents-panel", appearance.agentsPanelVisible, \.agentsPanelVisible),
-        ]
-        for (id, value, path) in toggles {
-            b.row(id, b.toggle(id, value) { [store] on in store.updateAppearance(id) { $0[keyPath: path] = on } })
-        }
         b.row("agents-panel-grouping", b.segmented("agents-panel-grouping", ["Agents", "Worktrees"], selected: appearance.agentsPanelGrouping == .worktrees ? 1 : 0) { [store] index in
             store.updateAppearance("agents-panel-grouping") { $0.agentsPanelGrouping = index == 1 ? .worktrees : .agents }
         })

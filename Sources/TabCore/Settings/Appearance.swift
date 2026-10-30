@@ -69,11 +69,8 @@ public struct Appearance: Codable, Equatable, Sendable {
     public var lightTheme: String
     public var sidebarExpanded: Bool
     public var sidebarHost: SidebarHost
+    /// The expanded sidebar's width, as last dragged.
     public var sidebarExpandedWidth: Double?
-    public var autoExpandWorktrees: Bool
-    public var worktreeShowUnread: Bool
-    /// Orders the worktree switcher by recent use instead of sidebar order.
-    public var worktreeRecentOrder: Bool
     public var worktreeRecent: [ProjectId]
     public var projectRecent: [ProjectId]
     /// Recently run palette commands, most recent first.
@@ -102,8 +99,8 @@ public struct Appearance: Codable, Equatable, Sendable {
     public var sidePanelWidth: Double?
 
     enum CodingKeys: String, CodingKey {
-        case darkTheme, lightTheme, sidebarExpanded, sidebarHost, sidebarExpandedWidth, autoExpandWorktrees
-        case worktreeShowUnread, worktreeRecentOrder, worktreeRecent, projectRecent, paletteRecent
+        case darkTheme, lightTheme, sidebarExpanded, sidebarHost, sidebarExpandedWidth
+        case worktreeRecent, projectRecent, paletteRecent
         case hiddenWorktrees, sidebarFocus, sidebarProjectOrder, agentsPanelVisible, agentsPanelDetached
         case agentsPanelDock, agentsPanelRightWidth, agentsPanelFrame, agentsPanelDockedHeight
         case agentsPanelGrouping, agentSessionsVisible, agentSessionsPosition, agentSessionsPinned
@@ -119,9 +116,6 @@ public struct Appearance: Codable, Equatable, Sendable {
         sidebarExpanded = true
         sidebarHost = .all
         sidebarExpandedWidth = nil
-        autoExpandWorktrees = false
-        worktreeShowUnread = true
-        worktreeRecentOrder = true
         worktreeRecent = []
         projectRecent = []
         paletteRecent = []
@@ -153,9 +147,6 @@ public struct Appearance: Codable, Equatable, Sendable {
         sidebarExpanded = try container.value(.sidebarExpanded, d.sidebarExpanded)
         sidebarHost = try container.value(.sidebarHost, d.sidebarHost)
         sidebarExpandedWidth = try container.decodeIfPresent(Double.self, forKey: .sidebarExpandedWidth)
-        autoExpandWorktrees = try container.value(.autoExpandWorktrees, d.autoExpandWorktrees)
-        worktreeShowUnread = try container.value(.worktreeShowUnread, d.worktreeShowUnread)
-        worktreeRecentOrder = try container.value(.worktreeRecentOrder, d.worktreeRecentOrder)
         worktreeRecent = try container.value(.worktreeRecent, d.worktreeRecent)
         projectRecent = try container.value(.projectRecent, d.projectRecent)
         paletteRecent = try container.value(.paletteRecent, d.paletteRecent)
@@ -186,9 +177,6 @@ public struct Appearance: Codable, Equatable, Sendable {
         try container.encode(sidebarExpanded, forKey: .sidebarExpanded)
         try container.encode(sidebarHost, forKey: .sidebarHost)
         try container.encodeIfPresent(sidebarExpandedWidth, forKey: .sidebarExpandedWidth)
-        try container.encode(autoExpandWorktrees, forKey: .autoExpandWorktrees)
-        try container.encode(worktreeShowUnread, forKey: .worktreeShowUnread)
-        try container.encode(worktreeRecentOrder, forKey: .worktreeRecentOrder)
         try container.encode(worktreeRecent, forKey: .worktreeRecent)
         try container.encode(projectRecent, forKey: .projectRecent)
         try container.encode(paletteRecent, forKey: .paletteRecent)

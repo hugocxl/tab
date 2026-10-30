@@ -95,10 +95,6 @@ public enum SettingsCatalog {
         SettingItem("light-theme", "Light theme", "Colors for the interface and terminals when macOS uses light appearance.", .appearance, "Themes"),
         SettingItem("dark-theme", "Dark theme", "Colors for the interface and terminals when macOS uses dark appearance.", .appearance, "Themes"),
         SettingItem("sidebar", "Expand sidebar", "Show project names alongside their icons in the workspace sidebar.", .appearance, "Interface"),
-        SettingItem("sidebar-width", "Sidebar width", "Width of the expanded sidebar in points.", .appearance, "Interface"),
-        SettingItem("auto-expand-worktrees", "Expand worktrees when switching projects", "Reveal worktrees when selecting a project.", .appearance, "Interface"),
-        SettingItem("worktree-unread", "Show unread worktree indicators", "Show unread completion counts beside worktrees.", .appearance, "Interface"),
-        SettingItem("worktree-recent-order", "Order the worktree switcher by recent use", "List the current worktree first, then the most recently used. Off, the project comes first, then its worktrees.", .appearance, "Interface"),
         SettingItem("agents-panel", "Show agents panel", "Show the agents panel, or its button when the sidebar is collapsed.", .appearance, "Agents Panel"),
         SettingItem("agents-panel-grouping", "Agents panel rows", "List each agent and open its pane, or each project and worktree running agents and open it.", .appearance, "Agents Panel"),
         // Terminal

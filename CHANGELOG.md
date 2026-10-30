@@ -19,6 +19,9 @@ Changelog.
 - The voice settings: dictation always uses the system's language and speech
   model, and inserts what you said without pressing Return.
 - The default window size setting: new windows open at 1200×800 points.
+- The sidebar width, worktree expansion, unread indicator and worktree
+  switcher order settings. Drag the sidebar's edge to resize it; the switcher
+  lists the current worktree, then the most recently used.
 
 ## 0.3.0 - 2026-10-30
 
