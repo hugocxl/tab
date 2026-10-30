@@ -18,8 +18,6 @@ final class SidebarViewController: NSViewController {
     private let topRow = FlippedView()
     private let toggle = ChromeButton(.panelLeft, label: "Toggle Sidebar")
     private let newTerminal = ChromeButton(.plus, label: "New Terminal")
-    private let filesButton = ChromeButton(.folder, label: "Files")
-    private let sourceControlButton = ChromeButton(.gitBranch, label: "Source Control")
     private let scroll = ScrollView()
     private let list = NSStackView()
     private let footer = FlippedView()
@@ -71,7 +69,7 @@ final class SidebarViewController: NSViewController {
         root.addSubview(topRow)
         root.addSubview(footer)
         root.addSubview(resizeHandle)
-        for button in [toggle, newTerminal, filesButton, sourceControlButton] { topRow.addSubview(button) }
+        for button in [toggle, newTerminal] { topRow.addSubview(button) }
         for button in [hostButton, addButton, browserButton] { footer.addSubview(button) }
         filterField.translatesAutoresizingMaskIntoConstraints = true
         filterField.isHidden = true
@@ -79,8 +77,6 @@ final class SidebarViewController: NSViewController {
 
         toggle.onPress = { [weak self] _ in self?.model.toggleSidebar() }
         newTerminal.onPress = { [weak self] _ in self?.model.newTerminal() }
-        filesButton.onPress = { [weak self] _ in self?.model.toggleRightPanel(.files) }
-        sourceControlButton.onPress = { [weak self] _ in self?.model.toggleRightPanel(.sourceControl) }
         hostButton.onPress = { [weak self] button in self?.model.remoteController.toggleHostMenu(relativeTo: button) }
         hostButton.menuProvider = { [weak self] in self?.filterMenu() }
         addButton.onPress = { [weak self] button in self?.actions?.addProject(anchor: button) }
@@ -124,9 +120,6 @@ final class SidebarViewController: NSViewController {
     }
 
     private func updateChrome(_ snapshot: SidebarSnapshot) {
-        let panel = model.rightPanel
-        filesButton.isOn = panel == .files
-        sourceControlButton.isOn = panel == .sourceControl
         toggle.toolTip = isExpanded ? "Hide Sidebar" : "Show Sidebar"
         filterField.isHidden = !(snapshot.filterShown || !model.nameFilter.isEmpty) || !isExpanded
         root.needsLayout = true
@@ -405,11 +398,7 @@ final class SidebarViewController: NSViewController {
         topRow.frame = CGRect(x: 0, y: Metrics.gutter, width: bounds.width, height: rowHeight)
         let mid = (rowHeight - side) / 2
         toggle.frame = CGRect(x: max(trafficLightsEnd, Metrics.gutter), y: mid, width: side, height: side)
-        var right = bounds.width
-        for button in [sourceControlButton, filesButton, newTerminal] {
-            right -= step
-            button.frame = CGRect(x: right, y: mid, width: side, height: side)
-        }
+        newTerminal.frame = CGRect(x: bounds.width - step, y: mid, width: side, height: side)
         let footerHeight = Self.footerHeight
         footer.frame = CGRect(x: 0, y: bounds.height - footerHeight, width: bounds.width, height: footerHeight)
         let y = Metrics.gutter

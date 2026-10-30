@@ -48,10 +48,8 @@ final class StubNativeHost: FilesPanelHost, SourceControlHost, EditorHost, DiffH
     }
     func openEditor(path: String, line: Int?, column: Int?) { opened.append(path) }
     func watchProjectFiles() { watches += 1 }
-    func closeFilesPanel() {}
     func openDiff(path: String, staged: Bool) { diffs.append((path, staged)) }
     func repositoryDidChange() { repositoryChanges += 1 }
-    func closeSourceControl() {}
     func editorTitleDidChange(_ title: String, dirty: Bool) { titles.append(title) }
 }
 

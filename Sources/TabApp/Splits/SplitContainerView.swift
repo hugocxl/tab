@@ -22,6 +22,11 @@ final class SplitContainerView: ThemedView {
     var sidebarToggle: NSView? {
         didSet { if sidebarToggle !== oldValue { needsLayout = true } }
     }
+    /// The right sidebar's toggle, shown in the top-right card while the
+    /// right sidebar is collapsed.
+    var rightSidebarToggle: NSView? {
+        didSet { if rightSidebarToggle !== oldValue { needsLayout = true } }
+    }
 
     init(model: AppModel) {
         self.model = model
@@ -75,7 +80,7 @@ final class SplitContainerView: ThemedView {
     override func layout() {
         super.layout()
         emptyView.frame = content
-        defer { placeSidebarToggle() }
+        defer { placeSidebarToggles() }
         guard let tab else {
             dividers = []
             updateDividerTracking()
@@ -96,15 +101,26 @@ final class SplitContainerView: ThemedView {
     }
 
     /// Leads the top-left card's header, or the empty card, with the
-    /// sidebar toggle.
-    private func placeSidebarToggle() {
-        let topLeft: PaneId? = tab?.zoomed ?? cards.first { _, card in
-            abs(card.frame.minX - content.minX) < 0.5 && abs(card.frame.minY - content.minY) < 0.5
-        }?.key
-        let owner = emptyView.isHidden ? topLeft : nil
-        for (id, card) in cards where id != owner && card.leadingView != nil { card.leadingView = nil }
-        if emptyView.isHidden { emptyView.leadingView = nil }
-        if let owner { cards[owner]?.leadingView = sidebarToggle } else if !emptyView.isHidden { emptyView.leadingView = sidebarToggle }
+    /// sidebar toggle, and ends the top-right card's with the right
+    /// sidebar's.
+    private func placeSidebarToggles() {
+        let empty = !emptyView.isHidden
+        let leftOwner = empty ? nil : topCard { abs($0.minX - content.minX) < 0.5 }
+        let rightOwner = empty ? nil : topCard { abs($0.maxX - content.maxX) < 0.5 }
+        for (id, card) in cards {
+            if id != leftOwner && card.leadingView != nil { card.leadingView = nil }
+            if id != rightOwner && card.trailingView != nil { card.trailingView = nil }
+        }
+        if let leftOwner { cards[leftOwner]?.leadingView = sidebarToggle }
+        if let rightOwner { cards[rightOwner]?.trailingView = rightSidebarToggle }
+        emptyView.leadingView = empty ? sidebarToggle : nil
+        emptyView.trailingView = empty ? rightSidebarToggle : nil
+    }
+
+    /// The zoomed card, or the card on the top edge whose frame matches.
+    private func topCard(_ matches: (CGRect) -> Bool) -> PaneId? {
+        if let zoomed = tab?.zoomed { return zoomed }
+        return cards.first { _, card in abs(card.frame.minY - content.minY) < 0.5 && matches(card.frame) }?.key
     }
 
     // MARK: Gutters
@@ -253,6 +269,15 @@ final class EmptyProjectView: ThemedView {
             needsLayout = true
         }
     }
+    /// The right sidebar's toggle, at the top right while it is collapsed.
+    var trailingView: NSView? {
+        didSet {
+            guard trailingView !== oldValue else { return }
+            if let oldValue, oldValue.superview === self { oldValue.removeFromSuperview() }
+            if let trailingView { addSubview(trailingView) }
+            needsLayout = true
+        }
+    }
 
     private let glyph = NSImageView()
     private let title = makeLabel("", font: AppFont.system(14, weight: .semibold))
@@ -312,9 +337,15 @@ final class EmptyProjectView: ThemedView {
 
     override func layout() {
         super.layout()
-        guard let leadingView else { return }
-        let size = leadingView.intrinsicContentSize
-        leadingView.frame = CGRect(x: Metrics.gutter, y: ((Metrics.headerHeight - size.height) / 2).rounded(), width: size.width, height: size.height)
+        if let leadingView {
+            let size = leadingView.intrinsicContentSize
+            leadingView.frame = CGRect(x: Metrics.gutter, y: ((Metrics.headerHeight - size.height) / 2).rounded(), width: size.width, height: size.height)
+        }
+        if let trailingView {
+            let size = trailingView.intrinsicContentSize
+            trailingView.frame = CGRect(x: bounds.width - Metrics.gutter - size.width, y: ((Metrics.headerHeight - size.height) / 2).rounded(),
+                                        width: size.width, height: size.height)
+        }
     }
 
     override func mouseDown(with event: NSEvent) {}

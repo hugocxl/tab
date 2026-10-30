@@ -50,10 +50,6 @@ final class ProjectHost: FilesPanelHost, SourceControlHost, EditorHost, DiffHost
         Task { _ = try? await side.files(FilesRequest(project: project, action: .watch)) }
     }
 
-    func closeFilesPanel() {
-        if model.rightPanel == .files { model.toggleRightPanel(.files) }
-    }
-
     // MARK: Source Control
 
     func openDiff(path: String, staged: Bool) {
@@ -62,10 +58,6 @@ final class ProjectHost: FilesPanelHost, SourceControlHost, EditorHost, DiffHost
 
     func repositoryDidChange() {
         model.gitChanged(project)
-    }
-
-    func closeSourceControl() {
-        if model.rightPanel == .sourceControl { model.toggleRightPanel(.sourceControl) }
     }
 
     // MARK: Editor and diff

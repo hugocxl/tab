@@ -31,10 +31,8 @@ final class LiveNativeHost: FilesPanelHost, SourceControlHost, EditorHost, DiffH
         let request = FilesRequest(project: nativeProject.id, action: .watch)
         Task { _ = try? await transport.files(request) }
     }
-    func closeFilesPanel() {}
     func openDiff(path: String, staged: Bool) {}
     func repositoryDidChange() { repositoryChanges += 1 }
-    func closeSourceControl() {}
     func editorTitleDidChange(_ title: String, dirty: Bool) {}
 }
 

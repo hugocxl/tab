@@ -3,6 +3,22 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.7.0 - 2026-10-30
+
+### Changed
+
+- Files and Source Control live in a right sidebar: their tabs, the shown
+  one highlighted, and its toggle sit above the panel like the left
+  sidebar's buttons, and once collapsed the toggle moves into the
+  top-right pane and reopens the last tab.
+- The Files and Source Control buttons left the left sidebar, and the
+  panels no longer have their own close button.
+
+### Fixed
+
+- The Amend checkbox in Source Control no longer squeezes its label onto
+  three lines.
+
 ## 0.6.0 - 2026-10-30
 
 ### Removed

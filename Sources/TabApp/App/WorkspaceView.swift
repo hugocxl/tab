@@ -3,14 +3,14 @@ import Combine
 import TabCore
 
 /// The window's content: the sidebar, the current project's split layout,
-/// and the right panel pinned beside it like Files in the reference window.
+/// and the right sidebar with Files and Source Control.
 @MainActor
 final class WorkspaceView: ThemedView {
     unowned let model: AppModel
     let sidebar: SidebarViewController
     let splits: SplitContainerView
     private let material = NSVisualEffectView()
-    private let panelHost = RightPanelHostView()
+    private let rightSidebar = RightSidebarView()
     private let banner = BannerView()
     private var shownPanel: RightPanelKind?
     private var shownPanelProject: ProjectId?
@@ -19,6 +19,7 @@ final class WorkspaceView: ThemedView {
     private var subscription: AnyCancellable?
     private var lastPanelLayout: (RightPanelKind?, CGFloat)?
     private let sidebarToggle = SidebarToggleSlot()
+    private let rightSidebarToggle = ChromeButton(.panelRight, label: "Show Sidebar")
 
     init(model: AppModel, sidebar: SidebarViewController) {
         self.model = model
@@ -31,21 +32,24 @@ final class WorkspaceView: ThemedView {
         addSubview(material)
         addSubview(sidebar.view)
         addSubview(splits)
-        addSubview(panelHost)
+        addSubview(rightSidebar)
         addSubview(banner)
         sidebar.onResize = { [weak self] width in
             self?.liveSidebarWidth = width
             self?.needsLayout = true
         }
-        panelHost.onResize = { [weak self] width in
+        rightSidebar.onResize = { [weak self] width in
             guard let self else { return }
             self.livePanelWidth = width
             if width == nil, let kind = self.shownPanel {
-                self.model.setRightPanelWidth(kind, self.panelHost.frame.width)
+                self.model.setRightPanelWidth(kind, self.rightSidebar.cardWidth)
             }
             self.needsLayout = true
         }
+        rightSidebar.onSelect = { [weak model] kind in model?.selectRightPanel(kind) }
+        rightSidebar.onToggle = { [weak model] in model?.toggleRightSidebar() }
         sidebarToggle.button.onPress = { [weak model] _ in model?.toggleSidebar() }
+        rightSidebarToggle.onPress = { [weak model] _ in model?.toggleRightSidebar() }
         subscription = model.changes.sink { [weak self] changes in self?.modelChanged(changes) }
         splits.reload()
         syncPanel()
@@ -92,7 +96,11 @@ final class WorkspaceView: ThemedView {
         let kind = model.rightPanel
         if kind != shownPanel {
             if let old = shownPanel { model.rightPanelContent(old)?.didHide() }
-            panelHost.content = kind.flatMap { model.rightPanelContent($0) }?.view
+            // Sized before the content arrives: constraints solved at zero
+            // width leave controls such as checkboxes collapsed.
+            if let kind { rightSidebar.frame = rightSidebarFrame(kind) }
+            rightSidebar.content = kind.flatMap { model.rightPanelContent($0) }?.view
+            rightSidebar.selected = kind
             shownPanel = kind
             shownPanelProject = nil
             if let kind { model.rightPanelContent(kind)?.didShow() }
@@ -101,7 +109,7 @@ final class WorkspaceView: ThemedView {
         let project = model.currentProject
         if shownPanelProject != project.id {
             shownPanelProject = project.id
-            content.projectDidChange(project.home && (kind == .files || kind == .sourceControl) ? nil : project)
+            content.projectDidChange(project.home ? nil : project)
         }
     }
 
@@ -122,6 +130,13 @@ final class WorkspaceView: ThemedView {
         model.appearance.sidebarExpanded ? (liveSidebarWidth ?? model.sidebarWidth) : 0
     }
 
+    /// The right sidebar's frame: the card's width plus the window gutter,
+    /// leaving the splits at least 240pt.
+    private func rightSidebarFrame(_ kind: RightPanelKind) -> NSRect {
+        let width = min(livePanelWidth ?? model.rightPanelWidth(kind), max(bounds.width - sidebarWidth - 240, RightPanelKind.minimumWidth))
+        return NSRect(x: bounds.width - Metrics.gutter - width, y: 0, width: width + Metrics.gutter, height: bounds.height)
+    }
+
     override func layout() {
         super.layout()
         let sidebarWidth = self.sidebarWidth
@@ -133,14 +148,13 @@ final class WorkspaceView: ThemedView {
         splits.sidebarToggle = expanded ? nil : sidebarToggle
         var right = bounds.width
         if let kind = shownPanel {
-            let width = min(livePanelWidth ?? model.rightPanelWidth(kind), max(bounds.width - sidebarWidth - 240, RightPanelKind.minimumWidth))
-            panelHost.isHidden = false
-            panelHost.frame = NSRect(x: bounds.width - Metrics.gutter - width, y: Metrics.gutter, width: width,
-                                     height: max(bounds.height - 2 * Metrics.gutter, 0))
-            right = panelHost.frame.minX
+            rightSidebar.isHidden = false
+            rightSidebar.frame = rightSidebarFrame(kind)
+            right = rightSidebar.frame.minX
         } else {
-            panelHost.isHidden = true
+            rightSidebar.isHidden = true
         }
+        splits.rightSidebarToggle = shownPanel == nil ? rightSidebarToggle : nil
         splits.frame = NSRect(x: sidebarWidth, y: 0, width: max(right - sidebarWidth, 0), height: bounds.height)
         let bannerWidth = min(splits.frame.width - 32, 520)
         banner.frame = NSRect(x: splits.frame.midX - bannerWidth / 2, y: 40, width: bannerWidth, height: 32)
@@ -173,57 +187,6 @@ final class SidebarToggleSlot: NSView {
     override func layout() {
         super.layout()
         button.frame = NSRect(x: reserve, y: 0, width: ChromeButton.side, height: ChromeButton.side)
-    }
-}
-
-/// The right panel's frame: a card with the panel color and its left edge
-/// as a resize handle.
-final class RightPanelHostView: ThemedView {
-    var content: NSView? {
-        didSet {
-            oldValue?.removeFromSuperview()
-            guard let content else { return }
-            content.frame = bounds
-            content.autoresizingMask = [.width, .height]
-            addSubview(content, positioned: .below, relativeTo: handle)
-        }
-    }
-
-    var onResize: ((CGFloat?) -> Void)?
-    private let handle = PanelResizeHandle()
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        wantsLayer = true
-        layer?.cornerRadius = Metrics.cardRadius
-        layer?.cornerCurve = .continuous
-        layer?.borderWidth = 1
-        layer?.masksToBounds = true
-        addSubview(handle)
-        handle.onDrag = { [weak self] delta in
-            guard let self else { return }
-            guard let delta else {
-                self.onResize?(nil)
-                return
-            }
-            let start = self.handle.startWidth
-            self.onResize?(min(max(start - delta, RightPanelKind.minimumWidth), RightPanelKind.maximumWidth))
-        }
-        handle.onBegin = { [weak self] in self?.handle.startWidth = self?.frame.width ?? 0 }
-    }
-
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    override var wantsUpdateLayer: Bool { true }
-
-    override func updateLayer() {
-        layer?.backgroundColor = NativeStyle.panel(theme).cgColor
-        layer?.borderColor = theme.cardBorder.cgColor
-    }
-
-    override func layout() {
-        super.layout()
-        handle.frame = NSRect(x: 0, y: 0, width: 5, height: bounds.height)
     }
 }
 

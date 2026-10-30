@@ -1,11 +1,25 @@
 import AppKit
 import TabCore
 
-/// The native panels pinned on the right of the current project, one at a
-/// time, like Files in the reference window.
+/// The tabs of the right sidebar, pinned beside the current project and
+/// shown one at a time.
 public enum RightPanelKind: String, CaseIterable, Sendable {
     case files
     case sourceControl
+
+    public var icon: AppIcon {
+        switch self {
+        case .files: return .folder
+        case .sourceControl: return .gitBranch
+        }
+    }
+
+    var sidePanel: SidePanel {
+        switch self {
+        case .files: return .files
+        case .sourceControl: return .sourceControl
+        }
+    }
 
     public var title: String {
         switch self {
@@ -66,19 +80,38 @@ extension AppModel {
         }
     }
 
-    /// Opens `kind` on the right, or closes it when it is open.
+    /// Opens the right sidebar on `kind`, or closes it when `kind` shows.
     public func toggleRightPanel(_ kind: RightPanelKind) {
-        let open = rightPanel == kind
+        if rightPanel == kind {
+            closeRightSidebar()
+        } else {
+            selectRightPanel(kind)
+        }
+    }
+
+    /// Shows `kind` in the right sidebar, opening it when it is closed.
+    public func selectRightPanel(_ kind: RightPanelKind) {
+        guard rightPanel != kind else { return }
         updateAppearance { appearance in
-            appearance.sidePanel = .none
-            guard !open else { return }
-            switch kind {
-            case .files: appearance.sidePanel = .files
-            case .sourceControl: appearance.sidePanel = .sourceControl
-            }
+            appearance.sidePanel = kind.sidePanel
+            appearance.lastSidePanel = kind.sidePanel
         }
         notify(.panel)
-        if !open { rightPanelContent(kind)?.focusContent() }
+        rightPanelContent(kind)?.focusContent()
+    }
+
+    /// Hides the right sidebar, or shows it again on the tab it last showed.
+    public func toggleRightSidebar() {
+        if rightPanel != nil {
+            closeRightSidebar()
+        } else {
+            selectRightPanel(appearance.lastSidePanel == .sourceControl ? .sourceControl : .files)
+        }
+    }
+
+    private func closeRightSidebar() {
+        updateAppearance { $0.sidePanel = .none }
+        notify(.panel)
     }
 
     /// The content of `kind`, made once.

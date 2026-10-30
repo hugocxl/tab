@@ -9,8 +9,6 @@ public protocol SourceControlHost: NativeHost {
     func openDiff(path: String, staged: Bool)
     /// The panel changed the repository: open diffs should refresh.
     func repositoryDidChange()
-    /// Hides the panel.
-    func closeSourceControl()
 }
 
 /// The Source Control panel pinned on the right of a project: branch,
@@ -58,7 +56,6 @@ public final class SourceControlController: NSViewController, NSTableViewDataSou
         spinner.isHidden = true
         header.addTrailing(spinner)
         header.addTrailing(refreshButton)
-        header.addTrailing(IconButton(.close, label: "Close") { [weak self] in self?.host?.closeSourceControl() })
 
         messageField.theme = theme
         messageField.onChange = { [weak self] in self?.updateCommitButton() }

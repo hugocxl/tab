@@ -11,8 +11,6 @@ public protocol FilesPanelHost: NativeHost {
     /// Makes the side connection watch the project's folder, so
     /// `filesChanged(_:)` hears about changes on disk.
     func watchProjectFiles()
-    /// Hides the panel.
-    func closeFilesPanel()
 }
 
 /// The Files panel pinned on the right of a project: the project's tree,
@@ -64,7 +62,6 @@ public final class FilesPanelController: NSViewController, NSTableViewDataSource
             (.folder, "New Folder", { [weak self] in self?.beginNewItem(folder: true) }),
             (.chevronUp, "Collapse All", { [weak self] in self?.collapseAll() }),
             (.refresh, "Refresh", { [weak self] in self?.refreshAll() }),
-            (.close, "Close", { [weak self] in self?.host?.closeFilesPanel() }),
         ]
         for (icon, label, action) in buttons {
             header.addTrailing(IconButton(icon, label: label, action: action))

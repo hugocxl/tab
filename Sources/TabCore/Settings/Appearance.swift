@@ -66,12 +66,14 @@ public struct Appearance: Codable, Equatable, Sendable {
     public var sidebarFocus: Bool
     public var sidebarProjectOrder: ProjectOrder
     public var sidePanel: SidePanel
+    /// The tab the right sidebar opens on when it is shown again.
+    public var lastSidePanel: SidePanel
     public var sidePanelWidth: Double?
 
     enum CodingKeys: String, CodingKey {
         case darkTheme, lightTheme, sidebarExpanded, sidebarHost, sidebarExpandedWidth
         case worktreeRecent, projectRecent, paletteRecent
-        case hiddenWorktrees, sidebarFocus, sidebarProjectOrder, sidePanel, sidePanelWidth
+        case hiddenWorktrees, sidebarFocus, sidebarProjectOrder, sidePanel, lastSidePanel, sidePanelWidth
     }
 
     public init() {
@@ -87,6 +89,7 @@ public struct Appearance: Codable, Equatable, Sendable {
         sidebarFocus = false
         sidebarProjectOrder = .manual
         sidePanel = .none
+        lastSidePanel = .files
         sidePanelWidth = nil
     }
 
@@ -105,6 +108,7 @@ public struct Appearance: Codable, Equatable, Sendable {
         sidebarFocus = try container.value(.sidebarFocus, d.sidebarFocus)
         sidebarProjectOrder = try container.value(.sidebarProjectOrder, d.sidebarProjectOrder)
         sidePanel = try container.value(.sidePanel, d.sidePanel)
+        lastSidePanel = try container.value(.lastSidePanel, d.lastSidePanel)
         sidePanelWidth = try container.decodeIfPresent(Double.self, forKey: .sidePanelWidth)
     }
 
@@ -122,6 +126,7 @@ public struct Appearance: Codable, Equatable, Sendable {
         try container.encode(sidebarFocus, forKey: .sidebarFocus)
         try container.encode(sidebarProjectOrder, forKey: .sidebarProjectOrder)
         try container.encode(sidePanel, forKey: .sidePanel)
+        try container.encode(lastSidePanel, forKey: .lastSidePanel)
         try container.encodeIfPresent(sidePanelWidth, forKey: .sidePanelWidth)
     }
 

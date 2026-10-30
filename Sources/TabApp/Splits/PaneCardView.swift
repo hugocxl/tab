@@ -44,6 +44,17 @@ final class PaneCardView: HoverView {
         }
     }
 
+    /// Room on the header's right, for the right sidebar's toggle when it is
+    /// collapsed and this card is top-right.
+    var trailingView: NSView? {
+        didSet {
+            guard trailingView !== oldValue else { return }
+            if let oldValue, oldValue.superview === header { oldValue.removeFromSuperview() }
+            if let trailingView { header.addSubview(trailingView) }
+            needsLayout = true
+        }
+    }
+
     init(pane: PaneId, model: AppModel) {
         self.pane = pane
         self.model = model
@@ -203,6 +214,12 @@ final class PaneCardView: HoverView {
         glyph.frame = CGRect(x: x, y: (height - Metrics.glyph) / 2, width: Metrics.glyph, height: Metrics.glyph)
         x += Metrics.glyph + Metrics.controlGap
         var right = bounds.width - gutter
+        if let trailingView {
+            let size = trailingView.intrinsicContentSize
+            right -= size.width
+            trailingView.frame = CGRect(x: right, y: ((height - size.height) / 2).rounded(), width: size.width, height: size.height)
+            right -= Metrics.controlGap
+        }
         for button in (extraButtons + actionButtons).reversed() {
             right -= 22
             button.frame = CGRect(x: right, y: (height - 22) / 2, width: 22, height: 22)
