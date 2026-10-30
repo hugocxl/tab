@@ -109,9 +109,12 @@ public final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation
     let renderer: TerminalRenderer
     let scrollbar = TerminalScrollbar()
     private var dirty: [CGRect] = []
+    private var preparedState: TerminalRenderState?
+    private var emptyGrid: RunGrid?
     private var markedText = ""
     private var markedSelection = NSRange(location: 0, length: 0)
     private var pendingKey: KeyEvent?
+    private var pendingKeyCode: UInt16?
     private var pressed: [UInt16: KeyEvent] = [:]
     private var blinkTimer: Timer?
     private var blinkVisible = true
@@ -121,10 +124,12 @@ public final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation
     private var selectionFingerprint: [String] = []
     private var heldButtons: Set<MouseButton> = []
     private var lastMouse: MouseEvent?
-    private var wheelRemainder: CGFloat = 0
-    private var scrollRemainder: CGFloat = 0
+    private var wheelScroll = TerminalScrollAccumulator()
+    private var historyScroll = TerminalScrollAccumulator()
     private var trackingArea: NSTrackingArea?
     private var lastCursorRow: Int?
+    /// Allows offscreen hosts to capture copies without the pasteboard service.
+    var selectionCopyHandler: ((String) -> Void)?
 
     private enum DragUnit {
         case cell
@@ -154,6 +159,7 @@ public final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation
         layout = TerminalLayout(bounds: .zero, metrics: metrics, options: settings.options)
         cursorBlinks = palette.cursorBlink ?? true
         super.init(frame: .zero)
+        dirty.reserveCapacity(128)
         wantsLayer = true
         clipsToBounds = true
         layerContentsRedrawPolicy = .onSetNeedsDisplay
@@ -265,7 +271,7 @@ public final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation
     public func setGrid(_ grid: RunGrid?) {
         self.grid = grid
         _ = self.grid?.takeChanges()
-        lastCursorRow = nil
+        lastCursorRow = grid.map { Int($0.cursor.row) }
         validateSelection()
         needsDisplay = true
         updateScrollbar()
@@ -277,8 +283,10 @@ public final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation
     public func updateGrid(_ body: (inout RunGrid) -> Void) -> Bool {
         guard grid != nil else { return false }
         let graphicsBefore = grid?.graphics.map(GraphicsIdentity.init)
+        let cursorBefore = grid?.cursor
         body(&grid!)
-        guard let changes = grid?.takeChanges() else { return false }
+        guard var changes = grid?.takeChanges() else { return false }
+        changes.cursor = changes.cursor && cursorBefore != grid?.cursor
         var invalidated = invalidate(changes)
         if grid?.graphics.map(GraphicsIdentity.init) != graphicsBefore {
             needsDisplay = true
@@ -315,6 +323,19 @@ public final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation
 
     // MARK: Drawing
 
+    public override func viewWillDraw() {
+        super.viewWillDraw()
+        if grid == nil, emptyGrid?.size != layout.viewport {
+            emptyGrid = RunGrid(saved: SavedScreen(size: layout.viewport, rows: [], cursor: Cursor(visible: false)))
+        }
+        guard let grid = grid ?? emptyGrid else { return }
+        let state = TerminalRenderState(
+            grid: grid, layout: layout, metrics: metrics, fonts: fonts, palette: palette, cursor: cursorState(grid),
+            selection: selection, find: find, link: link, markedText: markedText.isEmpty ? nil : markedText)
+        renderer.prepare(state)
+        preparedState = state
+    }
+
     public override func draw(_ dirtyRect: NSRect) {
         guard let context = NSGraphicsContext.current?.cgContext else { return }
         dirty.removeAll(keepingCapacity: true)
@@ -326,14 +347,7 @@ public final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation
         } else {
             dirty.append(dirtyRect)
         }
-        guard let grid else {
-            context.setFillColor(CGColor.terminal(palette.background, alpha: CGFloat(palette.backgroundOpacity)))
-            for rect in dirty { context.fill(rect) }
-            return
-        }
-        let state = TerminalRenderState(
-            grid: grid, layout: layout, metrics: metrics, fonts: fonts, palette: palette, cursor: cursorState(grid),
-            selection: selection, find: find, link: link, markedText: markedText.isEmpty ? nil : markedText)
+        guard let state = preparedState else { return }
         renderer.draw(state, dirty: dirty, in: context)
     }
 
@@ -474,18 +488,21 @@ public final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation
         }
         let unbound = KeyMapping.chord(event).map { settings.keybindings.bindings[$0] == .unbind } ?? false
         if !unbound, event.modifierFlags.contains(.command) { return }
-        if !event.isARepeat, KeyMapping.usesTextInput(event, optionAsAlt: settings.optionAsAlt) {
+        if KeyMapping.usesTextInput(event, optionAsAlt: settings.optionAsAlt) {
             pendingKey = KeyMapping.keyEvent(event, optionAsAlt: settings.optionAsAlt)
+            pendingKeyCode = event.keyCode
             interpretKeyEvents([event])
             pendingKey = nil
+            pendingKeyCode = nil
             return
         }
-        sendKey(KeyMapping.keyEvent(event, optionAsAlt: settings.optionAsAlt))
+        sendKey(KeyMapping.keyEvent(event, optionAsAlt: settings.optionAsAlt), code: event.keyCode)
     }
 
     public override func keyUp(with event: NSEvent) {
         guard let press = pressed.removeValue(forKey: event.keyCode) else { return }
         var release = press
+        release.consumedModifiers = []
         release.action = .release
         release.text = ""
         release.modifiers = KeyMapping.keyModifiers(event.modifierFlags)
@@ -514,7 +531,7 @@ public final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation
         case .ignore:
             break
         case .unbind:
-            sendKey(KeyMapping.keyEvent(event, optionAsAlt: settings.optionAsAlt))
+            sendKey(KeyMapping.keyEvent(event, optionAsAlt: settings.optionAsAlt), code: event.keyCode)
         case .copy: perform(.copy)
         case .paste: perform(.paste)
         case .selectAll: perform(.selectAll)
@@ -560,15 +577,10 @@ public final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation
         }
     }
 
-    private func sendKey(_ event: KeyEvent) {
+    private func sendKey(_ event: KeyEvent, code: UInt16? = nil) {
         guard (try? TerminalInput.key(event).validate()) != nil, prepareInput() else { return }
-        if let code = keyCode(of: event) { pressed[code] = event }
+        if let code, pressed.count < 64 || pressed[code] != nil { pressed[code] = event }
         host?.terminalView(self, send: .key(event))
-    }
-
-    private func keyCode(of event: KeyEvent) -> UInt16? {
-        guard event.action != .release, let current = NSApp.currentEvent, current.type == .keyDown else { return nil }
-        return current.keyCode
     }
 
     private func releaseKeys() {
@@ -576,6 +588,7 @@ public final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation
         pressed = [:]
         for (_, press) in keys {
             var release = press
+            release.consumedModifiers = []
             release.action = .release
             release.text = ""
             host?.terminalView(self, send: .key(release))
@@ -599,7 +612,8 @@ public final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation
     // MARK: NSTextInputClient
 
     public func insertText(_ string: Any, replacementRange: NSRange) {
-        let text = (string as? NSAttributedString)?.string ?? (string as? String) ?? ""
+        let inserted = (string as? NSAttributedString)?.string ?? (string as? String) ?? ""
+        let text = Self.replacingMarkedText(markedText, with: inserted, range: replacementRange)
         let hadMarked = !markedText.isEmpty
         markedText = ""
         markedSelection = NSRange(location: 0, length: 0)
@@ -609,7 +623,8 @@ public final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation
             pendingKey = nil
             key.text = text
             if (try? TerminalInput.key(key).validate()) != nil {
-                sendKey(key)
+                sendKey(key, code: pendingKeyCode)
+                pendingKeyCode = nil
                 return
             }
         }
@@ -618,8 +633,14 @@ public final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation
     }
 
     public func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
-        markedText = (string as? NSAttributedString)?.string ?? (string as? String) ?? ""
-        markedSelection = selectedRange
+        guard host?.isLive ?? false else { return }
+        if let grid, grid.scrollOffset > 0 { host?.terminalView(self, scrollTo: 0) }
+        let inserted = (string as? NSAttributedString)?.string ?? (string as? String) ?? ""
+        markedText = Self.replacingMarkedText(markedText, with: inserted, range: replacementRange)
+        let length = (markedText as NSString).length
+        let start = replacementRange.location == NSNotFound ? 0 : min(replacementRange.location, length)
+        let location = min(start + selectedRange.location, length)
+        markedSelection = NSRange(location: location, length: min(selectedRange.length, length - location))
         pendingKey = nil
         syncBlink()
         invalidateCursor()
@@ -628,7 +649,21 @@ public final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation
     public func unmarkText() {
         let text = markedText
         markedText = ""
+        markedSelection = NSRange(location: 0, length: 0)
+        pendingKey = nil
         if !text.isEmpty { insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0)) }
+        syncBlink()
+        invalidateCursor()
+    }
+
+    /// Replaces the input method's UTF-16 range, preserving complete characters.
+    static func replacingMarkedText(_ original: String, with text: String, range: NSRange) -> String {
+        guard range.location != NSNotFound, !original.isEmpty else { return text }
+        let string = original as NSString
+        let location = min(range.location, string.length)
+        let clamped = NSRange(location: location, length: min(range.length, string.length - location))
+        let complete = string.rangeOfComposedCharacterSequences(for: clamped)
+        return string.replacingCharacters(in: complete, with: text)
     }
 
     public func selectedRange() -> NSRange {
@@ -663,7 +698,8 @@ public final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation
     public override func doCommand(by selector: Selector) {
         guard let key = pendingKey else { return }
         pendingKey = nil
-        sendKey(key)
+        sendKey(key, code: pendingKeyCode)
+        pendingKeyCode = nil
     }
 
     // MARK: Selection
@@ -706,13 +742,20 @@ public final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation
     }
 
     @discardableResult
-    public func copySelection() -> Bool {
+    public func copySelection(to pasteboard: NSPasteboard = .general) -> Bool {
         guard let text = selectedText else { return false }
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
+        writeSelection(text, to: pasteboard)
         if settings.options.selectionClearOnCopy { clearSelection() }
         return true
+    }
+
+    private func writeSelection(_ text: String, to pasteboard: NSPasteboard) {
+        if let selectionCopyHandler {
+            selectionCopyHandler(text)
+            return
+        }
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
     }
 
     // MARK: Paste and drop
@@ -776,13 +819,12 @@ public final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation
     }
 
     private func reportsMouse(_ flags: NSEvent.ModifierFlags) -> Bool {
-        (host?.isLive ?? false) && settings.options.mouseReporting && inputModes.mouseTracking
-            && !flags.contains(.shift)
+        TerminalMouseMapping.reports(flags: flags, modes: inputModes, options: settings.options, live: host?.isLive ?? false)
     }
 
     private var reportsWheel: Bool {
-        (host?.isLive ?? false) && settings.options.mouseReporting
-            && (inputModes.mouseTracking || inputModes.alternateScroll)
+        TerminalMouseMapping.reports(flags: [], modes: inputModes, options: settings.options,
+                                     live: host?.isLive ?? false, wheel: true)
     }
 
     private func location(_ event: NSEvent) -> CGPoint {
@@ -860,9 +902,7 @@ public final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation
         guard dragUnit != nil else { return }
         dragUnit = nil
         if settings.options.copyOnSelect ?? false, let text = selectedText {
-            let pasteboard = NSPasteboard.general
-            pasteboard.clearContents()
-            pasteboard.setString(text, forType: .string)
+            writeSelection(text, to: .general)
         }
     }
 
@@ -952,14 +992,8 @@ public final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation
     private func sendMouse(_ action: MouseAction, button: MouseButton?, scroll: ScrollDirection? = nil, at location: CGPoint,
                            flags: NSEvent.ModifierFlags) {
         guard host?.isLive ?? false else { return }
-        let cols = max(1, Int(layout.viewport.cols))
-        let rows = max(1, Int(layout.viewport.rows))
-        let column = min(max(Int(((location.x - layout.grid.minX) / layout.cellWidth).rounded(.down)), 0), cols - 1)
-        let row = min(max(Int(((location.y - layout.grid.minY) / layout.cellHeight).rounded(.down)), 0), rows - 1)
-        var modifiers = KeyMapping.keyModifiers(flags)
-        modifiers.remove([.super, .capsLock])
-        let event = MouseEvent(action: action, button: button, scroll: scroll, col: UInt16(column), row: UInt16(row),
-                               modifiers: modifiers)
+        let event = TerminalMouseMapping.event(action: action, button: button, scroll: scroll, location: location,
+                                               layout: layout, flags: flags)
         if action == .motion, lastMouse == event { return }
         lastMouse = event
         if let button {
@@ -977,34 +1011,27 @@ public final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation
         }
         heldButtons = []
         lastMouse = nil
-        wheelRemainder = 0
+        wheelScroll.reset()
     }
 
     public override func scrollWheel(with event: NSEvent) {
-        let precise = event.hasPreciseScrollingDeltas
-        let rows = precise
-            ? event.scrollingDeltaY / max(layout.cellHeight, 1) * CGFloat(settings.options.scrollPrecision)
-            : event.scrollingDeltaY * CGFloat(settings.options.scrollDiscrete)
-        if reportsWheel, !event.modifierFlags.contains(.shift) {
-            if rows.sign != wheelRemainder.sign { wheelRemainder = 0 }
-            wheelRemainder = min(max(wheelRemainder + rows, -100), 100)
-            if abs(wheelRemainder) >= 1, let grid, grid.scrollOffset > 0 {
-                host?.terminalView(self, scrollTo: 0)
-            }
-            let location = location(event)
-            while abs(wheelRemainder) >= 1 {
-                sendMouse(.scroll, button: nil, scroll: wheelRemainder > 0 ? .up : .down, at: location,
+        let rows = TerminalMouseMapping.scrollRows(delta: event.scrollingDeltaY, precise: event.hasPreciseScrollingDeltas,
+                                                   cellHeight: layout.cellHeight, options: settings.options)
+        if TerminalMouseMapping.reports(flags: event.modifierFlags, modes: inputModes, options: settings.options,
+                                       live: host?.isLive ?? false, wheel: true) {
+            historyScroll.reset()
+            let whole = wheelScroll.consume(rows, reporting: true)
+            if whole != 0, let grid, grid.scrollOffset > 0 { host?.terminalView(self, scrollTo: 0) }
+            for _ in 0..<abs(whole) {
+                sendMouse(.scroll, button: nil, scroll: whole > 0 ? .up : .down, at: location(event),
                           flags: event.modifierFlags)
-                wheelRemainder -= wheelRemainder > 0 ? 1 : -1
             }
             return
         }
-        wheelRemainder = 0
-        if event.phase == .began || event.phase == .mayBegin { scrollRemainder = 0 }
-        scrollRemainder += rows
-        let whole = Int(scrollRemainder.rounded(.towardZero))
+        wheelScroll.reset()
+        if event.phase == .began || event.phase == .mayBegin { historyScroll.reset() }
+        let whole = historyScroll.consume(rows, reporting: false)
         guard whole != 0 else { return }
-        scrollRemainder -= CGFloat(whole)
         host?.terminalView(self, scrollBy: whole)
     }
 

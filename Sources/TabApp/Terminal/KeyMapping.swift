@@ -14,20 +14,22 @@ public enum KeyMapping {
     public static func keyEvent(_ event: NSEvent, optionAsAlt: OptionAsAlt, release: Bool = false) -> KeyEvent {
         keyEvent(keyCode: event.keyCode, characters: event.characters ?? "",
                  unshifted: event.characters(byApplyingModifiers: []) ?? event.charactersIgnoringModifiers ?? "",
-                 flags: event.modifierFlags, isRepeat: event.type == .keyDown && event.isARepeat,
+                 shifted: event.characters(byApplyingModifiers: .shift), flags: event.modifierFlags,
+                 isRepeat: event.type == .keyDown && event.isARepeat,
                  optionAsAlt: optionAsAlt, release: release)
     }
 
     /// The key event for a key code, the text it typed, the text it types with
     /// no modifiers, and the modifier flags.
-    public static func keyEvent(keyCode: UInt16, characters: String, unshifted: String, flags: NSEvent.ModifierFlags,
+    public static func keyEvent(keyCode: UInt16, characters: String, unshifted: String, shifted: String? = nil,
+                                flags: NSEvent.ModifierFlags,
                                 isRepeat: Bool = false, optionAsAlt: OptionAsAlt, release: Bool = false) -> KeyEvent {
         let modifiers = keyModifiers(flags)
         let alt = treatsOptionAsAlt(flags, optionAsAlt)
-        let logical = named[keyCode] == nil && unshifted.count == 1 ? unshifted : nil
+        let logical = keyCode == 49 ? " " : named[keyCode] == nil && unshifted.count == 1 ? unshifted : nil
         var text: String
         if modifiers.contains(.control) || (modifiers.contains(.alt) && alt) {
-            text = logical.map { modifiers.contains(.shift) ? $0.uppercased() : $0 } ?? ""
+            text = logical.map { modifiers.contains(.shift) ? shifted ?? $0.uppercased() : $0 } ?? ""
         } else {
             text = characters.isEmpty ? logical ?? "" : characters
         }
@@ -48,7 +50,7 @@ public enum KeyMapping {
         }
         return KeyEvent(key: keyName(keyCode: keyCode, unshifted: unshifted),
                         action: release ? .release : isRepeat ? .repeat : .press,
-                        modifiers: modifiers, consumedModifiers: consumed, text: release ? "" : text,
+                        modifiers: modifiers, consumedModifiers: release ? [] : consumed, text: release ? "" : text,
                         unshiftedCodepoint: unshiftedCodepoint, optionAsAlt: alt)
     }
 

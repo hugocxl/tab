@@ -62,6 +62,7 @@ public final class TerminalFontSet {
     public let generation: UInt64
     private let maps: [FontMap]
     private var mapped: [String: CTFont] = [:]
+    private let features: [[CFString: Any]]
 
     private static var nextGeneration: UInt64 = 0
 
@@ -75,6 +76,7 @@ public final class TerminalFontSet {
         let features = options.features.map { feature -> [CFString: Any] in
             [kCTFontOpenTypeFeatureTag: feature.tag, kCTFontOpenTypeFeatureValue: feature.value]
         }
+        self.features = features
         let fallbacks = families.dropFirst().map { family in
             CTFontDescriptorCreateWithAttributes([kCTFontFamilyNameAttribute: family] as CFDictionary)
         }
@@ -88,13 +90,13 @@ public final class TerminalFontSet {
             let name = CTFontCopyFamilyName(font) as String
             return name.caseInsensitiveCompare(family) == .orderedSame ? font : nil
         }
-        let base = make(families.first)
+        let base = families.lazy.compactMap { make($0) }.first
             ?? make("Menlo")
             ?? CTFontCreateUIFontForLanguage(.userFixedPitch, size, nil)
             ?? CTFontCreateWithName("Menlo" as CFString, size, nil)
         regular = Face(font: base, syntheticBold: false)
         func variant(_ configured: [String], _ traits: CTFontSymbolicTraits) -> Face {
-            if let font = make(configured.first) { return Face(font: font, syntheticBold: false) }
+            if let font = configured.lazy.compactMap({ make($0) }).first { return Face(font: font, syntheticBold: false) }
             if let font = CTFontCreateCopyWithSymbolicTraits(base, size, nil, traits, traits) {
                 return Face(font: font, syntheticBold: false)
             }
@@ -140,10 +142,16 @@ public final class TerminalFontSet {
     func mappedFont(for scalar: Unicode.Scalar, base: CTFont) -> CTFont? {
         guard !maps.isEmpty,
               let map = maps.last(where: { $0.start <= scalar.value && scalar.value <= $0.end }) else { return nil }
-        if let font = mapped[map.family] { return font }
-        let descriptor = CTFontDescriptorCreateWithAttributes([kCTFontFamilyNameAttribute: map.family] as CFDictionary)
-        let font = CTFontCreateWithFontDescriptor(descriptor, size, nil)
-        mapped[map.family] = font
+        let traits = CTFontGetSymbolicTraits(base).intersection([.traitBold, .traitItalic])
+        let key = "\(map.family):\(traits.rawValue)"
+        if let font = mapped[key] { return font }
+        var attributes: [CFString: Any] = [kCTFontFamilyNameAttribute: map.family]
+        if !features.isEmpty { attributes[kCTFontFeatureSettingsAttribute] = features }
+        let descriptor = CTFontDescriptorCreateWithAttributes(attributes as CFDictionary)
+        let regular = CTFontCreateWithFontDescriptor(descriptor, size, nil)
+        guard (CTFontCopyFamilyName(regular) as String).caseInsensitiveCompare(map.family) == .orderedSame else { return nil }
+        let font = CTFontCreateCopyWithSymbolicTraits(regular, size, nil, traits, traits) ?? regular
+        mapped[key] = font
         return font
     }
 

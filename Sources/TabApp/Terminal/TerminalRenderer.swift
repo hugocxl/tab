@@ -66,7 +66,9 @@ public struct TerminalRenderState {
 @MainActor public protocol TerminalRenderer: AnyObject {
     /// Whether the terminal background covers what is behind it.
     var isBackgroundOpaque: Bool { get }
-    /// Draws the rows touching `dirty` (view coordinates, y down).
+    /// Prepares changed row surfaces before AppKit enters draw(_:).
+    func prepare(_ state: TerminalRenderState)
+    /// Blits the prepared rows touching `dirty` (view coordinates, y down).
     func draw(_ state: TerminalRenderState, dirty: [CGRect], in context: CGContext)
     /// Forgets every cached row and image (fonts or colors changed).
     func invalidateAll()
@@ -81,6 +83,34 @@ public struct TerminalRenderState {
 @MainActor public final class CoreTextRenderer: TerminalRenderer {
     /// Rows laid out since creation, for tests and profiling.
     public private(set) var layoutCount = 0
+    public private(set) var drawCount = 0
+    var cachedLineCount: Int { cache.count }
+    public private(set) var rasterCount = 0
+    public private(set) var glyphLayoutCount = 0
+    private var glyphCache: [GlyphKey: [GlyphRun]] = [:]
+    private(set) var glyphBytes = 0
+    var cachedGlyphCount: Int { glyphCache.count }
+    static let glyphLimit = 1024
+    static let glyphByteLimit = 4 * 1024 * 1024
+    public var onLayoutRow: ((Int) -> Void)?
+    public var onRasterRow: ((Int) -> Void)?
+    public private(set) var surfaceAllocationCount = 0
+    /// Optional profiling hook; absent on the normal rendering path.
+    public var onDrawRow: ((Int) -> Void)?
+    public var onInvalidateRows: ((IndexSet) -> Void)?
+    /// Hard limits for retained layout payload, independent of scrollback size.
+    static let lineLimit = 512
+    static let lineByteLimit = 8 * 1024 * 1024
+    static let imageByteLimit = 32 * 1024 * 1024
+    private(set) var layoutBytes = 0
+    var surfaceBytes: Int { surfaces.reduce(0) { $0 + ($1?.bytes ?? 0) } }
+    var imageBytes: Int { images.values.reduce(0) { $0 + $1.bytesPerRow * $1.height } }
+    private var surfaces: [RowSurface?] = []
+    private var renderLayout: TerminalLayout?
+    private var renderMetrics: TerminalMetrics?
+    private var graphics: Graphics?
+    private var preparedImages: [ImagePlacement] = []
+    private var surfaceKeys: [PaintKey?] = []
     public private(set) var isBackgroundOpaque = true
 
     private var slots: [PreparedRow?] = []
@@ -90,89 +120,127 @@ public struct TerminalRenderState {
     private var stamp: UInt64 = 0
     private var palette: TerminalPalette?
     private var fontGeneration: UInt64 = 0
-    private var cols: UInt16 = 0
 
     public init() {}
 
     public func invalidateAll() {
-        slots = []
-        cache = [:]
-        images = [:]
-        colors = [:]
+        slots.removeAll(keepingCapacity: true)
+        cache.removeAll(keepingCapacity: true)
+        layoutBytes = 0
+        glyphBytes = 0
+        glyphCache.removeAll(keepingCapacity: true)
+        images.removeAll(keepingCapacity: true)
+        colors.removeAll(keepingCapacity: true)
+        surfaces.removeAll(keepingCapacity: true)
+        surfaceKeys.removeAll(keepingCapacity: true)
+        preparedImages.removeAll(keepingCapacity: true)
+        graphics = nil
+        renderLayout = nil
     }
 
     public func invalidate(rows: IndexSet) {
+        onInvalidateRows?(rows)
         for row in rows where row < slots.count { slots[row] = nil }
     }
 
-    // MARK: Drawing
-
-    public func draw(_ state: TerminalRenderState, dirty: [CGRect], in context: CGContext) {
-        prepareCaches(for: state)
-        stamp &+= 1
-        let layout = state.layout
-        let palette = state.palette
-        isBackgroundOpaque = palette.isOpaque
-        let backgroundAlpha = CGFloat(min(max(palette.backgroundOpacity, 0), 1))
-        var rows = IndexSet()
-        for rect in dirty {
-            if !palette.isOpaque { context.clear(rect) }
-            context.setFillColor(color(palette.background, alpha: backgroundAlpha))
-            context.fill(rect)
-            rows.insert(integersIn: layout.rows(in: rect))
+    public func prepare(_ state: TerminalRenderState) {
+        let configurationChanged = palette != state.palette || fontGeneration != state.fonts.generation
+            || renderLayout != state.layout || renderMetrics != state.metrics
+        if configurationChanged {
+            invalidateAll()
+            palette = state.palette
+            fontGeneration = state.fonts.generation
+            renderLayout = state.layout
+            renderMetrics = state.metrics
         }
-        guard !rows.isEmpty else { return }
-        context.saveGState()
-        defer { context.restoreGState() }
-        context.textMatrix = CGAffineTransform(scaleX: 1, y: -1)
-        let first = state.firstRow
-        let screenOffset = state.grid.history.count - first
-        var prepared: [Int: PreparedRow] = [:]
-        for row in rows {
-            let content = first + row
+        let rowCount = Int(state.layout.viewport.rows)
+        if slots.count != rowCount {
+            slots = Array(repeating: nil, count: rowCount)
+            surfaces = Array(repeating: nil, count: rowCount)
+            surfaceKeys = Array(repeating: nil, count: rowCount)
+        }
+        let graphicsChanged = graphics != state.grid.graphics
+        if graphicsChanged || configurationChanged {
+            graphics = state.grid.graphics
+            prepareImages(state)
+        }
+        isBackgroundOpaque = state.palette.isOpaque
+        stamp &+= 1
+        for row in 0..<rowCount {
+            let content = state.firstRow + row
             let runs = state.grid.contentRow(content) ?? []
             let selected = selectedColumns(state, row: content - state.grid.history.count)
             let item = preparedRow(runs, selected: selected, row: row, state: state)
-            prepared[row] = item
-            drawBackgrounds(item, row: row, state: state, backgroundAlpha: backgroundAlpha, in: context)
+            let selection = state.selection?.columns(row: content - state.grid.history.count, in: state.grid)
+            let link = state.link.flatMap { $0.row == content - state.grid.history.count ? $0 : nil }
+            let cursor = state.cursor.visible && state.cursor.row == row ? state.cursor : nil
+            let marked = state.cursor.row == row ? state.markedText : nil
+            let key = PaintKey(row: item.key, selection: selection, find: state.find, link: link,
+                               cursor: cursor, marked: marked, scroll: preparedImages.isEmpty ? 0 : state.grid.scrollOffset)
+            guard graphicsChanged || surfaceKeys[row] != key || surfaces[row] == nil else { continue }
+            let rect = state.layout.rowRect(row)
+            if surfaces[row]?.rect != rect {
+                surfaces[row] = RowSurface(rect: rect, scale: state.metrics.scale)
+                surfaceAllocationCount += 1
+            }
+            guard let surface = surfaces[row] else { continue }
+            paint(item, row: row, state: state, in: surface.context)
+            surfaceKeys[row] = key
+            rasterCount += 1
+            onRasterRow?(row)
         }
-        drawImages(state, screenOffset: screenOffset, below: true, rows: rows, in: context)
-        for row in rows {
-            drawHighlights(state, row: row, content: first + row, in: context)
+        trimLayouts()
+    }
+
+    public func draw(_ state: TerminalRenderState, dirty: [CGRect], in context: CGContext) {
+        guard let layout = renderLayout else { return }
+        context.saveGState()
+        defer { context.restoreGState() }
+        context.setBlendMode(.copy)
+        context.interpolationQuality = .none
+        for row in surfaces.indices {
+            guard let surface = surfaces[row],
+                  dirty.contains(where: { $0.intersects(layout.rowRect(row)) }) else { continue }
+            context.saveGState()
+            context.translateBy(x: surface.rect.minX, y: surface.rect.maxY)
+            context.scaleBy(x: 1, y: -1)
+            context.draw(surface.layer, in: CGRect(origin: .zero, size: surface.rect.size))
+            context.restoreGState()
+            drawCount += 1
+            onDrawRow?(row)
         }
-        for row in rows {
-            guard let item = prepared[row] else { continue }
-            let top = layout.grid.minY + CGFloat(row) * layout.cellHeight
-            drawDecorations(item, top: top, state: state, in: context)
-            drawGlyphs(item, origin: CGPoint(x: layout.grid.minX, y: top + state.metrics.baseline), fonts: state.fonts,
-                       override: nil, in: context)
-        }
-        drawImages(state, screenOffset: screenOffset, below: false, rows: rows, in: context)
-        drawLink(state, rows: rows, in: context)
-        if state.cursor.visible, rows.contains(state.cursor.row), let item = prepared[state.cursor.row] {
-            drawCursor(state, row: item, in: context)
-        }
-        if let text = state.markedText, !text.isEmpty, rows.contains(state.cursor.row) {
+    }
+
+    private func paint(_ item: PreparedRow, row: Int, state: TerminalRenderState, in context: CGContext) {
+        let rect = state.layout.rowRect(row)
+        context.clear(rect)
+        context.setFillColor(color(state.palette.background, alpha: CGFloat(state.palette.backgroundOpacity)))
+        context.fill(rect)
+        context.textMatrix = CGAffineTransform(scaleX: 1, y: -1)
+        drawImages(state, row: row, z: Int64.min..<(-1_073_741_824), in: context)
+        drawBackgrounds(item, row: row, state: state, backgroundAlpha: CGFloat(state.palette.backgroundOpacity), in: context)
+        drawImages(state, row: row, z: -1_073_741_824..<0, in: context)
+        drawHighlights(state, row: row, content: state.firstRow + row, in: context)
+        let top = state.layout.grid.minY + CGFloat(row) * state.layout.cellHeight
+        drawDecorations(item, top: top, state: state, in: context)
+        context.saveGState()
+        context.clip(to: state.layout.grid)
+        drawGlyphs(item, origin: CGPoint(x: state.layout.grid.minX, y: top + state.metrics.baseline),
+                   fonts: state.fonts, override: nil, in: context)
+        context.restoreGState()
+        drawImages(state, row: row, z: 0..<Int64.max, in: context)
+        drawLink(state, rows: IndexSet(integer: row), in: context)
+        if state.cursor.visible, state.cursor.row == row { drawCursor(state, row: item, in: context) }
+        if let text = state.markedText, !text.isEmpty, state.cursor.row == row {
             drawMarkedText(text, state: state, in: context)
         }
     }
 
-    private func prepareCaches(for state: TerminalRenderState) {
-        let rowCount = Int(state.layout.viewport.rows)
-        if palette != state.palette || fontGeneration != state.fonts.generation || cols != state.layout.viewport.cols {
-            palette = state.palette
-            fontGeneration = state.fonts.generation
-            cols = state.layout.viewport.cols
-            slots = []
-            cache = [:]
-            colors = [:]
-        }
-        if slots.count != rowCount {
-            slots = Array(repeating: nil, count: rowCount)
-        }
-        if cache.count > max(1024, rowCount * 8) {
-            let horizon = stamp > 64 ? stamp - 64 : 0
-            cache = cache.filter { $0.value.stamp >= horizon }
+    private func trimLayouts() {
+        while cache.count > Self.lineLimit || layoutBytes > Self.lineByteLimit {
+            guard let oldest = cache.min(by: { $0.value.stamp < $1.value.stamp }) else { return }
+            layoutBytes -= oldest.value.bytes
+            cache.removeValue(forKey: oldest.key)
         }
     }
 
@@ -196,14 +264,14 @@ public struct TerminalRenderState {
         } else {
             item = layoutRow(key, state: state)
             cache[key] = item
+            layoutBytes += item.bytes
             layoutCount += 1
+            onLayoutRow?(row)
         }
         item.stamp = stamp
         if row < slots.count { slots[row] = item }
         return item
     }
-
-    // MARK: Layout
 
     /// Lays out one row: background spans merged by color, decorations, and
     /// glyphs placed on their cells.
@@ -247,6 +315,19 @@ public struct TerminalRenderState {
                     pending.append(part.text, column: Int(part.column), glyphs: ascii, cellWidth: cellWidth)
                     continue
                 }
+                if !simple {
+                    pending.flush(into: item)
+                    let shapes = shapedCell(String(part.text), bold: run.style.bold, italic: run.style.italic, state: state)
+                    for var glyphs in shapes {
+                        glyphs.color = color
+                        glyphs.alpha = alpha
+                        glyphs.positions = glyphs.positions.map {
+                            CGPoint(x: $0.x + CGFloat(part.column) * cellWidth, y: $0.y)
+                        }
+                        item.glyphs.append(glyphs)
+                    }
+                    continue
+                }
                 let begin = length
                 text += part.text
                 let added = part.text.utf16.count
@@ -282,7 +363,7 @@ public struct TerminalRenderState {
             let attributes = CTRunGetAttributes(run) as NSDictionary
             guard let index = (attributes[Self.segmentKey] as? NSNumber)?.intValue, segments.indices.contains(index),
                   let fontValue = attributes[kCTFontAttributeName] else { continue }
-            let font = fontValue as! CTFont // swiftlint:disable:this force_cast
+            let font = fontValue as! CTFont
             let segment = segments[index]
             var glyphs = [CGGlyph](repeating: 0, count: count)
             var positions = [CGPoint](repeating: .zero, count: count)
@@ -308,6 +389,47 @@ public struct TerminalRenderState {
                 isColor: CTFontGetSymbolicTraits(font).contains(.traitColorGlyphs)))
         }
         return item
+    }
+
+    /// Shapes a cluster once, sharing fallback and mapped-font glyph geometry
+    /// across rows; color and cell origin are applied by the row layout.
+    private func shapedCell(_ text: String, bold: Bool, italic: Bool, state: TerminalRenderState) -> [GlyphRun] {
+        let key = GlyphKey(text: text, bold: bold, italic: italic)
+        if let cached = glyphCache[key] { return cached }
+        let face = state.fonts.face(bold: bold, italic: italic)
+        let string = CFAttributedStringCreateMutable(nil, 0)!
+        CFAttributedStringReplaceString(string, CFRange(location: 0, length: 0), text as CFString)
+        CFAttributedStringSetAttribute(string, CFRange(location: 0, length: text.utf16.count), kCTFontAttributeName, face.font)
+        let segments = [Segment(range: CFRange(location: 0, length: text.utf16.count), color: 0, alpha: 1,
+                                bold: bold, italic: italic)]
+        if state.fonts.hasMappedRanges { applyMappedFonts(string, text: text, segments: segments, fonts: state.fonts) }
+        let line = CTLineCreateWithAttributedString(string)
+        var result: [GlyphRun] = []
+        for run in CTLineGetGlyphRuns(line) as? [CTRun] ?? [] {
+            let count = CTRunGetGlyphCount(run)
+            guard count > 0 else { continue }
+            let font = (CTRunGetAttributes(run) as NSDictionary)[kCTFontAttributeName] as! CTFont
+            var glyphs = [CGGlyph](repeating: 0, count: count)
+            var positions = [CGPoint](repeating: .zero, count: count)
+            CTRunGetGlyphs(run, CFRange(location: 0, length: 0), &glyphs)
+            CTRunGetPositions(run, CFRange(location: 0, length: 0), &positions)
+            result.append(GlyphRun(font: font, glyphs: glyphs, positions: positions, color: 0, alpha: 1,
+                                   syntheticBold: face.syntheticBold && CFEqual(font, face.font),
+                                   isColor: CTFontGetSymbolicTraits(font).contains(.traitColorGlyphs)))
+        }
+        let bytes = text.utf8.count + result.reduce(128) {
+            $0 + $1.glyphs.count * MemoryLayout<CGGlyph>.stride + $1.positions.count * MemoryLayout<CGPoint>.stride + 128
+        }
+        if glyphCache.count >= Self.glyphLimit || glyphBytes + bytes > Self.glyphByteLimit {
+            glyphCache.removeAll(keepingCapacity: true)
+            glyphBytes = 0
+        }
+        if bytes <= Self.glyphByteLimit {
+            glyphCache[key] = result
+            glyphBytes += bytes
+        }
+        glyphLayoutCount += 1
+        return result
     }
 
     private func applyMappedFonts(_ string: CFMutableAttributedString, text: String, segments: [Segment],
@@ -382,7 +504,7 @@ public struct TerminalRenderState {
             guard start < cols else { break }
             let end = min(column, cols)
             let background = palette.style(run.style).background
-            guard background != palette.background else { continue }
+            guard background != palette.background || run.style.bg != .default || run.style.inverse else { continue }
             if let last = spans.last, last.color == background, last.columns.upperBound == start {
                 spans[spans.count - 1].columns = last.columns.lowerBound..<end
             } else {
@@ -396,7 +518,7 @@ public struct TerminalRenderState {
     static func coversRow(_ runs: [Run], palette: TerminalPalette, cols: UInt16) -> Bool {
         var width: UInt16 = 0
         for run in runs where run.width > 0 {
-            if palette.resolve(run.style.bg, default: palette.background) == palette.background { return false }
+            if palette.style(run.style).background == palette.background { return false }
             if run.text.unicodeScalars.contains(where: { (0xE0B0...0xE0D4).contains($0.value) }) { return false }
             width &+= run.width
             if width >= cols { return true }
@@ -404,11 +526,12 @@ public struct TerminalRenderState {
         return false
     }
 
-    // MARK: Painting
-
     private func drawBackgrounds(_ item: PreparedRow, row: Int, state: TerminalRenderState, backgroundAlpha: CGFloat,
                                  in context: CGContext) {
         let layout = state.layout
+        context.saveGState()
+        defer { context.restoreGState() }
+        context.setBlendMode(.copy)
         let alpha = state.palette.backgroundOpacityCells ? backgroundAlpha : 1
         let top = layout.grid.minY + CGFloat(row) * layout.cellHeight
         let height = layout.cellHeight
@@ -535,61 +658,68 @@ public struct TerminalRenderState {
         context.translateBy(x: origin.x, y: origin.y)
         let thicken = fonts.thicken && fonts.thickenStrength > 0
         for run in item.glyphs {
-            let fill = override ?? color(run.color, alpha: run.alpha)
-            context.setFillColor(fill)
             let stroke = !run.isColor && (run.syntheticBold || thicken)
-            if stroke {
-                context.setStrokeColor(fill)
-                context.setLineWidth(run.syntheticBold ? max(fonts.size / 24, 0.5) : 0.35 * fonts.thickenStrength)
-                context.setTextDrawingMode(.fillStroke)
-            } else {
-                context.setTextDrawingMode(.fill)
+            let grouped = stroke && override == nil && run.alpha < 1
+            if grouped {
+                context.saveGState()
+                context.setAlpha(run.alpha)
+                context.beginTransparencyLayer(auxiliaryInfo: nil)
             }
+            let fill = override ?? color(run.color, alpha: grouped ? 1 : run.alpha)
+            context.setFillColor(fill)
+            context.setTextDrawingMode(.fill)
             run.glyphs.withUnsafeBufferPointer { glyphs in
                 run.positions.withUnsafeBufferPointer { positions in
                     guard let glyphs = glyphs.baseAddress, let positions = positions.baseAddress else { return }
                     CTFontDrawGlyphs(run.font, glyphs, positions, run.glyphs.count, context)
+                    guard stroke else { return }
+                    context.setStrokeColor(fill)
+                    context.setLineWidth(run.syntheticBold ? max(fonts.size / 24, 0.5) : 0.35 * fonts.thickenStrength)
+                    context.setTextDrawingMode(.stroke)
+                    CTFontDrawGlyphs(run.font, glyphs, positions, run.glyphs.count, context)
                 }
+            }
+            if grouped {
+                context.endTransparencyLayer()
+                context.restoreGState()
             }
         }
         context.restoreGState()
     }
 
-    private func drawImages(_ state: TerminalRenderState, screenOffset: Int, below: Bool, rows: IndexSet,
-                            in context: CGContext) {
-        guard let graphics = state.grid.graphics, !graphics.placements.isEmpty else { return }
+    private func prepareImages(_ state: TerminalRenderState) {
+        preparedImages.removeAll(keepingCapacity: true)
+        images.removeAll(keepingCapacity: true)
+        guard let graphics = state.grid.graphics else { return }
         let layout = state.layout
-        let scale = state.metrics.scale
-        if images.count > graphics.images.count + 8 {
-            let live = Set(graphics.images.map { ImageKey(id: $0.id, generation: $0.generation) })
-            images = images.filter { live.contains($0.key) }
-        }
-        for placement in graphics.placements where (placement.z < 0) == below {
+        let sx = layout.cellWidth / CGFloat(max(graphics.cell.width, 1))
+        let sy = layout.cellHeight / CGFloat(max(graphics.cell.height, 1))
+        for placement in graphics.placements.sorted(by: { $0.z < $1.z }) {
             guard let image = graphics.images.first(where: { $0.id == placement.image }),
                   let cgImage = cgImage(image) else { continue }
-            var source = CGRect(x: Int(placement.source.x), y: Int(placement.source.y),
+            let source = CGRect(x: Int(placement.source.x), y: Int(placement.source.y),
                                 width: Int(placement.source.width), height: Int(placement.source.height))
-            if source.width == 0 || source.height == 0 {
-                source = CGRect(x: 0, y: 0, width: cgImage.width, height: cgImage.height)
-            }
-            let row = Int(placement.row) + screenOffset
-            let width = placement.size.cols > 0 ? CGFloat(placement.size.cols) * layout.cellWidth : source.width / scale
-            let height = placement.size.rows > 0 ? CGFloat(placement.size.rows) * layout.cellHeight : source.height / scale
-            let rect = CGRect(x: layout.grid.minX + CGFloat(placement.column) * layout.cellWidth
-                                + CGFloat(placement.offset.x) / scale,
-                              y: layout.grid.minY + CGFloat(row) * layout.cellHeight + CGFloat(placement.offset.y) / scale,
-                              width: width, height: height)
-            let touched = layout.rows(in: rect)
-            guard touched.contains(where: rows.contains) else { continue }
-            let cropped = source == CGRect(x: 0, y: 0, width: cgImage.width, height: cgImage.height)
-                ? cgImage : cgImage.cropping(to: source)
-            guard let cropped else { continue }
+            let crop = source.width == 0 || source.height == 0
+                ? CGRect(x: 0, y: 0, width: cgImage.width, height: cgImage.height) : source
+            guard let cropped = cgImage.cropping(to: crop) else { continue }
+            let rect = CGRect(x: layout.grid.minX + CGFloat(placement.column) * layout.cellWidth + CGFloat(placement.offset.x) * sx,
+                              y: layout.grid.minY + CGFloat(placement.row) * layout.cellHeight + CGFloat(placement.offset.y) * sy,
+                              width: placement.size.cols > 0 ? CGFloat(placement.size.cols) * layout.cellWidth : crop.width * sx,
+                              height: placement.size.rows > 0 ? CGFloat(placement.size.rows) * layout.cellHeight : crop.height * sy)
+            preparedImages.append(ImagePlacement(image: cropped, rect: rect, z: placement.z))
+        }
+    }
+
+    private func drawImages(_ state: TerminalRenderState, row: Int, z: Range<Int64>, in context: CGContext) {
+        for placement in preparedImages where z.contains(Int64(placement.z)) {
+            let rect = placement.rect.offsetBy(dx: 0, dy: CGFloat(state.grid.scrollOffset) * state.layout.cellHeight)
+            guard rect.intersects(state.layout.rowRect(row)) else { continue }
             context.saveGState()
-            context.clip(to: layout.grid)
+            context.clip(to: state.layout.grid)
             context.translateBy(x: rect.minX, y: rect.maxY)
             context.scaleBy(x: 1, y: -1)
             context.interpolationQuality = .high
-            context.draw(cropped, in: CGRect(origin: .zero, size: rect.size))
+            context.draw(placement.image, in: CGRect(origin: .zero, size: rect.size))
             context.restoreGState()
         }
     }
@@ -599,7 +729,9 @@ public struct TerminalRenderState {
         if let cached = images[key] { return cached }
         let width = Int(image.width)
         let height = Int(image.height)
-        guard width > 0, height > 0, image.rgba.count >= width * height * 4,
+        guard width > 0, height > 0, width <= Self.imageByteLimit / 4 / height,
+              imageBytes + width * height * 4 <= Self.imageByteLimit,
+              image.rgba.count >= width * height * 4,
               let provider = CGDataProvider(data: image.rgba as CFData),
               let space = CGColorSpace(name: CGColorSpace.sRGB),
               let cgImage = CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32,
@@ -692,14 +824,13 @@ public struct TerminalRenderState {
         let key = UInt64(value) | alphaByte << 32
         if let cached = colors[key] { return cached }
         let created = CGColor.terminal(value, alpha: CGFloat(alphaByte) / 255)
+        if colors.count >= 512 { colors.removeAll(keepingCapacity: true) }
         colors[key] = created
         return created
     }
 
     static let segmentKey = "TabTerminalSegment" as CFString
 }
-
-// MARK: - Cached rows
 
 struct RowKey: Hashable {
     var runs: [Run]
@@ -803,6 +934,13 @@ final class PreparedRow {
     var glyphs: [GlyphRun] = []
     var decorations: [Decoration] = []
     var stamp: UInt64 = 0
+    /// Retained payload estimate; excludes Core Text's process-wide font storage.
+    var bytes: Int {
+        256 + key.runs.reduce(0) { $0 + $1.text.utf8.count + MemoryLayout<Run>.stride }
+            + glyphs.reduce(0) { $0 + 128 + $1.glyphs.count * MemoryLayout<CGGlyph>.stride
+                + $1.positions.count * MemoryLayout<CGPoint>.stride }
+            + backgrounds.count * 32 + decorations.count * MemoryLayout<Decoration>.stride
+    }
 
     init(key: RowKey) {
         self.key = key
@@ -810,3 +948,53 @@ final class PreparedRow {
 }
 
 private typealias Selection = TerminalSelection
+
+/// Reused bitmap storage for a visible row, including its padding and overlays.
+private final class RowSurface {
+    let rect: CGRect
+    let context: CGContext
+    let layer: CGLayer
+    /// Backing pixel payload; Core Graphics owns the layer's allocation metadata.
+    let bytes: Int
+
+    init?(rect: CGRect, scale: CGFloat) {
+        let width = Int(ceil(rect.width * scale))
+        let height = Int(ceil(rect.height * scale))
+        guard width > 0, height > 0,
+              let reference = CGContext(data: nil, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 0,
+                                        space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                        bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue
+                                            | CGBitmapInfo.byteOrder32Little.rawValue),
+              let layer = CGLayer(reference, size: CGSize(width: width, height: height), auxiliaryInfo: nil),
+              let context = layer.context else { return nil }
+        self.rect = rect
+        self.context = context
+        self.layer = layer
+        bytes = ((width * 4 + 63) / 64 * 64) * height
+        context.scaleBy(x: scale, y: scale)
+        context.translateBy(x: -rect.minX, y: rect.maxY)
+        context.scaleBy(x: 1, y: -1)
+    }
+}
+
+private struct ImagePlacement {
+    var image: CGImage
+    var rect: CGRect
+    var z: Int32
+}
+
+private struct PaintKey: Equatable {
+    var row: RowKey
+    var selection: Range<UInt16>?
+    var find: TerminalFind?
+    var link: TerminalLinkCandidate?
+    var cursor: TerminalCursorState?
+    var marked: String?
+    var scroll: Int
+}
+
+private struct GlyphKey: Hashable {
+    var text: String
+    var bold: Bool
+    var italic: Bool
+}

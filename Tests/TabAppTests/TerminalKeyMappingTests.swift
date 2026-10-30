@@ -2,6 +2,7 @@ import AppKit
 import XCTest
 import TabCore
 import TabProtocol
+import TabTerminal
 @testable import TabApp
 
 final class TerminalKeyMappingTests: XCTestCase {
@@ -113,6 +114,87 @@ final class TerminalKeyMappingTests: XCTestCase {
                      "Clearing the defaults drops Shift+Return")
         XCTAssertFalse(view.canHandle(try event(keyCode: 7, characters: "x", flags: .command)))
         XCTAssertTrue(view.canHandle(try event(keyCode: 7, characters: "x", flags: .control)))
+    }
+
+    func testMappedEventsUseGhosttyApplicationCursorAndKittyEncoding() throws {
+        let terminal = try TabTerminal.Terminal(size: Size(cols: 80, rows: 24), historyBudgetBytes: 1024)
+        let up = key(126, "\u{F700}")
+        XCTAssertEqual(try terminal.encodeKey(up), Data("\u{1b}[A".utf8))
+        terminal.feed(Data("\u{1b}[?1h".utf8))
+        XCTAssertEqual(try terminal.encodeKey(up), Data("\u{1b}OA".utf8))
+        terminal.feed(Data("\u{1b}[>31u".utf8))
+        XCTAssertEqual(try terminal.encodeKey(key(0, "a")), Data("\u{1b}[97;;97u".utf8))
+        XCTAssertEqual(try terminal.encodeKey(key(0, "\u{01}", unshifted: "a", flags: .control)), Data("\u{1b}[97;5u".utf8))
+        let repeated = KeyMapping.keyEvent(keyCode: 0, characters: "a", unshifted: "a", flags: [], isRepeat: true, optionAsAlt: .both)
+        XCTAssertEqual(try terminal.encodeKey(repeated), Data("\u{1b}[97;1:2;97u".utf8))
+        let release = KeyMapping.keyEvent(keyCode: 0, characters: "A", unshifted: "a", flags: .shift,
+                                          optionAsAlt: .both, release: true)
+        XCTAssertEqual(release.consumedModifiers, [])
+        XCTAssertEqual(release.text, "")
+        XCTAssertEqual(try terminal.encodeKey(release), Data("\u{1b}[97;2:3u".utf8))
+    }
+
+    func testOptionSideMatrixAndShiftedPunctuationReachTheEngine() throws {
+        let terminal = try TabTerminal.Terminal(size: Size(cols: 80, rows: 24), historyBudgetBytes: 1024)
+        for option in OptionAsAlt.allCases {
+            for side in [KeyMapping.leftOption, KeyMapping.rightOption] {
+                let flags = NSEvent.ModifierFlags(rawValue: NSEvent.ModifierFlags.option.rawValue | side)
+                let mapped = key(11, "∫", unshifted: "b", flags: flags, option: option)
+                let alt = option == .both || option == .left && side == KeyMapping.leftOption
+                    || option == .right && side == KeyMapping.rightOption
+                XCTAssertEqual(try terminal.encodeKey(mapped), Data((alt ? "\u{1b}b" : "∫").utf8))
+            }
+        }
+        let flags: NSEvent.ModifierFlags = [.option, .shift]
+        let punctuation = KeyMapping.keyEvent(keyCode: 18, characters: "⁄", unshifted: "1", shifted: "!",
+                                              flags: flags, optionAsAlt: .both)
+        XCTAssertEqual(punctuation.text, "!")
+        XCTAssertEqual(try terminal.encodeKey(punctuation), Data("\u{1b}!".utf8))
+        XCTAssertEqual(key(49, " ", flags: .option).text, " ")
+        XCTAssertEqual(try terminal.encodeKey(key(49, " ", flags: .option)), Data("\u{1b} ".utf8))
+        XCTAssertEqual(try terminal.encodeKey(key(49, "\0", unshifted: " ", flags: .control)), Data([0]))
+    }
+
+    @MainActor
+    func testIMEReplacementUTF16AndCommitDoNotSendCompositionKeys() {
+        let view = TerminalView(settings: TerminalFixtures.settings(), palette: TerminalPalette())
+        let host = RecordingHost()
+        view.host = host
+        view.setGrid(TerminalFixtures.grid([[]]))
+        view.setMarkedText("a😀b", selectedRange: NSRange(location: 1, length: 2),
+                           replacementRange: NSRange(location: NSNotFound, length: 0))
+        XCTAssertEqual(view.markedRange(), NSRange(location: 0, length: 4))
+        XCTAssertTrue(host.inputs.isEmpty)
+        view.setMarkedText("界", selectedRange: NSRange(location: 1, length: 0), replacementRange: NSRange(location: 1, length: 2))
+        XCTAssertEqual(view.attributedSubstring(forProposedRange: NSRange(location: 0, length: 3), actualRange: nil)?.string, "a界b")
+        XCTAssertEqual(view.selectedRange(), NSRange(location: 2, length: 0))
+        view.insertText("c", replacementRange: NSRange(location: 2, length: 1))
+        XCTAssertEqual(host.inputs, [.text("a界c")])
+        XCTAssertFalse(view.hasMarkedText())
+        view.setMarkedText("é", selectedRange: NSRange(location: 1, length: 0),
+                           replacementRange: NSRange(location: NSNotFound, length: 0))
+        view.unmarkText()
+        view.unmarkText()
+        XCTAssertEqual(host.inputs, [.text("a界c"), .text("é")], "unmark commits once, matching Codesh")
+    }
+
+    @MainActor
+    func testKeyReleaseRemembersPhysicalPressWithoutNSAppCurrentEvent() throws {
+        let view = TerminalView(settings: TerminalFixtures.settings(), palette: TerminalPalette())
+        let host = RecordingHost()
+        view.host = host
+        view.setGrid(TerminalFixtures.grid([[]]))
+        view.keyDown(with: try event(keyCode: 126, characters: "\u{F700}", flags: []))
+        let released = try XCTUnwrap(NSEvent.keyEvent(with: .keyUp, location: .zero, modifierFlags: [], timestamp: 0,
+                                                      windowNumber: 0, context: nil, characters: "", charactersIgnoringModifiers: "",
+                                                      isARepeat: false, keyCode: 126))
+        view.keyUp(with: released)
+        guard case .key(let key)? = host.inputs.last else { return XCTFail("release missing") }
+        XCTAssertEqual(host.inputs.count, 2)
+        XCTAssertEqual(key.action, .release)
+        XCTAssertEqual(key.key, "arrow_up")
+        XCTAssertEqual(key.text, "")
+        XCTAssertEqual(key.consumedModifiers, [])
     }
 
     private func event(keyCode: UInt16, characters: String, flags: NSEvent.ModifierFlags) throws -> NSEvent {
