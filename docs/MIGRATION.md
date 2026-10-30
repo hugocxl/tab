@@ -90,7 +90,7 @@ crates. Behavior is 1:1 unless listed under "Intentionally changed".
 - [ ] Kitty graphics images
 - [ ] Keyboard: full key encoding through the engine (kitty keyboard protocol, application cursor keys), Option as Alt (none/left/right/both), IME composition and marked text, line feed on Shift+Return, built-in terminal bindings (clear screen, delete line, start/end of line, scroll to top/bottom, prompt jumps) and user key bindings from `terminal.json` that win over app shortcuts; option to disable built-ins
 - [ ] Mouse: selection (click, drag, double word, triple line), copy on select, clear selection when typing or copying, mouse reporting to programs with Shift to override, right-click menu, scroll with separate trackpad and wheel speeds, alternate scroll, scroll to live output on input
-- [ ] Copy/paste: Cmd+C/Cmd+V, bracketed paste, image paste sends Ctrl+V, drop files pastes paths; remote: upload then paste the remote path
+- [ ] Copy/paste: Cmd+C/Cmd+V, bracketed paste, image paste sends Ctrl+V, drop files pastes paths (promised files such as the screenshot thumbnail are received into a temp folder; dropped image data is saved as an upload and its path pasted); remote: upload then paste the remote path
 - [ ] Find (Cmd+F) across history with next/previous and case toggle, match highlighting
 - [ ] Links: Cmd-click URLs (system browser or built-in per setting) and file paths with `:line:column` (Tab editor or chosen app); remote files offer a read-only copy or the path
 - [ ] Prompt jumping (Cmd+Up/Down), Select Command Output

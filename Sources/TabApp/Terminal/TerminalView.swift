@@ -70,6 +70,8 @@ public extension TerminalViewDelegate {
     func terminalView(_ view: TerminalView, perform command: TerminalCommand, at point: TerminalPoint?)
     func terminalView(_ view: TerminalView, dropFiles paths: [String])
     func terminalView(_ view: TerminalView, pasteImage png: Data)
+    /// Saves dropped image data as a file on the terminal's server and pastes its path.
+    func terminalView(_ view: TerminalView, dropImage png: Data)
     func terminalView(_ view: TerminalView, didChangeViewport viewport: Size)
     func terminalView(_ view: TerminalView, didChangeFocus focused: Bool)
 }
@@ -163,7 +165,9 @@ public final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation
         wantsLayer = true
         clipsToBounds = true
         layerContentsRedrawPolicy = .onSetNeedsDisplay
-        registerForDraggedTypes([.fileURL, .string, .png, .tiff])
+        registerForDraggedTypes([.fileURL, .string, .png, .tiff] + NSFilePromiseReceiver.readableDraggedTypes.map {
+            NSPasteboard.PasteboardType($0)
+        })
         scrollbar.onScroll = { [weak self] offset in
             guard let self else { return }
             self.host?.terminalView(self, scrollTo: Int(offset.rounded()))
@@ -796,10 +800,61 @@ public final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation
         host?.isLive ?? false ? .copy : []
     }
 
+    /// Drops paste file paths like a paste, but files that are only promised,
+    /// such as the screenshot thumbnail's, are written to a temporary folder
+    /// first, and bare image data becomes a file, since a program reading
+    /// the clipboard on Ctrl+V would not see the dragged image.
     public override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         guard host?.isLive ?? false else { return false }
-        paste(from: sender.draggingPasteboard)
-        return true
+        let pasteboard = sender.draggingPasteboard
+        if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true])
+            as? [URL], !urls.isEmpty {
+            host?.terminalView(self, dropFiles: urls.map(\.path))
+            return true
+        }
+        if let promises = pasteboard.readObjects(forClasses: [NSFilePromiseReceiver.self], options: nil)
+            as? [NSFilePromiseReceiver], !promises.isEmpty {
+            receive(promises)
+            return true
+        }
+        if let png = Self.pngData(pasteboard) {
+            host?.terminalView(self, dropImage: png)
+            return true
+        }
+        if let text = pasteboard.string(forType: .string) {
+            pasteText(text)
+            return true
+        }
+        return false
+    }
+
+    /// Waits for every promised file, then drops the ones that arrived together.
+    private func receive(_ promises: [NSFilePromiseReceiver]) {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Tab Drops", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        } catch {
+            Log.terminal.error("drop folder: \(error.localizedDescription, privacy: .public)")
+            return
+        }
+        var pending = promises.reduce(0) { $0 + max(1, $1.fileNames.count) }
+        var received: [String] = []
+        for promise in promises {
+            promise.receivePromisedFiles(atDestination: folder, options: [:], operationQueue: .main) { [weak self] url, error in
+                MainActor.assumeIsolated {
+                    if let error {
+                        Log.terminal.error("drop: \(error.localizedDescription, privacy: .public)")
+                    } else {
+                        received.append(url.path)
+                    }
+                    pending -= 1
+                    guard pending == 0, !received.isEmpty, let self else { return }
+                    self.host?.terminalView(self, dropFiles: received)
+                }
+            }
+        }
     }
 
     // MARK: Mouse

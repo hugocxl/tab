@@ -56,6 +56,7 @@ enum TerminalFixtures {
     var commands: [TerminalCommand] = []
     var scrolls: [Int] = []
     var drops: [[String]] = []
+    var droppedImages: [Data] = []
 
     func terminalView(_ view: TerminalView, send input: TerminalInput) { inputs.append(input) }
     func terminalView(_ view: TerminalView, scrollBy rows: Int) { scrolls.append(rows) }
@@ -65,6 +66,7 @@ enum TerminalFixtures {
     }
     func terminalView(_ view: TerminalView, dropFiles paths: [String]) { drops.append(paths) }
     func terminalView(_ view: TerminalView, pasteImage png: Data) {}
+    func terminalView(_ view: TerminalView, dropImage png: Data) { droppedImages.append(png) }
     func terminalView(_ view: TerminalView, didChangeViewport viewport: Size) {}
     func terminalView(_ view: TerminalView, didChangeFocus focused: Bool) {}
 }

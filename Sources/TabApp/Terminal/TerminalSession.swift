@@ -454,10 +454,20 @@ public extension TerminalSessionControllerDelegate {
             terminalView(view, send: .bytes(Data([0x16])))
             return
         }
+        uploadImage(png, prefix: "pasted-image")
+    }
+
+    func terminalView(_ view: TerminalView, dropImage png: Data) {
+        guard isLive else { return }
+        uploadImage(png, prefix: "dropped-image")
+    }
+
+    /// Saves an image in the server's upload folder and pastes its path.
+    private func uploadImage(_ png: Data, prefix: String) {
         Task { [weak self] in
             guard let self else { return }
             do {
-                let name = "pasted-image-\(Int(Date().timeIntervalSince1970)).png"
+                let name = "\(prefix)-\(Int(Date().timeIntervalSince1970)).png"
                 let path = try await self.backend.upload(session: self.session, name: name, bytes: png)
                 if let text = TerminalPaste.quotedPaths([path.rawValue]) { self.view.pasteText(text) }
             } catch {
