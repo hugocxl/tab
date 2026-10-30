@@ -8,16 +8,19 @@ public struct BrowserHistoryEntry: Codable, Equatable, Sendable {
     public var lastVisit: Date
     /// Imported from another browser's bookmarks.
     public var bookmarked: Bool
+    /// Source and timestamp keys make repeated imports idempotent.
+    public var importedVisits: [String]
 
-    public init(url: String, title: String? = nil, visitCount: Int = 1, lastVisit: Date = Date(), bookmarked: Bool = false) {
+    public init(url: String, title: String? = nil, visitCount: Int = 1, lastVisit: Date = Date(), bookmarked: Bool = false, importedVisits: [String] = []) {
         self.url = url
         self.title = title
         self.visitCount = visitCount
         self.lastVisit = lastVisit
         self.bookmarked = bookmarked
+        self.importedVisits = importedVisits
     }
 
-    private enum CodingKeys: String, CodingKey { case url, title, visitCount, lastVisit, bookmarked }
+    private enum CodingKeys: String, CodingKey { case url, title, visitCount, lastVisit, bookmarked, importedVisits }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -26,6 +29,7 @@ public struct BrowserHistoryEntry: Codable, Equatable, Sendable {
         visitCount = try container.decodeIfPresent(Int.self, forKey: .visitCount) ?? 1
         lastVisit = try container.decodeIfPresent(Date.self, forKey: .lastVisit) ?? Date(timeIntervalSince1970: 0)
         bookmarked = try container.decodeIfPresent(Bool.self, forKey: .bookmarked) ?? false
+        importedVisits = try container.decodeIfPresent([String].self, forKey: .importedVisits) ?? []
     }
 }
 
@@ -35,8 +39,6 @@ public struct BrowserHistoryEntry: Codable, Equatable, Sendable {
 /// pages by visit count.
 @MainActor
 public final class BrowserHistoryStore {
-    /// How many pages are kept; the least recently visited go first.
-    public nonisolated static let capacity = 5_000
     public nonisolated static let suggestionLimit = 8
 
     public let file: URL
@@ -44,12 +46,19 @@ public final class BrowserHistoryStore {
     private var index: [String: Int] = [:]
     private var saveScheduled = false
     private let saveDelay: TimeInterval
+    private let allowedRoot: URL?
+
+    private var accessible: Bool {
+        guard let allowedRoot else { return true }
+        return file.resolvingSymlinksInPath().path.hasPrefix(allowedRoot.resolvingSymlinksInPath().path + "/")
+    }
 
     /// Reads `file` when it exists; a damaged file starts an empty history.
-    public init(file: URL, saveDelay: TimeInterval = 1) {
+    public init(file: URL, saveDelay: TimeInterval = 1, confinedTo allowedRoot: URL? = nil) {
         self.file = file
         self.saveDelay = saveDelay
-        guard let data = try? Data(contentsOf: file) else { return }
+        self.allowedRoot = allowedRoot
+        guard accessible, let data = try? Data(contentsOf: file) else { return }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .secondsSince1970
         entries = (try? decoder.decode([BrowserHistoryEntry].self, from: data)) ?? []
@@ -67,7 +76,6 @@ public final class BrowserHistoryStore {
         } else {
             index[url] = entries.count
             entries.append(BrowserHistoryEntry(url: url, title: title?.isEmpty == false ? title : nil, lastVisit: date))
-            trim()
         }
         scheduleSave()
     }
@@ -87,38 +95,48 @@ public final class BrowserHistoryStore {
         var added = 0
         for entry in imported where Self.isRecordable(entry.url) {
             if let position = index[entry.url] {
-                entries[position].visitCount += entry.visitCount
+                if entry.importedVisits.isEmpty {
+                    entries[position].visitCount += entry.visitCount
+                } else {
+                    let known = Set(entries[position].importedVisits)
+                    let added = Set(entry.importedVisits).subtracting(known)
+                    entries[position].visitCount += added.count
+                    entries[position].importedVisits.append(contentsOf: added.sorted())
+                }
+                if let title = entry.title, !title.isEmpty,
+                   entries[position].title == nil || entry.lastVisit >= entries[position].lastVisit {
+                    entries[position].title = title
+                }
                 entries[position].lastVisit = max(entries[position].lastVisit, entry.lastVisit)
                 entries[position].bookmarked = entries[position].bookmarked || entry.bookmarked
-                if entries[position].title == nil { entries[position].title = entry.title }
             } else {
                 index[entry.url] = entries.count
                 entries.append(entry)
                 added += 1
             }
         }
-        trim()
         scheduleSave()
         return added
     }
 
-    /// Suggestions for what was typed: the most recent pages when `query` is
-    /// empty, else pages whose address or title contains every word,
-    /// most visited first (bookmarks count as visited often).
+    /// Suggestions follow Codesh's history query: literal text in the URL
+    /// or title, most visited first, with ties broken by recency. An empty
+    /// query shows recent visits. Unvisited bookmarks do not appear.
     public func suggestions(for query: String, limit: Int = suggestionLimit) -> [BrowserHistoryEntry] {
-        let words = query.lowercased().split(whereSeparator: \.isWhitespace).map(String.init)
-        guard !words.isEmpty else {
-            return Array(entries.sorted { $0.lastVisit > $1.lastVisit }.prefix(limit))
+        let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let matches = entries.enumerated().filter { _, entry in
+            guard entry.visitCount > 0 else { return false }
+            guard !query.isEmpty else { return true }
+            return entry.url.range(of: query, options: .caseInsensitive) != nil
+                || entry.title?.range(of: query, options: .caseInsensitive) != nil
         }
-        let matches = entries.filter { entry in
-            let haystack = (entry.url + " " + (entry.title ?? "")).lowercased()
-            return words.allSatisfy(haystack.contains)
-        }
-        return Array(matches.sorted { lhs, rhs in
-            let left = Self.rank(lhs, words), right = Self.rank(rhs, words)
-            if left != right { return left > right }
-            return lhs.lastVisit > rhs.lastVisit
-        }.prefix(limit))
+        return matches.sorted { lhs, rhs in
+            if !query.isEmpty, lhs.element.visitCount != rhs.element.visitCount {
+                return lhs.element.visitCount > rhs.element.visitCount
+            }
+            if lhs.element.lastVisit != rhs.element.lastVisit { return lhs.element.lastVisit > rhs.element.lastVisit }
+            return lhs.offset > rhs.offset
+        }.prefix(max(limit, 0)).map(\.element)
     }
 
     /// Forgets every page.
@@ -131,6 +149,7 @@ public final class BrowserHistoryStore {
     /// Writes pending changes now, such as before quitting.
     public func saveNow() {
         saveScheduled = false
+        guard accessible else { return }
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .secondsSince1970
         guard let data = try? encoder.encode(entries) else { return }
@@ -138,31 +157,9 @@ public final class BrowserHistoryStore {
         try? data.write(to: file, options: .atomic)
     }
 
-    private static func rank(_ entry: BrowserHistoryEntry, _ words: [String]) -> Int {
-        var score = entry.visitCount + (entry.bookmarked ? 10 : 0)
-        let host = BrowserHistoryStore.hostAndPath(entry.url)
-        if let first = words.first, host.hasPrefix(first) { score += 1_000 }
-        return score
-    }
-
-    /// The address without its scheme or `www.`, for prefix matches.
-    static func hostAndPath(_ url: String) -> String {
-        var text = url.lowercased()
-        if let range = text.range(of: "://") { text = String(text[range.upperBound...]) }
-        if text.hasPrefix("www.") { text.removeFirst(4) }
-        return text
-    }
-
     private static func isRecordable(_ url: String) -> Bool {
         let lower = url.lowercased()
         return lower.hasPrefix("http://") || lower.hasPrefix("https://")
-    }
-
-    private func trim() {
-        guard entries.count > Self.capacity else { return }
-        entries.sort { $0.lastVisit > $1.lastVisit }
-        entries.removeLast(entries.count - Self.capacity)
-        rebuildIndex()
     }
 
     private func rebuildIndex() {

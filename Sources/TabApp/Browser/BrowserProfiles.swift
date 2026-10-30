@@ -41,17 +41,28 @@ public final class BrowserProfiles {
     public private(set) var profiles: [BrowserProfile]
     private var histories: [String: BrowserHistoryStore] = [:]
     private var stores: [String: WKWebsiteDataStore] = [:]
+    private let storeFactory: ((BrowserProfile) -> WKWebsiteDataStore)?
 
-    public init(root: URL) {
+    public init(root: URL, storeFactory: ((BrowserProfile) -> WKWebsiteDataStore)? = nil) {
         self.root = root
+        self.storeFactory = storeFactory
         let saved = (try? Data(contentsOf: root.appendingPathComponent("profiles.json")))
             .flatMap { try? JSONDecoder().decode([BrowserProfile].self, from: $0) } ?? []
-        profiles = [BrowserProfile(id: "", name: Self.defaultName)] + saved.filter { !$0.isBuiltInDefault }
+        var seen = Set<String>()
+        profiles = [saved.first(where: \.isBuiltInDefault) ?? BrowserProfile(id: "", name: Self.defaultName)] + saved.compactMap { profile in
+            guard let id = Self.identifier(profile.id)?.uuidString.lowercased(), seen.insert(id).inserted else { return nil }
+            return BrowserProfile(id: id, name: profile.name)
+        }
     }
 
     /// The store under the app's profile folder: `<profile>/browser`.
     public convenience init(dirs: TabDirs) {
         self.init(root: dirs.root.appendingPathComponent("browser", isDirectory: true))
+    }
+
+    private static func identifier(_ id: String) -> UUID? {
+        guard let identifier = UUID(uuidString: id), identifier.uuidString != "00000000-0000-0000-0000-000000000000" else { return nil }
+        return identifier
     }
 
     // MARK: Lookup
@@ -89,9 +100,11 @@ public final class BrowserProfiles {
     public func dataStore(for profile: BrowserProfile) -> WKWebsiteDataStore {
         if let store = stores[profile.id] { return store }
         let store: WKWebsiteDataStore
-        if profile.isBuiltInDefault {
+        if let storeFactory {
+            store = storeFactory(profile)
+        } else if profile.isBuiltInDefault {
             store = .default()
-        } else if let identifier = UUID(uuidString: profile.id) {
+        } else if let identifier = Self.identifier(profile.id) {
             store = WKWebsiteDataStore(forIdentifier: identifier)
         } else {
             store = .nonPersistent()
@@ -102,12 +115,13 @@ public final class BrowserProfiles {
 
     /// The folder holding `profile`'s app-side files.
     public func folder(for profile: BrowserProfile) -> URL {
-        root.appendingPathComponent(profile.isBuiltInDefault ? "default" : profile.id, isDirectory: true)
+        let name = Self.identifier(profile.id)?.uuidString.lowercased() ?? "default"
+        return root.appendingPathComponent(name, isDirectory: true)
     }
 
     public func history(for profile: BrowserProfile) -> BrowserHistoryStore {
         if let history = histories[profile.id] { return history }
-        let history = BrowserHistoryStore(file: folder(for: profile).appendingPathComponent("browser-history.json"))
+        let history = BrowserHistoryStore(file: folder(for: profile).appendingPathComponent("browser-history.json"), confinedTo: root)
         histories[profile.id] = history
         return history
     }
@@ -122,7 +136,9 @@ public final class BrowserProfiles {
     @discardableResult
     public func add(named name: String) throws -> BrowserProfile {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let profile = BrowserProfile(id: UUID().uuidString.lowercased(), name: trimmed.isEmpty ? "Profile" : trimmed)
+        let name = trimmed.isEmpty ? "Profile" : trimmed
+        try validateName(name)
+        let profile = BrowserProfile(id: UUID().uuidString.lowercased(), name: name)
         profiles.append(profile)
         try save()
         return profile
@@ -134,8 +150,10 @@ public final class BrowserProfiles {
         guard let position = profiles.firstIndex(where: { $0.id == id }) else {
             throw BrowserScripts.Failure("no browser profile with ID \(id)")
         }
+        try validateName(trimmed, excluding: id)
         profiles[position].name = trimmed
         try save()
+        for pane in panes.all where pane.profile.id == id { pane.updateProfileName(trimmed) }
     }
 
     /// Deletes a profile with its cookies, site data and history. Its open
@@ -156,24 +174,38 @@ public final class BrowserProfiles {
         histories[id] = nil
         stores[id] = nil
         try? FileManager.default.removeItem(at: folder(for: profile))
-        guard let identifier = UUID(uuidString: id) else { return }
+        guard let identifier = Self.identifier(id) else { return }
         try? await WKWebsiteDataStore.remove(forIdentifier: identifier)
     }
 
     /// Signs the profile out of everything: its cookies, site data and
     /// history go.
     public func clearData(_ id: String) async throws {
-        let profile = try resolve(id.isEmpty ? defaultProfile.id : id)
+        guard let profile = profiles.first(where: { $0.id == id }) else {
+            throw BrowserScripts.Failure("no browser profile with ID \(id)")
+        }
         history(for: profile).clear()
         let store = dataStore(for: profile)
         await store.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast)
+    }
+
+    private func validateName(_ name: String, excluding id: String? = nil) throws {
+        guard name.unicodeScalars.count <= 128 else {
+            throw BrowserScripts.Failure("invalid profile name: the name is longer than 128 characters")
+        }
+        guard !name.unicodeScalars.contains(where: { $0.properties.generalCategory == .control }) else {
+            throw BrowserScripts.Failure("invalid profile name: the name contains control characters")
+        }
+        guard !profiles.contains(where: { $0.id != id && $0.name.caseInsensitiveCompare(name) == .orderedSame }) else {
+            throw BrowserScripts.Failure("a profile named `\(name)` already exists")
+        }
     }
 
     private func save() throws {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let data = try encoder.encode(profiles.filter { !$0.isBuiltInDefault })
+        let data = try encoder.encode(profiles)
         try data.write(to: root.appendingPathComponent("profiles.json"), options: .atomic)
     }
 
@@ -198,8 +230,9 @@ public final class BrowserProfiles {
     }
 
     public func clearBrowserProfileData(_ id: String) async throws {
+        let name = profiles.first(where: { $0.id == id })?.name ?? Self.defaultName
         try await clearData(id)
-        notify?("Cleared browsing data for “\(try resolve(id.isEmpty ? nil : id).name)”", false)
+        notify?("Cleared browsing data for “\(name)”", false)
     }
 
     /// Browsers on this Mac whose history, bookmarks or cookies can be read.
@@ -226,9 +259,12 @@ public final class BrowserProfiles {
             return
         }
         let read = try await Task.detached(priority: .userInitiated) { try BrowserImport.readHistory(external) }.value
-        let added = history(for: profile).merge(read.visits + read.bookmarks)
-        history(for: profile).saveNow()
-        notify?("Imported \(read.visits.count) visits and \(read.bookmarks.count) bookmarks from \(source.name) (\(added) new pages)", false)
+        let history = history(for: profile)
+        let before = history.entries.reduce(0) { $0 + $1.visitCount }
+        history.merge(read.visits + read.bookmarks)
+        history.saveNow()
+        let added = history.entries.reduce(0) { $0 + $1.visitCount } - before
+        notify?("Imported \(added) visits and \(read.bookmarks.count) bookmarks from \(source.name)", false)
     }
 }
 

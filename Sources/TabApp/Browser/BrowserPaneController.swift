@@ -155,6 +155,8 @@ public final class BrowserPaneController: NSViewController {
         self.settings = settings
         guard isViewLoaded else { return }
         guard settings.enabled else {
+            suggestions.dismiss()
+            findBar.isHidden = true
             tearDownWebView()
             toolbar.isHidden = true
             placeholder.kind = .disabled
@@ -194,6 +196,7 @@ public final class BrowserPaneController: NSViewController {
     }
 
     private func tearDownWebView() {
+        cancelElementPicker()
         observations.removeAll()
         guard let webView else { return }
         webView.stopLoading()
@@ -396,6 +399,12 @@ public final class BrowserPaneController: NSViewController {
         reportState()
     }
 
+    /// Refreshes a renamed profile without replacing its page or data store.
+    func updateProfileName(_ name: String) {
+        profile.name = name
+        refreshChrome()
+    }
+
     // MARK: Web Inspector
 
     /// Shows or hides the Web Inspector (Cmd+Opt+I). WebKit has no public
@@ -567,8 +576,31 @@ public final class BrowserPaneController: NSViewController {
 
     // MARK: Keys
 
+    /// Routes catalog actions from the shell, including remapped shortcuts
+    /// and menu or palette actions, to this browser pane.
+    public func perform(_ action: ShortcutId) -> Bool {
+        guard settings.enabled else { return false }
+        switch action {
+        case .browserFocusAddress: focusAddress()
+        case .browserReload: reload()
+        case .browserBack: goBack()
+        case .browserForward: goForward()
+        case .find: showFind()
+        case .findNext: find(findBar.field.stringValue, backwards: false)
+        case .findPrevious: find(findBar.field.stringValue, backwards: true)
+        case .browserZoomIn, .increaseFontSize: zoomIn()
+        case .browserZoomOut, .decreaseFontSize: zoomOut()
+        case .browserZoomReset: resetZoom()
+        case .browserCopyUrl: copyAddress()
+        case .browserInspect: toggleWebInspector()
+        default: return false
+        }
+        return true
+    }
+
     /// Browser shortcuts while the pane has the keyboard.
     func handleKeyEquivalent(_ event: NSEvent) -> Bool {
+        guard settings.enabled else { return false }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.capsLock, .numericPad, .function])
         guard let key = event.charactersIgnoringModifiers?.lowercased() else { return false }
         switch (flags, key) {
@@ -608,9 +640,12 @@ public final class BrowserPaneController: NSViewController {
         const link = document.querySelector('link[rel~="icon"], link[rel="shortcut icon"], link[rel="apple-touch-icon"]');
         return link ? link.href : new URL('/favicon.ico', location.href).href;
         """
+        let pageURL = page.url
         Task { [weak self] in
-            guard let value = try? await BrowserPage.run(script, in: webView, timeout: 5),
-                  let href = value.string, let url = URL(string: href)
+            guard let value = try? await BrowserPage.run(script, in: webView, timeout: 5, world: .defaultClient),
+                  let href = value.string, let url = URL(string: href),
+                  ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
+                  self?.webView === webView, self?.page.url == pageURL
             else { return }
             if let cached = Self.favicons[href] {
                 self?.setFavicon(cached)
@@ -619,6 +654,7 @@ public final class BrowserPaneController: NSViewController {
             guard let (data, _) = try? await URLSession.shared.data(from: url), let image = NSImage(data: data) else { return }
             image.size = NSSize(width: 16, height: 16)
             Self.favicons[href] = image
+            guard self?.webView === webView, self?.page.url == pageURL else { return }
             self?.setFavicon(image)
         }
     }
@@ -651,9 +687,27 @@ public final class BrowserPaneController: NSViewController {
         if webView.window == nil, webView.bounds.isEmpty {
             webView.frame = NSRect(x: 0, y: 0, width: 1280, height: 800)
         }
-        let image = try await webView.takeSnapshot(configuration: nil)
-        guard let tiff = image.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff),
-              let png = bitmap.representation(using: .png, properties: [:])
+        if webView.window?.isVisible == true {
+            if let image = try? await webView.takeSnapshot(configuration: nil),
+               let tiff = image.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff),
+               let png = bitmap.representation(using: .png, properties: [:]) { return png }
+        }
+        let configuration = WKPDFConfiguration()
+        configuration.rect = webView.bounds
+        let data = try await BrowserPage.pdf(in: webView, configuration: configuration)
+        guard let provider = CGDataProvider(data: data as CFData), let document = CGPDFDocument(provider),
+              let page = document.page(at: 1),
+              let context = CGContext(data: nil, width: max(Int(webView.bounds.width), 1),
+                                      height: max(Int(webView.bounds.height), 1), bitsPerComponent: 8, bytesPerRow: 0,
+                                      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { throw BrowserScripts.Failure("the screenshot could not be encoded") }
+        let rect = CGRect(x: 0, y: 0, width: context.width, height: context.height)
+        context.setFillColor(CGColor.white)
+        context.fill(rect)
+        context.concatenate(page.getDrawingTransform(.mediaBox, rect: rect, rotate: 0, preserveAspectRatio: true))
+        context.drawPDFPage(page)
+        guard let image = context.makeImage(),
+              let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])
         else { throw BrowserScripts.Failure("the screenshot could not be encoded") }
         return png
     }
@@ -691,6 +745,7 @@ extension BrowserPaneController: WKNavigationDelegate, WKUIDelegate, WKDownloadD
         page.loading = true
         page.error = nil
         page.title = ""
+        setFavicon(nil)
         refreshChrome()
     }
 
@@ -826,16 +881,21 @@ extension BrowserPaneController: WKNavigationDelegate, WKUIDelegate, WKDownloadD
 /// Runs scripts in a page and reads back their results as JSON.
 @MainActor
 enum BrowserPage {
-    static func run(_ body: String, in webView: WKWebView, timeout: TimeInterval) async throws -> JSONValue {
+    static func run(_ body: String, in webView: WKWebView, timeout: TimeInterval, world: WKContentWorld? = nil) async throws -> JSONValue {
         let wrapped = BrowserScripts.jsonWrapped(body)
         let text: String = try await withCheckedThrowingContinuation { continuation in
             var finished = false
-            webView.callAsyncJavaScript(wrapped, arguments: [:], in: nil, in: .page) { result in
+            webView.callAsyncJavaScript(wrapped, arguments: [:], in: nil, in: world ?? .page) { result in
                 MainActor.assumeIsolated {
                     guard !finished else { return }
                     finished = true
                     switch result {
-                    case .success(let value): continuation.resume(returning: value as? String ?? "null")
+                    case .success(let value):
+                        if let text = value as? String {
+                            continuation.resume(returning: text)
+                        } else {
+                            continuation.resume(throwing: BrowserScripts.Failure("script error: the script's result could not be read as JSON"))
+                        }
                     case .failure(let error): continuation.resume(throwing: BrowserScripts.Failure(Self.message(error)))
                     }
                 }
@@ -855,10 +915,26 @@ enum BrowserPage {
         }
     }
 
+    static func pdf(in webView: WKWebView, configuration: WKPDFConfiguration) async throws -> Data {
+        try await withCheckedThrowingContinuation { continuation in
+            var finished = false
+            webView.createPDF(configuration: configuration) { result in
+                guard !finished else { return }
+                finished = true
+                continuation.resume(with: result)
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
+                MainActor.assumeIsolated {
+                    guard !finished else { return }
+                    finished = true
+                    continuation.resume(throwing: BrowserScripts.Failure("webkit backend: snapshot timed out"))
+                }
+            }
+        }
+    }
+
     static func message(_ error: any Error) -> String {
-        let error = error as NSError
-        if let message = error.userInfo["WKJavaScriptExceptionMessage"] as? String { return message }
-        return error.localizedDescription
+        "script error: " + error.localizedDescription
     }
 }
 

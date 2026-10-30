@@ -82,6 +82,7 @@ public enum BrowserImport {
         ("Edge", "Microsoft Edge", "Microsoft Edge Safe Storage"),
         ("Arc", "Arc/User Data", "Arc Safe Storage"),
         ("Vivaldi", "Vivaldi", "Vivaldi Safe Storage"),
+        ("Opera", "com.operasoftware.Opera", "Opera Safe Storage"),
     ]
 
     static var home: URL { FileManager.default.homeDirectoryForCurrentUser }
@@ -97,12 +98,8 @@ public enum BrowserImport {
     /// Every profile of another browser found on this Mac.
     public static func detect() -> [ExternalBrowserProfile] {
         var found: [ExternalBrowserProfile] = []
-        let fileManager = FileManager.default
         let safari = home.appendingPathComponent("Library/Safari")
-        if fileManager.fileExists(atPath: safari.appendingPathComponent("History.db").path)
-            || fileManager.fileExists(atPath: safari.appendingPathComponent("Bookmarks.plist").path) {
-            found.append(ExternalBrowserProfile(kind: .safari, browser: "Safari", name: "", folder: safari))
-        }
+        found.append(ExternalBrowserProfile(kind: .safari, browser: "Safari", name: "Default", folder: safari))
         let support = home.appendingPathComponent("Library/Application Support")
         for browser in chromiumBrowsers {
             let base = support.appendingPathComponent(browser.folder)
@@ -128,42 +125,55 @@ public enum BrowserImport {
                 names[folder] = (info as? [String: Any])?["name"] as? String ?? folder
             }
         }
+        func isProfile(_ folder: URL) -> Bool {
+            fileManager.fileExists(atPath: folder.appendingPathComponent("History").path)
+                || fileManager.fileExists(atPath: folder.appendingPathComponent("Bookmarks").path)
+        }
         let folders = ((try? fileManager.contentsOfDirectory(atPath: base.path)) ?? [])
-            .filter { $0 == "Default" || $0.hasPrefix("Profile ") }
-            .filter { fileManager.fileExists(atPath: base.appendingPathComponent($0).appendingPathComponent("History").path) }
-            .sorted()
+            .filter { $0 != "System Profile" && $0 != "Guest Profile" }
+            .filter { isProfile(base.appendingPathComponent($0)) }
+            .sorted { lhs, rhs in
+                if (lhs == "Default") != (rhs == "Default") { return lhs == "Default" }
+                if lhs.count != rhs.count { return lhs.count < rhs.count }
+                return lhs < rhs
+            }
+        if folders.isEmpty, isProfile(base) { return [(base, "Default")] }
         return folders.map { (base.appendingPathComponent($0, isDirectory: true), names[$0] ?? $0) }
     }
 
     static func firefoxProfiles(_ base: URL) -> [(URL, String)] {
-        guard let ini = try? String(contentsOf: base.appendingPathComponent("profiles.ini"), encoding: .utf8) else { return [] }
+        let ini = (try? String(contentsOf: base.appendingPathComponent("profiles.ini"), encoding: .utf8)) ?? ""
         var result: [(URL, String)] = []
-        var name: String?
-        var path: String?
-        var relative = true
+        var section = ""
+        var values: [String: String] = [:]
+        func add(_ folder: URL, name: String) {
+            guard FileManager.default.fileExists(atPath: folder.appendingPathComponent("places.sqlite").path),
+                  !result.contains(where: { $0.0.standardizedFileURL == folder.standardizedFileURL }) else { return }
+            result.append((folder, name))
+        }
         func flush() {
-            defer { name = nil; path = nil; relative = true }
-            guard let path else { return }
-            let folder = relative ? base.appendingPathComponent(path, isDirectory: true) : URL(fileURLWithPath: path, isDirectory: true)
-            guard FileManager.default.fileExists(atPath: folder.appendingPathComponent("places.sqlite").path) else { return }
-            result.append((folder, name ?? folder.lastPathComponent))
+            defer { values.removeAll() }
+            guard section.hasPrefix("Profile"), let path = values["Path"] else { return }
+            let folder = values["IsRelative"] == "0" ? URL(fileURLWithPath: path, isDirectory: true)
+                : base.appendingPathComponent(path, isDirectory: true)
+            add(folder, name: values["Name"] ?? folder.lastPathComponent)
         }
         for line in ini.split(whereSeparator: \.isNewline) {
             let text = line.trimmingCharacters(in: .whitespaces)
-            if text.hasPrefix("[") {
+            if text.hasPrefix("["), text.hasSuffix("]") {
                 flush()
+                section = String(text.dropFirst().dropLast())
                 continue
             }
-            let parts = text.split(separator: "=", maxSplits: 1).map(String.init)
+            let parts = text.split(separator: "=", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
             guard parts.count == 2 else { continue }
-            switch parts[0] {
-            case "Name": name = parts[1]
-            case "Path": path = parts[1]
-            case "IsRelative": relative = parts[1] != "0"
-            default: break
-            }
+            values[parts[0]] = parts[1]
         }
         flush()
+        for directory in [base.appendingPathComponent("Profiles"), base] {
+            let folders = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
+            for folder in folders.sorted(by: { $0.path < $1.path }) { add(folder, name: folder.lastPathComponent) }
+        }
         return result
     }
 
@@ -173,16 +183,21 @@ public enum BrowserImport {
         switch source.kind {
         case .safari:
             return ImportedHistory(
-                visits: (try? safariHistory(source.folder.appendingPathComponent("History.db"))) ?? [],
-                bookmarks: safariBookmarks(source.folder.appendingPathComponent("Bookmarks.plist")))
+                visits: try historyIfPresent(source.folder.appendingPathComponent("History.db"), read: safariHistory),
+                bookmarks: try safariBookmarks(source.folder.appendingPathComponent("Bookmarks.plist")))
         case .chromium:
             return ImportedHistory(
-                visits: try chromiumHistory(source.folder.appendingPathComponent("History")),
-                bookmarks: chromiumBookmarks(source.folder.appendingPathComponent("Bookmarks")))
+                visits: try historyIfPresent(source.folder.appendingPathComponent("History")) { try chromiumHistory($0, source: source.browser.lowercased()) },
+                bookmarks: try chromiumBookmarks(source.folder.appendingPathComponent("Bookmarks")))
         case .firefox:
             let places = source.folder.appendingPathComponent("places.sqlite")
-            return ImportedHistory(visits: try firefoxHistory(places), bookmarks: (try? firefoxBookmarks(places)) ?? [])
+            return ImportedHistory(visits: try firefoxHistory(places), bookmarks: try firefoxBookmarks(places))
         }
+    }
+
+    private static func historyIfPresent(_ file: URL, read: (URL) throws -> [BrowserHistoryEntry]) throws -> [BrowserHistoryEntry] {
+        guard FileManager.default.fileExists(atPath: file.path) else { return [] }
+        return try read(file)
     }
 
     /// Seconds between 2001-01-01 (Core Data) and the Unix epoch.
@@ -190,22 +205,28 @@ public enum BrowserImport {
     /// Microseconds between 1601-01-01 (WebKit/Chrome) and the Unix epoch.
     private static let chromeEpochMicroseconds: Int64 = 11_644_473_600_000_000
 
+    private static func bookmarkData(_ file: URL) throws -> Data? {
+        do { return try Data(contentsOf: file) }
+        catch CocoaError.fileReadNoSuchFile { return nil }
+    }
+
     static func safariHistory(_ file: URL) throws -> [BrowserHistoryEntry] {
         try SQLiteReader(copying: file).rows("""
-            SELECT i.url, (SELECT v.title FROM history_visits v WHERE v.history_item = i.id ORDER BY v.visit_time DESC LIMIT 1),
-                   i.visit_count, (SELECT MAX(v.visit_time) FROM history_visits v WHERE v.history_item = i.id)
-            FROM history_items i
+            SELECT i.url, v.title, v.visit_time
+            FROM history_visits v JOIN history_items i ON v.history_item = i.id ORDER BY v.visit_time
             """) { row in
             guard let url = row.text(0) else { return nil }
-            return BrowserHistoryEntry(url: url, title: row.text(1), visitCount: max(row.int(2), 1),
-                                       lastVisit: Date(timeIntervalSince1970: row.double(3) + coreDataEpoch))
+            let time = row.double(2)
+            return BrowserHistoryEntry(url: url, title: row.text(1), lastVisit: Date(timeIntervalSince1970: time + coreDataEpoch),
+                                       importedVisits: ["safari:\(time)"])
         }
     }
 
-    static func safariBookmarks(_ file: URL) -> [BrowserHistoryEntry] {
-        guard let data = try? Data(contentsOf: file),
-              let root = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
-        else { return [] }
+    static func safariBookmarks(_ file: URL) throws -> [BrowserHistoryEntry] {
+        guard let data = try bookmarkData(file) else { return [] }
+        guard let root = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] else {
+            throw BrowserScripts.Failure("unreadable Safari bookmarks file")
+        }
         var result: [BrowserHistoryEntry] = []
         func walk(_ node: [String: Any]) {
             if node["WebBookmarkType"] as? String == "WebBookmarkTypeLeaf", let url = node["URLString"] as? String {
@@ -218,19 +239,21 @@ public enum BrowserImport {
         return result
     }
 
-    static func chromiumHistory(_ file: URL) throws -> [BrowserHistoryEntry] {
-        try SQLiteReader(copying: file).rows("SELECT url, title, visit_count, last_visit_time FROM urls") { row in
+    static func chromiumHistory(_ file: URL, source: String = "chromium") throws -> [BrowserHistoryEntry] {
+        try SQLiteReader(copying: file).rows("SELECT u.url, u.title, v.visit_time FROM visits v JOIN urls u ON v.url = u.id ORDER BY v.visit_time") { row in
             guard let url = row.text(0) else { return nil }
-            return BrowserHistoryEntry(url: url, title: row.text(1), visitCount: max(row.int(2), 1),
-                                       lastVisit: chromeDate(row.int64(3)) ?? Date(timeIntervalSince1970: 0))
+            let time = row.int64(2)
+            return BrowserHistoryEntry(url: url, title: row.text(1), lastVisit: chromeDate(time) ?? Date(timeIntervalSince1970: 0),
+                                       importedVisits: ["\(source):\(time)"])
         }
     }
 
-    static func chromiumBookmarks(_ file: URL) -> [BrowserHistoryEntry] {
-        guard let data = try? Data(contentsOf: file),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let roots = json["roots"] as? [String: Any]
-        else { return [] }
+    static func chromiumBookmarks(_ file: URL) throws -> [BrowserHistoryEntry] {
+        guard let data = try bookmarkData(file) else { return [] }
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let roots = json["roots"] as? [String: Any] else {
+            throw BrowserScripts.Failure("unreadable Chromium bookmarks file")
+        }
         var result: [BrowserHistoryEntry] = []
         func walk(_ node: [String: Any]) {
             if node["type"] as? String == "url", let url = node["url"] as? String {
@@ -244,15 +267,23 @@ public enum BrowserImport {
     }
 
     static func firefoxHistory(_ file: URL) throws -> [BrowserHistoryEntry] {
-        try SQLiteReader(copying: file).rows("SELECT url, title, visit_count, last_visit_date FROM moz_places WHERE visit_count > 0") { row in
+        try SQLiteReader(copying: file).rows("SELECT p.url, p.title, v.visit_date FROM moz_historyvisits v JOIN moz_places p ON v.place_id = p.id ORDER BY v.visit_date") { row in
             guard let url = row.text(0) else { return nil }
-            return BrowserHistoryEntry(url: url, title: row.text(1), visitCount: max(row.int(2), 1),
-                                       lastVisit: Date(timeIntervalSince1970: row.double(3) / 1_000_000))
+            let time = row.int64(2)
+            return BrowserHistoryEntry(url: url, title: row.text(1), lastVisit: Date(timeIntervalSince1970: Double(time) / 1_000_000),
+                                       importedVisits: ["firefox:\(time)"])
         }
     }
 
     static func firefoxBookmarks(_ file: URL) throws -> [BrowserHistoryEntry] {
-        try SQLiteReader(copying: file).rows("SELECT p.url, b.title FROM moz_bookmarks b JOIN moz_places p ON p.id = b.fk WHERE b.type = 1") { row in
+        try SQLiteReader(copying: file).rows("""
+            WITH RECURSIVE imported(id) AS (
+                SELECT id FROM moz_bookmarks WHERE guid IN ('toolbar_____', 'menu________', 'unfiled_____', 'mobile______')
+                UNION SELECT b.id FROM moz_bookmarks b JOIN imported i ON b.parent = i.id
+            )
+            SELECT p.url, b.title FROM moz_bookmarks b JOIN moz_places p ON p.id = b.fk
+            JOIN imported i ON i.id = b.id WHERE b.type = 1 AND p.url NOT LIKE 'place:%'
+            """) { row in
             guard let url = row.text(0) else { return nil }
             return BrowserHistoryEntry(url: url, title: row.text(1), visitCount: 0, lastVisit: Date(timeIntervalSince1970: 0), bookmarked: true)
         }
@@ -278,7 +309,8 @@ public enum BrowserImport {
             return try parseBinaryCookies(data)
         case .chromium(_, let service):
             guard let file = chromiumCookiesFile(source.folder) else { throw BrowserScripts.Failure("No cookies were found") }
-            let key = try chromiumKey(password: try keychainPassword(service: service))
+            let account = service.replacingOccurrences(of: " Safe Storage", with: "")
+            let key = try chromiumKey(password: try keychainPassword(service: service, account: account))
             return try chromiumCookies(file, key: key)
         case .firefox:
             return try firefoxCookies(source.folder.appendingPathComponent("cookies.sqlite"))
@@ -292,10 +324,11 @@ public enum BrowserImport {
 
     /// The Safe Storage password Chromium keeps in the login Keychain. macOS
     /// asks the user to allow it.
-    static func keychainPassword(service: String) throws -> Data {
+    static func keychainPassword(service: String, account: String) throws -> Data {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne,
         ]
@@ -325,20 +358,32 @@ public enum BrowserImport {
         return key
     }
 
-    /// Decrypts a `v10` Chromium cookie value. Databases from version 24 on
-    /// put a SHA-256 of the host before the value; `hashPrefix` drops it.
-    public static func decryptChromiumValue(_ encrypted: Data, key: Data, hashPrefix: Bool) throws -> String {
-        guard encrypted.count > 3 else { return "" }
+    /// Decrypts Chromium's AES-CBC values, including a matching domain hash
+    /// on newer databases. Unprefixed values are stored raw.
+    public static func decryptChromiumValue(_ encrypted: Data, key: Data, hashPrefix: Bool, domain: String? = nil) throws -> String {
         let prefix = encrypted.prefix(3)
-        guard prefix == Data("v10".utf8) else { throw BrowserScripts.Failure("unsupported cookie encryption") }
-        let payload = Data(encrypted.dropFirst(3))
-        let plain = try aes128(operation: CCOperation(kCCDecrypt), payload, key: key)
+        guard prefix == Data("v10".utf8) || prefix == Data("v11".utf8) else {
+            return String(decoding: encrypted, as: UTF8.self)
+        }
+        let plain = try aes128(operation: CCOperation(kCCDecrypt), Data(encrypted.dropFirst(3)), key: key)
+        if let domain {
+            var digest = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
+            let bytes = Data(domain.utf8)
+            _ = bytes.withUnsafeBytes { CC_SHA256($0.baseAddress, CC_LONG(bytes.count), &digest) }
+            let value = plain.starts(with: digest) ? plain.dropFirst(digest.count) : plain[...]
+            return String(decoding: value, as: UTF8.self)
+        }
         let value = hashPrefix && plain.count >= 32 ? plain.dropFirst(32) : plain[...]
         return String(decoding: value, as: UTF8.self)
     }
 
     /// AES-128-CBC with PKCS#7 padding and an IV of 16 spaces, as Chromium uses.
     public static func aes128(operation: CCOperation, _ input: Data, key: Data) throws -> Data {
+        guard key.count == kCCKeySizeAES128 else { throw BrowserScripts.Failure("Could not decrypt a cookie") }
+        let decrypting = operation == CCOperation(kCCDecrypt)
+        if decrypting, input.isEmpty || input.count % kCCBlockSizeAES128 != 0 {
+            throw BrowserScripts.Failure("Could not decrypt a cookie")
+        }
         let iv = [UInt8](repeating: 0x20, count: kCCBlockSizeAES128)
         var output = Data(count: input.count + kCCBlockSizeAES128)
         var written = 0
@@ -346,7 +391,7 @@ public enum BrowserImport {
         let status = output.withUnsafeMutableBytes { outputBytes in
             input.withUnsafeBytes { inputBytes in
                 key.withUnsafeBytes { keyBytes in
-                    CCCrypt(operation, CCAlgorithm(kCCAlgorithmAES), CCOptions(kCCOptionPKCS7Padding),
+                    CCCrypt(operation, CCAlgorithm(kCCAlgorithmAES), decrypting ? CCOptions(0) : CCOptions(kCCOptionPKCS7Padding),
                             keyBytes.baseAddress, key.count, iv,
                             inputBytes.baseAddress, input.count,
                             outputBytes.baseAddress, capacity, &written)
@@ -354,7 +399,13 @@ public enum BrowserImport {
             }
         }
         guard status == kCCSuccess else { throw BrowserScripts.Failure("Could not decrypt a cookie") }
-        return output.prefix(written)
+        let plain = output.prefix(written)
+        guard decrypting else { return plain }
+        guard let last = plain.last, last > 0, last <= kCCBlockSizeAES128,
+              plain.count >= Int(last), plain.suffix(Int(last)).allSatisfy({ $0 == last }) else {
+            throw BrowserScripts.Failure("Could not decrypt a cookie")
+        }
+        return Data(plain.dropLast(Int(last)))
     }
 
     static func chromiumCookies(_ file: URL, key: Data) throws -> [ImportedCookie] {
@@ -364,8 +415,8 @@ public enum BrowserImport {
         return try reader.rows("SELECT host_key, name, value, encrypted_value, path, expires_utc, is_secure, is_httponly FROM cookies") { row in
             guard let domain = row.text(0), let name = row.text(1) else { return nil }
             var value = row.text(2) ?? ""
-            if value.isEmpty, let encrypted = row.blob(3), !encrypted.isEmpty {
-                guard let decrypted = try? decryptChromiumValue(encrypted, key: key, hashPrefix: hashPrefix) else { return nil }
+            if let encrypted = row.blob(3), !encrypted.isEmpty {
+                guard let decrypted = try? decryptChromiumValue(encrypted, key: key, hashPrefix: hashPrefix, domain: domain) else { return nil }
                 value = decrypted
             }
             return ImportedCookie(name: name, value: value, domain: domain, path: row.text(4) ?? "/",
@@ -376,8 +427,7 @@ public enum BrowserImport {
     static func firefoxCookies(_ file: URL) throws -> [ImportedCookie] {
         try SQLiteReader(copying: file).rows("SELECT host, name, value, path, expiry, isSecure, isHttpOnly FROM moz_cookies") { row in
             guard let domain = row.text(0), let name = row.text(1) else { return nil }
-            var expiry = row.double(4)
-            if expiry > 100_000_000_000 { expiry /= 1000 }
+            let expiry = row.double(4)
             return ImportedCookie(name: name, value: row.text(2) ?? "", domain: domain, path: row.text(3) ?? "/",
                                   secure: row.int(5) != 0, httpOnly: row.int(6) != 0,
                                   expires: expiry > 0 ? Date(timeIntervalSince1970: expiry) : nil)
@@ -403,10 +453,10 @@ public enum BrowserImport {
             for index in 0 ..< 8 { raw |= UInt64(bytes[offset + index]) << (8 * UInt64(index)) }
             return Double(bitPattern: raw)
         }
-        func cString(_ offset: Int) -> String {
-            guard offset >= 0, offset < bytes.count else { return "" }
-            let end = bytes[offset...].firstIndex(of: 0) ?? bytes.count
-            return String(decoding: bytes[offset ..< end], as: UTF8.self)
+        func cString(_ offset: Int, end: Int) throws -> String {
+            guard offset >= 0, offset < end, end <= bytes.count,
+                  let terminator = bytes[offset ..< end].firstIndex(of: 0) else { throw invalid }
+            return String(decoding: bytes[offset ..< terminator], as: UTF8.self)
         }
         guard bytes.count >= 8, bytes.prefix(4) == [0x63, 0x6F, 0x6F, 0x6B] else { throw invalid }
         let pageCount = try be32(4)
@@ -415,21 +465,31 @@ public enum BrowserImport {
         var pageStart = 8 + pageCount * 4
         var cookies: [ImportedCookie] = []
         for size in sizes {
+            let pageEnd = pageStart + size
+            guard size >= 12, pageEnd <= bytes.count,
+                  Array(bytes[pageStart ..< pageStart + 4]) == [0, 0, 1, 0] else { throw invalid }
             let cookieCount = try le32(pageStart + 4)
+            guard cookieCount <= (size - 12) / 4 else { throw invalid }
             for item in 0 ..< cookieCount {
-                let start = pageStart + (try le32(pageStart + 8 + item * 4))
+                let offset = try le32(pageStart + 8 + item * 4)
+                guard offset >= 12 + cookieCount * 4, offset <= size - 56 else { throw invalid }
+                let start = pageStart + offset
+                let recordSize = try le32(start)
+                guard recordSize >= 56, recordSize <= pageEnd - start else { throw invalid }
+                func field(_ position: Int) throws -> String {
+                    let relative = try le32(start + position)
+                    guard relative >= 56, relative < recordSize else { throw invalid }
+                    return try cString(start + relative, end: start + recordSize)
+                }
                 let flags = try le32(start + 8)
-                let domain = cString(start + (try le32(start + 16)))
-                let name = cString(start + (try le32(start + 20)))
-                let path = cString(start + (try le32(start + 24)))
-                let value = cString(start + (try le32(start + 28)))
                 let expiry = try double(start + 40)
-                cookies.append(ImportedCookie(
-                    name: name, value: value, domain: domain, path: path,
+                guard expiry.isFinite else { throw invalid }
+                cookies.append(try ImportedCookie(
+                    name: field(20), value: field(28), domain: field(16), path: field(24),
                     secure: flags & 1 != 0, httpOnly: flags & 4 != 0,
                     expires: expiry > 0 ? Date(timeIntervalSince1970: expiry + coreDataEpoch) : nil))
             }
-            pageStart += size
+            pageStart = pageEnd
         }
         return cookies
     }
@@ -469,7 +529,7 @@ final class SQLiteReader {
             for suffix in ["-wal", "-shm"] {
                 let side = URL(fileURLWithPath: file.path + suffix)
                 if fileManager.fileExists(atPath: side.path) {
-                    try? fileManager.copyItem(at: side, to: URL(fileURLWithPath: copy.path + suffix))
+                    try fileManager.copyItem(at: side, to: URL(fileURLWithPath: copy.path + suffix))
                 }
             }
         } catch {
@@ -498,8 +558,13 @@ final class SQLiteReader {
         }
         defer { sqlite3_finalize(statement) }
         var result: [T] = []
-        while sqlite3_step(statement) == SQLITE_ROW {
+        var status = sqlite3_step(statement)
+        while status == SQLITE_ROW {
             if let value = transform(Row(statement: statement)) { result.append(value) }
+            status = sqlite3_step(statement)
+        }
+        guard status == SQLITE_DONE else {
+            throw BrowserScripts.Failure("Could not read the browser's data: \(String(cString: sqlite3_errmsg(database)))")
         }
         return result
     }

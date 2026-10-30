@@ -26,7 +26,7 @@ final class BrowserHistoryTests: XCTestCase {
         XCTAssertNil(settings.resolve("   "))
     }
 
-    func testSuggestionsPreferHostPrefixThenVisitsAndShowRecentPagesWhenEmpty() {
+    func testSuggestionsMatchCodeshLiteralTextAndVisitOrder() {
         let history = BrowserHistoryStore(file: folder.appendingPathComponent("browser-history.json"))
         let old = Date(timeIntervalSince1970: 1_000)
         history.recordVisit(url: "https://docs.swift.org/guide", title: "The Swift Guide", at: old)
@@ -35,8 +35,9 @@ final class BrowserHistoryTests: XCTestCase {
         history.recordVisit(url: "about:blank", title: nil)
 
         XCTAssertEqual(history.suggestions(for: "swift").map(\.url),
-                       ["https://swift.org", "https://forums.swift.org", "https://docs.swift.org/guide"])
-        XCTAssertEqual(history.suggestions(for: "swift guide").map(\.url), ["https://docs.swift.org/guide"])
+                       ["https://forums.swift.org", "https://swift.org", "https://docs.swift.org/guide"])
+        XCTAssertTrue(history.suggestions(for: "swift the").isEmpty)
+        XCTAssertEqual(history.suggestions(for: "swift.org/guide").map(\.url), ["https://docs.swift.org/guide"])
         XCTAssertEqual(history.suggestions(for: "").first?.url, "https://swift.org")
         XCTAssertEqual(history.entries.count, 3, "start pages are not history")
     }
@@ -95,6 +96,37 @@ final class BrowserHistoryTests: XCTestCase {
         XCTAssertEqual(BrowserProfiles(root: folder).browserProfiles().map(\.name), ["Default", "Profile"])
     }
 
+    func testRepeatedImportKeepsVisitCountsAndLatestTitleAcrossRestarts() {
+        let file = folder.appendingPathComponent("browser-history.json")
+        let history = BrowserHistoryStore(file: file)
+        let imported = [
+            BrowserHistoryEntry(url: "https://example.test/", title: "Older", lastVisit: Date(timeIntervalSince1970: 1), importedVisits: ["firefox:1"]),
+            BrowserHistoryEntry(url: "https://example.test/", title: "Newer", lastVisit: Date(timeIntervalSince1970: 2), importedVisits: ["firefox:2"]),
+            BrowserHistoryEntry(url: "https://saved.test/", visitCount: 0, bookmarked: true),
+        ]
+        history.merge(imported)
+        history.saveNow()
+        let reopened = BrowserHistoryStore(file: file)
+        reopened.merge(imported)
+        XCTAssertEqual(reopened.entries.first?.visitCount, 2)
+        XCTAssertEqual(reopened.entries.first?.title, "Newer")
+        XCTAssertEqual(reopened.suggestions(for: "").map(\.url), ["https://example.test/"])
+        reopened.recordVisit(url: "https://example.test/", title: nil)
+        reopened.merge(imported)
+        XCTAssertEqual(reopened.entries.first?.visitCount, 3)
+    }
+
+    func testProfileNamesAreUniqueAndDefaultRenamePersists() throws {
+        let profiles = BrowserProfiles(root: folder)
+        let work = try profiles.add(named: "Work")
+        XCTAssertThrowsError(try profiles.add(named: "work"))
+        XCTAssertThrowsError(try profiles.rename(work.id, to: "DEFAULT"))
+        XCTAssertThrowsError(try profiles.add(named: "Bad\0Name"))
+        XCTAssertThrowsError(try profiles.add(named: String(repeating: "a", count: 129)))
+        try profiles.rename("", to: "Personal")
+        XCTAssertEqual(BrowserProfiles(root: folder).profiles[0].name, "Personal")
+    }
+
     func testDownloadsGetAFreeName() throws {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         FileManager.default.createFile(atPath: folder.appendingPathComponent("report.pdf").path, contents: Data())
@@ -146,6 +178,10 @@ final class BrowserImportTests: XCTestCase {
         XCTAssertEqual(cookies, [ImportedCookie(name: "sid", value: "xyz", domain: ".example.com", path: "/", secure: true,
                                                 httpOnly: true, expires: Date(timeIntervalSince1970: 700_000_000 + 978_307_200))])
         XCTAssertThrowsError(try BrowserImport.parseBinaryCookies(Data("nope".utf8)))
+        XCTAssertThrowsError(try BrowserImport.parseBinaryCookies(file.dropLast()))
+        var invalidOffset = file
+        invalidOffset.replaceSubrange(20 ..< 24, with: [255, 255, 255, 127])
+        XCTAssertThrowsError(try BrowserImport.parseBinaryCookies(invalidOffset))
     }
 }
 
@@ -184,6 +220,11 @@ final class BrowserScriptTests: XCTestCase {
         XCTAssertThrowsError(try BrowserScripts.condition(.waitFor, args: .object([:])))
     }
 
+    func testMalformedTimeoutsUseCodeshDefaults() {
+        XCTAssertEqual(BrowserScripts.timeout(.object(["timeoutMs": .int(-1)]), default: 5), 5)
+        XCTAssertEqual(BrowserScripts.timeout(.object(["timeoutMs": .double(100.5)]), default: 5), 5)
+    }
+
     func testTimeoutsAreCapped() {
         XCTAssertEqual(BrowserScripts.timeout(.object([:]), default: 5), 5)
         XCTAssertEqual(BrowserScripts.timeout(.object(["timeoutMs": .int(900_000)]), default: 5), BrowserCommand.maxWait)
@@ -208,12 +249,19 @@ final class TestBrowserHost: BrowserHost {
     var panes: [String: BrowserPaneController] = [:]
     var saved: [String: BrowserPane] = [:]
     var opened: [String] = []
+    var popupProfiles: [String] = []
 
     init(root: URL) {
-        browserProfiles = BrowserProfiles(root: root)
+        browserProfiles = BrowserProfiles(root: root, storeFactory: { profile in
+            if profile.isBuiltInDefault { return .nonPersistent() }
+            return WKWebsiteDataStore(forIdentifier: UUID(uuidString: profile.id)!)
+        })
     }
 
-    func openBrowserPane(url: String, profile: String, from source: BrowserPaneController) { opened.append(url) }
+    func openBrowserPane(url: String, profile: String, from source: BrowserPaneController) {
+        opened.append(url)
+        popupProfiles.append(profile)
+    }
     func browserPane(_ pane: BrowserPaneController, didChange state: BrowserPane) { saved[pane.tabId] = state }
     func browserPane(_ pane: BrowserPaneController, didChangeTitle title: String?, favicon: NSImage?) {}
     func browserPaneRequestsClose(_ pane: BrowserPaneController) {}
@@ -242,9 +290,11 @@ final class BrowserAutomationTests: XCTestCase {
     private var folder: URL!
     private var host: TestBrowserHost!
     private var automation: BrowserAutomation!
+    private var navigation: BrowserFixtureNavigation?
 
     override func setUp() async throws {
-        folder = FileManager.default.temporaryDirectory.appendingPathComponent("tab-automation-\(UUID().uuidString)")
+        folder = URL(fileURLWithPath: "/tmp/tab-browser-test").appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         host = TestBrowserHost(root: folder)
         automation = BrowserAutomation(host: host)
     }
@@ -252,6 +302,7 @@ final class BrowserAutomationTests: XCTestCase {
     override func tearDown() async throws {
         host = nil
         automation = nil
+        navigation = nil
         try? FileManager.default.removeItem(at: folder)
     }
 
@@ -282,12 +333,23 @@ final class BrowserAutomationTests: XCTestCase {
         let id = try XCTUnwrap(opened.string)
         let pane = try XCTUnwrap(host.panes[id])
         let webView = try XCTUnwrap(pane.ensureWebView())
-        webView.loadHTMLString(page, baseURL: URL(string: "https://fixture.test/"))
+        pane.view.frame = NSRect(x: 0, y: 0, width: 800, height: 600)
+        pane.view.layoutSubtreeIfNeeded()
+        let file = folder.appendingPathComponent("index.html")
+        try page.write(to: file, atomically: true, encoding: .utf8)
+        let navigation = BrowserFixtureNavigation(pane: pane, folder: folder)
+        self.navigation = navigation
+        webView.navigationDelegate = navigation
+        webView.loadFileURL(file, allowingReadAccessTo: folder)
         let deadline = Date().addingTimeInterval(20)
         while (pane.page.loads == 0 || pane.page.loading), Date() < deadline {
             try await Task.sleep(nanoseconds: 50_000_000)
         }
         XCTAssertFalse(pane.page.loading, "the fixture did not load")
+        guard pane.page.loads > 0, pane.page.url == file.absoluteString else {
+            throw BrowserScripts.Failure("WebKit did not load the file fixture in this environment")
+        }
+        XCTAssertEqual(pane.page.error, nil)
         return id
     }
 
@@ -355,7 +417,7 @@ final class BrowserAutomationTests: XCTestCase {
             _ = try await call(.evaluate, ["tabId": .string(id), "script": .string("throw new Error('boom')")])
             XCTFail("the error was lost")
         } catch {
-            XCTAssertTrue(String(describing: error).contains("boom"), "\(error)")
+            XCTAssertTrue(error.localizedDescription.hasPrefix("script error: "), "\(error)")
         }
         do {
             _ = try await automation.handle(command: "browser.fly", args: [:])
@@ -372,7 +434,7 @@ final class BrowserAutomationTests: XCTestCase {
         XCTAssertTrue(pane.isBlank)
         XCTAssertNil(pane.pageTitle)
         let first = try XCTUnwrap(pane.webView)
-        XCTAssertTrue(first.configuration.websiteDataStore === WKWebsiteDataStore.default())
+        XCTAssertTrue(first.configuration.websiteDataStore === host.browserProfiles.dataStore(for: pane.profile))
         pane.switchProfile(to: work)
         XCTAssertFalse(pane.webView === first, "a profile change needs a page in the other data store")
         XCTAssertEqual(host.saved["pane"]?.profile, work.id)

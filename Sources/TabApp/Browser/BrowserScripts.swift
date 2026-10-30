@@ -40,13 +40,8 @@ public enum BrowserScripts {
 
     /// The `timeoutMs` argument, within what a command may wait.
     public static func timeout(_ args: JSONValue, default fallback: TimeInterval) -> TimeInterval {
-        let milliseconds: Double?
-        switch args["timeoutMs"] {
-        case .int(let value): milliseconds = Double(max(value, 0))
-        case .double(let value): milliseconds = max(value, 0)
-        default: milliseconds = nil
-        }
-        return min(milliseconds.map { $0 / 1000 } ?? fallback, BrowserCommand.maxWait)
+        guard case .int(let value) = args["timeoutMs"], value >= 0 else { return fallback }
+        return min(Double(value) / 1000, BrowserCommand.maxWait)
     }
 
     // MARK: Scripts

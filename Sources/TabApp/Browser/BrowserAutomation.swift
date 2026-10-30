@@ -35,6 +35,7 @@ public final class BrowserAutomation {
             guard let url = host.browserSettings.resolve(try BrowserScripts.string(args, "url")) else {
                 throw BrowserScripts.Failure("invalid url")
             }
+            host.browserPane(pane, didChange: BrowserPane(url: url, profile: pane.profile.id))
             pane.load(url)
             return .null
         case .close:
@@ -73,7 +74,12 @@ public final class BrowserAutomation {
     /// Carries out a command by its wire name, as `app.sock` delivers it.
     public func handle(command name: String, args: [String: JSONValue]) async throws -> JSONValue {
         let name = name.hasPrefix("browser.") ? String(name.dropFirst("browser.".count)) : name
-        guard let command = BrowserCommand(rawValue: name) else {
+        guard let host else { throw BrowserScripts.Failure("Tab is closing") }
+        guard host.browserSettings.enabled else {
+            if name == "list" { return .array([]) }
+            throw BrowserScripts.Failure("the built-in browser is disabled")
+        }
+        guard let command = name == "eval" ? .evaluate : BrowserCommand(rawValue: name) else {
             throw BrowserScripts.Failure("unknown command browser.\(name)")
         }
         return try await handle(command: command, args: .object(args))
@@ -92,10 +98,10 @@ public final class BrowserAutomation {
             url = host.browserSettings.homeURL
         }
         let profile = BrowserScripts.optionalString(args, "profile")
-        if let profile { _ = try host.browserProfiles.resolve(profile) }
+        let profileId = try profile.map { try host.browserProfiles.resolve($0).id }
         let pane = try host.openBrowserPane(
             url: url,
-            profile: profile.map { (try? host.browserProfiles.resolve($0).id) ?? $0 },
+            profile: profileId,
             project: BrowserScripts.optionalString(args, "project"),
             worktree: BrowserScripts.optionalString(args, "worktree"),
             split: BrowserScripts.flag(args, "split"))
@@ -132,6 +138,7 @@ public final class BrowserAutomation {
     private func waitUntil(_ condition: String, pane: BrowserPaneController, timeout: TimeInterval) async throws -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while true {
+            try requireOpen(pane)
             let remaining = max(deadline.timeIntervalSinceNow, BrowserScripts.pollInterval)
             if (try? await pane.run(condition, timeout: remaining)) == .bool(true) { return true }
             if Date() >= deadline { return false }
@@ -146,10 +153,18 @@ public final class BrowserAutomation {
         let deadline = started.addingTimeInterval(timeout)
         let loads = pane.page.loads
         while true {
+            try requireOpen(pane)
             let waitedForStart = pane.page.loads != loads || Date().timeIntervalSince(started) >= Self.navigationStart
             if !pane.page.loading && waitedForStart { return .string(pane.page.url) }
             if Date() >= deadline { return .null }
             try await Task.sleep(nanoseconds: UInt64(BrowserScripts.pollInterval * 1_000_000_000))
+        }
+    }
+
+    private func requireOpen(_ pane: BrowserPaneController) throws {
+        guard let host else { throw BrowserScripts.Failure("Tab is closing") }
+        guard try host.browserTabs(project: nil, worktree: nil).contains(where: { $0.tabId == pane.tabId }) else {
+            throw BrowserScripts.Failure("browser tab closed")
         }
     }
 
@@ -161,8 +176,8 @@ public final class BrowserAutomation {
         case .cookiesGet:
             var cookies = await store.allCookies()
             if let url = BrowserScripts.optionalString(args, "url") {
-                guard let address = URL(string: url), let host = address.host else { throw BrowserScripts.Failure("invalid url") }
-                cookies = cookies.filter { Self.cookie($0, matches: host, path: address.path) }
+                guard let address = URL(string: url), let host = address.host else { return .array([]) }
+                cookies = cookies.filter { Self.cookie($0, matches: host, path: address.path, scheme: address.scheme ?? "") }
             }
             return .array(cookies.map(Self.json))
         case .cookiesSet:
@@ -172,8 +187,7 @@ public final class BrowserAutomation {
             }
             var expires: Date?
             switch args["expires"] {
-            case .int(let seconds): expires = Date(timeIntervalSince1970: TimeInterval(seconds))
-            case .double(let seconds): expires = Date(timeIntervalSince1970: seconds)
+            case .int(let seconds) where seconds >= 0: expires = Date(timeIntervalSince1970: TimeInterval(seconds))
             default: break
             }
             let cookie = ImportedCookie(
@@ -187,7 +201,7 @@ public final class BrowserAutomation {
             let name = try BrowserScripts.string(args, "name")
             let domain = BrowserScripts.optionalString(args, "domain")
             for cookie in await store.allCookies() where cookie.name == name {
-                if let domain, Self.bareDomain(cookie.domain) != Self.bareDomain(domain) { continue }
+                if let domain, cookie.domain != domain { continue }
                 await store.deleteCookie(cookie)
             }
             return .null
@@ -202,13 +216,17 @@ public final class BrowserAutomation {
     }
 
     /// Whether a browser would send `cookie` to `host` at `path`.
-    static func cookie(_ cookie: HTTPCookie, matches host: String, path: String) -> Bool {
-        let domain = bareDomain(cookie.domain)
-        let host = host.lowercased()
-        let domainMatches = host == domain || host.hasSuffix("." + domain)
+    static func cookie(_ cookie: HTTPCookie, matches host: String, path: String, scheme: String = "https") -> Bool {
+        if cookie.isSecure && scheme.lowercased() != "https" { return false }
+        let domain = bareDomain(cookie.domain).trimmingCharacters(in: CharacterSet(charactersIn: "."))
+        let host = host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))
+        guard !domain.isEmpty else { return false }
+        let domainMatches = host == domain || (cookie.domain.hasPrefix(".") && host.hasSuffix("." + domain))
         let cookiePath = cookie.path.isEmpty ? "/" : cookie.path
         let requestPath = path.isEmpty ? "/" : path
-        return domainMatches && requestPath.hasPrefix(cookiePath)
+        let pathMatches = requestPath == cookiePath
+            || (requestPath.hasPrefix(cookiePath) && (cookiePath.hasSuffix("/") || requestPath.dropFirst(cookiePath.count).hasPrefix("/")))
+        return domainMatches && pathMatches
     }
 
     static func json(_ cookie: HTTPCookie) -> JSONValue {
@@ -219,7 +237,7 @@ public final class BrowserAutomation {
             "path": .string(cookie.path),
             "secure": .bool(cookie.isSecure),
             "httpOnly": .bool(cookie.isHTTPOnly),
-            "expires": cookie.expiresDate.map { .int(Int64($0.timeIntervalSince1970)) } ?? .null,
+            "expires": cookie.expiresDate.flatMap { $0.timeIntervalSince1970 >= 0 ? .int(Int64($0.timeIntervalSince1970)) : nil } ?? .null,
         ])
     }
 }
