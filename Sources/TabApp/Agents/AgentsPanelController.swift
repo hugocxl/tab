@@ -553,9 +553,9 @@ final class AgentsPanelHeaderView: ThemedView {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        moveButton.action = { [weak self] in self?.onMove?() }
-        detachButton.action = { [weak self] in self?.onDetach?() }
-        closeButton.action = { [weak self] in self?.onClose?() }
+        moveButton.onPress = { [weak self] in self?.onMove?() }
+        detachButton.onPress = { [weak self] in self?.onDetach?() }
+        closeButton.onPress = { [weak self] in self?.onClose?() }
         titleLabel.setContentHuggingPriority(.required, for: .horizontal)
         summaryLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         let row = NSStackView(views: [titleLabel, summaryLabel, NSView(), moveButton, detachButton, closeButton])

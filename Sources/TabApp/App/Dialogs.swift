@@ -114,8 +114,8 @@ final class NewWorktreeDialog: NSObject {
         let projectName = model.state.project(parent).map { model.title(of: $0) } ?? ""
         let title = makeLabel("New Worktree in \(projectName)", font: AppFont.title)
         let cancel = PillButton("Cancel") { [weak self] in self?.close() }
-        create.action = { [weak self] in self?.submit() }
-        chooseFolder.action = { [weak self] in self?.pickFolder() }
+        create.onPress = { [weak self] in self?.submit() }
+        chooseFolder.onPress = { [weak self] in self?.pickFolder() }
         name.onChange = { [weak self] text in
             guard let self, !self.branchEdited else { return }
             self.branch.stringValue = sanitizedComponent(text, fallback: "")

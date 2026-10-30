@@ -60,7 +60,7 @@ public final class SourceControlController: NSViewController, NSTableViewDataSou
         card.theme = theme
         view = card
         header.title = host?.nativeProject.name ?? "Source Control"
-        refreshButton.action = { [weak self] in self?.refresh() }
+        refreshButton.onPress = { [weak self] in self?.refresh() }
         spinner.isHidden = true
         header.addTrailing(spinner)
         header.addTrailing(refreshButton)
@@ -73,9 +73,9 @@ public final class SourceControlController: NSViewController, NSTableViewDataSou
         amendBox.target = self
         amendBox.action = #selector(toggleAmend)
         amendBox.font = AppFont.body
-        generateButton.action = { [weak self] in self?.generateMessage() }
+        generateButton.onPress = { [weak self] in self?.generateMessage() }
         generateButton.isHidden = !(host?.canGenerateCommitMessage ?? false)
-        commitButton.action = { [weak self] in self?.commit() }
+        commitButton.onPress = { [weak self] in self?.commit() }
         let spacer = NSView()
         spacer.setContentHuggingPriority(.init(1), for: .horizontal)
         let commitRow = NSStackView(views: [amendBox, spacer, generateButton, commitButton])
@@ -528,59 +528,30 @@ final class PlaceholderTextView: NSTextView {
     }
 }
 
-/// A small text button such as "Stage All", "+" or "↺": muted text with a
-/// hover pill.
-final class TextGlyphButton: HoverView {
-    private let label: NSTextField
-    var action: (() -> Void)?
-    var isEnabled = true { didSet { themeDidChange() } }
+/// A small native borderless text button such as "Stage All", "+" or "↺",
+/// with the system hover bezel.
+final class TextGlyphButton: NSButton {
+    var onPress: (() -> Void)?
 
     init(_ title: String, tooltip: String, font: NSFont = AppFont.body) {
-        label = makeLabel(title, font: font)
-        label.alignment = .center
         super.init(frame: .zero)
+        self.title = title
+        self.font = font
+        bezelStyle = .accessoryBarAction
+        showsBorderOnlyWhileMouseInside = true
+        controlSize = .small
+        contentTintColor = .secondaryLabelColor
         translatesAutoresizingMaskIntoConstraints = false
         toolTip = tooltip
-        addSubview(label)
-        NSLayoutConstraint.activate([
-            label.centerYAnchor.constraint(equalTo: centerYAnchor),
-            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
-            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
-            heightAnchor.constraint(equalToConstant: 20),
-            widthAnchor.constraint(greaterThanOrEqualToConstant: 20),
-        ])
-        setAccessibilityElement(true)
-        setAccessibilityRole(.button)
         setAccessibilityLabel(tooltip)
+        target = self
+        action = #selector(pressed)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    override func themeDidChange() {
-        label.textColor = isHovered && isEnabled ? theme.fg : theme.fgMuted
-        alphaValue = isEnabled ? 1 : 0.4
-        needsDisplay = true
-    }
-
-    override func hoverDidChange() { themeDidChange() }
-
-    override func draw(_ dirtyRect: NSRect) {
-        guard isHovered, isEnabled else { return }
-        theme.hover.setFill()
-        NSBezierPath(roundedRect: bounds, xRadius: Metrics.radiusSmall, yRadius: Metrics.radiusSmall).fill()
-    }
-
-    override func mouseDown(with event: NSEvent) {}
-
-    override func mouseUp(with event: NSEvent) {
-        guard isEnabled, bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
-        action?()
-    }
-
-    override func accessibilityPerformPress() -> Bool {
-        guard isEnabled else { return false }
-        action?()
-        return true
+    @objc private func pressed() {
+        onPress?()
     }
 }
 
@@ -595,7 +566,7 @@ final class ChangeGroupCell: ThemedView {
     override init(frame: NSRect) {
         super.init(frame: frame)
         title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        bulk.action = { [weak self] in self?.onBulk?() }
+        bulk.onPress = { [weak self] in self?.onBulk?() }
         chevron.translatesAutoresizingMaskIntoConstraints = false
         addSubview(chevron)
         addSubview(title)
@@ -669,9 +640,9 @@ final class ChangeFileCell: HoverView {
 
     override init(frame: NSRect) {
         super.init(frame: frame)
-        stageButton.action = { [weak self] in self?.onStage?() }
-        unstageButton.action = { [weak self] in self?.onUnstage?() }
-        discardButton.action = { [weak self] in self?.onDiscard?() }
+        stageButton.onPress = { [weak self] in self?.onStage?() }
+        unstageButton.onPress = { [weak self] in self?.onUnstage?() }
+        discardButton.onPress = { [weak self] in self?.onDiscard?() }
         actions.orientation = .horizontal
         actions.spacing = 0
         actions.addArrangedSubview(stageButton)

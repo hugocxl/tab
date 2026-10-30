@@ -47,7 +47,7 @@ public protocol AgentSessionsHost: AnyObject {
 /// Saved agent conversations of the selected local project, searchable and
 /// filterable by provider, resumed in a new terminal.
 @MainActor
-public final class AgentSessionsController: NSViewController, NSTextFieldDelegate, NSTableViewDataSource, NSTableViewDelegate {
+public final class AgentSessionsController: NSViewController, NSSearchFieldDelegate, NSTableViewDataSource, NSTableViewDelegate {
     public private(set) weak var host: AgentSessionsHost?
     public private(set) var listing = AgentSessionListing()
     public private(set) var list = AgentSessionList()
@@ -73,7 +73,6 @@ public final class AgentSessionsController: NSViewController, NSTextFieldDelegat
     private let pinButton = IconButton(.pinOff, label: "Unpin")
     private let closeButton = IconButton(.close, label: "Close")
     private let search = SearchField(placeholder: "Search sessions…")
-    private let clearButton = IconButton(.circleX, label: "Clear search")
     private let filterButton = IconButton(.filter, label: "Filter providers")
     private let table = NSTableView()
     private let tableScroll = NSScrollView()
@@ -104,13 +103,12 @@ public final class AgentSessionsController: NSViewController, NSTextFieldDelegat
         root.controller = self
         historyGlyph.image = AppIcon.history.image(size: 14)
         historyGlyph.translatesAutoresizingMaskIntoConstraints = false
-        refreshButton.action = { [weak self] in self?.refresh() }
-        positionButton.action = { [weak self] in self?.togglePosition() }
-        pinButton.action = { [weak self] in self?.togglePinned() }
-        closeButton.action = { [weak self] in self?.host?.closeAgentSessions() }
-        clearButton.action = { [weak self] in self?.clearSearch(focus: true) }
-        filterButton.action = { [weak self] in self?.toggleFilters() }
-        resetButton.action = { [weak self] in self?.resetFilters() }
+        refreshButton.onPress = { [weak self] in self?.refresh() }
+        positionButton.onPress = { [weak self] in self?.togglePosition() }
+        pinButton.onPress = { [weak self] in self?.togglePinned() }
+        closeButton.onPress = { [weak self] in self?.host?.closeAgentSessions() }
+        filterButton.onPress = { [weak self] in self?.toggleFilters() }
+        resetButton.onPress = { [weak self] in self?.resetFilters() }
         spinner.isHidden = true
         titleLabel.setContentHuggingPriority(.required, for: .horizontal)
 
@@ -123,8 +121,7 @@ public final class AgentSessionsController: NSViewController, NSTextFieldDelegat
         header.translatesAutoresizingMaskIntoConstraints = false
 
         search.field.delegate = self
-        clearButton.isHidden = true
-        let searchRow = NSStackView(views: [search, clearButton, filterButton])
+        let searchRow = NSStackView(views: [search, filterButton])
         searchRow.orientation = .horizontal
         searchRow.alignment = .centerY
         searchRow.spacing = 4
@@ -309,7 +306,6 @@ public final class AgentSessionsController: NSViewController, NSTextFieldDelegat
     private func rebuild() {
         guard isViewLoaded else { return }
         list.rebuild(listing.sessions, providers: providers, query: query)
-        clearButton.isHidden = query.isEmpty
         table.reloadData()
         if let row = list.selectedRow { table.scrollRowToVisible(row) }
         updateEmptyState()
@@ -410,6 +406,10 @@ public final class AgentSessionsController: NSViewController, NSTextFieldDelegat
     // MARK: Search keys
 
     public func controlTextDidChange(_ notification: Notification) {
+        rebuild()
+    }
+
+    public func searchFieldDidEndSearching(_ sender: NSSearchField) {
         rebuild()
     }
 

@@ -35,9 +35,9 @@ public final class RemoteFolderBrowser: ThemedView {
         super.init(frame: NSRect(x: 0, y: 0, width: 480, height: 420))
         translatesAutoresizingMaskIntoConstraints = false
         up.toolTip = "Enclosing Folder"
-        up.action = { [weak self] in self?.goUp() }
+        up.onPress = { [weak self] in self?.goUp() }
         path.onCommit = { [weak self] text in self?.open(ServerPath(text)) }
-        addButton.action = { [weak self] in
+        addButton.onPress = { [weak self] in
             guard let self else { return }
             self.choose(self.current)
             self.dismiss?()

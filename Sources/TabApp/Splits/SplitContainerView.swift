@@ -270,7 +270,7 @@ final class EmptyProjectView: ThemedView {
         message.lineBreakMode = .byWordWrapping
         message.maximumNumberOfLines = 0
         message.preferredMaxLayoutWidth = 360
-        button.action = { [weak self] in self?.onNewTerminal?() }
+        button.onPress = { [weak self] in self?.onNewTerminal?() }
         let stack = NSStackView(views: [glyph, title, message, button])
         stack.orientation = .vertical
         stack.spacing = 16

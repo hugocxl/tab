@@ -278,7 +278,6 @@ public final class FilesPanelController: NSViewController, NSTableViewDataSource
         let place = directory.isEmpty ? "/" : directory
         editLabel.stringValue = folder ? "New folder in \(place)" : "New file in \(place)"
         let field = InlineNameField(text: "", label: folder ? "New folder name" : "New file name")
-        field.theme = card.theme
         field.translatesAutoresizingMaskIntoConstraints = false
         field.heightAnchor.constraint(equalToConstant: Metrics.controlHeight).isActive = true
         configure(field)
@@ -302,7 +301,6 @@ public final class FilesPanelController: NSViewController, NSTableViewDataSource
         table.reloadData(forRowIndexes: IndexSet(integer: index), columnIndexes: IndexSet(integer: 0))
         guard let cell = table.view(atColumn: 0, row: index, makeIfNecessary: true) as? FilesCellView else { return }
         let field = InlineNameField(text: NativePath.basename(path), label: "Name")
-        field.theme = card.theme
         configure(field)
         renameField = field
         cell.showEditor(field)

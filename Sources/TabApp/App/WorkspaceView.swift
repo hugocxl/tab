@@ -49,7 +49,7 @@ final class WorkspaceView: ThemedView {
             }
             self.needsLayout = true
         }
-        sidebarToggle.button.action = { [weak model] _ in model?.toggleSidebar() }
+        sidebarToggle.button.onPress = { [weak model] _ in model?.toggleSidebar() }
         subscription = model.changes.sink { [weak self] changes in self?.modelChanged(changes) }
         splits.reload()
         syncPanel()
@@ -339,7 +339,7 @@ final class BannerView: ThemedView {
         button.translatesAutoresizingMaskIntoConstraints = true
         addSubview(label)
         addSubview(button)
-        button.action = { [weak self] in self?.action?() }
+        button.onPress = { [weak self] in self?.action?() }
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }

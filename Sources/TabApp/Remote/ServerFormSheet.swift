@@ -139,10 +139,10 @@ final class ServerFormSheet: SheetWindow {
         }
         customSwitch.onChange = { [weak self] _ in self?.formChanged() }
         passwordSwitch.onChange = { [weak self] _ in self?.formChanged() }
-        testButton.action = { [weak self] in self?.test() }
-        trustButton.action = { [weak self] in self?.test(trust: true) }
-        installButton.action = { [weak self] in self?.test(install: true) }
-        saveButton.action = { [weak self] in self?.save() }
+        testButton.onPress = { [weak self] in self?.test() }
+        trustButton.onPress = { [weak self] in self?.test(trust: true) }
+        installButton.onPress = { [weak self] in self?.test(install: true) }
+        saveButton.onPress = { [weak self] in self?.save() }
         onCancel = { [weak self] in self?.close(saved: false) }
     }
 
@@ -259,8 +259,8 @@ final class PasswordSheet: SheetWindow {
             DialogParts.buttons(trailing: [cancel, connect]),
         ])
         super.init(content: content, width: 360)
-        connect.action = { [weak self] in self?.finish(true) }
-        cancel.action = { [weak self] in self?.finish(false) }
+        connect.onPress = { [weak self] in self?.finish(true) }
+        cancel.onPress = { [weak self] in self?.finish(false) }
         field.onCommit = { [weak self] in self?.finish(true) }
         onCancel = { [weak self] in self?.finish(false) }
         initialFirstResponder = field.field
@@ -295,8 +295,8 @@ final class NamePromptSheet: SheetWindow {
             DialogParts.buttons(trailing: [cancel, ok]),
         ])
         super.init(content: content, width: 320)
-        ok.action = { [weak self] in self?.finish(true) }
-        cancel.action = { [weak self] in self?.finish(false) }
+        ok.onPress = { [weak self] in self?.finish(true) }
+        cancel.onPress = { [weak self] in self?.finish(false) }
         field.onCommit = { [weak self] _ in self?.finish(true) }
         onCancel = { [weak self] in self?.finish(false) }
         initialFirstResponder = field.field

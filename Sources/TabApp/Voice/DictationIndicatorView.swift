@@ -48,10 +48,10 @@ final class DictationIndicatorView: ThemedView {
         dot.layer?.cornerRadius = 6
         dot.translatesAutoresizingMaskIntoConstraints = false
         clock.alignment = .left
-        cancelButton.action = { [weak self] in self?.onCancel?() }
-        pauseButton.action = { [weak self] in self?.onPause?() }
-        finishButton.action = { [weak self] in self?.onFinish?() }
-        closeButton.action = { [weak self] in self?.onCancel?() }
+        cancelButton.onPress = { [weak self] in self?.onCancel?() }
+        pauseButton.onPress = { [weak self] in self?.onPause?() }
+        finishButton.onPress = { [weak self] in self?.onFinish?() }
+        closeButton.onPress = { [weak self] in self?.onCancel?() }
         let buttons = NSStackView(views: [cancelButton, pauseButton, finishButton])
         buttons.spacing = 6
         let row = NSStackView(views: [dot, clock, meter, buttons])
@@ -111,9 +111,9 @@ final class DictationIndicatorView: ThemedView {
     override func themeDidChange() {
         chipLabel.textColor = state.error != nil ? theme.diffRemove : (state.transcript.isEmpty ? theme.fgDim : theme.fgMuted)
         clock.textColor = theme.fg
-        cancelButton.tint = { $0.fgMuted }
-        pauseButton.tint = { $0.fg }
-        finishButton.tint = { $0.diffRemove }
+        cancelButton.contentTintColor = theme.fgMuted
+        pauseButton.contentTintColor = theme.fg
+        finishButton.contentTintColor = theme.diffRemove
         panel.focused = focused
         hints.alphaValue = focused ? 1 : 0.55
         let paused = state.phase == .paused
@@ -260,47 +260,37 @@ private final class DictationMeter: ThemedView {
     }
 }
 
-/// A 24pt square button on the surface color with a tinted symbol.
+/// A native 24pt accessory-bar button with a tinted SF Symbol.
 @MainActor
-private final class DictationButton: HoverView {
-    var action: (() -> Void)?
-    var tint: (AppTheme) -> NSColor = { $0.fg } { didSet { needsDisplay = true } }
-    var symbol: String { didSet { needsDisplay = true } }
+private final class DictationButton: NSButton {
+    var onPress: (() -> Void)?
+    var symbol: String { didSet { updateImage() } }
 
     init(symbol: String, label: String) {
         self.symbol = symbol
         super.init(frame: NSRect(x: 0, y: 0, width: 24, height: 24))
         translatesAutoresizingMaskIntoConstraints = false
+        bezelStyle = .accessoryBarAction
+        imagePosition = .imageOnly
+        title = ""
         toolTip = label
-        setAccessibilityElement(true)
-        setAccessibilityRole(.button)
         setAccessibilityLabel(label)
+        target = self
+        action = #selector(pressed)
+        updateImage()
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     override var intrinsicContentSize: NSSize { NSSize(width: 24, height: 24) }
 
-    override func draw(_ dirtyRect: NSRect) {
-        (isHovered ? theme.hover : theme.surface).setFill()
-        NSBezierPath(roundedRect: bounds, xRadius: Metrics.radiusMedium, yRadius: Metrics.radiusMedium).fill()
-        let configuration = NSImage.SymbolConfiguration(pointSize: 10, weight: .semibold)
-            .applying(NSImage.SymbolConfiguration(paletteColors: [tint(theme)]))
-        guard let image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
-            .withSymbolConfiguration(configuration) else { return }
-        let size = image.size
-        image.draw(in: NSRect(x: ((bounds.width - size.width) / 2).rounded(), y: ((bounds.height - size.height) / 2).rounded(),
-                              width: size.width, height: size.height),
-                   from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+    private func updateImage() {
+        image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 10, weight: .semibold))
     }
 
-    override func mouseUp(with event: NSEvent) {
-        if bounds.contains(convert(event.locationInWindow, from: nil)) { action?() }
-    }
-
-    override func accessibilityPerformPress() -> Bool {
-        action?()
-        return true
+    @objc private func pressed() {
+        onPress?()
     }
 }
 

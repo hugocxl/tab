@@ -305,9 +305,9 @@ final class ActionMenuItem: NSMenuItem {
     @objc private func runHandler() { handler() }
 }
 
-/// A one-line name field for naming files inline: surface fill, accent
-/// ring, Return submits, Escape or leaving it cancels.
-final class InlineNameField: ThemedView, NSTextFieldDelegate {
+/// A native one-line name field for naming files inline: Return submits,
+/// Escape or leaving it cancels.
+final class InlineNameField: NSView, NSTextFieldDelegate {
     let field = NSTextField(string: "")
     var onSubmit: ((String) -> Void)?
     var onCancel: (() -> Void)?
@@ -317,22 +317,15 @@ final class InlineNameField: ThemedView, NSTextFieldDelegate {
     init(text: String, label: String) {
         super.init(frame: .zero)
         field.stringValue = text
-        field.isBordered = false
-        field.drawsBackground = false
-        field.focusRingType = .none
+        field.bezelStyle = .roundedBezel
         field.font = AppFont.body
         field.usesSingleLineMode = true
         field.cell?.isScrollable = true
         field.lineBreakMode = .byClipping
         field.delegate = self
         field.setAccessibilityLabel(label)
-        field.translatesAutoresizingMaskIntoConstraints = false
         addSubview(field)
-        NSLayoutConstraint.activate([
-            field.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
-            field.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
-            field.centerYAnchor.constraint(equalTo: centerYAnchor),
-        ])
+        field.pinEdges(to: self)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -351,20 +344,6 @@ final class InlineNameField: ThemedView, NSTextFieldDelegate {
     func resume() {
         finished = false
         window?.makeFirstResponder(field)
-    }
-
-    override func themeDidChange() {
-        field.textColor = theme.fg
-        needsDisplay = true
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.75, dy: 0.75), xRadius: Metrics.radiusSmall, yRadius: Metrics.radiusSmall)
-        theme.surface.setFill()
-        path.fill()
-        theme.accent.setStroke()
-        path.lineWidth = 1.5
-        path.stroke()
     }
 
     func controlTextDidChange(_ notification: Notification) {

@@ -46,7 +46,7 @@ final class HostMenuServerRow: HoverView {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         edit.toolTip = "Edit…"
-        edit.action = { [weak self] in self?.onEdit?() }
+        edit.onPress = { [weak self] in self?.onEdit?() }
         edit.isHidden = true
         detail.lineBreakMode = .byWordWrapping
         detail.maximumNumberOfLines = 4

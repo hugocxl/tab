@@ -2,14 +2,13 @@ import AppKit
 import TabCore
 import TabProtocol
 
-/// A glyph button for chrome rows, as Codesh's: a 28pt box with an 8pt
-/// radius, muted, brighter under the pointer, and on the surface pill while
-/// its panel is open.
-final class ChromeButton: HoverView {
-    var icon: AppIcon { didSet { needsDisplay = true } }
-    var action: ((ChromeButton) -> Void)?
+/// A native borderless glyph button for chrome rows: a 28pt box that shows
+/// the system hover bezel, kept while its panel is open (`isOn`).
+final class ChromeButton: NSButton {
+    var icon: AppIcon { didSet { updateImage() } }
+    var onPress: ((ChromeButton) -> Void)?
     var menuProvider: (() -> NSMenu?)?
-    var isOn = false { didSet { if isOn != oldValue { needsDisplay = true } } }
+    var isOn = false { didSet { if isOn != oldValue { updateBezel() } } }
     let side: CGFloat
     let glyphSize: CGFloat
 
@@ -17,12 +16,18 @@ final class ChromeButton: HoverView {
         self.icon = icon
         self.side = side
         glyphSize = glyph
-        self.action = action
+        onPress = action
         super.init(frame: NSRect(x: 0, y: 0, width: side, height: side))
+        bezelStyle = .accessoryBarAction
+        imagePosition = .imageOnly
+        imageScaling = .scaleNone
+        title = ""
         toolTip = label
-        setAccessibilityElement(true)
-        setAccessibilityRole(.button)
         setAccessibilityLabel(label)
+        target = self
+        self.action = #selector(pressed)
+        updateImage()
+        updateBezel()
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -35,28 +40,18 @@ final class ChromeButton: HoverView {
     override var intrinsicContentSize: NSSize { NSSize(width: side, height: side) }
     override var mouseDownCanMoveWindow: Bool { false }
 
-    override func draw(_ dirtyRect: NSRect) {
-        if isOn || isHovered {
-            (isOn ? theme.surface : theme.hover).setFill()
-            let radius = side >= Self.side ? Metrics.radiusLarge : Metrics.radiusMedium
-            NSBezierPath(roundedRect: bounds, xRadius: radius, yRadius: radius).fill()
-        }
-        guard let image = icon.image(size: glyphSize) else { return }
-        let color = isOn || isHovered ? theme.fg : theme.fgMuted
-        let rect = NSRect(x: ((bounds.width - image.size.width) / 2).rounded(), y: ((bounds.height - image.size.height) / 2).rounded(),
-                          width: image.size.width, height: image.size.height)
-        image.tinted(color).draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+    private func updateImage() {
+        image = icon.image(size: glyphSize)
     }
 
-    override func mouseDown(with event: NSEvent) {}
-
-    override func mouseUp(with event: NSEvent) {
-        if bounds.contains(convert(event.locationInWindow, from: nil)) { action?(self) }
+    private func updateBezel() {
+        showsBorderOnlyWhileMouseInside = !isOn
+        contentTintColor = isOn ? .labelColor : .secondaryLabelColor
+        needsDisplay = true
     }
 
-    override func accessibilityPerformPress() -> Bool {
-        action?(self)
-        return true
+    @objc private func pressed() {
+        onPress?(self)
     }
 
     override func menu(for event: NSEvent) -> NSMenu? { menuProvider?() }
@@ -358,8 +353,8 @@ final class ProjectHeaderRow: HoverView {
         for view in [iconView, titleLabel, gear] as [NSView] { addSubview(view) }
         if let remote { addSubview(remote) }
         if let plus { addSubview(plus) }
-        gear.action = { [weak self] button in self?.onGear?(button) }
-        plus?.action = { [weak self] _ in self?.onNewWorktree?() }
+        gear.onPress = { [weak self] button in self?.onGear?(button) }
+        plus?.onPress = { [weak self] _ in self?.onNewWorktree?() }
         alphaValue = missing ? 0.5 : 1
     }
 

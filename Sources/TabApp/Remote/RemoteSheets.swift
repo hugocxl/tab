@@ -157,9 +157,9 @@ enum DialogParts {
     }
 }
 
-/// A secure field styled like `InsetTextField`.
+/// A native bezeled secure field that reports edits and Return.
 @MainActor
-final class InsetSecureField: ThemedView, NSTextFieldDelegate {
+final class InsetSecureField: NSView, NSTextFieldDelegate {
     let field = NSSecureTextField()
     var onCommit: (() -> Void)?
     var onChange: (() -> Void)?
@@ -167,23 +167,15 @@ final class InsetSecureField: ThemedView, NSTextFieldDelegate {
     init(placeholder: String, label: String) {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
-        field.isBordered = false
-        field.drawsBackground = false
-        field.focusRingType = .none
+        field.bezelStyle = .roundedBezel
         field.font = AppFont.body
         field.placeholderString = placeholder
-        field.translatesAutoresizingMaskIntoConstraints = false
         field.setAccessibilityLabel(label)
         field.target = self
         field.delegate = self
         field.action = #selector(commit)
         addSubview(field)
-        NSLayoutConstraint.activate([
-            heightAnchor.constraint(equalToConstant: Metrics.controlHeight),
-            field.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-            field.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-            field.centerYAnchor.constraint(equalTo: centerYAnchor),
-        ])
+        field.pinEdges(to: self)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -196,18 +188,4 @@ final class InsetSecureField: ThemedView, NSTextFieldDelegate {
     @objc private func commit() { onCommit?() }
 
     func controlTextDidChange(_ notification: Notification) { onChange?() }
-
-    override func themeDidChange() {
-        field.textColor = theme.fg
-        needsDisplay = true
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: Metrics.radiusMedium, yRadius: Metrics.radiusMedium)
-        theme.surface.setFill()
-        path.fill()
-        theme.border.setStroke()
-        path.lineWidth = Metrics.border
-        path.stroke()
-    }
 }

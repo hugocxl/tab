@@ -255,9 +255,9 @@ final class ProxySheet: NSObject, NSWindowDelegate {
     }
 }
 
-/// The inset field's look around a secure text field, for passwords.
+/// A native bezeled secure field for passwords.
 @MainActor
-final class ProxyPasswordField: ThemedView {
+final class ProxyPasswordField: NSView {
     let field = NSSecureTextField()
 
     init(value: String, placeholder: String, label: String, width: CGFloat = 220) {
@@ -265,41 +265,15 @@ final class ProxyPasswordField: ThemedView {
         translatesAutoresizingMaskIntoConstraints = false
         field.stringValue = value
         field.placeholderString = placeholder
-        field.isBordered = false
-        field.drawsBackground = false
-        field.focusRingType = .none
+        field.bezelStyle = .roundedBezel
         field.font = AppFont.body
-        field.translatesAutoresizingMaskIntoConstraints = false
         field.setAccessibilityLabel(label)
         addSubview(field)
-        NSLayoutConstraint.activate([
-            heightAnchor.constraint(equalToConstant: Metrics.controlHeight),
-            widthAnchor.constraint(equalToConstant: width),
-            field.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-            field.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-            field.centerYAnchor.constraint(equalTo: centerYAnchor),
-        ])
+        field.pinEdges(to: self)
+        widthAnchor.constraint(equalToConstant: width).isActive = true
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     var stringValue: String { field.stringValue }
-
-    override func themeDidChange() {
-        field.textColor = theme.fg
-        needsDisplay = true
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: Metrics.radiusMedium, yRadius: Metrics.radiusMedium)
-        theme.surface.setFill()
-        path.fill()
-        theme.border.setStroke()
-        path.lineWidth = Metrics.border
-        path.stroke()
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        window?.makeFirstResponder(field)
-    }
 }

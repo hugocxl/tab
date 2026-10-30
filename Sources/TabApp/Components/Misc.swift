@@ -68,22 +68,15 @@ public final class ListRow: HoverView {
     }
 }
 
-/// A small spinning indicator; it animates only while in a window, and not
-/// at all under Reduce Motion.
-public final class Spinner: NSView {
-    private let indicator = NSProgressIndicator()
-
+/// A native small spinning indicator; it animates only while in a window,
+/// and not at all under Reduce Motion.
+public final class Spinner: NSProgressIndicator {
     public init(size: NSControl.ControlSize = .small) {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
-        indicator.style = .spinning
-        indicator.controlSize = size
-        indicator.isDisplayedWhenStopped = true
-        indicator.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(indicator)
-        indicator.pinEdges(to: self)
-        setAccessibilityElement(true)
-        setAccessibilityRole(.progressIndicator)
+        style = .spinning
+        controlSize = size
+        isDisplayedWhenStopped = true
         setAccessibilityLabel("Loading")
     }
 
@@ -92,9 +85,9 @@ public final class Spinner: NSView {
     public override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if window != nil && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
-            indicator.startAnimation(nil)
+            startAnimation(nil)
         } else {
-            indicator.stopAnimation(nil)
+            stopAnimation(nil)
         }
     }
 }

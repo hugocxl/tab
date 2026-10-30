@@ -137,6 +137,12 @@ The complete request list to support, grouped (names are the Swift cases):
   panels, palette and menus. SwiftUI (in `NSHostingView`) is allowed for the
   Settings window forms and for static dialogs. Never put SwiftUI on the
   terminal rendering path.
+- Controls are native: the `Components` buttons, switches, pop-ups,
+  segmented controls, text and search fields and spinners subclass their
+  AppKit controls (`NSButton`, `NSSwitch`, `NSPopUpButton`, …) and only add
+  closures. They follow the window's appearance, which tracks the theme.
+  Settings pages describe rows as `SettingControl` data rendered by a SwiftUI
+  grouped `Form`.
 - `TerminalView` is an `NSView` that draws rows of style runs with Core Text
   into its backing layer, invalidating only changed rows, with a per-row line
   cache keyed by content hash and a glyph run cache. One rectangle per

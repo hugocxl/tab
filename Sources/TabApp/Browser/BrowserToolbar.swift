@@ -47,7 +47,7 @@ final class BrowserToolbar: ThemedView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     override var theme: AppTheme {
-        didSet { [back, forward, reload, picker, external].forEach { $0.theme = theme }; address.theme = theme; profile.theme = theme; progress.theme = theme }
+        didSet { address.theme = theme; progress.theme = theme }
     }
 
     /// Shows the load progress as an accent line under the toolbar.
@@ -204,65 +204,39 @@ final class BrowserAddressBar: ThemedView, NSTextFieldDelegate {
     }
 }
 
-/// The profile the page browses with: a person glyph and its name; a click
-/// opens the profile menu.
-final class BrowserProfileButton: HoverView {
-    private let glyph = NSImageView()
-    private let label = makeLabel("", font: AppFont.footnote)
+/// The profile the page browses with: a native borderless button with a
+/// person glyph and its name; a click opens the profile menu.
+final class BrowserProfileButton: NSButton {
     var onClick: (() -> Void)?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         translatesAutoresizingMaskIntoConstraints = false
-        glyph.image = AppIcon.circleUser.image()
-        glyph.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(glyph)
-        addSubview(label)
-        NSLayoutConstraint.activate([
-            heightAnchor.constraint(equalToConstant: Metrics.controlHeight),
-            glyph.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
-            glyph.centerYAnchor.constraint(equalTo: centerYAnchor),
-            label.leadingAnchor.constraint(equalTo: glyph.trailingAnchor, constant: 4),
-            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
-            label.centerYAnchor.constraint(equalTo: centerYAnchor),
-            label.widthAnchor.constraint(lessThanOrEqualToConstant: 110),
-        ])
+        bezelStyle = .accessoryBarAction
+        showsBorderOnlyWhileMouseInside = true
+        image = AppIcon.circleUser.image()
+        imagePosition = .imageLeading
+        font = AppFont.footnote
+        contentTintColor = .secondaryLabelColor
+        lineBreakMode = .byTruncatingTail
+        widthAnchor.constraint(lessThanOrEqualToConstant: 140).isActive = true
         toolTip = "Browser Profile"
-        setAccessibilityElement(true)
-        setAccessibilityRole(.popUpButton)
+        target = self
+        action = #selector(pressed)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     var name: String {
-        get { label.stringValue }
+        get { title }
         set {
-            label.stringValue = newValue
+            title = newValue
             setAccessibilityLabel("Browser Profile: \(newValue)")
         }
     }
 
-    override func themeDidChange() {
-        glyph.contentTintColor = isHovered ? theme.fg : theme.fgMuted
-        label.textColor = isHovered ? theme.fg : theme.fgMuted
-        needsDisplay = true
-    }
-
-    override func hoverDidChange() { themeDidChange() }
-
-    override func draw(_ dirtyRect: NSRect) {
-        guard isHovered else { return }
-        theme.hover.setFill()
-        NSBezierPath(roundedRect: bounds, xRadius: Metrics.radiusMedium, yRadius: Metrics.radiusMedium).fill()
-    }
-
-    override func mouseUp(with event: NSEvent) {
-        if bounds.contains(convert(event.locationInWindow, from: nil)) { onClick?() }
-    }
-
-    override func accessibilityPerformPress() -> Bool {
+    @objc private func pressed() {
         onClick?()
-        return true
     }
 }
 
@@ -294,9 +268,9 @@ final class BrowserFindBar: ThemedView, NSTextFieldDelegate {
         glyph.image = AppIcon.search.image(size: 14)
         glyph.translatesAutoresizingMaskIntoConstraints = false
         missing.isHidden = true
-        previous.action = { [weak self] in self?.onStep?(true) }
-        next.action = { [weak self] in self?.onStep?(false) }
-        close.action = { [weak self] in self?.onClose?() }
+        previous.onPress = { [weak self] in self?.onStep?(true) }
+        next.onPress = { [weak self] in self?.onStep?(false) }
+        close.onPress = { [weak self] in self?.onClose?() }
         let row = NSStackView(views: [glyph, field, missing, previous, next, close])
         row.orientation = .horizontal
         row.spacing = 4
@@ -314,10 +288,6 @@ final class BrowserFindBar: ThemedView, NSTextFieldDelegate {
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    override var theme: AppTheme {
-        didSet { [previous, next, close].forEach { $0.theme = theme } }
-    }
 
     var notFound = false {
         didSet {
@@ -438,7 +408,6 @@ final class BrowserPlaceholder: ThemedView {
             address.widthAnchor.constraint(lessThanOrEqualToConstant: 420).isActive = true
             stack.addArrangedSubview(address)
             let retry = PillButton("Try Again", style: .primary) { [weak self] in self?.onRetry?() }
-            retry.theme = theme
             stack.setCustomSpacing(16, after: address)
             stack.addArrangedSubview(retry)
         case .disabled:

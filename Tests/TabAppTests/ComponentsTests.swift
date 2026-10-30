@@ -6,22 +6,10 @@ import XCTest
 
 @MainActor
 final class ComponentsTests: XCTestCase {
-    func testSliderPreviewsWhileDraggingAndCommitsOnRelease() {
-        let slider = Slider(value: 10, range: 0...100, step: 1, suffix: "%", label: "Opacity")
-        var previews: [Double] = []
-        var commits: [Double] = []
-        slider.onPreview = { previews.append($0) }
-        slider.onCommit = { commits.append($0) }
-        slider.beginDrag()
-        slider.drag(to: 0.5)
-        slider.drag(to: 0.504)
-        slider.drag(to: 0.75)
-        XCTAssertEqual(previews, [50, 75])
-        XCTAssertTrue(commits.isEmpty)
-        slider.endDrag()
-        XCTAssertEqual(commits, [75])
-        XCTAssertEqual(slider.displayText, "75%")
-        XCTAssertEqual(Slider.format(0.5, step: 0.01), "0.5")
+    func testSliderValuesFormatWithTheirStep() {
+        XCTAssertEqual(SliderSpec.format(75, step: 1), "75")
+        XCTAssertEqual(SliderSpec.format(0.5, step: 0.01), "0.5")
+        XCTAssertEqual(SliderSpec.format(1.25, step: 0.01), "1.25")
     }
 
     func testShortcutRecorderKeepsChordWhenRefused() throws {

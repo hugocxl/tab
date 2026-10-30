@@ -80,14 +80,14 @@ final class SidebarViewController: NSViewController {
         filterField.isHidden = true
         footer.addSubview(filterField)
 
-        toggle.action = { [weak self] _ in self?.model.toggleSidebar() }
-        newTerminal.action = { [weak self] _ in self?.model.newTerminal() }
-        filesButton.action = { [weak self] _ in self?.model.toggleRightPanel(.files) }
-        sourceControlButton.action = { [weak self] _ in self?.model.toggleRightPanel(.sourceControl) }
-        hostButton.action = { [weak self] button in self?.model.remoteController.toggleHostMenu(relativeTo: button) }
+        toggle.onPress = { [weak self] _ in self?.model.toggleSidebar() }
+        newTerminal.onPress = { [weak self] _ in self?.model.newTerminal() }
+        filesButton.onPress = { [weak self] _ in self?.model.toggleRightPanel(.files) }
+        sourceControlButton.onPress = { [weak self] _ in self?.model.toggleRightPanel(.sourceControl) }
+        hostButton.onPress = { [weak self] button in self?.model.remoteController.toggleHostMenu(relativeTo: button) }
         hostButton.menuProvider = { [weak self] in self?.filterMenu() }
-        addButton.action = { [weak self] button in self?.actions?.addProject(anchor: button) }
-        browserButton.action = { [weak self] _ in self?.model.openBrowser() }
+        addButton.onPress = { [weak self] button in self?.actions?.addProject(anchor: button) }
+        browserButton.onPress = { [weak self] _ in self?.model.openBrowser() }
         filterField.onChange = { [weak self] text in self?.model.nameFilter = text }
         filterField.onSubmit = { [weak self] in self?.view.window?.makeFirstResponder(nil) }
         resizeHandle.onDrag = { [weak self] width in self?.onResize?(width) }

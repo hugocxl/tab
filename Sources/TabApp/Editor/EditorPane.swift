@@ -670,8 +670,8 @@ final class DiskChangeBanner: ThemedView {
     override init(frame: NSRect) {
         super.init(frame: frame)
         translatesAutoresizingMaskIntoConstraints = false
-        reload.action = { [weak self] in self?.onReload?() }
-        keep.action = { [weak self] in self?.onKeep?() }
+        reload.onPress = { [weak self] in self?.onReload?() }
+        keep.onPress = { [weak self] in self?.onKeep?() }
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         let stack = NSStackView(views: [label, reload, keep])
         stack.orientation = .horizontal

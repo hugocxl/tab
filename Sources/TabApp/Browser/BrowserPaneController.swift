@@ -99,14 +99,14 @@ public final class BrowserPaneController: NSViewController {
     }
 
     private func wireToolbar() {
-        toolbar.back.action = { [weak self] in self?.goBack() }
-        toolbar.forward.action = { [weak self] in self?.goForward() }
-        toolbar.reload.action = { [weak self] in
+        toolbar.back.onPress = { [weak self] in self?.goBack() }
+        toolbar.forward.onPress = { [weak self] in self?.goForward() }
+        toolbar.reload.onPress = { [weak self] in
             guard let self else { return }
             page.loading ? stop() : reload()
         }
-        toolbar.picker.action = { [weak self] in self?.toggleElementPicker() }
-        toolbar.external.action = { [weak self] in self?.showExternalMenu() }
+        toolbar.picker.onPress = { [weak self] in self?.toggleElementPicker() }
+        toolbar.external.onPress = { [weak self] in self?.showExternalMenu() }
         toolbar.profile.onClick = { [weak self] in self?.showProfileMenu() }
         let address = toolbar.address
         address.onFocus = { [weak self] in

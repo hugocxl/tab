@@ -169,7 +169,7 @@ private final class SelectionBar: ThemedView {
             let disconnect = PillButton("Disconnect") { model.disconnect(ids) }
             disconnect.isEnabled = selected.contains { $0.state.isLive || $0.waitingToRetry }
             let move = PillButton("Move to Group…")
-            move.action = { [weak move] in
+            move.onPress = { [weak move] in
                 guard let move else { return }
                 controller.moveMenu(ids).popUp(positioning: nil, at: NSPoint(x: 0, y: move.bounds.maxY + 4), in: move)
             }
@@ -216,7 +216,7 @@ private final class GroupHeading: ThemedView {
         }
         let more = IconButton(.ellipsis, label: "Group Actions")
         more.toolTip = "Group Actions"
-        more.action = { [weak more] in
+        more.onPress = { [weak more] in
             guard let more else { return }
             controller.groupMenu(group)?.popUp(positioning: nil, at: NSPoint(x: 0, y: more.bounds.maxY + 4), in: more)
         }
@@ -277,7 +277,7 @@ private final class PaneServerRow: HoverView {
         edit.toolTip = "Edit…"
         let more = IconButton(.ellipsis, label: "More Actions")
         more.toolTip = "More Actions"
-        more.action = { [weak more] in
+        more.onPress = { [weak more] in
             guard let more else { return }
             controller.showServerMenu(id, in: more, at: NSPoint(x: 0, y: more.bounds.maxY + 4))
         }

@@ -68,7 +68,7 @@ final class PaneCardView: HoverView {
 
         let split = IconButton(.columns, label: "Split Right", side: 22) { [weak self] in self?.run { $0.split(.right) } }
         let down = IconButton(.rows, label: "Split Down", side: 22) { [weak self] in self?.run { $0.split(.down) } }
-        zoomButton.action = { [weak self] in
+        zoomButton.onPress = { [weak self] in
             guard let self else { return }
             self.model?.toggleZoom(self.pane)
         }
