@@ -47,7 +47,9 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, A
         window.isReleasedWhenClosed = false
         window.title = Release.appName
         window.collectionBehavior = [.fullScreenPrimary]
-        window.appearance = model.theme.nsAppearance
+        // The theme styles the content only: the window's own appearance
+        // sets its frame and shadow, which follow the system like other apps.
+        workspace.appearance = model.theme.nsAppearance
         palette = PaletteController(parent: window)
         paletteSource = PaletteSource(model: model)
         super.init(window: window)
@@ -75,7 +77,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, A
         model.presenter = self
         model.showSettingsAction = { [weak self] category in self?.showSettings(category) }
         model.changes.sink { [weak self] changes in self?.modelChanged(changes) }.store(in: &subscriptions)
-        model.theme.$palette.sink { [weak self] _ in self?.window?.appearance = self?.model.theme.nsAppearance }
+        model.theme.$palette.sink { [weak workspace] palette in workspace?.appearance = AppTheme.nsAppearance(palette) }
             .store(in: &subscriptions)
         updateTitle()
     }

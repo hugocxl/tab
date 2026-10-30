@@ -36,7 +36,7 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
         window.setContentSize(Self.defaultSize)
         model.window = window
         store.theme.$palette
-            .sink { [weak window] palette in window?.appearance = NSAppearance(named: palette.isLight ? .aqua : .darkAqua) }
+            .sink { [weak window] palette in window?.appearance = AppTheme.nsAppearance(palette) }
             .store(in: &observations)
         store.loadServerSettings()
         store.loadRemoteAccess()

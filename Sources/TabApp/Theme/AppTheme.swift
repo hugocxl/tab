@@ -228,7 +228,11 @@ public final class AppTheme: ObservableObject {
 
     /// The window appearance matching the palette, so system controls and
     /// menus draw light or dark like the theme.
-    public var nsAppearance: NSAppearance? {
+    public var nsAppearance: NSAppearance? { Self.nsAppearance(palette) }
+
+    /// The appearance for `palette`. `$palette` publishes before the new
+    /// value is stored, so its subscribers pass the value they receive.
+    public nonisolated static func nsAppearance(_ palette: ChromePalette) -> NSAppearance? {
         NSAppearance(named: palette.isLight ? .aqua : .darkAqua)
     }
 }

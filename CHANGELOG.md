@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.7.2 - 2026-10-30
+
+### Fixed
+
+- The window has the standard macOS shadow again instead of a heavy dark one,
+  whatever the theme.
+
 ## 0.7.1 - 2026-10-30
 
 ### Fixed
