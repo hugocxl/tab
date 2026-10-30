@@ -3,6 +3,19 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.8.0 - 2026-10-30
+
+### Added
+
+- When a new version is downloaded, a card at the bottom of the sidebar offers
+  to restart and update, says whether running terminals keep going, and lets
+  you wait for them to end or update now.
+
+### Changed
+
+- Updating with an unsaved editor open now tells you to save or close it
+  instead of doing nothing.
+
 ## 0.7.2 - 2026-10-30
 
 ### Fixed

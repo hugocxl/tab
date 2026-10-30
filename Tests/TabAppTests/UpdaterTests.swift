@@ -166,6 +166,27 @@ final class UpdaterTests: XCTestCase {
         XCTAssertFalse(UpdateDecision.shouldReplaceServer(serverVersion: nil, appVersion: "1.1.0", sessions: 0))
     }
 
+    /// The card's one-click choices never end running terminals: only
+    /// "Update Now…", which confirms first, does.
+    func testUpdateCardNeverEndsTerminalsWithoutConfirming() throws {
+        func actions(_ status: UpdaterStatus, compatible: Bool, sessions: Int) -> [UpdateCard.Action]? {
+            UpdateCard.make(status: status, compatible: compatible, sessions: sessions)?.buttons.map(\.action)
+        }
+        let ready = UpdaterStatus.ready(version: "1.1.0")
+        XCTAssertEqual(actions(ready, compatible: true, sessions: 3), [.restartAndUpdate])
+        XCTAssertEqual(UpdateDecision.step(for: .install(restartServer: false), compatible: true, sessions: 3), .install(stopServer: false))
+        XCTAssertEqual(actions(ready, compatible: false, sessions: 0), [.restartAndUpdate])
+        XCTAssertEqual(actions(ready, compatible: false, sessions: 2), [.waitForTerminals, .endTerminalsAndUpdate])
+        XCTAssertEqual(actions(.waitingForSessions(version: "1.1.0", sessions: 2), compatible: false, sessions: 2),
+                       [.endTerminalsAndUpdate, .cancelWaiting])
+
+        let installing = try XCTUnwrap(UpdateCard.make(status: .installing(version: "1.1.0"), compatible: false, sessions: 0))
+        XCTAssertTrue(installing.busy)
+        for status: UpdaterStatus in [.idle, .checking, .downloading(version: "1.1.0"), .failed("offline"), .unavailable("debug")] {
+            XCTAssertNil(UpdateCard.make(status: status, compatible: true, sessions: 0))
+        }
+    }
+
     func testDownloadVerificationRejectsChecksumAndSizeMismatches() throws {
         let folder = try temporaryFolder()
         let file = folder.appendingPathComponent("update.zip")

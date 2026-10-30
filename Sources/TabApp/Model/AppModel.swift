@@ -119,7 +119,9 @@ public final class AppModel {
     /// Remote Homes asked for before their server's catalog arrived.
     var pendingRemoteHomes: Set<ServerId> = []
     /// Terminals on this computer's server, for the updater.
-    var localSessionCount = 0
+    var localSessionCount = 0 {
+        didSet { if localSessionCount != oldValue { notify(.activity) } }
+    }
     let notifier: Notifier
     var windowActive = true
     /// Font overrides belong to panes and survive app and server restarts.

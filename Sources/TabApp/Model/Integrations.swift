@@ -190,7 +190,10 @@ extension AppModel: UpdaterHost {
         notify(.settings)
     }
 
+    /// The sidebar's update card announces new versions; a hidden sidebar
+    /// gets a toast instead.
     public func announceUpdate(version: String) {
-        presenter?.showToast("Tab \(version) is ready to install.", error: false)
+        guard !appearance.sidebarExpanded else { return }
+        presenter?.showToast("\(Release.appName) \(version) is ready. Show the sidebar to update.", error: false)
     }
 }

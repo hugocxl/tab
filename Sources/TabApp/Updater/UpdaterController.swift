@@ -22,9 +22,11 @@ public protocol UpdaterHost: AnyObject {
     /// Quits the app. The new version is already in place and starts once
     /// this process exits.
     func quitForUpdate()
-    /// The updater's status changed, such as for a menu item or a badge.
+    /// The updater's status or its card changed, such as for a menu item
+    /// or the sidebar's update card.
     func updaterStatusDidChange(_ status: UpdaterStatus)
-    /// A background check downloaded a new version, such as for a notification.
+    /// A background check downloaded a new version, for when the update
+    /// card isn't in view.
     func announceUpdate(version: String)
 }
 
@@ -62,6 +64,17 @@ public final class UpdaterController {
     /// Whether the install waits for every terminal to end.
     public private(set) var scheduled = false
 
+    /// The sidebar's update card: shown while a downloaded release is ready
+    /// or waiting, until the person dismisses it, and while it installs.
+    /// Hidden while the local server is disconnected, since what updating
+    /// does depends on it.
+    public var card: UpdateCard? {
+        if case .installing = status { return UpdateCard.make(status: status, compatible: false, sessions: 0) }
+        guard let prepared, prepared.version != dismissedVersion, let host, let server = host.localServerBuild else { return nil }
+        let compatible = UpdateDecision.isCompatible(prepared.manifest, with: server)
+        return UpdateCard.make(status: status, compatible: compatible, sessions: host.runningSessionCount)
+    }
+
     private weak var host: UpdaterHost?
     private let record: URL
     private let serverStartupLock: URL
@@ -71,6 +84,7 @@ public final class UpdaterController {
     private var task: Task<Void, Never>?
     private var sheet: UpdateSheet?
     private var replacingServer = false
+    private var dismissedVersion: String?
 
     /// - Parameters:
     ///   - dirs: the profile, which keeps the pending update record.
@@ -143,6 +157,39 @@ public final class UpdaterController {
             return
         }
         check(manual: true)
+    }
+
+    /// Hides the card until a newer version is downloaded or the app
+    /// restarts; a waiting install keeps waiting.
+    public func dismissCard() {
+        guard let prepared, card?.busy == false else { return }
+        dismissedVersion = prepared.version
+        host?.updaterStatusDidChange(status)
+    }
+
+    /// Runs a choice from the update card.
+    public func handle(_ action: UpdateCard.Action) {
+        guard let prepared, !isBusy, let host, let server = host.localServerBuild else { return }
+        switch action {
+        case .restartAndUpdate:
+            let compatible = UpdateDecision.isCompatible(prepared.manifest, with: server)
+            perform(UpdateDecision.step(for: .install(restartServer: false), compatible: compatible, sessions: host.runningSessionCount))
+        case .waitForTerminals:
+            perform(UpdateDecision.step(for: .waitForSessions, compatible: false, sessions: host.runningSessionCount))
+        case .cancelWaiting:
+            perform(.cancelWait)
+        case .endTerminalsAndUpdate:
+            ConfirmSheet.present(
+                on: host.updateWindow,
+                title: "Update and End All Terminals?",
+                message: "Every terminal on this Mac ends, including ones other apps show. Terminal panes close; other panes and settings stay.",
+                confirm: "Update and End Terminals",
+                destructive: true
+            ) { [weak self] confirmed in
+                guard confirmed, let self, self.prepared?.version == prepared.version else { return }
+                self.perform(.install(stopServer: true))
+            }
+        }
     }
 
     /// Shows the "Update available" sheet for the downloaded release.
@@ -246,9 +293,8 @@ public final class UpdaterController {
             refreshStatus()
             if manual { message("You’re running the latest version of \(Release.appName).") }
         case .success(let update?):
-            let previous = prepared
-            let announced = previous?.version == update.version
-            if let previous, previous.staging != update.staging {
+            let announced = prepared?.version == update.version
+            if let previous = prepared, previous.staging != update.staging {
                 Task.detached(priority: .utility) { previous.discard() }
                 scheduled = false
             }
@@ -309,7 +355,10 @@ public final class UpdaterController {
             setScheduled(true)
             return
         }
-        guard host.prepareToQuitForUpdate() else { return }
+        guard host.prepareToQuitForUpdate() else {
+            if !whenIdle { message("Save or close the editors with unsaved changes, then update again.") }
+            return
+        }
         status = .installing(version: prepared.version)
         let record = record
         let serverStartupLock = serverStartupLock

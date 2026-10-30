@@ -11,7 +11,7 @@ public enum AppIcon: String, CaseIterable, Sendable {
     case restore, refresh, rows, search, settings, terminal, terminalStack, close, externalLink
     case filter, filterCircle, history, arrowDownCircle, arrowUpCircle, chevronsUpDown
     case circle, circleCheck, clock, file, gitMerge, gitPullRequest, octagonX, copy, pause, pencil
-    case play, quote, stop, triangleAlert, phone, trash, minus, qrcode
+    case play, quote, stop, triangleAlert, phone, trash, minus, qrcode, arrowDown
 
     /// The SF Symbol drawn for the icon.
     public var symbolName: String? {
@@ -77,6 +77,7 @@ public enum AppIcon: String, CaseIterable, Sendable {
         case .trash: return "trash"
         case .minus: return "minus"
         case .qrcode: return "qrcode"
+        case .arrowDown: return "arrow.down"
         }
     }
 
@@ -141,7 +142,7 @@ public enum AppIcon: String, CaseIterable, Sendable {
         case .quote: return "text-quote"
         case .stop: return "square"
         case .triangleAlert: return "triangle-alert"
-        case .phone, .trash, .minus, .qrcode: return nil
+        case .phone, .trash, .minus, .qrcode, .arrowDown: return nil
         }
     }
 
