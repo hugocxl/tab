@@ -27,7 +27,7 @@ public struct Keymap: Equatable, Sendable, Codable {
     static let retired: Set<String> = [
         "toggle_composer", "composer.submit", "composer.insert", "composer.close", "composer.voice",
         "project_colors.previous_color", "project_colors.next_color",
-        "project_colors.choose_color", "project_colors.dismiss_colors",
+        "project_colors.choose_color", "project_colors.dismiss_colors", "open_configuration",
     ]
 
     public func chord(_ action: ShortcutId) -> KeyChord? { bindings[action.rawValue] }

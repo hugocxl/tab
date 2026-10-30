@@ -114,28 +114,20 @@ final class ModelRestoreShellStateTests: XCTestCase {
 
 @MainActor
 final class ModelRestoreActivationTests: XCTestCase {
-    func testReturningToAppRefreshesMissingFoldersAndHandEditedTerminalSettings() async throws {
+    func testReturningToAppRefreshesMissingFolders() async throws {
         let dirs = try ModelFixtures.profile()
         let model = AppModel(dirs: dirs)
         let folder = try ModelFixtures.folder("moved")
         let project = try XCTUnwrap(model.addProject(folder))
         try FileManager.default.moveItem(atPath: folder, toPath: folder + "-away")
-        var terminal = TerminalSettings()
-        terminal.fontSize = 19
-        terminal.options.backgroundVibrancy = 60
-        try terminal.save(to: dirs.terminalSettings)
         model.windowDidChangeActive(true)
-        let refreshed = await ModelFixtures.wait {
-            model.state.project(project)?.status == .missing && model.terminalSettings.fontSize == 19
-        }
-        XCTAssertTrue(refreshed)
+        let missing = await ModelFixtures.wait { model.state.project(project)?.status == .missing }
+        XCTAssertTrue(missing)
         XCTAssertTrue(model.sidebarListing.groups.first(where: { $0.project == project })?.cards.isEmpty == true)
         try FileManager.default.moveItem(atPath: folder + "-away", toPath: folder)
-        try Data("invalid json".utf8).write(to: dirs.terminalSettings)
         model.windowDidChangeActive(true)
         let restored = await ModelFixtures.wait { model.state.project(project)?.status == .available }
         XCTAssertTrue(restored)
-        XCTAssertEqual(model.terminalSettings.fontSize, 19, "invalid hand edits preserve the last good settings")
     }
 
     func testMobileChangedEventRefreshesTheSettingsStore() async throws {

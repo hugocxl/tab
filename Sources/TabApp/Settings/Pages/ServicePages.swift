@@ -284,10 +284,6 @@ extension SettingsModel {
         }
         b.row("backup-restore", .row(restore))
         if !store.backupStatus.isEmpty { b.note("backup-restore", store.backupStatus) }
-        let files = ["settings.json", "terminal.json", "server.json"].map { name in
-            b.button(name) { [store] in store.openConfiguration(name) }
-        }
-        b.row("backup-files", .row(files))
         b.row("backup-folder", b.button("Show in Finder") { [store] in
             try? FileManager.default.createDirectory(at: store.dirs.backups, withIntermediateDirectories: true)
             NSWorkspace.shared.activateFileViewerSelecting([store.dirs.backups])

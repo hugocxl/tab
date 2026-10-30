@@ -143,21 +143,13 @@ final class SettingsTests: XCTestCase {
         XCTAssertFalse(store.terminalIsCustomized)
     }
 
-    func testBrokenTerminalFileKeepsLastGoodSettings() throws {
+    func testBrokenTerminalFileIsReportedAndNeverOverwritten() throws {
+        let broken = Data("{ not json".utf8)
+        try broken.write(to: dirs.terminalSettings)
         let store = makeStore()
-        store.setTerminal("font-size", "15")
-        try Data("{ not json".utf8).write(to: dirs.terminalSettings)
-        store.reloadTerminal()
-        XCTAssertEqual(store.terminal.fontSize, 15)
         XCTAssertNotNil(store.errors["configuration"])
-
-        var fixed = TerminalSettings()
-        fixed.fontSize = 17
-        try JSONEncoder().encode(fixed).write(to: dirs.terminalSettings)
-        store.reloadTerminal()
-        XCTAssertEqual(store.terminal.fontSize, 17)
-        XCTAssertNil(store.errors["configuration"])
-        XCTAssertEqual(host.appliedTerminal.last?.fontSize, 17)
+        store.setTerminal("font-size", "15")
+        XCTAssertEqual(try Data(contentsOf: dirs.terminalSettings), broken)
     }
 
     // MARK: Backup
@@ -227,7 +219,6 @@ final class SettingsTests: XCTestCase {
             XCTAssertEqual(controller.category, category)
             XCTAssertEqual(controller.model.title, category.title)
             XCTAssertEqual(controller.model.selection, category)
-            XCTAssertEqual(controller.model.configurationFile, category.configurationFile)
             XCTAssertEqual(controller.model.lastBuild?.unknownIds, [])
         }
 

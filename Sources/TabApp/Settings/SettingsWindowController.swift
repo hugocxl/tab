@@ -54,7 +54,6 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
         if let category { select(category) }
         if window?.isVisible != true { window?.center() }
         showWindow(nil)
-        store.reloadTerminal()
     }
 
     /// Opens a page, as clicking it in the sidebar does.
@@ -70,10 +69,6 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
     /// Rebuilds the page from the store.
     public func reload() {
         model.reload()
-    }
-
-    public func windowDidBecomeKey(_ notification: Notification) {
-        store.reloadTerminal()
     }
 
     public func windowWillClose(_ notification: Notification) {

@@ -132,7 +132,7 @@ crates. Behavior is 1:1 unless listed under "Intentionally changed".
 
 ## App: settings window
 
-- [x] Separate window like System Settings (SwiftUI, fixed 740×580pt, not resizable): sidebar search across labels, server tile, one row per page with gradient SF Symbol icons (no expandable sections), back/forward through visited pages, native grouped form with descriptions under each label; works offline; changes apply immediately; Edit in… opens the section's JSON file; hand edits to `terminal.json` reload when the app activates, errors shown and last good values kept
+- [x] Separate window like System Settings (SwiftUI, fixed 740×580pt, not resizable): sidebar search across labels, server tile, one row per page with gradient SF Symbol icons (no expandable sections), back/forward through visited pages, native grouped form with descriptions under each label; works offline; changes apply immediately; a `terminal.json` that doesn't load is reported and never overwritten
 - [ ] General: closing behavior (end or detach), confirm when a program runs, open files with (Tab editor or another app), worktree default location (default/template/folder)
 - [x] Appearance: light and dark theme pickers following macOS appearance, ~490 bundled themes plus custom `themes/`, expand sidebar
 - [x] Keyboard: every shortcut with key glyphs, record a new one, Reset when changed, conflicts refused, saved under `keymap`
@@ -142,7 +142,7 @@ crates. Behavior is 1:1 unless listed under "Intentionally changed".
 - [x] Server: default shell, history budget, shell integration, stop and restart with confirmation
 - [x] Mobile: allow mobile devices, port, Show Pairing Code (QR), paired phones with Revoke
 - [x] AI: command-line tools per provider, prompts for commit and PR text, per-project PR prompts, commit choices (include unstaged, push)
-- [x] Changelog (Tab addition): every version from the bundled `CHANGELOG.md`, newest first, installed version marked, no "Edit in…"
+- [x] Changelog (Tab addition): every version from the bundled `CHANGELOG.md`, newest first, installed version marked
 - [x] Backup & Restore: Export… `.tab` file (settings, terminal, themes, server settings, remote server list, local projects with layouts); Choose file… restores on next launch with a recovery copy in `Backups/`; existing projects kept and matched layouts applied; excludes live sessions, paired devices, remote projects, project files, proxy
 - [x] Proxy: Set Up Proxy… from a terminal's menu (HTTP or SOCKS5, login, bypass list), Use for the whole app (new terminals, downloads, SSH), Apply Proxy per terminal (restart in same folder, proxy icon), env vars http_proxy/https_proxy/all_proxy/no_proxy; stored in `proxy.json`, never backed up — implemented in `TabApp/Proxy` (`ProxyModel`, `ProxyController`, sheet, `ProxyEnvironment`, `ProxyTunnel` as ssh's ProxyCommand) with tests; `main` must call `ProxyTunnel.runIfRequested()`; needs app verification
 
@@ -165,6 +165,7 @@ crates. Behavior is 1:1 unless listed under "Intentionally changed".
 - Phone SDK (`codesh-mobile`, Swift/Kotlin bindings): not ported. The server's mobile access is ported, so existing phone clients need a Tab-speaking SDK later.
 - Config files: `settings.json`, `terminal.json`, `server.json`, `state.json` instead of TOML. Themes keep Ghostty's format.
 - Dead settings removed: app layout mode, sidebar vibrancy and level, sidebar collapsed style, status bar visibility, tips visibility, tab-focused expansion. The sidebar is always opaque; there is no status bar.
+- Editing settings files by hand dropped: no Edit in… links, no Configuration files buttons, no Open Configuration action, and no reloading the files when the app activates. Settings are changed only in the Settings window.
 - Agents panel settings dropped: Cmd+Opt+A or View → Toggle Agents Panel shows it, and it always lists agents by state (no per-project rows).
 - Sidebar settings dropped: width (drag the sidebar's edge instead), expand worktrees when switching projects, unread worktree indicators, worktree switcher order (always current, then recent, then sidebar order).
 - Default window size setting dropped: new windows open at 1200×800pt.

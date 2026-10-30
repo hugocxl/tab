@@ -632,7 +632,6 @@ public enum ShortcutId: String, CaseIterable, Codable, Sendable {
     case endAllSessionsAndQuit = "end_all_sessions_and_quit"
     case showAll = "show_all"
     case zoom = "zoom"
-    case openConfiguration = "open_configuration"
     case terminalCloseFind = "terminal.close_find"
     case previousPrompt = "previous_prompt"
     case nextPrompt = "next_prompt"
@@ -784,7 +783,6 @@ extension ShortcutCatalog {
         ShortcutDefinition(.endAllSessionsAndQuit, keys: [], contexts: [nil], keyContexts: [], group: .app),
         ShortcutDefinition(.showAll, keys: [], contexts: [nil], keyContexts: [], group: .app),
         ShortcutDefinition(.zoom, keys: [], contexts: [nil], keyContexts: [], group: .app),
-        ShortcutDefinition(.openConfiguration, keys: [], contexts: [nil], keyContexts: [], group: .app),
         ShortcutDefinition(.terminalCloseFind, keys: ["escape"], contexts: ["TerminalFindOpen && !TerminalSearchInput"], keyContexts: [["TerminalFindOpen && !TerminalSearchInput"]], group: .terminal),
         ShortcutDefinition(.previousPrompt, keys: ["cmd-up", "cmd-shift-up"], contexts: [ShortcutContext.workspaceClipboard], keyContexts: [[ShortcutContext.workspaceClipboard], [ShortcutContext.workspaceClipboard]], group: .terminal),
         ShortcutDefinition(.nextPrompt, keys: ["cmd-down", "cmd-shift-down"], contexts: [ShortcutContext.workspaceClipboard], keyContexts: [[ShortcutContext.workspaceClipboard], [ShortcutContext.workspaceClipboard]], group: .terminal),

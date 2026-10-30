@@ -41,17 +41,6 @@ public enum SettingsCategory: String, CaseIterable, Sendable {
 
     /// Categories that start a new group in the sidebar, with a gap above.
     var startsGroup: Bool { [.terminal, .browser, .backup].contains(self) }
-
-    /// The file behind the page, for "Edit in …". Mobile access is managed
-    /// only here, and the changelog isn't a setting.
-    public var configurationFile: String? {
-        switch self {
-        case .server: return "server.json"
-        case .terminal: return "terminal.json"
-        case .mobile, .changelog: return nil
-        default: return "settings.json"
-        }
-    }
 }
 
 /// One setting as Settings lists and searches it.
@@ -175,7 +164,6 @@ public enum SettingsCatalog {
         // Backup
         SettingItem("backup-export", "Export backup", "Save settings, themes, projects, workspaces, and terminal layouts to a .tab file.", .backup, "Backup & Restore"),
         SettingItem("backup-restore", "Restore backup", "Choose a .tab backup. It is restored the next time Tab opens, with a recovery copy in the Backups folder.", .backup, "Backup & Restore"),
-        SettingItem("backup-files", "Configuration files", "Open configuration files in your editor. Terminal settings reload when Tab becomes active.", .backup, "Configuration"),
         SettingItem("backup-folder", "Backups folder", "Recovery copies made before a backup is restored.", .backup, "Configuration"),
     ]
 

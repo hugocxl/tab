@@ -140,7 +140,6 @@ public final class AppModel {
     private var flushScheduled = false
     private var saveWork: DispatchWorkItem?
     var referencesWork: DispatchWorkItem?
-    private var activationRefresh: Task<Void, Never>?
     private var savedAppearance: Appearance
 
     /// Loads the profile: a waiting backup first, then settings, terminal
@@ -504,41 +503,12 @@ public final class AppModel {
         edit { try $0.setWindowBounds(bounds) }
     }
 
-    /// Reloads hand-edited preferences and missing-folder status when returning to the app.
-    private func refreshProfile() {
-        activationRefresh?.cancel()
-        let originalSettings = settings
-        let originalTerminal = terminalSettings
-        let settingsFile = dirs.settings
-        let terminalFile = dirs.terminalSettings
-        activationRefresh = Task { [weak self] in
-            let loaded = await Task.detached(priority: .utility) {
-                (Result { try Settings.load(settingsFile) }, Result { try TerminalSettings.load(terminalFile) })
-            }.value
-            guard !Task.isCancelled, let self else { return }
-            if self.settings == originalSettings {
-                switch loaded.0 {
-                case .success(let settings):
-                    if settings != self.settings { self.apply(settings: settings) }
-                case .failure(let error): self.report("settings.json: \(error.localizedDescription)")
-                }
-            }
-            if self.terminalSettings == originalTerminal {
-                switch loaded.1 {
-                case .success(let settings):
-                    if settings != self.terminalSettings { self.apply(terminalSettings: settings) }
-                case .failure(let error): self.report("terminal.json: \(error.localizedDescription)")
-                }
-            }
-            self.edit { $0.refreshProjectStatuses() }
-        }
-    }
-
+    /// Rechecks missing project folders when returning to the app.
     public func windowDidChangeActive(_ active: Bool) {
         windowActive = active
         if active {
             acknowledgeFocusedActivity()
-            refreshProfile()
+            edit { $0.refreshProjectStatuses() }
         }
     }
 }

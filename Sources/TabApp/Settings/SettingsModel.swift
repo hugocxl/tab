@@ -154,8 +154,3 @@ final class SettingsModel: ObservableObject {
         }
     }
 }
-
-extension SettingsModel {
-    /// The file behind the open page, for "Edit in …"; none while searching.
-    var configurationFile: String? { isSearching ? nil : category.configurationFile }
-}

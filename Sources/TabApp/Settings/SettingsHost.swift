@@ -64,14 +64,12 @@ public protocol SettingsHost: AnyObject {
 
     /// `settings.json` changed; apply it to the running app.
     func settingsDidChange(_ settings: Settings)
-    /// `terminal.json` changed or was reloaded; apply it to every terminal.
+    /// `terminal.json` changed; apply it to every terminal.
     func terminalSettingsDidChange(_ settings: TerminalSettings)
     /// A slider is being dragged: show these terminal settings without
     /// saving them. The final value arrives through
     /// `terminalSettingsDidChange` on release.
     func previewTerminalSettings(_ settings: TerminalSettings)
-    /// Opens a configuration file in the user's default editor.
-    func openConfigurationFile(_ url: URL)
 
     // MARK: Server
 
@@ -133,7 +131,6 @@ public final class PreviewSettingsHost: SettingsHost {
     public private(set) var appliedSettings: [Settings] = []
     public private(set) var appliedTerminal: [TerminalSettings] = []
     public private(set) var previews: [TerminalSettings] = []
-    public private(set) var openedFiles: [URL] = []
     public private(set) var serverActions: [String] = []
     public var state: Data?
     public var projects: [SettingsProject] = []
@@ -144,7 +141,6 @@ public final class PreviewSettingsHost: SettingsHost {
     public func settingsDidChange(_ settings: Settings) { appliedSettings.append(settings) }
     public func terminalSettingsDidChange(_ settings: TerminalSettings) { appliedTerminal.append(settings) }
     public func previewTerminalSettings(_ settings: TerminalSettings) { previews.append(settings) }
-    public func openConfigurationFile(_ url: URL) { openedFiles.append(url) }
 
     public func connectServer() { serverState = .running }
     public func readServerSettings() async throws -> ServerSettingsDoc { serverSettings }

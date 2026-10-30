@@ -7,8 +7,7 @@ import TabProtocol
 /// profile, the server's and mobile access's settings read through the host,
 /// and the problems to show beside each row. Every change is validated,
 /// saved at once and passed to the host to apply. The app keeps one store
-/// for its whole life; it also reloads `terminal.json` when the app becomes
-/// active, so hand edits apply.
+/// for its whole life.
 @MainActor
 public final class SettingsStore {
     public let dirs: TabDirs
@@ -33,7 +32,6 @@ public final class SettingsStore {
 
     /// Fires after anything the window shows changed.
     public let changes = PassthroughSubject<Void, Never>()
-    private var activation: NSObjectProtocol?
     private var serverWrite: Task<Void, Never>?
     private var pairingRevision = 0
 
@@ -61,17 +59,6 @@ public final class SettingsStore {
         if BackupArchive.hasPending(dirs) {
             backupStatus = "An import is ready for the next launch. Quit and reopen Tab to apply it, or cancel the import here."
         }
-        activation = NotificationCenter.default.addObserver(
-            forName: NSApplication.didBecomeActiveNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.reloadTerminal() }
-        }
-    }
-
-    deinit {
-        if let activation { NotificationCenter.default.removeObserver(activation) }
     }
 
     private func changed() { changes.send() }
@@ -342,25 +329,6 @@ public final class SettingsStore {
             host?.terminalSettingsDidChange(defaults)
             applySettings()
             errors = errors.filter { SettingsCatalog.item($0.key)?.category != .terminal }
-        }
-    }
-
-    /// Reads `terminal.json` again after a hand edit. A file that does not
-    /// load keeps the last good settings and shows why.
-    public func reloadTerminal() {
-        do {
-            let loaded = try TerminalSettings.load(dirs.terminalSettings)
-            let hadError = errors["configuration"] != nil
-            errors["configuration"] = nil
-            guard loaded != terminal || hadError else { return }
-            terminal = loaded
-            host?.terminalSettingsDidChange(loaded)
-            changed()
-        } catch {
-            let message = "terminal.json: \(Self.message(error)). Your last saved values are kept until it is fixed."
-            guard errors["configuration"] != message else { return }
-            errors["configuration"] = message
-            changed()
         }
     }
 
@@ -710,21 +678,5 @@ public final class SettingsStore {
             try BackupArchive.cancelPending(dirs)
             backupStatus = "Import cancelled."
         }
-    }
-
-    // MARK: Files
-
-    /// Opens a configuration file in the default editor, creating it first
-    /// when missing.
-    public func openConfiguration(_ name: String) {
-        let url = dirs.root.appendingPathComponent(name)
-        if !FileManager.default.fileExists(atPath: url.path) {
-            switch name {
-            case "terminal.json": try? terminal.save(to: url)
-            case "settings.json": _ = try? Settings.load(url)
-            default: break
-            }
-        }
-        host?.openConfigurationFile(url)
     }
 }

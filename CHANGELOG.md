@@ -24,6 +24,9 @@ Changelog.
 - The sidebar width, worktree expansion, unread indicator and worktree
   switcher order settings. Drag the sidebar's edge to resize it; the switcher
   lists the current worktree, then the most recently used.
+- Editing settings files by hand: the Edit in… links, the Configuration files
+  buttons and the Open Configuration action are gone. Change settings in the
+  Settings window.
 - The agents panel settings. Show the panel with Command-Option-A or View →
   Toggle Agents Panel; it lists each agent by state.
 

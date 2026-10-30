@@ -42,13 +42,6 @@ public final class SettingsHostImpl: SettingsHost {
     public func terminalSettingsDidChange(_ settings: TerminalSettings) { model.apply(terminalSettings: settings) }
     public func previewTerminalSettings(_ settings: TerminalSettings) { model.apply(terminalSettings: settings, preview: true) }
 
-    public func openConfigurationFile(_ url: URL) {
-        if !FileManager.default.fileExists(atPath: url.path) {
-            try? Data("{}\n".utf8).write(to: url)
-        }
-        NSWorkspace.shared.open(url)
-    }
-
     // MARK: Server
 
     public var serverState: ServerConnectionState {

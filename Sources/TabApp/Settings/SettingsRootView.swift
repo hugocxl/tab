@@ -25,11 +25,6 @@ struct SettingsRootView: View {
                         }
                         .controlGroupStyle(.navigation)
                     }
-                    if let file = model.configurationFile {
-                        ToolbarItem(placement: .primaryAction) {
-                            Button("Edit in \(file)") { model.store.openConfiguration(file) }
-                        }
-                    }
                 }
         }
         .searchable(

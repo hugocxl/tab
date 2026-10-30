@@ -193,20 +193,6 @@ final class SettingsStoreRegressionTests: XCTestCase {
         XCTAssertFalse(store.settings.keymap.isDefault("split_right"))
     }
 
-    func testActivationReloadKeepsGoodValuesAndDoesNotOverwriteBrokenEdits() throws {
-        let store = store()
-        store.setTerminal("font-size", "18")
-        let broken = Data("{ broken".utf8)
-        try broken.write(to: dirs.terminalSettings)
-        NotificationCenter.default.post(name: NSApplication.didBecomeActiveNotification, object: nil)
-        XCTAssertEqual(store.terminal.fontSize, 18)
-        XCTAssertNotNil(store.errors["configuration"])
-        store.setTerminal("font-size", "20")
-        XCTAssertEqual(try Data(contentsOf: dirs.terminalSettings), broken)
-        XCTAssertEqual(store.terminal.fontSize, 18)
-        XCTAssertNotNil(store.errors["font-size"])
-    }
-
     func testResetDoesNotPartiallyResetTerminalWhenAppSettingsAreBroken() throws {
         let store = store()
         store.setTerminal("font-size", "20")
@@ -277,7 +263,6 @@ private final class SettingsWriteHost: SettingsHost {
     func settingsDidChange(_ settings: Settings) { base.settingsDidChange(settings) }
     func terminalSettingsDidChange(_ settings: TerminalSettings) { base.terminalSettingsDidChange(settings) }
     func previewTerminalSettings(_ settings: TerminalSettings) { base.previewTerminalSettings(settings) }
-    func openConfigurationFile(_ url: URL) { base.openConfigurationFile(url) }
     func connectServer() { base.connectServer() }
     func readServerSettings() async throws -> ServerSettingsDoc { try await base.readServerSettings() }
     func writeServerSettings(_ settings: ServerSettingsDoc) async throws {

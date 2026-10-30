@@ -88,7 +88,6 @@ final class Actions {
         case .installCommandLineTool: CommandLineInstaller.installAndReport(on: window?.window)
         case .toggleVoiceRecording: window?.toggleDictation()
         case .newBrowserTab: model.openBrowser()
-        case .openConfiguration: NSWorkspace.shared.open(model.dirs.settings)
         default: return false
         }
         return true
