@@ -54,6 +54,16 @@ cleanup() {
     rm -rf "$STAGING"
 }
 trap cleanup EXIT
+# Spotlight or Finder can hold a just-mounted volume for a moment.
+detach() {
+    local attempt
+    for attempt in 1 2 3 4 5; do
+        if hdiutil detach "$MOUNT" > /dev/null; then MOUNTED=0; return; fi
+        sleep "$attempt"
+    done
+    hdiutil detach -force "$MOUNT" > /dev/null
+    MOUNTED=0
+}
 TEAM=-
 if [ "$IDENTITY" != - ]; then
     codesign -d --verbose=4 "$APP" 2> "$STAGING/signature.txt"
@@ -112,8 +122,7 @@ done
 hdiutil attach -readwrite -nobrowse -noautoopen -mountpoint "$MOUNT" "$STAGING/Tab-rw.dmg"
 MOUNTED=1
 xcrun SetFile -a C "$MOUNT"
-hdiutil detach "$MOUNT"
-MOUNTED=0
+detach
 rm -f "$DMG"
 hdiutil convert "$STAGING/Tab-rw.dmg" -format UDZO -o "$DMG"
 SIGN_ARGS=(--force --sign "$IDENTITY")
@@ -134,8 +143,7 @@ cmp packaging/AppIcon.icns "$MOUNT/.VolumeIcon.icns"
 cmp packaging/AppIcon.icns "$MOUNT/Tab.app/Contents/Resources/AppIcon.icns"
 xcrun GetFileInfo -a "$MOUNT" | grep -q C
 swift scripts/release-metadata.swift "$MOUNT/Tab.app" "$DMG" "$TEAM" "$STAGING/update.json"
-hdiutil detach "$MOUNT"
-MOUNTED=0
+detach
 mv "$STAGING/update.json" "$OUTPUT/update.json"
 echo "==> Built $APP"
 echo "==> Built $DMG"
