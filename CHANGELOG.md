@@ -13,6 +13,8 @@ Changelog.
 ### Changed
 
 - The Settings window has a fixed size and no longer resizes.
+- Contributor instructions require pulling `main` before every commit, so
+  versions in the changelog don't collide.
 
 ### Removed
 

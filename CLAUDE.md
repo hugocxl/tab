@@ -38,6 +38,9 @@ Run `scripts/validate.sh` before finishing. Warnings are errors.
 Every commit updates [CHANGELOG.md](CHANGELOG.md) in the same commit. The app
 bundles the file and shows it in Settings → Changelog, so write it for users.
 
+- Before every commit, run `git pull --rebase origin main`. Other branches
+  push to `main` and tag versions, so the newest section and the next version
+  number must come from the latest `main`, not from where you started.
 - Each version is a `## X.Y.Z - YYYY-MM-DD` section, newest first, with
   `### Added`, `### Changed`, `### Fixed` or `### Removed` groups of `- `
   entries. Wrapped lines are indented two spaces. Inline Markdown only.
