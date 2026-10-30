@@ -24,6 +24,68 @@ final class UpdaterTests: XCTestCase {
 
     private let sonoma = OperatingSystemVersion(majorVersion: 14, minorVersion: 2, patchVersion: 0)
 
+    @MainActor
+    func testPendingUpdateStillChecksFeedAndSkipsToNewestRelease() async throws {
+        let pending = pendingUpdate("0.8.0")
+        let newest = pendingUpdate("0.10.0")
+        var checks = 0
+        var downloads: [String] = []
+        let result = try await UpdaterController.checkedUpdate(known: pending, latest: {
+            checks += 1
+            return newest.manifest
+        }, prepare: { manifest in
+            downloads.append(manifest.version)
+            return newest
+        })
+        XCTAssertEqual(checks, 1)
+        XCTAssertEqual(downloads, ["0.10.0"])
+        XCTAssertEqual(result, newest)
+    }
+
+    @MainActor
+    func testPendingUpdateIsReusedForSameOlderOrEmptyFeed() async throws {
+        let pending = pendingUpdate("0.9.0")
+        var differentHints = pending.manifest
+        differentHints.protocolVersions = []
+        for manifest in [differentHints, pendingUpdate("0.8.0").manifest, nil] {
+            var checks = 0
+            let result = try await UpdaterController.checkedUpdate(known: pending, latest: {
+                checks += 1
+                return manifest
+            }, prepare: { _ in
+                XCTFail("An equal or older release must not be downloaded")
+                return pending
+            })
+            XCTAssertEqual(checks, 1)
+            XCTAssertEqual(result, pending)
+        }
+    }
+
+    @MainActor
+    func testCheckWithoutPendingUpdateDownloadsLatestOrReturnsNil() async throws {
+        let newest = pendingUpdate("0.9.0")
+        let result = try await UpdaterController.checkedUpdate(known: nil, latest: {
+            newest.manifest
+        }, prepare: { _ in newest })
+        XCTAssertEqual(result, newest)
+
+        let empty = try await UpdaterController.checkedUpdate(known: nil, latest: { nil }, prepare: { _ in
+            XCTFail("An empty feed must not trigger a download")
+            return newest
+        })
+        XCTAssertNil(empty)
+    }
+
+    private func pendingUpdate(_ version: String) -> PreparedUpdate {
+        let bundle = URL(fileURLWithPath: "/Applications/Tab.app")
+        return PreparedUpdate(
+            manifest: UpdateManifest(version: version,
+                                     url: URL(string: "\(UpdateFeed.releases)/v\(version)/Tab-\(version)-arm64.dmg")!,
+                                     sha256: String(repeating: "a", count: 64), protocolVersions: [ProtocolVersion(1)]),
+            installation: Installation(bundle: bundle, team: "TESTTEAM00"),
+            staging: bundle.deletingLastPathComponent().appendingPathComponent(".tab-update-\(version)"))
+    }
+
     func testBetasUpdateToNewerBetasAndTheirStableReleaseButStableNeverToBetas() throws {
         for version in ["2.0.0-beta.10", "2.1.0-beta.10", "2.0.0", "3.0.0"] {
             XCTAssertNotNil(try UpdateFeed.parse(feed(version), current: "2.0.0-beta.9", systemVersion: sonoma), version)

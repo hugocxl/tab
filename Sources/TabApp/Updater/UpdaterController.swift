@@ -152,10 +152,6 @@ public final class UpdaterController {
 
     /// Check for Updates…: checks now and shows the result.
     public func checkForUpdates() {
-        if prepared != nil, !isBusy {
-            showUpdateSheet()
-            return
-        }
         check(manual: true)
     }
 
@@ -256,14 +252,9 @@ public final class UpdaterController {
         task = Task { [weak self] in
             let result: Result<PreparedUpdate?, Error>
             do {
-                guard let manifest = try await downloader.latest() else {
-                    result = .success(nil)
-                    self?.finishCheck(result, manual: manual)
-                    return
-                }
-                if let known, known.manifest == manifest {
-                    result = .success(known)
-                } else {
+                let update = try await Self.checkedUpdate(known: known, latest: {
+                    try await downloader.latest()
+                }, prepare: { manifest in
                     self?.status = .downloading(version: manifest.version)
                     let folder = FileManager.default.temporaryDirectory.appendingPathComponent("tab-update-\(UUID().uuidString)")
                     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -272,13 +263,29 @@ public final class UpdaterController {
                     let prepared = try await Task.detached(priority: .utility) {
                         try installation.prepare(archive: archive, manifest: manifest)
                     }.value
-                    result = .success(prepared)
-                }
+                    return prepared
+                })
+                result = .success(update)
             } catch {
                 result = .failure(error)
             }
             self?.finishCheck(result, manual: manual)
         }
+    }
+
+    /// Always refreshes the feed, but only replaces a verified pending
+    /// download with a newer release. A stale feed must not move it back.
+    static func checkedUpdate(
+        known: PreparedUpdate?,
+        latest: () async throws -> UpdateManifest?,
+        prepare: (UpdateManifest) async throws -> PreparedUpdate
+    ) async throws -> PreparedUpdate? {
+        let manifest = try await latest()
+        if let known {
+            guard let manifest, ReleaseVersion.isNewer(manifest.version, than: known.version) else { return known }
+        }
+        guard let manifest else { return nil }
+        return try await prepare(manifest)
     }
 
     private func finishCheck(_ result: Result<PreparedUpdate?, Error>, manual: Bool) {

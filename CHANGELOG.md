@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.9.1 - 2026-10-30
+
+### Fixed
+
+- Check for Updates checks for the latest release even when an older update is
+  already downloaded, and stale feeds never replace a newer pending update.
+
 ## 0.9.0 - 2026-10-30
 
 ### Removed
