@@ -50,6 +50,7 @@ extension AppModel {
         if connection.state.isOffline {
             for (id, controller) in panes.all where state.paneServer(id) == connection.id {
                 (controller as? TerminalPane)?.connectionChanged()
+                (controller as? AgentPaneController)?.connectionChanged()
             }
             edit { $0.forgetRemoteStatuses(connection.id) }
         }
@@ -80,6 +81,7 @@ extension AppModel {
                 await refreshActivity(server)
                 for (id, controller) in panes.all where state.paneServer(id) == server {
                     (controller as? TerminalPane)?.connectionChanged()
+                    (controller as? AgentPaneController)?.connectionChanged()
                 }
                 refreshGit(server: server)
                 syncGitWatch()
@@ -268,6 +270,10 @@ extension AppModel {
     private func receive(_ event: ClientEvent, from connection: ServerConnection) {
         let server = connection.id
         switch event {
+        case let .agentChatChanged(session, revision):
+            for (id, controller) in panes.all where state.paneServer(id) == server {
+                (controller as? AgentPaneController)?.sessionChanged(session: session, revision: revision)
+            }
         case .changed(let topic, _):
             switch topic {
             case .catalog: Task { await refreshCatalog(server) }

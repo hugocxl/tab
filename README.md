@@ -4,6 +4,9 @@ A Swift-only, native macOS terminal workspace, rewritten from
 [Codesh](https://github.com/hugocxl/codesh). Apple silicon; macOS 14 or later.
 Terminals run in a separate `tabd` process and survive closing the desktop app.
 
+[Agent Tabs](docs/AGENT_TABS.md) provide native Claude Code and Codex conversations
+alongside terminal panes, using the installed provider CLIs.
+
 Build with Xcode's Swift toolchain and Zig 0.17.0:
 
 ```sh

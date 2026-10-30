@@ -24,6 +24,7 @@ final class Actions {
            browser.controller.perform(id) { return true }
         switch id {
         case .newTab: model.newTerminal()
+        case .newAgent, .newClaudeAgent, .newCodexAgent: model.newAgent()
         case .newHomeTab: model.newHomeTerminal()
         case .newTabInProject: window?.openPalette(.newTerminal)
         case .existingTerminals: window?.openPalette(.terminals(model.currentProject.id))

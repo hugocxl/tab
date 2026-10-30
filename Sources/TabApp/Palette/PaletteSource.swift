@@ -193,6 +193,7 @@ final class PaletteSource: PaletteDataSource {
         let paneCount = model.activeTab?.panes.count ?? 0
         let missing = current.status == .missing
         command(.newTab, "New Terminal", .terminal)
+        command(.newAgent, "New Agent Tab", .panes, disabled: missing)
         command(.newHomeTab, "New Home Terminal", .terminal)
         page(ShortcutId.newTabInProject.rawValue, "New Terminal in Project…", .terminal, .newTerminal, shortcut: .newTabInProject)
         page(ShortcutId.existingTerminals.rawValue, "Existing Terminals…", .terminal, .terminals(project), shortcut: .existingTerminals)

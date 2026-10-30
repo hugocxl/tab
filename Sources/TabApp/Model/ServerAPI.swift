@@ -15,6 +15,7 @@ public protocol ServerAPI: AnyObject, Sendable {
     func close()
 
     func sessions() async throws -> [SessionInfo]
+    func agentChat(_ request: AgentChatRequest) async throws -> AgentChatSnapshot
     func createSession(_ session: CreateSession) async throws -> SessionInfo
     func closeSession(_ session: SessionId, operation: OperationId) async throws
     func endSession(_ session: SessionId) async throws
@@ -51,6 +52,10 @@ extension ServerClient: ServerAPI {
 }
 
 extension ServerAPI {
+    public func agentChat(_ request: AgentChatRequest) async throws -> AgentChatSnapshot {
+        throw ModelError("Agent chat is unsupported by this server.")
+    }
+
     /// Every file of `project`, for Go to File and the root search.
     public func searchFiles(_ project: ProjectId, limit: UInt32 = 50_000) async throws -> FileList {
         let reply = try await files(FilesRequest(project: project, action: .searchFiles(limit: limit)))

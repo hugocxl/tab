@@ -33,9 +33,11 @@ open class ThemedView: NSView {
             paletteObservation = nil
             return
         }
-        paletteObservation = theme.$palette.dropFirst().removeDuplicates().sink { [weak self] _ in
-            self?.themeDidChange()
-        }
+        // @Published emits before storing the new palette. Renderers read the
+        // theme's color properties, so deliver after that mutation has completed.
+        paletteObservation = theme.$palette.dropFirst().removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.themeDidChange() }
         themeDidChange()
     }
 

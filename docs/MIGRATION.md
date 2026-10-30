@@ -83,6 +83,7 @@ crates. Behavior is 1:1 unless listed under "Intentionally changed".
 - [x] Existing Terminals (Cmd+Opt+T): project's sessions this app isn't showing, owner app, open in a new pane — implemented (palette page)
 - [ ] End All Sessions and Quit; quitting never ends terminals; "server offline" keeps last screens and replays edits and closes on reconnect — implemented; offline tested with a fake server
 - [ ] Pane kinds: terminal, editor, diff, browser, Remote Servers, with per-kind titles; editor/diff/servers panes reuse an existing pane for the same target — implemented through `PaneRegistry` factories
+- [ ] Agent Tabs (Tab addition): general agent conversations beside terminals, viewport-virtualized native T3-based Markdown responses and tool disclosures, completed-work folding with persisted timing, copy and file-link actions, fixed bottom composer with model/provider, reasoning-effort and access selectors, inline approvals, Stop and server-owned conversation persistence. Agent panes share terminal tabs' background. Implemented with T3 fixture replays, daemon/socket tests and native UI snapshots; live Claude follow-up/resume verified; live Codex blocked by the installed CLI hanging before launch; full parity and visual verification remain in progress (scope and transcript limits in `docs/AGENT_TABS.md`).
 
 ## App: terminal view
 

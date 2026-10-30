@@ -5,6 +5,7 @@ import TabProtocol
 /// Something the server announced on the control channel, or the end of the
 /// connection.
 public enum ClientEvent: Hashable, Sendable {
+    case agentChatChanged(session: SessionId, revision: UInt64)
     /// Shared state (catalog, sessions, activity, remote access) changed; read it again.
     case changed(topic: Topic, revision: UInt64)
     case sessionMetadata(session: SessionId, metadata: SessionMetadata)
@@ -420,6 +421,8 @@ private final class State: @unchecked Sendable {
         }
         let mapped: ClientEvent
         switch event {
+        case .agentChatChanged(let session, let revision):
+            mapped = .agentChatChanged(session: session, revision: revision)
         case .changed(let topic, let revision): mapped = .changed(topic: topic, revision: revision)
         case .sessionMetadata(let session, let metadata): mapped = .sessionMetadata(session: session, metadata: metadata)
         case .progress(let session, let progress): mapped = .progress(session: session, progress: progress)

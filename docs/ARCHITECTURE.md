@@ -2,7 +2,7 @@
 
 Tab is a macOS terminal workspace for running agents and shells: projects and
 Git worktrees, each with one workspace of split panes (terminals, editors,
-diffs, browsers), with terminals that keep running in a background server after
+diffs, browsers, agent chats), with terminals that keep running in a background server after
 the app quits. It is a Swift-only rewrite of Codesh. The product behavior is the
 one documented in `~/repos/codesh/docs` (product, features, user guide); this
 document is how Tab is built.
@@ -10,7 +10,7 @@ document is how Tab is built.
 ## Processes
 
 ```
-Tab.app ──Unix socket──▶ tabd (local server: terminals, projects, history, git, files)
+Tab.app ──Unix socket──▶ tabd (terminals, agent chats, projects, history, git, files)
 Tab.app ──ssh host tab stdio──▶ tabd on another Mac
 tab CLI ──Unix socket / ssh──▶ tabd
 phone  ──TLS (paired)──▶ tabd (opt-in network listener)
@@ -87,6 +87,8 @@ The complete request list to support, grouped (names are the Swift cases):
   pruneWorktree | setWorktreesVisible)`, `listProjectSessions`, `listFolders`.
 - Server: `readServerSettings`, `writeServerSettings`, `stopServer`,
   `stopServerIfIdle`, `restartServer`.
+- Agent chats: `agentChat(create | read | send | approve | setAccess | interrupt | close)`;
+  `agentChatChanged(session, revision)` tells clients when to reread a snapshot.
 - Git: `summary`, `branches`, `remoteBranches`, `changes`, `switchBranch`,
   `createBranch`, `deleteBranch`, `deleteRemoteBranch`, `stage`, `unstage`,
   `discard`, `commit(message, amend)`, `diff`, `rawDiff`, `log`, `status`,
@@ -124,6 +126,14 @@ The complete request list to support, grouped (names are the Swift cases):
   Code, Codex, OpenCode, Cursor, Copilot, Droid, Pi, Grok, Kiro, Xal,
   Antigravity, Oh My Pi. States: working, blocked (waiting for you), idle,
   unknown. At most one unread event per session, in memory.
+- Agent chats are separate from terminal detection and PTYs. `AgentSessions`
+  owns their normalized transcripts and `AgentRuntime` drives installed Claude
+  Code and Codex processes over JSONL pipes. Claude uses stream-json control
+  messages; Codex uses `app-server` threads and turns. The adapters follow T3
+  Code's provider behavior (see [Agent Tabs](AGENT_TABS.md) and the bundled
+  third-party notice). Agent requests and coalesced revision notifications
+  travel over the existing control channel. App disconnects do not end agents;
+  daemon restart requires resuming the provider conversation.
 - Shell integration scripts live in `Resources/Shell`; zsh and fish load
   automatically through `ZDOTDIR` / `XDG_DATA_DIRS`, bash is opt-in with
   `TAB_SHELL_INTEGRATION=1`.
@@ -161,6 +171,19 @@ The complete request list to support, grouped (names are the Swift cases):
   bindings from `terminal.json` win while a terminal is focused.
 - Browser panes are `WKWebView`s with one `WKWebsiteDataStore` per profile and
   the app's own history. `tab browser` reaches the app over `app.sock`.
+- Agent panes are native AppKit Markdown transcripts with a fixed bottom composer,
+  model, effort and access pickers, folded tool activity, inline approvals and interruption.
+  They use the same card background as terminal panes. Native response blocks retain
+  selectable text, highlighted code, copy actions and project-aware file navigation.
+  Transcript geometry is separate from native row views: only the viewport and an
+  overscan buffer are mounted, with a bounded detached-view cache. Cached heights
+  avoid remeasuring unchanged history during streaming. Lightweight disclosure and
+  code-wrap state survives view eviction; scrolling is anchored by row identity.
+  Expanded work logs have bounded, independently virtualized scroll surfaces.
+  Their persisted pane state identifies the server-owned session and initial provider;
+  the server snapshot owns the current provider, model and reasoning effort. One connection event
+  consumer routes conversation revisions to matching panes; panes reread state
+  when notified or reconnected rather than polling.
 - Native panels (Files, Source Control) are tabs of the right sidebar
   of the current project; editor and diff panes are text views with a
   lightweight tokenizer-based highlighter for common languages.
@@ -178,6 +201,7 @@ Everything lives in one profile folder: `~/Library/Application Support/Tab`
 | `server.json` | Server settings: shell, history budget, shell integration |
 | `server.log`, `server.sock`, `server.pid` | Server log, socket, lock |
 | `sessions/` | Projects, sessions, saved screens and history |
+| `agents/` | Bounded agent transcript snapshots and provider conversation IDs |
 | `remote.json` | Mobile access settings and paired phones (token hashes) |
 | `settings.json` | App preferences, `keymap`, remote servers |
 | `terminal.json` | Terminal preferences and key bindings |

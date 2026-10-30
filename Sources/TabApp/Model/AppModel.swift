@@ -192,6 +192,7 @@ public final class AppModel {
         theme.setThemes(dark: settings.appearance.darkTheme, light: settings.appearance.lightTheme)
         self.notifier.model = self
         panes.register(.terminal) { TerminalPane(context: $0) }
+        panes.register(.agent) { AgentPaneController(context: $0) }
         registerNativeContent()
         browserProfiles.defaultProfileId = settings.browser.defaultProfile
         browserProfiles.notify = { [weak self] message, isError in self?.presenter?.showToast(message, error: isError) }
@@ -446,6 +447,7 @@ public final class AppModel {
         }
         for pane in visible {
             (panes.controller(for: pane) as? TerminalPane)?.refresh()
+            (panes.controller(for: pane) as? AgentPaneController)?.refresh()
         }
         createMissingSessions()
         acknowledgeFocusedActivity()

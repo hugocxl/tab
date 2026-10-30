@@ -81,6 +81,18 @@ extension AppModel {
 
     // MARK: Other pane kinds
 
+    /// Opens an Agent Tab; its initial provider is an internal seed for the composer.
+    @discardableResult
+    public func newAgent(in project: ProjectId? = nil, provider: TabCore.AgentChatProvider = .claude) -> PaneId? {
+        let target = project ?? currentProject.id
+        guard let project = state.project(target) else { return nil }
+        var opened: PaneId?
+        guard edit({ opened = try $0.openAgent(target, provider: provider) }) else { return nil }
+        connectOnDemand(project.serverId)
+        focusActiveContent()
+        return opened
+    }
+
     /// Opens a file in an editor pane beside the focused pane, or focuses
     /// the project's editor for it. `line` and `column` are 1-based.
     @discardableResult
@@ -215,6 +227,7 @@ extension AppModel {
         guard let pane = pane ?? activePane else { return }
         Task {
             guard await controller(for: pane)?.willClose() ?? true else { return }
+            guard await controller(for: pane)?.commitClose() ?? true else { return }
             remove(pane)
             focusActiveContent()
         }
@@ -243,7 +256,10 @@ extension AppModel {
             for id in ids {
                 guard await controller(for: id)?.willClose() ?? true else { return }
             }
-            for id in ids { remove(id) }
+            for id in ids {
+                guard await controller(for: id)?.commitClose() ?? true else { return }
+                remove(id)
+            }
             focusActiveContent()
         }
     }

@@ -34,6 +34,10 @@ extension ClientConnection {
             Task { [self] in
                 reply(id, await asyncResult { .files(try await files.handle(request, client: client)) })
             }
+        case .agentChat(let request):
+            Task { [self] in
+                reply(id, await asyncResult { .agentChat(try await server.agents.handle(request)) })
+            }
         case .exec(let request):
             do {
                 let root = try server.projectPath(request.project)
@@ -207,7 +211,7 @@ extension ClientConnection {
             try remote.revoke(device)
             return .remoteAccess(remote.state())
 
-        case .hello, .ping, .unknown, .authenticate, .pair, .git, .files, .exec, .cancelExec:
+        case .hello, .ping, .unknown, .authenticate, .pair, .git, .files, .exec, .cancelExec, .agentChat:
             throw ServiceError(.badRequest, "Unexpected request")
         }
     }
