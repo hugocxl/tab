@@ -77,11 +77,5 @@ extension SettingsModel {
         b.row("sidebar", b.toggle("sidebar", appearance.sidebarExpanded) { [store] value in
             store.updateAppearance("sidebar") { $0.sidebarExpanded = value }
         })
-        b.row("agents-panel", b.toggle("agents-panel", appearance.agentsPanelVisible) { [store] on in
-            store.updateAppearance("agents-panel") { $0.agentsPanelVisible = on }
-        })
-        b.row("agents-panel-grouping", b.segmented("agents-panel-grouping", ["Agents", "Worktrees"], selected: appearance.agentsPanelGrouping == .worktrees ? 1 : 0) { [store] index in
-            store.updateAppearance("agents-panel-grouping") { $0.agentsPanelGrouping = index == 1 ? .worktrees : .agents }
-        })
     }
 }

@@ -68,7 +68,7 @@ public enum AgentsPanelGeometry {
 @MainActor
 public protocol AgentsPanelHost: AnyObject {
     var theme: AppTheme { get }
-    /// The saved appearance: grouping, dock side, sizes and frame.
+    /// The saved appearance: dock side, sizes and frame.
     var appearance: Appearance { get }
     /// Changes and saves the appearance.
     func updateAppearance(_ change: (inout Appearance) -> Void)
@@ -77,8 +77,6 @@ public protocol AgentsPanelHost: AnyObject {
     var agentsPanelActive: (server: ServerId, project: ProjectId, session: SessionId?)? { get }
     /// Selects the agent's project and focuses its pane.
     func openAgent(_ agent: RunningAgent)
-    /// Selects a project or worktree from a grouped row.
-    func openProject(_ project: ProjectId, server: ServerId)
     /// Gives the keyboard back to the focused pane.
     func focusActivePane()
     /// Hides the panel, saving `agentsPanelVisible = false`.
@@ -90,16 +88,16 @@ public protocol AgentsPanelHost: AnyObject {
     func agentsPanelPlacementDidChange()
 }
 
-/// The running-agents panel: rows of agents grouped by state, or of projects
-/// with counts, opened with a click or the arrow keys and Return.
+/// The running-agents panel: rows of agents grouped by state, opened with a
+/// click or the arrow keys and Return.
 @MainActor
 public final class AgentsPanelController: NSViewController, NSWindowDelegate {
     public private(set) weak var host: AgentsPanelHost?
     /// Where the panel is shown; the shell sets it when it places the view.
     public var placement: AgentsPanelPlacement = .sidebar { didSet { applyPlacement() } }
+    /// Most urgent first.
     public private(set) var agents: [RunningAgent] = []
-    public private(set) var entries: [AgentsPanelEntry] = []
-    private var selected: AgentsPanelEntry.Key?
+    private var selected: RunningAgent.Key?
 
     private let root = AgentsPanelRootView()
     private let header = AgentsPanelHeaderView()
@@ -110,7 +108,7 @@ public final class AgentsPanelController: NSViewController, NSWindowDelegate {
     private var heightConstraint: NSLayoutConstraint?
     private var widthConstraint: NSLayoutConstraint?
     private var dragStart: CGFloat = 0
-    private var rows: [AgentsPanelEntry.Key: AgentsPanelRow] = [:]
+    private var rows: [RunningAgent.Key: AgentsPanelRow] = [:]
     private var floating: AgentsFloatingWindow?
     private var saveFrame: DispatchWorkItem?
 
@@ -188,12 +186,6 @@ public final class AgentsPanelController: NSViewController, NSWindowDelegate {
         reload()
     }
 
-    /// Regroups after the grouping setting changed.
-    public func appearanceDidChange() {
-        applyPlacement()
-        reload()
-    }
-
     /// Marks the row of the pane the user looks at; call when focus moves.
     public func activePaneDidChange() {
         updateRowStates()
@@ -201,11 +193,10 @@ public final class AgentsPanelController: NSViewController, NSWindowDelegate {
 
     private func reload() {
         guard isViewLoaded, let host else { return }
-        entries = AgentsPanelModel.entries(agents, grouping: host.appearance.agentsPanelGrouping)
         header.update(summary: AgentsPanelModel.summary(agents), placement: placement, dock: host.appearance.agentsPanelDock)
         stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         rows = [:]
-        if entries.isEmpty {
+        if agents.isEmpty {
             let empty = makeLabel("No agents running", font: AppFont.footnote, color: host.theme.fgMuted)
             let wrapper = NSView()
             wrapper.translatesAutoresizingMaskIntoConstraints = false
@@ -214,11 +205,11 @@ public final class AgentsPanelController: NSViewController, NSWindowDelegate {
             stack.addArrangedSubview(wrapper)
         }
         var previous: AgentStatus?
-        for entry in entries {
-            if previous != entry.status { addFullWidth(AgentsSectionLabel(entry.status.title)) }
-            previous = entry.status
-            let row = makeRow(entry, theme: host.theme)
-            rows[entry.key] = row
+        for agent in agents {
+            if previous != agent.status { addFullWidth(AgentsSectionLabel(agent.status.title)) }
+            previous = agent.status
+            let row = makeRow(agent, theme: host.theme)
+            rows[agent.key] = row
             addFullWidth(row)
         }
         updateRowStates()
@@ -230,56 +221,28 @@ public final class AgentsPanelController: NSViewController, NSWindowDelegate {
         view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
     }
 
-    private func makeRow(_ entry: AgentsPanelEntry, theme: AppTheme) -> AgentsPanelRow {
-        let row: AgentsPanelRow
-        switch entry {
-        case .agent(let agent):
-            let leading = NSStackView(views: [AgentStatusStyle.glyph(agent.status), AgentStatusStyle.logo(agent.provider, theme: theme)])
-            leading.spacing = 4
-            row = AgentsPanelRow(leading: leading, title: agent.title, detail: agent.location, trailing: nil,
+    private func makeRow(_ agent: RunningAgent, theme: AppTheme) -> AgentsPanelRow {
+        let leading = NSStackView(views: [AgentStatusStyle.glyph(agent.status), AgentStatusStyle.logo(agent.provider, theme: theme)])
+        leading.spacing = 4
+        let row = AgentsPanelRow(leading: leading, title: agent.title, detail: agent.location,
                                  tooltip: "\(agent.provider.displayName) · \(agent.status.title)")
-        case .project(_, _, let location, let counts):
-            row = AgentsPanelRow(leading: AgentStatusStyle.glyph(entry.status), title: location, detail: nil,
-                                 trailing: countsView(counts, theme: theme))
-        }
-        let key = entry.key
+        let key = agent.key
         row.onClick = { [weak self] in self?.open(key) }
         return row
     }
 
-    private func countsView(_ counts: [Int], theme: AppTheme) -> NSView {
-        let stack = NSStackView()
-        stack.spacing = 8
-        for (status, count) in zip(AgentStatus.allCases, counts) where count > 0 {
-            let dot = AgentStatusDot(status: status, filled: true)
-            dot.widthAnchor.constraint(equalToConstant: 6).isActive = true
-            dot.heightAnchor.constraint(equalToConstant: 6).isActive = true
-            let label = makeLabel("\(count)", font: AppFont.footnote, color: AgentStatusStyle.color(status, theme: theme))
-            let pair = NSStackView(views: [dot, label])
-            pair.spacing = 4
-            pair.setAccessibilityLabel("\(count) \(status.title.lowercased())")
-            stack.addArrangedSubview(pair)
-        }
-        return stack
-    }
-
     // MARK: Selection
 
-    private var activeKey: AgentsPanelEntry.Key? {
+    private var activeKey: RunningAgent.Key? {
         guard let active = host?.agentsPanelActive else { return nil }
-        return entries.first { entry in
-            switch entry {
-            case .agent(let agent): return agent.server == active.server && agent.session == active.session
-            case .project(_, let project, _, _): return project == active.project
-            }
-        }?.key
+        return agents.first { $0.server == active.server && $0.session == active.session }?.key
     }
 
     /// The keyboard selection: the last moved-to row, else the active one,
     /// else the first.
-    var selectedKey: AgentsPanelEntry.Key? {
-        if let selected, entries.contains(where: { $0.key == selected }) { return selected }
-        return activeKey ?? entries.first?.key
+    var selectedKey: RunningAgent.Key? {
+        if let selected, agents.contains(where: { $0.key == selected }) { return selected }
+        return activeKey ?? agents.first?.key
     }
 
     private func updateRowStates() {
@@ -294,15 +257,15 @@ public final class AgentsPanelController: NSViewController, NSWindowDelegate {
 
     /// Moves the keyboard selection by `delta` rows.
     func moveSelection(_ delta: Int) {
-        guard !entries.isEmpty else {
+        guard !agents.isEmpty else {
             selected = nil
             return
         }
-        let current = selectedKey.flatMap { key in entries.firstIndex { $0.key == key } } ?? 0
-        let next = min(max(current + delta, 0), entries.count - 1)
-        selected = entries[next].key
+        let current = selectedKey.flatMap { key in agents.firstIndex { $0.key == key } } ?? 0
+        let next = min(max(current + delta, 0), agents.count - 1)
+        selected = agents[next].key
         updateRowStates()
-        if let row = rows[entries[next].key] { row.scrollToVisible(row.bounds.insetBy(dx: 0, dy: -24)) }
+        if let row = rows[agents[next].key] { row.scrollToVisible(row.bounds.insetBy(dx: 0, dy: -24)) }
     }
 
     func openSelection() {
@@ -310,14 +273,11 @@ public final class AgentsPanelController: NSViewController, NSWindowDelegate {
         open(key)
     }
 
-    private func open(_ key: AgentsPanelEntry.Key) {
-        guard let host, let entry = entries.first(where: { $0.key == key }) else { return }
+    private func open(_ key: RunningAgent.Key) {
+        guard let host, let agent = agents.first(where: { $0.key == key }) else { return }
         selected = nil
         if placement == .popup { host.closeAgentsPopup() }
-        switch entry {
-        case .agent(let agent): host.openAgent(agent)
-        case .project(let server, let project, _, _): host.openProject(project, server: server)
-        }
+        host.openAgent(agent)
     }
 
     func dismiss() {

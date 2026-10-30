@@ -95,8 +95,6 @@ public enum SettingsCatalog {
         SettingItem("light-theme", "Light theme", "Colors for the interface and terminals when macOS uses light appearance.", .appearance, "Themes"),
         SettingItem("dark-theme", "Dark theme", "Colors for the interface and terminals when macOS uses dark appearance.", .appearance, "Themes"),
         SettingItem("sidebar", "Expand sidebar", "Show project names alongside their icons in the workspace sidebar.", .appearance, "Interface"),
-        SettingItem("agents-panel", "Show agents panel", "Show the agents panel, or its button when the sidebar is collapsed.", .appearance, "Agents Panel"),
-        SettingItem("agents-panel-grouping", "Agents panel rows", "List each agent and open its pane, or each project and worktree running agents and open it.", .appearance, "Agents Panel"),
         // Terminal
         SettingItem("font-family", "Font family", "The typeface used to render text in every terminal pane.", .terminal, "Font"),
         SettingItem("font-fallbacks", "Fallback fonts", "Fonts used, in order, for characters the main font lacks.", .terminal, "Font"),

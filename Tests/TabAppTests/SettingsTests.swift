@@ -121,11 +121,11 @@ final class SettingsTests: XCTestCase {
         try Data(#"{"futureSection": {"kept": true}}"#.utf8).write(to: dirs.settings)
         let store = makeStore()
         store.setCloseBehavior(.detach)
-        store.updateAppearance("agents-panel-grouping") { $0.agentsPanelGrouping = .worktrees }
+        store.updateAppearance("sidebar") { $0.sidebarExpanded = false }
 
         let saved = try Settings.load(dirs.settings)
         XCTAssertEqual(saved.window.closeBehavior, .detach)
-        XCTAssertEqual(saved.appearance.agentsPanelGrouping, .worktrees)
+        XCTAssertFalse(saved.appearance.sidebarExpanded)
         let raw = try JSONSerialization.jsonObject(with: Data(contentsOf: dirs.settings)) as? [String: Any]
         XCTAssertNotNil(raw?["futureSection"])
     }

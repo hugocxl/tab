@@ -43,13 +43,6 @@ public enum ProjectOrder: String, Codable, Sendable, CaseIterable {
     case manual, name, nameDescending, recentlyActive, dateAdded
 }
 
-public enum AgentsPanelGrouping: String, Codable, Sendable, CaseIterable {
-    /// Rows grouped by agent state.
-    case agents
-    /// Rows grouped by project and worktree.
-    case worktrees
-}
-
 public enum AgentsPanelDock: String, Codable, Sendable, CaseIterable {
     case left, right
 }
@@ -87,7 +80,6 @@ public struct Appearance: Codable, Equatable, Sendable {
     /// The detached panel's frame: x, y, width, height.
     public var agentsPanelFrame: [Double]?
     public var agentsPanelDockedHeight: Double?
-    public var agentsPanelGrouping: AgentsPanelGrouping
     public var agentSessionsVisible: Bool
     public var agentSessionsPosition: AgentSessionsPosition
     public var agentSessionsPinned: Bool
@@ -103,7 +95,7 @@ public struct Appearance: Codable, Equatable, Sendable {
         case worktreeRecent, projectRecent, paletteRecent
         case hiddenWorktrees, sidebarFocus, sidebarProjectOrder, agentsPanelVisible, agentsPanelDetached
         case agentsPanelDock, agentsPanelRightWidth, agentsPanelFrame, agentsPanelDockedHeight
-        case agentsPanelGrouping, agentSessionsVisible, agentSessionsPosition, agentSessionsPinned
+        case agentSessionsVisible, agentSessionsPosition, agentSessionsPinned
         case agentSessionsWidth, agentSessionsHeight, agentSessionsProviders, sidePanel, sidePanelWidth
     }
 
@@ -128,7 +120,6 @@ public struct Appearance: Codable, Equatable, Sendable {
         agentsPanelRightWidth = nil
         agentsPanelFrame = nil
         agentsPanelDockedHeight = nil
-        agentsPanelGrouping = .agents
         agentSessionsVisible = false
         agentSessionsPosition = .right
         agentSessionsPinned = true
@@ -159,7 +150,6 @@ public struct Appearance: Codable, Equatable, Sendable {
         agentsPanelRightWidth = try container.decodeIfPresent(Double.self, forKey: .agentsPanelRightWidth)
         agentsPanelFrame = try container.decodeIfPresent([Double].self, forKey: .agentsPanelFrame)
         agentsPanelDockedHeight = try container.decodeIfPresent(Double.self, forKey: .agentsPanelDockedHeight)
-        agentsPanelGrouping = try container.value(.agentsPanelGrouping, d.agentsPanelGrouping)
         agentSessionsVisible = try container.value(.agentSessionsVisible, d.agentSessionsVisible)
         agentSessionsPosition = try container.value(.agentSessionsPosition, d.agentSessionsPosition)
         agentSessionsPinned = try container.value(.agentSessionsPinned, d.agentSessionsPinned)
@@ -189,7 +179,6 @@ public struct Appearance: Codable, Equatable, Sendable {
         try container.encodeIfPresent(agentsPanelRightWidth, forKey: .agentsPanelRightWidth)
         try container.encodeIfPresent(agentsPanelFrame, forKey: .agentsPanelFrame)
         try container.encodeIfPresent(agentsPanelDockedHeight, forKey: .agentsPanelDockedHeight)
-        try container.encode(agentsPanelGrouping, forKey: .agentsPanelGrouping)
         try container.encode(agentSessionsVisible, forKey: .agentSessionsVisible)
         try container.encode(agentSessionsPosition, forKey: .agentSessionsPosition)
         try container.encode(agentSessionsPinned, forKey: .agentSessionsPinned)

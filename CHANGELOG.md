@@ -24,6 +24,8 @@ Changelog.
 - The sidebar width, worktree expansion, unread indicator and worktree
   switcher order settings. Drag the sidebar's edge to resize it; the switcher
   lists the current worktree, then the most recently used.
+- The agents panel settings. Show the panel with Command-Option-A or View →
+  Toggle Agents Panel; it lists each agent by state.
 
 ## 0.3.0 - 2026-10-30
 

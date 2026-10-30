@@ -73,12 +73,9 @@ final class EdgeResizeHandle: ThemedView {
 /// A 7pt dot: filled for needs input and completed, a ring for idle.
 final class AgentStatusDot: ThemedView {
     var status: AgentStatus { didSet { needsDisplay = true } }
-    /// Fills the idle dot too, as the grouped rows' counts do.
-    let filled: Bool
 
-    init(status: AgentStatus, filled: Bool = false) {
+    init(status: AgentStatus) {
         self.status = status
-        self.filled = filled
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
     }
@@ -91,7 +88,7 @@ final class AgentStatusDot: ThemedView {
         let color = AgentStatusStyle.color(status, theme: theme)
         let side = min(7, bounds.width, bounds.height)
         let rect = NSRect(x: (bounds.width - side) / 2, y: (bounds.height - side) / 2, width: side, height: side)
-        if status == .idle && !filled {
+        if status == .idle {
             let ring = NSBezierPath(ovalIn: rect.insetBy(dx: 0.5, dy: 0.5))
             color.setStroke()
             ring.lineWidth = 1
@@ -169,8 +166,8 @@ final class AgentsSectionLabel: ThemedView {
     }
 }
 
-/// A row with a leading glyph, a title, an optional detail line and an
-/// optional trailing view; hover, active and keyboard-selected fills.
+/// A row with a leading glyph, a title and an optional detail line; hover,
+/// active and keyboard-selected fills.
 final class AgentsPanelRow: HoverView {
     var isActive = false { didSet { needsDisplay = true } }
     var isSelected = false { didSet { needsDisplay = true } }
@@ -178,7 +175,7 @@ final class AgentsPanelRow: HoverView {
     private let titleLabel: NSTextField
     private let detailLabel: NSTextField
 
-    init(leading: NSView, title: String, detail: String?, trailing: NSView?, tooltip: String? = nil) {
+    init(leading: NSView, title: String, detail: String?, tooltip: String? = nil) {
         titleLabel = makeLabel(title, font: AppFont.body)
         detailLabel = makeLabel(detail ?? "", font: AppFont.footnote)
         detailLabel.isHidden = detail?.isEmpty ?? true
@@ -197,7 +194,6 @@ final class AgentsPanelRow: HoverView {
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = Metrics.controlGap
-        if let trailing { row.addArrangedSubview(trailing) }
         row.translatesAutoresizingMaskIntoConstraints = false
         addSubview(row)
         row.pinEdges(to: self, insets: NSEdgeInsets(top: 5, left: Metrics.gutter, bottom: 5, right: Metrics.gutter))

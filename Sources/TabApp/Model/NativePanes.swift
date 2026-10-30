@@ -233,10 +233,6 @@ extension AppModel: AgentsPanelHost, AgentSessionsHost {
         focusPane(agent.pane)
     }
 
-    public func openProject(_ project: ProjectId, server: ServerId) {
-        selectProject(project)
-    }
-
     public func focusActivePane() {
         focusActiveContent()
     }

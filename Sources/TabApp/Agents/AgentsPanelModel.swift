@@ -61,34 +61,14 @@ public struct RunningAgent: Hashable, Sendable {
     public var title: String
     public var provider: AgentProvider
     public var status: AgentStatus
-}
 
-/// A row of the Agents panel.
-public enum AgentsPanelEntry: Hashable, Sendable {
-    case agent(RunningAgent)
-    /// A project or worktree running agents, with counts per `AgentStatus`.
-    case project(server: ServerId, project: ProjectId, location: String, counts: [Int])
-
-    public enum Key: Hashable, Sendable {
-        case agent(ServerId, SessionId)
-        case project(ProjectId)
+    /// Identifies the agent across updates.
+    public struct Key: Hashable, Sendable {
+        public var server: ServerId
+        public var session: SessionId
     }
 
-    public var key: Key {
-        switch self {
-        case .agent(let agent): return .agent(agent.server, agent.session)
-        case .project(_, let project, _, _): return .project(project)
-        }
-    }
-
-    /// The agent's status, or the most urgent one in the project.
-    public var status: AgentStatus {
-        switch self {
-        case .agent(let agent): return agent.status
-        case .project(_, _, _, let counts):
-            return zip(AgentStatus.allCases, counts).first { $0.1 > 0 }?.0 ?? .idle
-        }
-    }
+    public var key: Key { Key(server: server, session: session) }
 }
 
 public enum AgentsPanelModel {
@@ -127,29 +107,6 @@ public enum AgentsPanelModel {
             }
         }
         return stableSorted(agents) { $0.status < $1.status }
-    }
-
-    /// The panel's rows: each agent, or each project with counts, sorted by
-    /// status and then by larger counts.
-    public static func entries(_ agents: [RunningAgent], grouping: AgentsPanelGrouping) -> [AgentsPanelEntry] {
-        if grouping == .agents { return agents.map(AgentsPanelEntry.agent) }
-        var groups: [(server: ServerId, project: ProjectId, location: String, counts: [Int])] = []
-        for agent in agents {
-            let column = agent.status.rawValue
-            if let index = groups.firstIndex(where: { $0.project == agent.project }) {
-                groups[index].counts[column] += 1
-            } else {
-                var counts = [0, 0, 0, 0]
-                counts[column] = 1
-                groups.append((agent.server, agent.project, agent.location, counts))
-            }
-        }
-        let entries = groups.map { AgentsPanelEntry.project(server: $0.server, project: $0.project, location: $0.location, counts: $0.counts) }
-        return stableSorted(entries) { lhs, rhs in
-            if lhs.status != rhs.status { return lhs.status < rhs.status }
-            guard case .project(_, _, _, let left) = lhs, case .project(_, _, _, let right) = rhs else { return false }
-            return right.lexicographicallyPrecedes(left)
-        }
     }
 
     /// "2 need input · 1 working", leaving out zero counts.

@@ -42,25 +42,6 @@ final class AgentsPanelTests: XCTestCase {
         XCTAssertEqual(AgentsPanelModel.summary(agents), "1 need input · 1 working")
     }
 
-    func testGroupingByProjectCountsStatusesAndSortsByUrgencyThenCount() {
-        func agent(_ project: ProjectId, _ status: AgentStatus) -> RunningAgent {
-            RunningAgent(server: server, session: SessionId(), project: project, location: project == app ? "app" : "api",
-                         pane: PaneId(), title: "t", provider: .claude, status: status)
-        }
-        let other = ProjectId()
-        let agents = [
-            agent(api, .working), agent(other, .working), agent(other, .working), agent(app, .idle), agent(api, .idle),
-            agent(other, .completed),
-        ]
-        let entries = AgentsPanelModel.entries(agents, grouping: .worktrees)
-        XCTAssertEqual(entries.map(\.key), [.project(other), .project(api), .project(app)])
-        guard case .project(_, _, _, let counts) = entries[0] else { return XCTFail("expected a project row") }
-        XCTAssertEqual(counts, [0, 2, 1, 0])
-        XCTAssertEqual(entries.map(\.status), [.working, .working, .idle])
-        XCTAssertEqual(AgentsPanelModel.entries(agents, grouping: .agents).count, agents.count)
-        XCTAssertTrue(AgentsPanelModel.entries([], grouping: .worktrees).isEmpty)
-    }
-
     func testPlacementFollowsTheAppearance() {
         var appearance = Appearance()
         XCTAssertEqual(AgentsPanelPlacement(appearance, sidebarExpanded: true), .sidebar)
@@ -93,7 +74,7 @@ final class AgentsPanelTests: XCTestCase {
             AgentActivity(session: second, project: app, provider: .codex, state: .working),
         ])
         controller.update([AgentsPanelSource(server: server, snapshot: snapshot, panes: [pane(app, "app", second), pane(app, "app", first)])])
-        XCTAssertEqual(controller.entries.count, 2)
+        XCTAssertEqual(controller.agents.count, 2)
         controller.moveSelection(1)
         controller.openSelection()
         XCTAssertEqual(host.opened, [second])
@@ -108,12 +89,6 @@ final class AgentsPanelTests: XCTestCase {
         XCTAssertFalse(host.appearance.agentsPanelDetached)
         XCTAssertEqual(host.appearance.agentsPanelDock, .right, "reattaching keeps the last side")
         XCTAssertEqual(host.placementChanges, 3)
-
-        host.appearance.agentsPanelGrouping = .worktrees
-        controller.appearanceDidChange()
-        XCTAssertEqual(controller.entries.map(\.key), [.project(app)])
-        controller.openSelection()
-        XCTAssertEqual(host.openedProjects, [app])
     }
 }
 
@@ -123,12 +98,10 @@ final class StubAgentsHost: AgentsPanelHost {
     var appearance = Appearance()
     var agentsPanelActive: (server: ServerId, project: ProjectId, session: SessionId?)?
     var opened: [SessionId] = []
-    var openedProjects: [ProjectId] = []
     var placementChanges = 0
 
     func updateAppearance(_ change: (inout Appearance) -> Void) { change(&appearance) }
     func openAgent(_ agent: RunningAgent) { opened.append(agent.session) }
-    func openProject(_ project: ProjectId, server: ServerId) { openedProjects.append(project) }
     func focusActivePane() {}
     func hideAgentsPanel() { appearance.agentsPanelVisible = false }
     func closeAgentsPopup() {}
