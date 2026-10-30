@@ -497,7 +497,7 @@ extension ProjectMutation {
             try project.validate()
         case .rename(_, let name):
             try Validation.name(name)
-        case .delete, .pruneWorktree, .setWorktreesVisible:
+        case .delete, .pruneWorktree:
             break
         }
     }

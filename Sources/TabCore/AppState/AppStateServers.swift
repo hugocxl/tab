@@ -163,7 +163,7 @@ extension AppState {
             switch intent.mutation {
             case .create(let record): return record.id == id
             case .delete(let other), .pruneWorktree(let other): return other == id
-            case .rename, .setWorktreesVisible: return false
+            case .rename: return false
             }
         }
         guard !waiting else { return }
@@ -200,8 +200,6 @@ extension AppState {
                 descriptors[project.id] = project
             case let .rename(project, name):
                 descriptors[project]?.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
-            case let .setWorktreesVisible(project, visible):
-                descriptors[project]?.worktreesHidden = !visible
             case .delete(let project), .pruneWorktree(let project):
                 descriptors = descriptors.filter { $0.key != project && $0.value.parentId != project }
             }
@@ -248,8 +246,6 @@ extension AppState {
             switch state.projectIntents[index].mutation {
             case let .rename(project, name) where project == old:
                 state.projectIntents[index].mutation = .rename(project: home, name: name)
-            case let .setWorktreesVisible(project, visible) where project == old:
-                state.projectIntents[index].mutation = .setWorktreesVisible(project: home, visible: visible)
             case .delete(let project) where project == old:
                 state.projectIntents[index].mutation = .delete(home)
             default:

@@ -332,7 +332,6 @@ extension AppModel {
     /// The worktree of `parent` to show: the current one, else the most
     /// recently used, else the parent.
     public func preferredWorktree(_ parent: ProjectId) -> ProjectId {
-        guard let project = state.project(parent), listingBuilder().worktreesVisible(project) else { return parent }
         let current = currentProject
         if (current.id == parent || current.parentId == parent) && current.status == .available { return current.id }
         return appearance.worktreeRecent.first { id in

@@ -222,12 +222,6 @@ final class ServerParityEndToEndTests: XCTestCase {
         XCTAssertEqual(catalog.projects.first { $0.id == id }?.parentId, parent.id)
         guard case .worktrees(let imported) = try action(parent.id, .worktrees) else { return XCTFail("worktrees") }
         XCTAssertEqual(imported.first { $0.directory == external.directory }?.registered, id)
-        for visible in [false, true] {
-            _ = try await client.mutateProject(ProjectIntent(mutation: .setWorktreesVisible(project: parent.id, visible: visible)))
-            let page = try await client.catalog()
-            XCTAssertEqual(page.projects.first { $0.id == parent.id }?.worktreesHidden, !visible)
-            XCTAssertTrue(page.projects.contains { $0.id == id })
-        }
         _ = try await client.mutateProject(ProjectIntent(mutation: .pruneWorktree(id)))
         var page = try await client.catalog()
         XCTAssertTrue(page.projects.contains { $0.id == id }, "existing directories are retained")

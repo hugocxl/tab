@@ -167,7 +167,6 @@ final class SidebarViewController: NSViewController {
             stack.orientation = .vertical
             stack.spacing = 2
             stack.alignment = .leading
-            stack.edgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: group.hasWorktrees ? 4 : 0, right: 0)
             let header = headerView(group)
             stack.addArrangedSubview(header)
             stack.setCustomSpacing(0, after: header)
@@ -277,11 +276,6 @@ final class SidebarViewController: NSViewController {
         }
         if !project.home {
             items.append(.submenu("Workspaces", workspaceItems(id, anchor: anchor)))
-            if model.git[id]?.isRepository ?? false {
-                items.append(.separator())
-                let visible = model.listingBuilder().worktreesVisible(project)
-                items.append(ClosureMenuItem("Show Worktrees", checked: visible) { [weak self] in self?.model.toggleWorktrees(id) })
-            }
         }
         items += pathItems(project)
         if !project.home {

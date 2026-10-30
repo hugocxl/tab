@@ -80,15 +80,14 @@ final class SidebarListingTests: XCTestCase {
         XCTAssertEqual(model.sidebarListing.projects.count, 2)
     }
 
-    func testWorkspaceFilterAndHiddenWorktrees() async throws {
+    func testWorkspaceFilterListsWorktrees() async throws {
         let (app, _) = try await repository("app", worktree: "feature")
         let lib = try XCTUnwrap(model.addProject(try ModelFixtures.folder("lib")))
         let workspace = try XCTUnwrap(model.createWorkspace("Work", adding: lib))
         model.selectWorkspace(workspace)
         XCTAssertEqual(model.sidebarListing.projects, [lib])
         model.selectWorkspace(nil)
-        model.toggleWorktrees(app)
-        XCTAssertEqual(model.sidebarListing.groups.first { $0.project == app }?.cards.map(\.project), [app])
+        XCTAssertEqual(model.sidebarListing.groups.first { $0.project == app }?.cards.count, 2)
     }
 
     func testCyclingFromHomeStartsAtTheFirstProjectInEitherDirection() async throws {

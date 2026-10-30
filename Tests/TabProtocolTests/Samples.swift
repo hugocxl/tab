@@ -62,7 +62,7 @@ enum Samples {
                                          cursor: Cursor(row: 1, col: 2), graphics: nil, reason: .exited(1))
 
     static let descriptor = ProjectDescriptor(id: project, directory: directory, name: "tab", kind: .worktree,
-                                              parentId: parent, worktreesHidden: true)
+                                              parentId: parent)
 
     static let summary = GitSummary(branch: "main", head: "abc123", upstream: "origin/main", ahead: 1, behind: 2,
                                     changed: 3, staged: 1, unstaged: 1, untracked: 1, conflicted: 0,
@@ -193,8 +193,6 @@ enum Samples {
         .mutateProject(ProjectIntent(operation: operation, mutation: .rename(project: project, name: "New"))),
         .mutateProject(ProjectIntent(operation: operation, mutation: .delete(project))),
         .mutateProject(ProjectIntent(operation: operation, mutation: .pruneWorktree(project))),
-        .mutateProject(ProjectIntent(operation: operation, mutation: .setWorktreesVisible(project: project,
-                                                                                         visible: false))),
         .listProjectSessions(project: project, after: session, revision: 2), .listFolders("/Users"),
         .readServerSettings,
         .writeServerSettings(ServerSettingsDoc(defaultShell: "/bin/zsh", historyBudgetBytes: 1024,

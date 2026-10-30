@@ -155,9 +155,6 @@ final class Catalog: @unchecked Sendable {
         case .rename(let id, let name):
             guard !state.deleting.contains(id), state.projects[id] != nil else { throw ServiceError.unknownProject(id) }
             state.projects[id]?.name = name
-        case .setWorktreesVisible(let id, let visible):
-            guard !state.deleting.contains(id), state.projects[id] != nil else { throw ServiceError.unknownProject(id) }
-            state.projects[id]?.worktreesHidden = !visible
         case .delete(let id):
             guard id != state.home else { throw ServiceError(.badRequest, "Home can't be removed") }
             guard state.projects[id] != nil else { throw ServiceError.unknownProject(id) }

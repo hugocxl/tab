@@ -60,8 +60,6 @@ public struct Appearance: Codable, Equatable, Sendable {
     public var projectRecent: [ProjectId]
     /// Recently run palette commands, most recent first.
     public var paletteRecent: [String]
-    /// Projects whose worktrees the sidebar hides.
-    public var hiddenWorktrees: Set<ProjectId>
     /// The sidebar has the keyboard rather than the workspace.
     public var sidebarFocus: Bool
     public var sidebarProjectOrder: ProjectOrder
@@ -73,7 +71,7 @@ public struct Appearance: Codable, Equatable, Sendable {
     enum CodingKeys: String, CodingKey {
         case darkTheme, lightTheme, sidebarExpanded, sidebarHost, sidebarExpandedWidth
         case worktreeRecent, projectRecent, paletteRecent
-        case hiddenWorktrees, sidebarFocus, sidebarProjectOrder, sidePanel, lastSidePanel, sidePanelWidth
+        case sidebarFocus, sidebarProjectOrder, sidePanel, lastSidePanel, sidePanelWidth
     }
 
     public init() {
@@ -85,7 +83,6 @@ public struct Appearance: Codable, Equatable, Sendable {
         worktreeRecent = []
         projectRecent = []
         paletteRecent = []
-        hiddenWorktrees = []
         sidebarFocus = false
         sidebarProjectOrder = .manual
         sidePanel = .none
@@ -104,7 +101,6 @@ public struct Appearance: Codable, Equatable, Sendable {
         worktreeRecent = try container.value(.worktreeRecent, d.worktreeRecent)
         projectRecent = try container.value(.projectRecent, d.projectRecent)
         paletteRecent = try container.value(.paletteRecent, d.paletteRecent)
-        hiddenWorktrees = try container.value(.hiddenWorktrees, d.hiddenWorktrees)
         sidebarFocus = try container.value(.sidebarFocus, d.sidebarFocus)
         sidebarProjectOrder = try container.value(.sidebarProjectOrder, d.sidebarProjectOrder)
         sidePanel = try container.value(.sidePanel, d.sidePanel)
@@ -122,7 +118,6 @@ public struct Appearance: Codable, Equatable, Sendable {
         try container.encode(worktreeRecent, forKey: .worktreeRecent)
         try container.encode(projectRecent, forKey: .projectRecent)
         try container.encode(paletteRecent, forKey: .paletteRecent)
-        try container.encode(hiddenWorktrees.sorted(), forKey: .hiddenWorktrees)
         try container.encode(sidebarFocus, forKey: .sidebarFocus)
         try container.encode(sidebarProjectOrder, forKey: .sidebarProjectOrder)
         try container.encode(sidePanel, forKey: .sidePanel)
@@ -149,8 +144,8 @@ public struct Appearance: Codable, Equatable, Sendable {
     }
 
     /// Saves only what changed since `previous`, over what the file holds now,
-    /// so another window's changes in between are kept. Hidden worktrees merge
-    /// as additions and removals. Returns the appearance as saved.
+    /// so another window's changes in between are kept. Returns the appearance
+    /// as saved.
     @discardableResult
     public func saveChanges(since previous: Appearance, to url: URL) throws -> Appearance {
         guard let current = try SettingsJSON.object(self) as? [String: Any],
@@ -161,19 +156,16 @@ public struct Appearance: Codable, Equatable, Sendable {
             throw SettingsError("appearance", "must be an object")
         }
         var target = document.root["appearance"] as? [String: Any] ?? old
-        for (key, value) in current where key != CodingKeys.hiddenWorktrees.stringValue {
+        for (key, value) in current {
             let unchanged = old[key].map { ($0 as AnyObject).isEqual(value) } ?? false
             if !unchanged { target[key] = value }
         }
-        var saved: Appearance
+        let saved: Appearance
         do {
             saved = try SettingsJSON.decode(Appearance.self, from: target)
         } catch {
             throw SettingsError("appearance", SettingsJSON.describe(error))
         }
-        saved.hiddenWorktrees.formUnion(hiddenWorktrees.subtracting(previous.hiddenWorktrees))
-        saved.hiddenWorktrees.subtract(previous.hiddenWorktrees.subtracting(hiddenWorktrees))
-        target[CodingKeys.hiddenWorktrees.stringValue] = saved.hiddenWorktrees.sorted().map(\.description)
         document.root["appearance"] = target
         try document.write(to: url)
         return saved

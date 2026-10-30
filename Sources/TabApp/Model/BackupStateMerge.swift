@@ -49,9 +49,7 @@ enum BackupStateMerge {
         var server = servers[local] as? [String: Any] ?? [:]
         var intents = server["projectIntents"] as? [[String: Any]] ?? []
         for project in projects where (project["id"] as? String).map(added.contains) == true {
-            var record = project
-            record["worktreesHidden"] = project["worktreesHidden"] as? Bool ?? false
-            let descriptor = try JSONDecoder().decode(ProjectDescriptor.self, from: JSONSerialization.data(withJSONObject: record))
+            let descriptor = try JSONDecoder().decode(ProjectDescriptor.self, from: JSONSerialization.data(withJSONObject: project))
             let intent = ProjectIntent(mutation: .create(descriptor))
             let encoded = try JSONEncoder().encode(intent)
             if let value = try JSONSerialization.jsonObject(with: encoded) as? [String: Any] { intents.append(value) }

@@ -25,18 +25,15 @@ public struct ProjectDescriptor: Hashable, Codable, Sendable {
     public var kind: ProjectKind?
     /// The project a worktree belongs to.
     public var parentId: ProjectId?
-    /// The project's worktrees are hidden in the sidebar.
-    public var worktreesHidden: Bool
 
     public init(id: ProjectId = ProjectId(), home: Bool = false, directory: ServerPath, name: String,
-                kind: ProjectKind? = nil, parentId: ProjectId? = nil, worktreesHidden: Bool = false) {
+                kind: ProjectKind? = nil, parentId: ProjectId? = nil) {
         self.id = id
         self.home = home
         self.directory = directory
         self.name = name
         self.kind = kind
         self.parentId = parentId
-        self.worktreesHidden = worktreesHidden
     }
 
     /// A new project, named after its folder.
@@ -57,7 +54,6 @@ public enum ProjectMutation: Hashable, Codable, Sendable {
     case delete(ProjectId)
     /// Removes a worktree project whose folder was deleted outside Tab.
     case pruneWorktree(ProjectId)
-    case setWorktreesVisible(project: ProjectId, visible: Bool)
 
     public init(from decoder: Decoder) throws {
         let c = try TaggedDecoding(decoder)
@@ -66,7 +62,6 @@ public enum ProjectMutation: Hashable, Codable, Sendable {
         case "rename": self = .rename(project: try c("project"), name: try c("name"))
         case "delete": self = .delete(try c("project"))
         case "pruneWorktree": self = .pruneWorktree(try c("project"))
-        case "setWorktreesVisible": self = .setWorktreesVisible(project: try c("project"), visible: try c("visible"))
         default: throw unknownCase(c.type, decoder)
         }
     }
@@ -86,10 +81,6 @@ public enum ProjectMutation: Hashable, Codable, Sendable {
         case .pruneWorktree(let project):
             var c = try TaggedEncoding(encoder, "pruneWorktree")
             try c(project, "project")
-        case .setWorktreesVisible(let project, let visible):
-            var c = try TaggedEncoding(encoder, "setWorktreesVisible")
-            try c(project, "project")
-            try c(visible, "visible")
         }
     }
 }

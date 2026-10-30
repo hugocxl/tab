@@ -88,20 +88,6 @@ extension AppModel {
         }
     }
 
-    /// Shows or hides a project's worktrees in the sidebar.
-    public func toggleWorktrees(_ project: ProjectId) {
-        updateAppearance { appearance in
-            if appearance.hiddenWorktrees.contains(project) {
-                appearance.hiddenWorktrees.remove(project)
-            } else {
-                appearance.hiddenWorktrees.insert(project)
-            }
-        }
-        if appearance.hiddenWorktrees.contains(project), currentProject.parentId == project {
-            selectProject(project)
-        }
-    }
-
     // MARK: Workspaces
 
     @discardableResult

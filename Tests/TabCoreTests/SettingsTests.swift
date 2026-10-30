@@ -85,7 +85,7 @@ final class SettingsTests: XCTestCase {
 
     // MARK: Appearance
 
-    func testAppearanceSavesOnlyChangesAndMergesHiddenWorktrees() throws {
+    func testAppearanceSavesOnlyChangesAndKeepsOtherWindowsChanges() throws {
         let directory = try TemporaryDirectory()
         let path = try directory.write("settings.json", #"{"appearance": {"sidebarProjectOrder": "name"}, "window": {"confirmRunningProcess": false}}"#)
         var appearance = try Appearance.load(path)
@@ -99,22 +99,15 @@ final class SettingsTests: XCTestCase {
             XCTAssertFalse(saved.window.confirmRunningProcess)
         }
 
-        let first = ProjectId()
-        let second = ProjectId()
         let initial = try Appearance.load(path)
         var one = initial
-        one.hiddenWorktrees.insert(first)
+        one.sidebarExpanded = !initial.sidebarExpanded
         try one.saveChanges(since: initial, to: path)
         var two = initial
-        two.hiddenWorktrees.insert(second)
         two.sidePanel = .files
-        var saved = try two.saveChanges(since: initial, to: path)
-        XCTAssertEqual(saved.hiddenWorktrees, [first, second])
-        let previousOne = one
-        one.hiddenWorktrees.remove(first)
-        saved = try one.saveChanges(since: previousOne, to: path)
-        XCTAssertEqual(saved.hiddenWorktrees, [second])
-        XCTAssertEqual(saved.sidePanel, .files, "another window's change is kept")
+        let saved = try two.saveChanges(since: initial, to: path)
+        XCTAssertEqual(saved.sidebarExpanded, one.sidebarExpanded, "another window's change is kept")
+        XCTAssertEqual(saved.sidePanel, .files)
         XCTAssertEqual(try Appearance.load(path), saved)
     }
 

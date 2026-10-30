@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.9.0 - 2026-10-30
+
+### Removed
+
+- The project menu no longer has Show Worktrees: a repository's worktrees are
+  always listed under it, without the extra gap below them.
+
 ## 0.8.0 - 2026-10-30
 
 ### Added

@@ -12,7 +12,6 @@ struct SidebarSnapshot: Equatable {
     struct GroupEntry: Equatable {
         var project: ProjectId
         var title: String
-        var hasWorktrees: Bool
         var hasIcon: Bool
         var canCreateWorktree: Bool
         var cards: [CardEntry]
@@ -45,7 +44,7 @@ struct SidebarSnapshot: Equatable {
                                  data: ActivityCardData.make(project: target, tab: nil, primary: card.primary, model: model))
             }
             return GroupEntry(
-                project: project.id, title: model.title(of: project), hasWorktrees: group.hasWorktrees,
+                project: project.id, title: model.title(of: project),
                 hasIcon: model.projectIcon(project.id) != nil,
                 canCreateWorktree: project.status == .available && (model.git[project.id]?.isRepository ?? false),
                 cards: cards, creating: model.worktreeCreations[project.id] ?? []

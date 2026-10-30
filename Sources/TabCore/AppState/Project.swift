@@ -53,14 +53,12 @@ public struct Project: Codable, Equatable, Sendable, Identifiable {
     public var directory: ServerPath
     public var kind: ProjectKind?
     public var parentId: ProjectId?
-    /// The server hides the project's worktrees in sidebars.
-    public var worktreesHidden: Bool
     public var tabs: [Tab]
     /// Checked on disk for this computer's projects; never saved.
     public internal(set) var status: ProjectStatus = .available
 
     enum CodingKeys: String, CodingKey {
-        case id, home, name, createdAt, serverId, directory, kind, parentId, worktreesHidden, tabs
+        case id, home, name, createdAt, serverId, directory, kind, parentId, tabs
     }
 
     public init(from decoder: Decoder) throws {
@@ -73,7 +71,6 @@ public struct Project: Codable, Equatable, Sendable, Identifiable {
         directory = try container.decode(ServerPath.self, forKey: .directory)
         kind = try container.decodeIfPresent(ProjectKind.self, forKey: .kind)
         parentId = try container.decodeIfPresent(ProjectId.self, forKey: .parentId)
-        worktreesHidden = try container.value(.worktreesHidden, false)
         tabs = try container.value(.tabs, [])
     }
 
@@ -87,7 +84,6 @@ public struct Project: Codable, Equatable, Sendable, Identifiable {
         try container.encode(directory, forKey: .directory)
         try container.encodeIfPresent(kind, forKey: .kind)
         try container.encodeIfPresent(parentId, forKey: .parentId)
-        if worktreesHidden { try container.encode(worktreesHidden, forKey: .worktreesHidden) }
         try container.encode(tabs, forKey: .tabs)
     }
 
@@ -101,7 +97,6 @@ public struct Project: Codable, Equatable, Sendable, Identifiable {
         directory = descriptor.directory
         kind = descriptor.kind
         parentId = descriptor.parentId
-        worktreesHidden = descriptor.worktreesHidden
         tabs = []
         refreshStatus()
     }
@@ -113,15 +108,11 @@ public struct Project: Codable, Equatable, Sendable, Identifiable {
         directory = descriptor.directory
         kind = descriptor.kind
         parentId = descriptor.parentId
-        worktreesHidden = descriptor.worktreesHidden
         refreshStatus()
     }
 
     public var descriptor: ProjectDescriptor {
-        ProjectDescriptor(
-            id: id, home: home, directory: directory, name: name, kind: kind, parentId: parentId,
-            worktreesHidden: worktreesHidden
-        )
+        ProjectDescriptor(id: id, home: home, directory: directory, name: name, kind: kind, parentId: parentId)
     }
 
     /// The first character of a name, which stands for it on a project's tile.
@@ -202,7 +193,7 @@ extension ProjectMutation {
     public var project: ProjectId {
         switch self {
         case .create(let descriptor): return descriptor.id
-        case .rename(let id, _), .delete(let id), .pruneWorktree(let id), .setWorktreesVisible(let id, _): return id
+        case .rename(let id, _), .delete(let id), .pruneWorktree(let id): return id
         }
     }
 }

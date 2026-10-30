@@ -84,7 +84,7 @@ The complete request list to support, grouped (names are the Swift cases):
   (which sessions this client shows), `identifyClient`, `cancelCreation`,
   `writeInput` (for CLI send), `ping`.
 - Catalog: `readCatalog`, `mutateProject(create | rename | delete |
-  pruneWorktree | setWorktreesVisible)`, `listProjectSessions`, `listFolders`.
+  pruneWorktree)`, `listProjectSessions`, `listFolders`.
 - Server: `readServerSettings`, `writeServerSettings`, `stopServer`,
   `stopServerIfIdle`, `restartServer`.
 - Git: `summary`, `branches`, `remoteBranches`, `changes`, `switchBranch`,

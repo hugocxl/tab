@@ -289,7 +289,7 @@ public final class Server: @unchecked Sendable {
             try services.worktreeGuard?.checkMutation(of: [project])
         case .delete(let project):
             try services.worktreeGuard?.checkMutation(of: [project] + catalog.children(of: project).map(\.id))
-        case .create, .setWorktreesVisible:
+        case .create:
             break
         }
         let revision = try catalog.mutate(intent)

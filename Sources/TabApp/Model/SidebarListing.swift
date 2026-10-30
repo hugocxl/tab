@@ -10,8 +10,6 @@ public struct SidebarListing: Equatable {
         /// Cards under the header: the project itself (primary) and its
         /// worktrees. Empty for a missing folder.
         public var cards: [Card]
-        /// The project is a Git repository whose worktrees are shown.
-        public var hasWorktrees: Bool
     }
 
     public struct Card: Equatable {
@@ -70,13 +68,10 @@ public struct SidebarListingBuilder {
         }.map { (project: $0.0.id, tab: $0.1.id) }
         var groups: [SidebarListing.Group] = []
         for parent in listedParents() {
-            let showsWorktrees = hasWorktrees(parent)
             var cards: [SidebarListing.Card] = []
             if parent.status == .available {
                 cards.append(SidebarListing.Card(project: parent.id, primary: repositories.contains(parent.id)))
-                if showsWorktrees {
-                    cards += children(of: parent.id).map { SidebarListing.Card(project: $0.id, primary: false) }
-                }
+                cards += children(of: parent.id).map { SidebarListing.Card(project: $0.id, primary: false) }
             }
             if !needle.isEmpty {
                 let parentMatches = matches(title(parent), needle)
@@ -88,7 +83,7 @@ public struct SidebarListingBuilder {
                     if cards.isEmpty { continue }
                 }
             }
-            groups.append(SidebarListing.Group(project: parent.id, cards: cards, hasWorktrees: showsWorktrees))
+            groups.append(SidebarListing.Group(project: parent.id, cards: cards))
         }
         return SidebarListing(terminals: terminals, groups: groups)
     }
@@ -116,15 +111,11 @@ public struct SidebarListingBuilder {
         }.flatMap { project in project.tabs.map { (project, $0) } }
     }
 
-    /// Whether the project shows its worktrees: a repository, or one with
-    /// worktree projects, whose worktrees aren't hidden.
+    /// Whether the project has worktrees: a repository, or one with
+    /// worktree projects.
     public func hasWorktrees(_ project: Project) -> Bool {
-        guard !project.home, project.parentId == nil, worktreesVisible(project) else { return false }
+        guard !project.home, project.parentId == nil else { return false }
         return repositories.contains(project.id) || state.projects.contains { $0.parentId == project.id }
-    }
-
-    public func worktreesVisible(_ project: Project) -> Bool {
-        !appearance.hiddenWorktrees.contains(project.id) && !project.worktreesHidden
     }
 
     public func children(of parent: ProjectId) -> [Project] {
