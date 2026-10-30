@@ -1,0 +1,116 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tab-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-15
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '14.0'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Read the existing release tag
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo 'Error: release tags must be vX.Y.Z' >&2
+            exit 1
+          fi
+          test "$(uname -m)" = arm64
+          echo "RELEASE_VERSION=$VERSION" >> "$GITHUB_ENV"
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.17.0
+      - uses: actions/cache@v4
+        with:
+          path: vendor/GhosttyVT.xcframework
+          key: ghostty-vt-arm64-${{ runner.os }}-${{ hashFiles('scripts/build-ghostty.sh', 'vendor/ghostty-vt/clear-screen.patch') }}
+      - name: Validate builds, tests and debug bundle
+        run: |
+          set -euo pipefail
+          scripts/validate.sh
+      - name: Import Developer ID certificate
+        env:
+          CERTIFICATE_P12: ${{ secrets.DEVELOPER_ID_APPLICATION_CERTIFICATE }}
+          CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_APPLICATION_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          : "${CERTIFICATE_P12:?Developer ID certificate is required}"
+          : "${CERTIFICATE_PASSWORD:?Certificate password is required}"
+          : "${KEYCHAIN_PASSWORD:?Keychain password is required}"
+          umask 077
+          CERTIFICATE="$RUNNER_TEMP/tab-release-certificate.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/tab-release-signing.keychain-db"
+          trap 'rm -f "$CERTIFICATE"' EXIT
+          printf '%s' "$CERTIFICATE_P12" | base64 --decode > "$CERTIFICATE"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" "$HOME/Library/Keychains/login.keychain-db"
+          security import "$CERTIFICATE" -k "$KEYCHAIN_PATH" -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | awk '/Developer ID Application:/ {print $2; exit}')"
+          : "${IDENTITY:?No Developer ID Application identity found}"
+          echo "CODESIGN_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+      - name: Build, sign, notarize, staple and verify release
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          REQUIRE_NOTARIZATION: '1'
+        run: |
+          set -euo pipefail
+          scripts/release.sh
+      - name: Publish complete assets through a draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="$GITHUB_REF_NAME"
+          if gh release view "$TAG" --json isDraft > "$RUNNER_TEMP/tab-release.json"; then
+            if [ "$(plutil -extract isDraft raw "$RUNNER_TEMP/tab-release.json")" != true ]; then
+              echo 'Error: this release is already public; its assets are immutable' >&2
+              exit 1
+            fi
+          else
+            gh release create "$TAG" --verify-tag --draft --latest=false \
+              --title "Tab $RELEASE_VERSION" --generate-notes
+          fi
+          ASSETS=("build/release/Tab-$RELEASE_VERSION-arm64.dmg" build/release/update.json)
+          gh release upload "$TAG" --clobber "${ASSETS[@]}"
+          for ASSET in "${ASSETS[@]}"; do
+            NAME="$(basename "$ASSET")"
+            REMOTE_SIZE="$(gh release view "$TAG" --json assets --jq ".assets[] | select(.name == \"$NAME\") | .size")"
+            test "$REMOTE_SIZE" = "$(stat -f %z "$ASSET")"
+          done
+          gh release edit "$TAG" --draft=false --prerelease=false --latest
+      - name: Preserve validation logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-logs
+          path: build/validation/*.log
+          if-no-files-found: ignore
+      - name: Remove signing keychain
+        if: always()
+        run: |
+          set -euo pipefail
+          KEYCHAIN_PATH="$RUNNER_TEMP/tab-release-signing.keychain-db"
+          if [ -f "$KEYCHAIN_PATH" ]; then security delete-keychain "$KEYCHAIN_PATH"; fi
+          rm -f "$RUNNER_TEMP/tab-release-certificate.p12"

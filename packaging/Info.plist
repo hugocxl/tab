@@ -10,16 +10,21 @@
     <key>CFBundleDisplayName</key><string>__APP_NAME__</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>__VERSION__</string>
-    <key>CFBundleVersion</key><string>__VERSION__</string>
+    <key>CFBundleVersion</key><string>__BUILD_NUMBER__</string>
+    <key>CFBundleGetInfoString</key><string>__APP_NAME__ __VERSION__</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
+    <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
     <key>NSHighResolutionCapable</key><true/>
+    <key>NSSupportsAutomaticGraphicsSwitching</key><true/>
     <key>NSPrincipalClass</key><string>NSApplication</string>
     <key>NSSupportsAutomaticTermination</key><false/>
     <key>NSSupportsSuddenTermination</key><false/>
     <key>NSMicrophoneUsageDescription</key><string>Tab records your voice to dictate into a terminal.</string>
     <key>NSSpeechRecognitionUsageDescription</key><string>Tab transcribes dictation on this Mac.</string>
-    <key>NSLocalNetworkUsageDescription</key><string>Tab lets paired phones connect to this Mac's terminals.</string>
+    <key>NSLocalNetworkUsageDescription</key><string>Commands in Tab can access devices on your local network, and paired phones can connect to this Mac's terminals.</string>
+    <key>NSAppTransportSecurity</key>
+    <dict><key>NSAllowsArbitraryLoadsInWebContent</key><true/></dict>
     <key>CFBundleURLTypes</key>
     <array>
         <dict>

@@ -1,10 +1,17 @@
 #!/bin/bash
 # Assembles Tab.app from a SwiftPM build. Usage: scripts/bundle.sh [debug|release]
-# The bundle lands in build/<config>/Tab.app and holds Tab, tabd and tab.
+# The bundle lands in build/<config>/ and holds TabDesktop, tabd and tab.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CONFIG="${1:-debug}"
-VERSION="$(cat "$ROOT/VERSION").$(git -C "$ROOT" rev-list --count HEAD 2>/dev/null || echo 0)"
+case "$CONFIG" in debug|release) ;; *) echo "Usage: $0 [debug|release]" >&2; exit 1 ;; esac
+source "$ROOT/scripts/swift-settings.sh"
+BUILD_NUMBER="$(git -C "$ROOT" rev-list --count HEAD 2>/dev/null || echo 0)"
+VERSION="${RELEASE_VERSION:-$(cat "$ROOT/VERSION").$BUILD_NUMBER}"
+if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "Error: expected an X.Y.Z release version, got $VERSION" >&2
+    exit 1
+fi
 if [ "$CONFIG" = "release" ]; then
     BUNDLE_ID="com.hugocorta.tab"; APP_NAME="Tab"
 else
@@ -12,9 +19,10 @@ else
 fi
 
 for product in TabDesktop tabd tab; do
-    (cd "$ROOT" && swift build -c "$CONFIG" --product "$product")
+    (cd "$ROOT" && swift build "${SWIFT_FLAGS[@]}" -c "$CONFIG" --product "$product")
 done
-BIN="$ROOT/.build/$CONFIG"
+BIN="$(cd "$ROOT" && swift build "${SWIFT_FLAGS[@]}" -c "$CONFIG" --show-bin-path)"
+swift "$ROOT/scripts/build-icon.swift"
 APP="$ROOT/build/$CONFIG/$APP_NAME.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
@@ -23,11 +31,21 @@ cp "$BIN/TabDesktop" "$BIN/tabd" "$BIN/tab" "$APP/Contents/MacOS/"
 for bundle in "$BIN"/*.bundle; do
     [ -d "$bundle" ] && cp -R "$bundle" "$APP/Contents/Resources/"
 done
-if [ -f "$ROOT/packaging/AppIcon.icns" ]; then
-    cp "$ROOT/packaging/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
-fi
+cp "$ROOT/packaging/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 sed -e "s/__BUNDLE_ID__/$BUNDLE_ID/g" -e "s/__APP_NAME__/$APP_NAME/g" -e "s/__VERSION__/$VERSION/g" \
+    -e "s/__BUILD_NUMBER__/$BUILD_NUMBER/g" \
     "$ROOT/packaging/Info.plist" > "$APP/Contents/Info.plist"
+plutil -lint "$APP/Contents/Info.plist"
 echo -n "APPL????" > "$APP/Contents/PkgInfo"
-codesign --force --deep --sign "${CODESIGN_IDENTITY:--}" --entitlements "$ROOT/packaging/Tab.entitlements" "$APP" 2>&1 | grep -v "replacing existing signature" || true
+SIGN_ARGS=(--force --sign "${CODESIGN_IDENTITY:--}")
+if [ "${CODESIGN_IDENTITY:--}" = - ]; then
+    SIGN_ARGS+=(--timestamp=none)
+else
+    SIGN_ARGS+=(--options runtime --timestamp)
+fi
+for product in tab tabd TabDesktop; do
+    codesign "${SIGN_ARGS[@]}" --entitlements "$ROOT/packaging/Tab.entitlements" "$APP/Contents/MacOS/$product"
+done
+codesign "${SIGN_ARGS[@]}" --entitlements "$ROOT/packaging/Tab.entitlements" "$APP"
+codesign --verify --deep --strict --verbose=2 "$APP"
 echo "$APP"

@@ -6,8 +6,9 @@ let root = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathCompon
 let packaging = root.appendingPathComponent("packaging")
 let big = NSImage(contentsOf: packaging.appendingPathComponent("AppIcon.svg"))!
 let small = NSImage(contentsOf: packaging.appendingPathComponent("AppIconSmall.svg"))!
-let set = FileManager.default.temporaryDirectory.appendingPathComponent("AppIcon.iconset")
-try? FileManager.default.removeItem(at: set)
+let temporary = FileManager.default.temporaryDirectory.appendingPathComponent("tab-icon-\(UUID().uuidString)")
+let set = temporary.appendingPathComponent("AppIcon.iconset")
+defer { try? FileManager.default.removeItem(at: temporary) }
 try! FileManager.default.createDirectory(at: set, withIntermediateDirectories: true)
 
 func render(_ image: NSImage, _ px: Int, to url: URL) {
@@ -29,9 +30,18 @@ for (name, px) in sizes {
     render(px <= 64 ? small : big, px, to: set.appendingPathComponent("icon_\(name).png"))
 }
 render(big, 1024, to: packaging.appendingPathComponent("AppIcon.png"))
-let iconutil = Process()
-iconutil.executableURL = URL(fileURLWithPath: "/usr/bin/iconutil")
-iconutil.arguments = ["--convert", "icns", "--output", packaging.appendingPathComponent("AppIcon.icns").path, set.path]
-try! iconutil.run()
-iconutil.waitUntilExit()
-exit(iconutil.terminationStatus)
+// ICNS accepts PNG representations directly. Writing the container here also
+// works where iconutil's image encoder service is unavailable in a sandbox.
+func chunk(_ type: String, _ payload: Data) -> Data {
+    var data = Data(type.utf8)
+    var length = UInt32(payload.count + 8).bigEndian
+    withUnsafeBytes(of: &length) { data.append(contentsOf: $0) }
+    data.append(payload)
+    return data
+}
+let types = ["icp4", "ic11", "icp5", "ic12", "ic07", "ic13", "ic08", "ic14", "ic09", "ic10"]
+var representations = Data()
+for ((name, _), type) in zip(sizes, types) {
+    representations.append(chunk(type, try Data(contentsOf: set.appendingPathComponent("icon_\(name).png"))))
+}
+try chunk("icns", representations).write(to: packaging.appendingPathComponent("AppIcon.icns"), options: .atomic)
