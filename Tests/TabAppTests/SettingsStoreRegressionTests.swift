@@ -72,14 +72,14 @@ final class SettingsStoreRegressionTests: XCTestCase {
         host.base.remoteAccess.settings.enabled = true
         let store = store()
         let controller = SettingsWindowController(store: store)
-        controller.select(.mobile, section: nil)
+        controller.select(.mobile)
         try await settle { store.remoteAccess != nil }
         store.startPairing()
         try await settle { store.pairing != nil }
-        controller.select(.general, section: nil)
+        controller.select(.general)
         try await settle { host.cancelledPairings == 1 }
         XCTAssertNil(store.pairing)
-        controller.select(.mobile, section: nil)
+        controller.select(.mobile)
         store.startPairing()
         try await settle { store.pairing != nil }
         controller.window?.close()
@@ -92,7 +92,7 @@ final class SettingsStoreRegressionTests: XCTestCase {
         host.delayPairing = true
         let store = store()
         let controller = SettingsWindowController(store: store)
-        controller.select(.mobile, section: nil)
+        controller.select(.mobile)
         try await settle { store.remoteAccess != nil }
         store.startPairing()
         try await settle { host.pairingStarted }
@@ -110,30 +110,27 @@ final class SettingsStoreRegressionTests: XCTestCase {
         defer { controller.window?.close() }
         try await settle { store.serverSettings != nil && store.remoteAccess != nil }
         controller.search("Default shell")
-        XCTAssertEqual(controller.page.lastBuild?.rowIds, ["default-shell"])
+        XCTAssertEqual(controller.model.lastBuild?.rowIds, ["default-shell"])
         controller.search("Allow mobile devices")
-        XCTAssertEqual(controller.page.lastBuild?.rowIds, ["mobile-access"])
+        XCTAssertEqual(controller.model.lastBuild?.rowIds, ["mobile-access"])
     }
 
-    func testPromptAndPaletteEditsSurvivePageRebuilds() throws {
+    func testClosingSettingsSavesFieldsBeingTyped() throws {
         let controller = SettingsWindowController(store: store())
-        let window = try XCTUnwrap(controller.window)
-        defer { window.close() }
-        for (category, section, id) in [(SettingsCategory.ai, "Commit", "ai-commit-prompt"), (.terminal, "Colors", "palette-0")] {
-            controller.select(category, section: section)
-            let field = try XCTUnwrap(controller.page.fields[id])
-            XCTAssertTrue(window.makeFirstResponder(field.field))
-            field.stringValue = id == "palette-0" ? "#123456" : "My unfinished prompt"
-            let text = field.stringValue
-            controller.page.reload()
-            XCTAssertEqual(controller.page.fields[id]?.stringValue, text)
+        for (category, id, text) in [(SettingsCategory.ai, "ai-commit-prompt", "My unfinished prompt"), (.terminal, "palette-0", "#123456")] {
+            controller.select(category)
+            let field = try XCTUnwrap(controller.model.fields[id])
+            controller.model.editing(id) { field.commit(text) }
         }
+        controller.window?.close()
+        XCTAssertEqual(try Settings.load(dirs.settings).ai.prompts["commit"], "My unfinished prompt")
+        XCTAssertEqual(try TerminalSettings.load(dirs.terminalSettings).options.palette[0]?.hex.lowercased(), "#123456")
     }
 
     func testTerminalBindingEditorPersistsAndRefusesCommandConflicts() throws {
         let store = store()
-        let page = SettingsPageView(store: store)
-        page.category = .terminal
+        let page = SettingsModel(store: store)
+        page.select(.terminal)
         let chord = try KeyChord("cmd-ctrl-alt-f9")
         XCTAssertTrue(store.saveCommand(CustomCommand(id: "tests", name: "Tests", command: "swift test")))
         XCTAssertNil(store.setBinding("command.tests", chord))
@@ -150,28 +147,33 @@ final class SettingsStoreRegressionTests: XCTestCase {
         XCTAssertEqual(try TerminalSettings.load(dirs.terminalSettings).keybindings.bindings[free], try TerminalAction("text:hello"))
     }
 
-    private func buttons(in view: NSView) -> [PillButton] {
-        if let button = view as? PillButton { return [button] }
-        return view.subviews.flatMap(buttons)
+    private func buttons(in control: SettingControl?) -> [ButtonSpec] {
+        (control?.leaves ?? []).compactMap {
+            if case .button(let button) = $0 { return button }
+            return nil
+        }
+    }
+
+    private func buttons(on page: SettingsModel) -> [ButtonSpec] {
+        (page.lastBuild?.rows ?? []).flatMap { buttons(in: $0.control) }
     }
 
     func testProfileRenameEnablesWhileTypingAndDefaultSavesToBrowserSettings() throws {
         host.base.profiles.append(BrowserProfileSummary(id: "work", name: "Work"))
         let store = store()
         store.refreshBrowserProfiles()
-        let page = SettingsPageView(store: store)
-        page.category = .browser
-        page.reload()
+        let page = SettingsModel(store: store)
+        page.select(.browser)
         let field = try XCTUnwrap(page.fields["browser-profiles"])
-        let rename = try XCTUnwrap(buttons(in: page).last { $0.title == "Rename to Name Below" })
-        XCTAssertFalse(rename.isEnabled)
-        field.onChange?("Personal")
-        XCTAssertTrue(rename.isEnabled)
-        XCTAssertTrue(rename.accessibilityPerformPress())
+        XCTAssertFalse(try XCTUnwrap(buttons(on: page).last { $0.title == "Rename to Name Below" }).enabled)
+        field.change?("Personal")
+        let rename = try XCTUnwrap(buttons(on: page).last { $0.title == "Rename to Name Below" })
+        XCTAssertTrue(rename.enabled)
+        rename.action()
         XCTAssertEqual(host.base.profiles.last?.name, "Personal")
         page.reload()
-        let makeDefault = try XCTUnwrap(buttons(in: page).first { $0.title == "Make Default" })
-        XCTAssertTrue(makeDefault.accessibilityPerformPress())
+        let makeDefault = try XCTUnwrap(buttons(on: page).first { $0.title == "Make Default" })
+        makeDefault.action()
         XCTAssertEqual(try Settings.load(dirs.settings).browser.defaultProfile, "work")
         XCTAssertEqual(store.settings.browser.defaultProfile, "work")
     }
@@ -181,15 +183,11 @@ final class SettingsStoreRegressionTests: XCTestCase {
         let original = try XCTUnwrap(store.settings.keymap.binding("split_right"))
         XCTAssertNil(store.setBinding("split_right", try KeyChord("cmd-ctrl-alt-f9")))
         XCTAssertNil(store.setBinding("split_down", original))
-        let page = SettingsPageView(store: store)
-        page.category = .keyboard
-        page.reload()
-        let row = try XCTUnwrap(page.lastBuild?.groups.flatMap(\.blocks).compactMap { block -> CardRow? in
-            guard case .row(let row) = block, row.id == "shortcut.split_right" else { return nil }
-            return row
-        }.first)
-        let reset = try XCTUnwrap(buttons(in: row).first)
-        XCTAssertTrue(reset.accessibilityPerformPress())
+        let page = SettingsModel(store: store)
+        page.select(.keyboard)
+        let row = try XCTUnwrap(page.lastBuild?.rows.first { $0.id == "shortcut.split_right" })
+        let reset = try XCTUnwrap(buttons(in: row.control).first)
+        reset.action()
         XCTAssertNotNil(store.errors["shortcut.split_right"])
         XCTAssertEqual(try Settings.load(dirs.settings).keymap, store.settings.keymap)
         XCTAssertFalse(store.settings.keymap.isDefault("split_right"))
@@ -207,18 +205,6 @@ final class SettingsStoreRegressionTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: dirs.terminalSettings), broken)
         XCTAssertEqual(store.terminal.fontSize, 18)
         XCTAssertNotNil(store.errors["font-size"])
-    }
-
-    func testClosingSettingsCommitsAnUnfinishedSliderDrag() throws {
-        let store = store()
-        let controller = SettingsWindowController(store: store)
-        controller.select(.terminal, section: "Font")
-        let slider = try XCTUnwrap(controller.page.lastBuild?.sliders.first)
-        slider.beginDrag()
-        slider.drag(to: 0.6)
-        XCTAssertEqual(store.terminal.fontSize, TerminalSettings.defaultFontSize)
-        controller.window?.close()
-        XCTAssertEqual(try TerminalSettings.load(dirs.terminalSettings).fontSize, slider.value)
     }
 
     func testResetDoesNotPartiallyResetTerminalWhenAppSettingsAreBroken() throws {

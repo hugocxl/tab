@@ -132,7 +132,7 @@ crates. Behavior is 1:1 unless listed under "Intentionally changed".
 
 ## App: settings window
 
-- [x] Separate window like System Settings: sidebar with search across labels, grouped inset cards; works offline; changes apply immediately; Edit in… opens the section's JSON file; hand edits to `terminal.json` reload when the app activates, errors shown and last good values kept
+- [x] Separate window like System Settings (SwiftUI, 740pt wide): sidebar search across labels, server tile, one row per page with gradient SF Symbol icons (no expandable sections), back/forward through visited pages, native grouped form with descriptions under each label; works offline; changes apply immediately; Edit in… opens the section's JSON file; hand edits to `terminal.json` reload when the app activates, errors shown and last good values kept
 - [ ] General: closing behavior (end or detach), confirm when a program runs, open files with (Tab editor or another app), default window size, worktree default location (default/template/folder), voice (language, offline model, send after recording)
 - [x] Appearance: light and dark theme pickers following macOS appearance, ~490 bundled themes plus custom `themes/`, sidebar width, order worktree switcher by recent use, agents panel rows grouping
 - [x] Keyboard: every shortcut with key glyphs, record a new one, Reset when changed, conflicts refused, saved under `keymap`

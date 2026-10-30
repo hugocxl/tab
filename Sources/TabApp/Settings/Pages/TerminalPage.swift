@@ -61,7 +61,7 @@ enum BindingActions {
     }
 }
 
-extension SettingsPageView {
+extension SettingsModel {
     private static let pixelRange = -5.0...20.0
     private static let percentRange = -50.0...200.0
 
@@ -156,9 +156,9 @@ extension SettingsPageView {
 
         // Migration and reset
         if !terminal.diagnostics.isEmpty {
-            let notes = terminal.diagnostics.map { note -> NSView in NoteLabel(note) }
+            let notes = terminal.diagnostics.map { SettingControl.label($0, .note) }
             let dismiss = b.button("Dismiss") { [store] in store.setTerminal("dismiss-import-notes", "") }
-            b.row("terminal-import-notes", vstack(notes + [dismiss]), stacked: true)
+            b.row("terminal-import-notes", .column(notes + [dismiss]), stacked: true)
         }
         b.row("terminal-reset", b.button("Reset", style: .destructive, enabled: store.terminalIsCustomized) { [weak self] in
             self?.confirm(
@@ -174,29 +174,29 @@ extension SettingsPageView {
     }
 
     /// A slider for a terminal number, previewing while dragged.
-    private func numberSlider(_ b: SettingsPageBuilder, _ id: String, _ value: Double, _ range: ClosedRange<Double>, _ step: Double, suffix: String = "") -> Slider {
+    private func numberSlider(_ b: SettingsPageBuilder, _ id: String, _ value: Double, _ range: ClosedRange<Double>, _ step: Double, suffix: String = "") -> SettingControl {
         b.slider(id, value: value, range: range, step: step, suffix: suffix) { [store] in
-            store.previewTerminal(id, Slider.format($0, step: step))
+            store.previewTerminal(id, SliderSpec.format($0, step: step))
         } commit: { [store] in
-            store.setTerminal(id, Slider.format($0, step: step))
+            store.setTerminal(id, SliderSpec.format($0, step: step))
         }
     }
 
-    private func paddingSliders(_ b: SettingsPageBuilder, _ edges: [(String, String, Double)]) -> NSView {
-        vstack(edges.map { id, title, value in
-            let label = makeLabel(title, font: AppFont.body, color: theme.fgMuted)
-            label.widthAnchor.constraint(equalToConstant: 60).isActive = true
-            let slider = b.slider("window-padding-x", value: value, range: 0...64, step: 1) { [store] in
-                store.previewTerminal(id, Slider.format($0, step: 1))
-            } commit: { [store] in
-                store.setTerminal(id, Slider.format($0, step: 1))
-            }
-            return hstack([label, slider])
+    private func paddingSliders(_ b: SettingsPageBuilder, _ edges: [(String, String, Double)]) -> SettingControl {
+        .column(edges.map { id, title, value in
+            .row([
+                .label(title, .secondary),
+                b.slider("window-padding-x", value: value, range: 0...64, step: 1, label: "\(title) padding") { [store] in
+                    store.previewTerminal(id, SliderSpec.format($0, step: 1))
+                } commit: { [store] in
+                    store.setTerminal(id, SliderSpec.format($0, step: 1))
+                },
+            ])
         })
     }
 
     /// A pixel or percent adjustment: a slider and its unit.
-    private func adjustment(_ b: SettingsPageBuilder, _ id: String, _ value: CellHeight) -> NSView {
+    private func adjustment(_ b: SettingsPageBuilder, _ id: String, _ value: CellHeight) -> SettingControl {
         let (amount, percent): (Double, Bool)
         switch value {
         case .natural: (amount, percent) = (0, false)
@@ -205,47 +205,50 @@ extension SettingsPageView {
         }
         let suffix = percent ? "%" : ""
         let slider = b.slider(id, value: amount, range: percent ? Self.percentRange : Self.pixelRange, step: 1, suffix: suffix) { [store] in
-            store.previewTerminal(id, Slider.format($0, step: 1) + suffix)
+            store.previewTerminal(id, SliderSpec.format($0, step: 1) + suffix)
         } commit: { [store] in
-            store.setTerminal(id, Slider.format($0, step: 1) + suffix)
+            store.setTerminal(id, SliderSpec.format($0, step: 1) + suffix)
         }
-        let unit = b.popUp(id, [.init(id: "pixels", title: "Pixels"), .init(id: "percent", title: "Percent")], selected: percent ? "percent" : "pixels") { [store] unit in
+        let unit = b.popUp(id, [.init(id: "pixels", title: "Pixels"), .init(id: "percent", title: "Percent")], selected: percent ? "percent" : "pixels", label: "Unit") { [store] unit in
             let range = unit == "percent" ? Self.percentRange : Self.pixelRange
             let clamped = min(max(amount.rounded(), range.lowerBound), range.upperBound)
-            store.setTerminal(id, Slider.format(clamped, step: 1) + (unit == "percent" ? "%" : ""))
+            store.setTerminal(id, SliderSpec.format(clamped, step: 1) + (unit == "percent" ? "%" : ""))
         }
-        return hstack([slider, unit])
+        return .row([slider, unit])
     }
 
-    private func fontPopUp(_ b: SettingsPageBuilder, _ id: String, families: [String], selected: String, allowDefault: Bool, _ change: @escaping (String) -> Void) -> PopUp {
-        var items = families.map { PopUp.Item(id: $0, title: $0) }
+    private func fontPopUp(
+        _ b: SettingsPageBuilder, _ id: String, families: [String], selected: String, allowDefault: Bool,
+        placeholder: String? = nil, label: String? = nil, _ change: @escaping (String) -> Void
+    ) -> SettingControl {
+        var items = families.map { Choice(id: $0, title: $0) }
         if !selected.isEmpty && !families.contains(selected) { items.insert(.init(id: selected, title: selected), at: 0) }
         if allowDefault { items.insert(.init(id: "", title: "Default"), at: 0) }
-        return b.popUp(id, items, selected: selected, change)
+        return b.popUp(id, items, selected: selected, placeholder: placeholder, label: label, change)
     }
 
-    private func fallbackList(_ b: SettingsPageBuilder) -> NSView {
+    private func fallbackList(_ b: SettingsPageBuilder) -> SettingControl {
         let fallbacks = Array(store.terminal.fontFamilies.dropFirst())
-        var rows: [NSView] = fallbacks.enumerated().map { index, name in
-            let remove = b.button("Remove") { [store] in
-                var names = fallbacks
-                names.remove(at: index)
-                store.editTerminal("font-fallbacks", .fallbacks(names))
-            }
-            return hstack([makeLabel(name, font: AppFont.body, color: theme.fg), remove])
+        var rows: [SettingControl] = fallbacks.enumerated().map { index, name in
+            .row([
+                .label(name),
+                b.button("Remove \(name)", symbol: "minus.circle") { [store] in
+                    var names = fallbacks
+                    names.remove(at: index)
+                    store.editTerminal("font-fallbacks", .fallbacks(names))
+                },
+            ])
         }
-        let add = PopUp(items: FontCatalog.all.filter { !fallbacks.contains($0) }.map { .init(id: $0, title: $0) }, selected: "", label: "Add fallback font") { [store] name in
+        let choices = FontCatalog.all.filter { !fallbacks.contains($0) }.map { Choice(id: $0, title: $0) }
+        rows.append(b.popUp("font-fallbacks", choices, selected: "", placeholder: "Add Font…", label: "Add fallback font") { [store] name in
             store.editTerminal("font-fallbacks", .fallbacks(fallbacks + [name]))
-        }
-        add.placeholder = "Add Font…"
-        add.select("")
-        rows.append(add)
-        return vstack(rows)
+        })
+        return .column(rows)
     }
 
-    private func codepointList(_ b: SettingsPageBuilder) -> NSView {
+    private func codepointList(_ b: SettingsPageBuilder) -> SettingControl {
         let maps = store.terminal.font.codepoints
-        var rows: [NSView] = []
+        var rows: [SettingControl] = []
         for map in maps where codepointDraft?.previous != map {
             let range = map.start == map.end ? String(format: "U+%04X", map.start) : String(format: "U+%04X-U+%04X", map.start, map.end)
             let edit = b.button("Edit") { [weak self] in
@@ -255,17 +258,19 @@ extension SettingsPageView {
             let delete = b.button("Delete", style: .destructive) { [store] in
                 store.editTerminal("font-codepoint-map", .codepointMap(previous: map, range: nil, family: nil))
             }
-            rows.append(hstack([makeLabel("\(range) → \(map.family)", font: AppFont.mono(12), color: theme.fg), edit, delete]))
+            rows.append(.row([.label("\(range) → \(map.family)", .monospaced), edit, delete]))
         }
         if let draft = codepointDraft {
-            let range = b.field("font-codepoint-map", draft.range, placeholder: "U+E000-U+F8FF", width: 180, monospaced: true) { [weak self] in
+            let range = b.field("font-codepoint-map", draft.range, placeholder: "U+E000-U+F8FF", width: 180, label: "Unicode range", monospaced: true) { [weak self] in
+                self?.codepointDraft?.range = $0
+            } commit: { [weak self] in
                 self?.codepointDraft?.range = $0
             }
-            range.onChange = { [weak self] in self?.codepointDraft?.range = $0 }
-            let family = fontPopUp(b, "font-codepoint-map", families: FontCatalog.all, selected: draft.family, allowDefault: false) { [weak self] in
+            let family = fontPopUp(b, "font-codepoint-map", families: FontCatalog.all, selected: draft.family, allowDefault: false,
+                                   placeholder: "Choose Font…", label: "Font") { [weak self] in
                 self?.codepointDraft?.family = $0
+                self?.reload()
             }
-            family.placeholder = "Choose Font…"
             let save = b.button("Save", style: .primary) { [weak self] in
                 guard let self, let draft = codepointDraft else { return }
                 guard !draft.family.isEmpty else { return store.setError("font-codepoint-map", "Choose a font first.") }
@@ -277,60 +282,58 @@ extension SettingsPageView {
                 self?.codepointDraft = nil
                 self?.store.setError("font-codepoint-map", nil)
             }
-            rows.append(hstack([range, family, save, cancel]))
+            rows.append(.row([range, family]))
+            rows.append(.row([cancel, save]))
         } else {
             rows.append(b.button("Add Map") { [weak self] in
                 self?.codepointDraft = CodepointDraft(previous: nil, range: "", family: "")
                 self?.reload()
             })
         }
-        return vstack(rows)
+        return .column(rows)
     }
 
-    private func colorControl(_ b: SettingsPageBuilder, _ id: String, _ color: CellColor?) -> NSView {
-        let well = ColorWell(color: color.flatMap { if case .rgb(let rgb) = $0 { return rgb } else { return nil } }) { [store] rgb in
-            store.setTerminal(id, rgb.hex)
-        }
-        well.setAccessibilityLabel(SettingsCatalog.item(id)?.label ?? id)
-        let field = b.field(id, color?.description ?? "", placeholder: "Theme", width: 130, monospaced: true) { [store] in
+    private func colorControl(_ b: SettingsPageBuilder, _ id: String, _ color: CellColor?) -> SettingControl {
+        let rgb = color.flatMap { if case .rgb(let rgb) = $0 { return rgb } else { return nil } }
+        let label = SettingsCatalog.item(id)?.label ?? id
+        let well = SettingControl.color(ColorSpec(color: rgb, label: label) { [store] in store.setTerminal(id, $0.hex) })
+        let field = b.field(id, color?.description ?? "", placeholder: "Theme", width: 110, monospaced: true) { [store] in
             store.setTerminal(id, $0)
         }
         let useTheme = b.button("Use Theme", enabled: color != nil) { [store] in store.setTerminal(id, "") }
-        return hstack([well, field, useTheme])
+        return .row([well, field, useTheme])
     }
 
-    private func paletteGrid(_ b: SettingsPageBuilder) -> NSView {
+    private func paletteGrid(_ b: SettingsPageBuilder) -> SettingControl {
         let palette = store.terminal.options.palette
-        var lines: [NSView] = []
+        var lines: [SettingControl] = []
         for row in 0..<4 {
-            var cells: [NSView] = []
+            var cells: [SettingControl] = []
             for column in 0..<4 {
                 let index = row * 4 + column
                 let id = "palette-\(index)"
-                let label = makeLabel(String(index), font: AppFont.small, color: theme.fgMuted)
-                label.alignment = .right
-                label.widthAnchor.constraint(equalToConstant: 18).isActive = true
-                let well = ColorWell(color: palette[index]) { [store] rgb in store.setTerminal(id, rgb.hex) }
-                well.setAccessibilityLabel("ANSI color \(index)")
-                let field = b.field(id, palette[index]?.hex ?? "", placeholder: "Theme", width: 84,
+                let well = SettingControl.color(ColorSpec(color: palette[index], label: "ANSI color \(index)") { [store] in
+                    store.setTerminal(id, $0.hex)
+                })
+                let field = b.field(id, palette[index]?.hex ?? "", placeholder: "\(index)", width: 72,
                                     label: "ANSI color \(index)", monospaced: true) { [store] in
                     store.setTerminal(id, $0)
                 }
-                cells.append(hstack([label, well, field], spacing: 4))
+                cells.append(.row([well, field]))
             }
-            lines.append(hstack(cells))
+            lines.append(.row(cells))
         }
         for index in 0..<16 {
-            if let error = store.errors["palette-\(index)"] { lines.append(NoteLabel(error, error: true)) }
+            if let error = store.errors["palette-\(index)"] { lines.append(.label(error, .error)) }
         }
-        return vstack(lines)
+        return .column(lines)
     }
 
-    private func bindingList(_ b: SettingsPageBuilder) -> NSView {
+    private func bindingList(_ b: SettingsPageBuilder) -> SettingControl {
         let bindings = store.terminal.keybindings.bindings.sorted { $0.key < $1.key }
-        var rows: [NSView] = []
+        var rows: [SettingControl] = []
         if bindings.isEmpty && bindingDraft == nil {
-            rows.append(NoteLabel("No custom key bindings yet."))
+            rows.append(.label("No custom key bindings yet.", .note))
         }
         for (chord, action) in bindings where bindingDraft?.previous != chord {
             let edit = b.button("Edit") { [weak self] in
@@ -341,8 +344,7 @@ extension SettingsPageView {
             let delete = b.button("Delete", style: .destructive) { [store] in
                 store.editTerminal("terminal-keybindings", .binding(previous: chord, chord: nil, action: nil))
             }
-            let title = makeLabel(BindingActions.title(action), font: AppFont.body, color: theme.fg)
-            rows.append(hstack([KeyCapRow(chord), title, edit, delete]))
+            rows.append(.row([.keys(chord), .label(BindingActions.title(action)), edit, delete]))
         }
         if let draft = bindingDraft {
             rows.append(bindingEditor(b, draft))
@@ -352,38 +354,36 @@ extension SettingsPageView {
                 self?.reload()
             })
         }
-        return vstack(rows)
+        return .column(rows)
     }
 
-    private func bindingEditor(_ b: SettingsPageBuilder, _ draft: BindingDraft) -> NSView {
-        let recorder = ShortcutRecorder(chord: draft.chord, placeholder: "Record Key", label: "Key")
-        recorder.onRecord = { [weak self] chord in
+    private func bindingEditor(_ b: SettingsPageBuilder, _ draft: BindingDraft) -> SettingControl {
+        let recorder = SettingControl.shortcut(ShortcutSpec(chord: draft.chord, placeholder: "Record Key", label: "Key") { [weak self] chord in
             self?.bindingDraft?.chord = chord
             return nil
-        }
-        let action = PopUp(items: BindingActions.all.map { .init(id: $0.id, title: $0.title) }, selected: draft.action, label: "Action") { [weak self] in
+        } error: { _ in })
+        let action = b.popUp("terminal-keybindings", BindingActions.all.map { Choice(id: $0.id, title: $0.title) }, selected: draft.action, label: "Action") { [weak self] in
             self?.bindingDraft?.action = $0
             self?.reload()
         }
-        var controls: [NSView] = [makeLabel("Key", font: AppFont.body, color: theme.fgMuted), recorder, makeLabel("Action", font: AppFont.body, color: theme.fgMuted), action]
-        var lines: [NSView] = [hstack(controls)]
+        var lines: [SettingControl] = [.row([.label("Key", .secondary), recorder, .label("Action", .secondary), action])]
         if BindingActions.parameterized.contains(draft.action) {
             let font = draft.action.hasSuffix("font_size")
-            let value = b.field("terminal-keybindings", draft.parameter, placeholder: font ? "1" : "\\e[A", width: 240, monospaced: true) { [weak self] in
+            let value = b.field("terminal-keybindings", draft.parameter, placeholder: font ? "1" : "\\e[A", width: 240, label: "Value", monospaced: true) { [weak self] in
+                self?.bindingDraft?.parameter = $0
+            } commit: { [weak self] in
                 self?.bindingDraft?.parameter = $0
             }
-            value.onChange = { [weak self] in self?.bindingDraft?.parameter = $0 }
-            controls = [makeLabel("Value", font: AppFont.body, color: theme.fgMuted), value]
-            lines.append(hstack(controls))
-            lines.append(NoteLabel(font ? "Points to change the font size by, such as 1." : "Text to send. Write special keys as escapes, such as \\e for Escape or \\x01 for Control-A."))
+            lines.append(.row([.label("Value", .secondary), value]))
+            lines.append(.label(font ? "Points to change the font size by, such as 1." : "Text to send. Write special keys as escapes, such as \\e for Escape or \\x01 for Control-A.", .note))
         }
         let save = b.button("Save", style: .primary) { [weak self] in self?.saveBinding() }
         let cancel = b.button("Cancel") { [weak self] in
             self?.bindingDraft = nil
             self?.store.setError("terminal-keybindings", nil)
         }
-        lines.append(hstack([save, cancel]))
-        return vstack(lines)
+        lines.append(.row([cancel, save]))
+        return .column(lines)
     }
 
     func saveBinding() {
@@ -393,29 +393,5 @@ extension SettingsPageView {
         store.editTerminal("terminal-keybindings", .binding(previous: draft.previous, chord: chord, action: action))
         if store.errors["terminal-keybindings"] == nil { bindingDraft = nil }
         reload()
-    }
-}
-
-/// A color well for a terminal color; choosing a color saves it as hex.
-final class ColorWell: NSColorWell {
-    private let onPick: (TabCore.RGBColor) -> Void
-
-    init(color: TabCore.RGBColor?, onPick: @escaping (TabCore.RGBColor) -> Void) {
-        self.onPick = onPick
-        super.init(frame: NSRect(x: 0, y: 0, width: 24, height: 20))
-        colorWellStyle = .minimal
-        self.color = color?.nsColor ?? .clear
-        translatesAutoresizingMaskIntoConstraints = false
-        widthAnchor.constraint(equalToConstant: 24).isActive = true
-        heightAnchor.constraint(equalToConstant: 20).isActive = true
-        target = self
-        action = #selector(picked)
-        setAccessibilityLabel("Color")
-    }
-
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    @objc private func picked() {
-        onPick(TabCore.RGBColor(color))
     }
 }

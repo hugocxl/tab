@@ -1,40 +1,50 @@
 import AppKit
 import TabCore
 
-/// Collects a page's rows in order, keeping only those the current page,
-/// section or search shows, then lays them out as section headers over
-/// inset cards. Pages call `row` for every setting they offer; rows with an
-/// id missing from the catalog are recorded in `unknownIds` (a bug the tests
-/// catch).
+/// One setting on a page: its label, description, control and refusal.
+struct SettingRow: Identifiable {
+    let id: String
+    let label: String
+    let description: String?
+    let control: SettingControl?
+    /// The control goes under the label, full width, such as a list.
+    let stacked: Bool
+    let error: String?
+}
+
+/// Collects a page's rows in order, keeping only those the current page or
+/// search shows, grouped into the sections the form shows. Pages call `row`
+/// for every setting they offer; rows with an id missing from the catalog are
+/// recorded in `unknownIds` (a bug the tests catch).
 @MainActor
 final class SettingsPageBuilder {
     enum Block {
-        case row(CardRow)
-        case below(NSView)
+        case row(SettingRow)
+        /// Shown under the section's rows, such as a note.
+        case below(SettingControl)
     }
 
-    struct Group {
+    struct Group: Identifiable {
         let category: SettingsCategory
         let section: String
         var blocks: [Block]
+
+        var id: String { "\(category.rawValue)/\(section)" }
     }
 
     let store: SettingsStore
     let query: String
     let category: SettingsCategory
-    let section: String?
     private let items: [String: SettingItem]
     private(set) var groups: [Group] = []
-    private(set) var fields: [String: InsetTextField] = [:]
-    private(set) var sliders: [Slider] = []
+    private(set) var fields: [String: TextSpec] = [:]
     private(set) var rowIds: [String] = []
     private(set) var unknownIds: [String] = []
 
-    init(store: SettingsStore, query: String, category: SettingsCategory, section: String?) {
+    init(store: SettingsStore, query: String, category: SettingsCategory) {
         self.store = store
         self.query = query.trimmingCharacters(in: .whitespaces).lowercased()
         self.category = category
-        self.section = section
         let index = SettingsCatalog.searchIndex(commands: store.settings.commands)
         items = Dictionary(index.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
     }
@@ -43,30 +53,27 @@ final class SettingsPageBuilder {
 
     func item(_ id: String) -> SettingItem? { items[id] }
 
-    /// Whether the row `id` is on screen: on the open page (and section),
-    /// or matching the search.
+    /// Whether the row `id` is on screen: on the open page, or matching the
+    /// search.
     func shows(_ id: String) -> Bool {
         guard let item = items[id] else {
             unknownIds.append(id)
             return false
         }
         if isSearching { return item.matches(query) }
-        return item.category == category && (section == nil || item.section == section)
+        return item.category == category
     }
 
     /// Adds a row for `id` with its catalog label; `label` replaces it, such
     /// as for a custom command's name.
     @discardableResult
-    func row(_ id: String, _ makeControl: @autoclosure () -> NSView?, stacked: Bool = false, label: String? = nil, description: String? = nil) -> CardRow? {
+    func row(_ id: String, _ makeControl: @autoclosure () -> SettingControl?, stacked: Bool = false, label: String? = nil, description: String? = nil) -> SettingRow? {
         guard shows(id), let item = items[id] else { return nil }
-        let control = makeControl()
-        control?.setAccessibilityHelp(description ?? item.description)
-        if control?.accessibilityLabel() == nil { control?.setAccessibilityLabel(label ?? item.label) }
-        let row = CardRow(
+        let row = SettingRow(
             id: id,
             label: label ?? item.label,
-            control: control,
             description: description ?? (item.description.isEmpty ? nil : item.description),
+            control: makeControl(),
             stacked: stacked,
             error: store.errors[id]
         )
@@ -75,14 +82,14 @@ final class SettingsPageBuilder {
         return row
     }
 
-    /// Adds a view under the card of `id`'s section, such as a note.
-    func below(_ id: String, _ view: NSView) {
+    /// Adds a control under the rows of `id`'s section, such as a note.
+    func below(_ id: String, _ control: SettingControl) {
         guard shows(id), let item = items[id] else { return }
-        append(.below(view), item)
+        append(.below(control), item)
     }
 
     func note(_ id: String, _ text: String, error: Bool = false) {
-        below(id, NoteLabel(text, error: error))
+        below(id, .label(text, error ? .error : .note))
     }
 
     private func append(_ block: Block, _ item: SettingItem) {
@@ -93,6 +100,20 @@ final class SettingsPageBuilder {
         }
     }
 
+    /// The rows on the page, in order.
+    var rows: [SettingRow] {
+        groups.flatMap(\.blocks).compactMap { block in
+            if case .row(let row) = block { return row }
+            return nil
+        }
+    }
+
+    /// A section's title: its name, or "Page › Section" in search results.
+    func title(_ group: Group) -> String? {
+        if isSearching { return "\(group.category.title) › \(group.section)" }
+        return group.category == .commands ? nil : group.section
+    }
+
     // MARK: Controls
 
     /// A text field saved on Return or leaving it.
@@ -101,42 +122,35 @@ final class SettingsPageBuilder {
         _ value: String,
         placeholder: String = "",
         width: CGFloat? = Metrics.controlWidth,
-        height: CGFloat? = nil,
         multiline: Bool = false,
         label: String? = nil,
         monospaced: Bool = false,
+        enabled: Bool = true,
+        change: ((String) -> Void)? = nil,
         commit: @escaping (String) -> Void
-    ) -> InsetTextField {
-        let field = InsetTextField(
-            value: value,
-            placeholder: placeholder,
-            label: label ?? items[id]?.label ?? id,
-            width: width,
-            height: height,
-            multiline: multiline,
-            monospaced: monospaced
+    ) -> SettingControl {
+        let spec = TextSpec(
+            id: id, value: value, placeholder: placeholder, label: label ?? items[id]?.label ?? id,
+            width: width, multiline: multiline, monospaced: monospaced, enabled: enabled, change: change, commit: commit
         )
-        field.onCommit = commit
-        fields[id] = field
-        return field
+        fields[id] = spec
+        return .text(spec)
     }
 
-    func toggle(_ id: String, _ value: Bool, _ change: @escaping (Bool) -> Void) -> Switch {
-        Switch(isOn: value, label: items[id]?.label ?? id, onChange: change)
+    func toggle(_ id: String, _ value: Bool, enabled: Bool = true, _ change: @escaping (Bool) -> Void) -> SettingControl {
+        .toggle(ToggleSpec(isOn: value, label: items[id]?.label ?? id, enabled: enabled, change: change))
     }
 
-    func popUp(_ id: String, _ items: [PopUp.Item], selected: String, _ change: @escaping (String) -> Void) -> PopUp {
-        PopUp(items: items, selected: selected, label: self.items[id]?.label ?? id, onChange: change)
+    func popUp(_ id: String, _ choices: [Choice], selected: String, placeholder: String? = nil, label: String? = nil, _ change: @escaping (String) -> Void) -> SettingControl {
+        .choice(ChoiceSpec(items: choices, selected: selected, label: label ?? items[id]?.label ?? id, placeholder: placeholder, change: change))
     }
 
-    func segmented(_ titles: [String], selected: Int, _ change: @escaping (Int) -> Void) -> SegmentedPill {
-        SegmentedPill(titles, selected: selected, onChange: change)
+    func segmented(_ id: String, _ titles: [String], selected: Int, _ change: @escaping (Int) -> Void) -> SettingControl {
+        .segmented(SegmentedSpec(titles: titles, selected: selected, label: items[id]?.label ?? id, change: change))
     }
 
-    func button(_ title: String, style: PillButton.Style = .normal, enabled: Bool = true, _ action: @escaping () -> Void) -> PillButton {
-        let button = PillButton(title, style: style, action: action)
-        button.isEnabled = enabled
-        return button
+    func button(_ title: String, style: ButtonSpec.Style = .normal, enabled: Bool = true, symbol: String? = nil, help: String? = nil, _ action: @escaping () -> Void) -> SettingControl {
+        .button(ButtonSpec(title: title, style: style, enabled: enabled, symbol: symbol, help: help, action: action))
     }
 
     /// A slider that previews while dragging and commits on release.
@@ -146,61 +160,10 @@ final class SettingsPageBuilder {
         range: ClosedRange<Double>,
         step: Double,
         suffix: String = "",
+        label: String? = nil,
         preview: ((Double) -> Void)? = nil,
         commit: @escaping (Double) -> Void
-    ) -> Slider {
-        let slider = Slider(value: value, range: range, step: step, suffix: suffix, label: items[id]?.label ?? id)
-        slider.onPreview = preview
-        slider.onCommit = commit
-        sliders.append(slider)
-        return slider
+    ) -> SettingControl {
+        .slider(SliderSpec(value: value, range: range, step: step, suffix: suffix, label: label ?? items[id]?.label ?? id, preview: preview, commit: commit))
     }
-
-    // MARK: Layout
-
-    /// The page's sections stacked: header, card, notes.
-    func makeSections() -> [NSView] {
-        var views: [NSView] = []
-        for group in groups {
-            let title = isSearching ? "\(group.category.title) › \(group.section)" : group.section
-            if !(group.category == .commands && !isSearching) { views.append(SectionHeader(title)) }
-            var card: Card?
-            for block in group.blocks {
-                switch block {
-                case .row(let row):
-                    if card == nil {
-                        let new = Card()
-                        views.append(new)
-                        card = new
-                    }
-                    card?.addRow(row)
-                case .below(let view):
-                    views.append(view)
-                    card = nil
-                }
-            }
-        }
-        return views
-    }
-}
-
-/// Small horizontal stacks for controls with buttons beside them.
-@MainActor
-func hstack(_ views: [NSView], spacing: CGFloat = Metrics.controlGap) -> NSStackView {
-    let stack = NSStackView(views: views)
-    stack.orientation = .horizontal
-    stack.alignment = .centerY
-    stack.spacing = spacing
-    stack.translatesAutoresizingMaskIntoConstraints = false
-    return stack
-}
-
-@MainActor
-func vstack(_ views: [NSView], spacing: CGFloat = Metrics.controlGap, alignment: NSLayoutConstraint.Attribute = .leading) -> NSStackView {
-    let stack = NSStackView(views: views)
-    stack.orientation = .vertical
-    stack.alignment = alignment
-    stack.spacing = spacing
-    stack.translatesAutoresizingMaskIntoConstraints = false
-    return stack
 }

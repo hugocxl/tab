@@ -1,10 +1,10 @@
 import AppKit
 import TabCore
 
-extension SettingsPageView {
+extension SettingsModel {
     func buildGeneral(_ b: SettingsPageBuilder) {
         let settings = store.settings
-        b.row("close-behavior", b.segmented(["Close sessions", "Detach"], selected: settings.window.closeBehavior == .detach ? 1 : 0) { [store] index in
+        b.row("close-behavior", b.segmented("close-behavior", ["Close sessions", "Detach"], selected: settings.window.closeBehavior == .detach ? 1 : 0) { [store] index in
             store.setCloseBehavior(index == 1 ? .detach : .closeSession)
         })
         b.row("confirm-process", b.toggle("confirm-process", settings.window.confirmRunningProcess) { [store] in
@@ -20,16 +20,14 @@ extension SettingsPageView {
             store.setWorktreeLocation("worktree-folder", $0)
         })
         b.row("voice-auto-send", b.toggle("voice-auto-send", settings.voice.autoSend) { [store] in store.setVoiceAutoSend($0) })
-        var languages = [PopUp.Item(id: "", title: "System language")]
+        var languages = [Choice(id: "", title: "System language")]
         let available = store.host?.dictationLanguages() ?? []
-        languages += available.map { PopUp.Item(id: $0.id, title: $0.name) }
+        languages += available.map { Choice(id: $0.id, title: $0.name) }
         if !settings.voice.language.isEmpty && !available.contains(where: { $0.id == settings.voice.language }) {
-            languages.append(PopUp.Item(id: settings.voice.language, title: settings.voice.language))
+            languages.append(Choice(id: settings.voice.language, title: settings.voice.language))
         }
         b.row("voice-language", b.popUp("voice-language", languages, selected: settings.voice.language) { [store] in store.setVoiceLanguage($0) })
-        let model = b.field("voice-model", settings.voice.model, placeholder: "System model") { [store] in store.setVoiceModel($0) }
-        b.row("voice-model", model)
-        b.note("voice-model", "Choose a compiled Apple Speech language model file. Leave blank to use the system model. Audio stays on this computer.")
+        b.row("voice-model", b.field("voice-model", settings.voice.model, placeholder: "System model") { [store] in store.setVoiceModel($0) })
     }
 
     static func number(_ value: Double) -> String {
@@ -40,17 +38,17 @@ extension SettingsPageView {
 
     /// Where files clicked in a terminal open: Tab's editor, the default
     /// application, Finder, or a chosen app.
-    private func fileOpenerPopUp(_ b: SettingsPageBuilder) -> PopUp {
+    private func fileOpenerPopUp(_ b: SettingsPageBuilder) -> SettingControl {
         let current = store.settings.openers.file
         var items = [
-            PopUp.Item(id: OpenerSettings.tabEditor, title: "Tab editor"),
-            PopUp.Item(id: "system.application", title: "Default application"),
-            PopUp.Item(id: "system.finder", title: "Finder"),
+            Choice(id: OpenerSettings.tabEditor, title: "Tab editor"),
+            Choice(id: "system.application", title: "Default application"),
+            Choice(id: "system.finder", title: "Finder"),
         ]
         if !items.contains(where: { $0.id == current }) {
-            items.append(PopUp.Item(id: current, title: Self.applicationName(current), separatorBefore: true))
+            items.append(Choice(id: current, title: Self.applicationName(current), separatorBefore: true))
         }
-        items.append(PopUp.Item(id: Self.choosingApplication, title: "Other Application…", separatorBefore: true))
+        items.append(Choice(id: Self.choosingApplication, title: "Other Application…", separatorBefore: true))
         return b.popUp("file-opener", items, selected: current) { [weak self] id in
             guard let self else { return }
             guard id == Self.choosingApplication else { return store.setFileOpener(id) }
@@ -84,9 +82,9 @@ extension SettingsPageView {
         for dark in [false, true] {
             let id = dark ? "dark-theme" : "light-theme"
             let current = dark ? appearance.darkTheme : appearance.lightTheme
-            var items = entries.map { PopUp.Item(id: $0.name, title: $0.name) }
+            var items = entries.map { Choice(id: $0.name, title: $0.name) }
             if !items.contains(where: { $0.id == current }) {
-                items.insert(PopUp.Item(id: current, title: current), at: 0)
+                items.insert(Choice(id: current, title: current), at: 0)
             }
             b.row(id, b.popUp(id, items, selected: current) { [store] in store.setTheme(dark: dark, $0) })
         }
@@ -111,7 +109,7 @@ extension SettingsPageView {
         for (id, value, path) in toggles {
             b.row(id, b.toggle(id, value) { [store] on in store.updateAppearance(id) { $0[keyPath: path] = on } })
         }
-        b.row("agents-panel-grouping", b.segmented(["Agents", "Worktrees"], selected: appearance.agentsPanelGrouping == .worktrees ? 1 : 0) { [store] index in
+        b.row("agents-panel-grouping", b.segmented("agents-panel-grouping", ["Agents", "Worktrees"], selected: appearance.agentsPanelGrouping == .worktrees ? 1 : 0) { [store] index in
             store.updateAppearance("agents-panel-grouping") { $0.agentsPanelGrouping = index == 1 ? .worktrees : .agents }
         })
     }

@@ -35,7 +35,7 @@ final class PanelsSnapshotTests: XCTestCase {
         let window = try XCTUnwrap(controller.window)
         window.setContentSize(SettingsWindowController.defaultSize)
         for category in SettingsCategory.allCases {
-            controller.select(category, section: nil)
+            controller.select(category)
             if category == .mobile {
                 store.loadRemoteAccess()
                 try await Task.sleep(nanoseconds: 50_000_000)

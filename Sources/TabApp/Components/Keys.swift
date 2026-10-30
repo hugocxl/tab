@@ -111,37 +111,30 @@ extension KeyChord {
     }
 }
 
-/// A button that records a shortcut: it shows the chord's glyphs, and
+/// A push button that records a shortcut: it shows the chord's glyphs, and
 /// after a click "Press a shortcut…" until a key is pressed. Escape cancels.
 /// `onRecord` returns an error to show, such as a conflict, or `nil` when
 /// the chord was taken.
-public final class ShortcutRecorder: HoverView {
+public final class ShortcutRecorder: NSButton {
     public private(set) var chord: KeyChord?
-    public var placeholder: String
+    public var placeholder: String { didSet { updateTitle() } }
     public var onRecord: ((KeyChord) -> String?)?
     public var onError: ((String?) -> Void)?
     public private(set) var isRecording = false {
         didSet { updateTitle() }
     }
-    private let label: NSTextField
 
     public init(chord: KeyChord?, placeholder: String = "Not assigned", label accessibilityName: String) {
         self.chord = chord
         self.placeholder = placeholder
-        label = makeLabel("", font: AppFont.small)
-        label.alignment = .center
         super.init(frame: .zero)
+        bezelStyle = .push
+        controlSize = .regular
+        setButtonType(.momentaryPushIn)
         translatesAutoresizingMaskIntoConstraints = false
-        addSubview(label)
-        NSLayoutConstraint.activate([
-            heightAnchor.constraint(equalToConstant: 22),
-            widthAnchor.constraint(greaterThanOrEqualToConstant: 64),
-            label.centerYAnchor.constraint(equalTo: centerYAnchor),
-            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-        ])
-        setAccessibilityElement(true)
-        setAccessibilityRole(.button)
+        widthAnchor.constraint(greaterThanOrEqualToConstant: 96).isActive = true
+        target = self
+        action = #selector(clicked)
         setAccessibilityLabel(accessibilityName)
         updateTitle()
     }
@@ -150,39 +143,18 @@ public final class ShortcutRecorder: HoverView {
 
     public override var acceptsFirstResponder: Bool { true }
 
-    public var title: String { label.stringValue }
-
     public func setChord(_ chord: KeyChord?) {
         self.chord = chord
         updateTitle()
     }
 
     private func updateTitle() {
-        label.stringValue = isRecording ? "Press a shortcut…" : (chord?.display ?? placeholder)
-        setAccessibilityValue(label.stringValue)
-        themeDidChange()
+        title = isRecording ? "Press a shortcut…" : (chord?.display ?? placeholder)
+        contentTintColor = isRecording ? .controlAccentColor : (chord == nil ? .secondaryLabelColor : nil)
+        setAccessibilityValue(title)
     }
 
-    public override func themeDidChange() {
-        label.textColor = isRecording ? theme.accent : (chord == nil ? theme.fgMuted : theme.fg)
-        needsDisplay = true
-    }
-
-    public override func draw(_ dirtyRect: NSRect) {
-        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: Metrics.radiusMedium, yRadius: Metrics.radiusMedium)
-        theme.button.setFill()
-        path.fill()
-        if isHovered {
-            theme.hover.setFill()
-            path.fill()
-        }
-        (isRecording ? theme.accent : theme.border).setStroke()
-        path.lineWidth = isRecording ? 1.5 : Metrics.border
-        path.stroke()
-    }
-
-    public override func mouseUp(with event: NSEvent) {
-        guard bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
+    @objc private func clicked() {
         beginRecording()
     }
 
@@ -199,7 +171,7 @@ public final class ShortcutRecorder: HoverView {
 
     public override func resignFirstResponder() -> Bool {
         isRecording = false
-        return true
+        return super.resignFirstResponder()
     }
 
     public override func performKeyEquivalent(with event: NSEvent) -> Bool {
@@ -209,14 +181,7 @@ public final class ShortcutRecorder: HoverView {
     }
 
     public override func keyDown(with event: NSEvent) {
-        guard isRecording else {
-            if event.charactersIgnoringModifiers == " " || event.keyCode == 36 {
-                beginRecording()
-            } else {
-                super.keyDown(with: event)
-            }
-            return
-        }
+        guard isRecording else { return super.keyDown(with: event) }
         record(event)
     }
 

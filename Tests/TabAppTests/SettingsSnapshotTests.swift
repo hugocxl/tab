@@ -42,37 +42,31 @@ final class SettingsSnapshotTests: XCTestCase {
             theme.setSystemDark(dark)
             let mode = dark ? "dark" : "light"
             for category in SettingsCategory.allCases {
-                controller.select(category, section: nil)
+                controller.select(category)
                 try await Task.sleep(nanoseconds: 5_000_000)
                 controller.reload()
                 try render(window.contentView, output, "\(mode)-\(category.rawValue)")
-                for section in category.sections {
-                    controller.select(category, section: section)
-                    let name = section.lowercased().replacingOccurrences(of: " ", with: "-").replacingOccurrences(of: "&", with: "and")
-                    try render(window.contentView, output, "\(mode)-\(category.rawValue)-\(name)")
-                }
             }
         }
         theme.setSystemDark(true)
-        controller.select(.terminal, section: "Key bindings")
-        controller.page.bindingDraft = BindingDraft(chord: try KeyChord("cmd-ctrl-f9"), action: "text", parameter: "\\e[A")
+        controller.select(.terminal)
+        controller.model.bindingDraft = BindingDraft(chord: try KeyChord("cmd-ctrl-f9"), action: "text", parameter: "\\e[A")
         controller.reload()
         try render(window.contentView, output, "terminal-binding-editor")
-        controller.select(.terminal, section: "Font")
-        controller.page.codepointDraft = CodepointDraft(range: "U+E000-U+F8FF", family: "Menlo")
+        controller.model.bindingDraft = nil
+        controller.model.codepointDraft = CodepointDraft(range: "U+E000-U+F8FF", family: "Menlo")
         controller.reload()
-        controller.page.scroll.scrollOffset = .greatestFiniteMagnitude
         try render(window.contentView, output, "terminal-codepoint-editor")
-        controller.select(.mobile, section: nil)
+        controller.select(.mobile)
         store.startPairing()
         try await Task.sleep(nanoseconds: 20_000_000)
         controller.reload()
         try render(window.contentView, output, "mobile-pairing-qr")
         controller.search("font")
         try render(window.contentView, output, "search-font")
-        controller.select(.browser, section: nil)
-        window.setContentSize(NSSize(width: 720, height: 780))
-        try render(window.contentView, output, "browser-narrow")
+        controller.select(.browser)
+        window.setContentSize(NSSize(width: SettingsWindowController.defaultSize.width, height: 480))
+        try render(window.contentView, output, "browser-short")
         let proxy = ProxySheet(model: ProxyModel(file: root.appendingPathComponent("proxy.json")), oldServer: false) { _ in }
         proxy.window.isReleasedWhenClosed = false
         proxy.window.setFrameOrigin(NSPoint(x: -20000, y: -20000))
@@ -80,7 +74,7 @@ final class SettingsSnapshotTests: XCTestCase {
         proxy.window.close()
         host.serverState = .stopped
         store.updateServerState(.stopped)
-        controller.select(.general, section: nil)
+        controller.select(.general)
         try render(window.contentView, output, "general-offline")
     }
 

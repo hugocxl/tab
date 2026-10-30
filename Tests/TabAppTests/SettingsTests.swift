@@ -45,11 +45,10 @@ final class SettingsTests: XCTestCase {
         store.updateRemoteAccess(RemoteAccessState(revision: 1, settings: RemoteAccessSettings(enabled: true), status: .listening))
         store.loadServerSettings()
         try await Task.sleep(nanoseconds: 50_000_000)
-        let page = SettingsPageView(store: store)
+        let page = SettingsModel(store: store)
         var shown = Set<String>()
         for category in SettingsCategory.allCases {
-            page.category = category
-            page.reload()
+            page.select(category)
             let build = try XCTUnwrap(page.lastBuild)
             XCTAssertEqual(build.unknownIds, [], "\(category) shows rows missing from the catalog")
             XCTAssertFalse(build.groups.isEmpty, "\(category) shows nothing")
@@ -60,8 +59,7 @@ final class SettingsTests: XCTestCase {
             XCTAssertTrue(shown.contains(item.id), "\(item.id) is in the catalog but no page shows it")
         }
 
-        page.query = "font"
-        page.reload()
+        page.search("font")
         let search = try XCTUnwrap(page.lastBuild)
         XCTAssertTrue(search.rowIds.contains("font-family"))
         XCTAssertTrue(search.rowIds.contains("shortcut.increase_font_size"))
@@ -94,9 +92,14 @@ final class SettingsTests: XCTestCase {
 
     func testRecorderRejectsAConflictAndKeepsItsChord() throws {
         let store = makeStore()
-        let page = SettingsPageView(store: store)
+        let page = SettingsModel(store: store)
         let original = store.settings.keymap.binding("split_right")
-        let recorder = page.shortcutRecorder(rowId: "shortcut.split_right", action: "split_right", chord: original, placeholder: "Not assigned", label: "Split right")
+        guard case .shortcut(let spec) = page.shortcutRecorder(rowId: "shortcut.split_right", action: "split_right", chord: original, placeholder: "Not assigned", label: "Split right") else {
+            return XCTFail("not a recorder")
+        }
+        let recorder = ShortcutRecorder(chord: spec.chord, placeholder: spec.placeholder, label: spec.label)
+        recorder.onRecord = spec.record
+        recorder.onError = spec.error
         recorder.record(try XCTUnwrap(store.settings.keymap.binding("split_down")))
         XCTAssertEqual(recorder.chord, original)
         XCTAssertNotNil(store.errors["shortcut.split_right"])
@@ -225,37 +228,50 @@ final class SettingsTests: XCTestCase {
         let window = try XCTUnwrap(controller.window)
         XCTAssertEqual(window.frame.size.width, SettingsWindowController.defaultSize.width, accuracy: 1)
         for category in SettingsCategory.allCases {
-            controller.select(category, section: nil)
+            controller.select(category)
             XCTAssertEqual(controller.category, category)
-            XCTAssertEqual(controller.page.titleLabel.stringValue, category.title)
-            XCTAssertEqual(controller.page.editLink?.title, category.configurationFile.map { "Edit in \($0)" })
-            XCTAssertEqual(controller.page.lastBuild?.unknownIds, [])
+            XCTAssertEqual(controller.model.title, category.title)
+            XCTAssertEqual(controller.model.selection, category)
+            XCTAssertEqual(controller.model.configurationFile, category.configurationFile)
+            XCTAssertEqual(controller.model.lastBuild?.unknownIds, [])
         }
-        controller.select(.general, section: "Window size")
-        XCTAssertEqual(Set(controller.page.lastBuild?.rowIds ?? []), ["width", "height"])
-        XCTAssertTrue(controller.sidebar.items.contains { $0.section == "Window size" && $0.isSelected })
 
         controller.search("theme")
-        XCTAssertTrue(controller.page.lastBuild?.rowIds.contains("dark-theme") ?? false)
-        XCTAssertFalse(controller.sidebar.items.contains { $0.isSelected })
-
-        controller.page.editLink?.performClick()
-        controller.select(.terminal, section: nil)
-        controller.page.editLink?.performClick()
-        XCTAssertEqual(host.openedFiles.map(\.lastPathComponent), ["terminal.json"])
-        XCTAssertTrue(FileManager.default.fileExists(atPath: dirs.terminalSettings.path))
+        XCTAssertTrue(controller.model.lastBuild?.rowIds.contains("dark-theme") ?? false)
+        XCTAssertNil(controller.model.selection)
+        XCTAssertEqual(controller.model.title, "Search")
+        controller.select(.general)
+        XCTAssertEqual(controller.model.query, "", "opening a page ends the search")
+        XCTAssertTrue(controller.model.lastBuild?.rowIds.contains("width") ?? false)
     }
 
-    func testServerTileFollowsTheHost() {
-        let store = makeStore()
-        let controller = SettingsWindowController(store: store)
-        XCTAssertEqual(controller.sidebar.serverTile.stateText, "Running")
-        store.updateServerState(.stopped)
-        controller.reload()
-        XCTAssertEqual(controller.sidebar.serverTile.stateText, "Stopped")
+    func testBackAndForwardWalkVisitedPages() {
+        let model = SettingsModel(store: makeStore())
+        XCTAssertFalse(model.canGoBack)
+        model.select(.terminal)
+        model.select(.mobile)
+        model.select(.mobile)
+        model.select(.ai)
+        model.goBack()
+        XCTAssertEqual(model.category, .mobile)
+        model.goBack()
+        XCTAssertEqual(model.category, .terminal)
+        XCTAssertTrue(model.canGoForward)
+        model.goForward()
+        XCTAssertEqual(model.category, .mobile)
+        model.select(.backup)
+        XCTAssertFalse(model.canGoForward, "a new page drops the forward pages")
+        model.goBack()
+        model.goBack()
+        model.goBack()
+        XCTAssertEqual(model.category, .general)
+        XCTAssertFalse(model.canGoBack)
     }
-}
 
-extension LinkButton {
-    func performClick() { _ = accessibilityPerformPress() }
+    func testSidebarListsEveryPageOnceWithoutTheServerRow() {
+        let listed = SettingsSidebar.groups.flatMap { $0 }
+        XCTAssertEqual(Set(listed), Set(SettingsCategory.allCases).subtracting([.server]))
+        XCTAssertEqual(listed.count, Set(listed).count)
+        XCTAssertEqual(SettingsSidebar.groups.map { $0.first }, [.general, .terminal, .browser, .backup])
+    }
 }

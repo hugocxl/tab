@@ -3,7 +3,7 @@ import TabClient
 import TabCore
 import TabProtocol
 
-extension SettingsPageView {
+extension SettingsModel {
     // MARK: Browser
 
     func buildBrowser(_ b: SettingsPageBuilder) {
@@ -17,7 +17,7 @@ extension SettingsPageView {
         b.row("browser-terminal-links", b.toggle("browser-terminal-links", browser.openTerminalLinks) { [store] value in
             store.updateBrowser("browser-terminal-links") { $0.openTerminalLinks = value }
         })
-        b.row("browser-search-engine", b.popUp("browser-search-engine", SearchEngine.allCases.map { .init(id: $0.rawValue, title: $0.name) }, selected: browser.searchEngine.rawValue) { [store] id in
+        b.row("browser-search-engine", b.popUp("browser-search-engine", SearchEngine.allCases.map { Choice(id: $0.rawValue, title: $0.name) }, selected: browser.searchEngine.rawValue) { [store] id in
             store.updateBrowser("browser-search-engine") { $0.searchEngine = SearchEngine(rawValue: id) ?? .google }
         })
         b.row("browser-home-page", b.field("browser-home-page", browser.homePage, placeholder: "Start page") { [store] text in
@@ -27,36 +27,36 @@ extension SettingsPageView {
         b.row("browser-import", importButtons(b), stacked: true)
     }
 
-    private func profileList(_ b: SettingsPageBuilder) -> NSView {
+    private func profileList(_ b: SettingsPageBuilder) -> SettingControl {
         let defaultId = store.settings.browser.defaultProfile
-        var rows: [NSView] = [NoteLabel("Each profile keeps its own cookies, cache, history, and logins. Pick a profile per tab from the browser toolbar.")]
-        var renameButtons: [PillButton] = []
+        let hasName = !profileName.trimmingCharacters(in: .whitespaces).isEmpty
+        var rows: [SettingControl] = []
         for profile in store.browserProfiles {
-            let name = makeLabel(profile.name, font: AppFont.body, color: theme.fg)
-            var controls: [NSView] = [name]
+            var controls: [SettingControl] = [.label(profile.name)]
             if profile.id == defaultId {
-                controls.append(Badge("Default"))
+                controls.append(.label("Default", .badge))
             } else {
                 controls.append(b.button("Make Default") { [store] in
                     store.updateBrowser("browser-profiles") { $0.defaultProfile = profile.id }
                 })
             }
-            let rename = b.button("Rename to Name Below", enabled: !profileName.trimmingCharacters(in: .whitespaces).isEmpty) { [weak self] in
-                guard let self else { return }
-                store.renameBrowserProfile(profile.id, profileName)
-                profileName = ""
-            }
-            renameButtons.append(rename)
-            controls.append(rename)
-            controls.append(b.button("Clear Data") { [weak self] in
-                self?.confirm(
-                    "Clear data for “\(profile.name)”?",
-                    "This signs out and removes all cookies, cache, history, and logins for this profile, including imported ones.",
-                    "Clear Data"
-                ) { self?.store.clearBrowserProfile(profile.id) }
-            })
+            var actions: [SettingControl] = [
+                b.button("Rename to Name Below", enabled: hasName) { [weak self] in
+                    guard let self else { return }
+                    store.renameBrowserProfile(profile.id, profileName)
+                    profileName = ""
+                    reload()
+                },
+                b.button("Clear Data") { [weak self] in
+                    self?.confirm(
+                        "Clear data for “\(profile.name)”?",
+                        "This signs out and removes all cookies, cache, history, and logins for this profile, including imported ones.",
+                        "Clear Data"
+                    ) { self?.store.clearBrowserProfile(profile.id) }
+                },
+            ]
             if !profile.id.isEmpty {
-                controls.append(b.button("Delete", style: .destructive) { [weak self] in
+                actions.append(b.button("Delete", style: .destructive) { [weak self] in
                     self?.confirm(
                         "Delete “\(profile.name)”?",
                         "This permanently deletes the profile's cookies, history, and browsing data. Its tabs use the default profile.",
@@ -64,38 +64,41 @@ extension SettingsPageView {
                     ) { self?.store.deleteBrowserProfile(profile.id) }
                 })
             }
-            rows.append(vstack([hstack(Array(controls.prefix(2)), spacing: 6), hstack(Array(controls.dropFirst(2)), spacing: 6)]))
+            rows.append(.column([.row(controls), .row(actions)]))
         }
-        let name = b.field("browser-profiles", profileName, placeholder: "Profile name") { [weak self] in self?.profileName = $0 }
-        name.onChange = { [weak self] text in
-            self?.profileName = text
-            for button in renameButtons { button.isEnabled = !text.trimmingCharacters(in: .whitespaces).isEmpty }
+        let name = b.field("browser-profiles", profileName, placeholder: "Profile name") { [weak self] text in
+            guard let self else { return }
+            let hadName = !profileName.trimmingCharacters(in: .whitespaces).isEmpty
+            profileName = text
+            if hadName != !text.trimmingCharacters(in: .whitespaces).isEmpty { reload() }
+        } commit: { [weak self] in
+            self?.profileName = $0
         }
         let add = b.button("Add Profile") { [weak self] in
             guard let self else { return }
-            store.addBrowserProfile(fields["browser-profiles"]?.stringValue ?? profileName)
+            store.addBrowserProfile(profileName)
             if store.errors["browser-profiles"] == nil { profileName = "" }
             reload()
         }
-        rows.append(hstack([name, add]))
-        return vstack(rows)
+        rows.append(.row([name, add]))
+        return .column(rows)
     }
 
-    private func importButtons(_ b: SettingsPageBuilder) -> NSView {
+    private func importButtons(_ b: SettingsPageBuilder) -> SettingControl {
         let sources = store.host?.browserImportSources() ?? []
-        guard !sources.isEmpty else { return NoteLabel("No other browsers were found on this computer.") }
-        var rows: [NSView] = sources.map { source in
-            var controls: [NSView] = [
-                makeLabel(source.name, font: AppFont.body, color: theme.fg),
+        guard !sources.isEmpty else { return .label("No other browsers were found on this computer.", .note) }
+        var rows: [SettingControl] = sources.map { source in
+            var controls: [SettingControl] = [
+                .label(source.name),
                 b.button("History & Bookmarks") { [store] in store.importBrowserData(source, cookies: false) },
             ]
             if source.supportsCookies {
                 controls.append(b.button("Cookies") { [store] in store.importBrowserData(source, cookies: true) })
             }
-            return hstack(controls, spacing: 6)
+            return .row(controls)
         }
-        rows.append(NoteLabel("Imports go into the default profile. Cookies bring your sign-ins; macOS may ask to allow access to the browser's key."))
-        return vstack(rows)
+        rows.append(.label("Imports go into the default profile. Cookies bring your sign-ins; macOS may ask to allow access to the browser's key.", .note))
+        return .column(rows)
     }
 
     // MARK: Server
@@ -145,14 +148,10 @@ extension SettingsPageView {
             b.note("mobile-access", store.errors["mobile-access"] ?? "Loading mobile access…", error: store.errors["mobile-access"] != nil)
             return
         }
-        let enabled = b.toggle("mobile-access", state.settings.enabled) { [store] in store.setMobileEnabled($0) }
-        enabled.isEnabled = !store.mobileBusy
-        b.row("mobile-access", enabled)
-        let port = b.field("mobile-port", String(state.settings.port)) { [store] in store.setMobilePort($0) }
-        port.field.isEnabled = !store.mobileBusy
-        b.row("mobile-port", port)
+        b.row("mobile-access", b.toggle("mobile-access", state.settings.enabled, enabled: !store.mobileBusy) { [store] in store.setMobileEnabled($0) })
+        b.row("mobile-port", b.field("mobile-port", String(state.settings.port), width: 80, enabled: !store.mobileBusy) { [store] in store.setMobilePort($0) })
         let (status, failed) = Self.status(state)
-        b.row("mobile-status", makeLabel(status, font: AppFont.body, color: failed ? theme.danger : theme.fgMuted))
+        b.row("mobile-status", .label(status, failed ? .error : .secondary))
         b.row("mobile-pair", pairing(b, state), stacked: store.pairing != nil)
         b.row("mobile-devices", devices(b, state), stacked: true)
     }
@@ -167,41 +166,38 @@ extension SettingsPageView {
         }
     }
 
-    private func pairing(_ b: SettingsPageBuilder, _ state: RemoteAccessState) -> NSView {
+    private func pairing(_ b: SettingsPageBuilder, _ state: RemoteAccessState) -> SettingControl {
         guard let offer = store.pairing else {
             return b.button("Show Pairing Code", enabled: state.settings.enabled && !store.mobileBusy) { [store] in store.startPairing() }
         }
         let link = offer.invite.link
-        var views: [NSView] = []
+        var views: [SettingControl] = []
         if let code = QRCode(link) {
-            let view = QRCodeView(code: code)
-            view.widthAnchor.constraint(equalToConstant: 200).isActive = true
-            view.heightAnchor.constraint(equalToConstant: 200).isActive = true
-            views.append(view)
+            views.append(.qrCode(code))
         } else {
-            views.append(NoteLabel("The pairing code is too long to show."))
+            views.append(.label("The pairing code is too long to show.", .note))
         }
-        views.append(NoteLabel("Scan with the Tab app. The code works once and expires in 5 minutes."))
+        views.append(.label("Scan with the Tab app. The code works once and expires in 5 minutes.", .note))
         let copy = b.button("Copy Link") {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(link, forType: .string)
         }
         let cancel = b.button("Cancel") { [store] in store.cancelPairing() }
-        views.append(hstack([copy, cancel], spacing: 6))
-        return vstack(views)
+        views.append(.row([cancel, copy]))
+        return .column(views)
     }
 
-    private func devices(_ b: SettingsPageBuilder, _ state: RemoteAccessState) -> NSView {
-        guard !state.devices.isEmpty else { return NoteLabel("No paired devices yet.") }
-        return vstack(state.devices.map { device in
-            let name = makeLabel(device.name, font: AppFont.body, color: theme.fg)
-            let seen = makeLabel(Self.lastSeen(device), font: AppFont.footnote, color: theme.fgMuted)
-            let revoke = b.button("Revoke", style: .destructive) { [weak self] in
-                self?.confirm("Revoke “\(device.name)”?", "The phone disconnects now and must be paired again to connect.", "Revoke") {
-                    self?.store.revokeDevice(device.id)
-                }
-            }
-            return hstack([vstack([name, seen], spacing: 1), revoke])
+    private func devices(_ b: SettingsPageBuilder, _ state: RemoteAccessState) -> SettingControl {
+        guard !state.devices.isEmpty else { return .label("No paired devices yet.", .note) }
+        return .column(state.devices.map { device in
+            .row([
+                .column([.label(device.name), .label(Self.lastSeen(device), .secondary)]),
+                b.button("Revoke", style: .destructive) { [weak self] in
+                    self?.confirm("Revoke “\(device.name)”?", "The phone disconnects now and must be paired again to connect.", "Revoke") {
+                        self?.store.revokeDevice(device.id)
+                    }
+                },
+            ])
         })
     }
 
@@ -220,7 +216,7 @@ extension SettingsPageView {
         for action in AIAction.allCases {
             let current = store.settings.ai.providers[action.rawValue] ?? ""
             let auto = installed.first.flatMap { id in AIAction.providers.first { $0.id == id }?.name }
-            var items = [PopUp.Item(id: "", title: auto.map { "Auto · \($0)" } ?? "Auto · None installed")]
+            var items = [Choice(id: "", title: auto.map { "Auto · \($0)" } ?? "Auto · None installed")]
             for provider in AIAction.providers {
                 let title = installed.contains(provider.id) ? provider.name : "\(provider.name) · Not installed"
                 items.append(.init(id: provider.id, title: title, separatorBefore: provider.id == AIAction.providers.first?.id))
@@ -231,15 +227,13 @@ extension SettingsPageView {
             b.row(action.providerSetting, b.popUp(action.providerSetting, items, selected: current) { [store] in
                 store.setAIProvider(action, $0)
             })
-            let prompt = b.field(action.promptSetting, store.prompt(action), width: nil, height: 88, multiline: true) { [store] in
+            let prompt = b.field(action.promptSetting, store.prompt(action), width: nil, multiline: true) { [store] in
                 store.setAIPrompt(action, $0)
             }
             let restore = b.button("Restore Default", enabled: store.prompt(action) != action.defaultPrompt) { [store] in
                 store.setAIPrompt(action, action.defaultPrompt)
             }
-            let control = vstack([prompt, restore], alignment: .trailing)
-            prompt.widthAnchor.constraint(equalTo: control.widthAnchor).isActive = true
-            b.row(action.promptSetting, control, stacked: true)
+            b.row(action.promptSetting, .column([prompt, restore], trailing: true), stacked: true)
             if action == .createPullRequest { buildProjectPrompt(b) }
             if action == .commit {
                 let choices = store.settings.ai.commit
@@ -262,40 +256,38 @@ extension SettingsPageView {
         let id = "ai-project-pr-prompt"
         let projects = store.host?.aiPromptProjects() ?? []
         guard let project = projects.first(where: { $0.id == promptProject }) ?? projects.first else {
-            b.row(id, NoteLabel("Add a project to give it its own prompt."), stacked: true)
+            b.row(id, .label("Add a project to give it its own prompt.", .note), stacked: true)
             return
         }
-        let picker = b.popUp(id, projects.map { PopUp.Item(id: $0.id, title: $0.name) }, selected: project.id) { [weak self] in
+        let picker = b.popUp(id, projects.map { Choice(id: $0.id, title: $0.name) }, selected: project.id, label: "Project") { [weak self] in
             self?.promptProject = $0
             self?.reload()
         }
         let saved = store.projectPRPrompt(project.id)
-        let prompt = b.field(id, saved, placeholder: "Uses the pull request prompt above", width: nil, height: 88,
+        let prompt = b.field(id, saved, placeholder: "Uses the pull request prompt above", width: nil,
                              multiline: true, label: "\(project.name) pull request prompt") { [store] in
             store.setProjectPRPrompt(project.id, $0)
         }
         let reset = b.button("Use General Prompt", enabled: !saved.isEmpty) { [store] in
             store.setProjectPRPrompt(project.id, "")
         }
-        let control = vstack([picker, prompt, reset], alignment: .trailing)
-        prompt.widthAnchor.constraint(equalTo: control.widthAnchor).isActive = true
-        b.row(id, control, stacked: true)
+        b.row(id, .column([picker, prompt, reset], trailing: true), stacked: true)
     }
 
     // MARK: Backup
 
     func buildBackup(_ b: SettingsPageBuilder) {
         b.row("backup-export", b.button("Export…", enabled: !store.backupBusy) { [weak self] in self?.exportBackup() })
-        var restore: [NSView] = [b.button("Choose file…", enabled: !store.backupBusy) { [weak self] in self?.chooseBackup() }]
+        var restore: [SettingControl] = [b.button("Choose file…", enabled: !store.backupBusy) { [weak self] in self?.chooseBackup() }]
         if store.hasPendingRestore {
             restore.append(b.button("Cancel Import") { [store] in store.cancelRestore() })
         }
-        b.row("backup-restore", hstack(restore, spacing: 6))
+        b.row("backup-restore", .row(restore))
         if !store.backupStatus.isEmpty { b.note("backup-restore", store.backupStatus) }
         let files = ["settings.json", "terminal.json", "server.json"].map { name in
             b.button(name) { [store] in store.openConfiguration(name) }
         }
-        b.row("backup-files", hstack(files, spacing: 6))
+        b.row("backup-files", .row(files))
         b.row("backup-folder", b.button("Show in Finder") { [store] in
             try? FileManager.default.createDirectory(at: store.dirs.backups, withIntermediateDirectories: true)
             NSWorkspace.shared.activateFileViewerSelecting([store.dirs.backups])

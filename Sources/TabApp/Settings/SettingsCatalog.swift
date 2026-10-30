@@ -20,41 +20,25 @@ public enum SettingsCategory: String, CaseIterable, Sendable {
         }
     }
 
-    /// The glyph and fill of the category's tile.
-    var tile: (icon: AppIcon, fill: UInt32, glyph: UInt32) {
+    /// The SF Symbol and colors of the category's icon tile: a gradient from
+    /// `top` to `bottom` under a `glyph`-colored symbol.
+    var icon: (symbol: String, top: UInt32, bottom: UInt32, glyph: UInt32) {
         switch self {
-        case .general: return (.settings, 0x77777C, 0xFFFFFF)
-        case .appearance: return (.palette, 0x3478F6, 0xFFFFFF)
-        case .terminal: return (.terminal, 0x203B26, 0x79F58B)
-        case .keyboard: return (.keyboard, 0x77777C, 0xFFFFFF)
-        case .commands: return (.code, 0xE98224, 0xFFFFFF)
-        case .browser: return (.globe, 0x268DEC, 0xFFFFFF)
-        case .server: return (.network, 0x299FA3, 0xFFFFFF)
-        case .mobile: return (.appWindow, 0x38A455, 0xFFFFFF)
-        case .ai: return (.sparkles, 0xA34DE0, 0xFFFFFF)
-        case .backup: return (.history, 0x77777C, 0xFFFFFF)
+        case .general: return ("gearshape.fill", 0xA2A2A7, 0x76767B, 0xFFFFFF)
+        case .appearance: return ("paintpalette.fill", 0x3FA2FF, 0xC04BF2, 0xFFFFFF)
+        case .terminal: return ("apple.terminal", 0x3A3A3C, 0x151515, 0x5BE37A)
+        case .keyboard: return ("command", 0xF7F7F8, 0xDCDCDF, 0x6E6E73)
+        case .commands: return ("chevron.left.forwardslash.chevron.right", 0xFF9E4A, 0xF26A1B, 0xFFFFFF)
+        case .browser: return ("globe", 0x5BB2FF, 0x1F6FEB, 0xFFFFFF)
+        case .server: return ("server.rack", 0x4FD1D5, 0x1E9AA0, 0xFFFFFF)
+        case .mobile: return ("iphone", 0x6BDB7E, 0x2FA84A, 0xFFFFFF)
+        case .ai: return ("sparkles", 0xD07BFF, 0x9437F0, 0xFFFFFF)
+        case .backup: return ("clock.arrow.circlepath", 0x9B9BA0, 0x5F5F64, 0xFFFFFF)
         }
     }
 
     /// Categories that start a new group in the sidebar, with a gap above.
     var startsGroup: Bool { [.terminal, .browser, .backup].contains(self) }
-
-    /// The sections the sidebar lists under the category when expanded.
-    public var sections: [String] {
-        switch self {
-        case .general: return ["Closing terminals", "Files", "Window size", "Worktrees", "Voice"]
-        case .appearance: return ["Themes", "Interface", "Agents Panel"]
-        case .terminal:
-            return ["Font", "Background", "Colors", "Cursor", "Selection", "Scrolling", "Input", "Key bindings", "Migration", "Reset"]
-        case .keyboard: return ["Shortcuts"]
-        case .commands: return []
-        case .browser: return ["General", "Browsing", "Profiles"]
-        case .server: return ["Connection", "Sessions", "Server control"]
-        case .mobile: return ["Access", "Pairing", "Devices"]
-        case .ai: return ["Commit", "Create Pull Request"]
-        case .backup: return ["Backup & Restore", "Configuration"]
-        }
-    }
 
     /// The file behind the page, for "Edit in …". Mobile access is managed
     /// only here.

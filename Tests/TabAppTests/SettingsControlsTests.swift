@@ -67,43 +67,45 @@ final class SettingsControlsTests: XCTestCase {
         return paths
     }
 
-    private func controls(in view: NSView) -> [NSView] {
-        if view is Switch || view is SegmentedPill || view is PopUp || view is Slider || view is InsetTextField {
-            return [view]
+    /// The controls on a row that write settings.
+    private func controls(in control: SettingControl) -> [SettingControl] {
+        control.leaves.filter {
+            switch $0 {
+            case .toggle, .segmented, .choice, .slider, .text: return true
+            default: return false
+            }
         }
-        return view.subviews.flatMap(controls)
     }
 
     /// Actuates `control` once; `false` when it offers nothing else to pick.
-    private func actuate(_ control: NSView, rowId: String) -> Bool {
+    private func actuate(_ control: SettingControl, rowId: String) -> Bool {
         switch control {
-        case let toggle as Switch:
-            guard toggle.isEnabled else { return false }
-            toggle.toggle()
-        case let pill as SegmentedPill:
-            pill.select(pill.selectedIndex == 0 ? 1 : 0)
-        case let popUp as PopUp:
-            guard let other = popUp.items.first(where: { $0.id != popUp.selectedId && !$0.id.hasPrefix("__") }) else { return false }
-            popUp.choose(other.id)
-        case let slider as Slider:
-            let next = slider.value + slider.step <= slider.maximum ? slider.value + slider.step : slider.value - slider.step
-            slider.value = next
-            slider.onCommit?(next)
-        case let field as InsetTextField:
-            guard field.field.isEnabled else { return false }
+        case .toggle(let toggle):
+            guard toggle.enabled else { return false }
+            toggle.change(!toggle.isOn)
+        case .segmented(let pill):
+            pill.change(pill.selected == 0 ? 1 : 0)
+        case .choice(let popUp):
+            guard let other = popUp.items.first(where: { $0.id != popUp.selected && !$0.id.hasPrefix("__") }) else { return false }
+            popUp.change(other.id)
+        case .slider(let slider):
+            let next = slider.value + slider.step <= slider.range.upperBound ? slider.value + slider.step : slider.value - slider.step
+            slider.commit(next)
+        case .text(let field):
+            guard field.enabled else { return false }
             if rowId == "browser-profiles" { return false }
-            let numeric = Double(field.stringValue) != nil || Double(field.field.placeholderString ?? "") != nil
-            field.stringValue = numeric ? "1000" : (field.stringValue.isEmpty ? "qa-value" : field.stringValue + "-qa")
-            if rowId.contains("folder") || rowId.contains("template") { field.stringValue = "~/qa-worktrees" }
-            if rowId == "worktree-template" { field.stringValue = "../{base-dir}.{branch}" }
-            if rowId == "default-shell" { field.stringValue = "/bin/bash" }
-            if rowId == "mobile-port" { field.stringValue = "7420" }
-            if rowId == "browser-home-page" { field.stringValue = "https://example.com" }
-            if rowId == "font-feature" { field.stringValue = "ss01" }
+            let numeric = Double(field.value) != nil || Double(field.placeholder) != nil
+            var text = numeric ? "1000" : (field.value.isEmpty ? "qa-value" : field.value + "-qa")
+            if rowId.contains("folder") || rowId.contains("template") { text = "~/qa-worktrees" }
+            if rowId == "worktree-template" { text = "../{base-dir}.{branch}" }
+            if rowId == "default-shell" { text = "/bin/bash" }
+            if rowId == "mobile-port" { text = "7420" }
+            if rowId == "browser-home-page" { text = "https://example.com" }
+            if rowId == "font-feature" { text = "ss01" }
             if ["palette", "background", "foreground", "cursor-color", "cursor-text", "selection-foreground", "selection-background"].contains(rowId) {
-                field.stringValue = "#123456"
+                text = "#123456"
             }
-            field.commit()
+            field.commit(text)
         default:
             return false
         }
@@ -112,21 +114,14 @@ final class SettingsControlsTests: XCTestCase {
 
     func testVoiceModelCanBeEditedAndCleared() throws {
         let store = SettingsStore(dirs: dirs, host: host, theme: AppTheme(systemIsDark: true))
-        let page = SettingsPageView(store: store)
-        page.category = .general
-        page.section = "Voice"
-        page.reload()
-        let row = try XCTUnwrap(page.lastBuild?.groups.flatMap(\.blocks).compactMap { block -> CardRow? in
-            if case .row(let row) = block, row.id == "voice-model" { return row }
-            return nil
-        }.first)
-        let field = try XCTUnwrap(row.control as? InsetTextField)
-        XCTAssertTrue(field.field.isEnabled)
-        field.stringValue = "/tmp/spanish.lm"
-        field.commit()
+        let page = SettingsModel(store: store)
+        page.select(.general)
+        let row = try XCTUnwrap(page.lastBuild?.rows.first { $0.id == "voice-model" })
+        guard case .text(let field) = row.control else { return XCTFail("voice-model is not a text field") }
+        XCTAssertTrue(field.enabled)
+        field.commit("/tmp/spanish.lm")
         XCTAssertEqual(try Settings.load(dirs.settings).voice.model, "/tmp/spanish.lm")
-        field.stringValue = ""
-        field.commit()
+        field.commit("")
         XCTAssertEqual(try Settings.load(dirs.settings).voice.model, "")
     }
 
@@ -135,26 +130,17 @@ final class SettingsControlsTests: XCTestCase {
         store.loadServerSettings()
         store.loadRemoteAccess()
         try await Task.sleep(nanoseconds: 50_000_000)
-        let page = SettingsPageView(store: store)
+        let page = SettingsModel(store: store)
         var report: [String: [String]] = [:]
         var silent: [String] = []
         for category in SettingsCategory.allCases {
-            page.category = category
-            page.section = nil
-            page.reload()
-            let rowIds = try XCTUnwrap(page.lastBuild).groups.flatMap(\.blocks).compactMap { block -> String? in
-                if case .row(let row) = block { return row.id }
-                return nil
-            }
+            page.select(category)
+            let rowIds = try XCTUnwrap(page.lastBuild).rows.map(\.id)
             for rowId in rowIds {
-                page.section = SettingsCatalog.item(rowId)?.section
                 for index in 0 ..< 16 {
                     page.reload()
-                    guard let row = page.lastBuild?.groups.flatMap(\.blocks).lazy.compactMap({ block -> CardRow? in
-                        if case .row(let row) = block, row.id == rowId { return row }
-                        return nil
-                    }).first, let view = row.control else { break }
-                    let found = controls(in: view)
+                    guard let row = page.lastBuild?.rows.first(where: { $0.id == rowId }), let control = row.control else { break }
+                    let found = controls(in: control)
                     guard found.indices.contains(index) else { break }
                     let before = snapshot()
                     guard actuate(found[index], rowId: rowId) else { continue }
