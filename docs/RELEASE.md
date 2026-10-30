@@ -80,7 +80,8 @@ The repository must be public: installed apps download the feed and the DMG
 without credentials. Set every secret at once with:
 
 ```sh
-scripts/setup-release-secrets.sh DeveloperID.p12 AuthKey_KEYID.p8 <issuer-id> <team-id>
+scripts/setup-release-secrets.sh DeveloperID.p12 --api-key AuthKey_KEYID.p8 <issuer-id>
+scripts/setup-release-secrets.sh DeveloperID.p12 --apple-id you@example.com
 ```
 
 | Secret | Value |
