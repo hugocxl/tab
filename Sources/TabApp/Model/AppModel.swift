@@ -121,7 +121,6 @@ public final class AppModel {
     public private(set) lazy var remoteController = RemoteServersController(model: remoteServers)
     public private(set) lazy var proxyController = ProxyController(model: proxy, host: self)
     /// AI commit and pull request actions.
-    public private(set) lazy var ai = AIActionsController(host: self)
     /// Updates from GitHub Releases.
     public private(set) lazy var updater = UpdaterController(host: self, dirs: dirs, configuration: proxy.sessionConfiguration())
     /// Icons of this computer's project folders.

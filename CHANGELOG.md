@@ -24,6 +24,8 @@ Changelog.
 - The sidebar width, worktree expansion, unread indicator and worktree
   switcher order settings. Drag the sidebar's edge to resize it; the switcher
   lists the current worktree, then the most recently used.
+- AI actions: the AI settings page, Commit with AI, Create Pull Request with AI
+  and the Source Control panel's Generate Commit Message button.
 - Custom commands, with their Settings page, palette entries and shortcuts.
 - Editing settings files by hand: the Edit in… links, the Configuration files
   buttons and the Open Configuration action are gone. Change settings in the

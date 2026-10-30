@@ -13,7 +13,6 @@ final class LiveNativeHost: FilesPanelHost, SourceControlHost, EditorHost, DiffH
     var nativeTransport: NativeTransport? { transport }
     let theme = AppTheme(catalog: ThemeCatalog.load(customDirectory: nil), systemIsDark: true)
     var codeFont: NSFont { .monospacedSystemFont(ofSize: 12, weight: .regular) }
-    var canGenerateCommitMessage = false
     var toasts: [String] = []
     var opened: [String] = []
     var repositoryChanges = 0
@@ -35,7 +34,6 @@ final class LiveNativeHost: FilesPanelHost, SourceControlHost, EditorHost, DiffH
     func closeFilesPanel() {}
     func openDiff(path: String, staged: Bool) {}
     func repositoryDidChange() { repositoryChanges += 1 }
-    func generateCommitMessage() async throws -> String { "" }
     func closeSourceControl() {}
     func editorTitleDidChange(_ title: String, dirty: Bool) {}
 }

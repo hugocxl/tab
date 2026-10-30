@@ -129,20 +129,6 @@ struct SettingsDocument {
     mutating func replace<T: Encodable>(_ section: String, _ value: T) throws {
         root[section] = try SettingsJSON.object(value)
     }
-
-    /// Sets or removes keys of the object `section.table`.
-    mutating func setEntries(_ section: String, _ table: String, _ entries: [(String, Any?)]) throws {
-        if root[section] != nil && !(root[section] is [String: Any]) {
-            throw SettingsError(section, "must be an object")
-        }
-        var values = root[section] as? [String: Any] ?? [:]
-        var target = values[table] as? [String: Any] ?? [:]
-        for (key, value) in entries {
-            target[key] = value
-        }
-        values[table] = target
-        root[section] = values
-    }
 }
 
 /// Reads `url`, first writing `defaults` there when it does not exist.

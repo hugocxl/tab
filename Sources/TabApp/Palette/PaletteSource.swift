@@ -224,14 +224,6 @@ final class PaletteSource: PaletteDataSource {
         page("git_changes", "Changes…", .git, .changes(project), keywords: "git status stage diff", disabled: !repository)
         page("new_branch", "New Branch…", .git, .newBranch(project), keywords: "git create", disabled: !repository)
         command(.toggleSourceControl, "Toggle Source Control", .git, keywords: "git changes stage commit")
-        for (action, title) in [(RepositoryAction.commit, "Commit with AI…"), (.createPullRequest, "Create Pull Request with AI…")] {
-            let availability = model.ai.availability(action, project: project)
-            if availability == .hidden { continue }
-            var disabled = false
-            if case .disabled = availability { disabled = true }
-            commands.append(RootCommand(id: "ai_\(action.rawValue)", title: title, keywords: "ai agent generate", category: .git,
-                                        disabled: disabled, target: .run { [weak self] in self?.model.ai.start(action, project: project) }))
-        }
         command(.newWorktree, "New Worktree…", .worktrees, disabled: model.newWorktreeTarget == nil)
         if let parent = worktreeSwitcherProject {
             page(ShortcutId.switchWorktree.rawValue, "Switch Worktree…", .worktrees, .worktrees(parent), shortcut: .switchWorktree)

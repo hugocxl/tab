@@ -546,59 +546,6 @@ public final class SettingsStore {
         }
     }
 
-    // MARK: AI
-
-    /// Chooses the tool for an action; empty means Auto.
-    public func setAIProvider(_ action: AIAction, _ provider: String) {
-        attempt(action.providerSetting) {
-            settings.ai = try Settings.saveAIEntry(
-                in: dirs.settings, table: "providers", key: action.rawValue, value: provider.isEmpty ? nil : provider
-            )
-            applySettings()
-        }
-    }
-
-    /// Saves an action's prompt; the default prompt or an empty one is
-    /// stored as no prompt.
-    public func setAIPrompt(_ action: AIAction, _ prompt: String) {
-        let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        let value = trimmed.isEmpty || trimmed == action.defaultPrompt ? nil : trimmed
-        attempt(action.promptSetting) {
-            settings.ai = try Settings.saveAIEntry(in: dirs.settings, table: "prompts", key: action.rawValue, value: value)
-            applySettings()
-        }
-    }
-
-    public func prompt(_ action: AIAction) -> String {
-        let saved = settings.ai.prompts[action.rawValue]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return saved.isEmpty ? action.defaultPrompt : saved
-    }
-
-    /// The pull request prompt saved for `project`, empty when it uses the
-    /// general one.
-    public func projectPRPrompt(_ project: String) -> String {
-        settings.ai.projectPrPrompts[project]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-    }
-
-    /// Saves `project`'s own pull request prompt; an empty one goes back to
-    /// the general prompt.
-    public func setProjectPRPrompt(_ project: String, _ prompt: String) {
-        let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        attempt("ai-project-pr-prompt") {
-            settings.ai = try Settings.saveAIEntry(
-                in: dirs.settings, table: "projectPrPrompts", key: project, value: trimmed.isEmpty ? nil : trimmed
-            )
-            applySettings()
-        }
-    }
-
-    public func setCommitChoices(_ choices: CommitChoices) {
-        attempt("ai-commit-include-unstaged") {
-            settings.ai = try Settings.saveCommitChoices(choices, in: dirs.settings)
-            applySettings()
-        }
-    }
-
     // MARK: Backup
 
     /// Writes a backup of the profile to `url`.

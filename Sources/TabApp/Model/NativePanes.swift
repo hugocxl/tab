@@ -64,15 +64,6 @@ final class ProjectHost: FilesPanelHost, SourceControlHost, EditorHost, DiffHost
         model.gitChanged(project)
     }
 
-    var canGenerateCommitMessage: Bool {
-        if case .available = model.ai.availability(.commit, project: project) { return true }
-        return false
-    }
-
-    func generateCommitMessage() async throws -> String {
-        try await model.generateCommitMessage(project)
-    }
-
     func closeSourceControl() {
         if model.rightPanel == .sourceControl { model.toggleRightPanel(.sourceControl) }
     }

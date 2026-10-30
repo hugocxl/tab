@@ -9,10 +9,6 @@ public protocol SourceControlHost: NativeHost {
     func openDiff(path: String, staged: Bool)
     /// The panel changed the repository: open diffs should refresh.
     func repositoryDidChange()
-    /// Whether an AI tool is configured to write commit messages.
-    var canGenerateCommitMessage: Bool { get }
-    /// Writes a commit message for the staged changes with the configured AI tool.
-    func generateCommitMessage() async throws -> String
     /// Hides the panel.
     func closeSourceControl()
 }
@@ -27,7 +23,6 @@ public final class SourceControlController: NSViewController, NSTableViewDataSou
     private var error: String?
     private var stale = true
     private var amend = false
-    private var generating = false
 
     private let card = NativePanelCard()
 
@@ -42,7 +37,6 @@ public final class SourceControlController: NSViewController, NSTableViewDataSou
     private let spinner = Spinner()
     let messageField = CommitMessageField(placeholder: "Message (⌘↩ to commit)")
     private let amendBox = NSButton(checkboxWithTitle: "Amend", target: nil, action: nil)
-    private let generateButton = IconButton(.sparkles, label: "Generate Commit Message")
     let commitButton = PillButton("Commit")
     private let message = NativeMessageView("Loading changes…")
     private let table = NSTableView()
@@ -73,12 +67,10 @@ public final class SourceControlController: NSViewController, NSTableViewDataSou
         amendBox.target = self
         amendBox.action = #selector(toggleAmend)
         amendBox.font = AppFont.body
-        generateButton.onPress = { [weak self] in self?.generateMessage() }
-        generateButton.isHidden = !(host?.canGenerateCommitMessage ?? false)
         commitButton.onPress = { [weak self] in self?.commit() }
         let spacer = NSView()
         spacer.setContentHuggingPriority(.init(1), for: .horizontal)
-        let commitRow = NSStackView(views: [amendBox, spacer, generateButton, commitButton])
+        let commitRow = NSStackView(views: [amendBox, spacer, commitButton])
         commitRow.orientation = .horizontal
         commitRow.alignment = .centerY
         commitRow.spacing = Metrics.controlGap
@@ -270,23 +262,6 @@ public final class SourceControlController: NSViewController, NSTableViewDataSou
         }
         amend = amendBox.state == .on
         updateCommitButton()
-    }
-
-    private func generateMessage() {
-        guard let host, !generating else { return }
-        generating = true
-        generateButton.isEnabled = false
-        Task { [weak self] in
-            do {
-                let text = try await host.generateCommitMessage()
-                self?.messageField.string = text
-            } catch {
-                self?.host?.showToast(NativeErrors.describe(error), style: .error)
-            }
-            self?.generating = false
-            self?.generateButton.isEnabled = true
-            self?.updateCommitButton()
-        }
     }
 
     private func setBusy(_ busy: Bool) {

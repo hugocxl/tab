@@ -3,7 +3,6 @@ import Foundation
 /// The app's preferences, stored in `settings.json`. Every section tolerates
 /// missing and unknown keys, so files written by older or newer builds load.
 public struct Settings: Codable, Equatable, Sendable {
-    public var ai: AISettings
     public var appearance: Appearance
     public var window: WindowSettings
     public var keymap: Keymap
@@ -17,7 +16,6 @@ public struct Settings: Codable, Equatable, Sendable {
     public var servers: [ServerEntry]
 
     public init() {
-        ai = AISettings()
         appearance = Appearance()
         window = WindowSettings()
         keymap = Keymap()
@@ -33,7 +31,6 @@ public struct Settings: Codable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let defaults = Settings()
-        ai = try container.value(.ai, defaults.ai)
         appearance = try container.value(.appearance, defaults.appearance)
         window = try container.value(.window, defaults.window)
         keymap = try container.value(.keymap, defaults.keymap)
@@ -125,32 +122,6 @@ public struct Settings: Codable, Equatable, Sendable {
         try document.merge("projects", ["searchRoot": root])
         try document.write(to: url)
         projects.searchRoot = root
-    }
-
-    /// Saves one AI entry, such as `prompts.commit`, over the file's current
-    /// contents, and returns the AI settings as saved. `nil` removes it.
-    public static func saveAIEntry(in url: URL, table: String, key: String, value: String?) throws -> AISettings {
-        try saveAIEntries(in: url, table: table, entries: [(key, value)])
-    }
-
-    /// Saves the options last chosen for an AI commit.
-    public static func saveCommitChoices(_ choices: CommitChoices, in url: URL) throws -> AISettings {
-        try saveAIEntries(
-            in: url,
-            table: "commit",
-            entries: [("includeUnstaged", choices.includeUnstaged), ("push", choices.push)]
-        )
-    }
-
-    private static func saveAIEntries(in url: URL, table: String, entries: [(String, Any?)]) throws -> AISettings {
-        var document = try SettingsDocument.read(url)
-        try document.setEntries("ai", table, entries)
-        try document.write(to: url)
-        do {
-            return try SettingsJSON.decode(AISettings.self, from: document.root["ai"] ?? [String: Any]())
-        } catch {
-            throw SettingsError("ai", SettingsJSON.describe(error))
-        }
     }
 }
 
@@ -245,83 +216,5 @@ public struct OpenerSettings: Codable, Equatable, Sendable {
         url = try container.value(.url, Self.systemBrowser)
         file = try container.value(.file, Self.tabEditor)
         projectTarget = try container.decodeIfPresent(String.self, forKey: .projectTarget)
-    }
-}
-
-/// The options last chosen for an AI commit.
-public struct CommitChoices: Codable, Equatable, Sendable {
-    public var includeUnstaged: Bool
-    public var push: Bool
-
-    public init(includeUnstaged: Bool = true, push: Bool = true) {
-        self.includeUnstaged = includeUnstaged
-        self.push = push
-    }
-}
-
-/// AI tool choices per action. Hand edits are expected here, so keys this
-/// build does not know and values that are not text are ignored instead of
-/// stopping the app from starting.
-public struct AISettings: Codable, Equatable, Sendable {
-    /// The command-line tool per action, such as `commit` → `claude`.
-    public var providers: [String: String]
-    /// Extra instructions per action.
-    public var prompts: [String: String]
-    /// Pull request instructions per project id.
-    public var projectPrPrompts: [String: String]
-    public var commit: CommitChoices
-
-    enum CodingKeys: String, CodingKey {
-        case providers, prompts, projectPrPrompts, commit
-    }
-
-    public init(
-        providers: [String: String] = [:],
-        prompts: [String: String] = [:],
-        projectPrPrompts: [String: String] = [:],
-        commit: CommitChoices = CommitChoices()
-    ) {
-        self.providers = providers
-        self.prompts = prompts
-        self.projectPrPrompts = projectPrPrompts
-        self.commit = commit
-    }
-
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        providers = Self.textEntries(container, .providers)
-        prompts = Self.textEntries(container, .prompts)
-        projectPrPrompts = Self.textEntries(container, .projectPrPrompts)
-        let defaults = CommitChoices()
-        let commit = try? container.nestedContainer(keyedBy: CommitChoices.CodingKeys.self, forKey: .commit)
-        self.commit = CommitChoices(
-            includeUnstaged: (try? commit?.decodeIfPresent(Bool.self, forKey: .includeUnstaged)) ?? defaults.includeUnstaged,
-            push: (try? commit?.decodeIfPresent(Bool.self, forKey: .push)) ?? defaults.push
-        )
-    }
-
-    private static func textEntries(_ container: KeyedDecodingContainer<CodingKeys>, _ key: CodingKeys) -> [String: String] {
-        guard let table = try? container.nestedContainer(keyedBy: AnyKey.self, forKey: key) else { return [:] }
-        var entries: [String: String] = [:]
-        for entry in table.allKeys {
-            if let text = try? table.decode(String.self, forKey: entry) { entries[entry.stringValue] = text }
-        }
-        return entries
-    }
-}
-
-extension CommitChoices {
-    enum CodingKeys: String, CodingKey {
-        case includeUnstaged, push
-    }
-}
-
-struct AnyKey: CodingKey {
-    var stringValue: String
-    var intValue: Int?
-    init(stringValue: String) { self.stringValue = stringValue }
-    init?(intValue: Int) {
-        stringValue = String(intValue)
-        self.intValue = intValue
     }
 }

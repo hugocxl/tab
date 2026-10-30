@@ -127,26 +127,6 @@ final class SettingsTests: XCTestCase {
         }
     }
 
-    // MARK: AI
-
-    func testAISettingsIgnoreHandEditMistakesAndSavesKeepHandEdits() throws {
-        let directory = try TemporaryDirectory()
-        let path = try directory.write("settings.json", #"{"ai": {"prompt": "typo", "prompts": {"commit": "Use Conventional Commits", "create_pr": 5}, "commit": {"push": "yes"}}}"#)
-        let loaded = try Settings.load(path)
-        XCTAssertEqual(loaded.ai.prompts, ["commit": "Use Conventional Commits"])
-        XCTAssertEqual(loaded.ai.commit, CommitChoices())
-        var saved = try Settings.saveAIEntry(in: path, table: "providers", key: "commit", value: "claude")
-        XCTAssertEqual(saved.providers["commit"], "claude")
-        XCTAssertEqual(saved.prompts["commit"], "Use Conventional Commits")
-        saved = try Settings.saveAIEntry(in: path, table: "projectPrPrompts", key: "project-id", value: "Project instructions")
-        XCTAssertEqual(saved.projectPrPrompts["project-id"], "Project instructions")
-        saved = try Settings.saveAIEntry(in: path, table: "prompts", key: "commit", value: nil)
-        XCTAssertTrue(saved.prompts.isEmpty)
-        saved = try Settings.saveCommitChoices(CommitChoices(includeUnstaged: false, push: true), in: path)
-        XCTAssertFalse(saved.commit.includeUnstaged)
-        XCTAssertEqual(try Settings.load(path).ai, saved)
-    }
-
     // MARK: Worktrees
 
     func testWorktreeTemplatesRequireABranchThatSurvivesNormalization() {

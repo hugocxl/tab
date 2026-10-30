@@ -9,7 +9,7 @@ public enum AppIcon: String, CaseIterable, Sendable {
     case code, circleUser, columns, ellipsis, folder, gitBranch, globe, eye, keyboard, lightbulb
     case maximize, network, palette, panelBottom, panelLeft, panelRight, pin, pinOff, plus, puzzle
     case restore, refresh, rows, search, settings, terminal, terminalStack, close, externalLink
-    case filter, filterCircle, history, sparkles, arrowDownCircle, arrowUpCircle, chevronsUpDown
+    case filter, filterCircle, history, arrowDownCircle, arrowUpCircle, chevronsUpDown
     case circle, circleCheck, clock, file, gitMerge, gitPullRequest, octagonX, copy, pause, pencil
     case play, quote, stop, triangleAlert, phone, trash, minus, qrcode
 
@@ -56,7 +56,6 @@ public enum AppIcon: String, CaseIterable, Sendable {
         case .filter: return "line.3.horizontal.decrease"
         case .filterCircle: return "line.3.horizontal.decrease.circle"
         case .history: return "clock.arrow.circlepath"
-        case .sparkles: return "sparkles"
         case .arrowDownCircle: return "arrow.down.circle"
         case .arrowUpCircle: return "arrow.up.circle"
         case .chevronsUpDown: return "chevron.up.chevron.down"
@@ -125,7 +124,6 @@ public enum AppIcon: String, CaseIterable, Sendable {
         case .filter: return "list-filter"
         case .filterCircle: return "filter-circle"
         case .history: return "history"
-        case .sparkles: return "sparkles"
         case .arrowDownCircle: return "circle-arrow-down"
         case .arrowUpCircle: return "circle-arrow-up"
         case .chevronsUpDown: return "chevrons-up-down"

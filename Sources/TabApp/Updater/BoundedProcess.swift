@@ -3,7 +3,7 @@ import Foundation
 
 /// Runs a program in its own process group with stdin closed, collecting
 /// its output up to a size limit and within a time limit. The whole group is
-/// killed when it ends, is cancelled, or overruns, so helpers it started
+/// killed when it ends or overruns, so helpers it started
 /// can't outlive it or hold its output open.
 enum BoundedProcess {
     /// How long to keep reading after the program exits while helpers it
@@ -16,47 +16,22 @@ enum BoundedProcess {
     }
 
     enum Failure: Error, Equatable {
-        case cancelled
         case timedOut
         case tooLarge
         case exited(String)
         case io(String)
-
-        func describe(provider: String) -> String {
-            switch self {
-            case .cancelled: return "Cancelled"
-            case .timedOut: return "\(provider) did not respond within five minutes"
-            case .tooLarge: return "\(provider)'s response exceeded the 256 KB output limit"
-            case .exited(let detail): return "\(provider) failed: \(detail)"
-            case .io(let error): return error
-            }
-        }
-    }
-
-    private static let groupsLock = NSLock()
-    nonisolated(unsafe) private static var groups = Set<pid_t>()
-
-    /// Kills every program still running, such as when the app quits.
-    static func terminateAll() {
-        let running = groupsLock.withLock { groups }
-        for group in running { killpg(group, SIGKILL) }
     }
 
     /// Blocks until the program is done; call it off the main thread.
     static func run(program: String, arguments: [String], environment: [String: String], directory: String,
-                    timeout: TimeInterval, limit: Int, cancellation: AICancellation) throws -> Output {
-        guard !cancellation.isCancelled else { throw Failure.cancelled }
+                    timeout: TimeInterval, limit: Int) throws -> Output {
         guard !([program, directory] + arguments + environment.flatMap { [$0.key, $0.value] }).contains(where: { $0.contains("\0") }) else {
             throw Failure.io("Process arguments contain a null byte")
         }
         let pid: pid_t
         let pipes: [Int32]
         (pid, pipes) = try spawn(program: program, arguments: arguments, environment: environment, directory: directory)
-        groupsLock.withLock { _ = groups.insert(pid) }
-        defer {
-            killpg(pid, SIGKILL)
-            groupsLock.withLock { _ = groups.remove(pid) }
-        }
+        defer { killpg(pid, SIGKILL) }
         let collector = Collector(limit: limit)
         let readers = DispatchGroup()
         for (index, descriptor) in pipes.enumerated() {
@@ -72,9 +47,7 @@ enum BoundedProcess {
         var exitedAt: TimeInterval?
         var outcome: Result<Int32, Failure>?
         while outcome == nil {
-            if cancellation.isCancelled {
-                outcome = .failure(.cancelled)
-            } else if ProcessInfo.processInfo.systemUptime >= deadline {
+            if ProcessInfo.processInfo.systemUptime >= deadline {
                 outcome = .failure(.timedOut)
             } else if collector.overflowed {
                 outcome = .failure(.tooLarge)

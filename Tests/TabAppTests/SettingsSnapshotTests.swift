@@ -19,7 +19,6 @@ final class SettingsSnapshotTests: XCTestCase {
         let host = PreviewSettingsHost()
         host.profiles.append(BrowserProfileSummary(id: "work", name: "Work"))
         host.importSources = [BrowserImportSource(name: "Safari", supportsCookies: false), BrowserImportSource(name: "Chrome", supportsCookies: true)]
-        host.projects = [SettingsProject(id: "demo", name: "Tab")]
         host.remoteAccess = RemoteAccessState(revision: 1, settings: RemoteAccessSettings(enabled: true), status: .listening)
         host.remoteAccess.devices = [PairedDevice(id: DeviceId(), name: "My iPhone", pairedAt: 1, connected: true)]
         let theme = AppTheme.shared

@@ -41,19 +41,6 @@ public struct BrowserImportSource: Equatable, Sendable {
     }
 }
 
-/// A project whose pull request prompt Settings can override: a top-level
-/// project (worktrees use their parent's prompt).
-public struct SettingsProject: Equatable, Sendable {
-    /// The project id, the key under `ai.projectPrPrompts`.
-    public var id: String
-    public var name: String
-
-    public init(id: String, name: String) {
-        self.id = id
-        self.name = name
-    }
-}
-
 /// What Settings needs from the rest of the app: the server, mobile access,
 /// browser profiles and the app model. Settings reads and writes
 /// `settings.json` and `terminal.json` itself and tells the host after each
@@ -108,13 +95,8 @@ public protocol SettingsHost: AnyObject {
     /// Imports history and bookmarks, or cookies, into the default profile.
     func importBrowserData(from source: BrowserImportSource, cookies: Bool) async throws
 
-    // MARK: Other
+    // MARK: Backup
 
-    /// Ids of the AI command-line tools found on this Mac, such as `claude`.
-    func installedAIProviders() -> [String]
-    /// The projects that can have their own pull request prompt, in sidebar
-    /// order.
-    func aiPromptProjects() -> [SettingsProject]
     /// The local projects with their layouts and workspaces, as the backup
     /// stores them (`state.json`'s configuration).
     func backupState() throws -> Data
@@ -133,7 +115,6 @@ public final class PreviewSettingsHost: SettingsHost {
     public private(set) var previews: [TerminalSettings] = []
     public private(set) var serverActions: [String] = []
     public var state: Data?
-    public var projects: [SettingsProject] = []
     public var importSources: [BrowserImportSource] = []
 
     public init() {}
@@ -181,8 +162,6 @@ public final class PreviewSettingsHost: SettingsHost {
     public func browserImportSources() -> [BrowserImportSource] { importSources }
     public func importBrowserData(from source: BrowserImportSource, cookies: Bool) async throws {}
 
-    public func installedAIProviders() -> [String] { [] }
-    public func aiPromptProjects() -> [SettingsProject] { projects }
     public func backupState() throws -> Data {
         if let state { return state }
         return try AppStateStore.encode(AppState.bootstrap())

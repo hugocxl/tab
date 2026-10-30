@@ -3,7 +3,7 @@ import TabCore
 
 /// A page of the Settings window, in sidebar order.
 public enum SettingsCategory: String, CaseIterable, Sendable {
-    case general, appearance, terminal, keyboard, browser, server, mobile, ai, backup, changelog
+    case general, appearance, terminal, keyboard, browser, server, mobile, backup, changelog
 
     public var title: String {
         switch self {
@@ -14,7 +14,6 @@ public enum SettingsCategory: String, CaseIterable, Sendable {
         case .browser: return "Browser"
         case .server: return "Server"
         case .mobile: return "Mobile"
-        case .ai: return "AI"
         case .backup: return "Backup & Restore"
         case .changelog: return "Changelog"
         }
@@ -31,7 +30,6 @@ public enum SettingsCategory: String, CaseIterable, Sendable {
         case .browser: return ("globe", 0x5BB2FF, 0x1F6FEB, 0xFFFFFF)
         case .server: return ("server.rack", 0x4FD1D5, 0x1E9AA0, 0xFFFFFF)
         case .mobile: return ("iphone", 0x6BDB7E, 0x2FA84A, 0xFFFFFF)
-        case .ai: return ("sparkles", 0xD07BFF, 0x9437F0, 0xFFFFFF)
         case .backup: return ("clock.arrow.circlepath", 0x9B9BA0, 0x5F5F64, 0xFFFFFF)
         case .changelog: return ("list.bullet.rectangle.portrait.fill", 0xFFC94A, 0xF29D1B, 0xFFFFFF)
         }
@@ -149,14 +147,6 @@ public enum SettingsCatalog {
         SettingItem("mobile-status", "Status", "Whether phones can reach this device right now.", .mobile, "Access"),
         SettingItem("mobile-pair", "Pair a phone", "Show a one-time code to scan with the Tab app.", .mobile, "Pairing"),
         SettingItem("mobile-devices", "Paired devices", "Phones that can connect. Revoking one disconnects it immediately.", .mobile, "Devices"),
-        // AI
-        SettingItem("ai-commit-provider", "Commit provider", "AI CLI that drafts commit messages. Auto uses the first installed provider.", .ai, "Commit"),
-        SettingItem("ai-commit-prompt", "Commit prompt", "AI drafts only the commit message. Tab commits, and pushes when you choose to. An empty prompt uses the default. Do not include secrets.", .ai, "Commit"),
-        SettingItem("ai-commit-include-unstaged", "Include unstaged changes", "Stage every change before an AI commit, not only what is already staged.", .ai, "Commit"),
-        SettingItem("ai-commit-push", "Push after committing", "Push the branch once an AI commit is made.", .ai, "Commit"),
-        SettingItem("ai-create-pr-provider", "Pull request provider", "AI CLI that drafts pull requests. Auto uses the first installed provider.", .ai, "Create Pull Request"),
-        SettingItem("ai-create-pr-prompt", "Pull request prompt", "AI drafts the title, summary, branch name, and target branch. You review them before Tab commits, pushes, and opens the pull request. An empty prompt uses the default.", .ai, "Create Pull Request"),
-        SettingItem("ai-project-pr-prompt", "Project pull request prompt", "Instructions for one project's pull requests, used instead of the pull request prompt above. Its worktrees use it too. Empty uses the general prompt.", .ai, "Create Pull Request"),
         // Backup
         SettingItem("backup-export", "Export backup", "Save settings, themes, projects, workspaces, and terminal layouts to a .tab file.", .backup, "Backup & Restore"),
         SettingItem("backup-restore", "Restore backup", "Choose a .tab backup. It is restored the next time Tab opens, with a recovery copy in the Backups folder.", .backup, "Backup & Restore"),
@@ -186,29 +176,4 @@ public enum SettingsCatalog {
     public static func search(_ query: String) -> [SettingItem] {
         searchIndex().filter { $0.matches(query) }
     }
-}
-
-/// AI actions whose provider and prompt Settings edits.
-public enum AIAction: String, CaseIterable, Sendable {
-    case commit
-    case createPullRequest = "create_pr"
-
-    public var defaultPrompt: String {
-        switch self {
-        case .commit:
-            return "Write a concise commit message that explains the intent of all staged changes. Follow the repository's existing commit-message style."
-        case .createPullRequest:
-            return "Write an accurate pull request title and a concise summary of the changes. Choose a short descriptive branch name and the appropriate target branch."
-        }
-    }
-
-    var providerSetting: String { self == .commit ? "ai-commit-provider" : "ai-create-pr-provider" }
-    var promptSetting: String { self == .commit ? "ai-commit-prompt" : "ai-create-pr-prompt" }
-
-    /// AI command-line tools, as `(id, name)`.
-    public static let providers: [(id: String, name: String)] = [
-        ("claude", "Claude Code"), ("codex", "Codex"), ("opencode", "OpenCode"), ("copilot", "GitHub Copilot"),
-        ("cursor", "Cursor"), ("droid", "Droid"), ("grok", "Grok"), ("kiro", "Kiro CLI"), ("pi", "Pi"),
-        ("xal", "Xal"), ("antigravity", "Antigravity"), ("omp", "Oh My Pi"),
-    ]
 }

@@ -19,7 +19,6 @@ final class SettingsControlsTests: XCTestCase {
         dirs = TabDirs(root: root)
         host = PreviewSettingsHost()
         host.remoteAccess = RemoteAccessState(revision: 1, settings: RemoteAccessSettings(enabled: true), status: .listening)
-        host.projects = [SettingsProject(id: "11111111-1111-1111-1111-111111111111", name: "demo")]
     }
 
     override func tearDown() async throws {
@@ -155,8 +154,6 @@ final class SettingsControlsTests: XCTestCase {
             "confirm-process": "settings.json:window.confirmRunningProcess",
             "font-ligatures": "terminal.json:font.features",
             "browser-enabled": "settings.json:browser.enabled",
-            "ai-commit-push": "settings.json:ai.commit.push",
-            "ai-project-pr-prompt#1": "settings.json:ai.projectPrPrompts.11111111-1111-1111-1111-111111111111",
             "mobile-access": "remote",
             "default-shell": "server",
         ]

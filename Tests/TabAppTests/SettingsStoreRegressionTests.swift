@@ -117,13 +117,13 @@ final class SettingsStoreRegressionTests: XCTestCase {
 
     func testClosingSettingsSavesFieldsBeingTyped() throws {
         let controller = SettingsWindowController(store: store())
-        for (category, id, text) in [(SettingsCategory.ai, "ai-commit-prompt", "My unfinished prompt"), (.terminal, "palette-0", "#123456")] {
+        for (category, id, text) in [(SettingsCategory.general, "worktree-template", "../{branch}"), (.terminal, "palette-0", "#123456")] {
             controller.select(category)
             let field = try XCTUnwrap(controller.model.fields[id])
             controller.model.editing(id) { field.commit(text) }
         }
         controller.window?.close()
-        XCTAssertEqual(try Settings.load(dirs.settings).ai.prompts["commit"], "My unfinished prompt")
+        XCTAssertEqual(try Settings.load(dirs.settings).worktrees.defaultLocation.pathTemplate, "../{branch}")
         XCTAssertEqual(try TerminalSettings.load(dirs.terminalSettings).options.palette[0]?.hex.lowercased(), "#123456")
     }
 
@@ -292,7 +292,5 @@ private final class SettingsWriteHost: SettingsHost {
     func clearBrowserProfileData(_ id: String) async throws { try await base.clearBrowserProfileData(id) }
     func browserImportSources() -> [BrowserImportSource] { [] }
     func importBrowserData(from source: BrowserImportSource, cookies: Bool) async throws {}
-    func installedAIProviders() -> [String] { [] }
-    func aiPromptProjects() -> [SettingsProject] { [] }
     func backupState() throws -> Data { try base.backupState() }
 }

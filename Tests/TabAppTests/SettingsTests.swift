@@ -225,7 +225,7 @@ final class SettingsTests: XCTestCase {
         model.select(.terminal)
         model.select(.mobile)
         model.select(.mobile)
-        model.select(.ai)
+        model.select(.backup)
         model.goBack()
         XCTAssertEqual(model.category, .mobile)
         model.goBack()

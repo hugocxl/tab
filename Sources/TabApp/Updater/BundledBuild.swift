@@ -9,7 +9,7 @@ enum BundledBuild {
             program: executable.path, arguments: ["--build-info"],
             environment: ProcessInfo.processInfo.environment,
             directory: executable.deletingLastPathComponent().path,
-            timeout: 5, limit: 65_536, cancellation: AICancellation()
+            timeout: 5, limit: 65_536
         )
         return try JSONDecoder().decode(BuildInfo.self, from: output.stdout)
     }
@@ -32,7 +32,7 @@ enum BundledBuild {
         let output = try BoundedProcess.run(
             program: executable.path, arguments: ["--version"],
             environment: ProcessInfo.processInfo.environment, directory: directory.path,
-            timeout: 5, limit: 65_536, cancellation: AICancellation()
+            timeout: 5, limit: 65_536
         )
         guard String(decoding: output.stdout, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines) == "tabd \(version)" else {
             throw UpdateError.invalidBundle("The bundled client and server do not match the release.")

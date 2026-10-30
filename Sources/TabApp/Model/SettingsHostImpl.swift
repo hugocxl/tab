@@ -97,18 +97,7 @@ public final class SettingsHostImpl: SettingsHost {
         try await model.browserProfiles.importBrowserData(from: source, cookies: cookies)
     }
 
-    // MARK: Other
-
-    /// The AI command-line tools found on this Mac.
-    public func installedAIProviders() -> [String] {
-        model.ai.installed.map(\.id)
-    }
-
-    public func aiPromptProjects() -> [SettingsProject] {
-        model.state.projects
-            .filter { !$0.home && $0.parentId == nil }
-            .map { SettingsProject(id: $0.id.description, name: $0.name) }
-    }
+    // MARK: Backup
 
     public func backupState() throws -> Data {
         try BackupStateMerge.backup(model.state, terminalFontSizes: model.terminalFontSizes)

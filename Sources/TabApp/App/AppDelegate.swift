@@ -116,7 +116,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         terminating = true
         model?.saveNow()
         model?.browserProfiles.saveHistories()
-        model?.ai.cancelAll()
         model?.updater.stop()
         socket?.close()
     }

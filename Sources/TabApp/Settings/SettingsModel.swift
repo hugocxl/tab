@@ -20,8 +20,6 @@ final class SettingsModel: ObservableObject {
     var bindingDraft: BindingDraft?
     var codepointDraft: CodepointDraft?
     var profileName = ""
-    /// The project whose pull request prompt the AI page edits.
-    var promptProject: String?
     /// The bundled changelog, read when its page first opens.
     private(set) lazy var changelog: Changelog? = Changelog.bundled()
 
@@ -125,7 +123,6 @@ final class SettingsModel: ObservableObject {
         case .browser: buildBrowser(builder)
         case .server: buildServer(builder)
         case .mobile: buildMobile(builder)
-        case .ai: buildAI(builder)
         case .backup: buildBackup(builder)
         case .changelog: break
         }

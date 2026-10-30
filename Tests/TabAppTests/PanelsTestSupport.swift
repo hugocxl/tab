@@ -34,7 +34,6 @@ final class StubNativeHost: FilesPanelHost, SourceControlHost, EditorHost, DiffH
     var nativeTransport: NativeTransport? { transport }
     let theme = AppTheme(systemIsDark: true)
     var codeFont: NSFont { .monospacedSystemFont(ofSize: 12, weight: .regular) }
-    var canGenerateCommitMessage = false
     var toasts: [String] = []
     var confirmAnswer = true
     var opened: [String] = []
@@ -52,7 +51,6 @@ final class StubNativeHost: FilesPanelHost, SourceControlHost, EditorHost, DiffH
     func closeFilesPanel() {}
     func openDiff(path: String, staged: Bool) { diffs.append((path, staged)) }
     func repositoryDidChange() { repositoryChanges += 1 }
-    func generateCommitMessage() async throws -> String { "Generated" }
     func closeSourceControl() {}
     func editorTitleDidChange(_ title: String, dirty: Bool) { titles.append(title) }
 }
