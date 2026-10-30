@@ -488,12 +488,6 @@ public struct KeyChord: Hashable, Comparable, Codable, Sendable, CustomStringCon
     /// How the menu bar shows it, such as `⌘⇧P`.
     public var display: String { ShortcutCatalog.displayChord(rawValue) }
 
-    /// Whether the chord uses Command, Control or Option, as command
-    /// shortcuts must.
-    public var hasCommandModifier: Bool {
-        !modifiers.intersection([.command, .control, .option]).isEmpty
-    }
-
     public static func < (lhs: KeyChord, rhs: KeyChord) -> Bool { lhs.rawValue < rhs.rawValue }
 
     private static let namedKeys: Set<String> = [

@@ -99,17 +99,10 @@ final class ShortcutTests: XCTestCase {
         }
     }
 
-    func testACommandKeepsAKeyANewerDefaultClaimsButCannotTakeOneInUse() throws {
-        let key = try XCTUnwrap(ShortcutId.newTabInProject.definition.keys.first)
-        let chord = try KeyChord(key)
-        let keymap = try Keymap.fromOverrides(["command.tests": key])
-        XCTAssertEqual(keymap.binding("command.tests"), chord)
-        XCTAssertNil(keymap.chord(.newTabInProject))
-        XCTAssertThrowsError(try keymap.withBinding("command.other", KeyChord("cmd-t")))
-        let moved = try keymap.withBinding("command.tests", KeyChord("ctrl-alt-f24"))
-        XCTAssertEqual(moved.chord(.newTabInProject), chord)
-        XCTAssertThrowsError(try moved.withBinding("command.tests", chord))
-        XCTAssertThrowsError(try Keymap.fromOverrides(["command.tests": "shift-f5"]), "commands need cmd, ctrl or alt")
+    func testRemovedActionsStillLoadAndUnknownOnesAreRefused() throws {
+        let keymap = try Keymap.fromOverrides(["command.tests": "cmd-ctrl-t", "open_configuration": "cmd-ctrl-o"])
+        XCTAssertNil(keymap.binding("command.tests"))
+        XCTAssertTrue(keymap.overrides.isEmpty)
         XCTAssertThrowsError(try Keymap.fromOverrides(["no_such_action": "cmd-j"]))
         XCTAssertThrowsError(try Keymap.fromOverrides(["split_right": "cmd-"]))
         XCTAssertThrowsError(try Keymap.fromOverrides(["split_right": "cmd-t"]), "two actions on one key")

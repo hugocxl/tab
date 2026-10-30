@@ -1,8 +1,7 @@
 import Foundation
 
 /// The app's shortcuts: each command's primary key, the catalog's defaults
-/// with the user's changes from `settings.json` → `keymap` applied. Custom
-/// commands bind as `command.<id>`.
+/// with the user's changes from `settings.json` → `keymap` applied.
 public struct Keymap: Equatable, Sendable, Codable {
     /// The effective primary key of each bound action.
     public private(set) var bindings: [String: KeyChord]
@@ -23,7 +22,8 @@ public struct Keymap: Equatable, Sendable, Codable {
         return bindings
     }()
 
-    /// Actions that no longer exist; older files that bind them still load.
+    /// Actions that no longer exist; older files that bind them, or removed
+    /// custom commands (`command.<id>`), still load.
     static let retired: Set<String> = [
         "toggle_composer", "composer.submit", "composer.insert", "composer.close", "composer.voice",
         "project_colors.previous_color", "project_colors.next_color",
@@ -46,16 +46,10 @@ public struct Keymap: Equatable, Sendable, Codable {
     }
 
     /// The keymap with `id` bound to `chord`, or reset to its default when
-    /// `chord` is `nil`. A command can't take a key a built-in action uses
-    /// now; one that had its key before a built-in default claimed it keeps
-    /// it, and that default yields.
+    /// `chord` is `nil`.
     public func withBinding(_ id: String, _ chord: KeyChord?) throws -> Keymap {
-        let isCommand = Self.isCommandAction(id)
-        guard ShortcutCatalog.find(id) != nil || isCommand else {
+        guard ShortcutCatalog.find(id) != nil else {
             throw SettingsError("keymap", "unknown action")
-        }
-        if isCommand, let chord, let other = builtinKeys()[chord.rawValue] {
-            throw SettingsError("keymap.\(id)", "\(chord) is also bound to keymap.\(other)")
         }
         var overrides = self.overrides
         overrides[id] = chord?.rawValue
@@ -80,14 +74,15 @@ public struct Keymap: Equatable, Sendable, Codable {
     /// The keymap for a user's changes, refusing unknown actions, invalid keys
     /// and keys bound twice where both apply.
     public static func fromOverrides(_ overrides: [String: String]) throws -> Keymap {
-        let overrides = overrides.filter { !retired.contains($0.key) && !$0.key.hasPrefix("extension.") }
+        let overrides = overrides.filter {
+            !retired.contains($0.key) && !$0.key.hasPrefix("extension.") && !$0.key.hasPrefix("command.")
+        }
         var keymap = Keymap()
         keymap.overrides = overrides
         var explicit: [String: KeyChord] = [:]
         for (name, value) in overrides {
             let key = "keymap.\(name)"
-            let isCommand = isCommandAction(name)
-            guard ShortcutCatalog.find(name) != nil || isCommand else {
+            guard ShortcutCatalog.find(name) != nil else {
                 throw SettingsError(key, "unknown action")
             }
             let chord: KeyChord
@@ -95,9 +90,6 @@ public struct Keymap: Equatable, Sendable, Codable {
                 chord = try KeyChord(value)
             } catch {
                 throw SettingsError(key, "\(error)")
-            }
-            if isCommand && !["cmd-", "ctrl-", "alt-"].contains(where: chord.rawValue.hasPrefix) {
-                throw SettingsError(key, "command shortcuts must include Command, Control, or Option")
             }
             explicit[name] = chord
         }
@@ -114,7 +106,6 @@ public struct Keymap: Equatable, Sendable, Codable {
                 throw SettingsError("keymap.\(id)", "\(chord) is also bound to keymap.\(other)")
             }
         }
-        try keymap.validateCommandAliases()
         let defaults = defaultBindings
         keymap.overrides = keymap.overrides.filter { id, chord in
             chord.isEmpty || (try? KeyChord(chord)) != defaults[id]
@@ -122,36 +113,10 @@ public struct Keymap: Equatable, Sendable, Codable {
         return keymap
     }
 
-    private func validateCommandAliases() throws {
-        guard bindings.keys.contains(where: Self.isCommandAction) else { return }
-        let builtins = builtinKeys()
-        for (id, chord) in bindings.sorted(by: { $0.key < $1.key }) where Self.isCommandAction(id) {
-            if let other = builtins[chord.rawValue] {
-                throw SettingsError("keymap.\(id)", "\(chord) is also bound to keymap.\(other)")
-            }
-        }
-    }
-
-    /// Each key a built-in action uses in some context, and that action.
-    private func builtinKeys() -> [String: String] {
-        var builtins: [String: String] = [:]
-        for shortcut in ShortcutCatalog.all {
-            for context in shortcut.contexts {
-                for key in keys(shortcut.name, context: context) {
-                    builtins[key] = shortcut.name
-                }
-            }
-        }
-        return builtins
-    }
-
     /// The keys that run `id` in `context`: a rebound action's one key, or the
     /// defaults that apply there and that no other binding has taken.
     public func keys(_ id: String, context: String?) -> [String] {
-        guard let primary = bindings[id] else { return [] }
-        guard let shortcut = ShortcutCatalog.find(id) else {
-            return Self.isCommandAction(id) ? [primary.rawValue] : []
-        }
+        guard let primary = bindings[id], let shortcut = ShortcutCatalog.find(id) else { return [] }
         guard shortcut.defaultChord == primary else { return [primary.rawValue] }
         return zip(shortcut.keys, shortcut.keyContexts)
             .filter { $0.1.contains(context) }
@@ -186,14 +151,7 @@ public struct Keymap: Equatable, Sendable, Codable {
         try container.encode(overrides)
     }
 
-    /// Whether `id` names a custom command's shortcut, `command.<id>`.
-    public static func isCommandAction(_ id: String) -> Bool {
-        guard id.hasPrefix("command.") else { return false }
-        return CustomCommand.isValidId(String(id.dropFirst("command.".count)))
-    }
-
     static func sameScope(_ left: String, _ right: String) -> Bool {
-        if isCommandAction(left) || isCommandAction(right) { return true }
         guard let left = ShortcutCatalog.find(left), let right = ShortcutCatalog.find(right) else { return false }
         return left.overlaps(right)
     }

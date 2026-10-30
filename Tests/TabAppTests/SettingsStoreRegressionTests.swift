@@ -127,21 +127,12 @@ final class SettingsStoreRegressionTests: XCTestCase {
         XCTAssertEqual(try TerminalSettings.load(dirs.terminalSettings).options.palette[0]?.hex.lowercased(), "#123456")
     }
 
-    func testTerminalBindingEditorPersistsAndRefusesCommandConflicts() throws {
+    func testTerminalBindingEditorPersists() throws {
         let store = store()
         let page = SettingsModel(store: store)
         page.select(.terminal)
-        let chord = try KeyChord("cmd-ctrl-alt-f9")
-        XCTAssertTrue(store.saveCommand(CustomCommand(id: "tests", name: "Tests", command: "swift test")))
-        XCTAssertNil(store.setBinding("command.tests", chord))
-        let before = try Data(contentsOf: dirs.terminalSettings)
-        page.bindingDraft = BindingDraft(chord: chord, action: "text", parameter: "hello")
-        page.saveBinding()
-        XCTAssertNotNil(store.errors["terminal-keybindings"])
-        XCTAssertEqual(try Data(contentsOf: dirs.terminalSettings), before)
-        XCTAssertNotNil(page.bindingDraft)
         let free = try KeyChord("cmd-ctrl-alt-f10")
-        page.bindingDraft?.chord = free
+        page.bindingDraft = BindingDraft(chord: free, action: "text", parameter: "hello")
         page.saveBinding()
         XCTAssertNil(page.bindingDraft)
         XCTAssertEqual(try TerminalSettings.load(dirs.terminalSettings).keybindings.bindings[free], try TerminalAction("text:hello"))

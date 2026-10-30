@@ -179,7 +179,7 @@ Everything lives in one profile folder: `~/Library/Application Support/Tab`
 | `server.log`, `server.sock`, `server.pid` | Server log, socket, lock |
 | `sessions/` | Projects, sessions, saved screens and history |
 | `remote.json` | Mobile access settings and paired phones (token hashes) |
-| `settings.json` | App preferences, `keymap`, commands, remote servers |
+| `settings.json` | App preferences, `keymap`, remote servers |
 | `terminal.json` | Terminal preferences and key bindings |
 | `themes/` | Custom themes in Ghostty's theme format (`key = value`) |
 | `state.json` | Projects, layouts, workspaces, window state |

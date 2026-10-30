@@ -4,7 +4,6 @@ import Foundation
 /// missing and unknown keys, so files written by older or newer builds load.
 public struct Settings: Codable, Equatable, Sendable {
     public var ai: AISettings
-    public var commands: [CustomCommand]
     public var appearance: Appearance
     public var window: WindowSettings
     public var keymap: Keymap
@@ -19,7 +18,6 @@ public struct Settings: Codable, Equatable, Sendable {
 
     public init() {
         ai = AISettings()
-        commands = []
         appearance = Appearance()
         window = WindowSettings()
         keymap = Keymap()
@@ -36,7 +34,6 @@ public struct Settings: Codable, Equatable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let defaults = Settings()
         ai = try container.value(.ai, defaults.ai)
-        commands = try container.value(.commands, defaults.commands)
         appearance = try container.value(.appearance, defaults.appearance)
         window = try container.value(.window, defaults.window)
         keymap = try container.value(.keymap, defaults.keymap)
@@ -70,7 +67,6 @@ public struct Settings: Codable, Equatable, Sendable {
 
     public func validate() throws {
         try browser.validate()
-        try validateCommands()
         try ServerEntry.validate(servers)
     }
 

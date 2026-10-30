@@ -166,14 +166,8 @@ public final class SettingsStore {
     @discardableResult
     public func setBinding(_ id: String, _ chord: KeyChord?) -> String? {
         if let chord {
-            if Keymap.isCommandAction(id) && !chord.hasCommandModifier {
-                return refuse(id, "Command shortcuts must include Command, Control, or Option.")
-            }
             if let other = settings.keymap.conflict(for: id, chord: chord), other != id {
-                return refuse(id, "\(chord.display) is already used by \(Self.actionName(other, commands: settings.commands)).")
-            }
-            if Keymap.isCommandAction(id), terminal.keybindings.action(for: chord) != nil {
-                return refuse(id, "\(chord.display) is a terminal key binding. Choose a different shortcut.")
+                return refuse(id, "\(chord.display) is already used by \(ShortcutCatalog.find(other)?.label ?? other).")
             }
         }
         do {
@@ -195,49 +189,6 @@ public final class SettingsStore {
         errors[id] = message
         changed()
         return message
-    }
-
-    /// How a keymap action is named on the page.
-    static func actionName(_ id: String, commands: [CustomCommand]) -> String {
-        if let shortcut = ShortcutCatalog.find(id) { return shortcut.label }
-        if let command = commands.first(where: { $0.shortcutId == id }) { return command.name }
-        return id
-    }
-
-    // MARK: Commands
-
-    /// Adds `command`, or replaces the one with its id.
-    @discardableResult
-    public func saveCommand(_ command: CustomCommand) -> Bool {
-        attempt("commands") {
-            var next = settings
-            var command = command
-            command.name = command.name.trimmingCharacters(in: .whitespaces)
-            command.command = command.command.trimmingCharacters(in: .whitespaces)
-            try command.validate()
-            if let index = next.commands.firstIndex(where: { $0.id == command.id }) {
-                next.commands[index] = command
-            } else {
-                next.commands.append(command)
-            }
-            try next.saveCommands(to: dirs.settings)
-            settings = next
-            applySettings()
-        }
-    }
-
-    public func removeCommand(_ id: String) {
-        attempt("commands") {
-            var next = settings
-            guard let command = next.commands.first(where: { $0.id == id }) else { return }
-            next.commands.removeAll { $0.id == id }
-            if next.keymap.binding(command.shortcutId) != nil {
-                next.keymap = try next.keymap.withBinding(command.shortcutId, nil)
-            }
-            try next.saveCommands(to: dirs.settings)
-            settings = next
-            applySettings()
-        }
     }
 
     // MARK: Terminal
@@ -278,9 +229,6 @@ public final class SettingsStore {
     }
 
     private func saveTerminal(_ next: TerminalSettings) throws {
-        if next.keybindings != terminal.keybindings {
-            try settings.validateCommandShortcuts(terminal: next)
-        }
         try next.save(to: dirs.terminalSettings)
         terminal = next
         host?.terminalSettingsDidChange(next)

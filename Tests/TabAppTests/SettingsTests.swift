@@ -28,16 +28,14 @@ final class SettingsTests: XCTestCase {
     // MARK: Search
 
     func testSearchFindsEverySettingByItsLabel() {
-        let commands = [CustomCommand(id: "tests", name: "Run tests", command: "swift test")]
-        let index = SettingsCatalog.searchIndex(commands: commands)
+        let index = SettingsCatalog.searchIndex()
         XCTAssertEqual(Set(index.map(\.id)).count, index.count, "row ids must be unique")
         for item in index {
-            let results = SettingsCatalog.search(item.label, commands: commands)
+            let results = SettingsCatalog.search(item.label)
             XCTAssertTrue(results.contains(item), "searching “\(item.label)” misses \(item.id)")
         }
-        XCTAssertEqual(SettingsCatalog.search("Run tests", commands: commands).first?.id, "command.tests")
-        XCTAssertTrue(SettingsCatalog.search("ligatures", commands: []).contains { $0.id == "font-ligatures" })
-        XCTAssertTrue(SettingsCatalog.search("zzz-no-such-setting", commands: []).isEmpty)
+        XCTAssertTrue(SettingsCatalog.search("ligatures").contains { $0.id == "font-ligatures" })
+        XCTAssertTrue(SettingsCatalog.search("zzz-no-such-setting").isEmpty)
     }
 
     func testEveryRowAPageShowsIsInTheSearchIndex() async throws {
@@ -55,7 +53,7 @@ final class SettingsTests: XCTestCase {
             shown.formUnion(build.rowIds)
         }
         let conditional: Set<String> = ["terminal-import-notes"]
-        for item in SettingsCatalog.items where !conditional.contains(item.id) && item.id != "add-command" {
+        for item in SettingsCatalog.items where !conditional.contains(item.id) {
             XCTAssertTrue(shown.contains(item.id), "\(item.id) is in the catalog but no page shows it")
         }
 
@@ -103,16 +101,6 @@ final class SettingsTests: XCTestCase {
         recorder.record(try XCTUnwrap(store.settings.keymap.binding("split_down")))
         XCTAssertEqual(recorder.chord, original)
         XCTAssertNotNil(store.errors["shortcut.split_right"])
-    }
-
-    func testCommandShortcutsNeedAModifier() throws {
-        let store = makeStore()
-        XCTAssertTrue(store.saveCommand(CustomCommand(id: "build", name: "Build", command: "make")))
-        XCTAssertNotNil(store.setBinding("command.build", try KeyChord("f5")))
-        XCTAssertNil(store.setBinding("command.build", try KeyChord("cmd-alt-ctrl-b")))
-        store.removeCommand("build")
-        XCTAssertNil(store.settings.keymap.binding("command.build"))
-        XCTAssertTrue(try Settings.load(dirs.settings).commands.isEmpty)
     }
 
     // MARK: Saving

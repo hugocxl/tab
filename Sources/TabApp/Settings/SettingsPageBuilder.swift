@@ -45,7 +45,7 @@ final class SettingsPageBuilder {
         self.store = store
         self.query = query.trimmingCharacters(in: .whitespaces).lowercased()
         self.category = category
-        let index = SettingsCatalog.searchIndex(commands: store.settings.commands)
+        let index = SettingsCatalog.searchIndex()
         items = Dictionary(index.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
     }
 
@@ -111,7 +111,7 @@ final class SettingsPageBuilder {
     /// A section's title: its name, or "Page › Section" in search results.
     func title(_ group: Group) -> String? {
         if isSearching { return "\(group.category.title) › \(group.section)" }
-        return group.category == .commands ? nil : group.section
+        return group.section
     }
 
     // MARK: Controls

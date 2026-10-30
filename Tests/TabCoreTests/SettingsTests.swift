@@ -147,39 +147,6 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(try Settings.load(path).ai, saved)
     }
 
-    // MARK: Commands
-
-    func testCustomCommandsRejectInvalidDefinitionsWithoutWriting() throws {
-        let directory = try TemporaryDirectory()
-        let path = try directory.write("settings.json", "{}")
-        var settings = try Settings.load(path)
-        let command = CustomCommand(name: "Tests", command: "swift test")
-        settings.commands = [command]
-        settings.keymap = try settings.keymap.withBinding(command.shortcutId, KeyChord("ctrl-alt-t"))
-        try settings.saveCommands(to: path)
-        XCTAssertEqual(try Settings.load(path), settings)
-        let saved = try directory.read("settings.json")
-        for invalid in [
-            CustomCommand(id: "", name: "x", command: "x"),
-            CustomCommand(id: "has space", name: "x", command: "x"),
-            CustomCommand(name: " ", command: "x"),
-            CustomCommand(name: "x", command: "line\nbreak"),
-            CustomCommand(name: "x", command: " "),
-        ] {
-            var changed = settings
-            changed.commands.append(invalid)
-            XCTAssertThrowsError(try changed.saveCommands(to: path))
-        }
-        var duplicate = settings
-        duplicate.commands.append(command)
-        XCTAssertThrowsError(try duplicate.saveCommands(to: path))
-        XCTAssertEqual(try directory.read("settings.json"), saved)
-        var terminal = TerminalSettings()
-        terminal.keybindings.bindings[try KeyChord("ctrl-alt-t")] = .clearScreen
-        XCTAssertThrowsError(try settings.validateCommandShortcuts(terminal: terminal))
-        XCTAssertNoThrow(try settings.validateCommandShortcuts(terminal: TerminalSettings()))
-    }
-
     // MARK: Worktrees
 
     func testWorktreeTemplatesRequireABranchThatSurvivesNormalization() {

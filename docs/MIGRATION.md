@@ -102,7 +102,7 @@ crates. Behavior is 1:1 unless listed under "Intentionally changed".
 ## App: command palette
 
 - [ ] Cmd+Shift+P: root search across commands, files (2+ chars, See all), branches, worktrees, projects, terminals; recent commands; keycaps; Return, Cmd+Return secondary, Cmd+K actions, Escape back/close, Backspace back when empty; 740pt wide, 480pt tall, 72pt from top layout — implemented (`PaletteController`, `PaletteSource`; ranking and page tests; render compared with `palette.png`)
-- [ ] Pages: Go to File (Cmd+P), Find in Files (Cmd+Shift+F, Aa and .* toggles, grouped results), Open Project (Cmd+O), New Terminal in Project (Cmd+Shift+N), Switch Worktree (Cmd+Opt+W), Existing Terminals (Cmd+Opt+T), Switch Branch…, New Branch…, Changes… (Return opens diff, Cmd+K stage/unstage/discard), Change Theme (Cmd+Shift+K), custom Commands — implemented; plus Commit/Create Pull Request with AI and Check for Updates on the root page
+- [ ] Pages: Go to File (Cmd+P), Find in Files (Cmd+Shift+F, Aa and .* toggles, grouped results), Open Project (Cmd+O), New Terminal in Project (Cmd+Shift+N), Switch Worktree (Cmd+Opt+W), Existing Terminals (Cmd+Opt+T), Switch Branch…, New Branch…, Changes… (Return opens diff, Cmd+K stage/unstage/discard), Change Theme (Cmd+Shift+K) — implemented; plus Commit/Create Pull Request with AI and Check for Updates on the root page
 
 ## App: native panels
 
@@ -136,7 +136,6 @@ crates. Behavior is 1:1 unless listed under "Intentionally changed".
 - [ ] General: closing behavior (end or detach), confirm when a program runs, open files with (Tab editor or another app), worktree default location (default/template/folder)
 - [x] Appearance: light and dark theme pickers following macOS appearance, ~490 bundled themes plus custom `themes/`, expand sidebar
 - [x] Keyboard: every shortcut with key glyphs, record a new one, Reset when changed, conflicts refused, saved under `keymap`
-- [x] Commands: custom commands (name, command, optional shortcut) run in a new pane
 - [x] Terminal: everything in the terminal view list above, with sliders previewing while dragging, pixel/percent units, key bindings recorder with actions (send text, …), disable built-ins, Reset terminal settings with confirmation
 - [x] Browser: enable, open terminal links in browser, default profile, search engine, home page, profiles, import
 - [x] Server: default shell, history budget, shell integration, stop and restart with confirmation
@@ -165,6 +164,7 @@ crates. Behavior is 1:1 unless listed under "Intentionally changed".
 - Phone SDK (`codesh-mobile`, Swift/Kotlin bindings): not ported. The server's mobile access is ported, so existing phone clients need a Tab-speaking SDK later.
 - Config files: `settings.json`, `terminal.json`, `server.json`, `state.json` instead of TOML. Themes keep Ghostty's format.
 - Dead settings removed: app layout mode, sidebar vibrancy and level, sidebar collapsed style, status bar visibility, tips visibility, tab-focused expansion. The sidebar is always opaque; there is no status bar.
+- Custom commands dropped: no Commands settings page, palette entries or `command.<id>` shortcuts; older keymaps that bind them still load.
 - Editing settings files by hand dropped: no Edit in… links, no Configuration files buttons, no Open Configuration action, and no reloading the files when the app activates. Settings are changed only in the Settings window.
 - Agents panel settings dropped: Cmd+Opt+A or View → Toggle Agents Panel shows it, and it always lists agents by state (no per-project rows).
 - Sidebar settings dropped: width (drag the sidebar's edge instead), expand worktrees when switching projects, unread worktree indicators, worktree switcher order (always current, then recent, then sidebar order).

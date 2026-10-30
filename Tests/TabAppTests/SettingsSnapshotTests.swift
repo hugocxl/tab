@@ -31,7 +31,6 @@ final class SettingsSnapshotTests: XCTestCase {
         }
         theme.setCatalog(ThemeCatalog.load(customDirectory: nil))
         let store = SettingsStore(dirs: TabDirs(root: root), host: host, theme: theme)
-        XCTAssertTrue(store.saveCommand(CustomCommand(id: "tests", name: "Run tests", command: "swift test")))
         let controller = SettingsWindowController(store: store)
         let window = try XCTUnwrap(controller.window)
         window.setFrameOrigin(NSPoint(x: -20000, y: -20000))

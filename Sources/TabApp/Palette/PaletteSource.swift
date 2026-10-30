@@ -106,7 +106,6 @@ final class PaletteSource: PaletteDataSource {
                                 breadcrumb: server.isLocal ? "Open Project" : "Add Project on \(model.serverName(server) ?? "Server")")
             spec.completesOnTab = true
             return spec
-        case .commands: return PageSpec(page, placeholder: "Run command…", breadcrumb: "Commands")
         }
     }
 
@@ -171,7 +170,6 @@ final class PaletteSource: PaletteDataSource {
         case .newTerminal: return .items(newTerminalItems(query))
         case .themes: return .items(themeItems(query))
         case .addProject(let server): return addProjectContent(server, query)
-        case .commands: return .items(customCommandItems(query))
         }
     }
 
@@ -270,18 +268,7 @@ final class PaletteSource: PaletteDataSource {
         commands.append(RootCommand(id: "remote_servers", title: "Remote Servers…", category: .remote,
                                     target: .run { [weak self] in self?.model.showServersPane() }))
         command(.openSettings, "Open Settings", .settings)
-        for custom in model.settings.commands {
-            commands.append(RootCommand(
-                id: custom.shortcutId, title: custom.name, keywords: custom.command, category: .custom,
-                shortcut: keymap.binding(custom.shortcutId), disabled: missing,
-                target: .run { [weak self] in self?.runCustom(custom) }
-            ))
-        }
         return commands
-    }
-
-    func runCustom(_ command: CustomCommand) {
-        model.newTerminal(in: model.currentProject.id, command: command.command)
     }
 
     private var worktreeSwitcherProject: ProjectId? {
@@ -802,20 +789,6 @@ final class PaletteSource: PaletteDataSource {
             let scheme = theme.scheme
             let colors = [scheme.background, scheme.palette[1], scheme.palette[2], scheme.palette[3]].compactMap { $0?.nsColor }
             item.tile = PaletteTile(.swatches(colors), .none)
-            return item
-        }
-    }
-
-    private func customCommandItems(_ query: String) -> [PaletteItem] {
-        let keymap = model.settings.keymap
-        return rankKeepingOrder(model.settings.commands, key: \.name, query: query, limit: .max).map { entry in
-            let command = entry.item
-            var item = PaletteItem(id: command.id, title: command.name, target: .run { [weak self] in self?.runCustom(command) })
-            item.highlights = entry.ranges
-            item.subtitle = command.command
-            item.shortcut = keymap.binding(command.shortcutId)
-            item.kind = PaletteKind.command.rawValue
-            item.tile = PaletteCategory.custom.tile
             return item
         }
     }

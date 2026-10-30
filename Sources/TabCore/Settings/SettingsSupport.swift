@@ -169,3 +169,9 @@ func readOrCreate(_ url: URL, defaults: () throws -> Data) throws -> Data {
         throw SettingsError(url.path, error.localizedDescription)
     }
 }
+
+extension String {
+    var hasControlCharacter: Bool {
+        unicodeScalars.contains { $0.properties.generalCategory == .control }
+    }
+}

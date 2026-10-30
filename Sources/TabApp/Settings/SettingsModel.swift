@@ -17,7 +17,6 @@ final class SettingsModel: ObservableObject {
     weak var window: NSWindow?
 
     /// Transient editors on the page.
-    var commandDraft: CustomCommand?
     var bindingDraft: BindingDraft?
     var codepointDraft: CodepointDraft?
     var profileName = ""
@@ -123,7 +122,6 @@ final class SettingsModel: ObservableObject {
         case .appearance: buildAppearance(builder)
         case .terminal: buildTerminal(builder)
         case .keyboard: buildKeyboard(builder)
-        case .commands: buildCommands(builder)
         case .browser: buildBrowser(builder)
         case .server: buildServer(builder)
         case .mobile: buildMobile(builder)

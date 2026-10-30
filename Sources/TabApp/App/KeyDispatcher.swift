@@ -8,8 +8,6 @@ enum KeyResolution: Equatable {
     case pane
     /// The app runs a shortcut's action.
     case action(ShortcutId)
-    /// A custom command's shortcut.
-    case command(String)
     /// Normal handling: the focused view, then the menu bar.
     case pass
 }
@@ -33,12 +31,10 @@ final class KeyDispatcher {
         return editing.contains(chord.rawValue)
     }
 
-    static func resolve(chord: KeyChord?, paneTakes: Bool, editingText: Bool, keymap: Keymap,
-                        commands: [CustomCommand]) -> KeyResolution {
+    static func resolve(chord: KeyChord?, paneTakes: Bool, editingText: Bool, keymap: Keymap) -> KeyResolution {
         if paneTakes { return .pane }
         guard let chord else { return .pass }
         if editingText && isTextEditing(chord) { return .pass }
-        if let command = commands.first(where: { keymap.binding($0.shortcutId) == chord }) { return .command(command.id) }
         if let action = keymap.action(for: chord) ?? Self.alternate(chord, keymap: keymap), !menuActions.contains(action) {
             return .action(action)
         }
@@ -95,16 +91,12 @@ final class KeyDispatcher {
         let editingText = window.firstResponder is NSTextView && !(pane?.hasFocus ?? false)
         let paneTakes = !editingText && (pane?.handleKeyFirst(event) ?? false)
         let resolution = Self.resolve(chord: KeyChord(event: event), paneTakes: paneTakes, editingText: editingText,
-                                      keymap: model.settings.keymap, commands: model.settings.commands)
+                                      keymap: model.settings.keymap)
         switch resolution {
         case .pane:
             return true
         case .action(let id):
             return actions.perform(id)
-        case .command(let id):
-            guard let command = model.settings.commands.first(where: { $0.id == id }) else { return false }
-            model.newTerminal(in: model.currentProject.id, command: command.command)
-            return true
         case .pass:
             if event.keyCode == 53, !editingText, !model.nameFilter.isEmpty {
                 actions.clearSidebarFilter()

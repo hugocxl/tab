@@ -3,7 +3,7 @@ import TabCore
 
 /// A page of the Settings window, in sidebar order.
 public enum SettingsCategory: String, CaseIterable, Sendable {
-    case general, appearance, terminal, keyboard, commands, browser, server, mobile, ai, backup, changelog
+    case general, appearance, terminal, keyboard, browser, server, mobile, ai, backup, changelog
 
     public var title: String {
         switch self {
@@ -11,7 +11,6 @@ public enum SettingsCategory: String, CaseIterable, Sendable {
         case .appearance: return "Appearance"
         case .terminal: return "Terminal"
         case .keyboard: return "Keyboard"
-        case .commands: return "Commands"
         case .browser: return "Browser"
         case .server: return "Server"
         case .mobile: return "Mobile"
@@ -29,7 +28,6 @@ public enum SettingsCategory: String, CaseIterable, Sendable {
         case .appearance: return ("paintpalette.fill", 0x3FA2FF, 0xC04BF2, 0xFFFFFF)
         case .terminal: return ("apple.terminal", 0x3A3A3C, 0x151515, 0x5BE37A)
         case .keyboard: return ("command", 0xF7F7F8, 0xDCDCDF, 0x6E6E73)
-        case .commands: return ("chevron.left.forwardslash.chevron.right", 0xFF9E4A, 0xF26A1B, 0xFFFFFF)
         case .browser: return ("globe", 0x5BB2FF, 0x1F6FEB, 0xFFFFFF)
         case .server: return ("server.rack", 0x4FD1D5, 0x1E9AA0, 0xFFFFFF)
         case .mobile: return ("iphone", 0x6BDB7E, 0x2FA84A, 0xFFFFFF)
@@ -131,8 +129,6 @@ public enum SettingsCatalog {
         SettingItem("keybind-clear-defaults", "Disable built-in bindings", "Turn off Tab's built-in terminal keys, such as Command-K to clear the screen, and keep only yours.", .terminal, "Key bindings"),
         SettingItem("terminal-import-notes", "Imported settings", "Notes about terminal settings that could not be applied.", .terminal, "Migration"),
         SettingItem("terminal-reset", "Reset terminal settings", "Return every setting on this page, including key bindings, to its default.", .terminal, "Reset"),
-        // Commands
-        SettingItem("add-command", "Custom commands", "Run a saved shell command in a new tab in the selected project. Assign a direct shortcut or find it in the command palette.", .commands, "Commands"),
         // Browser
         SettingItem("browser-enabled", "Enable built-in browser", "Open web pages in browser tabs and let tab browser commands drive them.", .browser, "General"),
         SettingItem("browser-terminal-links", "Open terminal links in the browser", "Command-click a web link in a terminal to open it in a browser tab instead of your system browser.", .browser, "General"),
@@ -181,19 +177,14 @@ public enum SettingsCatalog {
         }
     }
 
-    /// A custom command's row.
-    public static func commandItem(_ command: CustomCommand) -> SettingItem {
-        SettingItem(command.shortcutId, command.name, command.command, .commands, "Commands")
-    }
-
-    /// Every row the window can show for `commands`.
-    public static func searchIndex(commands: [CustomCommand]) -> [SettingItem] {
-        items + shortcutItems() + commands.map(commandItem)
+    /// Every row the window can show.
+    public static func searchIndex() -> [SettingItem] {
+        items + shortcutItems()
     }
 
     /// The rows matching `query`, in page order.
-    public static func search(_ query: String, commands: [CustomCommand]) -> [SettingItem] {
-        searchIndex(commands: commands).filter { $0.matches(query) }
+    public static func search(_ query: String) -> [SettingItem] {
+        searchIndex().filter { $0.matches(query) }
     }
 }
 

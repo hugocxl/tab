@@ -3,7 +3,7 @@ import TabCore
 
 /// The root page's sections, in display order.
 enum PaletteCategory: Int, CaseIterable {
-    case terminal, panes, files, git, worktrees, projects, view, window, remote, settings, custom
+    case terminal, panes, files, git, worktrees, projects, view, window, remote, settings
 
     var title: String {
         switch self {
@@ -17,7 +17,6 @@ enum PaletteCategory: Int, CaseIterable {
         case .window: return "Window"
         case .remote: return "Remote"
         case .settings: return "Settings"
-        case .custom: return "Custom Commands"
         }
     }
 
@@ -33,7 +32,6 @@ enum PaletteCategory: Int, CaseIterable {
         case .window: return .icon(.appWindow, .gray)
         case .remote: return .icon(.network, .pink)
         case .settings: return .icon(.settings, .gray)
-        case .custom: return .icon(.play, .amber)
         }
     }
 }

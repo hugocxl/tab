@@ -9,9 +9,9 @@ final class AppKeyDispatchTests: XCTestCase {
     private let keymap = Keymap()
 
     private func resolve(_ key: String, paneTakes: Bool = false, editing: Bool = false,
-                         commands: [CustomCommand] = [], keymap: Keymap? = nil) -> KeyResolution {
+                         keymap: Keymap? = nil) -> KeyResolution {
         KeyDispatcher.resolve(chord: try? KeyChord(key), paneTakes: paneTakes, editingText: editing,
-                              keymap: keymap ?? self.keymap, commands: commands)
+                              keymap: keymap ?? self.keymap)
     }
 
     /// A focused terminal's own bindings win over app shortcuts; then the
@@ -31,12 +31,10 @@ final class AppKeyDispatchTests: XCTestCase {
         XCTAssertEqual(resolve("cmd-shift-p", editing: true), .action(.toggleCommandPalette))
     }
 
-    func testRebindingsAndCustomCommands() throws {
-        let command = CustomCommand(id: "deploy", name: "Deploy", command: "make deploy")
-        let rebound = try Keymap.fromOverrides(["split_right": "cmd-alt-d", "command.deploy": "cmd-ctrl-d"])
+    func testRebindings() throws {
+        let rebound = try Keymap.fromOverrides(["split_right": "cmd-alt-d"])
         XCTAssertEqual(resolve("cmd-alt-d", keymap: rebound), .action(.splitRight))
         XCTAssertEqual(resolve("cmd-d", keymap: rebound), .pass, "the old key no longer splits")
-        XCTAssertEqual(resolve("cmd-ctrl-d", commands: [command], keymap: rebound), .command("deploy"))
     }
 
     func testMenuKeyEquivalents() throws {

@@ -21,7 +21,6 @@ public enum PalettePage: Hashable, Sendable {
     case themes
     /// Open Project on this computer or another one.
     case addProject(ServerId)
-    case commands
 }
 
 /// UI the sidebar, menus and palette open in the main window.
