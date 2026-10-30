@@ -33,6 +33,15 @@ APP="$ROOT/build/$CONFIG/$APP_NAME.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN/TabDesktop" "$BIN/tabd" "$BIN/tab" "$APP/Contents/MacOS/"
+# SwiftPM records the deployment target as the SDK version, and macOS keeps
+# apps linked against an old SDK in its compatibility look (no current
+# toolbars or controls). Record the SDK the binaries were built with.
+MIN_OS="$(otool -l "$APP/Contents/MacOS/TabDesktop" | awk '/LC_BUILD_VERSION/ { found = 1 } found && $1 == "minos" { print $2; exit }')"
+SDK_VERSION="$(xcrun --sdk macosx --show-sdk-version)"
+for product in TabDesktop tabd tab; do
+    xcrun vtool -set-build-version macos "$MIN_OS" "$SDK_VERSION" -replace \
+        -output "$APP/Contents/MacOS/$product" "$APP/Contents/MacOS/$product"
+done
 # SwiftPM resource bundles sit beside the executables.
 for bundle in "$BIN"/*.bundle; do
     [ -d "$bundle" ] && cp -R "$bundle" "$APP/Contents/Resources/"

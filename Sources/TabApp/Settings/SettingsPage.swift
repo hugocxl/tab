@@ -303,6 +303,7 @@ private struct TextFieldView: View {
         TextField(spec.label, text: $text, prompt: Text(spec.placeholder), axis: spec.multiline ? .vertical : .horizontal)
             .lineLimit(spec.multiline ? 4...10 : 1...1)
             .textFieldStyle(.roundedBorder)
+            .multilineTextAlignment(.leading)
             .labelsHidden()
             .font(spec.monospaced ? .body.monospaced() : .body)
             .frame(width: spec.width)

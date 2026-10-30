@@ -36,7 +36,11 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
         hosting.sceneBridgingOptions = [.toolbars, .title]
         window.contentViewController = hosting
         window.setContentSize(Self.defaultSize)
-        window.setFrameAutosaveName("TabSettingsWindow")
+        // A new name: frames saved by the old, wider window would restore it.
+        window.setFrameAutosaveName("TabSettings")
+        if window.frame.width != Self.defaultSize.width {
+            window.setContentSize(NSSize(width: Self.defaultSize.width, height: window.contentLayoutRect.height))
+        }
         model.window = window
         store.theme.$palette
             .sink { [weak window] palette in window?.appearance = NSAppearance(named: palette.isLight ? .aqua : .darkAqua) }

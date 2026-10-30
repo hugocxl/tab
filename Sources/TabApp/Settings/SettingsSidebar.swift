@@ -57,11 +57,11 @@ struct SettingsSidebar: View {
             ForEach(Self.groups, id: \.self) { group in
                 Section {
                     ForEach(group, id: \.self) { category in
-                        Label {
-                            Text(category.title)
-                        } icon: {
+                        HStack(spacing: 8) {
                             SettingsIcon(category: category)
+                            Text(category.title)
                         }
+                        .padding(.vertical, 2)
                         .tag(category)
                     }
                 }
