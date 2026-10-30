@@ -69,6 +69,8 @@ jobs:
       - name: Validate builds, tests and debug bundle
         run: |
           set -euo pipefail
+          # Find in Files runs ripgrep; its tests need it like the app does.
+          command -v rg > /dev/null || brew install ripgrep
           scripts/validate.sh
       - name: Import Developer ID certificate
         env:
