@@ -144,6 +144,10 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, A
         let height = Self.trafficLights.y * 2 + close.frame.height
         let frame = NSRect(x: 0, y: window.frame.height - height, width: window.frame.width, height: height)
         if container.frame != frame { container.frame = frame }
+        // The workspace is added after the titlebar and would cover the buttons.
+        if let themeFrame = container.superview, themeFrame.subviews.last !== container {
+            themeFrame.addSubview(container, positioned: .above, relativeTo: nil)
+        }
         if windowButtonStep == nil, let minimize = window.standardWindowButton(.miniaturizeButton) {
             windowButtonStep = minimize.frame.minX - close.frame.minX
         }

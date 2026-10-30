@@ -271,6 +271,7 @@ private final class DictationButton: NSButton {
         super.init(frame: NSRect(x: 0, y: 0, width: 24, height: 24))
         translatesAutoresizingMaskIntoConstraints = false
         bezelStyle = .accessoryBarAction
+        refusesFirstResponder = true
         imagePosition = .imageOnly
         title = ""
         toolTip = label

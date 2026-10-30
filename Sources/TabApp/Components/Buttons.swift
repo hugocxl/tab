@@ -10,6 +10,7 @@ public final class IconButton: NSButton {
     /// Tints the glyph with the accent, for toggles that are on.
     public var isActive = false { didSet { updateTint() } }
     public let side: CGFloat
+    private let palette = PaletteObserver()
 
     public init(_ icon: AppIcon, label: String, side: CGFloat = 24, action: (() -> Void)? = nil) {
         self.icon = icon
@@ -18,6 +19,7 @@ public final class IconButton: NSButton {
         super.init(frame: NSRect(x: 0, y: 0, width: side, height: side))
         bezelStyle = .accessoryBarAction
         showsBorderOnlyWhileMouseInside = true
+        refusesFirstResponder = true
         imagePosition = .imageOnly
         imageScaling = .scaleNone
         title = ""
@@ -29,7 +31,6 @@ public final class IconButton: NSButton {
         target = self
         self.action = #selector(pressed)
         updateImage()
-        updateTint()
     }
 
     public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -37,11 +38,19 @@ public final class IconButton: NSButton {
     public override var intrinsicContentSize: NSSize { NSSize(width: side, height: side) }
 
     private func updateImage() {
-        image = icon.image(size: Metrics.glyph)
+        updateTint()
     }
 
+    public override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        palette.observe(self) { [weak self] in self?.updateTint() }
+    }
+
+    /// Draws the glyph pre-tinted in the theme's colors: AppKit would wash
+    /// out a template image in an inactive window, unlike the theme's chrome.
     private func updateTint() {
-        contentTintColor = isActive ? .controlAccentColor : .secondaryLabelColor
+        let theme = AppTheme.shared
+        image = icon.image(size: Metrics.glyph)?.tinted(isActive ? theme.accent : theme.fgMuted)
     }
 
     @objc private func pressed() {
@@ -97,6 +106,21 @@ public final class PillButton: NSButton {
     public func perform() {
         guard isEnabled else { return }
         onPress?()
+    }
+}
+
+extension NSButton {
+    /// Shows the title in `color`, which AppKit keeps in inactive windows,
+    /// unlike its own label colors.
+    func setTitleColor(_ color: NSColor) {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = alignment
+        paragraph.lineBreakMode = lineBreakMode
+        attributedTitle = NSAttributedString(string: title, attributes: [
+            .foregroundColor: color,
+            .font: font ?? AppFont.body,
+            .paragraphStyle: paragraph,
+        ])
     }
 }
 

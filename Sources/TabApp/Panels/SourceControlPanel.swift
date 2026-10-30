@@ -532,6 +532,7 @@ final class PlaceholderTextView: NSTextView {
 /// with the system hover bezel.
 final class TextGlyphButton: NSButton {
     var onPress: (() -> Void)?
+    private let palette = PaletteObserver()
 
     init(_ title: String, tooltip: String, font: NSFont = AppFont.body) {
         super.init(frame: .zero)
@@ -539,8 +540,8 @@ final class TextGlyphButton: NSButton {
         self.font = font
         bezelStyle = .accessoryBarAction
         showsBorderOnlyWhileMouseInside = true
+        refusesFirstResponder = true
         controlSize = .small
-        contentTintColor = .secondaryLabelColor
         translatesAutoresizingMaskIntoConstraints = false
         toolTip = tooltip
         setAccessibilityLabel(tooltip)
@@ -549,6 +550,11 @@ final class TextGlyphButton: NSButton {
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        palette.observe(self) { [weak self] in self?.setTitleColor(AppTheme.shared.fgMuted) }
+    }
 
     @objc private func pressed() {
         onPress?()
@@ -614,7 +620,8 @@ final class ChangeGroupCell: ThemedView {
 
 extension TextGlyphButton {
     func setLabel(_ text: String) {
-        (subviews.first as? NSTextField)?.stringValue = text
+        title = text
+        setTitleColor(AppTheme.shared.fgMuted)
         toolTip = text
         setAccessibilityLabel(text)
     }

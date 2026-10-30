@@ -208,16 +208,16 @@ final class BrowserAddressBar: ThemedView, NSTextFieldDelegate {
 /// person glyph and its name; a click opens the profile menu.
 final class BrowserProfileButton: NSButton {
     var onClick: (() -> Void)?
+    private let palette = PaletteObserver()
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         translatesAutoresizingMaskIntoConstraints = false
         bezelStyle = .accessoryBarAction
         showsBorderOnlyWhileMouseInside = true
-        image = AppIcon.circleUser.image()
+        refusesFirstResponder = true
         imagePosition = .imageLeading
         font = AppFont.footnote
-        contentTintColor = .secondaryLabelColor
         lineBreakMode = .byTruncatingTail
         widthAnchor.constraint(lessThanOrEqualToConstant: 140).isActive = true
         toolTip = "Browser Profile"
@@ -231,8 +231,20 @@ final class BrowserProfileButton: NSButton {
         get { title }
         set {
             title = newValue
+            applyTheme()
             setAccessibilityLabel("Browser Profile: \(newValue)")
         }
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        palette.observe(self) { [weak self] in self?.applyTheme() }
+    }
+
+    private func applyTheme() {
+        let color = AppTheme.shared.fgMuted
+        image = AppIcon.circleUser.image()?.tinted(color)
+        setTitleColor(color)
     }
 
     @objc private func pressed() {

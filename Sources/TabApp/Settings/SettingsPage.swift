@@ -7,6 +7,7 @@ import TabCore
 /// Settings: a section per group of rows, notes under them.
 struct SettingsPage: View {
     @ObservedObject var model: SettingsModel
+    @Environment(\.settingsTheme) private var theme
 
     var body: some View {
         Form {
@@ -15,7 +16,7 @@ struct SettingsPage: View {
                     Section {
                         HStack(alignment: .firstTextBaseline) {
                             Label(message, systemImage: "exclamationmark.triangle.fill")
-                                .foregroundStyle(.red)
+                                .foregroundStyle(theme?.danger ?? .red)
                             Spacer()
                             Button("Dismiss") { model.store.dismissError(id) }
                         }
@@ -37,6 +38,8 @@ struct SettingsPage: View {
             }
         }
         .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
+        .background { theme?.background.ignoresSafeArea() }
     }
 
     /// A run of rows and the notes that follow them.
@@ -67,6 +70,7 @@ struct SettingsPage: View {
             Section {
                 ForEach(part.notes.indices, id: \.self) { index in
                     SettingControlView(control: part.notes[index], model: model)
+                        .listRowBackground(theme?.card)
                 }
             } header: {
                 if let title { Text(title) }
@@ -75,6 +79,7 @@ struct SettingsPage: View {
             Section {
                 ForEach(part.rows) { row in
                     SettingRowView(row: row, model: model)
+                        .listRowBackground(theme?.card)
                 }
             } header: {
                 if let title { Text(title) }
@@ -95,6 +100,7 @@ struct SettingsPage: View {
 /// A setting's label with its description and refusal under it.
 private struct SettingLabel: View {
     let row: SettingRow
+    @Environment(\.settingsTheme) private var theme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -108,7 +114,7 @@ private struct SettingLabel: View {
             if let error = row.error {
                 Text(error)
                     .font(.subheadline)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(theme?.danger ?? .red)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -205,6 +211,7 @@ struct SettingControlView: View {
 private struct LabelView: View {
     let text: String
     let style: SettingControl.LabelStyle
+    @Environment(\.settingsTheme) private var theme
 
     var body: some View {
         switch style {
@@ -215,7 +222,7 @@ private struct LabelView: View {
         case .note:
             Text(text).font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         case .error:
-            Text(text).font(.subheadline).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+            Text(text).font(.subheadline).foregroundStyle(theme?.danger ?? .red).fixedSize(horizontal: false, vertical: true)
         case .monospaced:
             Text(text).font(.body.monospaced())
         case .badge:

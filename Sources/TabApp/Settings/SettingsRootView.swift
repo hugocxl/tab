@@ -7,6 +7,7 @@ struct SettingsRootView: View {
     @ObservedObject var model: SettingsModel
 
     var body: some View {
+        let theme = SettingsTheme(model.store.theme)
         NavigationSplitView {
             SettingsSidebar(model: model)
                 .toolbar(removing: .sidebarToggle)
@@ -36,5 +37,8 @@ struct SettingsRootView: View {
             placement: .sidebar,
             prompt: "Search Settings"
         )
+        .environment(\.settingsTheme, theme)
+        .foregroundStyle(theme.text)
+        .tint(theme.accent)
     }
 }

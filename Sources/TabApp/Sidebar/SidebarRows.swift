@@ -11,6 +11,7 @@ final class ChromeButton: NSButton {
     var isOn = false { didSet { if isOn != oldValue { updateBezel() } } }
     let side: CGFloat
     let glyphSize: CGFloat
+    private let palette = PaletteObserver()
 
     init(_ icon: AppIcon, label: String, side: CGFloat = ChromeButton.side, glyph: CGFloat = Metrics.glyph, action: ((ChromeButton) -> Void)? = nil) {
         self.icon = icon
@@ -19,6 +20,7 @@ final class ChromeButton: NSButton {
         onPress = action
         super.init(frame: NSRect(x: 0, y: 0, width: side, height: side))
         bezelStyle = .accessoryBarAction
+        refusesFirstResponder = true
         imagePosition = .imageOnly
         imageScaling = .scaleNone
         title = ""
@@ -27,7 +29,6 @@ final class ChromeButton: NSButton {
         target = self
         self.action = #selector(pressed)
         updateImage()
-        updateBezel()
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -41,13 +42,19 @@ final class ChromeButton: NSButton {
     override var mouseDownCanMoveWindow: Bool { false }
 
     private func updateImage() {
-        image = icon.image(size: glyphSize)
+        updateBezel()
     }
 
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        palette.observe(self) { [weak self] in self?.updateBezel() }
+    }
+
+    /// The glyph is pre-tinted in the theme's colors: AppKit would wash out
+    /// a template image in an inactive window, unlike the theme's chrome.
     private func updateBezel() {
         showsBorderOnlyWhileMouseInside = !isOn
-        contentTintColor = isOn ? .labelColor : .secondaryLabelColor
-        needsDisplay = true
+        image = icon.image(size: glyphSize)?.tinted(isOn ? AppTheme.shared.fg : AppTheme.shared.fgMuted)
     }
 
     @objc private func pressed() {

@@ -39,6 +39,7 @@ extension SwiftUI.Color {
 /// The search field is the window's sidebar search.
 struct SettingsSidebar: View {
     @ObservedObject var model: SettingsModel
+    @Environment(\.settingsTheme) private var theme
 
     /// The categories under the server tile, split where a group starts.
     static let groups: [[SettingsCategory]] = SettingsCategory.allCases
@@ -68,6 +69,8 @@ struct SettingsSidebar: View {
             }
         }
         .listStyle(.sidebar)
+        .scrollContentBackground(.hidden)
+        .background { theme?.sidebar.ignoresSafeArea() }
     }
 }
 

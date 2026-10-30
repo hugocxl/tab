@@ -46,6 +46,24 @@ open class ThemedView: NSView {
     }
 }
 
+/// Calls `update` now and whenever the shared theme's palette changes, while
+/// the view is in a window; for native controls tinted with theme colors.
+@MainActor
+final class PaletteObserver {
+    private var observation: AnyCancellable?
+
+    func observe(_ view: NSView, update: @escaping () -> Void) {
+        guard view.window != nil else {
+            observation = nil
+            return
+        }
+        observation = AppTheme.shared.$palette.dropFirst().removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { _ in update() }
+        update()
+    }
+}
+
 /// A view tracking whether the pointer is inside it.
 open class HoverView: ThemedView {
     public private(set) var isHovered = false {
