@@ -5,7 +5,8 @@
 #   scripts/changelog.sh version [REV]       the newest version at REV (HEAD)
 #   scripts/changelog.sh tag BEFORE AFTER    checks that each commit pushed in
 #       BEFORE..AFTER adds a new version, then tags every untagged version
-#       since the last tagged one at the last commit that has it (local tags)
+#       since the last tagged one at the last commit that has it (local tags;
+#       a version that already has a tag is left as it is)
 #   scripts/changelog.sh notes [SINCE]       the sections newer than version SINCE
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -55,11 +56,8 @@ tag_versions() {
         if [ $((index + 1)) -lt "${#commits[@]}" ]; then next="$(version_at "${commits[$((index + 1))]}")"; fi
         [ "$next" = "$current" ] && continue
         tag="v$current"
-        existing="$(git rev-parse --verify --quiet "refs/tags/$tag^{commit}" || true)"
-        if [ -n "$existing" ]; then
-            [ "$existing" = "$commit" ] || { echo "Error: $tag already tags $existing, not $commit" >&2; exit 1; }
-            continue
-        fi
+        # A tagged version is released already, wherever its tag points.
+        git rev-parse --verify --quiet "refs/tags/$tag" > /dev/null && continue
         git tag -a "$tag" -m "Tab $current" "$commit"
         echo "Tagged $tag at $(git log -1 --format='%h %s' "$commit")"
     done

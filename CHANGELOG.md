@@ -3,25 +3,19 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.4.2 - 2026-10-30
+
+### Fixed
+
+- Releases no longer stop when an earlier version was already published.
+
 ## 0.4.1 - 2026-10-30
 
 ### Changed
 
 - Every change pushed to Tab is released automatically as its own version,
   with these notes describing it.
-
-## 0.4.0 - 2026-10-30
-
-### Added
-
-- Settings has a Changelog page listing what changed in every version, with
-  the installed one marked.
-
-### Changed
-
 - The Settings window has a fixed size and no longer resizes.
-- Contributor instructions require pulling `main` before every commit, so
-  versions in the changelog don't collide.
 
 ### Removed
 
@@ -31,14 +25,21 @@ Changelog.
 - The sidebar width, worktree expansion, unread indicator and worktree
   switcher order settings. Drag the sidebar's edge to resize it; the switcher
   lists the current worktree, then the most recently used.
-- AI actions: the AI settings page, Commit with AI, Create Pull Request with AI
-  and the Source Control panel's Generate Commit Message button.
-- Custom commands, with their Settings page, palette entries and shortcuts.
+- The agents panel settings. Show the panel with Command-Option-A or View →
+  Toggle Agents Panel; it lists each agent by state.
 - Editing settings files by hand: the Edit in… links, the Configuration files
   buttons and the Open Configuration action are gone. Change settings in the
   Settings window.
-- The agents panel settings. Show the panel with Command-Option-A or View →
-  Toggle Agents Panel; it lists each agent by state.
+- AI actions: the AI settings page, Commit with AI, Create Pull Request with AI
+  and the Source Control panel's Generate Commit Message button.
+- Custom commands, with their Settings page, palette entries and shortcuts.
+
+## 0.4.0 - 2026-10-30
+
+### Added
+
+- Settings has a Changelog page listing what changed in every version, with
+  the installed one marked.
 
 ## 0.3.0 - 2026-10-30
 
