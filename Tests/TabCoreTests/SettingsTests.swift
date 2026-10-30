@@ -20,9 +20,11 @@ final class SettingsTests: XCTestCase {
         {
           "future": {"anything": [1, 2]},
           "window": {"confirmRunningProcess": false, "newOption": "x"},
-          "appearance": {"darkTheme": "Dracula", "layout": "tab_focused", "tipsVisible": true},
+          "appearance": {"darkTheme": "Dracula", "layout": "tab_focused", "tipsVisible": true,
+                         "agentsPanelDock": "right", "agentSessionsProviders": ["claude"]},
           "browser": {"searchEngine": "duckDuckGo"},
-          "keymap": {"split_right": "cmd-alt-d", "toggle_composer": "cmd-j", "extension.foo": "cmd-u"}
+          "keymap": {"split_right": "cmd-alt-d", "toggle_composer": "cmd-j", "extension.foo": "cmd-u",
+                     "toggle_agents_panel": "cmd-alt-a", "toggle_agent_sessions": "cmd-alt-s"}
         }
         """
         let path = try directory.write("settings.json", source)
@@ -105,14 +107,14 @@ final class SettingsTests: XCTestCase {
         try one.saveChanges(since: initial, to: path)
         var two = initial
         two.hiddenWorktrees.insert(second)
-        two.agentsPanelDock = .right
+        two.sidePanel = .files
         var saved = try two.saveChanges(since: initial, to: path)
         XCTAssertEqual(saved.hiddenWorktrees, [first, second])
         let previousOne = one
         one.hiddenWorktrees.remove(first)
         saved = try one.saveChanges(since: previousOne, to: path)
         XCTAssertEqual(saved.hiddenWorktrees, [second])
-        XCTAssertEqual(saved.agentsPanelDock, .right, "another window's change is kept")
+        XCTAssertEqual(saved.sidePanel, .files, "another window's change is kept")
         XCTAssertEqual(try Appearance.load(path), saved)
     }
 

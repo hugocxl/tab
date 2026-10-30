@@ -190,8 +190,7 @@ public enum ShortcutCatalog {
     /// Commands a user can rebind in Settings → Keyboard and the keymap.
     public static let keymapActions: [ShortcutId] = [
         .openSettings, .newHomeTab, .newTabInProject, .newWorktree, .switchWorktree,
-        .toggleSidebar, .toggleAgentsPanel, .toggleAgentSessions, .toggleFiles,
-        .toggleSourceControl, .goToFile, .findInFiles, .toggleFullScreen, .toggleThemePicker,
+        .toggleSidebar, .toggleFiles, .toggleSourceControl, .goToFile, .findInFiles, .toggleFullScreen, .toggleThemePicker,
         .toggleCommandPalette, .navigateBack, .navigateForward, .quit, .hideApp, .hideOthers,
         .minimize, .newTab, .existingTerminals, .detachTerminal, .closeTab, .splitRight,
         .splitDown, .focusPaneLeft, .focusPaneRight, .focusPaneUp, .focusPaneDown,
@@ -210,7 +209,7 @@ public enum ShortcutCatalog {
     /// so a newer default never takes a key someone bound before it existed.
     public static let yielding: [ShortcutId] = [
         .openSettings, .newHomeTab, .newTabInProject, .newWorktree, .switchWorktree,
-        .toggleSidebar, .toggleAgentsPanel, .toggleFiles, .toggleSourceControl, .goToFile,
+        .toggleSidebar, .toggleFiles, .toggleSourceControl, .goToFile,
         .findInFiles, .toggleFullScreen, .toggleThemePicker, .toggleCommandPalette,
         .navigateBack, .navigateForward, .quit, .hideApp, .hideOthers, .minimize,
         .previousPrompt, .nextPrompt, .find, .findNext, .findPrevious,
@@ -325,8 +324,6 @@ public enum ShortcutCatalog {
         view += [
             .separator,
             .shortcut(.toggleSidebar, title: "Toggle Sidebar"),
-            .shortcut(.toggleAgentsPanel, title: "Toggle Agents Panel"),
-            .shortcut(.toggleAgentSessions, title: "Toggle Agent Sessions"),
             .shortcut(.toggleFiles, title: "Toggle Files"),
             .shortcut(.toggleSourceControl, title: "Toggle Source Control"),
             .shortcut(.goToFile, title: "Go to File…"),
@@ -556,8 +553,6 @@ public enum ShortcutId: String, CaseIterable, Codable, Sendable {
     case newWorktree = "new_worktree"
     case switchWorktree = "switch_worktree"
     case toggleSidebar = "toggle_sidebar"
-    case toggleAgentsPanel = "toggle_agents_panel"
-    case toggleAgentSessions = "toggle_agent_sessions"
     case toggleFiles = "toggle_files"
     case toggleSourceControl = "toggle_source_control"
     case goToFile = "go_to_file"
@@ -707,8 +702,6 @@ extension ShortcutCatalog {
         ShortcutDefinition(.newWorktree, keys: ["cmd-alt-n"], contexts: ["WorkspaceTabs"], keyContexts: [["WorkspaceTabs"]], group: .projects),
         ShortcutDefinition(.switchWorktree, keys: ["cmd-alt-w"], contexts: ["WorkspaceTabs"], keyContexts: [["WorkspaceTabs"]], group: .projects),
         ShortcutDefinition(.toggleSidebar, keys: ["cmd-b"], contexts: ["WorkspaceTabs"], keyContexts: [["WorkspaceTabs"]], group: .projects),
-        ShortcutDefinition(.toggleAgentsPanel, keys: ["cmd-alt-a"], contexts: ["WorkspaceTabs"], keyContexts: [["WorkspaceTabs"]], group: .projects),
-        ShortcutDefinition(.toggleAgentSessions, keys: [], contexts: ["WorkspaceTabs"], keyContexts: [], group: .projects),
         ShortcutDefinition(.toggleFiles, keys: ["cmd-e"], contexts: ["WorkspaceTabs"], keyContexts: [["WorkspaceTabs"]], group: .files),
         ShortcutDefinition(.toggleSourceControl, keys: ["cmd-y"], contexts: ["WorkspaceTabs"], keyContexts: [["WorkspaceTabs"]], group: .files),
         ShortcutDefinition(.goToFile, keys: ["cmd-p"], contexts: ["WorkspaceTabs"], keyContexts: [["WorkspaceTabs"]], group: .files),

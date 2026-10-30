@@ -66,8 +66,6 @@ final class Actions {
             let current = model.currentProject
             window?.openPalette(.worktrees(current.parentId ?? current.id))
         case .toggleSidebar: model.toggleSidebar()
-        case .toggleAgentsPanel: toggleAgentsPanel()
-        case .toggleAgentSessions: model.toggleRightPanel(.agentSessions)
         case .toggleFiles: model.toggleRightPanel(.files)
         case .toggleSourceControl: model.toggleRightPanel(.sourceControl)
         case .goToFile: window?.openPalette(.files)
@@ -97,27 +95,6 @@ final class Actions {
         guard let terminal else { return false }
         terminal.perform(command)
         return true
-    }
-
-    /// Shows the Agents panel where it is placed and gives it the keyboard;
-    /// hides it when it is shown and already has the keyboard, as Codesh.
-    func toggleAgentsPanel() {
-        let appearance = model.appearance
-        let placement = AgentsPanelPlacement(appearance, sidebarExpanded: appearance.sidebarExpanded)
-        if placement == .right {
-            model.toggleRightPanel(.agents)
-            return
-        }
-        let panel = model.agentsPanel
-        let shown = appearance.agentsPanelVisible && (placement != .popup || model.agentsPopupOpen)
-        if shown && panel.hasFocus {
-            model.hideAgentsPanel()
-            return
-        }
-        if !appearance.agentsPanelVisible { model.updateAppearance { $0.agentsPanelVisible = true } }
-        if placement == .popup { model.agentsPopupOpen = true }
-        model.notify(.panel)
-        DispatchQueue.main.async { panel.focus() }
     }
 
     func clearSidebarFilter() {

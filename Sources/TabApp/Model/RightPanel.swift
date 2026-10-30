@@ -6,15 +6,11 @@ import TabCore
 public enum RightPanelKind: String, CaseIterable, Sendable {
     case files
     case sourceControl
-    case agents
-    case agentSessions
 
     public var title: String {
         switch self {
         case .files: return "Files"
         case .sourceControl: return "Source Control"
-        case .agents: return "Agents"
-        case .agentSessions: return "Agent Sessions"
         }
     }
 
@@ -63,8 +59,6 @@ final class PlaceholderPanel: RightPanelContent {
 extension AppModel {
     /// The panel open on the right, if any.
     public var rightPanel: RightPanelKind? {
-        if appearance.agentSessionsVisible { return .agentSessions }
-        if appearance.agentsPanelVisible, appearance.agentsPanelDock == .right { return .agents }
         switch appearance.sidePanel {
         case .files: return .files
         case .sourceControl: return .sourceControl
@@ -76,17 +70,11 @@ extension AppModel {
     public func toggleRightPanel(_ kind: RightPanelKind) {
         let open = rightPanel == kind
         updateAppearance { appearance in
-            appearance.agentSessionsVisible = false
-            if appearance.agentsPanelDock == .right { appearance.agentsPanelVisible = false }
             appearance.sidePanel = .none
             guard !open else { return }
             switch kind {
             case .files: appearance.sidePanel = .files
             case .sourceControl: appearance.sidePanel = .sourceControl
-            case .agents:
-                appearance.agentsPanelVisible = true
-                appearance.agentsPanelDock = .right
-            case .agentSessions: appearance.agentSessionsVisible = true
             }
         }
         notify(.panel)
@@ -103,25 +91,13 @@ extension AppModel {
 
     /// The right panel's width, remembered per panel.
     public func rightPanelWidth(_ kind: RightPanelKind) -> CGFloat {
-        let saved: Double?
-        switch kind {
-        case .files, .sourceControl: saved = appearance.sidePanelWidth
-        case .agents: saved = appearance.agentsPanelRightWidth
-        case .agentSessions: saved = appearance.agentSessionsWidth
-        }
-        let width = saved.map { CGFloat($0) } ?? RightPanelKind.defaultWidth
+        let width = appearance.sidePanelWidth.map { CGFloat($0) } ?? RightPanelKind.defaultWidth
         return min(max(width, RightPanelKind.minimumWidth), RightPanelKind.maximumWidth)
     }
 
     public func setRightPanelWidth(_ kind: RightPanelKind, _ width: CGFloat) {
         let width = Double(min(max(width, RightPanelKind.minimumWidth), RightPanelKind.maximumWidth).rounded())
-        updateAppearance { appearance in
-            switch kind {
-            case .files, .sourceControl: appearance.sidePanelWidth = width
-            case .agents: appearance.agentsPanelRightWidth = width
-            case .agentSessions: appearance.agentSessionsWidth = width
-            }
-        }
+        updateAppearance { $0.sidePanelWidth = width }
         notify(.panel)
     }
 }

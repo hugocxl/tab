@@ -43,14 +43,6 @@ public enum ProjectOrder: String, Codable, Sendable, CaseIterable {
     case manual, name, nameDescending, recentlyActive, dateAdded
 }
 
-public enum AgentsPanelDock: String, Codable, Sendable, CaseIterable {
-    case left, right
-}
-
-public enum AgentSessionsPosition: String, Codable, Sendable, CaseIterable {
-    case right, bottom
-}
-
 /// The native panel pinned on the right of the workspace.
 public enum SidePanel: String, Codable, Sendable, CaseIterable {
     case none, files, sourceControl
@@ -73,34 +65,14 @@ public struct Appearance: Codable, Equatable, Sendable {
     /// The sidebar has the keyboard rather than the workspace.
     public var sidebarFocus: Bool
     public var sidebarProjectOrder: ProjectOrder
-    public var agentsPanelVisible: Bool
-    public var agentsPanelDetached: Bool
-    public var agentsPanelDock: AgentsPanelDock
-    public var agentsPanelRightWidth: Double?
-    /// The detached panel's frame: x, y, width, height.
-    public var agentsPanelFrame: [Double]?
-    public var agentsPanelDockedHeight: Double?
-    public var agentSessionsVisible: Bool
-    public var agentSessionsPosition: AgentSessionsPosition
-    public var agentSessionsPinned: Bool
-    public var agentSessionsWidth: Double?
-    public var agentSessionsHeight: Double?
-    /// Providers the Agent Sessions panel lists.
-    public var agentSessionsProviders: [AgentProvider]
     public var sidePanel: SidePanel
     public var sidePanelWidth: Double?
 
     enum CodingKeys: String, CodingKey {
         case darkTheme, lightTheme, sidebarExpanded, sidebarHost, sidebarExpandedWidth
         case worktreeRecent, projectRecent, paletteRecent
-        case hiddenWorktrees, sidebarFocus, sidebarProjectOrder, agentsPanelVisible, agentsPanelDetached
-        case agentsPanelDock, agentsPanelRightWidth, agentsPanelFrame, agentsPanelDockedHeight
-        case agentSessionsVisible, agentSessionsPosition, agentSessionsPinned
-        case agentSessionsWidth, agentSessionsHeight, agentSessionsProviders, sidePanel, sidePanelWidth
+        case hiddenWorktrees, sidebarFocus, sidebarProjectOrder, sidePanel, sidePanelWidth
     }
-
-    /// Providers whose saved sessions the Agent Sessions panel can read.
-    public static let agentSessionProviders: [AgentProvider] = [.claude, .codex, .copilot, .droid, .pi, .ohMyPi, .xal]
 
     public init() {
         darkTheme = ThemeCatalog.defaultDark
@@ -114,18 +86,6 @@ public struct Appearance: Codable, Equatable, Sendable {
         hiddenWorktrees = []
         sidebarFocus = false
         sidebarProjectOrder = .manual
-        agentsPanelVisible = false
-        agentsPanelDetached = false
-        agentsPanelDock = .left
-        agentsPanelRightWidth = nil
-        agentsPanelFrame = nil
-        agentsPanelDockedHeight = nil
-        agentSessionsVisible = false
-        agentSessionsPosition = .right
-        agentSessionsPinned = true
-        agentSessionsWidth = nil
-        agentSessionsHeight = nil
-        agentSessionsProviders = Self.agentSessionProviders
         sidePanel = .none
         sidePanelWidth = nil
     }
@@ -144,18 +104,6 @@ public struct Appearance: Codable, Equatable, Sendable {
         hiddenWorktrees = try container.value(.hiddenWorktrees, d.hiddenWorktrees)
         sidebarFocus = try container.value(.sidebarFocus, d.sidebarFocus)
         sidebarProjectOrder = try container.value(.sidebarProjectOrder, d.sidebarProjectOrder)
-        agentsPanelVisible = try container.value(.agentsPanelVisible, d.agentsPanelVisible)
-        agentsPanelDetached = try container.value(.agentsPanelDetached, d.agentsPanelDetached)
-        agentsPanelDock = try container.value(.agentsPanelDock, d.agentsPanelDock)
-        agentsPanelRightWidth = try container.decodeIfPresent(Double.self, forKey: .agentsPanelRightWidth)
-        agentsPanelFrame = try container.decodeIfPresent([Double].self, forKey: .agentsPanelFrame)
-        agentsPanelDockedHeight = try container.decodeIfPresent(Double.self, forKey: .agentsPanelDockedHeight)
-        agentSessionsVisible = try container.value(.agentSessionsVisible, d.agentSessionsVisible)
-        agentSessionsPosition = try container.value(.agentSessionsPosition, d.agentSessionsPosition)
-        agentSessionsPinned = try container.value(.agentSessionsPinned, d.agentSessionsPinned)
-        agentSessionsWidth = try container.decodeIfPresent(Double.self, forKey: .agentSessionsWidth)
-        agentSessionsHeight = try container.decodeIfPresent(Double.self, forKey: .agentSessionsHeight)
-        agentSessionsProviders = try container.value(.agentSessionsProviders, d.agentSessionsProviders)
         sidePanel = try container.value(.sidePanel, d.sidePanel)
         sidePanelWidth = try container.decodeIfPresent(Double.self, forKey: .sidePanelWidth)
     }
@@ -173,18 +121,6 @@ public struct Appearance: Codable, Equatable, Sendable {
         try container.encode(hiddenWorktrees.sorted(), forKey: .hiddenWorktrees)
         try container.encode(sidebarFocus, forKey: .sidebarFocus)
         try container.encode(sidebarProjectOrder, forKey: .sidebarProjectOrder)
-        try container.encode(agentsPanelVisible, forKey: .agentsPanelVisible)
-        try container.encode(agentsPanelDetached, forKey: .agentsPanelDetached)
-        try container.encode(agentsPanelDock, forKey: .agentsPanelDock)
-        try container.encodeIfPresent(agentsPanelRightWidth, forKey: .agentsPanelRightWidth)
-        try container.encodeIfPresent(agentsPanelFrame, forKey: .agentsPanelFrame)
-        try container.encodeIfPresent(agentsPanelDockedHeight, forKey: .agentsPanelDockedHeight)
-        try container.encode(agentSessionsVisible, forKey: .agentSessionsVisible)
-        try container.encode(agentSessionsPosition, forKey: .agentSessionsPosition)
-        try container.encode(agentSessionsPinned, forKey: .agentSessionsPinned)
-        try container.encodeIfPresent(agentSessionsWidth, forKey: .agentSessionsWidth)
-        try container.encodeIfPresent(agentSessionsHeight, forKey: .agentSessionsHeight)
-        try container.encode(agentSessionsProviders, forKey: .agentSessionsProviders)
         try container.encode(sidePanel, forKey: .sidePanel)
         try container.encodeIfPresent(sidePanelWidth, forKey: .sidePanelWidth)
     }

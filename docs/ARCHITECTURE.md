@@ -161,7 +161,7 @@ The complete request list to support, grouped (names are the Swift cases):
   bindings from `terminal.json` win while a terminal is focused.
 - Browser panes are `WKWebView`s with one `WKWebsiteDataStore` per profile and
   the app's own history. `tab browser` reaches the app over `app.sock`.
-- Native panels (Files, Source Control, Agents, Agent Sessions) pin on the right
+- Native panels (Files, Source Control) pin on the right
   of the current project; editor and diff panes are text views with a
   lightweight tokenizer-based highlighter for common languages.
 - Notifications use `UNUserNotificationCenter`; dictation uses

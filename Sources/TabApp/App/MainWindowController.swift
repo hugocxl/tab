@@ -123,7 +123,6 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, A
             dictation.targetDidChange()
             if palette.isOpen, palette.page == .root { palette.refresh() }
         }
-        if changes.contains(.panel) || changes.contains(.settings) { placeAgentsPanel() }
     }
 
     private func updateTitle() {
@@ -321,19 +320,6 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, A
         let controller = settingsWindow ?? SettingsWindowController(store: settingsStore)
         settingsWindow = controller
         controller.show(category)
-    }
-
-    // MARK: Agents panel
-
-    private func placeAgentsPanel() {
-        let appearance = model.appearance
-        let placement = AgentsPanelPlacement(appearance, sidebarExpanded: appearance.sidebarExpanded)
-        if placement == .floating && appearance.agentsPanelVisible, let window {
-            model.agentsPanel.placement = .floating
-            model.agentsPanel.showFloating(over: window)
-        } else {
-            model.agentsPanel.closeFloating()
-        }
     }
 
     // MARK: Quitting

@@ -3,6 +3,14 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.6.0 - 2026-10-30
+
+### Removed
+
+- The Agents panel and the Agent Sessions panel are gone, with their
+  shortcuts and menu items; running agents still show on the sidebar cards
+  and pane headers.
+
 ## 0.5.0 - 2026-10-30
 
 ### Changed

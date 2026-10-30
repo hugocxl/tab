@@ -110,8 +110,6 @@ crates. Behavior is 1:1 unless listed under "Intentionally changed".
 - [ ] Editor pane: syntax highlighting for common languages, unsaved marker, save prompts on close/quit, reload on disk change or offer to keep yours, refuses binary and very large files, open at line:column — `EditorPaneController` (NSTextView, line numbers, incremental highlighting, Cmd+S/Cmd+F, wrap toggle, `go(line:column:)`, `confirmClose` for quit) and `EditorPaneContent` implemented with tests; needs shell wiring and app verification
 - [ ] Source Control panel (Cmd+Y): branch header with Refresh, Conflicts/Staged/Changes/Untracked groups, stage/unstage/discard per file, Stage All/Unstage All, commit message with Cmd+Return, Amend, refresh on changes — `SourceControlController` + `SourceControlModel` implemented with tests (commit errors as toasts); `ProjectPanelContent.sourceControl` adapts it; needs shell wiring and app verification
 - [ ] Diff pane: working tree or staged diff for a file, refreshes on changes, long diffs cut short — `DiffPaneController` (unified/split, drawn rows only, horizontal scroll) + `DiffDocument` implemented with tests; `DiffPaneContent` adapts it; needs shell wiring and app verification
-- [ ] Agents panel (Cmd+Opt+A): rows grouped by state, Return opens pane; docked at sidebar bottom (resizable), popup when collapsed, Move to Right (resizable, remembered), Detach (floating, remembered frame), reattach — `AgentsPanelController` + `AgentsPanelModel` implemented with tests; needs shell wiring and app verification
-- [ ] Agent Sessions panel: titlebar history button and View menu toggle, per local project directory, search titles/IDs/providers, provider multi-select filter with counts, grouped by recency, Up/Down/Return resume in a new terminal with the provider's resume command, Tab to filters, Escape semantics, resize, batched background loading, Refresh; providers Claude Code, Codex, Copilot, Droid, Pi, Oh My Pi, Xal with their JSONL locations and `CLAUDE_CONFIG_DIR` / `CODEX_HOME` — `AgentSessionsController` + `AgentSessionCatalog` (port of `files.rs`/`parse.rs` with the Rust tests) implemented; titlebar button and View menu are the shell's; needs app verification
 - [ ] Notifications: macOS notification when an agent needs attention or finishes, not for the visible pane or detached terminals, click jumps to the pane, looking clears everywhere, only one app notifies (claim)
 
 ## App: browser
@@ -146,7 +144,7 @@ crates. Behavior is 1:1 unless listed under "Intentionally changed".
 
 ## App: other
 
-- [ ] Menu bar built from the shortcut catalog: Tab (About, Settings, Install Command Line Tool…, End All Sessions and Quit), File, Edit (Select Command Output), View (Toggle Agent Sessions, Toggle Voice Recording), Window, Help — implemented (`MenuBarBuilder`)
+- [ ] Menu bar built from the shortcut catalog: Tab (About, Settings, Install Command Line Tool…, End All Sessions and Quit), File, Edit (Select Command Output), View (Toggle Voice Recording), Window, Help — implemented (`MenuBarBuilder`)
 - [x] Install Command Line Tool… links `~/.local/bin/tab` to the bundle's copy — implemented (`CommandLineInstaller.installAndReport`) with tests; menu item and palette command wired
 - [ ] `tab://pair` URL scheme and `tab <folder>` single-instance handoff over `app.sock` — implemented (`AppDelegate`, `AppSocketHandler`, `SingleInstance`; handoff tested)
 - [ ] Dictation (Cmd+Shift+I): on-device SFSpeechRecognizer into the active live terminal, Finish/Cancel, pause releases the mic, 10-minute cap, one session at a time, system language, inserts without sending — implemented in `TabApp/Voice` (`DictationController`, indicator, `SpeechRecorder`) with state-machine tests; wired to Cmd+Shift+I in the shell; needs Info.plist usage strings and app verification
@@ -165,7 +163,7 @@ crates. Behavior is 1:1 unless listed under "Intentionally changed".
 - AI actions dropped: no AI settings page, Commit or Create Pull Request with AI, or generated commit messages in Source Control.
 - Custom commands dropped: no Commands settings page, palette entries or `command.<id>` shortcuts; older keymaps that bind them still load.
 - Editing settings files by hand dropped: no Edit in… links, no Configuration files buttons, no Open Configuration action, and no reloading the files when the app activates. Settings are changed only in the Settings window.
-- Agents panel settings dropped: Cmd+Opt+A or View → Toggle Agents Panel shows it, and it always lists agents by state (no per-project rows).
+- Agents panel and Agent Sessions panel dropped: running agents show on the sidebar cards and pane headers; older keymaps that bind their toggles still load.
 - Sidebar settings dropped: width (drag the sidebar's edge instead), expand worktrees when switching projects, unread worktree indicators, worktree switcher order (always current, then recent, then sidebar order).
 - Default window size setting dropped: new windows open at 1200×800pt.
 - Voice settings dropped: dictation always uses the system's on-device language and the system model, and inserts the transcript without pressing Return.

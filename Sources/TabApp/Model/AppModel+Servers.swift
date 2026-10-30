@@ -390,7 +390,6 @@ extension AppModel {
             connection.activity = snapshot
             connection.activityLoaded = true
             clearUnreferencedNotifications()
-            updateAgentsPanel()
             notify(.activity)
             let fresh = loaded ? notificationEvents(server).filter {
                 $0.id > latest && !(deliveredNotifications[server]?.contains($0.id) ?? false)

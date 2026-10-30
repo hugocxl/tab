@@ -66,10 +66,6 @@ public final class AppModel {
     public let browserProfiles: BrowserProfiles
     /// Runs `tab browser` commands.
     public private(set) lazy var browserAutomation = BrowserAutomation(host: self)
-    /// The Agents panel, wherever it is placed.
-    public private(set) lazy var agentsPanel = AgentsPanelController(host: self)
-    /// The Agent Sessions panel.
-    public private(set) lazy var agentSessions = AgentSessionsController(host: self)
     /// Opens Settings, on a page when given; set by the window.
     public var showSettingsAction: ((SettingsCategory?) -> Void)?
     var projectHosts: [ProjectId: ProjectHost] = [:]
@@ -101,11 +97,6 @@ public final class AppModel {
     /// sidebar, or `nil`.
     public var shortcutHints: ChordModifiers? {
         didSet { if shortcutHints != oldValue { notify(.state) } }
-    }
-    /// The Agents panel's popup is open: its left placement while the
-    /// sidebar is collapsed. Not saved, as in Codesh.
-    public var agentsPopupOpen = false {
-        didSet { if agentsPopupOpen != oldValue { notify(.panel) } }
     }
     /// Worktree names being created, by parent project.
     public internal(set) var worktreeCreations: [ProjectId: [String]] = [:]
@@ -332,7 +323,6 @@ public final class AppModel {
         flushScheduled = false
         let changed = pending
         pending = []
-        if !changed.isDisjoint(with: [.state, .settings]) { updateAgentsPanel() }
         if !changed.isEmpty { changes.send(changed) }
     }
 

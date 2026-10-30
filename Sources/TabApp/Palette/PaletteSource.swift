@@ -244,8 +244,6 @@ final class PaletteSource: PaletteDataSource {
                  keywords: server.destination)
         }
         command(.toggleSidebar, "Toggle Sidebar", .view)
-        command(.toggleAgentsPanel, "Toggle Agents Panel", .view)
-        command(.toggleAgentSessions, "Toggle Agent Sessions", .view, keywords: "harness history resume providers")
         page(ShortcutId.toggleThemePicker.rawValue, "Change Theme…", .view, .themes, shortcut: .toggleThemePicker,
              keywords: "appearance colors")
         command(.toggleVoiceRecording, "Toggle Voice Recording", .view, keywords: "dictation speech")

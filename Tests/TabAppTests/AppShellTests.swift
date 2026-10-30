@@ -69,8 +69,8 @@ final class AppKeyDispatchTests: XCTestCase {
             "Switch Worktree…", "Open Project…", "-", "Close Tab",
         ])
         XCTAssertEqual(titles("View"), [
-            "Command Palette…", "-", "Toggle Voice Recording", "-", "Toggle Sidebar", "Toggle Agents Panel",
-            "Toggle Agent Sessions", "Toggle Files", "Toggle Source Control", "Go to File…", "Find in Files…",
+            "Command Palette…", "-", "Toggle Voice Recording", "-", "Toggle Sidebar",
+            "Toggle Files", "Toggle Source Control", "Go to File…", "Find in Files…",
             "Toggle Full Screen", "-", "Theme Picker", "-", "Increase Font Size", "Decrease Font Size",
         ])
         XCTAssertEqual(titles("Window"), [
