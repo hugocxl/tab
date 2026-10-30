@@ -99,6 +99,13 @@ extension AppModel {
     func registerNativeContent() {
         panes.register(.editor) { context in
             guard case .editor(let path) = context.pane.content else { return PlaceholderPaneController(context: context) }
+            if let copy = RemoteFileCopy.url(for: path) {
+                let host = RemoteCopyHost(model: context.model, project: context.project.id, path: copy.path)
+                let content = EditorPaneContent(host: host, path: copy.path)
+                _ = content.view
+                content.controller.textView.isEditable = false
+                return content
+            }
             let host = context.model.projectHost(context.project.id)
             return EditorPaneContent(host: host, path: path)
         }

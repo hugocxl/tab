@@ -110,6 +110,26 @@ final class SettingsControlsTests: XCTestCase {
         return true
     }
 
+    func testVoiceModelCanBeEditedAndCleared() throws {
+        let store = SettingsStore(dirs: dirs, host: host, theme: AppTheme(systemIsDark: true))
+        let page = SettingsPageView(store: store)
+        page.category = .general
+        page.section = "Voice"
+        page.reload()
+        let row = try XCTUnwrap(page.lastBuild?.groups.flatMap(\.blocks).compactMap { block -> CardRow? in
+            if case .row(let row) = block, row.id == "voice-model" { return row }
+            return nil
+        }.first)
+        let field = try XCTUnwrap(row.control as? InsetTextField)
+        XCTAssertTrue(field.field.isEnabled)
+        field.stringValue = "/tmp/spanish.lm"
+        field.commit()
+        XCTAssertEqual(try Settings.load(dirs.settings).voice.model, "/tmp/spanish.lm")
+        field.stringValue = ""
+        field.commit()
+        XCTAssertEqual(try Settings.load(dirs.settings).voice.model, "")
+    }
+
     func testEveryControlWritesItsSetting() async throws {
         let store = SettingsStore(dirs: dirs, host: host, theme: AppTheme(catalog: ThemeCatalog.load(customDirectory: nil), systemIsDark: true))
         store.loadServerSettings()
@@ -164,6 +184,7 @@ final class SettingsControlsTests: XCTestCase {
             "width": "settings.json:window.defaultSize.width",
             "height": "settings.json:window.defaultSize.height",
             "voice-auto-send": "settings.json:voice.autoSend",
+            "voice-model": "settings.json:voice.model",
             "font-ligatures": "terminal.json:font.features",
             "browser-enabled": "settings.json:browser.enabled",
             "ai-commit-push": "settings.json:ai.commit.push",

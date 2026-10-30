@@ -26,6 +26,26 @@ final class UpdaterProcessTests: XCTestCase {
         XCTAssertThrowsError(try UpdateFeed.parse(JSONSerialization.data(withJSONObject: feed), current: "1.0.0"))
     }
 
+    func testLegacyServerMetadataFallsBackToVersionAndMismatchesStillFail() throws {
+        let root = URL(fileURLWithPath: "/tmp/tab-build-info-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let expected = BuildInfo(version: "1.1.0", protocolVersions: [ProtocolVersion(2)])
+        let json = String(decoding: try JSONEncoder().encode(expected), as: UTF8.self)
+        let cli = root.appendingPathComponent("tab")
+        try "#!/bin/sh\nprintf '%s' '\(json)'\n".write(to: cli, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: cli.path)
+        let server = root.appendingPathComponent("tabd")
+        try "#!/bin/sh\nif [ \"$1\" = --version ]; then printf 'tabd 1.1.0'; else exit 2; fi\n".write(to: server, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: server.path)
+        XCTAssertEqual(try BundledBuild.check(in: root, version: "1.1.0"), expected)
+        let mismatch = String(decoding: try JSONEncoder().encode(BuildInfo(version: "1.1.0", protocolVersions: [ProtocolVersion(3)])), as: UTF8.self)
+        try "#!/bin/sh\nif [ \"$1\" = --build-info ]; then printf '%s' '\(mismatch)'; else printf 'tabd 1.1.0'; fi\n".write(to: server, atomically: true, encoding: .utf8)
+        XCTAssertThrowsError(try BundledBuild.check(in: root, version: "1.1.0"))
+        try "#!/bin/sh\nprintf 'tabd 1.0.0'\n".write(to: server, atomically: true, encoding: .utf8)
+        XCTAssertThrowsError(try BundledBuild.check(in: root, version: "1.1.0"))
+    }
+
     private func fixture() throws -> (root: URL, archive: URL, manifest: UpdateManifest) {
         let root = URL(fileURLWithPath: "/tmp/tab-update-test").appendingPathComponent(UUID().uuidString).resolvingSymlinksInPath()
         let fm = FileManager.default
@@ -36,14 +56,14 @@ final class UpdaterProcessTests: XCTestCase {
         try fm.createDirectory(at: macOS, withIntermediateDirectories: true)
         let build = BuildInfo(version: "1.1.0", protocolVersions: [ProtocolVersion(2)])
         let json = String(decoding: try JSONEncoder().encode(build), as: UTF8.self)
-        for name in [Executable.app, Executable.cli, Executable.server] {
+        for name in [DesktopExecutable.name, Executable.cli, Executable.server] {
             let binary = macOS.appendingPathComponent(name)
             try "#!/bin/sh\nprintf '%s' '\(json)'\n".write(to: binary, atomically: true, encoding: .utf8)
             try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: binary.path)
         }
         let info: [String: Any] = [
             "CFBundleIdentifier": Release.bundleIdentifier,
-            "CFBundleExecutable": Executable.app,
+            "CFBundleExecutable": DesktopExecutable.name,
             "CFBundleShortVersionString": "1.1.0",
         ]
         let plist = try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)

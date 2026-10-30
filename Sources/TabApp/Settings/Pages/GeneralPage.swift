@@ -27,10 +27,9 @@ extension SettingsPageView {
             languages.append(PopUp.Item(id: settings.voice.language, title: settings.voice.language))
         }
         b.row("voice-language", b.popUp("voice-language", languages, selected: settings.voice.language) { [store] in store.setVoiceLanguage($0) })
-        let model = b.field("voice-model", settings.voice.model, placeholder: "System recognizer") { [store] in store.setVoiceModel($0) }
-        model.field.isEnabled = false
+        let model = b.field("voice-model", settings.voice.model, placeholder: "System model") { [store] in store.setVoiceModel($0) }
         b.row("voice-model", model)
-        b.note("voice-model", "macOS uses its on-device system recognizer. Custom offline model files are only supported by Codesh on Linux.")
+        b.note("voice-model", "Choose a compiled Apple Speech language model file. Leave blank to use the system model. Audio stays on this computer.")
     }
 
     static func number(_ value: Double) -> String {

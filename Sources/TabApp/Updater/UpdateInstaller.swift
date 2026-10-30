@@ -102,7 +102,7 @@ public struct Installation: Equatable, Sendable {
         guard CodeSignature.isValid(app, requirement: requirement) else {
             throw UpdateError.invalidBundle("The update isn't signed by the same developer as this app.")
         }
-        for name in [Executable.app, Executable.cli, Executable.server] {
+        for name in [try DesktopExecutable.name(in: app), Executable.cli, Executable.server] {
             try Self.run("/usr/bin/lipo", [app.appendingPathComponent("Contents/MacOS/" + name).path, "-verify_arch", "arm64"])
         }
         try Self.checkContents(app, version: version)
@@ -120,11 +120,9 @@ public struct Installation: Equatable, Sendable {
         guard info["CFBundleShortVersionString"] as? String == version else {
             throw UpdateError.invalidBundle("The update's version doesn't match the update feed.")
         }
-        guard info["CFBundleExecutable"] as? String == Executable.app else {
-            throw UpdateError.invalidBundle("The update has an unexpected app executable.")
-        }
+        let appExecutable = try DesktopExecutable.name(in: app)
         let executables = app.appendingPathComponent("Contents/MacOS")
-        for name in [Executable.app, Executable.server, Executable.cli]
+        for name in [appExecutable, Executable.server, Executable.cli]
             where !Executable.isExecutableFile(executables.appendingPathComponent(name))
         {
             throw UpdateError.invalidBundle("The update is missing \(name).")

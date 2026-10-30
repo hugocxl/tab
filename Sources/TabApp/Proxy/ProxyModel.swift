@@ -79,6 +79,16 @@ public final class ProxyModel {
         choices[pane] = proxy
     }
 
+    /// Moves a restart's explicit choice before the replacement can start.
+    public func transferChoice(from pane: PaneId, to replacement: PaneId) {
+        choices[replacement] = choices.removeValue(forKey: pane)
+    }
+
+    /// Drops choices whose panes closed before starting a terminal.
+    func retainChoices(for panes: Set<PaneId>) {
+        choices = choices.filter { panes.contains($0.key) }
+    }
+
     /// Drops the choice of a pane that closed.
     public func forget(_ pane: PaneId) {
         choices[pane] = nil

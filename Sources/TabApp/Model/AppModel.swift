@@ -22,12 +22,18 @@ public enum ModelChange: Hashable, Sendable {
 @MainActor
 public protocol AppPresenter: AnyObject {
     var window: NSWindow? { get }
+    /// A palette or confirmation covers the terminal the user was viewing.
+    var terminalActivityObscured: Bool { get }
     /// Asks a question as a sheet; the answer is whether the user confirmed.
     func confirm(title: String, message: String, confirm: String, destructive: Bool) async -> Bool
     func showToast(_ message: String, error: Bool)
     /// Add Project on another computer: its folder browser.
     func showRemoteFolderBrowser(_ server: ServerId)
     func bringToFront()
+}
+
+extension AppPresenter {
+    public var terminalActivityObscured: Bool { false }
 }
 
 /// Git facts the sidebar cards show.
@@ -302,11 +308,13 @@ public final class AppModel {
     }
 
     func stateDidChange() {
+        proxy.retainChoices(for: Set(state.projects.flatMap(\.tabs).flatMap(\.panes).map(\.id)))
         scheduleSave()
         scheduleReferenceSync()
         replayAllIntents()
         flushClosures()
         recordNavigation()
+        clearUnreferencedNotifications()
         syncVisible()
         syncGitWatch()
         notify(.state)

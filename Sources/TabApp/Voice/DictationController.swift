@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import TabCore
+import TabProtocol
 
 /// The live terminal a dictation types into: the pane and the exact
 /// attachment it showed when dictation started. A new connection or another
@@ -10,6 +11,11 @@ public struct DictationTarget: Hashable, Sendable {
     public var pane: String
     /// Such as the server, the session's channel and the connection's generation.
     public var attachment: String
+
+    /// Identifies the exact session and connection even when channels are reused.
+    init(pane: PaneId, server: ServerId, session: SessionId, instance: UInt64, connection: ObjectIdentifier, channel: ChannelId) {
+        self.init(pane: pane.description, attachment: "\(server):\(session):\(instance):\(connection):\(channel)")
+    }
 
     public init(pane: String, attachment: String) {
         self.pane = pane

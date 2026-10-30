@@ -111,6 +111,7 @@ extension AppModel: ProxyHost {
 
     public func restartTerminal(_ pane: PaneId) {
         Task {
+            defer { proxy.forget(pane) }
             guard await controller(for: pane)?.willClose() ?? true else { return }
             guard let server = state.paneServer(pane), let old = state.pane(pane)?.content.session,
                   let projectId = state.paneProject(pane), let project = state.project(projectId) else { return }
@@ -118,7 +119,10 @@ extension AppModel: ProxyHost {
             var created: PaneId?
             edit { state in
                 created = try state.restartTerminal(pane)
-                if let created { _ = state.prepareCreation(created, directory: directory) }
+                if let created {
+                    proxy.transferChoice(from: pane, to: created)
+                    _ = state.prepareCreation(created, directory: directory)
+                }
             }
             panes.remove(pane)
             endSessions([old], on: server)
@@ -128,9 +132,16 @@ extension AppModel: ProxyHost {
 
     public func proxyDidChange(_ model: ProxyModel) {
         updater.setSessionConfiguration(model.sessionConfiguration())
-        for entry in settings.servers where connections[entry.id] != nil {
+        for entry in settings.servers {
+            guard let connection = connections[entry.id],
+                  connection.sshTarget != (try? ServerForm.target(for: entry, proxy: sshProxy)) else { continue }
+            let active: Bool
+            switch connection.state {
+            case .idle, .needsUser: active = false
+            case .ready, .connecting, .reconnecting: active = true
+            }
             connections.removeValue(forKey: entry.id)?.disconnect()
-            connectOnDemand(entry.id)
+            if active { connectOnDemand(entry.id) }
         }
         notify(.settings)
     }
@@ -247,9 +258,7 @@ extension AppModel: UpdaterHost {
 
     public func stopLocalServerIfIdle() async -> Bool {
         guard let main = connections[.local]?.main else { return true }
-        let sessions = (try? await main.sessions()) ?? []
-        guard sessions.isEmpty else { return false }
-        return (try? await main.stopServer(force: false)) ?? false
+        return (try? await main.stopServerIfIdle()) ?? false
     }
 
     public func prepareToQuitForUpdate() -> Bool {

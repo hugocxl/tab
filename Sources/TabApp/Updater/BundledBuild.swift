@@ -15,12 +15,28 @@ enum BundledBuild {
     }
 
     /// Both executables must describe the same release and protocol set.
+    /// Older servers without build metadata fall back to their version;
+    /// the matching CLI supplies the release's protocol set.
     static func check(in directory: URL, version: String) throws -> BuildInfo {
         let client = try read(directory.appendingPathComponent(Executable.cli))
-        let server = try read(directory.appendingPathComponent(Executable.server))
-        guard client == server, server.version == version, !server.protocolVersions.isEmpty else {
+        guard client.version == version, !client.protocolVersions.isEmpty else {
             throw UpdateError.invalidBundle("The bundled client and server do not match the release.")
         }
-        return server
+        let executable = directory.appendingPathComponent(Executable.server)
+        if let server = try? read(executable) {
+            guard client == server else {
+                throw UpdateError.invalidBundle("The bundled client and server do not match the release.")
+            }
+            return server
+        }
+        let output = try BoundedProcess.run(
+            program: executable.path, arguments: ["--version"],
+            environment: ProcessInfo.processInfo.environment, directory: directory.path,
+            timeout: 5, limit: 65_536, cancellation: AICancellation()
+        )
+        guard String(decoding: output.stdout, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines) == "tabd \(version)" else {
+            throw UpdateError.invalidBundle("The bundled client and server do not match the release.")
+        }
+        return client
     }
 }

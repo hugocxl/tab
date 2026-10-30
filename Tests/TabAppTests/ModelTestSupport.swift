@@ -16,6 +16,16 @@ final class ModelFakeServer: ServerAPI, TerminalBackend, @unchecked Sendable {
     private var _closed: [SessionId] = []
     private var _references: [[SessionId]] = []
     private var _mutations: [ProjectIntent] = []
+    private var _activity = ActivitySnapshot()
+    private var _acknowledged: [UInt64] = []
+    private var _claims: [[UInt64]] = []
+    private var _claimResult: [UInt64]?
+    private var _folderRequests: [ServerPath] = []
+    private var _fileRequests: [FilesRequest] = []
+    private var _fileReply: FilesReply = .entries([])
+    private var _stops: [Bool] = []
+    private var _idleStops = 0
+    var beforeClaim: (@Sendable () async -> Void)?
 
     init(identity: ServerId = ServerId(), catalog: CatalogPage) {
         server = ServerInfo(build: BuildInfo(version: "test"), instance: 1, server: identity)
@@ -43,6 +53,25 @@ final class ModelFakeServer: ServerAPI, TerminalBackend, @unchecked Sendable {
     var closed: [SessionId] { locked { _closed } }
     var references: [[SessionId]] { locked { _references } }
     var mutations: [ProjectIntent] { locked { _mutations } }
+
+    var activitySnapshot: ActivitySnapshot {
+        get { locked { _activity } }
+        set { locked { _activity = newValue } }
+    }
+    var claimResult: [UInt64]? {
+        get { locked { _claimResult } }
+        set { locked { _claimResult = newValue } }
+    }
+    var acknowledged: [UInt64] { locked { _acknowledged } }
+    var claims: [[UInt64]] { locked { _claims } }
+    var folderRequests: [ServerPath] { locked { _folderRequests } }
+    var fileRequests: [FilesRequest] { locked { _fileRequests } }
+    var fileReply: FilesReply {
+        get { locked { _fileReply } }
+        set { locked { _fileReply = newValue } }
+    }
+    var stops: [Bool] { locked { _stops } }
+    var idleStops: Int { locked { _idleStops } }
 
     func send(_ event: ClientEvent) { continuation.yield(event) }
 
@@ -86,15 +115,31 @@ final class ModelFakeServer: ServerAPI, TerminalBackend, @unchecked Sendable {
         }
     }
 
-    func listFolders(_ path: ServerPath) async throws -> [ServerPath] { [] }
-    func activity() async throws -> ActivitySnapshot { ActivitySnapshot() }
-    func acknowledgeActivity(_ events: [UInt64]) async throws {}
-    func claimActivity(_ events: [UInt64]) async throws -> [UInt64] { events }
+    func listFolders(_ path: ServerPath) async throws -> [ServerPath] {
+        locked { _folderRequests.append(path) }
+        return [ServerPath(path.rawValue + "/child")]
+    }
+    func activity() async throws -> ActivitySnapshot { activitySnapshot }
+    func acknowledgeActivity(_ events: [UInt64]) async throws { locked { _acknowledged.append(contentsOf: events) } }
+    func claimActivity(_ events: [UInt64]) async throws -> [UInt64] {
+        locked { _claims.append(events) }
+        if let beforeClaim { await beforeClaim() }
+        return locked { _claimResult ?? events }
+    }
     func git(_ request: GitRequest) async throws -> GitReply { .summary(nil) }
-    func files(_ request: FilesRequest) async throws -> FilesReply { .entries([]) }
+    func files(_ request: FilesRequest) async throws -> FilesReply {
+        locked { _fileRequests.append(request) }
+        return fileReply
+    }
     func serverSettings() async throws -> ServerSettingsDoc { ServerSettingsDoc() }
     func writeServerSettings(_ settings: ServerSettingsDoc) async throws {}
-    func stopServer(force: Bool) async throws -> Bool { true }
+    func stopServer(force: Bool) async throws -> Bool {
+        locked { _stops.append(force) }
+        return true
+    }
+    func stopServerIfIdle() async throws -> Bool {
+        locked { _idleStops += 1; return _live.isEmpty }
+    }
     func restartServer() async throws {}
 
     func remoteAccess() async throws -> RemoteAccessState {

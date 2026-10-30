@@ -13,7 +13,7 @@ extension AppModel {
         if let existing = connections[server] { return existing }
         let entry = server.isLocal ? nil : settings.server(server)
         guard server.isLocal || entry != nil, let connector = connector(server, entry) else { return nil }
-        let connection = ServerConnection(id: server, connector: connector)
+        let connection = ServerConnection(id: server, connector: connector, sshTarget: entry.flatMap { try? ServerForm.target(for: $0, proxy: sshProxy) })
         connection.onReady = { [weak self] connection in self?.serverReady(connection) }
         connection.onEvent = { [weak self] connection, event in self?.receive(event, from: connection) }
         connection.onStateChange = { [weak self] connection in self?.connectionChanged(connection) }
@@ -39,8 +39,9 @@ extension AppModel {
             connections.removeValue(forKey: entry.id)?.disconnect()
         }
         for entry in settings.servers {
-            guard let previous = old.first(where: { $0.id == entry.id }), previous != entry else { continue }
+            guard let previous = old.first(where: { $0.id == entry.id }), !previous.hasSameConnection(as: entry) else { continue }
             connections.removeValue(forKey: entry.id)?.disconnect()
+            connectOnDemand(entry.id)
         }
     }
 
@@ -248,6 +249,7 @@ extension AppModel {
                     edit { $0.queueDiscard(server, info.id) }
                     return
                 }
+                proxy.forget(pane)
                 edit { try $0.setPaneSession(pane, info.id) }
                 var command: String?
                 edit { command = $0.takeStartupCommand(pane) }
@@ -371,37 +373,68 @@ extension AppModel {
 
     func refreshActivity(_ server: ServerId) async {
         guard let connection = connections[server], let main = connection.main else { return }
-        guard let snapshot = try? await main.activity() else { return }
-        let known = Set(connection.activity.events.map(\.id))
-        connection.activity = snapshot
-        updateAgentsPanel()
-        notify(.activity)
+        if connection.activityRefreshing {
+            connection.activityDirty = true
+            return
+        }
+        connection.activityRefreshing = true
+        defer { connection.activityRefreshing = false }
+        repeat {
+            connection.activityDirty = false
+            guard let snapshot = try? await main.activity(), connection.main === main else { return }
+            let previous = connection.activity
+            let latest = previous.events.map(\.id).max() ?? 0
+            let unread = Set(snapshot.events.filter { !$0.read }.map(\.id))
+            notifier.clear(previous.events.filter { !unread.contains($0.id) }.map(\.id), server: server)
+            let loaded = connection.activityLoaded
+            connection.activity = snapshot
+            connection.activityLoaded = true
+            clearUnreferencedNotifications()
+            updateAgentsPanel()
+            notify(.activity)
+            let fresh = loaded ? notificationEvents(server).filter {
+                $0.id > latest && !(deliveredNotifications[server]?.contains($0.id) ?? false)
+            } : []
+            acknowledgeFocusedActivity()
+            guard !fresh.isEmpty, notifier.available else { continue }
+            guard let claimed = try? await main.claimActivity(fresh.map(\.id)), connection.main === main else { continue }
+            deliveredNotifications[server, default: []].formUnion(claimed)
+            for event in notificationEvents(server) where claimed.contains(event.id) {
+                notifier.deliver(event, server: server, title: notificationTitle(server, event))
+            }
+        } while connection.activityDirty
+    }
+
+    /// Rechecks pane ownership and visibility after a notification claim returns.
+    private func notificationEvents(_ server: ServerId) -> [AgentEvent] {
         let focused = focusedSession()
         let referenced = Set(state.sessionReferences(server))
-        let fresh = snapshot.events.filter { event in
-            !event.read && !known.contains(event.id) && referenced.contains(event.session)
+        return connections[server]?.activity.events.filter { event in
+            !event.read && referenced.contains(event.session)
                 && !(focused?.0 == server && focused?.1 == event.session)
-                && !(deliveredNotifications[server]?.contains(event.id) ?? false)
-        }
-        acknowledgeFocusedActivity()
-        guard !fresh.isEmpty, notifier.available else { return }
-        guard let claimed = try? await main.claimActivity(fresh.map(\.id)) else { return }
-        deliveredNotifications[server, default: []].formUnion(claimed)
-        for event in fresh where claimed.contains(event.id) {
-            notifier.deliver(event, server: server, title: notificationTitle(server, event))
+        } ?? []
+    }
+
+    /// Detached and closed terminals no longer leave a notification behind.
+    func clearUnreferencedNotifications() {
+        for (server, connection) in connections {
+            let referenced = Set(state.sessionReferences(server))
+            let removed = connection.activity.events.filter { !referenced.contains($0.session) }.map(\.id)
+            notifier.clear(removed, server: server)
         }
     }
 
     private func notificationTitle(_ server: ServerId, _ event: AgentEvent) -> String {
         let pane = sessionPanes(server, event.session).first
         let project = pane.flatMap { state.paneProject($0) }.flatMap { state.project($0) }
-        let name = project.map { title(of: $0) }
-        return [event.provider.displayName, name].compactMap { $0 }.joined(separator: " · ")
+        let name = project?.name ?? "Tab"
+        let remote = server.isLocal ? nil : serverName(server)
+        return [event.provider.displayName, name, remote].compactMap { $0 }.joined(separator: " · ")
     }
 
     /// The server and session the user is looking at, if any.
     func focusedSession() -> (ServerId, SessionId)? {
-        guard windowActive, let pane = activePane, let server = state.paneServer(pane),
+        guard windowActive, presenter?.terminalActivityObscured != true, let pane = activePane, let server = state.paneServer(pane),
               let session = state.pane(pane)?.content.session else { return nil }
         return (server, session)
     }
@@ -444,5 +477,13 @@ extension AppModel {
     func hasUnread(_ server: ServerId, _ sessions: [SessionId]) -> Bool {
         guard let connection = connections[server] else { return false }
         return connection.activity.events.contains { !$0.read && sessions.contains($0.session) }
+    }
+}
+
+extension ServerEntry {
+    /// Presentation edits preserve the SSH connection and its attachments.
+    func hasSameConnection(as other: ServerEntry) -> Bool {
+        ssh == other.ssh && port == other.port && identityFile == other.identityFile
+            && sshCommand == other.sshCommand && passwordLogin == other.passwordLogin
     }
 }

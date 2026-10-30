@@ -57,6 +57,15 @@ final class TerminalPane: PaneContentController {
 
     var hasFocus: Bool { session?.view.isFocused ?? false }
 
+    /// Dictation keeps its attachment while its overlay owns keyboard focus.
+    func dictationTarget(overlayActive: Bool) -> DictationTarget? {
+        guard let model, model.activePane == pane, let session, session.state == .live, let channel = session.channel,
+              let connection = model.connections[server], connection.state.isReady, let main = connection.main,
+              session.backend === main.terminalBackend, hasFocus || overlayActive else { return nil }
+        return DictationTarget(pane: pane, server: server, session: session.session, instance: main.server.instance,
+                               connection: ObjectIdentifier(main), channel: channel)
+    }
+
     func focusContent() {
         guard let session else {
             view.window?.makeFirstResponder(host)
@@ -329,9 +338,34 @@ extension TerminalPane: TerminalViewDelegate {
     }
 
     func terminalView(_ view: TerminalView, openRemoteFile path: String, line: Int?, column: Int?) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(path, forType: .string)
-        model?.presenter?.showToast("Copied the remote path \(path)", error: false)
+        let menu = remoteFileMenu(path: path, line: line, column: column)
+        menu.popUp(positioning: nil, at: view.convert(view.window?.mouseLocationOutsideOfEventStream ?? .zero, from: nil), in: view)
+    }
+
+    /// The remote link's two actions, with the download disabled while offline.
+    func remoteFileMenu(path: String, line: Int?, column: Int?) -> NSMenu {
+        let open = ClosureMenuItem("Open a Copy") { [weak self] in
+            guard let self, let model = self.model,
+                  let owner = RemoteFileCopy.project(for: path, server: self.server, in: model.state.projects),
+                  let side = model.sideClient(for: owner.id) else { return }
+            let name = model.serverName(self.server) ?? "the server"
+            Task {
+                do {
+                    let copy = try await RemoteFileCopy.download(path, project: owner.id, directory: owner.directory, serverName: name, through: side)
+                    model.openEditor(project: self.project, path: copy.path, line: line, column: column)
+                } catch {
+                    model.report("Could not open a copy: \(error.message)")
+                }
+            }
+        }
+        let owner = model.flatMap { RemoteFileCopy.project(for: path, server: server, in: $0.state.projects) }
+        open.isEnabled = owner.flatMap { model?.sideClient(for: $0.id) } != nil
+        let copy = ClosureMenuItem("Copy Path") { [weak self] in
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(path, forType: .string)
+            self?.model?.presenter?.showToast("Copied the path", error: false)
+        }
+        return NSMenu.make([open, copy])
     }
 
     func terminalViewContextMenuItems(_ view: TerminalView) -> TerminalContextMenu.ShellItems {
@@ -375,8 +409,9 @@ extension TerminalPane: TerminalViewDelegate {
     }
 
     func terminalView(_ view: TerminalView, didChangeFocus focused: Bool) {
-        guard focused, let model, model.activePane != pane else { return }
-        model.focusPane(pane)
+        guard focused, let model else { return }
+        if model.activePane != pane { model.focusPane(pane) }
+        model.acknowledgeFocusedActivity()
     }
 }
 

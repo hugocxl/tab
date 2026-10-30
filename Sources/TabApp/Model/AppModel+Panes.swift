@@ -86,7 +86,7 @@ extension AppModel {
     @discardableResult
     public func openEditor(project: ProjectId, path: String, line: Int? = nil, column: Int? = nil) -> PaneId? {
         var opened: PaneId?
-        guard edit({ opened = try $0.openEditorPane(project, path: Self.relative(path, in: $0.project(project))) }),
+        guard edit({ opened = try $0.openEditorPane(project, path: RemoteFileCopy.reference(for: path) ?? Self.relative(path, in: $0.project(project))) }),
               let pane = opened else { return nil }
         if let line { editorLocations[pane] = (line, column ?? 1) }
         (controller(for: pane) as? EditorLocationReceiver)?.reveal(line: line, column: column)

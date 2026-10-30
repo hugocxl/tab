@@ -5,6 +5,11 @@ import XCTest
 @testable import TabApp
 
 final class UpdaterTests: XCTestCase {
+    @MainActor
+    func testAutomaticUpdateChecksMatchCodeshHourlySchedule() {
+        XCTAssertEqual(UpdaterController.checkInterval, 3600)
+    }
+
     private func feed(_ version: String, extra: [String: Any] = [:], url: String? = nil) -> Data {
         var object: [String: Any] = [
             "version": version,

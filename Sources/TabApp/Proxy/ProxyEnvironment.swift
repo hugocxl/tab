@@ -18,7 +18,9 @@ public enum ProxyEnvironment {
     public static func sshCommand(_ proxy: ProxySettings?, program: String? = Executable.currentURL()?.path) throws -> ProxyCommand? {
         guard let proxy, proxy.global else { return nil }
         guard let program else { throw TunnelError("this app's executable was not found") }
-        let settings = String(decoding: try JSONEncoder().encode(proxy), as: UTF8.self)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        let settings = String(decoding: try encoder.encode(proxy), as: UTF8.self)
         return ProxyCommand(program: program, arguments: [ProxyTunnel.argument],
                             environment: [ProxyTunnel.settingsVariable: settings])
     }

@@ -102,7 +102,7 @@ final class CLIInstallTests: XCTestCase {
     }
 
     func testOnlyAnInstalledBundleIsLinked() throws {
-        let installed = URL(fileURLWithPath: "/Applications/Tab.app/Contents/MacOS/Tab")
+        let installed = URL(fileURLWithPath: "/Applications/Tab.app/Contents/MacOS/TabDesktop")
         XCTAssertEqual(try CommandLineInstaller.installedTool(executable: installed).path, "/Applications/Tab.app/Contents/MacOS/tab")
         for running in [
             "/Volumes/Tab/Tab.app/Contents/MacOS/Tab",

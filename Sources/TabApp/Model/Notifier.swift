@@ -11,13 +11,22 @@ public final class Notifier: NSObject {
     weak var model: AppModel?
     private var center: UNUserNotificationCenter?
     private var authorized = false
+    private var delivery: ((AgentEvent, ServerId, String) -> Void)?
+    private var clearing: (([UInt64], ServerId) -> Void)?
+
+    /// Uses an in-memory notification sink without the macOS notification center.
+    init(deliver: @escaping (AgentEvent, ServerId, String) -> Void, clear: @escaping ([UInt64], ServerId) -> Void) {
+        delivery = deliver
+        clearing = clear
+        super.init()
+    }
 
     public override init() {
         super.init()
     }
 
     /// Whether this process can show notifications.
-    public var available: Bool { center != nil && authorized }
+    public var available: Bool { delivery != nil || center != nil && authorized }
 
     private static var canUseCenter: Bool {
         Bundle.main.bundleURL.pathExtension == "app" && Bundle.main.bundleIdentifier != nil
@@ -38,6 +47,7 @@ public final class Notifier: NSObject {
     }
 
     func deliver(_ event: AgentEvent, server: ServerId, title: String) {
+        if let delivery { delivery(event, server, title); return }
         guard let center else { return }
         let content = UNMutableNotificationContent()
         content.title = title
@@ -49,8 +59,11 @@ public final class Notifier: NSObject {
     }
 
     func clear(_ ids: [UInt64], server: ServerId) {
-        guard let center, !ids.isEmpty else { return }
+        guard !ids.isEmpty else { return }
+        if let clearing { clearing(ids, server); return }
+        guard let center else { return }
         let identifiers = ids.map { Self.identifier(server, $0) }
+        center.removePendingNotificationRequests(withIdentifiers: identifiers)
         center.removeDeliveredNotifications(withIdentifiers: identifiers)
     }
 }

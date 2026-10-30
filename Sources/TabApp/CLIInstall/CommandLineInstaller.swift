@@ -96,7 +96,7 @@ public enum CommandLineInstaller {
         let path = bundle.standardizedFileURL.path
         let temporary = ["/Volumes/", "/tmp/", "/private/tmp/", "/private/var/folders/"].contains { path.hasPrefix($0) }
         let translocated = bundle.pathComponents.contains { $0 == "AppTranslocation" || $0.hasPrefix(".tab-update-") }
-        if executable.lastPathComponent != Executable.app || temporary || translocated
+        if !DesktopExecutable.accepts(executable.lastPathComponent) || temporary || translocated
             || bundle.lastPathComponent == "previous.app"
         {
             throw InstallError("Move \(appName).app to Applications and reopen it before installing its command line tool.")
@@ -154,5 +154,22 @@ public enum CommandLineInstaller {
             throw InstallError(String(cString: strerror(errno)))
         }
         try AtomicFile.syncDirectory(folder)
+    }
+}
+
+/// The app binary has a distinct name from the case-insensitive `tab` CLI.
+enum DesktopExecutable {
+    static let name = "TabDesktop"
+
+    static func accepts(_ name: String) -> Bool {
+        name == Self.name || name == Executable.app
+    }
+
+    static func name(in app: URL) throws -> String {
+        guard let info = NSDictionary(contentsOf: app.appendingPathComponent("Contents/Info.plist")),
+              let name = info["CFBundleExecutable"] as? String, accepts(name) else {
+            throw UpdateError.invalidBundle("The update has an unexpected app executable.")
+        }
+        return name
     }
 }

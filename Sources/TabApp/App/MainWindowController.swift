@@ -16,6 +16,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, A
     let keys: KeyDispatcher
     private let palette: PaletteController
     private let paletteSource: PaletteSource
+    private var pendingFolderBrowser: ServerId?
     private var settingsWindow: SettingsWindowController?
     let settingsHost: SettingsHostImpl
     private lazy var settingsStore = SettingsStore(dirs: model.dirs, host: settingsHost, theme: model.theme)
@@ -107,6 +108,10 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, A
     }
 
     private func modelChanged(_ changes: Set<ModelChange>) {
+        if let server = pendingFolderBrowser, model.connectionState(server).isReady {
+            pendingFolderBrowser = nil
+            showRemoteFolderBrowser(server)
+        }
         if changes.contains(.state) { updateTitle() }
         if changes.contains(.settings) {
             palette.actionsChord = model.settings.keymap.chord(.commandPaletteActions)
@@ -197,6 +202,8 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, A
 
     // MARK: AppPresenter
 
+    public var terminalActivityObscured: Bool { palette.isOpen || window?.attachedSheet != nil }
+
     public func confirm(title: String, message: String, confirm: String, destructive: Bool) async -> Bool {
         await withCheckedContinuation { continuation in
             ConfirmSheet.present(on: window, title: title, message: message, confirm: confirm, destructive: destructive,
@@ -218,6 +225,10 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, A
     public func showRemoteFolderBrowser(_ server: ServerId) {
         guard let window else { return }
         model.connectOnDemand(server)
+        guard model.connectionState(server).isReady else {
+            pendingFolderBrowser = server
+            return
+        }
         let start = model.state.serverHome(server)?.directory ?? ServerPath("/")
         let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 480, height: 420), styleMask: [.titled], backing: .buffered, defer: true)
         panel.appearance = model.theme.nsAppearance
@@ -280,8 +291,11 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, A
             openPalette(.addProject(.local))
             return
         }
-        var remote: [NSMenuItem] = model.settings.servers.map { server in
-            ClosureMenuItem(server.name) { [weak self] in self?.openPalette(.addProject(server.id)) }
+        var remote: [NSMenuItem] = serversByGroup(model.settings.servers, entry: { $0 }).flatMap { group, servers in
+            let items: [NSMenuItem] = servers.map { server in
+                ClosureMenuItem(server.name) { [weak self] in self?.openPalette(.addProject(server.id)) }
+            }
+            return group.map { [NSMenuItem.submenu($0, items)] } ?? items
         }
         remote.append(.separator())
         remote.append(ClosureMenuItem("Manage Remote Servers…") { [weak self] in self?.model.showServersPane() })
@@ -340,10 +354,8 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, A
 
 extension MainWindowController: DictationHost {
     public var dictationTarget: DictationTarget? {
-        guard let pane = model.activePane, let terminal = model.panes.controller(for: pane) as? TerminalPane,
-              terminal.hasFocus, let session = terminal.session, session.state == .live, let channel = session.channel
-        else { return nil }
-        return DictationTarget(pane: pane.description, attachment: "\(terminal.server):\(channel)")
+        guard let pane = model.activePane, let terminal = model.panes.controller(for: pane) as? TerminalPane else { return nil }
+        return terminal.dictationTarget(overlayActive: dictation.isActive)
     }
 
     public var dictationOverlayContainer: NSView? { window?.contentView }

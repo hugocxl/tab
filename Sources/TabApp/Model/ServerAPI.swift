@@ -37,6 +37,7 @@ public protocol ServerAPI: AnyObject, Sendable {
     func serverSettings() async throws -> ServerSettingsDoc
     func writeServerSettings(_ settings: ServerSettingsDoc) async throws
     func stopServer(force: Bool) async throws -> Bool
+    func stopServerIfIdle() async throws -> Bool
     func restartServer() async throws
     func remoteAccess() async throws -> RemoteAccessState
     func writeRemoteAccess(_ settings: RemoteAccessSettings) async throws -> RemoteAccessState

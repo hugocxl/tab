@@ -52,8 +52,8 @@ public enum ConnectionState: Equatable, Sendable {
     /// Whether the server's projects and terminals show as offline.
     public var isOffline: Bool {
         switch self {
-        case .ready, .connecting, .idle: return false
-        case .reconnecting, .needsUser: return true
+        case .ready, .connecting: return false
+        case .idle, .reconnecting, .needsUser: return true
         }
     }
 }
@@ -70,6 +70,9 @@ public final class ServerConnection {
     public private(set) var side: ServerAPI?
     /// The last activity the server reported.
     public internal(set) var activity = ActivitySnapshot()
+    var activityLoaded = false
+    var activityRefreshing = false
+    var activityDirty = false
     /// Terminal progress by session.
     public internal(set) var progress: [SessionId: SessionProgress] = [:]
     /// The last error, for banners and the host menu.
@@ -77,6 +80,7 @@ public final class ServerConnection {
     /// Why the last attempt failed, while not connected.
     public private(set) var lastFailure: ClientError?
 
+    let sshTarget: SSHTarget?
     let connector: ServerConnector
     private let backoff: @Sendable (Int) -> TimeInterval
     private var task: Task<Void, Never>?
@@ -92,10 +96,11 @@ public final class ServerConnection {
     /// The state changed.
     var onStateChange: ((ServerConnection) -> Void)?
 
-    init(id: ServerId, connector: ServerConnector,
+    init(id: ServerId, connector: ServerConnector, sshTarget: SSHTarget? = nil,
          backoff: @escaping @Sendable (Int) -> TimeInterval = { ReconnectBackoff.delay(afterFailures: $0) }) {
         self.id = id
         self.connector = connector
+        self.sshTarget = sshTarget
         self.backoff = backoff
     }
 

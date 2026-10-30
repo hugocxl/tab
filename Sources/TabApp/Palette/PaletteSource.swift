@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import TabClient
 import TabCore
 import TabProtocol
@@ -21,6 +22,8 @@ final class PaletteSource: PaletteDataSource {
     private var sessions: [ProjectId: Loadable<[ProjectSession]>] = [:]
     private var find = FindState()
     private let folders = FolderSearch()
+    private var subscription: AnyCancellable?
+    private var waitingForFolders: Set<ServerId> = []
 
     enum Loadable<Value> {
         case loading
@@ -44,6 +47,13 @@ final class PaletteSource: PaletteDataSource {
     init(model: AppModel) {
         self.model = model
         folders.onChange = { [weak self] in self?.palette?.refresh(.addProject(.local)) }
+        subscription = model.changes.sink { [weak self] _ in
+            guard let self else { return }
+            for server in self.waitingForFolders where self.model.connectionState(server).isReady {
+                let path = self.remoteFolders[server]?.path
+                self.loadRemoteFolders(server, path: path?.isEmpty == false ? path : nil)
+            }
+        }
     }
 
     private var current: Project { model.currentProject }
@@ -118,10 +128,12 @@ final class PaletteSource: PaletteDataSource {
     }
 
     func closed() {
+        waitingForFolders.removeAll()
         find.task?.cancel()
         files = [:]
         changes = [:]
         sessions = [:]
+        model.acknowledgeFocusedActivity()
         model.focusActiveContent()
     }
 
@@ -822,17 +834,21 @@ final class PaletteSource: PaletteDataSource {
     private func loadRemoteFolders(_ server: ServerId, path: String?) {
         model.connectOnDemand(server)
         guard let connection = model.connections[server], let main = connection.main else {
-            remoteFolders[server] = (path ?? "", .failed("Connecting to \(model.serverName(server) ?? "the server")…"))
+            waitingForFolders.insert(server)
+            remoteFolders[server] = (path ?? "", .loading)
             return
         }
+        waitingForFolders.remove(server)
         let home = model.state.serverHome(server)?.directory.rawValue ?? "/"
         let target = path ?? home
         remoteFolders[server] = (target, .loading)
         Task {
             do {
                 let list = try await main.listFolders(ServerPath(target))
+                guard connection.main === main, remoteFolders[server]?.path == target else { return }
                 remoteFolders[server] = (target, .loaded(list))
             } catch {
+                guard connection.main === main, remoteFolders[server]?.path == target else { return }
                 remoteFolders[server] = (target, .failed(error.message))
             }
             palette?.refresh()

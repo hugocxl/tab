@@ -17,7 +17,7 @@ phone  ──TLS (paired)──▶ tabd (opt-in network listener)
 tab browser ──app.sock──▶ Tab.app (browser automation)
 ```
 
-- `Tab.app/Contents/MacOS/` holds `Tab`, `tabd` and `tab`. The app and the CLI
+- `Tab.app/Contents/MacOS/` holds `TabDesktop` (the app), `tabd` and `tab`. The app and the CLI
   start `tabd` from beside themselves when it isn't running (detached session,
   `setsid`, stdio to `server.log`).
 - The server owns projects and sessions. Apps own layouts, panes, workspaces
@@ -40,7 +40,7 @@ tab browser ──app.sock──▶ Tab.app (browser automation)
 | `TabClient` | Connect to a server: local socket (starting tabd), SSH remote (`tab stdio`), handshake, requests with replies, events, per-session grid cache, reconnect. | TabCore, TabProtocol |
 | `tab` | The CLI: server, project, session, worktree, settings, activity, git, files, exec, mobile, browser, install-skills, stdio, `tab <folder>`. | TabClient |
 | `TabApp` | The AppKit app: window, sidebar, splits, terminal view, panels, palette, settings window, browser, dialogs, notifications, updater, dictation. | TabClient |
-| `TabDesktop` | App executable main, installed in the bundle as `Tab`. | TabApp |
+| `TabDesktop` | App executable main; keeps that name in the bundle because `Tab` and `tab` collide on a case-insensitive disk. | TabApp |
 
 Rules: a module never imports one to its right in the table except as listed.
 Apps never include server code; they only speak the protocol.
@@ -181,7 +181,7 @@ Everything lives in one profile folder: `~/Library/Application Support/Tab`
 | `app.sock` | The app's socket for `tab browser` and `tab <folder>` |
 
 Identity: bundle id `com.hugocorta.tab` (`com.hugocorta.tab-dev` for debug
-builds), URL scheme `tab://`, environment prefix `TAB_`, executables `Tab`,
+builds), URL scheme `tab://`, environment prefix `TAB_`, executables `TabDesktop`,
 `tabd`, `tab`.
 
 ## Decisions

@@ -342,13 +342,14 @@ final class ProjectHeaderRow: HoverView {
         titleLabel = makeLabel(title, font: AppFont.system(12, weight: .semibold))
         if let remoteName, !project.isRemoteHome {
             let view = NSImageView(image: AppIcon.network.image(size: 10) ?? NSImage())
-            view.toolTip = "Remote project on \(remoteName)"
+            view.toolTip = "Remote project on \(remoteName) · \(project.directory.rawValue)"
             remote = view
         } else {
             remote = nil
         }
         plus = canCreateWorktree ? ChromeButton(.plus, label: "New Worktree", side: 20, glyph: 12) : nil
         super.init(frame: .zero)
+        if let remoteName { toolTip = "\(remoteName) · \(project.directory.rawValue)" }
         iconView.image = icon
         iconView.imageScaling = .scaleProportionallyUpOrDown
         iconView.wantsLayer = true

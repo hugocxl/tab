@@ -51,7 +51,7 @@ public enum UpdaterStatus: Equatable, Sendable {
 @MainActor
 public final class UpdaterController {
     /// Background checks run at launch and then this often.
-    public static let checkInterval: TimeInterval = 6 * 60 * 60
+    public static let checkInterval: TimeInterval = 60 * 60
 
     public private(set) var status: UpdaterStatus = .idle {
         didSet { if status != oldValue { host?.updaterStatusDidChange(status) } }
@@ -89,7 +89,7 @@ public final class UpdaterController {
     }
 
     /// Finds the installation, restores a pending update, checks now and
-    /// every six hours. Debug builds and apps not signed with a Developer ID
+    /// every hour. Debug builds and apps not signed with a Developer ID
     /// never check.
     public func start() {
         guard installation == nil, task == nil else { return }
