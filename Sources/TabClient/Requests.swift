@@ -4,6 +4,27 @@ import TabProtocol
 /// Typed requests. Each throws `ClientError.unexpectedReply` when the server
 /// answers with a reply that doesn't fit.
 extension ServerClient {
+    public func agentModelCatalog(_ request: AgentModelCatalogRequest) async throws -> AgentModelCatalogReply {
+        let reply = try await self.request(.agentModelCatalog(request))
+        guard case .agentModelCatalog(let catalog) = reply else { throw unexpected(reply) }
+        return catalog
+    }
+
+    public func agentComposerContext(_ request: AgentComposerContextRequest) async throws -> AgentComposerContextReply {
+        let reply = try await self.request(.agentComposerContext(request))
+        guard case .agentComposerContext(let context) = reply else { throw unexpected(reply) }
+        return context
+    }
+
+    /// Reads or changes a server-owned agent conversation. Disconnecting does not close it.
+    public func agentChat(_ request: AgentChatRequest) async throws -> AgentChatSnapshot {
+        // Startup can include initialize, resume and turn/start RPCs. The server
+        // cancels a stuck submission at 120 seconds, before this budget expires.
+        let reply = try await self.request(.agentChat(request), timeout: max(defaultTimeout, 180))
+        guard case .agentChat(let snapshot) = reply else { throw unexpected(reply) }
+        return snapshot
+    }
+
     // MARK: Sessions
 
     public func ping() async throws {

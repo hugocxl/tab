@@ -87,6 +87,18 @@ final class ConnectionOutboxTests: XCTestCase {
         outbox.close()
     }
 
+    func testAgentChangesCoalesceBySessionKeepingHighestRevision() throws {
+        let outbox = Outbox()
+        let first = SessionId(), second = SessionId()
+        outbox.push(.event(.agentChatChanged(session: first, revision: 9)))
+        outbox.push(.event(.agentChatChanged(session: first, revision: 2)))
+        outbox.push(.event(.agentChatChanged(session: second, revision: 4)))
+        guard case .message(.event(.agentChatChanged(first, 9))) = try decode(next(outbox)) else { return XCTFail() }
+        guard case .message(.event(.agentChatChanged(second, 4))) = try decode(next(outbox)) else { return XCTFail() }
+        outbox.close()
+        XCTAssertNil(outbox.next(), "Only one queued invalidation per conversation")
+    }
+
     func testAClosedChannelTakesNoFrames() {
         let outbox = Outbox()
         outbox.openChannel(channel)

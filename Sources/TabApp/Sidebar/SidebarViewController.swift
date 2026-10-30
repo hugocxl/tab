@@ -80,7 +80,10 @@ final class SidebarViewController: NSViewController {
         footer.addSubview(filterField)
 
         toggle.onPress = { [weak self] _ in self?.model.toggleSidebar() }
-        newTerminal.onPress = { [weak self] _ in self?.model.newTerminal() }
+        newTerminal.onPress = { [weak self] button in
+            guard let self else { return }
+            self.model.newPaneMenu().popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.height), in: button)
+        }
         hostButton.onPress = { [weak self] button in self?.model.remoteController.toggleHostMenu(relativeTo: button) }
         hostButton.menuProvider = { [weak self] in self?.filterMenu() }
         addButton.onPress = { [weak self] button in self?.actions?.addProject(anchor: button) }
@@ -321,6 +324,7 @@ final class SidebarViewController: NSViewController {
     private func terminalItems(_ id: ProjectId) -> [NSMenuItem] {
         [
             ClosureMenuItem("New Terminal") { [weak self] in self?.model.newTerminal(in: id) },
+            ClosureMenuItem("New Agent Tab") { [weak self] in self?.model.newAgent(in: id) },
             ClosureMenuItem("Existing Terminals…") { [weak self] in self?.actions?.openPalette(.terminals(id)) },
         ]
     }

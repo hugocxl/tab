@@ -108,6 +108,9 @@ public struct ShortcutDefinition: Sendable {
         switch id {
         case .newTab: label = "new terminal"
         case .newTabInProject: label = "new terminal in project"
+        case .newAgent: label = "new Agent Tab"
+        case .newClaudeAgent: label = "new Agent Tab — Claude Code"
+        case .newCodexAgent: label = "new Agent Tab — Codex"
         default:
             label = name.replacingOccurrences(of: "_", with: " ").replacingOccurrences(of: ".", with: " ")
         }
@@ -189,6 +192,7 @@ public enum ShortcutCatalog {
 
     /// Commands a user can rebind in Settings → Keyboard and the keymap.
     public static let keymapActions: [ShortcutId] = [
+        .newAgent, .newClaudeAgent, .newCodexAgent,
         .openSettings, .newHomeTab, .newTabInProject, .newWorktree, .switchWorktree,
         .toggleSidebar, .toggleFiles, .toggleSourceControl, .goToFile, .findInFiles, .toggleFullScreen, .toggleThemePicker,
         .toggleCommandPalette, .navigateBack, .navigateForward, .quit, .hideApp, .hideOthers,
@@ -308,6 +312,7 @@ public enum ShortcutCatalog {
         ]
         let file: [ShortcutMenuItem] = [
             .shortcut(.newTab, title: "New Terminal"),
+            .shortcut(.newAgent, title: "New Agent Tab"),
             .shortcut(.newBrowserTab, title: "New Browser Pane"),
             .shortcut(.newHomeTab, title: "New Home Terminal"),
             .shortcut(.newTabInProject, title: "New Terminal in Project…"),
@@ -505,6 +510,10 @@ public struct KeyChord: Hashable, Comparable, Codable, Sendable, CustomStringCon
 
 public enum ShortcutId: String, CaseIterable, Codable, Sendable {
     case newTab = "new_tab"
+    case newAgent = "new_agent"
+    // Legacy keymap aliases; visible menus and the palette use newAgent.
+    case newClaudeAgent = "new_claude_agent"
+    case newCodexAgent = "new_codex_agent"
     case existingTerminals = "existing_terminals"
     case detachTerminal = "detach_terminal"
     case closeTab = "close_tab"
@@ -654,6 +663,9 @@ extension ShortcutCatalog {
     /// Every shortcut, in the order Settings lists them.
     public static let all: [ShortcutDefinition] = [
         ShortcutDefinition(.newTab, keys: ["cmd-t"], contexts: ["MainWindow"], keyContexts: [["MainWindow"]], group: .panes),
+        ShortcutDefinition(.newAgent, keys: [], contexts: ["MainWindow"], keyContexts: [], group: .panes),
+        ShortcutDefinition(.newClaudeAgent, keys: [], contexts: ["MainWindow"], keyContexts: [], group: .panes),
+        ShortcutDefinition(.newCodexAgent, keys: [], contexts: ["MainWindow"], keyContexts: [], group: .panes),
         ShortcutDefinition(.existingTerminals, keys: ["cmd-alt-t"], contexts: ["WorkspaceTabs"], keyContexts: [["WorkspaceTabs"]], group: .panes),
         ShortcutDefinition(.detachTerminal, keys: [], contexts: ["WorkspaceTabs"], keyContexts: [], group: .panes),
         ShortcutDefinition(.closeTab, keys: ["cmd-shift-w"], contexts: ["WorkspaceTabs"], keyContexts: [["WorkspaceTabs"]], group: .panes),

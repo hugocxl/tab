@@ -205,6 +205,9 @@ public enum Topic: OpenEnum {
 // MARK: - Requests
 
 public enum RequestBody: Hashable, Codable, Sendable {
+    case agentModelCatalog(AgentModelCatalogRequest)
+    case agentChat(AgentChatRequest)
+    case agentComposerContext(AgentComposerContextRequest)
     case hello(Hello)
     case ping
 
@@ -281,6 +284,9 @@ public enum RequestBody: Hashable, Codable, Sendable {
         let c = try TaggedDecoding(decoder)
         switch c.type {
         case "hello": self = .hello(try c("hello"))
+        case "agentModelCatalog": self = .agentModelCatalog(try c("request"))
+        case "agentChat": self = .agentChat(try c("request"))
+        case "agentComposerContext": self = .agentComposerContext(try c("request"))
         case "ping": self = .ping
         case "listSessions": self = .listSessions
         case "createSession": self = .createSession(try c("session"))
@@ -340,6 +346,15 @@ public enum RequestBody: Hashable, Codable, Sendable {
         case .hello(let hello):
             var c = try TaggedEncoding(encoder, "hello")
             try c(hello, "hello")
+        case .agentModelCatalog(let request):
+            var c = try TaggedEncoding(encoder, "agentModelCatalog")
+            try c(request, "request")
+        case .agentChat(let request):
+            var c = try TaggedEncoding(encoder, "agentChat")
+            try c(request, "request")
+        case .agentComposerContext(let request):
+            var c = try TaggedEncoding(encoder, "agentComposerContext")
+            try c(request, "request")
         case .ping: try TaggedEncoding(encoder, "ping")
         case .listSessions: try TaggedEncoding(encoder, "listSessions")
         case .createSession(let session):
@@ -477,6 +492,9 @@ public enum RequestBody: Hashable, Codable, Sendable {
 // MARK: - Replies
 
 public enum ReplyBody: Hashable, Codable, Sendable {
+    case agentModelCatalog(AgentModelCatalogReply)
+    case agentChat(AgentChatSnapshot)
+    case agentComposerContext(AgentComposerContextReply)
     case hello(HelloReply)
     /// The peer shares no protocol version with this server.
     case versionUnsupported(supported: [ProtocolVersion])
@@ -544,6 +562,9 @@ public enum ReplyBody: Hashable, Codable, Sendable {
         switch c.type {
         case "hello": self = .hello(try c("hello"))
         case "versionUnsupported": self = .versionUnsupported(supported: try c("supported"))
+        case "agentModelCatalog": self = .agentModelCatalog(try c("catalog"))
+        case "agentChat": self = .agentChat(try c("snapshot"))
+        case "agentComposerContext": self = .agentComposerContext(try c("context"))
         case "pong": self = .pong
         case "error": self = .error(try c("error"))
         case "sessions": self = .sessions(try c("sessions"))
@@ -595,6 +616,15 @@ public enum ReplyBody: Hashable, Codable, Sendable {
         case .versionUnsupported(let supported):
             var c = try TaggedEncoding(encoder, "versionUnsupported")
             try c(supported, "supported")
+        case .agentModelCatalog(let catalog):
+            var c = try TaggedEncoding(encoder, "agentModelCatalog")
+            try c(catalog, "catalog")
+        case .agentChat(let snapshot):
+            var c = try TaggedEncoding(encoder, "agentChat")
+            try c(snapshot, "snapshot")
+        case .agentComposerContext(let context):
+            var c = try TaggedEncoding(encoder, "agentComposerContext")
+            try c(context, "context")
         case .pong: try TaggedEncoding(encoder, "pong")
         case .error(let error):
             var c = try TaggedEncoding(encoder, "error")
@@ -688,6 +718,7 @@ public enum ReplyBody: Hashable, Codable, Sendable {
 
 /// Something the server tells every client on the control channel.
 public enum EventBody: Hashable, Codable, Sendable {
+    case agentChatChanged(session: SessionId, revision: UInt64)
     /// Shared state reached `revision`; read it again.
     case changed(topic: Topic, revision: UInt64)
     case sessionMetadata(session: SessionId, metadata: SessionMetadata)
@@ -705,6 +736,7 @@ public enum EventBody: Hashable, Codable, Sendable {
         let c = try TaggedDecoding(decoder)
         switch c.type {
         case "changed": self = .changed(topic: try c("topic"), revision: try c("revision"))
+        case "agentChatChanged": self = .agentChatChanged(session: try c("session"), revision: try c("revision"))
         case "sessionMetadata": self = .sessionMetadata(session: try c("session"), metadata: try c("metadata"))
         case "progress": self = .progress(session: try c("session"), progress: try c("progress"))
         case "sessionEnded": self = .sessionEnded(session: try c("session"), reason: try c("reason"))
@@ -721,6 +753,10 @@ public enum EventBody: Hashable, Codable, Sendable {
         case .changed(let topic, let revision):
             var c = try TaggedEncoding(encoder, "changed")
             try c(topic, "topic")
+            try c(revision, "revision")
+        case .agentChatChanged(let session, let revision):
+            var c = try TaggedEncoding(encoder, "agentChatChanged")
+            try c(session, "session")
             try c(revision, "revision")
         case .sessionMetadata(let session, let metadata):
             var c = try TaggedEncoding(encoder, "sessionMetadata")

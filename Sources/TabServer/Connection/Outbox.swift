@@ -40,6 +40,10 @@ final class Outbox: @unchecked Sendable {
             case (.changed(let topic, let old), .changed(let newTopic, let revision)) where topic == newTopic:
                 control[index] = .event(.changed(topic: topic, revision: max(old, revision)))
                 return true
+            case (.agentChatChanged(let session, let old), .agentChatChanged(let newSession, let revision))
+                where session == newSession:
+                control[index] = .event(.agentChatChanged(session: session, revision: max(old, revision)))
+                return true
             case (.sessionMetadata(let session, _), .sessionMetadata(let newSession, _)) where session == newSession,
                  (.progress(let session, _), .progress(let newSession, _)) where session == newSession:
                 control[index] = message

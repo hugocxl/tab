@@ -39,6 +39,9 @@ public protocol PaneContentController: AnyObject {
     /// Asks before closing, such as for unsaved changes or a running program.
     /// `false` keeps the pane.
     func willClose() async -> Bool
+    /// Commits an approved close, such as ending a server-owned conversation.
+    /// Called only after every pane in a group has agreed to close.
+    func commitClose() async -> Bool
     /// The pane is on screen again, or for the first time.
     func didShow()
     /// The pane left the screen: another project, a zoomed sibling, or closed.
@@ -62,6 +65,8 @@ public protocol PaneContentController: AnyObject {
 }
 
 extension PaneContentController {
+    public func commitClose() async -> Bool { true }
+
     public var hasFocus: Bool {
         guard let responder = view.window?.firstResponder as? NSView else { return false }
         return responder.isDescendant(of: view)
@@ -77,11 +82,12 @@ extension PaneContentController {
 
 /// The kinds of pane content, as `PaneContent` cases without their data.
 public enum PaneKind: Hashable, Sendable, CaseIterable {
-    case terminal, editor, diff, browser, servers
+    case terminal, agent, editor, diff, browser, servers
 
     public init(_ content: PaneContent) {
         switch content {
         case .terminal: self = .terminal
+        case .agent: self = .agent
         case .editor: self = .editor
         case .diff: self = .diff
         case .browser: self = .browser
@@ -93,6 +99,7 @@ public enum PaneKind: Hashable, Sendable, CaseIterable {
     public var glyph: AppIcon {
         switch self {
         case .terminal: return .terminal
+        case .agent: return .code
         case .editor: return .file
         case .diff: return .gitBranch
         case .browser: return .globe
@@ -103,6 +110,7 @@ public enum PaneKind: Hashable, Sendable, CaseIterable {
     public var name: String {
         switch self {
         case .terminal: return "Terminal"
+        case .agent: return "Agent"
         case .editor: return "Editor"
         case .diff: return "Diff"
         case .browser: return "Browser"
@@ -201,7 +209,7 @@ final class PlaceholderPaneController: PaneContentController {
         switch context.pane.content {
         case .editor(let path), .diff(let path, _): detail = path
         case .browser(let browser): detail = browser.url ?? "New page"
-        case .terminal, .servers: detail = context.project.directory.rawValue
+        case .terminal, .agent, .servers: detail = context.project.directory.rawValue
         }
         title = context.pane.title.isEmpty ? kind.name : context.pane.title
         view = PlaceholderView(title: kind.name, detail: detail)

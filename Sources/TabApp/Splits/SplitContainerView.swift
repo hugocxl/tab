@@ -283,6 +283,7 @@ final class EmptyProjectView: ThemedView {
     private let title = makeLabel("", font: AppFont.system(14, weight: .semibold))
     private let message = makeLabel("", font: AppFont.small)
     private let button = PillButton("New Terminal", style: .primary)
+    private let agentButton = PillButton("New Agent Tab", style: .normal)
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -296,7 +297,7 @@ final class EmptyProjectView: ThemedView {
         message.maximumNumberOfLines = 0
         message.preferredMaxLayoutWidth = 360
         button.onPress = { [weak self] in self?.onNewTerminal?() }
-        let stack = NSStackView(views: [glyph, title, message, button])
+        let stack = NSStackView(views: [glyph, title, message, button, agentButton])
         stack.orientation = .vertical
         stack.spacing = 16
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -316,8 +317,10 @@ final class EmptyProjectView: ThemedView {
         title.stringValue = missing ? "Project folder is missing" : "Nothing open in \(project.name)"
         message.stringValue = missing
             ? "This project’s folder could not be found. Remove the project from the sidebar to clear its tabs."
-            : "Open a terminal to start working in this project."
+            : "Open a terminal or Agent Tab to start working in this project."
         button.isHidden = missing
+        agentButton.isHidden = missing
+        agentButton.onPress = { [weak model] in model?.newAgent(in: project.id) }
         onNewTerminal = { [weak model] in model?.newTerminal(in: project.id) }
     }
 

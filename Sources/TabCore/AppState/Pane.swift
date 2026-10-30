@@ -18,6 +18,8 @@ public struct BrowserPane: Codable, Hashable, Sendable {
 public enum PaneContent: Codable, Hashable, Sendable {
     /// A terminal; `session` is `nil` until its server creates it.
     case terminal(session: SessionId?)
+    /// A conversation identity is assigned before contacting its server.
+    case agent(session: SessionId, provider: AgentChatProvider)
     case browser(BrowserPane)
     /// The Remote Servers pane, which manages other computers' servers.
     case servers
@@ -42,6 +44,7 @@ public enum PaneContent: Codable, Hashable, Sendable {
         switch self {
         case .editor(let path): return Self.basename(path)
         case let .diff(path, staged): return staged ? "\(Self.basename(path)) (staged)" : Self.basename(path)
+        case .agent: return "Agent"
         case .terminal, .browser, .servers: return nil
         }
     }
@@ -51,7 +54,7 @@ public enum PaneContent: Codable, Hashable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case type, session, url, profile, path, staged
+        case type, session, provider, url, profile, path, staged
     }
 
     public init(from decoder: Decoder) throws {
@@ -59,6 +62,9 @@ public enum PaneContent: Codable, Hashable, Sendable {
         switch try container.decode(String.self, forKey: .type) {
         case "terminal":
             self = .terminal(session: try container.decodeIfPresent(SessionId.self, forKey: .session))
+        case "agent":
+            self = .agent(session: try container.decode(SessionId.self, forKey: .session),
+                          provider: try container.decode(AgentChatProvider.self, forKey: .provider))
         case "browser":
             self = .browser(BrowserPane(
                 url: try container.decodeIfPresent(String.self, forKey: .url),
@@ -84,6 +90,10 @@ public enum PaneContent: Codable, Hashable, Sendable {
         case .terminal(let session):
             try container.encode("terminal", forKey: .type)
             try container.encodeIfPresent(session, forKey: .session)
+        case let .agent(session, provider):
+            try container.encode("agent", forKey: .type)
+            try container.encode(session, forKey: .session)
+            try container.encode(provider, forKey: .provider)
         case .browser(let browser):
             try container.encode("browser", forKey: .type)
             try container.encodeIfPresent(browser.url, forKey: .url)
@@ -212,6 +222,9 @@ public struct Tab: Codable, Equatable, Sendable, Identifiable {
     }
 
     mutating func sanitizeTitles() {
+        for index in panes.indices {
+            if case .agent = panes[index].content { panes[index].title = "Agent" }
+        }
         var terminal = false
         for index in panes.indices where panes[index].content.isTerminal {
             panes[index].title = TerminalTitle.sanitizeOrDefault(panes[index].title)

@@ -37,6 +37,9 @@ public final class Server: @unchecked Sendable {
     let archive: ArchiveStore
     let activity = Activity()
     let uploads: Uploads
+    let agents: AgentSessions
+    let agentComposerContext: AgentComposerContextService
+    let agentModelCatalog: AgentModelCatalogService
     let shellIntegration: ShellIntegration?
     let lifecycle = DispatchQueue(label: "tab.server.lifecycle", qos: .utility)
 
@@ -67,8 +70,27 @@ public final class Server: @unchecked Sendable {
         settings = try ServerSettingsStore(url: configuration.settings)
         let archive = try ArchiveStore(root: dirs.sessions)
         self.archive = archive
-        catalog = try Catalog(directory: dirs.sessions, homeDirectory: configuration.homeDirectory,
-                              hasSavedScreen: { archive.contains($0) })
+        let catalog = try Catalog(directory: dirs.sessions, homeDirectory: configuration.homeDirectory,
+                                  hasSavedScreen: { archive.contains($0) })
+        self.catalog = catalog
+        agentComposerContext = AgentComposerContextService(home: URL(fileURLWithPath: configuration.homeDirectory),
+            projectDirectory: { project in
+                let directory = try catalog.project(project).directory
+                guard directory.isDirectory else { throw ServiceError(.badPath, "The agent's project folder is unavailable") }
+                return directory.url
+            })
+        agentModelCatalog = AgentModelCatalogService(home: URL(fileURLWithPath: configuration.homeDirectory),
+            cacheDirectory: dirs.root.appendingPathComponent("agent-model-catalog"),
+            projectDirectory: { project in
+                let directory = try catalog.project(project).directory
+                guard directory.isDirectory else { throw ServiceError(.badPath, "The agent's project folder is unavailable") }
+                return directory.url
+            })
+        agents = try AgentSessions(root: dirs.root.appendingPathComponent("agents"), projectDirectory: { project in
+            let directory = try catalog.project(project).directory
+            guard directory.isDirectory else { throw ServiceError(.badPath, "The agent's project folder is unavailable") }
+            return directory.rawValue
+        })
         uploads = Uploads(directory: configuration.uploads)
         do {
             shellIntegration = try ShellIntegration.install(into: dirs.root.appendingPathComponent("shell-integration"))
@@ -80,6 +102,12 @@ public final class Server: @unchecked Sendable {
                           server: catalog.serverId)
         catalog.onChange = { [weak self] revision in self?.catalogChanged(revision) }
         activity.onChange = { [weak self] revision in self?.activityChanged(revision) }
+        agents.changed = { [weak self] session, revision in
+            self?.broadcast(.agentChatChanged(session: session, revision: revision))
+        }
+        agents.checkDirectory = { [weak self] directory in
+            try self?.services.worktreeGuard?.checkSession(directory: directory)
+        }
         resumeCleanup()
         pruneExpiredSessions()
     }
@@ -274,6 +302,7 @@ public final class Server: @unchecked Sendable {
         let deleting = catalog.deleting()
         guard !deleting.isEmpty else { return }
         for project in deleting {
+            agents.close(project: project)
             for session in catalog.sessions(of: project) { try discardOwned(session) }
         }
         try catalog.finishDeletions()
@@ -352,19 +381,27 @@ public final class Server: @unchecked Sendable {
     // MARK: Stopping
 
     func requestStop(force: Bool) -> ReplyBody {
-        if !force, hasSessions { return .serverBusy }
+        if !force {
+            // Terminal creation also holds operations. Check it before reserving
+            // agents, so a busy terminal does not leave agent requests refused.
+            guard operations.try() else { return .serverBusy }
+            defer { operations.unlock() }
+            guard !hasSessions, agents.tryRefuseIfIdle() else { return .serverBusy }
+            refuseNewSessions()
+            scheduleStop()
+            return .serverStopping
+        }
         refuseNewSessions()
         scheduleStop()
         return .serverStopping
     }
 
     func requestStopIfIdle() -> ReplyBody {
-        let idle = sessionLock.withLock { () -> Bool in
-            guard !stopping, sessions.isEmpty, starting.isEmpty else { return false }
-            stopping = true
-            return true
-        }
-        guard idle else { return .serverBusy }
+        guard operations.try() else { return .serverBusy }
+        defer { operations.unlock() }
+        let idle = sessionLock.withLock { !stopping && sessions.isEmpty && starting.isEmpty }
+        guard idle, agents.tryRefuseIfIdle() else { return .serverBusy }
+        sessionLock.withLock { stopping = true }
         broadcast(.serverRestarting)
         scheduleStop()
         return .serverStopping
@@ -381,6 +418,7 @@ public final class Server: @unchecked Sendable {
     /// would only be ended with it, so creation fails instead.
     private func refuseNewSessions() {
         sessionLock.withLock { stopping = true }
+        agents.refuseNewRequests()
     }
 
     /// Stops after the reply had a moment to go out.
@@ -390,6 +428,7 @@ public final class Server: @unchecked Sendable {
 
     /// Ends every session (their content is saved) and waits for them.
     func endAllSessions(timeout: TimeInterval = 10) {
+        agents.shutdown()
         let owners = sessionLock.withLock { () -> [SessionOwner] in
             stopping = true
             return Array(sessions.values)
@@ -497,6 +536,7 @@ extension Server: WorktreeCatalog {
     }
 
     public func endSessions(project: ProjectId, directory: String) throws {
+        agents.close(project: project, directory: directory)
         let root = Catalog.canonical(directory)
         let targets = liveSessions().filter { info in
             let folder = Catalog.canonical(info.directory.rawValue)

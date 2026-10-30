@@ -162,6 +162,10 @@ extension Message {
 extension RequestBody {
     public func validate() throws(ErrorCode) {
         switch self {
+        case .agentChat(let request):
+            try request.validate()
+        case .agentComposerContext, .agentModelCatalog:
+            break
         case .hello(let hello):
             try Validation.versions(hello.versions)
         case .clearScreen(let channel), .detach(let channel):
@@ -243,6 +247,12 @@ extension ServerSettingsDoc {
 extension ReplyBody {
     public func validate() throws(ErrorCode) {
         switch self {
+        case .agentChat(let snapshot):
+            try snapshot.validate()
+        case .agentComposerContext(let context):
+            try context.validate()
+        case .agentModelCatalog(let catalog):
+            try catalog.validate()
         case .activityClaimed(let ids):
             if ids.count > Limits.activityHistoryLimit { throw .badRequest }
         case .activity(let snapshot):
@@ -301,7 +311,7 @@ extension EventBody {
             try metadata.directory.validate()
         case .progress(_, let progress):
             if let percent = progress.progress?.percent, percent > 100 { throw .badRequest }
-        case .changed, .sessionEnded, .gitChanged, .serverRestarting, .fatal, .unknown:
+        case .changed, .agentChatChanged, .sessionEnded, .gitChanged, .serverRestarting, .fatal, .unknown:
             break
         }
     }

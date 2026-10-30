@@ -72,7 +72,7 @@ final class ShortcutTests: XCTestCase {
     func testEveryDefaultBindingRoundTripsAndResolvesBothDirections() throws {
         let keymap = Keymap()
         for action in ShortcutCatalog.keymapActions {
-            if [.selectCommandOutput, .detachTerminal].contains(action) {
+            if [.selectCommandOutput, .detachTerminal, .newAgent, .newClaudeAgent, .newCodexAgent].contains(action) {
                 XCTAssertNil(keymap.chord(action))
                 continue
             }
@@ -97,6 +97,20 @@ final class ShortcutTests: XCTestCase {
                 XCTAssertEqual(try roundTrip(keymap), keymap)
             }
         }
+    }
+
+    func testGenericAgentActionAndLegacyAliasesKeepCustomBindings() throws {
+        let bindings: [String: String] = [
+            ShortcutId.newAgent.rawValue: "ctrl-alt-f22",
+            ShortcutId.newClaudeAgent.rawValue: "ctrl-alt-f23",
+            ShortcutId.newCodexAgent.rawValue: "ctrl-alt-f24",
+        ]
+        let keymap = try Keymap.fromOverrides(bindings)
+        for id in [ShortcutId.newAgent, .newClaudeAgent, .newCodexAgent] {
+            let chord = try KeyChord(XCTUnwrap(bindings[id.rawValue]))
+            XCTAssertEqual(keymap.action(for: chord), id)
+        }
+        XCTAssertEqual(try roundTrip(keymap), keymap)
     }
 
     func testRemovedActionsStillLoadAndUnknownOnesAreRefused() throws {
