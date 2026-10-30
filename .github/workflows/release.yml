@@ -1,13 +1,17 @@
 name: Release
 
-# A tag vX.Y.Z publishes a stable release, the feed of
-# releases/latest/download/update.json. A tag vX.Y.Z-beta.N, where N is the
-# tagged commit's count (scripts/tag-release.sh makes both), publishes a
+# Every push to main publishes a stable release, the feed of
+# releases/latest/download/update.json. Each pushed commit adds a version to
+# CHANGELOG.md; the workflow tags every commit with its version and releases
+# the newest one, with the changelog as its notes. A tag vX.Y.Z-beta.N, where
+# N is the tagged commit's count (scripts/tag-beta.sh makes it), publishes a
 # prerelease and moves the beta feed, the update.json of the `beta` release.
+# Tags this workflow pushes don't start it again.
 
 on:
   push:
-    tags: ['v*']
+    branches: [main]
+    tags: ['v*-beta.*']
 
 permissions:
   contents: read
@@ -28,21 +32,31 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Read the release tag
+      - name: Version the pushed commits
+        env:
+          BEFORE: ${{ github.event.before }}
         run: |
           set -euo pipefail
+          test "$(uname -m)" = arm64
+          if [ "$GITHUB_REF_TYPE" = branch ]; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898283+github-actions[bot]@users.noreply.github.com'
+            # Local tags until the release is built; they're pushed with it.
+            scripts/changelog.sh tag "$BEFORE" "$GITHUB_SHA"
+            VERSION="$(scripts/changelog.sh version)"
+            echo "RELEASE_TAG=v$VERSION" >> "$GITHUB_ENV"
+            echo "RELEASE_VERSION=$VERSION" >> "$GITHUB_ENV"
+            echo "RELEASE_CHANNEL=stable" >> "$GITHUB_ENV"
+            exit 0
+          fi
           VERSION="${GITHUB_REF_NAME#v}"
-          if [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            CHANNEL=stable
-          elif [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+-beta\.([1-9][0-9]*)$ ]]; then
-            CHANNEL=beta
-            COUNT="$(git rev-list --count HEAD)"
-            if [ "${BASH_REMATCH[1]}" != "$COUNT" ]; then
-              echo "Error: a beta tag ends in its commit's count; tag this commit v${VERSION%-beta.*}-beta.$COUNT" >&2
-              exit 1
-            fi
-          else
-            echo 'Error: release tags must be vX.Y.Z or vX.Y.Z-beta.N' >&2
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+-beta\.([1-9][0-9]*)$ ]]; then
+            echo 'Error: beta tags must be vX.Y.Z-beta.N' >&2
+            exit 1
+          fi
+          COUNT="$(git rev-list --count HEAD)"
+          if [ "${BASH_REMATCH[1]}" != "$COUNT" ]; then
+            echo "Error: a beta tag ends in its commit's count; tag this commit v${VERSION%-beta.*}-beta.$COUNT" >&2
             exit 1
           fi
           git fetch origin '+refs/heads/main:refs/remotes/origin/main'
@@ -50,9 +64,9 @@ jobs:
             echo 'Error: release only commits on main' >&2
             exit 1
           fi
-          test "$(uname -m)" = arm64
+          echo "RELEASE_TAG=$GITHUB_REF_NAME" >> "$GITHUB_ENV"
           echo "RELEASE_VERSION=$VERSION" >> "$GITHUB_ENV"
-          echo "RELEASE_CHANNEL=$CHANNEL" >> "$GITHUB_ENV"
+          echo "RELEASE_CHANNEL=beta" >> "$GITHUB_ENV"
       - name: Use the Xcode the project is developed with
         run: |
           set -euo pipefail
@@ -120,7 +134,14 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          TAG="$GITHUB_REF_NAME"
+          TAG="$RELEASE_TAG"
+          if [ "$RELEASE_CHANNEL" = stable ]; then
+            git push origin --tags
+          fi
+          # The changelog since the latest release, so a push of several
+          # commits lists them all.
+          PREVIOUS="$(gh release view --json tagName --jq .tagName 2>/dev/null || true)"
+          scripts/changelog.sh notes "${PREVIOUS#v}" > "$RUNNER_TEMP/tab-release-notes.md"
           if gh release view "$TAG" --json isDraft > "$RUNNER_TEMP/tab-release.json"; then
             if [ "$(plutil -extract isDraft raw "$RUNNER_TEMP/tab-release.json")" != true ]; then
               echo 'Error: this release is already public; its assets are immutable' >&2
@@ -130,7 +151,7 @@ jobs:
             PRERELEASE=--prerelease=false
             if [ "$RELEASE_CHANNEL" = beta ]; then PRERELEASE=--prerelease; fi
             gh release create "$TAG" --verify-tag --draft --latest=false "$PRERELEASE" \
-              --title "Tab $RELEASE_VERSION" --generate-notes
+              --title "Tab $RELEASE_VERSION" --notes-file "$RUNNER_TEMP/tab-release-notes.md"
           fi
           ASSETS=("build/release/Tab-$RELEASE_VERSION-arm64.dmg" build/release/update.json)
           gh release upload "$TAG" --clobber "${ASSETS[@]}"

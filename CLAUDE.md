@@ -35,31 +35,34 @@ Run `scripts/validate.sh` before finishing. Warnings are errors.
 
 ## Changelog
 
-Every commit updates [CHANGELOG.md](CHANGELOG.md) in the same commit. The app
-bundles the file and shows it in Settings → Changelog, so write it for users.
+Every commit is a version: it adds a new section on top of
+[CHANGELOG.md](CHANGELOG.md) in the same commit. The app bundles the file and
+shows it in Settings → Changelog, so write it for users.
 
 - Before every commit, run `git pull --rebase origin main`. Other branches
-  push to `main` and tag versions, so the newest section and the next version
-  number must come from the latest `main`, not from where you started.
-- Each version is a `## X.Y.Z - YYYY-MM-DD` section, newest first, with
-  `### Added`, `### Changed`, `### Fixed` or `### Removed` groups of `- `
-  entries. Wrapped lines are indented two spaces. Inline Markdown only.
-- The newest section is the version the commit will be tagged as. If it is
-  not tagged yet (`git tag -l vX.Y.Z` is empty), add to it; otherwise start a
-  new section with the next version (see Releasing) and today's date.
+  push to `main`, so the next version number must come from the latest
+  `main`, not from where you started. If the rebase conflicts in the
+  changelog, renumber your section above theirs.
+- Each commit adds one `## X.Y.Z - YYYY-MM-DD` section with today's date,
+  newer than the one below it: the patch for fixes and changes nobody sees,
+  the minor version for new features or visible changes. Never add entries to
+  an older section.
+- Sections hold `### Added`, `### Changed`, `### Fixed` or `### Removed`
+  groups of `- ` entries. Wrapped lines are indented two spaces. Inline
+  Markdown only.
 - Describe what changed for someone using Tab, in one sentence each: not file
   names, refactors or test-only work. A commit with no visible change, such as
   a CI fix, gets a short entry under `### Fixed` or `### Changed` all the same.
-- `ChangelogTests` checks the format and order, and `scripts/tag-release.sh`
-  refuses a version that isn't the changelog's newest.
+- `ChangelogTests` checks the format and order; the Release workflow refuses
+  a push with a commit that doesn't add a newer version.
 
 ## Releasing
 
-Every commit pushed to `main` ships as a new tagged version. After pushing,
-run `scripts/tag-release.sh X.Y.Z` on the pushed `main` and check that the
-Release workflow succeeds. Bump the patch for fixes and the minor version for
-new features or visible changes; use `--beta` only when asked. X.Y.Z is the
-newest version in `CHANGELOG.md`.
+Releases are automatic. Every push to `main` runs the Release workflow: it
+tags each pushed commit `vX.Y.Z` with its changelog version and publishes the
+newest one as a release, with the changelog as its notes. Don't tag stable
+versions by hand. After pushing, check that the workflow succeeds. Make a
+beta with `scripts/tag-beta.sh` only when asked.
 
 ## Dependencies
 

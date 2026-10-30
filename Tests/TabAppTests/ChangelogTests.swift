@@ -43,8 +43,8 @@ final class ChangelogTests: XCTestCase {
         XCTAssertEqual(Changelog.releaseVersion(of: "1.2.0"), "1.2.0")
     }
 
-    /// The repository's changelog is what the app shows and what
-    /// `scripts/tag-release.sh` checks, so it must stay in this format.
+    /// The repository's changelog is what the app shows and where
+    /// `scripts/changelog.sh` reads versions, so it must stay in this format.
     func testRepositoryChangelogListsEveryVersionNewestFirst() throws {
         let file = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()

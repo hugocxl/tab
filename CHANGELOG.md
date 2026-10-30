@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.4.1 - 2026-10-30
+
+### Changed
+
+- Every change pushed to Tab is released automatically as its own version,
+  with these notes describing it.
+
 ## 0.4.0 - 2026-10-30
 
 ### Added

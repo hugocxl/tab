@@ -2,8 +2,8 @@
 
 Tab ships one Apple silicon DMG and an `update.json` feed in each GitHub Release,
 following Codesh's schema-1 layout. macOS 14.0 is the minimum. No release script
-launches the GUI, pushes a commit, or publishes a release locally; publishing is a
-tag push, which `scripts/tag-release.sh` makes.
+launches the GUI, pushes a commit, or publishes a release locally: every push to
+`main` publishes one, and a beta is a tag push, which `scripts/tag-beta.sh` makes.
 
 ## Build locally
 
@@ -15,10 +15,11 @@ scripts/validate.sh
 RELEASE_VERSION=0.2.0 scripts/release.sh
 ```
 
-The release tag is the only source of a release's version: `vX.Y.Z` for a stable
-release, `vX.Y.Z-beta.N` for a beta, where `N` is the tagged commit's
-`git rev-list --count`, which orders betas. `release.sh` requires `RELEASE_VERSION`;
-the workflow sets it from the tag. Local bundles from `bundle.sh` without it are
+A stable version comes from `CHANGELOG.md`: each commit adds a section, and its
+newest `## X.Y.Z` is the commit's version, tagged `vX.Y.Z` by the workflow. A beta
+is `vX.Y.Z-beta.N`, where `N` is the tagged commit's `git rev-list --count`, which
+orders betas. `release.sh` requires `RELEASE_VERSION`; the workflow sets it.
+`scripts/changelog.sh version` prints a commit's version. Local bundles from `bundle.sh` without it are
 `X.Y.<commit count>` from `VERSION` (`X.Y`) and are never published.
 `CFBundleShortVersionString` is `X.Y.Z`, as macOS expects; the full version, with
 any `-beta.N`, is the `TabVersion` key, which the app and the updater read.
@@ -98,17 +99,21 @@ The workflow notarizes with the API key. Without `APPLE_API_KEY_P8` it falls bac
 to `APPLE_ID` and `APPLE_APP_SPECIFIC_PASSWORD`, Codesh's secrets. Its signing
 keychain gets a random password per run. `GITHUB_TOKEN` is supplied by GitHub.
 
-Each release's changes are listed in `CHANGELOG.md`, which the app shows in
-Settings → Changelog. `tag-release.sh` refuses a version that isn't the
-changelog's newest. To cut a release, push the validated commit to `main`, then:
+Each version's changes are listed in `CHANGELOG.md`, which the app shows in
+Settings → Changelog. Releasing is pushing to `main`: the workflow runs for every
+push. It refuses the push if a pushed commit doesn't add a newer changelog version,
+tags every commit with its version (`scripts/changelog.sh tag`), and releases the
+newest one. Its notes are the changelog sections since the latest release, so a
+push of several commits lists them all. The tags are pushed once the release is
+built, and tags the workflow pushes don't start it again. For a beta of the
+newest version, when asked:
 
 ```sh
-scripts/tag-release.sh 0.2.0          # stable: tags and pushes v0.2.0
-scripts/tag-release.sh 0.2.0 --beta   # beta: tags and pushes v0.2.0-beta.<commit count>
+scripts/tag-beta.sh   # tags and pushes vX.Y.Z-beta.<commit count>
 ```
 
 The workflow runs on GitHub's Apple silicon `xcode-27` runner with Xcode 27.1. It
-refuses tags that aren't on `main` and betas whose `N` isn't the commit count,
+refuses beta tags that aren't on `main` or whose `N` isn't the commit count,
 builds Ghostty if uncached, runs `scripts/validate.sh`, imports the certificate into
 a temporary keychain, and calls `scripts/release.sh`.
 
