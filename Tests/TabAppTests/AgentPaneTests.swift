@@ -69,9 +69,17 @@ final class AgentPaneTests: XCTestCase {
         }
 
         func controller() -> AgentPaneController {
-            AgentPaneController(session: session, project: project, provider: .claude) { [self] in
+            let pane = AgentPaneController(session: session, project: project, provider: .claude) { [self] in
                 try await request($0)
             }
+            pane.loadModelCatalog = { provider, _ in
+                let options: [(String, String)] = provider == .claude
+                    ? [("claude-sonnet-5-5", "Claude Sonnet 5.5"), ("claude-opus-5-5", "Claude Opus 5.5")]
+                    : [("gpt-6.1-sol", "GPT-6.1 Sol"), ("gpt-6-astra", "GPT-6 Astra")]
+                return options.map { .init(id: $0.0, title: $0.1, reasoningEfforts: [.low, .medium, .high, .max],
+                                           defaultReasoningEffort: .medium) }
+            }
+            return pane
         }
     }
 
@@ -141,6 +149,81 @@ final class AgentPaneTests: XCTestCase {
         pane.surface.composer.string = "/clear"
         pane.send()
         XCTAssertTrue(pane.surface.composer.string.isEmpty)
+        XCTAssertFalse(backend.requests.contains { if case .send = $0 { return true }; return false })
+    }
+
+    func testProviderContextAndResolvedModelReachCompactControlsWithoutChangingSettings() async throws {
+        let backend = Backend()
+        backend.snapshot.resolvedModel = "claude-sonnet-5-5"
+        backend.snapshot.contextUsage = .init(usedTokens: 42_000, contextWindow: 200_000)
+        let pane = backend.controller()
+        defer { pane.dispose() }
+        pane.refresh()
+        try await wait { pane.snapshot != nil }
+        pane.view.frame = NSRect(x: 0, y: 0, width: 1000, height: 800)
+        pane.view.layoutSubtreeIfNeeded()
+        XCTAssertNil(pane.selection.model, "A resolved provider model is display metadata, not a settings override")
+        XCTAssertEqual(pane.surface.model.labelText, "Claude Sonnet 5.5")
+        XCTAssertFalse(pane.surface.model.itemArray.contains {
+            guard let choice = $0.representedObject as? AgentModelSelection else { return false }
+            return choice.model == nil
+        })
+        XCTAssertEqual(pane.surface.contextIndicator.fractionUsed ?? -1, 0.21, accuracy: 0.001)
+        XCTAssertTrue(pane.surface.feedback.isHidden)
+        for control in [pane.surface.model, pane.surface.effort, pane.surface.access] {
+            XCTAssertEqual(control.frame.width, control.intrinsicContentSize.width)
+        }
+        backend.snapshot.contextUsage = .init(usedTokens: 123)
+        pane.refresh()
+        try await wait { pane.surface.contextIndicator.usedTokens == 123 }
+        XCTAssertNil(pane.surface.contextIndicator.fractionUsed, "Unknown capacity must not produce a fabricated percentage")
+    }
+
+    func testDiscoveredModelsAndNewReasoningValuesNeedNoAppRelease() async throws {
+        let backend = Backend()
+        let pane = backend.controller()
+        defer { pane.dispose() }
+        pane.loadModelCatalog = { provider, _ in
+            guard provider == .codex else { return [] }
+            return [.init(id: "future-codex-model", title: "Future Codex Model",
+                          reasoningEfforts: [.low, .high, .init(rawValue: "next-generation")], defaultReasoningEffort: .low)]
+        }
+        pane.refresh()
+        try await wait { pane.snapshot != nil && pane.surface.model.itemTitles.contains("Future Codex Model") }
+        XCTAssertFalse(pane.surface.model.itemTitles.contains("GPT-6 Astra"), "Only provider-discovered models belong in the menu")
+        pane.selectModel(provider: .codex, model: "future-codex-model")
+        XCTAssertEqual(pane.surface.model.labelText, "Future Codex Model")
+        XCTAssertEqual(pane.surface.effort.itemTitles, ["Auto", "Low", "High", AgentReasoningEffort(rawValue: "next-generation").title])
+        XCTAssertEqual(pane.surface.effort.defaultValueTitle, "Low")
+        pane.selectEffort(.init(rawValue: "next-generation"))
+        XCTAssertEqual(pane.reasoningEffort?.rawValue, "next-generation")
+        pane.surface.composer.string = "Use the discovered model"
+        pane.send()
+        try await wait { pane.surface.composer.string.isEmpty }
+        guard case .send(_, _, let model, let effort, let provider, _) = backend.requests.last else { return XCTFail("Missing send") }
+        XCTAssertEqual(model, "future-codex-model")
+        XCTAssertEqual(provider, .codex)
+        XCTAssertEqual(effort?.rawValue, "next-generation")
+    }
+
+    func testRefreshModelsRequestsFreshProviderDataAndUpdatesMenu() async throws {
+        let backend = Backend()
+        let pane = backend.controller()
+        defer { pane.dispose() }
+        var refreshes: [Bool] = []
+        pane.loadModelCatalog = { provider, force in
+            guard provider == .codex else { return [] }
+            refreshes.append(force)
+            return [.init(id: force ? "new-release" : "existing", title: force ? "New release" : "Existing",
+                          reasoningEfforts: [.high])]
+        }
+        pane.refresh()
+        try await wait { pane.snapshot != nil && pane.surface.model.itemTitles.contains("Existing") }
+        pane.surface.model.selectItem(withTitle: "Refresh models…")
+        _ = (pane.surface.model.target as? NSObject)?.perform(try XCTUnwrap(pane.surface.model.action), with: pane.surface.model)
+        try await wait { pane.surface.model.itemTitles.contains("New release") }
+        XCTAssertEqual(refreshes, [false, true])
+        XCTAssertFalse(pane.surface.model.itemTitles.contains("Existing"))
         XCTAssertFalse(backend.requests.contains { if case .send = $0 { return true }; return false })
     }
 

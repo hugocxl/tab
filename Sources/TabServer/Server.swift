@@ -39,6 +39,7 @@ public final class Server: @unchecked Sendable {
     let uploads: Uploads
     let agents: AgentSessions
     let agentComposerContext: AgentComposerContextService
+    let agentModelCatalog: AgentModelCatalogService
     let shellIntegration: ShellIntegration?
     let lifecycle = DispatchQueue(label: "tab.server.lifecycle", qos: .utility)
 
@@ -73,6 +74,13 @@ public final class Server: @unchecked Sendable {
                                   hasSavedScreen: { archive.contains($0) })
         self.catalog = catalog
         agentComposerContext = AgentComposerContextService(home: URL(fileURLWithPath: configuration.homeDirectory),
+            projectDirectory: { project in
+                let directory = try catalog.project(project).directory
+                guard directory.isDirectory else { throw ServiceError(.badPath, "The agent's project folder is unavailable") }
+                return directory.url
+            })
+        agentModelCatalog = AgentModelCatalogService(home: URL(fileURLWithPath: configuration.homeDirectory),
+            cacheDirectory: dirs.root.appendingPathComponent("agent-model-catalog"),
             projectDirectory: { project in
                 let directory = try catalog.project(project).directory
                 guard directory.isDirectory else { throw ServiceError(.badPath, "The agent's project folder is unavailable") }

@@ -1,4 +1,5 @@
 import AppKit
+import TabCore
 
 /// Native text input with a drawn placeholder: no overlay intercepts selection or clicks.
 @MainActor
@@ -92,10 +93,33 @@ final class AgentComposerTextView: NSTextView {
     }
 }
 
-/// An actual NSPopUpButton and native menu, with the quiet text-only trigger used by the composer.
+/// Content-sized native picker with a quiet icon, label and disclosure chevron.
 @MainActor
-final class AgentTextPopUp: NSPopUpButton {
-    var chatTheme: AppTheme = .shared { didSet { needsDisplay = true } }
+class AgentTextPopUp: NSPopUpButton {
+    var chatTheme: AppTheme = .shared { didSet { refreshLogos(); needsDisplay = true } }
+    var symbol = "cpu" { didSet { needsDisplay = true } }
+    var providerLogo: AgentProvider? { didSet { refreshLogos(); needsDisplay = true } }
+    var menuLogos: [Int: AgentProvider] = [:] { didSet { refreshLogos() } }
+    private var brandImage: NSImage?
+
+    private func refreshLogos() {
+        brandImage = providerLogo.flatMap { AgentLogo.image(for: $0, lightBackground: chatTheme.palette.isLight) }
+        for (index, provider) in menuLogos {
+            let image = AgentLogo.image(for: provider, lightBackground: chatTheme.palette.isLight)
+            image?.size = NSSize(width: 16, height: 16)
+            image?.isTemplate = false
+            item(at: index)?.image = image
+        }
+    }
+    var displayedTitle: String? {
+        didSet {
+            invalidateIntrinsicContentSize()
+            setAccessibilityValue(labelText)
+            superview?.needsLayout = true
+            needsDisplay = true
+        }
+    }
+    var labelText: String { displayedTitle ?? titleOfSelectedItem ?? controlLabel }
     private let controlLabel: String
     private var hoverTracking: NSTrackingArea?
     private var hovered = false
@@ -129,8 +153,8 @@ final class AgentTextPopUp: NSPopUpButton {
     override func drawFocusRingMask() { NSBezierPath(roundedRect: bounds, xRadius: 5, yRadius: 5).fill() }
 
     override var intrinsicContentSize: NSSize {
-        let width = ((titleOfSelectedItem ?? controlLabel) as NSString).size(withAttributes: [.font: AppFont.small]).width
-        return NSSize(width: ceil(width) + 22, height: 26)
+        let width = (labelText as NSString).size(withAttributes: [.font: AppFont.small]).width
+        return NSSize(width: ceil(width) + 46, height: 28)
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -141,7 +165,19 @@ final class AgentTextPopUp: NSPopUpButton {
         let color = isEnabled ? chatTheme.fgMuted : chatTheme.fgDim
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = .byTruncatingTail
-        ((titleOfSelectedItem ?? controlLabel) as NSString).draw(in: NSRect(x: 4, y: 6, width: max(0, bounds.width - 22), height: 18),
+        let configuration = NSImage.SymbolConfiguration(pointSize: 12, weight: .regular)
+            .applying(NSImage.SymbolConfiguration(paletteColors: [color]))
+        if let brandImage {
+            brandImage.draw(in: NSRect(x: 4, y: floor((bounds.height - 16) / 2), width: 16, height: 16),
+                            from: .zero, operation: .sourceOver, fraction: isEnabled ? 1 : 0.5,
+                            respectFlipped: true, hints: [.interpolation: NSImageInterpolation.high])
+        } else {
+            NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
+            .withSymbolConfiguration(configuration)?
+            .draw(in: NSRect(x: 5, y: floor((bounds.height - 14) / 2), width: 14, height: 14),
+                  from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+        }
+        (labelText as NSString).draw(in: NSRect(x: 25, y: floor((bounds.height - 16) / 2), width: max(0, bounds.width - 44), height: 18),
             withAttributes: [.font: AppFont.small, .foregroundColor: color, .paragraphStyle: paragraph])
         color.setStroke()
         let path = NSBezierPath()

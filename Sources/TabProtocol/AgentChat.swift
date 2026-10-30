@@ -36,25 +36,40 @@ public enum AgentAccessMode: String, Codable, Hashable, Sendable, CaseIterable {
 }
 
 /// Optional reasoning control; nil lets the installed provider use its defaults.
-public enum AgentReasoningEffort: String, Codable, Hashable, Sendable, CaseIterable {
-    case low, medium, high, xhigh, max
+public struct AgentReasoningEffort: RawRepresentable, Codable, Hashable, Sendable {
+    public var rawValue: String
+    public init(rawValue: String) { self.rawValue = rawValue }
+    public static let low = Self(rawValue: "low")
+    public static let medium = Self(rawValue: "medium")
+    public static let high = Self(rawValue: "high")
+    public static let xhigh = Self(rawValue: "xhigh")
+    public static let max = Self(rawValue: "max")
+    public static let ultra = Self(rawValue: "ultra")
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        rawValue = try container.decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+
+    public func validate() throws(ErrorCode) {
+        guard !rawValue.isEmpty, rawValue.utf8.count <= 64,
+              rawValue.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) }) else {
+            throw .badRequest
+        }
+    }
 
     public var title: String { self == .xhigh ? "Extra high" : rawValue.capitalized }
 
-    /// T3's Claude model profiles; Codex advertises these four reasoning levels.
-    /// Unknown/default Claude models expose only the conservative common levels.
-    public static func supported(provider: AgentChatProvider, model: String?) -> [Self] {
-        if provider == .codex { return [.low, .medium, .high, .xhigh] }
-        let model = (model ?? "").lowercased().replacingOccurrences(of: ".", with: "-")
-        if model.contains("haiku-4-5") { return [] }
-        if ["opus-5", "opus-4-8", "opus-4-7", "fable-5", "sonnet-5", "haiku-5"].contains(where: { model.contains($0) }) {
-            return [.low, .medium, .high, .xhigh, .max]
-        }
-        if ["opus-4-6", "opus-4-5", "sonnet-4-6"].contains(where: { model.contains($0) }) {
-            return [.low, .medium, .high, .max]
-        }
-        return [.low, .medium, .high]
+    /// Installed provider capabilities are authoritative; only wire safety is checked here.
+    public func isAccepted(provider: AgentChatProvider, model: String?) -> Bool {
+        (try? validate()) != nil
     }
+
 }
 
 /// A stable transcript row; streaming updates retain its identity.
@@ -91,6 +106,9 @@ public struct AgentChatSnapshot: Codable, Hashable, Sendable {
     public var provider: AgentChatProvider
     public var providerSession: String?
     public var model: String?
+    /// Actual provider model, independent of the user's optional model override.
+    public var resolvedModel: String?
+    public var contextUsage: AgentContextUsage?
     public var reasoningEffort: AgentReasoningEffort?
     public var accessMode: AgentAccessMode?
     public var turns: [AgentChatTurn]?
@@ -102,6 +120,8 @@ public struct AgentChatSnapshot: Codable, Hashable, Sendable {
                 providerSession: String? = nil, model: String? = nil,
                 reasoningEffort: AgentReasoningEffort? = nil,
                 accessMode: AgentAccessMode? = .standard,
+                contextUsage: AgentContextUsage? = nil,
+                resolvedModel: String? = nil,
                 turns: [AgentChatTurn]? = nil,
                 status: AgentChatStatus = .idle, revision: UInt64 = 0, items: [AgentChatItem] = []) {
         self.session = session
@@ -109,6 +129,8 @@ public struct AgentChatSnapshot: Codable, Hashable, Sendable {
         self.provider = provider
         self.providerSession = providerSession
         self.model = model
+        self.resolvedModel = resolvedModel
+        self.contextUsage = contextUsage
         self.reasoningEffort = reasoningEffort
         self.accessMode = accessMode ?? .standard
         self.turns = turns
@@ -118,7 +140,7 @@ public struct AgentChatSnapshot: Codable, Hashable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case session, project, provider, providerSession, model, reasoningEffort, accessMode, turns, status, revision, items
+        case session, project, provider, providerSession, model, resolvedModel, contextUsage, reasoningEffort, accessMode, turns, status, revision, items
     }
 
     public init(from decoder: Decoder) throws {
@@ -128,6 +150,8 @@ public struct AgentChatSnapshot: Codable, Hashable, Sendable {
         provider = try c.decode(AgentChatProvider.self, forKey: .provider)
         providerSession = try c.decodeIfPresent(String.self, forKey: .providerSession)
         model = try c.decodeIfPresent(String.self, forKey: .model)
+        resolvedModel = try c.decodeIfPresent(String.self, forKey: .resolvedModel)
+        contextUsage = try c.decodeIfPresent(AgentContextUsage.self, forKey: .contextUsage)
         reasoningEffort = try c.decodeIfPresent(AgentReasoningEffort.self, forKey: .reasoningEffort)
         accessMode = try c.decodeIfPresent(AgentAccessMode.self, forKey: .accessMode) ?? .standard
         turns = try c.decodeIfPresent([AgentChatTurn].self, forKey: .turns)

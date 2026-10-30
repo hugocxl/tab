@@ -5,6 +5,75 @@ import XCTest
 @testable import TabServer
 
 final class AgentRuntimeTests: XCTestCase {
+    func testCodexResumedAutoEffortFindsSelectedModelOnLaterCatalogPage() async throws {
+        let recorder = AgentRuntimeRecorder()
+        let idle = expectation(description: "later-page selection completed")
+        recorder.observe = { event in if case .status(.idle) = event { idle.fulfill() } }
+        let fixture = try AgentRuntimeFixture("""
+        take
+        emit '{"id":1,"result":{}}'
+        take
+        take
+        emit '{"id":2,"result":{"thread":{"id":"resumed"}}}'
+        take
+        emit '{"id":3,"result":{"config":{}}}'
+        take
+        emit '{"id":4,"result":{"data":[{"model":"first","isDefault":true}],"nextCursor":"next"}}'
+        take
+        emit '{"id":5,"result":{"data":[{"model":"later-page","defaultReasoningEffort":"ultra"}]}}'
+        take
+        emit '{"id":6,"result":{"turn":{"id":"turn"}}}'
+        emit '{"method":"turn/completed","params":{"turn":{"id":"turn","status":"completed"}}}'
+        hold
+        """)
+        defer { fixture.remove() }
+        let runtime = fixture.runtime(.codex, recorder: recorder, resume: "resumed")
+        defer { runtime.stop() }
+        try await runtime.send(text: "Hello", model: "later-page")
+        await fulfillment(of: [idle], timeout: 5)
+        let sent = try fixture.messages()
+        XCTAssertEqual((sent[5]["params"] as? [String: Any])?["cursor"] as? String, "next")
+        XCTAssertEqual((sent[6]["params"] as? [String: Any])?["effort"] as? String, "ultra")
+        XCTAssertEqual((sent[6]["params"] as? [String: Any])?["model"] as? String, "later-page")
+    }
+
+    func testDynamicFutureReasoningPassesThroughBothProviderRuntimes() async throws {
+        for provider in AgentChatProvider.allCases {
+            let recorder = AgentRuntimeRecorder()
+            let body = provider == .claude ? """
+            take
+            emit '{"type":"control_response","response":{"subtype":"success","request_id":"1","response":{}}}'
+            take
+            emit '{"type":"result","subtype":"success","is_error":false,"result":"ok"}'
+            hold
+            """ : """
+            take
+            emit '{"id":1,"result":{}}'
+            take
+            take
+            emit '{"id":2,"result":{"thread":{"id":"thread"}}}'
+            take
+            emit '{"id":3,"result":{"turn":{"id":"turn"}}}'
+            emit '{"method":"turn/completed","params":{"turn":{"id":"turn","status":"completed"}}}'
+            hold
+            """
+            let fixture = try AgentRuntimeFixture(body)
+            defer { fixture.remove() }
+            let idle = expectation(description: "\(provider) future effort")
+            recorder.observe = { event in if case .status(.idle) = event { idle.fulfill() } }
+            let runtime = fixture.runtime(provider, recorder: recorder)
+            defer { runtime.stop() }
+            try await runtime.send(text: "Hello", model: "future-model", reasoningEffort: .init(rawValue: "future-effort"))
+            await fulfillment(of: [idle], timeout: 5)
+            if provider == .claude {
+                XCTAssertTrue(try fixture.launches()[0].contains("--effort\nfuture-effort\n"))
+            } else {
+                let sent = try fixture.messages()
+                XCTAssertEqual((sent.last?["params"] as? [String: Any])?["effort"] as? String, "future-effort")
+            }
+        }
+    }
+
     // Protocol replays are synthetic, derived from the T3 reference paths cited in the
     // provider implementations; no authentication, CLI install or billable request is used.
     func testClaudeStreamingApprovalToolResultAndNoDuplicateAnswer() async throws {
@@ -19,8 +88,8 @@ final class AgentRuntimeTests: XCTestCase {
         take
         emit '{"type":"control_response","response":{"subtype":"success","request_id":"1","response":{}}}'
         take
-        emit '{"type":"system","subtype":"init","session_id":"claude-session"}'
-        emit '{"type":"stream_event","event":{"type":"message_start","message":{"id":"message-1"}}}'
+        emit '{"type":"system","subtype":"init","session_id":"claude-session","model":"test-model"}'
+        emit '{"type":"stream_event","event":{"type":"message_start","message":{"id":"message-1","model":"test-model","usage":{"input_tokens":10,"cache_read_input_tokens":100,"cache_creation_input_tokens":20}}}}'
         emit '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello "}}}'
         printf '%s' '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"'
         printf '\\303'
@@ -30,7 +99,7 @@ final class AgentRuntimeTests: XCTestCase {
         emit '{"type":"control_request","request_id":"permission-1","request":{"subtype":"can_use_tool","tool_name":"Bash","tool_use_id":"tool-1","input":{"command":"pwd"}}}'
         take
         emit '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tool-1","content":"/project"}]}}'
-        emit '{"type":"result","subtype":"success","is_error":false,"result":"Hello é"}'
+        emit '{"type":"result","subtype":"success","is_error":false,"result":"Hello é","modelUsage":{"test-model":{"inputTokens":9000,"contextWindow":200000}}}'
         hold
         """)
         defer { fixture.remove() }
@@ -58,6 +127,8 @@ final class AgentRuntimeTests: XCTestCase {
         XCTAssertEqual(decision?["toolUseID"] as? String, "tool-1")
         XCTAssertEqual((decision?["updatedInput"] as? [String: Any])?["command"] as? String, "pwd")
         XCTAssertTrue(recorder.sessions.contains("claude-session"))
+        XCTAssertEqual(recorder.contextUsage.last, .init(usedTokens: 130, contextWindow: 200_000))
+        XCTAssertEqual(recorder.resolvedModels, ["test-model"])
     }
 
     func testCodexResumeNumericZeroApprovalAndEarlyNotifications() async throws {
@@ -81,6 +152,8 @@ final class AgentRuntimeTests: XCTestCase {
         emit '{"id":4,"result":{"data":[{"id":"test-model","model":"test-model","isDefault":true,"defaultReasoningEffort":"medium"}]}}'
         take
         emit '{"method":"turn/started","params":{"turn":{"id":"turn-1"}}}'
+        emit '{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","tokenUsage":{"last":{"totalTokens":1234},"total":{"totalTokens":999999},"modelContextWindow":258400}}}'
+        emit '{"method":"thread/tokenUsage/updated","params":{"threadId":"child-thread","tokenUsage":{"last":{"totalTokens":9999},"modelContextWindow":1000000}}}'
         emit '{"method":"item/agentMessage/delta","params":{"itemId":"answer","delta":"Done"}}'
         emit '{"id":0,"method":"item/commandExecution/requestApproval","params":{"itemId":"command-1","command":"pwd","availableDecisions":["accept","decline"]}}'
         emit '{"id":5,"result":{"turn":{"id":"turn-1"}}}'
@@ -114,6 +187,8 @@ final class AgentRuntimeTests: XCTestCase {
         XCTAssertEqual(recorder.transcript["command-1"]?.isComplete, true)
         XCTAssertEqual(recorder.transcript["0"]?.text, "Declined")
         XCTAssertEqual(recorder.sessions, ["thread-1"])
+        XCTAssertEqual(recorder.contextUsage, [.init(usedTokens: 1234, contextWindow: 258_400)],
+                       "Subagent thread notifications must not overwrite root context usage")
     }
 
     func testCodexInterruptWaitsForCompletionAndUsesTurnID() async throws {
@@ -320,15 +395,15 @@ final class AgentRuntimeTests: XCTestCase {
         XCTAssertEqual(try fixture.launches().count, 1, "Codex selections apply per turn without discarding its thread")
     }
 
-    func testUnsupportedEffortIsRejectedBeforeLaunchingProvider() async throws {
+    func testMalformedEffortIsRejectedBeforeLaunchingProvider() async throws {
         let fixture = try AgentRuntimeFixture("take\nhold")
         defer { fixture.remove() }
         let recorder = AgentRuntimeRecorder()
         let runtime = fixture.runtime(.codex, recorder: recorder)
         defer { runtime.stop() }
         do {
-            try await runtime.send(text: "not sent", model: nil, reasoningEffort: .max)
-            XCTFail("Codex has no max effort")
+            try await runtime.send(text: "not sent", model: nil, reasoningEffort: .init(rawValue: "bad\nvalue"))
+            XCTFail("Malformed reasoning must not reach the provider")
         } catch { XCTAssertTrue(error.localizedDescription.contains("does not support")) }
         XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.log.path))
         XCTAssertTrue(recorder.statuses.isEmpty)
@@ -455,6 +530,8 @@ final class AgentRuntimeRecorder: @unchecked Sendable {
     var statuses: [AgentChatStatus] { snapshot.compactMap { if case .status(let value) = $0 { return value }; return nil } }
     var failures: [String] { snapshot.compactMap { if case .failure(let value) = $0 { return value }; return nil } }
     var sessions: [String] { snapshot.compactMap { if case .providerSession(let value) = $0 { return value }; return nil } }
+    var contextUsage: [AgentContextUsage] { snapshot.compactMap { if case .contextUsage(let value) = $0 { return value }; return nil } }
+    var resolvedModels: [String] { snapshot.compactMap { if case .resolvedModel(let value) = $0 { return value }; return nil } }
     var transcript: [String: AgentChatItem] {
         var items: [String: AgentChatItem] = [:]
         for event in snapshot {

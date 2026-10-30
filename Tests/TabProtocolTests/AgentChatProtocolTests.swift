@@ -37,18 +37,16 @@ final class AgentChatProtocolTests: XCTestCase {
         XCTAssertThrowsError(try AgentChatRequest.approve(session: session, request: "", allow: true).validate())
     }
 
-    func testModelEffortCapabilitiesMatchT3ProfilesWithoutInventingCustomCapabilities() throws {
-        for model in ["claude-opus-5-5", "claude-fable-5-1", "claude-sonnet-5-5", "claude-haiku-5-5"] {
-            XCTAssertEqual(AgentReasoningEffort.supported(provider: .claude, model: model), AgentReasoningEffort.allCases)
-        }
-        XCTAssertEqual(AgentReasoningEffort.supported(provider: .claude, model: nil), [.low, .medium, .high])
-        XCTAssertEqual(AgentReasoningEffort.supported(provider: .claude, model: "custom"), [.low, .medium, .high])
-        XCTAssertEqual(AgentReasoningEffort.supported(provider: .claude, model: "claude-haiku-4-5"), [])
-        XCTAssertEqual(AgentReasoningEffort.supported(provider: .claude, model: "claude-opus-4-6"), [.low, .medium, .high, .max])
-        XCTAssertEqual(AgentReasoningEffort.supported(provider: .codex, model: "gpt-6.1-sol"), [.low, .medium, .high, .xhigh])
+    func testEffortValuesAreExtensibleAndRemainSingleValueStrings() throws {
         XCTAssertEqual(AgentReasoningEffort.xhigh.title, "Extra high")
-        XCTAssertThrowsError(try AgentChatRequest.send(session: SessionId(), text: "hello", model: nil,
-                                                       reasoningEffort: .max, provider: .codex).validate())
+        for provider in AgentChatProvider.allCases {
+            for effort in [AgentReasoningEffort.max, .ultra, .init(rawValue: "future-effort")] {
+                XCTAssertNoThrow(try AgentChatRequest.send(session: SessionId(), text: "hello", model: "future-model",
+                                                         reasoningEffort: effort, provider: provider).validate())
+                XCTAssertEqual(try WireJSON.decode(AgentReasoningEffort.self, from: WireJSON.encode(effort)), effort)
+            }
+        }
+        XCTAssertEqual(String(decoding: try WireJSON.encode(AgentReasoningEffort.high), as: UTF8.self), "\"high\"")
     }
 
     func testLegacySnapshotAndSendWithoutAddedOptionalFieldsRemainDecodable() throws {
@@ -62,6 +60,8 @@ final class AgentChatProtocolTests: XCTestCase {
         let restored = try WireJSON.decode(AgentChatSnapshot.self, from: JSONSerialization.data(withJSONObject: legacy))
         XCTAssertEqual(restored.accessMode, .standard)
         XCTAssertNil(restored.turns)
+        XCTAssertNil(restored.contextUsage)
+        XCTAssertNil(restored.resolvedModel)
         XCTAssertEqual(AgentAccessMode.standard.title, "Auto")
         XCTAssertEqual(AgentAccessMode.ask.title, "Ask every time")
         XCTAssertEqual(AgentAccessMode.fullAccess.title, "Full access")
@@ -91,5 +91,19 @@ final class AgentChatProtocolTests: XCTestCase {
         var invalidTurn = snapshot
         invalidTurn.turns?[0].completedAt = start.addingTimeInterval(-1)
         XCTAssertThrowsError(try invalidTurn.validate())
+    }
+
+    func testContextUsageRoundTripsWithKnownAndUnknownCapacity() throws {
+        for capacity in [nil, 200_000] as [Int?] {
+            let snapshot = AgentChatSnapshot(session: SessionId(), project: ProjectId(), provider: .claude,
+                contextUsage: .init(usedTokens: 42_000, contextWindow: capacity), resolvedModel: "claude-sonnet-4-6")
+            XCTAssertEqual(try WireJSON.decode(AgentChatSnapshot.self, from: WireJSON.encode(snapshot)), snapshot)
+            try snapshot.validate()
+        }
+        var invalid = AgentChatSnapshot(session: SessionId(), project: ProjectId(), provider: .codex,
+            contextUsage: .init(usedTokens: -1))
+        XCTAssertThrowsError(try invalid.validate())
+        invalid.contextUsage = .init(usedTokens: 0, contextWindow: 0)
+        XCTAssertThrowsError(try invalid.validate())
     }
 }

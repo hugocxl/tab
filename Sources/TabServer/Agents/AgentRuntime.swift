@@ -7,6 +7,8 @@ internal enum AgentRuntimeEvent: Sendable {
     case textDelta(id: String, text: String)
     case status(AgentChatStatus)
     case providerSession(String)
+    case contextUsage(AgentContextUsage)
+    case resolvedModel(String)
     case failure(String)
 }
 
@@ -104,7 +106,7 @@ internal final class AgentRuntime: @unchecked Sendable {
                     return
                 }
                 if let reasoningEffort,
-                   !AgentReasoningEffort.supported(provider: self.provider, model: model).contains(reasoningEffort) {
+                   !reasoningEffort.isAccepted(provider: self.provider, model: model) {
                     continuation.resume(throwing: AgentRuntimeError("This provider/model does not support \(reasoningEffort.title) reasoning."))
                     return
                 }
@@ -209,6 +211,7 @@ internal final class AgentRuntime: @unchecked Sendable {
                             self.threadID = id
                             self.ready = true
                             self.onEvent(.providerSession(id))
+                            if let model = response["model"] as? String { self.onEvent(.resolvedModel(model)) }
                             completion(.success(response))
                         } catch { completion(.failure(error)) }
                     }
@@ -251,6 +254,7 @@ internal final class AgentRuntime: @unchecked Sendable {
                         do {
                             let response = try result.get()
                             self.model = model
+                            if let wireModel { self.onEvent(.resolvedModel(wireModel)) }
                             self.reasoningEffort = reasoningEffort
                             self.hasSubmittedTurn = true
                             if self.busy, let turn = response["turn"] as? [String: Any] { self.turnID = turn["id"] as? String }
@@ -291,10 +295,9 @@ internal final class AgentRuntime: @unchecked Sendable {
         try request("config/read", params: ["includeLayers": false, "cwd": directory]) { result in
             do {
                 let config = try result.get()["config"] as? [String: Any] ?? [:]
-                try self.request("model/list", params: [:]) { result in
+                try self.codexModels { result in
                     do {
-                        let response = try result.get()
-                        let models = response["data"] as? [[String: Any]] ?? []
+                        let models = try result.get()
                         let defaultModel = config["model"] as? String
                             ?? models.first(where: { $0["isDefault"] as? Bool == true })?["model"] as? String
                         let effectiveModel = model ?? defaultModel
@@ -308,6 +311,26 @@ internal final class AgentRuntime: @unchecked Sendable {
                                              resetEffort ? defaultEffort : reasoningEffort?.rawValue)))
                     } catch { completion(.failure(error)) }
                 }
+            } catch { completion(.failure(error)) }
+        }
+    }
+
+    private func codexModels(cursor: String? = nil, rows: [[String: Any]] = [],
+                             cursors: Set<String> = [],
+                             completion: @escaping (Result<[[String: Any]], Error>) -> Void) throws {
+        var params: [String: Any] = ["includeHidden": false, "limit": 100]
+        if let cursor { params["cursor"] = cursor }
+        try request("model/list", params: params) { result in
+            do {
+                let response = try result.get()
+                let models = rows + (response["data"] as? [[String: Any]] ?? [])
+                guard models.count <= 4096 else { throw AgentRuntimeError("Codex model catalog is too large.") }
+                if let next = response["nextCursor"] as? String, !next.isEmpty {
+                    guard cursors.count < 32, !cursors.contains(next) else {
+                        throw AgentRuntimeError("Codex model catalog pagination did not finish.")
+                    }
+                    try self.codexModels(cursor: next, rows: models, cursors: cursors.union([next]), completion: completion)
+                } else { completion(.success(models)) }
             } catch { completion(.failure(error)) }
         }
     }
@@ -519,6 +542,7 @@ internal final class AgentRuntime: @unchecked Sendable {
             }
             return
         }
+        if method == "thread/tokenUsage/updated", params["threadId"] as? String != threadID { return }
         codex.receive(message)
         if method == "turn/started", let turn = params["turn"] as? [String: Any] { turnID = turn["id"] as? String }
         if method == "turn/completed" {

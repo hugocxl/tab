@@ -17,6 +17,7 @@ public protocol ServerAPI: AnyObject, Sendable {
     func sessions() async throws -> [SessionInfo]
     func agentChat(_ request: AgentChatRequest) async throws -> AgentChatSnapshot
     func agentComposerContext(_ request: AgentComposerContextRequest) async throws -> AgentComposerContextReply
+    func agentModelCatalog(_ request: AgentModelCatalogRequest) async throws -> AgentModelCatalogReply
     func createSession(_ session: CreateSession) async throws -> SessionInfo
     func closeSession(_ session: SessionId, operation: OperationId) async throws
     func endSession(_ session: SessionId) async throws
@@ -53,6 +54,10 @@ extension ServerClient: ServerAPI {
 }
 
 extension ServerAPI {
+    public func agentModelCatalog(_ request: AgentModelCatalogRequest) async throws -> AgentModelCatalogReply {
+        throw ModelError("Model discovery is unsupported by this server.")
+    }
+
     public func agentComposerContext(_ request: AgentComposerContextRequest) async throws -> AgentComposerContextReply {
         throw ModelError("Composer skill discovery is unsupported by this server.")
     }

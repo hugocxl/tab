@@ -3,7 +3,7 @@ import Foundation
 extension AgentChatRequest {
     public func validate() throws(ErrorCode) {
         switch self {
-        case .send(_, let text, let model, let effort, let provider, let attachments):
+        case .send(_, let text, let model, let effort, _, let attachments):
             try AgentChatAttachment.validate(attachments ?? [])
             if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !(attachments ?? []).isEmpty {
                 guard text.utf8.count <= 64 * 1024 else { throw .badRequest }
@@ -11,8 +11,7 @@ extension AgentChatRequest {
                 try Validation.message(text, limit: 64 * 1024)
             }
             if let model { try Validation.message(model, limit: 256) }
-            if let effort, let provider,
-               !AgentReasoningEffort.supported(provider: provider, model: model).contains(effort) { throw .badRequest }
+            try effort?.validate()
         case .approve(_, let request, _):
             try Validation.message(request, limit: 1024)
         case .create, .read, .interrupt, .close, .setAccess:
@@ -23,11 +22,17 @@ extension AgentChatRequest {
 
 extension AgentChatSnapshot {
     public func validate() throws(ErrorCode) {
+        try reasoningEffort?.validate()
         guard items.count <= 512,
               items.reduce(0, { $0 + $1.transcriptByteCount }) <= 512 * 1024,
               items.allSatisfy({ $0.id.utf8.count <= 1024 }),
               (providerSession?.utf8.count ?? 0) <= 4096,
-              (model?.utf8.count ?? 0) <= 256 else { throw .badRequest }
+              (model?.utf8.count ?? 0) <= 256,
+              (resolvedModel?.utf8.count ?? 0) <= 256 else { throw .badRequest }
+        if let contextUsage {
+            guard contextUsage.usedTokens >= 0,
+                  contextUsage.contextWindow.map({ $0 > 0 }) ?? true else { throw .badRequest }
+        }
         if let turns {
             let users = Set(items.filter { $0.kind == .user }.map(\.id))
             guard turns.count <= 512,

@@ -24,12 +24,11 @@ codex login status
 ```
 
 The app invokes the installed agent in the project's directory. The model menu
-groups Claude Code and Codex presets from T3's model manifest, with a provider
-default and **Custom model…** option for each. Presets are not an account-specific
-availability check; the provider must support the selected model.
+groups the catalogs reported by Claude Code and Codex, with **Refresh models…**
+to request an updated catalog.
 
 Model and effort changes apply to the next message and are saved with the
-conversation when sent. **Default effort** delegates to the provider. The effort menu
+conversation when sent. **Auto** reasoning delegates to the provider's configured default. The effort menu
 offers the selected model's supported settings. Switching provider is available
 until a provider conversation has been established; after that, open a new Agent
 Tab to use another provider. Changing models within the same provider retains
@@ -67,6 +66,21 @@ automatically answered by any access mode.
 ## Native chat behavior
 
 ### Composer context and attachments
+
+The bottom model, reasoning and access pickers use content-sized labels, icons
+and vertical separators, wrapping in narrow panes. The reasoning picker supports
+keyboard navigation in a native popover. Its `Auto` value follows the provider's
+configured reasoning level. The model menu offers provider-reported models;
+provider-resolved model metadata supplies the current label when available.
+Both model lists and reasoning options load directly from the project server's
+installed Claude Code and Codex. Catalogs refresh automatically and through
+**Refresh models…**; cached provider catalogs support offline use. New model IDs
+and reasoning levels require no Tab release. Provider-advertised defaults are
+marked when available.
+
+The context ring reports the latest provider-reported context usage. Click it for
+token counts and capacity. Unknown capacity stays unknown rather than displaying
+an estimated percentage; usage is retained across reconnects and restarts.
 
 - Type **@** to search project files and other open agent conversations in the
   project. Up/Down selects a result; Return or Tab inserts it; Escape dismisses
@@ -143,8 +157,8 @@ revision `6fc9144a60c4a5f45089316ddd5f7371bafd3bf2`. Key references:
 - `apps/web/src/components/chat/TimelineUserMessageRow.tsx`,
   `MessagesTimeline.logic.ts`, and `apps/web/src/components/ChatMarkdown.tsx`:
   user bubbles, activity folding and document-like assistant responses.
-- `apps/server/src/provider/model-manifest.json`: model presets and Claude
-  reasoning-effort capabilities.
+- Provider discovery protocols supply model names and reasoning capabilities;
+  T3's model manifest remains a behavioral reference rather than a picker catalog.
 
 T3's server is TypeScript and its Claude adapter uses the Agent SDK. Tab adapts
 these behaviors into Swift and drives the installed CLIs over pipes. Claude

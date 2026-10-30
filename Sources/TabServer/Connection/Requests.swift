@@ -38,6 +38,10 @@ extension ClientConnection {
             Task { [self] in
                 reply(id, await asyncResult { .agentChat(try await server.agents.handle(request)) })
             }
+        case .agentModelCatalog(let request):
+            Task { [self] in
+                reply(id, await asyncResult { .agentModelCatalog(try await server.agentModelCatalog.handle(request)) })
+            }
         case .agentComposerContext(let request):
             Task { [self] in
                 reply(id, await asyncResult { .agentComposerContext(try await server.agentComposerContext.handle(request)) })
@@ -216,7 +220,7 @@ extension ClientConnection {
             return .remoteAccess(remote.state())
 
         case .hello, .ping, .unknown, .authenticate, .pair, .git, .files, .exec, .cancelExec, .agentChat,
-             .agentComposerContext:
+             .agentComposerContext, .agentModelCatalog:
             throw ServiceError(.badRequest, "Unexpected request")
         }
     }

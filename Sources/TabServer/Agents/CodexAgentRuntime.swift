@@ -16,6 +16,14 @@ internal final class CodexAgentRuntime {
         guard let method = message["method"] as? String,
               let params = message["params"] as? [String: Any] else { return }
         switch method {
+        case "thread/tokenUsage/updated":
+            guard let usage = params["tokenUsage"] as? [String: Any],
+                  let last = usage["last"] as? [String: Any],
+                  let tokens = agentTokenCount(last["totalTokens"]) ?? agentTokenCount(last["inputTokens"]) else { return }
+            // `total` is lifetime billed usage; `last` is the latest model request.
+            // Cached input is already included, and must never be added again.
+            onEvent(.contextUsage(AgentContextUsage(usedTokens: tokens,
+                contextWindow: agentContextWindow(usage["modelContextWindow"]))))
         case "item/agentMessage/delta":
             guard let id = params["itemId"] as? String, let text = params["delta"] as? String else { return }
             if items[id] == nil {

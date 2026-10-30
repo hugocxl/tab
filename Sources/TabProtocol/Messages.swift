@@ -205,6 +205,7 @@ public enum Topic: OpenEnum {
 // MARK: - Requests
 
 public enum RequestBody: Hashable, Codable, Sendable {
+    case agentModelCatalog(AgentModelCatalogRequest)
     case agentChat(AgentChatRequest)
     case agentComposerContext(AgentComposerContextRequest)
     case hello(Hello)
@@ -283,6 +284,7 @@ public enum RequestBody: Hashable, Codable, Sendable {
         let c = try TaggedDecoding(decoder)
         switch c.type {
         case "hello": self = .hello(try c("hello"))
+        case "agentModelCatalog": self = .agentModelCatalog(try c("request"))
         case "agentChat": self = .agentChat(try c("request"))
         case "agentComposerContext": self = .agentComposerContext(try c("request"))
         case "ping": self = .ping
@@ -344,6 +346,9 @@ public enum RequestBody: Hashable, Codable, Sendable {
         case .hello(let hello):
             var c = try TaggedEncoding(encoder, "hello")
             try c(hello, "hello")
+        case .agentModelCatalog(let request):
+            var c = try TaggedEncoding(encoder, "agentModelCatalog")
+            try c(request, "request")
         case .agentChat(let request):
             var c = try TaggedEncoding(encoder, "agentChat")
             try c(request, "request")
@@ -487,6 +492,7 @@ public enum RequestBody: Hashable, Codable, Sendable {
 // MARK: - Replies
 
 public enum ReplyBody: Hashable, Codable, Sendable {
+    case agentModelCatalog(AgentModelCatalogReply)
     case agentChat(AgentChatSnapshot)
     case agentComposerContext(AgentComposerContextReply)
     case hello(HelloReply)
@@ -556,6 +562,7 @@ public enum ReplyBody: Hashable, Codable, Sendable {
         switch c.type {
         case "hello": self = .hello(try c("hello"))
         case "versionUnsupported": self = .versionUnsupported(supported: try c("supported"))
+        case "agentModelCatalog": self = .agentModelCatalog(try c("catalog"))
         case "agentChat": self = .agentChat(try c("snapshot"))
         case "agentComposerContext": self = .agentComposerContext(try c("context"))
         case "pong": self = .pong
@@ -609,6 +616,9 @@ public enum ReplyBody: Hashable, Codable, Sendable {
         case .versionUnsupported(let supported):
             var c = try TaggedEncoding(encoder, "versionUnsupported")
             try c(supported, "supported")
+        case .agentModelCatalog(let catalog):
+            var c = try TaggedEncoding(encoder, "agentModelCatalog")
+            try c(catalog, "catalog")
         case .agentChat(let snapshot):
             var c = try TaggedEncoding(encoder, "agentChat")
             try c(snapshot, "snapshot")

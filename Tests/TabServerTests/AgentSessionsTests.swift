@@ -74,6 +74,73 @@ private actor AgentSubmissionGate {
 }
 
 final class AgentSessionsTests: XCTestCase {
+    func testContextTelemetryPersistsAndModelChangesClearItWithoutChangingDefaultSelection() async throws {
+        let root = try root(), box = AgentRuntimeBox()
+        let sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, callback in
+            let runtime = FakeAgentRuntime(callback)
+            runtime.onSend = {
+                callback(.resolvedModel("provider-default"))
+                callback(.contextUsage(.init(usedTokens: 42_000, contextWindow: 200_000)))
+                callback(.status(.idle))
+            }
+            box.install(runtime)
+            return runtime
+        })
+        let id = SessionId()
+        _ = try await sessions.handle(.create(session: id, project: ProjectId(), provider: .codex))
+        let submitted = try await sessions.handle(.send(session: id, text: "hello", model: nil))
+        XCTAssertEqual(submitted.contextUsage, .init(usedTokens: 42_000, contextWindow: 200_000))
+        XCTAssertEqual(submitted.resolvedModel, "provider-default")
+        XCTAssertNil(submitted.model, "Resolved telemetry must not change provider-default selection semantics")
+        sessions.shutdown()
+
+        let restored = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, callback in
+            let runtime = FakeAgentRuntime(callback)
+            // Deliberately do not emit new telemetry, to expose stale values.
+            runtime.onSend = { callback(.status(.idle)) }
+            box.install(runtime)
+            return runtime
+        })
+        defer { restored.shutdown() }
+        let recovered = try await restored.handle(.read(session: id))
+        XCTAssertEqual(recovered.contextUsage, submitted.contextUsage)
+        XCTAssertEqual(recovered.resolvedModel, "provider-default")
+        let sameModel = try await restored.handle(.send(session: id, text: "again", model: nil, reasoningEffort: .high))
+        XCTAssertEqual(sameModel.contextUsage, submitted.contextUsage, "Effort alone does not invalidate the context capacity")
+        let changedModel = try await restored.handle(.send(session: id, text: "switch", model: "other"))
+        XCTAssertNil(changedModel.contextUsage)
+        XCTAssertNil(changedModel.resolvedModel)
+    }
+
+    func testProviderChangeClearsUnestablishedTelemetryAndFencesLateEvents() async throws {
+        let root = try root(), box = AgentRuntimeBox()
+        let sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { provider, _, _, callback in
+            let runtime = FakeAgentRuntime(callback)
+            runtime.providerSession = nil
+            runtime.onSend = {
+                if provider == .claude {
+                    callback(.contextUsage(.init(usedTokens: 123)))
+                    callback(.resolvedModel("claude-default"))
+                    callback(.failure("startup failed"))
+                } else { callback(.status(.idle)) }
+            }
+            box.install(runtime)
+            return runtime
+        })
+        defer { sessions.shutdown() }
+        let id = SessionId()
+        _ = try await sessions.handle(.create(session: id, project: ProjectId(), provider: .claude))
+        let failed = try await sessions.handle(.send(session: id, text: "hello", model: nil))
+        XCTAssertEqual(failed.contextUsage?.usedTokens, 123)
+        let old = try XCTUnwrap(box.runtime)
+        let switched = try await sessions.handle(.send(session: id, text: "retry", model: nil, provider: .codex))
+        XCTAssertNil(switched.contextUsage)
+        XCTAssertNil(switched.resolvedModel)
+        old.callback(.contextUsage(.init(usedTokens: 999)))
+        let latest = try await sessions.handle(.read(session: id))
+        XCTAssertNil(latest.contextUsage)
+    }
+
     private func root() throws -> URL {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("agent-tests-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -554,12 +621,12 @@ final class AgentSessionsTests: XCTestCase {
         let original = try await sessions.handle(.create(session: session, project: ProjectId(), provider: .claude))
         do {
             _ = try await sessions.handle(.send(session: session, text: "unsupported", model: "claude-haiku-4-5",
-                                               reasoningEffort: .high))
-            XCTFail("Haiku 4.5 has no effort control")
+                                               reasoningEffort: .init(rawValue: "bad\nvalue")))
+            XCTFail("Control characters are not valid effort values")
         } catch {}
         do {
-            _ = try await sessions.handle(.send(session: session, text: "invalid switch", model: "gpt-6.1-sol",
-                                               reasoningEffort: .max, provider: .codex))
+            _ = try await sessions.handle(.send(session: session, text: "invalid effort", model: "claude-opus-5-5",
+                                               reasoningEffort: .init(rawValue: ""), provider: .claude))
             XCTFail("Validate effort before changing providers")
         } catch {}
         XCTAssertNil(box.runtime)

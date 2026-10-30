@@ -14,6 +14,9 @@ internal final class ClaudeAgentRuntime {
     private var tools: [String: AgentChatItem] = [:]
     private var blocks: [Int: String] = [:]
     private var partialInputs: [String: String] = [:]
+    private var contextUsage: AgentContextUsage?
+    private var contextModel: String?
+    private var contextWindows: [String: Int] = [:]
 
     init(onEvent: @escaping @Sendable (AgentRuntimeEvent) -> Void) { self.onEvent = onEvent }
 
@@ -27,10 +30,15 @@ internal final class ClaudeAgentRuntime {
         // Subagent messages belong to their tool, not the root assistant stream.
         if let parent = message["parent_tool_use_id"], !(parent is NSNull) { return }
         switch message["type"] as? String {
+        case "system":
+            if message["subtype"] as? String == "init", let model = message["model"] as? String {
+                onEvent(.resolvedModel(model))
+            }
         case "stream_event":
             guard let event = message["event"] as? [String: Any] else { return }
             stream(event)
         case "assistant":
+            if let assistant = message["message"] as? [String: Any] { recordContext(assistant) }
             guard let assistant = message["message"] as? [String: Any],
                   let id = assistant["id"] as? String,
                   let content = assistant["content"] as? [[String: Any]] else { return }
@@ -71,6 +79,19 @@ internal final class ClaudeAgentRuntime {
                 onEvent(.item(item))
             }
         case "result":
+            // modelUsage aggregates billed input across requests (and possibly subagents).
+            // Only its capacity is usable as context telemetry.
+            if let models = message["modelUsage"] as? [String: [String: Any]] {
+                for (model, usage) in models {
+                    if let window = agentContextWindow(usage["contextWindow"]) { contextWindows[model] = window }
+                }
+                if let model = contextModel, var usage = contextUsage,
+                   let window = contextWindows[model], usage.contextWindow != window {
+                    usage.contextWindow = window
+                    contextUsage = usage
+                    onEvent(.contextUsage(usage))
+                }
+            }
             // The result string repeats the final assistant answer. Never append it again.
             for (id, text) in texts { onEvent(.item(AgentChatItem(id: id, kind: .assistant, text: text))) }
             for (_, var item) in tools where !item.isComplete {
@@ -94,6 +115,7 @@ internal final class ClaudeAgentRuntime {
         case "message_start":
             let message = event["message"] as? [String: Any]
             messageID = message?["id"] as? String
+            if let message { recordContext(message) }
             blocks.removeAll()
         case "content_block_start":
             guard let block = event["content_block"] as? [String: Any], let index = event["index"] as? Int else { return }
@@ -119,6 +141,28 @@ internal final class ClaudeAgentRuntime {
             }
         default: break
         }
+    }
+
+    private func recordContext(_ message: [String: Any]) {
+        guard let usage = message["usage"] as? [String: Any],
+              let input = agentTokenCount(usage["input_tokens"]) else { return }
+        var tokens = input
+        for key in ["cache_read_input_tokens", "cache_creation_input_tokens"] {
+            let count: Int
+            if let value = usage[key] {
+                guard let parsed = agentTokenCount(value) else { return }
+                count = parsed
+            } else { count = 0 }
+            let sum = tokens.addingReportingOverflow(count)
+            guard !sum.overflow else { return }
+            tokens = sum.partialValue
+        }
+        let model = message["model"] as? String
+        let current = AgentContextUsage(usedTokens: tokens, contextWindow: model.flatMap { contextWindows[$0] })
+        contextModel = model
+        guard current != contextUsage else { return }
+        contextUsage = current
+        onEvent(.contextUsage(current))
     }
 
     private func append(_ text: String) {

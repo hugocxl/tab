@@ -209,7 +209,7 @@ final class AgentSessions: @unchecked Sendable {
                     throw ServiceError(.badRequest, "An established conversation cannot switch providers. Open a new Agent Tab.")
                 }
             }
-            if let effort, !AgentReasoningEffort.supported(provider: provider, model: model).contains(effort) {
+            if let effort, !effort.isAccepted(provider: provider, model: model) {
                 throw ServiceError(.badRequest, "\(provider.name) does not support \(effort.title) reasoning for this model")
             }
             let restart = provider != entry.snapshot.provider
@@ -230,6 +230,10 @@ final class AgentSessions: @unchecked Sendable {
                 throw ServiceError(.badRequest, error.localizedDescription)
             }
             if restart, entry.runtime != nil { retireRuntime(entry) }
+            if provider != entry.snapshot.provider || model != entry.snapshot.model {
+                entry.snapshot.contextUsage = nil
+                entry.snapshot.resolvedModel = nil
+            }
             entry.snapshot.provider = provider
             let user = AgentChatItem(kind: .user, text: text,
                                      attachments: attachments?.map(\.descriptor))
@@ -401,6 +405,14 @@ final class AgentSessions: @unchecked Sendable {
             }
             guard entry.snapshot.providerSession != id else { return }
             entry.snapshot.providerSession = id
+        case .contextUsage(let usage):
+            guard usage.usedTokens >= 0, usage.contextWindow.map({ $0 > 0 }) ?? true,
+                  entry.snapshot.contextUsage != usage else { return }
+            entry.snapshot.contextUsage = usage
+        case .resolvedModel(let model):
+            guard !model.isEmpty, model.utf8.count <= 256, !model.contains("\0"),
+                  entry.snapshot.resolvedModel != model else { return }
+            entry.snapshot.resolvedModel = model
         case .failure(let message):
             entry.snapshot.status = .failed
             updateTurn(entry, status: .failed)
@@ -557,6 +569,11 @@ final class AgentSessions: @unchecked Sendable {
         entry.snapshot.items.removeAll { $0.id.utf8.count > 1024 }
         if let id = entry.snapshot.providerSession, id.utf8.count > 4096 { entry.snapshot.providerSession = nil }
         if let model = entry.snapshot.model, model.utf8.count > 256 { entry.snapshot.model = nil }
+        if let model = entry.snapshot.resolvedModel, model.utf8.count > 256 { entry.snapshot.resolvedModel = nil }
+        if let usage = entry.snapshot.contextUsage,
+           usage.usedTokens < 0 || (usage.contextWindow.map({ $0 <= 0 }) ?? false) {
+            entry.snapshot.contextUsage = nil
+        }
         if entry.snapshot.items.filter({ $0.kind == .approval && !$0.isComplete }).count > 128 {
             entry.snapshot.status = .failed
             updateTurn(entry, status: .failed)

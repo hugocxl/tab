@@ -22,7 +22,7 @@ final class AgentComposerSurfaceTests: XCTestCase {
             for control in controls {
                 XCTAssertFalse(control.isHiddenOrHasHiddenAncestor)
                 XCTAssertGreaterThanOrEqual(control.frame.width, 70)
-                XCTAssertEqual(control.frame.height, 26)
+                XCTAssertEqual(control.frame.height, 28)
                 XCTAssertTrue(control.superview?.bounds.contains(control.frame) == true)
                 XCTAssertFalse(control.frame.intersects(surface.send.frame), "Picker must not cover Send at \(width)pt")
                 XCTAssertNotNil(control.toolTip)

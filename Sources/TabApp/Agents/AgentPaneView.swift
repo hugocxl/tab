@@ -5,11 +5,13 @@ import TabProtocol
 @MainActor
 final class AgentPaneView: ThemedView {
     let model = AgentTextPopUp(label: "Model")
-    let effort = AgentTextPopUp(label: "Reasoning effort")
+    let effort = AgentReasoningPopUp(label: "Reasoning effort")
     let access = AgentTextPopUp(label: "Access mode")
     let composer = AgentComposerTextView()
     let send = AgentRoundButton(kind: .send)
     let stop = AgentRoundButton(kind: .stop)
+    let contextIndicator = AgentContextIndicator(frame: .zero)
+    private let pickerSeparators = [NSView(), NSView()]
     let attach = PillButton("", style: .plain)
     let attachmentStrip = AgentAttachmentStrip(frame: .zero)
     let suggestions = AgentComposerSuggestionsView(frame: .zero)
@@ -89,7 +91,8 @@ final class AgentPaneView: ThemedView {
         attach.imagePosition = .imageOnly
         attach.setAccessibilityLabel("Attach files")
         attach.toolTip = "Attach files or drop them into the message box"
-        for child in [composerScroll, attachmentStrip, attach, model, effort, access, send, stop] {
+        for separator in pickerSeparators { separator.wantsLayer = true; composerCard.addSubview(separator) }
+        for child in [composerScroll, attachmentStrip, attach, model, effort, access, contextIndicator, send, stop] {
             composerCard.addSubview(child)
             // This surface uses measured frames: controls must not bring their own size constraints.
             child.translatesAutoresizingMaskIntoConstraints = true
@@ -135,7 +138,8 @@ final class AgentPaneView: ThemedView {
         let footerTextHeight = (feedback.stringValue as NSString).boundingRect(
             with: NSSize(width: feedbackWidth, height: .greatestFiniteMagnitude),
             options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: [.font: AppFont.footnote]).height
-        let footerHeight = max(retry.isHidden ? 14 : 24, min(30, ceil(footerTextHeight)))
+        let footerHeight = feedback.stringValue.isEmpty && retry.isHidden ? 0 : max(retry.isHidden ? 14 : 24, min(30, ceil(footerTextHeight)))
+        feedback.isHidden = footerHeight == 0
         let footerTop = max(0, bounds.height - 10 - footerHeight)
         feedback.frame = NSRect(x: left + 4, y: footerTop, width: max(0, feedbackWidth - 4), height: footerHeight)
         retry.frame = NSRect(x: left + width - retryWidth, y: footerTop, width: retryWidth, height: footerHeight)
@@ -148,8 +152,33 @@ final class AgentPaneView: ThemedView {
             composer.textContainer.map { manager.usedRect(for: $0).height }
         } ?? 0
         let editorHeight = min(164, max(56, ceil(usedHeight) + 12))
-        let twoRows = width < 560
-        let controlsHeight: CGFloat = twoRows ? 72 : 40
+        // Pack intrinsic widths; wrap only when the next whole picker will not fit.
+        // The trailing usage/send buttons have reserved space on the first row.
+        var pickerFrames: [NSRect] = []
+        var separatorFrames: [NSRect?] = []
+        var x: CGFloat = 46
+        var row: CGFloat = 0
+        let fitsSingleRow = 46 + [model, effort, access].reduce(CGFloat(26)) { $0 + $1.intrinsicContentSize.width } <= width - 82
+        for (index, picker) in [model, effort, access].enumerated() {
+            var right = row == 0 ? width - 82 : width - 14
+            let desired = picker.intrinsicContentSize.width
+            let gap: CGFloat = index == 0 ? 0 : 13
+            var wraps = false
+            if index > 0 && ((index == 1 && !fitsSingleRow) || x + gap + desired > right) {
+                row += 1
+                x = 14
+                right = width - 14
+                wraps = true
+            }
+            if index > 0 {
+                separatorFrames.append(wraps ? nil : NSRect(x: x + 6, y: row * 32 + 8, width: 1, height: 12))
+                if !wraps { x += gap }
+            }
+            let measuredWidth = min(desired, max(0, right - x))
+            pickerFrames.append(NSRect(x: x, y: row * 32, width: measuredWidth, height: 28))
+            x += measuredWidth
+        }
+        let controlsHeight: CGFloat = 40 + row * 32
         let attachmentHeight: CGFloat = attachmentStrip.hasAttachments ? 76 : 0
         let cardHeight = attachmentHeight + editorHeight + 14 + controlsHeight
         composerCard.frame = NSRect(x: left, y: max(0, footerTop - 8 - cardHeight), width: width, height: cardHeight)
@@ -162,21 +191,13 @@ final class AgentPaneView: ThemedView {
         let actionFrame = NSRect(x: max(0, width - 44), y: controlsY, width: 30, height: 30)
         send.frame = actionFrame
         stop.frame = actionFrame
-
-        if twoRows {
-            model.frame = NSRect(x: 46, y: controlsY + 2, width: max(0, width - 104), height: 26)
-            let available = max(0, width - 36)
-            let effortWidth = min(140, available * 0.5)
-            effort.frame = NSRect(x: 14, y: controlsY + 34, width: effortWidth, height: 26)
-            access.frame = NSRect(x: effort.frame.maxX + 8, y: controlsY + 34,
-                                  width: max(0, available - effortWidth), height: 26)
-        } else {
-            let effortWidth = min(120, max(80, effort.intrinsicContentSize.width))
-            let accessWidth = min(180, max(104, access.intrinsicContentSize.width))
-            let modelWidth = min(240, max(0, width - 114 - effortWidth - accessWidth))
-            model.frame = NSRect(x: 46, y: controlsY + 2, width: modelWidth, height: 26)
-            effort.frame = NSRect(x: model.frame.maxX + 8, y: controlsY + 2, width: effortWidth, height: 26)
-            access.frame = NSRect(x: effort.frame.maxX + 8, y: controlsY + 2, width: accessWidth, height: 26)
+        contextIndicator.frame = NSRect(x: max(0, width - 78), y: controlsY + 1, width: 28, height: 28)
+        for (picker, frame) in zip([model, effort, access], pickerFrames) {
+            picker.frame = frame.offsetBy(dx: 0, dy: controlsY + 1)
+        }
+        for (separator, frame) in zip(pickerSeparators, separatorFrames) {
+            separator.isHidden = frame == nil
+            if let frame { separator.frame = frame.offsetBy(dx: 0, dy: controlsY + 1) }
         }
 
         let activityHeight: CGFloat = activity.isHidden ? 0 : 30
@@ -346,6 +367,8 @@ final class AgentPaneView: ThemedView {
         activityLabel.textColor = theme.fgMuted
         feedback.textColor = theme.fgDim
         for control in [model, effort, access] { control.chatTheme = theme }
+        for separator in pickerSeparators { separator.layer?.backgroundColor = theme.fg.withAlphaComponent(0.18).cgColor }
+        contextIndicator.chatTheme = theme
         send.chatTheme = theme
         stop.chatTheme = theme
         endButton.chatTheme = theme

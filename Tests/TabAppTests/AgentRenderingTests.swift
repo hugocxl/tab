@@ -72,7 +72,7 @@ final class AgentRenderingTests: XCTestCase {
         let surface = AgentPaneView(frame: NSRect(x: 0, y: 0, width: width, height: height))
         surface.model.addItems(withTitles: ["Claude Sonnet", "Codex"])
         surface.effort.addItems(withTitles: ["High", "Medium", "Low"])
-        surface.feedback.stringValue = "Return to send · Shift-Return for a new line"
+        surface.access.addItem(withTitle: "Auto")
         surface.retry.isHidden = true
         surface.layoutSubtreeIfNeeded()
         return surface

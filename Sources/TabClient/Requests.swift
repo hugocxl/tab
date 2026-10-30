@@ -4,6 +4,12 @@ import TabProtocol
 /// Typed requests. Each throws `ClientError.unexpectedReply` when the server
 /// answers with a reply that doesn't fit.
 extension ServerClient {
+    public func agentModelCatalog(_ request: AgentModelCatalogRequest) async throws -> AgentModelCatalogReply {
+        let reply = try await self.request(.agentModelCatalog(request))
+        guard case .agentModelCatalog(let catalog) = reply else { throw unexpected(reply) }
+        return catalog
+    }
+
     public func agentComposerContext(_ request: AgentComposerContextRequest) async throws -> AgentComposerContextReply {
         let reply = try await self.request(.agentComposerContext(request))
         guard case .agentComposerContext(let context) = reply else { throw unexpected(reply) }
