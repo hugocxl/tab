@@ -3,6 +3,17 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.5.0 - 2026-10-30
+
+### Changed
+
+- The command palette has a lighter surface, rounder corners, lighter
+  section headers and outlined keycaps, and its Return and Actions buttons
+  float in a glass capsule over the rows, which fade out beneath it.
+- The command palette no longer dims the window behind it; a soft shadow
+  lifts it off the window instead.
+- The command palette opens lower in the window.
+
 ## 0.4.4 - 2026-10-30
 
 ### Fixed

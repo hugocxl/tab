@@ -2,13 +2,17 @@ import AppKit
 import TabCore
 
 /// The palette card: the 56pt header with the search field, the rows or a
-/// status message, and the 40pt footer.
+/// status message, and the footer capsule floating over the last 52pt, where
+/// the rows fade out beneath it.
 final class PalettePanelView: ThemedView {
     let header = PaletteHeaderView()
     let list = PaletteListView()
     let footer = PaletteFooterView()
+    private let fade = PaletteFadeView()
     private let messageLabel = makeLabel("", font: AppFont.system(12))
-    private let card = ThemedBackground(color: { $0.raised })
+    /// A tight shadow at the card's edge, under the wide one on `self`.
+    private let edge = ThemedBackground(color: { $0.floating })
+    private let card = ThemedBackground(color: { $0.floating })
 
     var message: (String, isError: Bool)? {
         didSet {
@@ -30,12 +34,11 @@ final class PalettePanelView: ThemedView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
-        layer?.cornerRadius = PaletteLayout.radius
-        layer?.shadowColor = NSColor.black.cgColor
-        layer?.shadowOpacity = 0.45
-        layer?.shadowRadius = 24
-        layer?.shadowOffset = CGSize(width: 0, height: -12)
-        card.wantsLayer = true
+        shadow = Self.shadow(alpha: 0.26, blur: 36, y: 14)
+        edge.cornerRadius = PaletteLayout.radius
+        edge.layer?.cornerCurve = .continuous
+        edge.shadow = Self.shadow(alpha: 0.14, blur: 4, y: 1)
+        addSubview(edge)
         card.cornerRadius = PaletteLayout.radius
         card.layer?.masksToBounds = true
         card.layer?.borderWidth = 1
@@ -44,31 +47,42 @@ final class PalettePanelView: ThemedView {
         messageLabel.alignment = .center
         messageLabel.translatesAutoresizingMaskIntoConstraints = true
         messageLabel.isHidden = true
-        for view in [header, list, messageLabel, footer] as [NSView] { card.addSubview(view) }
+        for view in [header, list, messageLabel, fade, footer] as [NSView] { card.addSubview(view) }
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    /// A black shadow `y` points below the view: AppKit applies the offset
+    /// in flipped coordinates here.
+    static func shadow(alpha: CGFloat, blur: CGFloat, y: CGFloat) -> NSShadow {
+        let shadow = NSShadow()
+        shadow.shadowColor = NSColor.black.withAlphaComponent(alpha)
+        shadow.shadowBlurRadius = blur
+        shadow.shadowOffset = NSSize(width: 0, height: y)
+        return shadow
+    }
+
     override func themeDidChange() {
-        card.layer?.borderColor = theme.border.cgColor
-        card.needsDisplay = true
+        card.layer?.borderColor = theme.fg(alpha: 0.10).cgColor
         needsDisplay = true
     }
 
     override func layout() {
         super.layout()
+        edge.frame = bounds
         card.frame = bounds
-        card.layer?.borderColor = theme.border.cgColor
         let width = bounds.width
         header.frame = NSRect(x: 0, y: 0, width: width, height: PaletteLayout.header)
         footer.frame = NSRect(x: 0, y: bounds.height - PaletteLayout.footer, width: width, height: PaletteLayout.footer)
         let body = NSRect(x: 0, y: header.frame.maxY, width: width, height: max(footer.frame.minY - header.frame.maxY, 0))
-        list.frame = body
+        list.frame = NSRect(x: 0, y: header.frame.maxY, width: width, height: max(bounds.height - header.frame.maxY, 0))
+        fade.frame = NSRect(x: 0, y: footer.frame.minY - 12, width: width, height: footer.frame.height + 12)
         let height = messageLabel.intrinsicContentSize.height
         messageLabel.frame = NSRect(x: 32, y: body.midY - height / 2, width: width - 64, height: height)
         if let actionsPanel {
             let size = NSSize(width: PaletteLayout.actionsWidth, height: actionsPanel.preferredHeight)
-            actionsPanel.frame = NSRect(x: width - size.width - 8, y: footer.frame.minY - size.height - 4, width: size.width, height: size.height)
+            let capsule = footer.convert(footer.capsule.frame, to: self)
+            actionsPanel.frame = NSRect(x: capsule.maxX - size.width, y: capsule.minY - size.height - 6, width: size.width, height: size.height)
         }
     }
 }
@@ -135,11 +149,6 @@ final class PaletteHeaderView: ThemedView {
         needsDisplay = true
     }
 
-    override func draw(_ dirtyRect: NSRect) {
-        theme.border.setFill()
-        NSRect(x: 0, y: bounds.height - 1, width: bounds.width, height: 1).fill()
-    }
-
     override func layout() {
         super.layout()
         let middle = bounds.height / 2
@@ -175,49 +184,135 @@ final class PaletteSearchField: NSTextField {
     }
 }
 
-/// The footer: the primary action with ↩ and Actions with its keycaps.
+/// The footer: a glass capsule at the bottom right with the primary action
+/// and ↩, then Actions and ⌘K. Clicks beside the capsule reach the rows.
 final class PaletteFooterView: ThemedView {
+    let capsule = GlassCapsuleView()
     let primary = FooterButton()
     let actions = FooterButton()
-    private let separator = ThemedBackground(color: { $0.border })
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         primary.caps.symbols = ["↩"]
         actions.label.stringValue = "Actions"
         actions.caps.symbols = ["⌘", "K"]
-        for view in [primary, separator, actions] as [NSView] { addSubview(view) }
+        actions.muted = true
+        for view in [primary, actions] as [NSView] { capsule.content.addSubview(view) }
+        addSubview(capsule)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     func configure(primary title: String?, actionsEnabled: Bool) {
         primary.isHidden = title == nil
-        separator.isHidden = title == nil
         primary.label.stringValue = title ?? ""
+        primary.invalidateIntrinsicContentSize()
         actions.isEnabled = actionsEnabled
         needsLayout = true
     }
 
-    override func draw(_ dirtyRect: NSRect) {
-        theme.border.setFill()
-        NSRect(x: 0, y: 0, width: bounds.width, height: 1).fill()
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let hit = super.hitTest(point)
+        return hit === self ? nil : hit
     }
 
     override func layout() {
         super.layout()
-        let middle = bounds.height / 2
-        var right = bounds.width - 8
-        let actionsSize = actions.intrinsicContentSize
-        right -= actionsSize.width
-        actions.frame = NSRect(x: right, y: middle - 14, width: actionsSize.width, height: 28)
-        guard !primary.isHidden else { return }
-        right -= 9
-        separator.frame = NSRect(x: right, y: middle - 8, width: 1, height: 16)
-        right -= 8
-        let primarySize = primary.intrinsicContentSize
-        right -= primarySize.width
-        primary.frame = NSRect(x: right, y: middle - 14, width: primarySize.width, height: 28)
+        let inset = (PaletteLayout.capsule - 28) / 2
+        var x = inset
+        if !primary.isHidden {
+            let size = primary.intrinsicContentSize
+            primary.frame = NSRect(x: x, y: inset, width: size.width, height: 28)
+            x += size.width + 2
+        }
+        let size = actions.intrinsicContentSize
+        actions.frame = NSRect(x: x, y: inset, width: size.width, height: 28)
+        let width = x + size.width + inset
+        let margin = (bounds.height - PaletteLayout.capsule) / 2
+        capsule.frame = NSRect(x: bounds.width - margin - width, y: margin, width: width, height: PaletteLayout.capsule)
+    }
+}
+
+/// The rows fading into the card behind the footer capsule.
+final class PaletteFadeView: ThemedView {
+    private let gradient = CAGradientLayer()
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        layer?.addSublayer(gradient)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func themeDidChange() {
+        let color = theme.floating
+        gradient.colors = [color.withAlphaComponent(0).cgColor, color.withAlphaComponent(0.55).cgColor]
+        gradient.locations = [0, 1]
+    }
+
+    override func layout() {
+        super.layout()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        gradient.frame = bounds
+        CATransaction.commit()
+    }
+}
+
+/// A floating capsule of Liquid Glass on macOS 26 and later, the rows
+/// beneath refracting through a whitened clear glass inside a hairline edge;
+/// before, frosted glass with a shadow.
+final class GlassCapsuleView: ThemedView {
+    let content = ThemedView()
+    private let glass: NSView
+
+    override init(frame frameRect: NSRect) {
+        if #available(macOS 26, *) {
+            let glass = NSGlassEffectView()
+            glass.style = .clear
+            glass.contentView = content
+            self.glass = glass
+        } else {
+            let material = NSVisualEffectView()
+            material.material = .popover
+            material.blendingMode = .withinWindow
+            material.state = .active
+            material.wantsLayer = true
+            material.layer?.masksToBounds = true
+            material.layer?.cornerCurve = .continuous
+            material.addSubview(content)
+            self.glass = material
+        }
+        super.init(frame: frameRect)
+        if glass is NSVisualEffectView { shadow = PalettePanelView.shadow(alpha: 0.10, blur: 12, y: 3) }
+        addSubview(glass)
+        layer?.cornerCurve = .continuous
+        layer?.borderWidth = 1
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func themeDidChange() {
+        glass.appearance = NSAppearance(named: theme.isLight ? .aqua : .darkAqua)
+        layer?.borderColor = theme.fg(alpha: 0.10).cgColor
+        if #available(macOS 26, *), let glass = glass as? NSGlassEffectView {
+            glass.tintColor = theme.isLight ? NSColor.white.withAlphaComponent(0.25) : theme.floating.withAlphaComponent(0.35)
+        }
+    }
+
+    override func layout() {
+        super.layout()
+        let radius = bounds.height / 2
+        glass.frame = bounds
+        content.frame = bounds
+        layer?.cornerRadius = radius
+        if #available(macOS 26, *), let glass = glass as? NSGlassEffectView {
+            glass.cornerRadius = radius
+        } else {
+            glass.layer?.cornerRadius = radius
+        }
     }
 }
 
@@ -248,7 +343,8 @@ final class PaletteListView: NSScrollView, NSTableViewDataSource, NSTableViewDel
         table.action = #selector(clicked)
         table.refusesFirstResponder = true
         documentView = table
-        contentInsets = NSEdgeInsets(top: PaletteLayout.listInset, left: 0, bottom: PaletteLayout.listInset, right: 0)
+        contentInsets = NSEdgeInsets(top: PaletteLayout.listInset, left: 0, bottom: PaletteLayout.listInset + PaletteLayout.footer, right: 0)
+        scrollerInsets = NSEdgeInsets(top: 0, left: 0, bottom: PaletteLayout.footer, right: 0)
         automaticallyAdjustsContentInsets = false
         table.onHover = { [weak self] row in self?.hover(row) }
     }
@@ -356,11 +452,10 @@ final class ActionsPanelView: ThemedView {
         self.state = state
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.cornerRadius = 10
+        layer?.cornerRadius = 14
+        layer?.cornerCurve = .continuous
         layer?.borderWidth = 1
-        layer?.shadowColor = NSColor.black.cgColor
-        layer?.shadowOpacity = 0.35
-        layer?.shadowRadius = 12
+        shadow = PalettePanelView.shadow(alpha: 0.16, blur: 20, y: 6)
         for (index, action) in state.actions.enumerated() {
             let title = state.armed && index == state.selected ? "Press Return to \(action.title.lowercased())" : action.title
             let label = makeLabel(title, font: AppFont.system(13))
@@ -377,8 +472,8 @@ final class ActionsPanelView: ThemedView {
     override var wantsUpdateLayer: Bool { false }
 
     override func themeDidChange() {
-        layer?.backgroundColor = theme.raised.cgColor
-        layer?.borderColor = theme.border.cgColor
+        layer?.backgroundColor = theme.floating.cgColor
+        layer?.borderColor = theme.fg(alpha: 0.10).cgColor
         for (index, label) in labels.enumerated() {
             label.textColor = state.actions[index].destructive ? theme.danger : theme.fg
         }
@@ -386,11 +481,11 @@ final class ActionsPanelView: ThemedView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        layer?.backgroundColor = theme.raised.cgColor
-        layer?.borderColor = theme.border.cgColor
+        layer?.backgroundColor = theme.floating.cgColor
+        layer?.borderColor = theme.fg(alpha: 0.10).cgColor
         let row = rowFrame(state.selected)
         theme.fg(alpha: 0.08).setFill()
-        NSBezierPath(roundedRect: row, xRadius: 6, yRadius: 6).fill()
+        NSBezierPath(roundedRect: row, xRadius: 8, yRadius: 8).fill()
     }
 
     private func rowFrame(_ index: Int) -> NSRect {

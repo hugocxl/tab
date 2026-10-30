@@ -101,7 +101,7 @@ crates. Behavior is 1:1 unless listed under "Intentionally changed".
 
 ## App: command palette
 
-- [ ] Cmd+Shift+P: root search across commands, files (2+ chars, See all), branches, worktrees, projects, terminals; recent commands; keycaps; Return, Cmd+Return secondary, Cmd+K actions, Escape back/close, Backspace back when empty; 740pt wide, 480pt tall, 72pt from top layout — implemented (`PaletteController`, `PaletteSource`; ranking and page tests; render compared with `palette.png`)
+- [ ] Cmd+Shift+P: root search across commands, files (2+ chars, See all), branches, worktrees, projects, terminals; recent commands; keycaps; Return, Cmd+Return secondary, Cmd+K actions, Escape back/close, Backspace back when empty; 740pt wide, 480pt tall, 72pt plus a fifth of the window from the top (kept fully visible) layout — implemented (`PaletteController`, `PaletteSource`; ranking and page tests; render compared with `palette.png`)
 - [ ] Pages: Go to File (Cmd+P), Find in Files (Cmd+Shift+F, Aa and .* toggles, grouped results), Open Project (Cmd+O), New Terminal in Project (Cmd+Shift+N), Switch Worktree (Cmd+Opt+W), Existing Terminals (Cmd+Opt+T), Switch Branch…, New Branch…, Changes… (Return opens diff, Cmd+K stage/unstage/discard), Change Theme (Cmd+Shift+K) — implemented; plus Check for Updates on the root page
 
 ## App: native panels

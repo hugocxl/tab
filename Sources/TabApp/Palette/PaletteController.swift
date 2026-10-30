@@ -18,8 +18,9 @@ protocol PaletteDataSource: AnyObject {
     func closed()
 }
 
-/// The command palette: a stack of pages over a 30% black backdrop, in a
-/// panel 740pt wide, at most 480pt tall and 72pt from the window's top.
+/// The command palette: a stack of pages over a clear click-catcher, in a
+/// panel 740pt wide, at most 480pt tall and 72pt plus a fifth of the window
+/// below its top.
 @MainActor
 final class PaletteController: NSObject, NSTextFieldDelegate {
     weak var source: PaletteDataSource?
@@ -193,9 +194,10 @@ final class PaletteController: NSObject, NSTextFieldDelegate {
 
     private func layoutPanel() {
         guard let panel, let root, let state = stack.last else { return }
-        let height = min(state.height, max(root.bounds.height - PaletteLayout.top - 8, 120))
+        let top = PaletteLayout.offset(windowHeight: root.bounds.height)
+        let height = min(state.height, max(root.bounds.height - top - 8, 120))
         let width = min(PaletteLayout.width, root.bounds.width - 16)
-        panel.frame = NSRect(x: ((root.bounds.width - width) / 2).rounded(), y: PaletteLayout.top, width: width, height: height)
+        panel.frame = NSRect(x: ((root.bounds.width - width) / 2).rounded(), y: top, width: width, height: height)
         panel.needsLayout = true
     }
 
@@ -399,17 +401,13 @@ struct ActionsState {
     var armed = false
 }
 
-/// The 30% black backdrop; a click outside the panel closes the palette.
+/// The clear layer over the window; a click outside the panel closes the
+/// palette.
 final class PaletteRootView: NSView {
     var onDismiss: (() -> Void)?
     weak var panel: PalettePanelView?
 
     override var isFlipped: Bool { true }
-
-    override func draw(_ dirtyRect: NSRect) {
-        NSColor(white: 0, alpha: 0.3).setFill()
-        bounds.fill()
-    }
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)

@@ -7,15 +7,17 @@ public enum PaletteLayout {
     public static let width: CGFloat = 740
     public static let maxHeight: CGFloat = 480
     public static let top: CGFloat = 72
-    public static let radius: CGFloat = 14
+    public static let radius: CGFloat = 20
     public static let header: CGFloat = 56
     public static let section: CGFloat = 28
     public static let row: CGFloat = 40
     public static let rowInset: CGFloat = 8
-    public static let rowRadius: CGFloat = 8
+    public static let rowRadius: CGFloat = 10
     public static let tile: CGFloat = 24
     public static let tileRadius: CGFloat = 6
-    public static let footer: CGFloat = 40
+    /// The strip the floating footer capsule sits in; rows scroll under it.
+    public static let footer: CGFloat = 52
+    public static let capsule: CGFloat = 36
     public static let status: CGFloat = 96
     public static let listInset: CGFloat = 6
     public static let searchFont: CGFloat = 18
@@ -30,6 +32,13 @@ public enum PaletteLayout {
     public static func height(sections: Int, items: Int, list: Bool, maxHeight: CGFloat = maxHeight) -> CGFloat {
         let body = list ? CGFloat(sections) * section + CGFloat(items) * row + listInset * 2 : status
         return min(header + body + footer, maxHeight) + border
+    }
+
+    /// The panel's distance from the top of a window `height` tall: 20% of
+    /// the window lower than `top`, as long as a full-height panel still fits.
+    /// It doesn't depend on the page, so the panel stays put while typing.
+    public static func offset(windowHeight height: CGFloat) -> CGFloat {
+        max(top, min(top + height * 0.2, height - maxHeight - border - 8)).rounded()
     }
 
     /// The ⌘K panel's height for `rows` actions.

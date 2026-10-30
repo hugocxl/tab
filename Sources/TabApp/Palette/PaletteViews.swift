@@ -87,7 +87,7 @@ final class PaletteTileView: ThemedView {
     }
 }
 
-/// Keycaps for a chord, drawn as in the palette.
+/// Keycaps for a chord: outlined rounded squares with muted symbols.
 final class KeycapsView: ThemedView {
     var symbols: [String] = [] { didSet { if symbols != oldValue { needsDisplay = true; invalidateIntrinsicContentSize() } } }
 
@@ -107,8 +107,11 @@ final class KeycapsView: ThemedView {
         for symbol in symbols {
             let width = Self.capWidth(symbol)
             let rect = NSRect(x: x, y: (bounds.height - Metrics.keycap) / 2, width: width, height: Metrics.keycap)
-            theme.surface.setFill()
-            NSBezierPath(roundedRect: rect, xRadius: Metrics.radiusSmall, yRadius: Metrics.radiusSmall).fill()
+            let path = NSBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), xRadius: Metrics.radiusMedium, yRadius: Metrics.radiusMedium)
+            theme.fg(alpha: 0.03).setFill()
+            path.fill()
+            theme.fg(alpha: 0.16).setStroke()
+            path.stroke()
             let text = NSAttributedString(string: symbol, attributes: [.font: AppFont.small, .foregroundColor: theme.fgMuted])
             let size = text.size()
             text.draw(at: NSPoint(x: rect.midX - size.width / 2, y: rect.midY - size.height / 2))
@@ -145,8 +148,8 @@ final class PaletteItemView: NSView {
             label.maximumNumberOfLines = 1
             label.cell?.truncatesLastVisibleLine = true
         }
-        subtitle.font = AppFont.system(12)
-        kind.font = AppFont.system(12)
+        subtitle.font = AppFont.system(14)
+        kind.font = AppFont.system(13)
         chevron.image = AppIcon.chevronRight.image(size: 12)
         check.image = AppIcon.check.image(size: 12)
         for view in [tile, title, subtitle, check, badge, keycaps, kind, chevron] as [NSView] { addSubview(view) }
@@ -185,7 +188,7 @@ final class PaletteItemView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         guard let item, selected || (hovered && !item.disabled) else { return }
         let rect = bounds.insetBy(dx: PaletteLayout.rowInset, dy: 0)
-        (selected ? theme.fg(alpha: 0.08) : theme.hover).setFill()
+        (selected ? theme.selection : theme.hover).setFill()
         NSBezierPath(roundedRect: rect, xRadius: PaletteLayout.rowRadius, yRadius: PaletteLayout.rowRadius).fill()
     }
 
@@ -244,7 +247,7 @@ final class PaletteSectionView: NSView {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        label.font = AppFont.system(11, weight: .semibold)
+        label.font = AppFont.system(12)
         addSubview(label)
     }
 
@@ -267,10 +270,12 @@ final class PaletteSectionView: NSView {
 
 /// A footer button: a label and its keycaps.
 final class FooterButton: HoverView {
-    let label = makeLabel("", font: AppFont.system(12, weight: .medium))
+    let label = makeLabel("", font: AppFont.system(13, weight: .medium))
     let caps = KeycapsView()
     var action: (() -> Void)?
     var isEnabled = true { didSet { themeDidChange() } }
+    /// A secondary button, such as Actions: its label is muted.
+    var muted = false { didSet { themeDidChange() } }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -282,27 +287,27 @@ final class FooterButton: HoverView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     override var intrinsicContentSize: NSSize {
-        NSSize(width: label.textWidth + 6 + caps.intrinsicContentSize.width + 16, height: 28)
+        NSSize(width: 12 + label.textWidth + 8 + caps.intrinsicContentSize.width + 6, height: 28)
     }
 
     override func themeDidChange() {
-        label.textColor = isEnabled ? theme.fg : theme.fgDim
+        label.textColor = !isEnabled ? theme.fgDim : muted ? theme.fgMuted : theme.fg
         needsDisplay = true
     }
 
     override func draw(_ dirtyRect: NSRect) {
         guard isEnabled, isHovered else { return }
-        theme.hover.setFill()
-        NSBezierPath(roundedRect: bounds, xRadius: Metrics.radiusMedium, yRadius: Metrics.radiusMedium).fill()
+        theme.fg(alpha: 0.07).setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: bounds.height / 2, yRadius: bounds.height / 2).fill()
     }
 
     override func layout() {
         super.layout()
         let width = label.textWidth
         let height = label.intrinsicContentSize.height
-        label.frame = NSRect(x: 8, y: ((bounds.height - height) / 2).rounded(), width: width, height: height)
+        label.frame = NSRect(x: 12, y: ((bounds.height - height) / 2).rounded(), width: width, height: height)
         let capsSize = caps.intrinsicContentSize
-        caps.frame = NSRect(x: 8 + width + 6, y: (bounds.height - capsSize.height) / 2, width: capsSize.width, height: capsSize.height)
+        caps.frame = NSRect(x: 12 + width + 8, y: (bounds.height - capsSize.height) / 2, width: capsSize.width, height: capsSize.height)
     }
 
     override func mouseDown(with event: NSEvent) {}

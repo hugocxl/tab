@@ -183,6 +183,11 @@ public final class AppTheme: ObservableObject {
     public var cardBorder: NSColor { Self.cardBorder(palette).nsColor }
     /// Raised surfaces such as the Settings sidebar and popovers.
     public var raised: NSColor { palette.raised.nsColor }
+    /// Surfaces floating over the window, such as the command palette: a
+    /// faint tint of the background in light themes, raised in dark ones.
+    public var floating: NSColor { (Self.isLight(palette) ? Self.tint(palette) : palette.raised).nsColor }
+    /// Whether the palette is a light one.
+    public var isLight: Bool { Self.isLight(palette) }
     /// Pills and chips at rest.
     public var pill: NSColor { surface }
     /// Pills and chips under the pointer.
