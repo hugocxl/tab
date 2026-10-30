@@ -582,6 +582,9 @@ final class ChangeGroupCell: ThemedView {
         chevron.contentTintColor = theme.fgMuted
     }
 
+    /// Claims the click so the table doesn't take it and swallow the mouse up.
+    override func mouseDown(with event: NSEvent) {}
+
     override func mouseUp(with event: NSEvent) {
         guard bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
         onToggle?()
@@ -702,6 +705,9 @@ final class ChangeFileCell: HoverView {
         theme.hover.setFill()
         NSBezierPath(roundedRect: bounds.insetBy(dx: 0, dy: 1), xRadius: Metrics.radiusSmall, yRadius: Metrics.radiusSmall).fill()
     }
+
+    /// Claims the click so the table doesn't take it and swallow the mouse up.
+    override func mouseDown(with event: NSEvent) {}
 
     override func mouseUp(with event: NSEvent) {
         guard bounds.contains(convert(event.locationInWindow, from: nil)) else { return }

@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.4.3 - 2026-10-30
+
+### Fixed
+
+- Clicking a file in the Source Control panel opens its diff again, and
+  clicking a group header collapses or expands it.
+
 ## 0.4.2 - 2026-10-30
 
 ### Fixed
