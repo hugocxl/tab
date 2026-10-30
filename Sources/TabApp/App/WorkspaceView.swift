@@ -64,14 +64,14 @@ final class WorkspaceView: ThemedView {
     override var mouseDownCanMoveWindow: Bool { true }
 
     override func updateLayer() {
-        layer?.backgroundColor = theme.bg.cgColor
+        layer?.backgroundColor = theme.chrome.cgColor
     }
 
     private func syncVibrancy() {
         let enabled = model.terminalVibrancy > 0
         material.isHidden = !enabled
         window?.isOpaque = !enabled
-        window?.backgroundColor = enabled ? .clear : theme.bg
+        window?.backgroundColor = enabled ? .clear : theme.chrome
     }
 
     override func viewDidMoveToWindow() {

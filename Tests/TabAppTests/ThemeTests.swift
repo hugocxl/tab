@@ -47,6 +47,14 @@ final class ThemeTests: XCTestCase {
         // 2.5% of #d5cec7 over #111111 is about #161616.
         XCTAssertEqual(card.red * 255, 22, accuracy: 1)
         XCTAssertEqual(card.alpha, 1)
+        XCTAssertEqual(AppTheme.chrome(palette), palette.bg)
+    }
+
+    func testLightThemesKeepCardsOnTheBackgroundAndDarkenTheChrome() {
+        let palette = AppTheme(catalog: catalog(), darkTheme: "Night", lightTheme: "Day", systemIsDark: false).palette
+        XCTAssertEqual(AppTheme.card(palette), palette.bg)
+        // Cards must stand above the sidebar and window, not sink below them.
+        XCTAssertLessThan(AppTheme.chrome(palette).lightness, AppTheme.card(palette).lightness)
     }
 
     func testVibrancyOffUnderAccessibilityOptions() {

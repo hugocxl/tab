@@ -174,8 +174,11 @@ public final class AppTheme: ObservableObject {
     /// The foreground at `alpha`.
     public func fg(alpha: CGFloat) -> NSColor { palette.fg.withAlpha(alpha).nsColor }
 
-    /// Pane cards: 2.5% foreground over the background (about `#161616`).
+    /// Pane cards: lighter than the window in dark themes, and the theme's own
+    /// background in light ones, where the window darkens instead.
     public var card: NSColor { Self.card(palette).nsColor }
+    /// The window background behind the pane cards, shared by the sidebar.
+    public var chrome: NSColor { Self.chrome(palette).nsColor }
     /// Card borders: 95% border over the background (about `#282827`).
     public var cardBorder: NSColor { Self.cardBorder(palette).nsColor }
     /// Raised surfaces such as the Settings sidebar and popovers.
@@ -198,7 +201,20 @@ public final class AppTheme: ObservableObject {
     public var button: NSColor { fg(alpha: 0.16) }
 
     public nonisolated static func card(_ palette: ChromePalette) -> ChromeColor {
+        isLight(palette) ? palette.bg : tint(palette)
+    }
+
+    public nonisolated static func chrome(_ palette: ChromePalette) -> ChromeColor {
+        isLight(palette) ? tint(palette) : palette.bg
+    }
+
+    /// 2.5% foreground over the background (about `#161616` in the default theme).
+    private nonisolated static func tint(_ palette: ChromePalette) -> ChromeColor {
         palette.fg.blended(over: palette.bg, amount: 0.025)
+    }
+
+    private nonisolated static func isLight(_ palette: ChromePalette) -> Bool {
+        palette.bg.lightness > palette.fg.lightness
     }
 
     public nonisolated static func cardBorder(_ palette: ChromePalette) -> ChromeColor {

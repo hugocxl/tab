@@ -465,7 +465,7 @@ final class SidebarRootView: ThemedView {
     override var mouseDownCanMoveWindow: Bool { true }
 
     override func updateLayer() {
-        layer?.backgroundColor = theme.bg.cgColor
+        layer?.backgroundColor = theme.chrome.cgColor
     }
 
     override func layout() {
