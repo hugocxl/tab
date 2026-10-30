@@ -15,7 +15,7 @@ enum App {
     /// How long the app has to answer: `TAB_CLI_TIMEOUT` seconds, else 10.
     static func replyTime(environment: [String: String] = ProcessInfo.processInfo.environment) throws -> TimeInterval {
         guard let text = environment["TAB_CLI_TIMEOUT"], !text.isEmpty else { return 10 }
-        guard let seconds = UInt32(text), seconds > 0 else {
+        guard let seconds = UInt64(text), seconds > 0 else {
             throw CLIError("TAB_CLI_TIMEOUT must be a whole number of seconds")
         }
         return TimeInterval(seconds)
@@ -47,14 +47,15 @@ enum App {
 
     /// Starts the app: the bundle this program is in, else the installed one
     /// by its bundle identifier. Returns false when it can't.
-    static func launch() -> Bool {
+    static func launch(folder: String? = nil) -> Bool {
         let open = Process()
         open.executableURL = URL(fileURLWithPath: "/usr/bin/open")
         if let executable = Executable.currentURL(), let bundle = Executable.containingBundle(of: executable) {
-            open.arguments = ["-g", "-a", bundle.path]
+            open.arguments = ["-a", bundle.path]
         } else {
-            open.arguments = ["-g", "-b", Release.bundleIdentifier]
+            open.arguments = ["-b", Release.bundleIdentifier]
         }
+        if let folder { open.arguments?.append(folder) }
         open.standardInput = FileHandle.nullDevice
         open.standardOutput = FileHandle.nullDevice
         open.standardError = FileHandle.nullDevice
@@ -77,15 +78,18 @@ enum OpenFolder {
         guard Paths.isDirectory(path), let folder = Paths.canonical(path) else {
             throw CLIError("\(word) is not a command or a folder; run tab --help")
         }
-        do {
-            _ = try App.call(.open(path: folder), timeout: try App.replyTime(), startApp: true)
-            return
-        } catch AppSocketError.notRunning {
-            let client = try await LocalServer.profile().connect(kind: .cli)
-            defer { client.close() }
-            let project = try await Projects.folderProject(folder, client: client)
-            Output.line(project.id.description)
+        if !App.overSSH {
+            do {
+                _ = try AppSocket.call(socket: App.socket(), .open(path: folder), timeout: try App.replyTime())
+                return
+            } catch AppSocketError.notRunning {
+                if App.launch(folder: folder) { return }
+            }
         }
+        let client = try await LocalServer.profile().connect(kind: .cli)
+        defer { client.close() }
+        let project = try await Projects.folderProject(folder, client: client)
+        Output.line(project.id.description)
     }
 }
 

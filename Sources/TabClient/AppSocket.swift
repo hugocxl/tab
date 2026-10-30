@@ -7,6 +7,7 @@ public enum JSONValue: Hashable, Sendable, Codable, CustomStringConvertible {
     case null
     case bool(Bool)
     case int(Int64)
+    case uint(UInt64)
     case double(Double)
     case string(String)
     case array([JSONValue])
@@ -20,6 +21,8 @@ public enum JSONValue: Hashable, Sendable, Codable, CustomStringConvertible {
             self = .bool(value)
         } else if let value = try? container.decode(Int64.self) {
             self = .int(value)
+        } else if let value = try? container.decode(UInt64.self) {
+            self = .uint(value)
         } else if let value = try? container.decode(Double.self) {
             self = .double(value)
         } else if let value = try? container.decode(String.self) {
@@ -37,6 +40,7 @@ public enum JSONValue: Hashable, Sendable, Codable, CustomStringConvertible {
         case .null: try container.encodeNil()
         case .bool(let value): try container.encode(value)
         case .int(let value): try container.encode(value)
+        case .uint(let value): try container.encode(value)
         case .double(let value): try container.encode(value)
         case .string(let value): try container.encode(value)
         case .array(let value): try container.encode(value)
@@ -67,7 +71,7 @@ public enum JSONValue: Hashable, Sendable, Codable, CustomStringConvertible {
 /// closes the connection.
 ///
 ///     {"type":"open","path":"/Users/me/code/app"}
-///     {"type":"browser","command":"click","args":{"tabId":"…","selector":"#go"}}
+///     {"verb":"browser.click","args":{"tabId":"…","selector":"#go"}}
 public enum AppRequest: Hashable, Sendable, Codable {
     /// Opens a folder as a project, selecting it if it is one already.
     case open(path: String)
@@ -77,16 +81,24 @@ public enum AppRequest: Hashable, Sendable, Codable {
     /// A request from a newer `tab`; answer with an error.
     case unknown(String)
 
-    private enum Keys: String, CodingKey { case type, path, command, args }
+    private enum Keys: String, CodingKey { case verb, args, type, path }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: Keys.self)
+        if let verb = try container.decodeIfPresent(String.self, forKey: .verb) {
+            let args = container.contains(.args)
+                ? try container.decode([String: JSONValue].self, forKey: .args) : [:]
+            guard verb.hasPrefix("browser.") else {
+                self = .unknown(verb)
+                return
+            }
+            let command = String(verb.dropFirst("browser.".count))
+            self = .browser(command: command == "eval" ? "evaluate" : command, args: args)
+            return
+        }
         let type = try container.decode(String.self, forKey: .type)
         switch type {
         case "open": self = .open(path: try container.decode(String.self, forKey: .path))
-        case "browser":
-            self = .browser(command: try container.decode(String.self, forKey: .command),
-                            args: try container.decodeIfPresent([String: JSONValue].self, forKey: .args) ?? [:])
         default: self = .unknown(type)
         }
     }
@@ -98,32 +110,32 @@ public enum AppRequest: Hashable, Sendable, Codable {
             try container.encode("open", forKey: .type)
             try container.encode(path, forKey: .path)
         case .browser(let command, let args):
-            try container.encode("browser", forKey: .type)
-            try container.encode(command, forKey: .command)
+            let verb = command == "evaluate" ? "eval" : command
+            try container.encode("browser.\(verb)", forKey: .verb)
             try container.encode(args, forKey: .args)
         case .unknown(let type):
-            try container.encode(type, forKey: .type)
+            try container.encode(type, forKey: .verb)
         }
     }
 }
 
 /// The app's answer:
 ///
-///     {"ok":true,"result":…}
+///     {"ok":true,"value":…}
 ///     {"ok":false,"error":"No tab with that ID"}
 public enum AppReply: Hashable, Sendable, Codable {
     case ok(JSONValue)
     case failed(String)
 
-    private enum Keys: String, CodingKey { case ok, result, error }
+    private enum Keys: String, CodingKey { case ok, value, error }
 
     public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: Keys.self)
-        if try container.decodeIfPresent(Bool.self, forKey: .ok) == true {
-            self = .ok(try container.decodeIfPresent(JSONValue.self, forKey: .result) ?? .null)
-        } else {
-            self = .failed(try container.decodeIfPresent(String.self, forKey: .error) ?? "Tab did not handle the request")
+        let reply = try JSONValue(from: decoder)
+        if reply["ok"] == .bool(true) {
+            self = .ok(reply["value"] ?? .null)
+            return
         }
+        self = .failed(reply["error"]?.string ?? "Tab did not handle the request")
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -131,7 +143,7 @@ public enum AppReply: Hashable, Sendable, Codable {
         switch self {
         case .ok(let result):
             try container.encode(true, forKey: .ok)
-            try container.encode(result, forKey: .result)
+            try container.encode(result, forKey: .value)
         case .failed(let error):
             try container.encode(false, forKey: .ok)
             try container.encode(error, forKey: .error)
@@ -149,7 +161,7 @@ public enum AppSocketError: Error, Hashable, Sendable, CustomStringConvertible {
 
     public var description: String {
         switch self {
-        case .notRunning: "the Tab app is not running"
+        case .notRunning: "the Tab desktop app is not running"
         case .noResponse: "no response from Tab"
         case .transport(let message): "could not reach Tab: \(message)"
         case .failed(let message): message
@@ -172,8 +184,8 @@ public enum AppSocket {
         return try encoder.encode(value)
     }
 
-    /// Sends `request` and waits up to `timeout` for the reply; an error reply
-    /// throws `failed`.
+    /// Sends `request` with the read/write timeout Codesh uses; an error reply
+    /// throws `failed`. Each successful I/O operation renews the timeout.
     public static func call(socket: URL, _ request: AppRequest, timeout: TimeInterval) throws -> JSONValue {
         let stream: FileDescriptorStream
         do {
@@ -181,30 +193,47 @@ public enum AppSocket {
         } catch let error as TransportError where LocalServer.unavailable(error) {
             throw AppSocketError.notRunning
         } catch {
+            if let transport = error as? TransportError, case .system(_, let code) = transport {
+                throw ioError(code)
+            }
             throw AppSocketError.transport(String(describing: error))
         }
-        let done = DispatchSemaphore(value: 0)
-        let timedOut = Flag()
-        DispatchQueue.global().async {
-            if done.wait(timeout: .now() + timeout) == .timedOut {
-                timedOut.set()
-                stream.close()
+        defer { stream.close() }
+        guard timeout > 0, timeout.isFinite else { throw ioError(EINVAL) }
+        let seconds = min(timeout, Double(Int.max / 2))
+        var interval = timeval(tv_sec: Int(seconds), tv_usec: Int32((seconds - seconds.rounded(.down)) * 1_000_000))
+        for option in [SO_RCVTIMEO, SO_SNDTIMEO] {
+            guard setsockopt(stream.readDescriptor, SOL_SOCKET, option, &interval,
+                             socklen_t(MemoryLayout<timeval>.size)) == 0 else { throw ioError(errno) }
+        }
+        let requestData = try encode(request)
+        try requestData.withUnsafeBytes { bytes in
+            guard let base = bytes.baseAddress else { return }
+            var offset = 0
+            while offset < bytes.count {
+                let count = send(stream.writeDescriptor, base + offset, bytes.count - offset, MSG_NOSIGNAL)
+                if count < 0 {
+                    if errno == EINTR { continue }
+                    throw ioError(errno)
+                }
+                offset += count
             }
         }
-        defer {
-            done.signal()
-            stream.close()
+        guard shutdown(stream.writeDescriptor, SHUT_WR) == 0 else { throw ioError(errno) }
+        var data = Data()
+        var chunk = [UInt8](repeating: 0, count: 64 * 1024)
+        while data.count < maxReplyBytes {
+            let count = chunk.withUnsafeMutableBytes { bytes in
+                recv(stream.readDescriptor, bytes.baseAddress, min(bytes.count, maxReplyBytes - data.count), 0)
+            }
+            if count == 0 { break }
+            if count < 0 {
+                if errno == EINTR { continue }
+                throw ioError(errno)
+            }
+            data.append(contentsOf: chunk[..<count])
         }
-        let data: Data
-        do {
-            try stream.write(try encode(request))
-            shutdown(stream.writeDescriptor, SHUT_WR)
-            data = try readAll(stream, limit: maxReplyBytes)
-        } catch {
-            if timedOut.isSet { throw AppSocketError.noResponse }
-            throw AppSocketError.transport(String(describing: error))
-        }
-        if timedOut.isSet || data.isEmpty { throw AppSocketError.noResponse }
+        if data.isEmpty { throw AppSocketError.noResponse }
         guard let reply = try? JSONDecoder().decode(AppReply.self, from: data) else {
             throw AppSocketError.failed("invalid reply from Tab")
         }
@@ -212,6 +241,11 @@ public enum AppSocket {
         case .ok(let result): return result
         case .failed(let error): throw AppSocketError.failed(error)
         }
+    }
+
+    private static func ioError(_ code: Int32) -> AppSocketError {
+        if code == EAGAIN || code == EWOULDBLOCK { return .noResponse }
+        return .transport("\(String(cString: strerror(code))) (os error \(code))")
     }
 
     static func readAll(_ stream: ByteStream, limit: Int) throws -> Data {
@@ -271,7 +305,7 @@ public final class AppSocketServer: @unchecked Sendable {
 }
 
 /// The browser automation commands `tab browser` sends as
-/// `{"type":"browser","command":<rawValue>,"args":{…}}`. Every command but
+/// `{"verb":"browser.<command>","args":{…}}` (`evaluate` uses `eval`). Every command but
 /// `open` and `list` names its tab with `"tabId"`. Element commands take a CSS
 /// `"selector"` and answer `false` when nothing matches. Waits take an
 /// optional `"timeoutMs"` (capped at 60000).

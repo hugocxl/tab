@@ -1,13 +1,15 @@
 /// Usage text of the `tab` command line tool.
 public enum CLIHelp {
     public static let root = """
-    Tab - terminal workspace command line tool
+    Tab - terminal client and server management
 
     Usage: tab [--host DESTINATION] [COMMAND]
 
-      <folder>      Open a folder as a project in the Tab app
+      (no command)  Print command usage
+      <folder>      Open a folder as a project in the desktop app, or register it
+                    on the server without it or over SSH
       server        Start, inspect or stop the server
-      project       List, add, rename or delete server projects
+      project       List, add, edit or delete server projects
       session       Create terminals, send input, read output and end sessions
       worktree      List, create, register or remove Git worktree projects
       settings      Read or update server settings
@@ -16,7 +18,7 @@ public enum CLIHelp {
       files         Run a server file action using JSON
       exec          Execute a program in a server project
       mobile        Enable access, pair phones and revoke devices
-      browser       Drive browser tabs in the Tab app on this computer
+      browser       Drive browser tabs in the desktop app on this computer
       install-skills
                     Install the tab-cli skill for AI coding agents
       stdio         Connect stdin/stdout to the server; used over SSH
@@ -29,7 +31,8 @@ public enum CLIHelp {
     over SSH (user@host, an ssh_config alias or ssh://user@host:port); Tab must be
     installed there, and directories are absolute paths on that computer.
     TAB_DIR selects the local profile folder. No app is required, except by
-    browser commands and tab <folder>, which start it.
+    browser commands, which start it for open.
+    Tabs, panes and workspaces belong to UI clients.
     Project selectors accept an exact ID, unique name or directory path.
     Inside a Tab terminal, session commands default to that terminal.
     Use ./NAME to open a folder named like a command.
@@ -167,7 +170,7 @@ public enum CLIHelp {
       close <tab-id>
       reload|back|forward <tab-id>
       screenshot <tab-id>               Print the page as a base64 PNG
-      evaluate <tab-id> <javascript>    Print the result as JSON (also: eval)
+      eval <tab-id> <javascript>        Print the result as JSON
       click|hover|scroll-into-view|check|uncheck <tab-id> <selector>
       fill <tab-id> <selector> <text>
       type <tab-id> <selector> <text> [--submit]
@@ -192,8 +195,8 @@ public enum CLIHelp {
       cookies delete <tab-id> <name> [domain]
       cookies clear <tab-id>
 
-    Browser commands talk to the Tab app on this computer, not to the server, so
-    they don't take --host. Open starts the app if it isn't running.
+    Browser commands talk to the Tab desktop app on this computer, not to the
+    server, so they don't take --host. Open starts the app if it isn't running.
     Tabs open in the current project, or the one named by --project and
     --worktree; --split opens the tab beside the current pane instead.
     Use the tab ID that open or list prints. Page actions print their result as

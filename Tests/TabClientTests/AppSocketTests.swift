@@ -1,3 +1,5 @@
+import Darwin
+import TabProtocol
 import XCTest
 @testable import TabClient
 
@@ -11,9 +13,11 @@ final class AppSocketTests: XCTestCase {
                        #"{"path":"/Users/me/code/app","type":"open"}"#)
         let click = AppRequest.browser(command: BrowserCommand.click.rawValue,
                                        args: ["tabId": .string("T"), "selector": .string("#go")])
-        XCTAssertEqual(try json(click), ##"{"args":{"selector":"#go","tabId":"T"},"command":"click","type":"browser"}"##)
-        XCTAssertEqual(try json(AppReply.ok(.string("tab-1"))), #"{"ok":true,"result":"tab-1"}"#)
+        XCTAssertEqual(try json(click), ##"{"args":{"selector":"#go","tabId":"T"},"verb":"browser.click"}"##)
+        XCTAssertEqual(try json(AppReply.ok(.string("tab-1"))), #"{"ok":true,"value":"tab-1"}"#)
         XCTAssertEqual(try json(AppReply.failed("No tab with that ID")), #"{"error":"No tab with that ID","ok":false}"#)
+        let evaluate = AppRequest.browser(command: "evaluate", args: ["tabId": .string("T"), "script": .string("1")])
+        XCTAssertEqual(try json(evaluate), #"{"args":{"script":"1","tabId":"T"},"verb":"browser.eval"}"#)
         XCTAssertEqual(BrowserCommand.storageGet.rawValue, "storage.get")
         XCTAssertEqual(BrowserCommand.waitForNavigation.rawValue, "waitForNavigation")
     }
@@ -30,12 +34,16 @@ final class AppSocketTests: XCTestCase {
             XCTAssertEqual(try JSONDecoder().decode(AppRequest.self, from: AppSocket.encode(value)), value)
         }
         let decode = { (text: String) in try JSONDecoder().decode(AppRequest.self, from: Data(text.utf8)) }
-        XCTAssertEqual(try decode(#"{"type":"browser","command":"list"}"#), .browser(command: "list", args: [:]))
+        XCTAssertEqual(try decode(#"{"verb":"browser.list"}"#), .browser(command: "list", args: [:]))
         XCTAssertEqual(try decode(#"{"type":"focus","window":1}"#), .unknown("focus"))
         let reply = { (text: String) in try JSONDecoder().decode(AppReply.self, from: Data(text.utf8)) }
         XCTAssertEqual(try reply(#"{"ok":true}"#), .ok(.null))
         XCTAssertEqual(try reply(#"{"ok":false}"#), .failed("Tab did not handle the request"))
-        XCTAssertEqual(try reply(#"{"ok":true,"result":[{"tabId":"a","active":true}],"extra":1}"#),
+        XCTAssertEqual(try reply(#"{"ok":"true","error":3}"#), .failed("Tab did not handle the request"))
+        XCTAssertEqual(try reply("null"), .failed("Tab did not handle the request"))
+        XCTAssertEqual(try reply("[]"), .failed("Tab did not handle the request"))
+        XCTAssertThrowsError(try decode(#"{"verb":"browser.list","args":null}"#))
+        XCTAssertEqual(try reply(#"{"ok":true,"value":[{"tabId":"a","active":true}],"extra":1}"#),
                        .ok(.array([.object(["tabId": .string("a"), "active": .bool(true)])])))
     }
 
@@ -44,15 +52,23 @@ final class AppSocketTests: XCTestCase {
         XCTAssertThrowsError(try AppSocket.call(socket: socket, .open(path: "/"), timeout: 1)) { error in
             XCTAssertEqual(error as? AppSocketError, .notRunning)
         }
-        let server = try AppSocketServer(socket: socket) { request in
-            switch request {
-            case .open(let path): return .ok(.object(["opened": .string(path)]))
-            case .browser(let command, _) where command == "slow":
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
-                return .ok(.null)
-            case .browser(let command, let args): return .failed("\(command) \(args["tabId"]?.string ?? "")")
-            case .unknown(let type): return .failed(type)
+        let server: AppSocketServer
+        do {
+            server = try AppSocketServer(socket: socket) { request in
+                switch request {
+                case .open(let path): return .ok(.object(["opened": .string(path)]))
+                case .browser(let command, _) where command == "slow":
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    return .ok(.null)
+                case .browser(let command, let args): return .failed("\(command) \(args["tabId"]?.string ?? "")")
+                case .unknown(let type): return .failed(type)
+                }
             }
+        } catch let error as TransportError {
+            if case .system(_, let code) = error, code == EPERM || code == EACCES {
+                throw XCTSkip("AppSocketTests requires unsandboxed Unix sockets: \(error)")
+            }
+            throw error
         }
         defer { server.close() }
         let opened = try await blocking { try AppSocket.call(socket: socket, .open(path: "/srv/app"), timeout: 5) }

@@ -344,6 +344,18 @@ final class ArgumentTests: XCTestCase {
         XCTAssertEqual(try command(["browser", "storage", "get", "-h"]), .help(CLIHelp.browser))
     }
 
+    func testBrowserUnsignedNumbersKeepTheirExactWireValue() throws {
+        let maximum = "18446744073709551615"
+        let wait = try browser(["wait", "T", "--timeout-ms", maximum])
+        XCTAssertEqual(wait.args["timeoutMs"], .uint(UInt64.max))
+        XCTAssertEqual(wait.extraTime, 60)
+        let data = try AppSocket.encode(wait.request)
+        XCTAssertTrue(String(decoding: data, as: UTF8.self).contains(maximum))
+        XCTAssertEqual(try JSONDecoder().decode(AppRequest.self, from: data), wait.request)
+        let cookie = try browser(["cookies", "set", "T", "id", "1", "a.test", "--expires", maximum])
+        XCTAssertEqual(cookie.args["expires"], .uint(UInt64.max))
+    }
+
     func testWrongBrowserArgumentsNameTheUsage() {
         XCTAssertThrowsError(try command(["browser", "click", "T"])) { error in
             XCTAssertEqual((error as? CLIError)?.message, "usage: tab browser click <tab-id> <selector>")

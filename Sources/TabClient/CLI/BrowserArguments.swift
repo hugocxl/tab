@@ -32,7 +32,7 @@ public struct BrowserInvocation: Hashable, Sendable {
     }
 
     fileprivate func optional(_ key: String, _ value: UInt64?) -> Self {
-        value.map { arg(key, .int(Int64(clamping: $0))) } ?? self
+        value.map { arg(key, $0 <= UInt64(Int64.max) ? .int(Int64($0)) : .uint($0)) } ?? self
     }
 
     fileprivate func output(_ output: BrowserOutput) -> Self {
@@ -45,6 +45,8 @@ public struct BrowserInvocation: Hashable, Sendable {
     fileprivate func waiting(_ defaultWait: TimeInterval) -> Self {
         var copy = self
         if case .int(let milliseconds)? = args["timeoutMs"] {
+            copy.extraTime = min(TimeInterval(milliseconds) / 1000, BrowserCommand.maxWait)
+        } else if case .uint(let milliseconds)? = args["timeoutMs"] {
             copy.extraTime = min(TimeInterval(milliseconds) / 1000, BrowserCommand.maxWait)
         } else {
             copy.extraTime = defaultWait
