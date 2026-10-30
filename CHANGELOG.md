@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.7.1 - 2026-10-30
+
+### Fixed
+
+- Releases no longer fail when a slow build machine makes a terminal speed
+  check miss its time limit.
+
 ## 0.7.0 - 2026-10-30
 
 ### Changed
