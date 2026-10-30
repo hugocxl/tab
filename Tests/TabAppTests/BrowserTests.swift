@@ -353,6 +353,21 @@ final class BrowserAutomationTests: XCTestCase {
         return id
     }
 
+    func testClosedTabsCannotUseARetainedController() async throws {
+        let pane = try host.openBrowserPane(url: nil, profile: nil, project: nil, worktree: nil, split: false)
+        let id = pane.tabId
+        _ = try await call(.close, ["tabId": .string(id)])
+        XCTAssertTrue(host.browserProfiles.panes.pane(id) === pane)
+        for command: BrowserCommand in [.read, .reload, .screenshot, .waitForNavigation, .cookiesGet] {
+            do {
+                _ = try await call(command, ["tabId": .string(id)])
+                XCTFail("\(command) accepted a closed tab")
+            } catch {
+                XCTAssertEqual(error.localizedDescription, "browser tab not found \(id)")
+            }
+        }
+    }
+
     func testCommandsDriveARealPage() async throws {
         let id = try await openFixture()
         let tab: [String: JSONValue] = ["tabId": .string(id)]

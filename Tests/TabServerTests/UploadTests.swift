@@ -4,6 +4,19 @@ import XCTest
 @testable import TabServer
 
 final class UploadTests: XCTestCase {
+    func testCompletedPathsResolveTemporaryDirectoryAliases() throws {
+        let root = try makeShortTemporaryFolder()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let alias = root.appendingPathComponent("alias")
+        try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: root)
+        let uploads = Uploads(directory: alias.appendingPathComponent("uploads"))
+        let session = SessionId()
+        let path = try XCTUnwrap(try uploads.receive(UploadChunk(session: session, upload: OperationId(),
+            name: "file", offset: 0, bytes: Data([1]), last: true)))
+        XCTAssertEqual(path.rawValue, root.appendingPathComponent("uploads/\(session)/file").path)
+        XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: path.rawValue)), Data([1]))
+    }
+
     func testOutOfOrderChunksCleanUpAndSizeLimitsRefuseBeforeWriting() throws {
         let root = try makeShortTemporaryFolder()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -62,7 +75,24 @@ final class UploadTests: XCTestCase {
                                                              offset: 5, bytes: Data([1]), last: false)),
                              "a file can't start in the middle")
 
-        try uploads.remove(session)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: first.rawValue))
+        let folder = URL(fileURLWithPath: first.rawValue).deletingLastPathComponent()
+        XCTAssertEqual(Set(try FileManager.default.contentsOfDirectory(atPath: folder.path)), ["shot.png", "shot-2.png"])
+    }
+
+    func testDiscardLeavesUploadsForSystemTemporaryDirectoryCleanup() throws {
+        let host = try CoreTestServer(start: false)
+        let server = host.server
+        let session = try server.createSession(CreateSession(project: server.homeProject,
+            directory: ServerPath(host.root.path), size: Size(cols: 80, rows: 24), command: "sleep 30"), requester: nil)
+        defer { server.endAllSessions() }
+        let complete = try XCTUnwrap(try server.uploads.receive(UploadChunk(session: session.id, upload: OperationId(),
+            name: "file", offset: 0, bytes: Data([1]), last: true)))
+        let partial = OperationId()
+        XCTAssertNil(try server.uploads.receive(UploadChunk(session: session.id, upload: partial,
+            name: "unfinished", offset: 0, bytes: Data([2]), last: false)))
+        try server.discard(session.id)
+        XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: complete.rawValue)), Data([1]))
+        let folder = URL(fileURLWithPath: complete.rawValue).deletingLastPathComponent()
+        XCTAssertEqual(try Data(contentsOf: folder.appendingPathComponent("\(partial).part")), Data([2]))
     }
 }

@@ -52,13 +52,6 @@ final class Uploads: @unchecked Sendable {
         }
     }
 
-    /// Deletes a session's uploads.
-    func remove(_ session: SessionId) throws {
-        let folder = directory.appendingPathComponent(session.description, isDirectory: true)
-        guard FileManager.default.fileExists(atPath: folder.path) else { return }
-        try FileManager.default.removeItem(at: folder)
-    }
-
     /// Makes `url` a folder only this user can open, or checks that it is
     /// one. Other users can create names first in a shared temporary folder,
     /// so a link, a file, or someone else's folder is refused.

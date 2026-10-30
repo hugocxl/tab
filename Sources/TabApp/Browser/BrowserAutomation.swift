@@ -130,6 +130,9 @@ public final class BrowserAutomation {
     /// The live page of the tab in `args`, loaded hidden if it was never shown.
     private func page(_ args: JSONValue, host: BrowserHost) throws -> BrowserPaneController {
         let id = try BrowserScripts.string(args, "tabId")
+        guard try host.browserTabs(project: nil, worktree: nil).contains(where: { $0.tabId == id }) else {
+            throw notFound(id)
+        }
         guard let pane = host.browserProfiles.panes.pane(id) ?? host.browserPane(tabId: id) else { throw notFound(id) }
         guard pane.ensureWebView() != nil else { throw BrowserScripts.Failure("the built-in browser is disabled") }
         return pane

@@ -164,7 +164,7 @@ public final class BrowserPaneController: NSViewController {
             return
         }
         toolbar.isHidden = false
-        if webView == nil { makeWebView(loading: initialURL ?? settings.homeURL) }
+        if webView == nil { makeWebView(loading: initialURL) }
         refreshChrome()
     }
 
@@ -677,7 +677,7 @@ public final class BrowserPaneController: NSViewController {
     /// The page, created hidden when the pane's view was never loaded.
     func ensureWebView() -> WKWebView? {
         _ = view
-        if webView == nil, settings.enabled { makeWebView(loading: initialURL ?? settings.homeURL) }
+        if webView == nil, settings.enabled { makeWebView(loading: initialURL) }
         return webView
     }
 

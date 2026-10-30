@@ -106,12 +106,19 @@ final class GitWorktreeTests: XCTestCase {
         let repo = try GitTestRepo(commit: true)
         let outside = repo.path + "/outside-tab"
         try repo.run("worktree", "add", "-b", "made-outside", outside)
+        guard case .worktrees(let listed) = try repo.git(.worktrees) else { return XCTFail("worktrees") }
+        let discovered = try XCTUnwrap(listed.first { $0.directory.rawValue == outside })
+        XCTAssertEqual(discovered.branch, "made-outside")
+        XCTAssertNil(discovered.registered)
+        XCTAssertFalse(discovered.primary || discovered.bare || discovered.prunable)
         let id = ProjectId()
         guard case .project(let project) = try repo.git(.worktree(WorktreeIntent(action: .register(
-            project: id, directory: ServerPath(outside))))) else { return XCTFail("project") }
+            project: id, directory: discovered.directory)))) else { return XCTFail("project") }
         XCTAssertEqual(project.name, "made-outside")
         XCTAssertEqual(project.kind, .worktree)
         XCTAssertTrue(repo.catalog.contains(id))
+        guard case .worktrees(let imported) = try repo.git(.worktrees) else { return XCTFail("worktrees") }
+        XCTAssertEqual(imported.first { $0.directory == discovered.directory }?.registered, id)
         XCTAssertTrue(repo.errorMessage {
             try repo.git(.worktree(WorktreeIntent(action: .register(project: ProjectId(), directory: ServerPath(outside)))))
         }.contains("already registered"))

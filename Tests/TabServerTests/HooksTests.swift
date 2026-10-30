@@ -61,6 +61,27 @@ final class HooksTests: XCTestCase {
         XCTAssertEqual(try repo.read("removed"), "projectglobal")
     }
 
+    func testHookEnvironmentKeepsTheParentPathAndCanonicalizesTheWorktreePath() throws {
+        let repo = try GitTestRepo(commit: true)
+        let alias = repo.path + "/alias"
+        try FileManager.default.createSymbolicLink(atPath: alias, withDestinationPath: repo.path)
+        repo.catalog.add(ProjectDescriptor(id: repo.project, directory: ServerPath(alias), name: "Alias"))
+        try configure(repo, setup: [
+            #"printf '%s\n' "$TAB_PROJECT_PATH" "$TAB_WORKTREE_PATH" "$PWD" > environment"#,
+        ], teardown: [])
+        let target = alias + "/tree"
+        guard case .project(let project) = try repo.git(.worktree(WorktreeIntent(action: .create(
+            project: ProjectId(), directory: ServerPath(target), branch: "feature", base: "main"),
+            options: WorktreeOptions(hooks: try preview(repo, teardown: false))))) else {
+            return XCTFail("project")
+        }
+        let canonicalTarget = repo.path + "/tree"
+        XCTAssertEqual(project.directory.rawValue, canonicalTarget)
+        let values = try String(contentsOfFile: canonicalTarget + "/environment", encoding: .utf8)
+            .split(separator: "\n").map(String.init)
+        XCTAssertEqual(values, [alias, canonicalTarget, canonicalTarget])
+    }
+
     func testHooksAreOptInAndChangedApprovalIsRejectedBeforeCreation() throws {
         let repo = try GitTestRepo(commit: true)
         try configure(repo, setup: ["touch setup-ran"], teardown: ["touch teardown-ran"])

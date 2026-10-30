@@ -215,7 +215,6 @@ public final class Server: @unchecked Sendable {
         try catalog.beginDiscard(session)
         try endAndWait(session)
         try archive.discardNow(session)
-        try uploads.remove(session)
         try catalog.finishDiscard(session)
     }
 
@@ -254,7 +253,6 @@ public final class Server: @unchecked Sendable {
             defer { operations.unlock() }
             do {
                 try archive.discardNow(session)
-                try? uploads.remove(session)
                 try catalog.finishDiscard(session)
             } catch {
                 ServerLog.error("session \(session) retention cleanup failed: \(error)")

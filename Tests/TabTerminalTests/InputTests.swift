@@ -119,4 +119,19 @@ final class InputTests: XCTestCase {
         terminal.feed("\u{1b}[?1h")
         XCTAssertEqual(try terminal.encodeMouse(wheel), Data("\u{1b}OA\u{1b}OA\u{1b}OA".utf8))
     }
+
+    func testAlternateScrollMetadataRequiresTheAlternateScreen() throws {
+        let terminal = try makeTerminal(cols: 80, rows: 24)
+        terminal.feed("\u{1b}[?1000h\u{1b}[?1004h\u{1b}[?1007h")
+        var expected = InputModes()
+        expected.mouseTracking = true
+        expected.focusEvents = true
+        XCTAssertEqual(try terminal.inputModes(), expected)
+        terminal.feed("\u{1b}[?1049h")
+        expected.alternateScroll = true
+        XCTAssertEqual(try terminal.inputModes(), expected)
+        terminal.feed("\u{1b}[?1049l")
+        expected.alternateScroll = false
+        XCTAssertEqual(try terminal.inputModes(), expected)
+    }
 }
