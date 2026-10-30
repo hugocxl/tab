@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.4.4 - 2026-10-30
+
+### Fixed
+
+- Creating a worktree from the New Worktree dialog no longer fails with
+  “Worktree is already registered”.
+
 ## 0.4.3 - 2026-10-30
 
 ### Fixed

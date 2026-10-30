@@ -189,7 +189,7 @@ extension AppModel {
             notify(.state)
         }
         let intent = WorktreeIntent(
-            action: .create(project: parent, directory: ServerPath(directory), branch: branch, base: base),
+            action: .create(project: ProjectId(), directory: ServerPath(directory), branch: branch, base: base),
             options: WorktreeOptions(name: name, hooks: hooks)
         )
         do {

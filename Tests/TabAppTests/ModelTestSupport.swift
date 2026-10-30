@@ -36,6 +36,7 @@ final class ModelFakeServer: ServerAPI, TerminalBackend, @unchecked Sendable {
     private var _claimResult: [UInt64]?
     private var _folderRequests: [ServerPath] = []
     private var _fileRequests: [FilesRequest] = []
+    private var _gitRequests: [GitRequest] = []
     private var _fileReply: FilesReply = .entries([])
     private var _stops: [Bool] = []
     private var _idleStops = 0
@@ -67,6 +68,7 @@ final class ModelFakeServer: ServerAPI, TerminalBackend, @unchecked Sendable {
     var closed: [SessionId] { locked { _closed } }
     var references: [[SessionId]] { locked { _references } }
     var mutations: [ProjectIntent] { locked { _mutations } }
+    var gitRequests: [GitRequest] { locked { _gitRequests } }
 
     var activitySnapshot: ActivitySnapshot {
         get { locked { _activity } }
@@ -140,7 +142,10 @@ final class ModelFakeServer: ServerAPI, TerminalBackend, @unchecked Sendable {
         if let beforeClaim { await beforeClaim() }
         return locked { _claimResult ?? events }
     }
-    func git(_ request: GitRequest) async throws -> GitReply { .summary(nil) }
+    func git(_ request: GitRequest) async throws -> GitReply {
+        locked { _gitRequests.append(request) }
+        return .summary(nil)
+    }
     func files(_ request: FilesRequest) async throws -> FilesReply {
         locked { _fileRequests.append(request) }
         return fileReply

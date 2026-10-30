@@ -39,6 +39,18 @@ final class SidebarListingTests: XCTestCase {
         return (parentId, worktree.id)
     }
 
+    func testNewWorktreeAsksForAFreshProjectNotItsParent() async throws {
+        let parent = try XCTUnwrap(model.addProject(try ModelFixtures.folder("app")))
+        _ = await ModelFixtures.wait { self.model.state.projectIntents(.local).isEmpty }
+        _ = await model.createWorktree(parent: parent, name: "feature", branch: "feature", base: "main",
+                                       directory: "/tmp/worktrees/feature", hooks: nil)
+        let request = try XCTUnwrap(server.gitRequests.last)
+        guard case .worktree(let intent) = request.action,
+              case .create(let project, _, _, _) = intent.action else { return XCTFail("Expected a worktree creation") }
+        XCTAssertEqual(request.project, parent)
+        XCTAssertNotEqual(project, parent)
+    }
+
     func testProjectsListInOrderWithTheirWorktreesAndHomeTerminalsFirst() async throws {
         let (app, feature) = try await repository("app", worktree: "feature")
         let lib = try XCTUnwrap(model.addProject(try ModelFixtures.folder("lib")))
