@@ -164,6 +164,8 @@ extension RequestBody {
         switch self {
         case .agentChat(let request):
             try request.validate()
+        case .agentComposerContext:
+            break
         case .hello(let hello):
             try Validation.versions(hello.versions)
         case .clearScreen(let channel), .detach(let channel):
@@ -247,6 +249,8 @@ extension ReplyBody {
         switch self {
         case .agentChat(let snapshot):
             try snapshot.validate()
+        case .agentComposerContext(let context):
+            try context.validate()
         case .activityClaimed(let ids):
             if ids.count > Limits.activityHistoryLimit { throw .badRequest }
         case .activity(let snapshot):

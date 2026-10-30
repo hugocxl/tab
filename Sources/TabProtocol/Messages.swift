@@ -206,6 +206,7 @@ public enum Topic: OpenEnum {
 
 public enum RequestBody: Hashable, Codable, Sendable {
     case agentChat(AgentChatRequest)
+    case agentComposerContext(AgentComposerContextRequest)
     case hello(Hello)
     case ping
 
@@ -283,6 +284,7 @@ public enum RequestBody: Hashable, Codable, Sendable {
         switch c.type {
         case "hello": self = .hello(try c("hello"))
         case "agentChat": self = .agentChat(try c("request"))
+        case "agentComposerContext": self = .agentComposerContext(try c("request"))
         case "ping": self = .ping
         case "listSessions": self = .listSessions
         case "createSession": self = .createSession(try c("session"))
@@ -344,6 +346,9 @@ public enum RequestBody: Hashable, Codable, Sendable {
             try c(hello, "hello")
         case .agentChat(let request):
             var c = try TaggedEncoding(encoder, "agentChat")
+            try c(request, "request")
+        case .agentComposerContext(let request):
+            var c = try TaggedEncoding(encoder, "agentComposerContext")
             try c(request, "request")
         case .ping: try TaggedEncoding(encoder, "ping")
         case .listSessions: try TaggedEncoding(encoder, "listSessions")
@@ -483,6 +488,7 @@ public enum RequestBody: Hashable, Codable, Sendable {
 
 public enum ReplyBody: Hashable, Codable, Sendable {
     case agentChat(AgentChatSnapshot)
+    case agentComposerContext(AgentComposerContextReply)
     case hello(HelloReply)
     /// The peer shares no protocol version with this server.
     case versionUnsupported(supported: [ProtocolVersion])
@@ -551,6 +557,7 @@ public enum ReplyBody: Hashable, Codable, Sendable {
         case "hello": self = .hello(try c("hello"))
         case "versionUnsupported": self = .versionUnsupported(supported: try c("supported"))
         case "agentChat": self = .agentChat(try c("snapshot"))
+        case "agentComposerContext": self = .agentComposerContext(try c("context"))
         case "pong": self = .pong
         case "error": self = .error(try c("error"))
         case "sessions": self = .sessions(try c("sessions"))
@@ -605,6 +612,9 @@ public enum ReplyBody: Hashable, Codable, Sendable {
         case .agentChat(let snapshot):
             var c = try TaggedEncoding(encoder, "agentChat")
             try c(snapshot, "snapshot")
+        case .agentComposerContext(let context):
+            var c = try TaggedEncoding(encoder, "agentComposerContext")
+            try c(context, "context")
         case .pong: try TaggedEncoding(encoder, "pong")
         case .error(let error):
             var c = try TaggedEncoding(encoder, "error")

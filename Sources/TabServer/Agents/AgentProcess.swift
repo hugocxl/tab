@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import TabProtocol
 
 /// NDJSON transport. Readers drain both pipes independently; stdout EOF precedes exit delivery.
 internal final class AgentProcess: @unchecked Sendable {
@@ -106,7 +107,10 @@ internal final class AgentProcess: @unchecked Sendable {
     }
 
     func write(_ message: [String: Any]) throws {
-        var data = try JSONSerialization.data(withJSONObject: message, options: [.sortedKeys])
+        var data = try JSONSerialization.data(withJSONObject: message, options: [.sortedKeys, .withoutEscapingSlashes])
+        guard data.count < Limits.maxFrame else {
+            throw AgentRuntimeError("Agent input exceeds the maximum frame size. Remove attachments or use smaller files.")
+        }
         data.append(10)
         lock.lock()
         defer { lock.unlock() }

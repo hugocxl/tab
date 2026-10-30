@@ -39,6 +39,8 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
     private var bubbleWidth: CGFloat = 0
     private var bodyHeight: CGFloat = 0
     private var detailHeight: CGFloat = 0
+    private var attachmentLabels: [NSTextField] = []
+    private var attachmentsHeight: CGFloat = 0
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -112,6 +114,23 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
             text = String(text.prefix(600)).components(separatedBy: "\n").prefix(8).joined(separator: "\n") + "…"
         }
         body.isHidden = item.kind == .assistant
+        let attachments = item.kind == .user ? item.attachments ?? [] : []
+        while attachmentLabels.count > attachments.count { attachmentLabels.removeLast().removeFromSuperview() }
+        while attachmentLabels.count < attachments.count {
+            let label = makeLabel("", font: AppFont.small)
+            label.lineBreakMode = .byTruncatingMiddle
+            label.isSelectable = true
+            addSubview(label)
+            attachmentLabels.append(label)
+        }
+        for (index, attachment) in attachments.enumerated() {
+            let size = ByteCountFormatter.string(fromByteCount: Int64(attachment.byteCount), countStyle: .file)
+            let label = attachmentLabels[index]
+            label.stringValue = "📎 \(attachment.name) · \(size)"
+            label.toolTip = attachment.name
+            label.textColor = theme.fgMuted
+            label.setAccessibilityLabel("Attachment: \(attachment.name), \(size)")
+        }
         response.isHidden = item.kind != .assistant
         copy.isHidden = (item.kind != .assistant && item.kind != .user) || !item.isComplete
         copy.toolTip = item.kind == .user ? "Copy message" : "Copy response as Markdown"
@@ -141,10 +160,14 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
             let plain = body.string as NSString
             let natural = plain.boundingRect(with: NSSize(width: max(1, width * 0.85 - 28), height: .greatestFiniteMagnitude),
                 options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: [.font: AppFont.system(14)]).width
-            bubbleWidth = min(width * 0.85, max(48, ceil(natural) + 28))
-            bodyHeight = body.height(for: max(1, bubbleWidth - 28))
+            let attachmentWidth = attachmentLabels.map {
+                ($0.stringValue as NSString).size(withAttributes: [.font: AppFont.small]).width
+            }.max() ?? 0
+            bubbleWidth = min(width * 0.85, max(48, ceil(max(natural, attachmentWidth)) + 28))
+            bodyHeight = body.string.isEmpty ? 0 : body.height(for: max(1, bubbleWidth - 28))
             if !expandMessage.isHidden && !messageExpanded { bodyHeight = min(176, bodyHeight) }
-            return bodyHeight + 22 + (expandMessage.isHidden ? 0 : 26) + 28
+            attachmentsHeight = attachmentLabels.isEmpty ? 0 : CGFloat(attachmentLabels.count) * 22 + (bodyHeight > 0 ? 8 : 0)
+            return bodyHeight + attachmentsHeight + 22 + (expandMessage.isHidden ? 0 : 26) + 28
         }
         bodyHeight = item.kind == .assistant ? response.height(for: width) : body.height(for: width)
         detailHeight = detail.isHidden ? 0 : detail.height(for: max(1, width - 24))
@@ -161,6 +184,11 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
             bubble.frame = NSRect(x: left, y: 0, width: bubbleWidth, height: bounds.height - 28)
             body.frame = NSRect(x: left + 14, y: 11, width: max(1, bubbleWidth - 28), height: bodyHeight)
             expandMessage.frame = NSRect(x: left + 10, y: body.frame.maxY + 4, width: 90, height: 24)
+            let attachmentTop = body.frame.maxY + (expandMessage.isHidden ? 0 : 26) + (bodyHeight > 0 ? 8 : 0)
+            for (index, label) in attachmentLabels.enumerated() {
+                label.frame = NSRect(x: left + 14, y: attachmentTop + CGFloat(index) * 22,
+                                     width: max(1, bubbleWidth - 28), height: 20)
+            }
             copy.frame = NSRect(x: width - 60, y: bubble.frame.maxY + 4, width: 60, height: 24)
             timestamp.frame = NSRect(x: max(0, width - 220), y: copy.frame.minY + 4, width: 150, height: 18)
             timestamp.alignment = .right

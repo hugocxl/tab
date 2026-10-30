@@ -88,6 +88,11 @@ internal final class AgentRuntime: @unchecked Sendable {
     }
 
     func send(text: String, model: String?, reasoningEffort: AgentReasoningEffort? = nil) async throws {
+        try await send(text: text, model: model, reasoningEffort: reasoningEffort, attachments: [])
+    }
+
+    func send(text: String, model: String?, reasoningEffort: AgentReasoningEffort?,
+              attachments: [StagedAgentAttachment]) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             queue.async {
                 guard !self.closed, !self.failed else {
@@ -117,7 +122,8 @@ internal final class AgentRuntime: @unchecked Sendable {
                 let submit: (Result<[String: Any], Error>) -> Void = { result in
                     do {
                         _ = try result.get()
-                        try self.submit(text: text, model: model, reasoningEffort: reasoningEffort, continuation: continuation)
+                        try self.submit(text: text, model: model, reasoningEffort: reasoningEffort,
+                                        attachments: attachments, continuation: continuation)
                     } catch {
                         self.fail(error.localizedDescription)
                         continuation.resume(throwing: error)
@@ -212,13 +218,14 @@ internal final class AgentRuntime: @unchecked Sendable {
     }
 
     private func submit(text: String, model: String?, reasoningEffort: AgentReasoningEffort?,
+                        attachments: [StagedAgentAttachment],
                         continuation: CheckedContinuation<Void, Error>) throws {
         if provider == .claude {
             let submitUser: (Result<[String: Any], Error>) -> Void = { result in
                 do {
                     _ = try result.get()
                     self.claude.beginTurn()
-                    try self.write(["type": "user", "message": ["role": "user", "content": text],
+                    try self.write(["type": "user", "message": ["role": "user", "content": AgentAttachments.claudeContent(text: text, attachments: attachments)],
                                      "parent_tool_use_id": NSNull(), "session_id": self.claude.sessionID ?? self.resumeSession ?? ""])
                     self.hasSubmittedTurn = true
                     continuation.resume()
@@ -233,7 +240,7 @@ internal final class AgentRuntime: @unchecked Sendable {
             try codexSelection(model: model, reasoningEffort: reasoningEffort) { selection in
                 do {
                     let (wireModel, effort) = try selection.get()
-                    var params: [String: Any] = ["threadId": threadID, "input": [["type": "text", "text": text, "text_elements": []]]]
+                    var params: [String: Any] = ["threadId": threadID, "input": AgentAttachments.codexInput(text: text, attachments: attachments)]
                     // T3 codexRuntimeModeTurnDefaults: explicitly reset on every
                     // turn so leaving Full access restores native prompting/sandboxing.
                     params["approvalPolicy"] = self.accessMode == .fullAccess ? "never" : self.accessMode == .ask ? "untrusted" : "on-request"

@@ -4,10 +4,70 @@ import AppKit
 @MainActor
 final class AgentComposerTextView: NSTextView {
     var onEdit: (() -> Void)?
+    var onAttachFiles: (([URL]) -> Void)?
+    /// The second argument is the image MIME type, not a filename.
+    var onAttachImage: ((Data, String) -> Void)?
     var placeholderColor = NSColor.secondaryLabelColor
+    private var acceptingAttachmentDrop = false { didSet { needsDisplay = true } }
+    private let ownedStorage: NSTextStorage?
 
-    /// The composer sends text only; do not import styled runs or file attachments.
-    override func paste(_ sender: Any?) { pasteAsPlainText(sender) }
+    override init(frame frameRect: NSRect = .zero, textContainer container: NSTextContainer? = nil) {
+        let resolved: NSTextContainer
+        if let container {
+            ownedStorage = nil
+            resolved = container
+        } else {
+            let storage = NSTextStorage()
+            let manager = NSLayoutManager()
+            resolved = NSTextContainer(containerSize: NSSize(width: max(1, frameRect.width), height: .greatestFiniteMagnitude))
+            storage.addLayoutManager(manager)
+            manager.addTextContainer(resolved)
+            ownedStorage = storage
+        }
+        super.init(frame: frameRect, textContainer: resolved)
+        registerForDraggedTypes(AgentAttachmentPasteboard.types)
+    }
+
+    required init?(coder: NSCoder) {
+        ownedStorage = nil
+        super.init(coder: coder)
+        registerForDraggedTypes(AgentAttachmentPasteboard.types)
+    }
+
+    override func paste(_ sender: Any?) {
+        if !receiveAttachment(from: .general) { pasteAsPlainText(sender) }
+    }
+
+    @discardableResult
+    func receiveAttachment(from pasteboard: NSPasteboard) -> Bool {
+        AgentAttachmentPasteboard.receive(pasteboard, onFiles: onAttachFiles, onImage: onAttachImage)
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { updateAttachmentDrop(sender) }
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { updateAttachmentDrop(sender) }
+    override func draggingExited(_ sender: NSDraggingInfo?) { acceptingAttachmentDrop = false; super.draggingExited(sender) }
+    override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        if AgentAttachmentPasteboard.canRead(sender.draggingPasteboard) { return updateAttachmentDrop(sender) == .copy }
+        return super.prepareForDragOperation(sender)
+    }
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        acceptingAttachmentDrop = false
+        if receiveAttachment(from: sender.draggingPasteboard) { return true }
+        return super.performDragOperation(sender)
+    }
+    override func concludeDragOperation(_ sender: NSDraggingInfo?) {
+        acceptingAttachmentDrop = false
+        super.concludeDragOperation(sender)
+    }
+
+    private func updateAttachmentDrop(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard AgentAttachmentPasteboard.canRead(sender.draggingPasteboard) else {
+            acceptingAttachmentDrop = false
+            return super.draggingUpdated(sender)
+        }
+        acceptingAttachmentDrop = sender.draggingSourceOperationMask.contains(.copy)
+        return acceptingAttachmentDrop ? .copy : []
+    }
 
     override func didChangeText() {
         super.didChangeText()
@@ -17,6 +77,14 @@ final class AgentComposerTextView: NSTextView {
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
+        if acceptingAttachmentDrop {
+            NSColor.controlAccentColor.withAlphaComponent(0.10).setFill()
+            let outline = NSBezierPath(roundedRect: visibleRect.insetBy(dx: 2, dy: 2), xRadius: 6, yRadius: 6)
+            outline.fill()
+            NSColor.controlAccentColor.setStroke()
+            outline.lineWidth = 2
+            outline.stroke()
+        }
         guard string.isEmpty, !hasMarkedText() else { return }
         ("Message the agent…" as NSString).draw(at: textContainerOrigin, withAttributes: [
             .font: font ?? AppFont.system(14), .foregroundColor: placeholderColor,

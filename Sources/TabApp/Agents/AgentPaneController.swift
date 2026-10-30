@@ -36,6 +36,11 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     private var needsAuthoritativeSnapshot = false
     private(set) var snapshot: AgentChatSnapshot?
     private(set) var errorMessage: String?
+    private(set) var draftAttachments: [AgentDraftAttachment] = []
+    private var attachmentTask: Task<Void, Never>?
+    private var preparingAttachments = 0
+    private var attachmentPreview: NSPopover?
+    private lazy var composerCoordinator = AgentComposerCoordinator(surface: surface)
 
     convenience init(context: PaneContext) {
         self.init(context: context) { client, request in try await client.agentChat(request) }
@@ -68,6 +73,39 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
             guard let model, let project = model.state.paneProject(pane) else { return }
             model.openEditor(project: project, path: path, line: line)
         }
+        composerCoordinator.loadFiles = { [weak model] in
+            guard let model, let project = model.state.paneProject(pane), let client = model.sideClient(for: project) else {
+                throw AgentPaneError.offline
+            }
+            return try await client.searchFiles(project).paths
+        }
+        composerCoordinator.loadThreads = { [weak model] in
+            guard let model, let projectID = model.state.paneProject(pane),
+                  let project = model.state.project(projectID), let client = model.sideClient(for: projectID) else {
+                throw AgentPaneError.offline
+            }
+            let sessions = project.tabs.flatMap(\.panes).compactMap { pane -> SessionId? in
+                if case .agent(let other, _) = pane.content, other != session { return other }
+                return nil
+            }
+            var threads: [AgentMentionThread] = []
+            for other in Set(sessions).prefix(24) {
+                try Task.checkCancellation()
+                guard let snapshot = try? await client.agentChat(.read(session: other)),
+                      let first = snapshot.items.first(where: { $0.kind == .user }), !first.text.isEmpty else { continue }
+                let messages = snapshot.items.filter { $0.kind == .user || $0.kind == .assistant }.suffix(30)
+                let context = messages.map { "\($0.kind == .user ? "User" : "Assistant"): \($0.text)" }.joined(separator: "\n\n")
+                threads.append(AgentMentionThread(id: "\(other)", title: String(first.text.prefix(90)),
+                                                   context: String(context.suffix(24_000))))
+            }
+            return threads
+        }
+        composerCoordinator.loadSkills = { [weak model, weak self] in
+            guard let self, let model, let project = model.state.paneProject(pane),
+                  let client = model.sideClient(for: project),
+                  let provider = TabProtocol.AgentChatProvider(rawValue: self.selection.provider.rawValue) else { throw AgentPaneError.offline }
+            return try await client.agentComposerContext(.init(project: project, provider: provider)).skills
+        }
     }
 
     /// Request injection keeps failure, reconnect and event races testable without a server.
@@ -95,6 +133,20 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         surface.stop.onPress = { [weak self] in self?.stop() }
         surface.retry.onPress = { [weak self] in self?.refresh() }
         surface.onApproval = { [weak self] id, allow in self?.approve(id, allow: allow) }
+        surface.attach.onPress = { [weak self] in self?.chooseAttachments() }
+        surface.composer.onAttachFiles = { [weak self] in self?.attachFiles($0) }
+        surface.composer.onAttachImage = { [weak self] data, mime in self?.attachImage(data, mimeType: mime) }
+        surface.attachmentStrip.onRemove = { [weak self] id in
+            guard let self else { return }
+            self.draftAttachments.removeAll { $0.id == id }
+            self.updateAttachments()
+        }
+        surface.attachmentStrip.onPreview = { [weak self] in self?.previewAttachment($0) }
+        composerCoordinator.onAction = { [weak self] in self?.performComposerAction($0) }
+        composerCoordinator.onContext = { [weak self] name, content in
+            self?.addAttachments([AgentDraftAttachment(name: name, mimeType: "text/plain", data: Data(content.utf8))])
+        }
+        composerCoordinator.onError = { [weak self] in self?.showComposerError($0) }
         updateControls()
     }
 
@@ -132,11 +184,15 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         stopTask = nil
         submitting = false
         stopRequested = false
+        attachmentTask?.cancel()
+        attachmentPreview?.close()
+        composerCoordinator.invalidate()
     }
 
     func connectionChanged() {
         guard !disposed else { return }
         connectionGeneration &+= 1
+        composerCoordinator.invalidate()
         needsAuthoritativeSnapshot = true
         refreshTask?.cancel()
         commandTask?.cancel()
@@ -190,13 +246,21 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     }
 
     func send() {
+        if composerCoordinator.performTypedAction() { return }
         let text = surface.composer.string
         guard !disposed, commandTask == nil, created, canSend,
-              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+              preparingAttachments == 0,
+              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !draftAttachments.isEmpty else { return }
+        let attachments = draftAttachments.map { AgentChatAttachment(id: $0.id, name: $0.name, mimeType: $0.mimeType, data: $0.data) }
+        let sentIDs = Set(attachments.map(\.id))
+        composerCoordinator.dismiss()
         surface.scrollToEnd()
         run(.send(session: session, text: text, model: selection.model,
-                  reasoningEffort: reasoningEffort, provider: selection.provider)) { [weak self] in
+                  reasoningEffort: reasoningEffort, provider: selection.provider,
+                  attachments: attachments.isEmpty ? nil : attachments)) { [weak self] in
             self?.selectionEdited = false
+            self?.draftAttachments.removeAll { sentIDs.contains($0.id) }
+            self?.updateAttachments()
             // Don't lose edits typed while the request was in flight, or a failed send.
             guard let self, self.surface.composer.string == text else { return }
             self.surface.composer.string = ""
@@ -209,6 +273,154 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
             $0.id == id && $0.kind == .approval && !$0.isComplete
         }) == true else { return }
         run(.approve(session: session, request: id, allow: allow))
+    }
+
+    private func chooseAttachments() {
+        guard let window = view.window else { return }
+        let panel = NSOpenPanel()
+        panel.title = "Attach files"
+        panel.prompt = "Attach"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = true
+        panel.beginSheetModal(for: window) { [weak self] response in
+            if response == .OK { self?.attachFiles(panel.urls) }
+        }
+    }
+
+    func attachFiles(_ urls: [URL]) {
+        guard !disposed, !urls.isEmpty else { return }
+        prepareAttachments { try await AgentAttachmentImporter.load(urls: urls) }
+    }
+
+    private func prepareAttachments(_ load: @escaping @Sendable () async throws -> [AgentDraftAttachment]) {
+        let previous = attachmentTask
+        preparingAttachments += 1
+        updateControls()
+        attachmentTask = Task { [weak self] in
+            await previous?.value
+            guard let self else { return }
+            defer {
+                self.preparingAttachments -= 1
+                if self.preparingAttachments == 0 { self.attachmentTask = nil }
+                self.updateControls()
+            }
+            do {
+                try Task.checkCancellation()
+                guard !self.disposed else { return }
+                let loaded = try await load()
+                try Task.checkCancellation()
+                guard !self.disposed else { return }
+                self.addAttachments(loaded)
+            } catch is CancellationError { }
+            catch { self.showComposerError(error.localizedDescription) }
+        }
+    }
+
+    private func attachImage(_ data: Data, mimeType: String) {
+        guard !disposed else { return }
+        prepareAttachments {
+            try await Task.detached(priority: .userInitiated) {
+                [try AgentAttachmentImporter.fromImage(data: data, mimeType: mimeType)]
+            }.value
+        }
+    }
+
+    private func addAttachments(_ attachments: [AgentDraftAttachment]) {
+        let additions = attachments.filter { candidate in
+            !draftAttachments.contains { $0.name == candidate.name && $0.data == candidate.data }
+        }
+        guard draftAttachments.count + additions.count <= AgentChatAttachment.maxCount,
+              (draftAttachments + additions).reduce(0, { $0 + $1.data.count }) <= AgentChatAttachment.maxTotalBytes else {
+            showComposerError("Attach up to \(AgentChatAttachment.maxCount) files, totaling at most \(AgentChatAttachment.maxTotalBytes / 1024 / 1024) MB.")
+            return
+        }
+        draftAttachments += additions
+        errorMessage = nil
+        updateAttachments()
+    }
+
+    private func updateAttachments() {
+        surface.attachmentStrip.update(draftAttachments, theme: surface.theme)
+        surface.needsLayout = true
+        updateControls()
+    }
+
+    private func previewAttachment(_ id: String) {
+        guard let attachment = draftAttachments.first(where: { $0.id == id }), view.window != nil else { return }
+        let content = NSViewController()
+        let background = ThemedBackground(color: { $0.floating })
+        background.theme = surface.theme
+        background.frame = NSRect(x: 0, y: 0, width: 480, height: 340)
+        content.view = background
+        let title = makeLabel(attachment.name, font: AppFont.small)
+        title.textColor = surface.theme.fg
+        title.frame = NSRect(x: 16, y: 12, width: 448, height: 22)
+        title.lineBreakMode = .byTruncatingMiddle
+        background.addSubview(title)
+        if let image = attachment.thumbnail {
+            let preview = NSImageView(frame: NSRect(x: 16, y: 44, width: 448, height: 280))
+            preview.image = image
+            preview.imageScaling = .scaleProportionallyUpOrDown
+            preview.setAccessibilityLabel(attachment.name)
+            background.addSubview(preview)
+            Task { [weak preview] in
+                if let image = await AgentAttachmentImporter.previewImage(data: attachment.data) { preview?.image = image }
+            }
+        } else {
+            let scroll = NSScrollView(frame: NSRect(x: 16, y: 44, width: 448, height: 280))
+            scroll.drawsBackground = false
+            scroll.hasVerticalScroller = true
+            let text = NSTextView(frame: scroll.bounds)
+            text.isEditable = false
+            text.drawsBackground = false
+            text.textColor = surface.theme.fg
+            text.font = AppFont.mono(12)
+            if let source = String(data: attachment.data, encoding: .utf8) {
+                text.string = String(source.prefix(32_000)) + (source.count > 32_000 ? "\n[Preview shortened]" : "")
+            } else {
+                text.string = "\(attachment.name)\n\(attachment.mimeType)\n\(ByteCountFormatter.string(fromByteCount: Int64(attachment.data.count), countStyle: .file))"
+            }
+            text.isVerticallyResizable = true
+            text.autoresizingMask = [.width]
+            text.textContainer?.widthTracksTextView = true
+            scroll.documentView = text
+            background.addSubview(scroll)
+        }
+        attachmentPreview?.close()
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.contentViewController = content
+        attachmentPreview = popover
+        popover.show(relativeTo: surface.attachmentStrip.bounds, of: surface.attachmentStrip, preferredEdge: .minY)
+    }
+
+    private func showComposerError(_ message: String) {
+        errorMessage = message
+        updateControls()
+    }
+
+    private func performComposerAction(_ action: String) {
+        let control: NSControl?
+        switch action {
+        case "model": control = surface.model
+        case "effort": control = surface.effort
+        case "access": control = surface.access
+        case "attach": chooseAttachments(); return
+        case "stop": stop(); return
+        case "clear":
+            surface.composer.string = ""
+            draftAttachments = []
+            updateAttachments()
+            surface.refreshComposer()
+            return
+        default: return
+        }
+        guard let control, control.isEnabled else {
+            showComposerError("This setting is unavailable while the agent is working or reconnecting.")
+            return
+        }
+        control.performClick(nil)
     }
 
     func stop() {
@@ -305,7 +517,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
 
     private func updateControls() {
         surface.send.isEnabled = !disposed && created && commandTask == nil && canSend &&
-            !surface.composer.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            preparingAttachments == 0 && (!surface.composer.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !draftAttachments.isEmpty)
         surface.stop.isEnabled = !disposed && !needsAuthoritativeSnapshot && stopTask == nil && !stopRequested &&
             (submitting || snapshot?.status == .working || snapshot?.status == .waiting)
         let busy = submitting || snapshot?.status == .working || snapshot?.status == .waiting
@@ -329,6 +541,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     }
 
     private var statusText: String {
+        if preparingAttachments > 0 { return "Preparing attachments…" }
         if needsAuthoritativeSnapshot { return "Reconnecting… Your transcript and draft are kept here." }
         if submitting { return "" }
         switch snapshot?.status {
@@ -340,7 +553,12 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         }
     }
 
-    func textDidChange(_ notification: Notification) { updateControls() }
+    func textDidChange(_ notification: Notification) {
+        updateControls()
+        composerCoordinator.changed()
+    }
+
+    func textViewDidChangeSelection(_ notification: Notification) { composerCoordinator.changed() }
 
     private var supportedEfforts: [AgentReasoningEffort] {
         AgentReasoningEffort.supported(provider: selection.provider, model: selection.model)
@@ -361,6 +579,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
               canChangeProvider || provider == snapshot?.provider else { return }
         let trimmed = model?.trimmingCharacters(in: .whitespacesAndNewlines)
         selection = AgentModelSelection(provider: provider, model: trimmed?.isEmpty == false ? trimmed : nil)
+        composerCoordinator.invalidate()
         if let effort = reasoningEffort, !supportedEfforts.contains(effort) { reasoningEffort = nil }
         selectionEdited = true
         updateControls()
@@ -465,6 +684,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     }
 
     func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        if composerCoordinator.handle(commandSelector) { return true }
         guard commandSelector == #selector(NSResponder.insertNewline(_:)) else { return false }
         guard !textView.hasMarkedText() else { return false }
         if NSEvent.modifierFlags.contains(.shift) { return false }

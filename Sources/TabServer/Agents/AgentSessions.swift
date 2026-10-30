@@ -4,10 +4,20 @@ import TabProtocol
 /// Injectable boundary: tests never need a provider executable.
 protocol AgentSessionRuntime: Sendable {
     func send(text: String, model: String?, reasoningEffort: AgentReasoningEffort?) async throws
+    func send(text: String, model: String?, reasoningEffort: AgentReasoningEffort?,
+              attachments: [StagedAgentAttachment]) async throws
     func approve(request: String, allow: Bool) async throws
     func setAccess(_ mode: AgentAccessMode) async throws
     func interrupt() async throws
     func stop()
+}
+
+extension AgentSessionRuntime {
+    func send(text: String, model: String?, reasoningEffort: AgentReasoningEffort?,
+              attachments: [StagedAgentAttachment]) async throws {
+        guard attachments.isEmpty else { throw AgentRuntimeError("This agent runtime does not support attachments.") }
+        try await send(text: text, model: model, reasoningEffort: reasoningEffort)
+    }
 }
 
 extension AgentRuntime: AgentSessionRuntime {}
@@ -146,7 +156,7 @@ final class AgentSessions: @unchecked Sendable {
         }
         let id: SessionId
         switch request {
-        case .read(let session), .send(let session, _, _, _, _), .approve(let session, _, _),
+        case .read(let session), .send(let session, _, _, _, _, _), .approve(let session, _, _),
              .interrupt(let session), .close(let session), .setAccess(let session, _): id = session
         case .create: throw ServiceError(.badRequest, "Unexpected create")
         }
@@ -185,7 +195,8 @@ final class AgentSessions: @unchecked Sendable {
             continuation.resume(returning: entry.snapshot)
             return
         }
-        if case .send(_, let text, let model, let effort, let requestedProvider) = request {
+        var stagedAttachments: [StagedAgentAttachment] = []
+        if case .send(_, let text, let model, let effort, let requestedProvider, let attachments) = request {
             guard !entry.submitting, entry.snapshot.status != .working, entry.snapshot.status != .waiting else {
                 throw ServiceError(.badRequest, "The agent is already handling a message")
             }
@@ -207,13 +218,21 @@ final class AgentSessions: @unchecked Sendable {
                 guard !entry.hasSuccessfulTurn || entry.snapshot.providerSession != nil else {
                     throw ServiceError(.badRequest, "The provider has not supplied a session ID to resume this conversation")
                 }
-                if entry.runtime != nil { retireRuntime(entry) }
             }
             if entry.runtime == nil, entry.hasSuccessfulTurn, entry.snapshot.providerSession == nil {
                 throw ServiceError(.badRequest, "The provider has not supplied a session ID to resume this conversation")
             }
+            do {
+                stagedAttachments = try AgentAttachments.stage(attachments ?? [], root: root
+                    .appendingPathComponent("attachments", isDirectory: true)
+                    .appendingPathComponent(id.description, isDirectory: true))
+            } catch {
+                throw ServiceError(.badRequest, error.localizedDescription)
+            }
+            if restart, entry.runtime != nil { retireRuntime(entry) }
             entry.snapshot.provider = provider
-            let user = AgentChatItem(kind: .user, text: text)
+            let user = AgentChatItem(kind: .user, text: text,
+                                     attachments: attachments?.map(\.descriptor))
             entry.snapshot.items.append(user)
             entry.snapshot.turns = (entry.snapshot.turns ?? []) + [AgentChatTurn(userItemID: user.id, startedAt: Date())]
             entry.snapshot.model = model
@@ -255,6 +274,7 @@ final class AgentSessions: @unchecked Sendable {
             entry.interrupting = UUID()
         }
         let pending = PendingReply(continuation)
+        let turnAttachments = stagedAttachments
         if case .send = request { entry.pendingSubmission = pending }
         queue.asyncAfter(deadline: .now() + submissionTimeout) { [self] in
             guard !pending.finished else { return }
@@ -272,10 +292,10 @@ final class AgentSessions: @unchecked Sendable {
             let failure: Error?
             do {
                 switch request {
-                case .send(_, let text, _, _, _):
+                case .send(_, let text, _, _, _, _):
                     try await accessTask?.value
                     try Task.checkCancellation()
-                    try await runtime.send(text: text, model: model, reasoningEffort: effort)
+                    try await runtime.send(text: text, model: model, reasoningEffort: effort, attachments: turnAttachments)
                 case .setAccess: try await accessTask?.value
                 case .approve(_, let request, let allow): try await runtime.approve(request: request, allow: allow)
                 case .interrupt: try await runtime.interrupt()
@@ -584,6 +604,8 @@ final class AgentSessions: @unchecked Sendable {
         guard budget > 0 else { return nil }
         var item = source
         var remaining = budget
+        remaining -= (item.attachments ?? []).reduce(0) { $0 + $1.transcriptByteCount }
+        guard remaining >= 0 else { return nil }
         if let tool = item.tool {
             item.tool = boundedTool(tool, budget: min(32 * 1024, max(0, budget - 1024)))
             if item.tool == nil {

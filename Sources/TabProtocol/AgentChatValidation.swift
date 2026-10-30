@@ -3,8 +3,13 @@ import Foundation
 extension AgentChatRequest {
     public func validate() throws(ErrorCode) {
         switch self {
-        case .send(_, let text, let model, let effort, let provider):
-            try Validation.message(text, limit: 64 * 1024)
+        case .send(_, let text, let model, let effort, let provider, let attachments):
+            try AgentChatAttachment.validate(attachments ?? [])
+            if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !(attachments ?? []).isEmpty {
+                guard text.utf8.count <= 64 * 1024 else { throw .badRequest }
+            } else {
+                try Validation.message(text, limit: 64 * 1024)
+            }
             if let model { try Validation.message(model, limit: 256) }
             if let effort, let provider,
                !AgentReasoningEffort.supported(provider: provider, model: model).contains(effort) { throw .badRequest }
@@ -32,6 +37,12 @@ extension AgentChatSnapshot {
                 throw .badRequest
             }
         }
+        for item in items {
+            if let attachments = item.attachments {
+                guard attachments.count <= AgentChatAttachment.maxCount else { throw .badRequest }
+                for attachment in attachments { try attachment.validate() }
+            }
+        }
         // Include JSON escaping and leave room for the reply envelope.
         guard let encoded = try? WireJSON.encode(self), encoded.count < Limits.maxFrame - 1024 else {
             throw .badRequest
@@ -43,6 +54,7 @@ extension AgentChatItem {
     /// Counts duplicated compatibility text and structured metadata, not just visible prose.
     public var transcriptByteCount: Int {
         text.utf8.count + (detail?.utf8.count ?? 0) + (tool?.transcriptByteCount ?? 0)
+            + (attachments ?? []).reduce(0) { $0 + $1.transcriptByteCount }
     }
 }
 

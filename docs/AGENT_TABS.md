@@ -66,6 +66,29 @@ automatically answered by any access mode.
 
 ## Native chat behavior
 
+### Composer context and attachments
+
+- Type **@** to search project files and other open agent conversations in the
+  project. Up/Down selects a result; Return or Tab inserts it; Escape dismisses
+  suggestions. File mentions retain their project-relative paths. Thread mentions
+  include a bounded text excerpt as an attachment, so the provider receives context.
+- Type **/** for `/model`, `/effort`, `/access`, `/attach`, `/stop` and `/clear`.
+  These perform native actions; `/clear` clears the draft and its attachments.
+  Provider-specific commands without a native implementation are not advertised.
+- Installed **/skill:name** entries come from the project's server: Claude's
+  `.claude/skills` and project `.claude/commands`, or Codex's `.agents/skills`
+  and `~/.codex/skills`. Project definitions take precedence over global ones.
+  Selecting a skill includes its instructions and original resource directory.
+- Use the **paperclip**, drop files onto the input box, or paste copied files and
+  images. Attachment tiles show filenames, sizes and image thumbnails; each has
+  a remove action. Attachment-only messages are supported. Failed sends retain
+  draft attachments, and successful sends leave attachment names in the transcript.
+- Attach up to **10 files totaling 8 MiB**. Bytes travel to the project server,
+  including remote hosts, and are staged privately for provider access. Claude
+  receives native image/PDF blocks; Codex receives native image inputs and file
+  paths for other formats. Unsupported image formats are converted when possible.
+  Attachment data is not embedded in retained transcript snapshots.
+
 This first version supports text conversations, streamed tool activity,
 one-time tool approval or denial, interruption and provider conversation resume.
 Responses update incrementally in stable native text views. Sending immediately
@@ -144,14 +167,14 @@ functionality. Component paths below are relative to `apps/web/src/components/`.
 | --- | --- | --- |
 | Streaming and resume | Stable partial-response text views; server-owned conversations and provider resume IDs; startup interruption; persisted turn timing | T3's thread lineage, fork/revert and checkpoint workflows are not implemented (`chat/ThreadLineageWorkflowRow.tsx`, `chat/TimelineAssistantRows.tsx`). |
 | Work logs | Compact tool groups; expandable input/output; status and command exit code; ANSI colors; colored changes; file/web links; completed-work folding | Subagent thread navigation, richer checkpoint summaries and provider-specific interactive tools need additional protocol data (`chat/TimelineWorkEntryRow.tsx`, `chat/TimelineWorkGroupRows.tsx`). |
-| Approval and composer | Native model/effort/access menus, inline permission actions, Stop, growing text input, plain-text paste, scroll following and scroll-to-end | Structured questionnaires, attachment/context/skill pickers and queued/steered messages are not implemented. |
+| Approval and composer | Native model/effort/access menus, inline permission actions, Stop, growing text input, @ file/thread suggestions, / native actions and discovered skills, attachment picker/drop/paste, scroll following and scroll-to-end | Structured questionnaires, provider-specific goal/feedback/usage commands, machine/PR mentions and queued/steered messages are not implemented. |
 | Markdown prose | Headings, paragraphs, inline emphasis/code, nested list markers, tasks, quotes, links | Full CommonMark/GFM block nesting, reference links, footnotes, heading-fragment navigation, alerts and HTML details remain (`ChatMarkdown.tsx`, `chat/MarkdownDetails.tsx`, `chat/markdownFragments.ts`). |
 | Code | Tab's native syntax tokenizer, language/filename heading, exact-source copy, wrap toggle and horizontal scrolling | T3's larger grammar set, file icons, persistent wrap preference and guarded Run command action (`chat/MarkdownCodeBlock.tsx`). Nested code/table widgets inside list items or quotes are not equivalent yet. |
 | Tables | Native columns/alignment, horizontal overflow, Markdown and CSV copy | Cross-cell selection and semantic table navigation (`chat/MarkdownTable.tsx`). |
 | Links | HTTP/HTTPS/mailto; file paths and line navigation into the project editor | File chips, existence-aware previews/context menus, column positions, favicons, citations and thread/PR/context link presentations (`chat/MarkdownFileLink.tsx`, `chat/MarkdownExternalLink.tsx`, `chat/AssistantCitationChip.tsx`, `chat/MarkdownThreadLink.tsx`). |
 | Copy and selection | Selectable prose/code, response/user copy, exact code copy, table export | Cross-section selection, Markdown-preserving selection copy and selection-to-citation toolbar (`chat/AssistantSelectionToolbar.tsx`, `apps/web/src/markdown-clipboard.ts`). |
 | Math and diagrams | Source remains readable as text/code | Typeset math and Mermaid diagram/source switching (`chat/MarkdownMath.tsx`, `chat/MathTypeset.tsx`, `chat/MarkdownMermaidCodeBlock.tsx`, `chat/MermaidDiagram.tsx`). |
-| Media and embedded apps | Text-only conversation transport | Images/audio/video, asset loading/retry, galleries/zoom, published HTML, MCP apps and artifact-template cards (`chat/ChatMarkdownMedia.tsx`, `chat/ExpandedImageDialog.tsx`, `chat/HtmlRenderFrame.tsx`, `chat/McpAppFrame.tsx`). |
+| Media and embedded apps | File/image attachment transport, draft thumbnails, Claude native image/PDF input and Codex native image input | Assistant image/audio/video rendering, asset loading/retry, galleries/zoom, published HTML, MCP apps and artifact-template cards (`chat/ChatMarkdownMedia.tsx`, `chat/ExpandedImageDialog.tsx`, `chat/HtmlRenderFrame.tsx`, `chat/McpAppFrame.tsx`). |
 | Rendering optimization | Viewport-virtualized rows/work logs, bounded native-view caches, row-identity scroll anchors, cached section content/measurements and selection retention | Last-block-only Markdown parsing and reduced-motion-aware streamed-block fades (`ChatMarkdown.tsx`, `apps/web/src/index.css`). |
 
 ## Troubleshooting

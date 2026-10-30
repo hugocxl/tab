@@ -10,6 +10,9 @@ final class AgentPaneView: ThemedView {
     let composer = AgentComposerTextView()
     let send = AgentRoundButton(kind: .send)
     let stop = AgentRoundButton(kind: .stop)
+    let attach = PillButton("", style: .plain)
+    let attachmentStrip = AgentAttachmentStrip(frame: .zero)
+    let suggestions = AgentComposerSuggestionsView(frame: .zero)
     let retry = PillButton("Retry", style: .plain)
     let feedback = NSTextField(wrappingLabelWithString: "")
     let transcriptScroll = NSScrollView()
@@ -82,7 +85,11 @@ final class AgentPaneView: ThemedView {
         composerScroll.scrollerStyle = .overlay
         composerCard.cornerRadius = 18
         composerCard.layer?.borderWidth = Metrics.border
-        for child in [composerScroll, model, effort, access, send, stop] {
+        attach.image = NSImage(systemSymbolName: "paperclip", accessibilityDescription: "Attach files")
+        attach.imagePosition = .imageOnly
+        attach.setAccessibilityLabel("Attach files")
+        attach.toolTip = "Attach files or drop them into the message box"
+        for child in [composerScroll, attachmentStrip, attach, model, effort, access, send, stop] {
             composerCard.addSubview(child)
             // This surface uses measured frames: controls must not bring their own size constraints.
             child.translatesAutoresizingMaskIntoConstraints = true
@@ -102,6 +109,9 @@ final class AgentPaneView: ThemedView {
         feedback.maximumNumberOfLines = 2
         feedback.lineBreakMode = .byTruncatingTail
         for child in [transcriptScroll, activity, composerCard, feedback, retry, endButton] { addSubview(child) }
+        addSubview(suggestions)
+        suggestions.isHidden = true
+        registerForDraggedTypes([.fileURL, .png, .tiff])
         endButton.onPress = { [weak self] in self?.scrollToEnd() }
         endButton.isHidden = true
         retry.translatesAutoresizingMaskIntoConstraints = true
@@ -140,17 +150,21 @@ final class AgentPaneView: ThemedView {
         let editorHeight = min(164, max(56, ceil(usedHeight) + 12))
         let twoRows = width < 560
         let controlsHeight: CGFloat = twoRows ? 72 : 40
-        let cardHeight = editorHeight + 14 + controlsHeight
+        let attachmentHeight: CGFloat = attachmentStrip.hasAttachments ? 76 : 0
+        let cardHeight = attachmentHeight + editorHeight + 14 + controlsHeight
         composerCard.frame = NSRect(x: left, y: max(0, footerTop - 8 - cardHeight), width: width, height: cardHeight)
-        composerScroll.frame = NSRect(x: 14, y: 10, width: editorWidth, height: editorHeight)
+        attachmentStrip.frame = NSRect(x: 14, y: 8, width: editorWidth, height: attachmentHeight)
+        attachmentStrip.isHidden = attachmentHeight == 0
+        composerScroll.frame = NSRect(x: 14, y: 10 + attachmentHeight, width: editorWidth, height: editorHeight)
         composer.frame.size.height = max(editorHeight, ceil(usedHeight) + 12)
-        let controlsY = editorHeight + 16
+        let controlsY = attachmentHeight + editorHeight + 16
+        attach.frame = NSRect(x: 12, y: controlsY + 1, width: 28, height: 28)
         let actionFrame = NSRect(x: max(0, width - 44), y: controlsY, width: 30, height: 30)
         send.frame = actionFrame
         stop.frame = actionFrame
 
         if twoRows {
-            model.frame = NSRect(x: 14, y: controlsY + 2, width: max(0, width - 72), height: 26)
+            model.frame = NSRect(x: 46, y: controlsY + 2, width: max(0, width - 104), height: 26)
             let available = max(0, width - 36)
             let effortWidth = min(140, available * 0.5)
             effort.frame = NSRect(x: 14, y: controlsY + 34, width: effortWidth, height: 26)
@@ -159,8 +173,8 @@ final class AgentPaneView: ThemedView {
         } else {
             let effortWidth = min(120, max(80, effort.intrinsicContentSize.width))
             let accessWidth = min(180, max(104, access.intrinsicContentSize.width))
-            let modelWidth = min(240, max(0, width - 82 - effortWidth - accessWidth))
-            model.frame = NSRect(x: 14, y: controlsY + 2, width: modelWidth, height: 26)
+            let modelWidth = min(240, max(0, width - 114 - effortWidth - accessWidth))
+            model.frame = NSRect(x: 46, y: controlsY + 2, width: modelWidth, height: 26)
             effort.frame = NSRect(x: model.frame.maxX + 8, y: controlsY + 2, width: effortWidth, height: 26)
             access.frame = NSRect(x: effort.frame.maxX + 8, y: controlsY + 2, width: accessWidth, height: 26)
         }
@@ -177,6 +191,9 @@ final class AgentPaneView: ThemedView {
         else { restoreScrollAnchor(anchor) }
         endButton.frame = NSRect(x: floor((bounds.width - 126) / 2), y: max(0, transcriptBottom - 36), width: 126, height: 28)
         updateEndButton()
+        let suggestionHeight = min(suggestions.preferredHeight, max(0, composerCard.frame.minY - 12))
+        suggestions.frame = NSRect(x: left, y: max(0, composerCard.frame.minY - suggestionHeight - 6),
+                                   width: width, height: suggestionHeight)
         lastViewportWidth = bounds.width
         super.layout()
     }
@@ -188,6 +205,33 @@ final class AgentPaneView: ThemedView {
         model.needsDisplay = true
         effort.needsDisplay = true
         access.needsDisplay = true
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        let point = convert(sender.draggingLocation, from: nil)
+        guard composerCard.frame.contains(point), sender.draggingSourceOperationMask.contains(.copy),
+              sender.draggingPasteboard.availableType(from: [.fileURL, .png, .tiff]) != nil else { return [] }
+        composerCard.layer?.borderColor = theme.accent.cgColor
+        return .copy
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        let operation = draggingEntered(sender)
+        if operation.isEmpty { draggingExited(sender) }
+        return operation
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        composerCard.layer?.borderColor = theme.fg.withAlphaComponent(0.10).cgColor
+    }
+
+    override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool { !draggingEntered(sender).isEmpty }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        defer { draggingExited(sender) }
+        guard !draggingEntered(sender).isEmpty else { return false }
+        return AgentAttachmentPasteboard.receive(sender.draggingPasteboard, onFiles: composer.onAttachFiles,
+                                                 onImage: composer.onAttachImage)
     }
 
     /// The controller owns enabled states and actions; the surface presents honest activity.
@@ -290,6 +334,8 @@ final class AgentPaneView: ThemedView {
     }
 
     override func themeDidChange() {
+        attachmentStrip.updateTheme(theme)
+        suggestions.update(suggestions.items, theme: theme)
         needsDisplay = true
         composerCard.theme = theme
         composerCard.layer?.borderColor = theme.fg.withAlphaComponent(0.10).cgColor

@@ -27,7 +27,7 @@ final class AgentPaneTests: XCTestCase {
             switch request {
             case .create:
                 if failCreate { throw NSError(domain: "Offline", code: 1) }
-            case .send(_, let text, let model, let effort, let provider):
+            case .send(_, let text, let model, let effort, let provider, _):
                 if gateNextSend {
                     gateNextSend = false
                     await withCheckedContinuation { sendGate = $0 }
@@ -103,6 +103,45 @@ final class AgentPaneTests: XCTestCase {
         XCTAssertEqual(backend.snapshot.items.count, 1)
         XCTAssertFalse(pane.surface.send.isEnabled)
         XCTAssertTrue(pane.surface.stop.isEnabled)
+    }
+
+    func testAttachmentOnlySendTransfersBytesAndFailedSendKeepsDraft() async throws {
+        let backend = Backend()
+        let pane = backend.controller()
+        defer { pane.dispose() }
+        pane.refresh()
+        try await wait { pane.snapshot != nil }
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("agent-attachment-\(UUID()).txt")
+        let bytes = Data("Attached context from the client machine".utf8)
+        try bytes.write(to: file)
+        defer { try? FileManager.default.removeItem(at: file) }
+        pane.attachFiles([file])
+        try await wait { pane.surface.send.isEnabled }
+        XCTAssertEqual(pane.draftAttachments.count, 1)
+        backend.failSend = true
+        pane.send()
+        try await wait { pane.errorMessage != nil }
+        XCTAssertEqual(pane.draftAttachments.first?.data, bytes)
+        guard case .send(_, let text, _, _, _, let attachments) = backend.requests.last else { return XCTFail("Missing send") }
+        XCTAssertEqual(text, "")
+        XCTAssertEqual(attachments?.first?.data, bytes)
+        XCTAssertEqual(attachments?.first?.name, file.lastPathComponent)
+        backend.failSend = false
+        pane.send()
+        try await wait { pane.draftAttachments.isEmpty }
+        XCTAssertEqual(backend.requests.filter { if case .send = $0 { return true }; return false }.count, 2)
+    }
+
+    func testSlashActionDoesNotSendAProviderMessage() async throws {
+        let backend = Backend()
+        let pane = backend.controller()
+        defer { pane.dispose() }
+        pane.refresh()
+        try await wait { pane.snapshot != nil }
+        pane.surface.composer.string = "/clear"
+        pane.send()
+        XCTAssertTrue(pane.surface.composer.string.isEmpty)
+        XCTAssertFalse(backend.requests.contains { if case .send = $0 { return true }; return false })
     }
 
     func testRefreshCoalescesAndFiltersOtherSessionsAndOldRevisions() async throws {

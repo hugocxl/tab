@@ -69,15 +69,18 @@ public struct AgentChatItem: Codable, Hashable, Sendable, Identifiable {
     public var detail: String?
     public var isComplete: Bool
     public var tool: AgentToolActivity?
+    public var attachments: [AgentChatAttachmentDescriptor]?
 
     public init(id: String = UUID().uuidString, kind: Kind, text: String,
-                detail: String? = nil, isComplete: Bool = true, tool: AgentToolActivity? = nil) {
+                detail: String? = nil, isComplete: Bool = true, tool: AgentToolActivity? = nil,
+                attachments: [AgentChatAttachmentDescriptor]? = nil) {
         self.id = id
         self.kind = kind
         self.text = text
         self.detail = detail
         self.isComplete = isComplete
         self.tool = tool
+        self.attachments = attachments
     }
 }
 
@@ -142,7 +145,7 @@ public enum AgentChatRequest: Codable, Hashable, Sendable {
     case read(session: SessionId)
     /// Nil model/effort explicitly restore provider defaults; nil provider keeps the current provider.
     case send(session: SessionId, text: String, model: String?, reasoningEffort: AgentReasoningEffort? = nil,
-              provider: AgentChatProvider? = nil)
+              provider: AgentChatProvider? = nil, attachments: [AgentChatAttachment]? = nil)
     case approve(session: SessionId, request: String, allow: Bool)
     /// Updates host approvals immediately; native provider sandbox policy changes on the next turn.
     case setAccess(session: SessionId, mode: AgentAccessMode)
