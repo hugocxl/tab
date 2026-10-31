@@ -353,8 +353,8 @@ final class HostHeaderRow: ThemedView {
         super.layout()
         iconView.frame = CGRect(x: 10, y: (bounds.height - 18) / 2, width: 20, height: 18)
         let height = titleLabel.intrinsicContentSize.height
-        titleLabel.frame = CGRect(x: 40, y: ((bounds.height - height) / 2).rounded(),
-                                 width: max(bounds.width - 50, 0), height: height)
+        titleLabel.frame = CGRect(x: 31, y: ((bounds.height - height) / 2).rounded(),
+                                 width: max(bounds.width - 41, 0), height: height)
     }
 }
 

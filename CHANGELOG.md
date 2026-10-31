@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.11.1 - 2026-10-31
+
+### Fixed
+
+- Host headings in the sidebar sit closer to their icons.
+
 ## 0.11.0 - 2026-10-31
 
 ### Changed
