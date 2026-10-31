@@ -3,6 +3,19 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.13.0 - 2026-10-31
+
+### Changed
+
+- Agent logos in the sidebar are smaller and share the same proportions, so
+  no logo looks oversized next to the others.
+
+### Fixed
+
+- Agent logos on dark or white tiles keep a visible edge on dark and light
+  themes.
+- The Grok logo shows on dark themes instead of a blank white tile.
+
 ## 0.12.0 - 2026-10-31
 
 ### Added

@@ -183,37 +183,78 @@ public enum BundledImage {
 }
 
 /// Agent logos, colored, with dark-on-light variants where the logo needs
-/// one.
+/// one. Every logo comes back on the same square canvas with the same optical
+/// weight: tile logos fill it with rounded corners and a hairline edge that
+/// keeps a tile matching the background in shape, bare glyphs sit inset.
 public enum AgentLogo {
+    private enum Shape { case tile, glyph }
+
+    /// How much of the canvas a bare glyph covers, so it reads as large as a
+    /// filled tile.
+    private static let glyphScale: CGFloat = 0.88
+    /// The corner radius of tile logos, relative to the canvas side.
+    private static let tileRadius: CGFloat = 0.22
+    /// The width of a tile's inner edge, relative to the canvas side: about
+    /// 1pt at sidebar size.
+    private static let tileEdge: CGFloat = 1.0 / 16
+
     /// The logo for `provider`, or `nil` for an unknown provider.
     @MainActor
     public static func image(for provider: AgentProvider, lightBackground: Bool) -> NSImage? {
-        guard let (name, hasLightVariant) = resource(provider) else { return nil }
+        guard let (name, hasLightVariant, shape) = resource(provider) else { return nil }
         if name == "provider-xal" {
-            let image = BundledImage.load(name, extension: "svg")
-            image?.isTemplate = true
-            return image
+            guard let image = BundledImage.load(name, extension: "svg") else { return nil }
+            let normalized = normalize(image, shape: shape, lightBackground: lightBackground)
+            normalized.isTemplate = true
+            return normalized
         }
-        if lightBackground && hasLightVariant, let light = BundledImage.load("\(name)-light", extension: "png") {
-            return light
-        }
-        return BundledImage.load(name, extension: "png")
+        let source = lightBackground && hasLightVariant
+            ? BundledImage.load("\(name)-light", extension: "png") ?? BundledImage.load(name, extension: "png")
+            : BundledImage.load(name, extension: "png")
+        return source.map { normalize($0, shape: shape, lightBackground: lightBackground) }
     }
 
-    private static func resource(_ provider: AgentProvider) -> (String, Bool)? {
+    /// Redraws `image` on a square canvas: aspect-fit and inset for glyphs,
+    /// clipped to a rounded square with a contrasting inner edge for tiles.
+    private static func normalize(_ image: NSImage, shape: Shape, lightBackground: Bool) -> NSImage {
+        let side: CGFloat = 64
+        let canvas = NSRect(x: 0, y: 0, width: side, height: side)
+        return NSImage(size: canvas.size, flipped: false) { _ in
+            switch shape {
+            case .tile:
+                let radius = side * tileRadius
+                let path = NSBezierPath(roundedRect: canvas, xRadius: radius, yRadius: radius)
+                path.addClip()
+                image.draw(in: canvas)
+                // Twice the width, since the clip hides the outer half.
+                path.lineWidth = side * tileEdge * 2
+                (lightBackground ? NSColor(white: 0, alpha: 0.12) : NSColor(white: 1, alpha: 0.16)).setStroke()
+                path.stroke()
+            case .glyph:
+                let box = side * glyphScale
+                let scale = min(box / max(image.size.width, 1), box / max(image.size.height, 1))
+                let size = NSSize(width: image.size.width * scale, height: image.size.height * scale)
+                image.draw(in: NSRect(x: (side - size.width) / 2, y: (side - size.height) / 2,
+                                      width: size.width, height: size.height))
+            }
+            return true
+        }
+    }
+
+    private static func resource(_ provider: AgentProvider) -> (String, Bool, Shape)? {
         switch provider {
-        case .claude: return ("agent-claude", false)
-        case .codex: return ("agent-codex", true)
-        case .openCode: return ("agent-opencode", false)
-        case .cursor: return ("agent-cursor", false)
-        case .copilot: return ("agent-copilot", false)
-        case .droid: return ("agent-droid", false)
-        case .pi: return ("agent-pi", false)
-        case .grok: return ("agent-grok", true)
-        case .kiro: return ("agent-kiro", false)
-        case .xal: return ("provider-xal", false)
-        case .antigravity: return ("agent-antigravity", false)
-        case .ohMyPi: return ("agent-omp", false)
+        case .claude: return ("agent-claude", false, .glyph)
+        case .codex: return ("agent-codex", true, .glyph)
+        case .openCode: return ("agent-opencode", false, .tile)
+        case .cursor: return ("agent-cursor", false, .tile)
+        case .copilot: return ("agent-copilot", false, .tile)
+        case .droid: return ("agent-droid", false, .tile)
+        case .pi: return ("agent-pi", false, .tile)
+        case .grok: return ("agent-grok", true, .tile)
+        case .kiro: return ("agent-kiro", false, .tile)
+        case .xal: return ("provider-xal", false, .glyph)
+        case .antigravity: return ("agent-antigravity", false, .glyph)
+        case .ohMyPi: return ("agent-omp", false, .tile)
         case .unknown: return nil
         }
     }

@@ -219,7 +219,8 @@ final class SidebarCardView: HoverView {
         let top = Metrics.border + 6
         let left = inset
         let right = bounds.width - inset
-        lead.frame = CGRect(x: left, y: top, width: 18, height: 18)
+        let leadFrame = CGRect(x: left, y: top, width: 18, height: 18)
+        lead.frame = lead is NSImageView ? leadFrame.insetBy(dx: 2, dy: 2) : leadFrame
         var x = left + 18 + 6
         let headlineHeight = headline.intrinsicContentSize.height
         let line1Y = (top + 9 - headlineHeight / 2).rounded()
