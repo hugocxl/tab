@@ -8,6 +8,7 @@ import XCTest
 final class AgentComposerSurfaceTests: XCTestCase {
     private func surface(width: CGFloat = 680) -> AgentPaneView {
         let surface = AgentPaneView(frame: NSRect(x: 0, y: 0, width: width, height: 700))
+        surface.disposeConversation() // This fixture exercises the native fallback.
         surface.model.addItem(withTitle: "A custom model with a very long name")
         surface.effort.addItem(withTitle: "Extra high")
         surface.access.addItem(withTitle: "Full access")
@@ -48,14 +49,14 @@ final class AgentComposerSurfaceTests: XCTestCase {
                                          status: .working, items: [AgentChatItem(id: "tool", kind: .tool, text: "Read source", isComplete: false)])
         surface.setActivity(status: .working, submitting: false)
         surface.render(snapshot)
-        XCTAssertTrue(visibleLabels(surface).contains("Working…"))
+        XCTAssertFalse(visibleLabels(surface).contains("Working…"), "Working belongs in the transcript")
         snapshot.items.append(AgentChatItem(id: "answer", kind: .assistant, text: "Partial answer", isComplete: false))
         surface.render(snapshot)
         surface.layoutSubtreeIfNeeded()
         let body = try XCTUnwrap(descendants(surface.transcriptScroll).compactMap { $0 as? NSTextView }
             .first { $0.string == "Partial answer" })
         XCTAssertFalse(body.visibleRect.isEmpty, "Activity must not obscure streamed assistant text")
-        XCTAssertTrue(visibleLabels(surface).contains("Working…"))
+        XCTAssertFalse(visibleLabels(surface).contains("Working…"), "Working belongs in the transcript")
         snapshot.items[snapshot.items.count - 1].text += " grows"
         surface.render(snapshot)
         XCTAssertEqual(body.string, "Partial answer grows", "The same text view must continue updating")

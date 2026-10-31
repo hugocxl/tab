@@ -574,12 +574,15 @@ public struct GitRepoInfo: Hashable, Codable, Sendable {
     public var gitDir: ServerPath
     public var isWorktree: Bool
     public var currentBranch: String?
+    /// Credential-free origin used only to match existing in-message PR links.
+    public var originURL: String?
 
-    public init(root: ServerPath, gitDir: ServerPath, isWorktree: Bool = false, currentBranch: String? = nil) {
+    public init(root: ServerPath, gitDir: ServerPath, isWorktree: Bool = false, currentBranch: String? = nil, originURL: String? = nil) {
         self.root = root
         self.gitDir = gitDir
         self.isWorktree = isWorktree
         self.currentBranch = currentBranch
+        self.originURL = originURL
     }
 }
 
@@ -807,6 +810,7 @@ public enum GitPullRequestAction: Hashable, Codable, Sendable {
     case info
     /// The current branch's pull request number.
     case number
+    case preview(host: String, repository: String, number: UInt64)
     case diff(number: UInt64, lineLimit: UInt32?)
     case list(filter: GitPullRequestFilter, limit: UInt32, checks: Bool)
     case create(title: String, body: String, baseBranch: String?, draft: Bool)
@@ -821,6 +825,7 @@ public enum GitPullRequestAction: Hashable, Codable, Sendable {
         switch c.type {
         case "info": self = .info
         case "number": self = .number
+        case "preview": self = .preview(host: try c("host"), repository: try c("repository"), number: try c("number"))
         case "diff": self = .diff(number: try c("number"), lineLimit: try c("lineLimit"))
         case "list": self = .list(filter: try c("filter", default: .open), limit: try c("limit"), checks: try c("checks"))
         case "create":
@@ -840,6 +845,9 @@ public enum GitPullRequestAction: Hashable, Codable, Sendable {
         switch self {
         case .info: try TaggedEncoding(encoder, "info")
         case .number: try TaggedEncoding(encoder, "number")
+        case .preview(let host, let repository, let number):
+            var c = try TaggedEncoding(encoder, "preview")
+            try c(host, "host"); try c(repository, "repository"); try c(number, "number")
         case .diff(let number, let lineLimit):
             var c = try TaggedEncoding(encoder, "diff")
             try c(number, "number")
@@ -947,6 +955,7 @@ public enum GitReply: Hashable, Codable, Sendable {
     case commit(String)
     case pullRequest(GitPullRequest?)
     case pullRequestNumber(UInt64?)
+    case pullRequestPreview(GitPullRequestPreview)
     case pullRequests([GitPullRequest])
     case changesPreview(GitChangesPreview)
     case baseSwitch(GitBaseSwitch)
@@ -973,6 +982,7 @@ public enum GitReply: Hashable, Codable, Sendable {
         case "commit": self = .commit(try c("hash"))
         case "pullRequest": self = .pullRequest(try c("pullRequest"))
         case "pullRequestNumber": self = .pullRequestNumber(try c("number"))
+        case "pullRequestPreview": self = .pullRequestPreview(try c("preview"))
         case "pullRequests": self = .pullRequests(try c("pullRequests"))
         case "changesPreview": self = .changesPreview(try c("preview"))
         case "baseSwitch": self = .baseSwitch(try c("result"))
@@ -1027,6 +1037,9 @@ public enum GitReply: Hashable, Codable, Sendable {
         case .pullRequest(let pullRequest):
             var c = try TaggedEncoding(encoder, "pullRequest")
             try c(pullRequest, "pullRequest")
+        case .pullRequestPreview(let preview):
+            var c = try TaggedEncoding(encoder, "pullRequestPreview")
+            try c(preview, "preview")
         case .pullRequestNumber(let number):
             var c = try TaggedEncoding(encoder, "pullRequestNumber")
             try c(number, "number")

@@ -3,6 +3,27 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.14.0 - 2026-10-31
+
+### Changed
+
+- Agent conversations now render rich Markdown, tool activity, code, tables,
+  images, and completed work in a unified conversation view.
+- Agent conversations use macOS system fonts and the app's existing themes,
+  with the same pane background as terminals.
+
+### Added
+
+- Conversation search, assistant quotations, recorded change previews, and
+  richer file and media actions are available directly from agent messages.
+
+### Fixed
+
+- New agent tabs wait for their themed conversation before appearing, avoiding
+  a white flash or a brief glimpse of the old empty state.
+- Tool attachments remain scoped to their messages, and saving tool images
+  no longer blocks other agent conversations.
+
 ## 0.13.0 - 2026-10-31
 
 ### Changed

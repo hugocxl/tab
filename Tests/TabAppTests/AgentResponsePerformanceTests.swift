@@ -63,8 +63,10 @@ final class AgentResponsePerformanceTests: XCTestCase {
         let theme = AppTheme(systemIsDark: true)
         let original = AgentResponseView(frame: .zero)
         original.setContent(source, theme: theme)
-        let unwrappedHeight = original.height(for: 280)
         let code = try XCTUnwrap(original.subviews.compactMap { $0 as? AgentResponseCode }.first)
+        XCTAssertTrue(code.wrapped, "Conversation defaults code blocks to wrapped text")
+        code.setWrapped(false)
+        let unwrappedHeight = original.height(for: 280)
         var userChanges = 0
         original.onHeightChanged = { userChanges += 1 }
         code.wrap.perform()

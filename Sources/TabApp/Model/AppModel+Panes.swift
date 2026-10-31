@@ -14,9 +14,9 @@ extension AppModel {
     }
 
     /// A new terminal in `project`, switching to it.
-    public func newTerminal(in project: ProjectId, command: String? = nil) {
+    public func newTerminal(in project: ProjectId, command: String? = nil, directory: ServerPath? = nil) {
         guard let target = state.project(project) else { return }
-        let directory = newPaneDirectory(in: target)
+        let directory = directory ?? newPaneDirectory(in: target)
         var created: PaneId?
         edit { state in
             let tab = try state.openTerminalTab(project)
@@ -88,6 +88,17 @@ extension AppModel {
         guard let project = state.project(target) else { return nil }
         var opened: PaneId?
         guard edit({ opened = try $0.openAgent(target, provider: provider) }) else { return nil }
+        connectOnDemand(project.serverId)
+        focusActiveContent()
+        return opened
+    }
+
+    /// Opens the existing server-owned conversation targeted by a body citation/link.
+    @discardableResult
+    func openExistingAgent(_ snapshot: AgentChatSnapshot) -> PaneId? {
+        guard let project = state.project(snapshot.project) else { return nil }
+        var opened: PaneId?
+        guard edit({ opened = try $0.openAgent(project.id, session: snapshot.session, provider: snapshot.provider) }) else { return nil }
         connectOnDemand(project.serverId)
         focusActiveContent()
         return opened

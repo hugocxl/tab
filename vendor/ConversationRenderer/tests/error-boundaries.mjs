@@ -1,0 +1,31 @@
+import {createServer} from 'node:http';
+import {readFileSync,existsSync,mkdirSync,writeFileSync} from 'node:fs';
+import {resolve,dirname,extname} from 'node:path';
+import {fileURLToPath,pathToFileURL} from 'node:url';
+const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
+const {checkout}=JSON.parse(readFileSync(resolve(root,'.work/source.json'),'utf8'));
+const {chromium}=await import(pathToFileURL(resolve(checkout,'apps/web/node_modules/playwright/index.mjs')).href);
+const directory=resolve(root,'.work/error-boundaries');
+const mime={'.html':'text/html','.js':'text/javascript','.css':'text/css','.wasm':'application/wasm','.woff2':'font/woff2','.woff':'font/woff','.svg':'image/svg+xml','.json':'application/json'};
+const server=createServer((request,response)=>{const path=resolve(directory,'.'+decodeURIComponent(new URL(request.url,'http://localhost').pathname));if(!path.startsWith(directory+'/')&&path!==directory){response.writeHead(403);response.end();return;}const file=path===directory?resolve(directory,'index.html'):path;if(!existsSync(file)){response.writeHead(404);response.end();return;}response.setHeader('Content-Type',mime[extname(file)]??'application/octet-stream');response.end(readFileSync(file));});
+await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+const browser=await chromium.launch({headless:true});
+const context=await browser.newContext({viewport:{width:800,height:900}});
+const page=await context.newPage();
+const errors=[];page.on('pageerror',error=>errors.push(error.message));page.on('console',message=>{if(message.type()==='error')errors.push(message.text());});
+await page.addInitScript(()=>{window.__bridge=[];window.webkit={messageHandlers:{tabConversation:{postMessage(message){window.__bridge.push(message);if(message.type==='action')queueMicrotask(()=>window.TabConversation?.resolve({requestId:message.requestId,ok:false,error:'No native host in smoke test'}));}}}};});
+try{
+ await page.goto(`http://127.0.0.1:${server.address().port}/`,{waitUntil:'networkidle'});
+ await page.waitForFunction(()=>window.TabConversation);
+ await page.waitForSelector('[data-conversation-retained]');
+ await page.evaluate(()=>window.TabConversation.update({status:'widget'}));
+ await page.waitForSelector('[data-source-widget-fallback]');
+ if(!await page.locator('[data-conversation-retained]').isVisible())throw new Error('Widget fallback replaced the conversation');
+ const widget=await page.evaluate(()=>window.__bridge);
+ if(!widget.some(message=>message.type==='renderDiagnostic'&&message.message==='Intentional widget render failure'))throw new Error('The actual source widget boundary did not report a diagnostic');
+ if(widget.some(message=>message.type==='error'))throw new Error('A source widget fallback incorrectly triggered whole-body replacement');
+ await page.evaluate(()=>window.TabConversation.update({status:'root'}));
+ await page.waitForFunction(()=>window.__bridge.some(message=>message.type==='error'&&message.message==='Intentional whole-body render failure'));
+ const result={widgetFallbackRetained:true,rootFailureReported:true,bridge:await page.evaluate(()=>window.__bridge)};
+ const target=resolve(root,'.work/qa');mkdirSync(target,{recursive:true});writeFileSync(resolve(target,'error-boundaries.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result,null,2));
+}catch(error){console.error(JSON.stringify({error:String(error),errors,body:await page.locator('body').innerText(),bridge:await page.evaluate(()=>window.__bridge)},null,2));throw error;}finally{await browser.close();await new Promise(resolve=>server.close(resolve));}

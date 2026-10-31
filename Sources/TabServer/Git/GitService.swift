@@ -115,7 +115,7 @@ public final class GitService: GitServiceProtocol, @unchecked Sendable {
             return true
         case .pullRequest(let action):
             switch action {
-            case .info, .number, .diff, .list: return true
+            case .info, .number, .diff, .list, .preview: return true
             default: return false
             }
         default:

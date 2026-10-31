@@ -137,6 +137,17 @@ final class AgentAttachmentTests: XCTestCase {
         defer { restored.shutdown() }
         let resumed = try await restored.handle(.read(session: id))
         XCTAssertEqual(resumed.items.first?.attachments, [file.descriptor])
+        let itemID = try XCTUnwrap(resumed.items.first?.id)
+        let fetched = try await restored.attachment(.init(session: id, item: itemID, attachment: file.id))
+        XCTAssertEqual(fetched.attachment, file)
+        do {
+            _ = try await restored.attachment(.init(session: SessionId(), item: itemID, attachment: file.id))
+            XCTFail("Attachment reads must remain scoped to their conversation")
+        } catch {}
+        do {
+            _ = try await restored.attachment(.init(session: id, item: UUID().uuidString, attachment: file.id))
+            XCTFail("Attachment reads must remain scoped to their message")
+        } catch {}
         XCTAssertEqual(try Data(contentsOf: path), file.data)
         _ = try await restored.handle(.close(session: id))
         XCTAssertEqual(try Data(contentsOf: path), file.data, "Closing must not break provider history references")
@@ -159,6 +170,41 @@ final class AgentAttachmentTests: XCTestCase {
         XCTAssertEqual(retry.items.filter { $0.kind == .user }.count, 2)
         XCTAssertNotEqual(runtime.attachments.first?.url, firstPath)
         XCTAssertEqual(try Data(contentsOf: firstPath), file.data)
+    }
+
+    func testRepeatedAttachmentIDsStayScopedToEachMessage() async throws {
+        let root = try root()
+        let runtime = AttachmentSessionRuntime(fail: true)
+        let store = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, _ in runtime })
+        defer { store.shutdown() }
+        let session = SessionId()
+        _ = try await store.handle(.create(session: session, project: ProjectId(), provider: .claude))
+        let first = AgentChatAttachment(id: "same-id", name: "first.txt", mimeType: "text/plain", data: Data("first".utf8))
+        let second = AgentChatAttachment(id: "same-id", name: "second.txt", mimeType: "text/plain", data: Data("second".utf8))
+        _ = try await store.handle(.send(session: session, text: "first", model: nil, attachments: [first]))
+        let snapshot = try await store.handle(.send(session: session, text: "second", model: nil, attachments: [second]))
+        let messages = snapshot.items.filter { $0.kind == .user }
+        XCTAssertEqual(messages.count, 2)
+        let firstRead = try await store.attachment(.init(session: session, item: messages[0].id, attachment: first.id))
+        let secondRead = try await store.attachment(.init(session: session, item: messages[1].id, attachment: second.id))
+        XCTAssertEqual(firstRead.attachment, first)
+        XCTAssertEqual(secondRead.attachment, second)
+    }
+
+    func testAttachmentReadRejectsChangedFilesAndSymbolicLinks() throws {
+        let root = try root()
+        let attachment = AgentChatAttachment(name: "file.txt", mimeType: "text/plain", data: Data("stored".utf8))
+        let staged = try AgentAttachments.stage([attachment], root: root)
+        try AgentAttachments.record(staged, root: root)
+        XCTAssertEqual(try AgentAttachments.retrieve(attachment.descriptor, root: root), attachment)
+        let file = try XCTUnwrap(staged.first?.url)
+        try Data("changed length".utf8).write(to: file)
+        XCTAssertThrowsError(try AgentAttachments.retrieve(attachment.descriptor, root: root))
+        try FileManager.default.removeItem(at: file)
+        let outside = root.appendingPathComponent("outside.txt")
+        try attachment.data.write(to: outside)
+        try FileManager.default.createSymbolicLink(at: file, withDestinationURL: outside)
+        XCTAssertThrowsError(try AgentAttachments.retrieve(attachment.descriptor, root: root))
     }
 
     func testUnsupportedAttachmentFailsBeforeTranscriptOrStatusChanges() async throws {

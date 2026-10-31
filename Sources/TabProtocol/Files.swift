@@ -18,7 +18,9 @@ public enum FilesAction: Hashable, Codable, Sendable {
     case read(ServerPath)
     /// Reads any file, such as an image, as it is on disk.
     case readBytes(ServerPath)
-    case write(path: ServerPath, content: String)
+    /// A bounded chunk for conversation media; `readBytes` keeps its existing limit.
+    case readRange(path: ServerPath, offset: UInt64, length: UInt32, expectedRevision: String?)
+    case write(path: ServerPath, content: String, createParents: Bool = false)
     case writeBytes(path: ServerPath, bytes: Data)
     case stat(ServerPath)
     case mkdir(ServerPath)
@@ -40,7 +42,8 @@ public enum FilesAction: Hashable, Codable, Sendable {
         case "list": self = .list(try c("path"))
         case "read": self = .read(try c("path"))
         case "readBytes": self = .readBytes(try c("path"))
-        case "write": self = .write(path: try c("path"), content: try c("content"))
+        case "readRange": self = .readRange(path: try c("path"), offset: try c("offset"), length: try c("length"), expectedRevision: try c("expectedRevision"))
+        case "write": self = .write(path: try c("path"), content: try c("content"), createParents: try c("createParents", default: false))
         case "writeBytes": self = .writeBytes(path: try c("path"), bytes: try c("bytes"))
         case "stat": self = .stat(try c("path"))
         case "mkdir": self = .mkdir(try c("path"))
@@ -66,10 +69,17 @@ public enum FilesAction: Hashable, Codable, Sendable {
         case .readBytes(let path):
             var c = try TaggedEncoding(encoder, "readBytes")
             try c(path, "path")
-        case .write(let path, let content):
+        case .readRange(let path, let offset, let length, let revision):
+            var c = try TaggedEncoding(encoder, "readRange")
+            try c(path, "path")
+            try c(offset, "offset")
+            try c(length, "length")
+            try c(revision, "expectedRevision")
+        case .write(let path, let content, let createParents):
             var c = try TaggedEncoding(encoder, "write")
             try c(path, "path")
             try c(content, "content")
+            if createParents { try c(true, "createParents") }
         case .writeBytes(let path, let bytes):
             var c = try TaggedEncoding(encoder, "writeBytes")
             try c(path, "path")
@@ -155,6 +165,21 @@ public struct FileBytes: Hashable, Codable, Sendable {
     }
 }
 
+/// Bytes from one observed file revision, suitable for bounded media streaming.
+public struct FileByteRange: Hashable, Codable, Sendable {
+    public static let maximumChunkBytes = 256 * 1024
+    public var path: ServerPath
+    public var offset: UInt64
+    public var totalSize: UInt64
+    public var revision: String
+    public var bytes: Data
+
+    public init(path: ServerPath, offset: UInt64, totalSize: UInt64, revision: String, bytes: Data) {
+        self.path = path; self.offset = offset; self.totalSize = totalSize
+        self.revision = revision; self.bytes = bytes
+    }
+}
+
 public struct ContentSearchQuery: Hashable, Codable, Sendable {
     public var query: String
     public var caseSensitive: Bool
@@ -237,6 +262,7 @@ public enum FilesReply: Hashable, Codable, Sendable {
     case entries([FileEntry])
     case content(FileContent)
     case bytes(FileBytes)
+    case byteRange(FileByteRange)
     case info(FileInfo)
     case path(ServerPath)
     case paths([ServerPath])
@@ -250,6 +276,7 @@ public enum FilesReply: Hashable, Codable, Sendable {
         case "entries": self = .entries(try c("entries"))
         case "content": self = .content(try c("file"))
         case "bytes": self = .bytes(try c("file"))
+        case "byteRange": self = .byteRange(try c("file"))
         case "info": self = .info(try c("info"))
         case "path": self = .path(try c("path"))
         case "paths": self = .paths(try c("paths"))
@@ -270,6 +297,9 @@ public enum FilesReply: Hashable, Codable, Sendable {
             try c(file, "file")
         case .bytes(let file):
             var c = try TaggedEncoding(encoder, "bytes")
+            try c(file, "file")
+        case .byteRange(let file):
+            var c = try TaggedEncoding(encoder, "byteRange")
             try c(file, "file")
         case .info(let info):
             var c = try TaggedEncoding(encoder, "info")

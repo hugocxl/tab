@@ -51,7 +51,7 @@ final class MessageTests: XCTestCase {
         }
         for reply in Samples.gitReplies { roundTrip(Message.reply(RequestId(1), .git(reply))) }
         XCTAssertEqual(try types(Samples.gitActions).count, 40, "add a sample for every GitAction case")
-        XCTAssertEqual(try types(Samples.gitReplies).count, 21, "add a sample for every GitReply case")
+        XCTAssertEqual(try types(Samples.gitReplies).count, 22, "add a sample for every GitReply case")
     }
 
     func testEveryFilesActionAndReplyRoundTrips() throws {
@@ -59,8 +59,8 @@ final class MessageTests: XCTestCase {
             roundTrip(Message.request(RequestId(1), .files(FilesRequest(project: Samples.project, action: action))))
         }
         for reply in Samples.filesReplies { roundTrip(Message.reply(RequestId(1), .files(reply))) }
-        XCTAssertEqual(try types(Samples.filesActions).count, 14, "add a sample for every FilesAction case")
-        XCTAssertEqual(try types(Samples.filesReplies).count, 9, "add a sample for every FilesReply case")
+        XCTAssertEqual(try types(Samples.filesActions).count, 15, "add a sample for every FilesAction case")
+        XCTAssertEqual(try types(Samples.filesReplies).count, 10, "add a sample for every FilesReply case")
     }
 
     func testWireShapeUsesTypeDiscriminator() throws {

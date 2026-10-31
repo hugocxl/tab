@@ -40,6 +40,12 @@ final class AgentSessions: @unchecked Sendable {
         var checkpointing = false
         var hasSuccessfulTurn = false
         var accessTask: Task<Void, Error>?
+        var baselineTask: Task<AgentCheckpointStore.Snapshot?, Never>?
+        var checkpointTask: Task<Void, Never>?
+        var stagingToolImages = false
+        var deferredEvents: [AgentRuntimeEvent] = []
+        var deferredEventBytes = 0
+        var deferredEventOverflow = false
 
         init(_ snapshot: AgentChatSnapshot, directory: String) {
             self.snapshot = snapshot
@@ -67,6 +73,7 @@ final class AgentSessions: @unchecked Sendable {
 
     private let queue = DispatchQueue(label: "tab.agents.sessions", qos: .userInitiated)
     private let writer = DispatchQueue(label: "tab.agents.persistence", qos: .utility)
+    private var retainedCheckpointIDs: [SessionId: Set<String>] = [:] // writer queue only
     private let root: URL
     private let factory: Factory
     private let projectDirectory: @Sendable (ProjectId) throws -> String
@@ -74,6 +81,10 @@ final class AgentSessions: @unchecked Sendable {
     private let interruptTimeout: TimeInterval
     var changed: @Sendable (SessionId, UInt64) -> Void
     var checkDirectory: @Sendable (String) throws -> Void = { _ in }
+    var stageToolImages: @Sendable ([AgentChatAttachment], URL) throws -> Void = { images, directory in
+        let staged = try AgentAttachments.stageToolImages(images, root: directory)
+        try AgentAttachments.record(staged, root: directory)
+    }
     private var entries: [SessionId: Entry] = [:]
     private var stopping = false
 
@@ -104,6 +115,16 @@ final class AgentSessions: @unchecked Sendable {
                 let entry = Entry(saved.snapshot, directory: saved.directory)
                 entry.hasSuccessfulTurn = saved.hasSuccessfulTurn ?? entry.hasSuccessfulTurn
                 bound(entry)
+                let checkpointDirectory = root.appendingPathComponent("checkpoints", isDirectory: true)
+                    .appendingPathComponent(entry.snapshot.session.description, isDirectory: true)
+                let existing = (try? FileManager.default.contentsOfDirectory(at: checkpointDirectory, includingPropertiesForKeys: nil)) ?? []
+                let checkpointIDs = Set(existing.filter { $0.pathExtension == "json" }.map { file in
+                    let name = file.deletingPathExtension().lastPathComponent
+                    return name.hasPrefix("pending-") ? String(name.dropFirst(8)) : name
+                })
+                let sessionID = entry.snapshot.session
+                writer.async { self.retainedCheckpointIDs[sessionID] = checkpointIDs }
+                restoreCheckpoints(entry)
                 if entry.snapshot.status == .working || entry.snapshot.status == .waiting {
                     interrupted(entry, message: "Agent interrupted when the server stopped. Send a message to resume.")
                 } else {
@@ -131,6 +152,56 @@ final class AgentSessions: @unchecked Sendable {
                     continuation.resume(throwing: error)
                 }
             }
+        }
+    }
+
+    func attachment(_ request: AgentAttachmentRequest) async throws -> AgentAttachmentReply {
+        try request.validate()
+        let descriptor = queue.sync {
+            entries[request.session]?.snapshot.items.first { $0.id == request.item }?.attachments?.first { $0.id == request.attachment }
+        }
+        guard let descriptor else { throw ServiceError(.badRequest, "Attachment not found in this conversation message") }
+        let directory = root.appendingPathComponent("attachments", isDirectory: true)
+            .appendingPathComponent(request.session.description, isDirectory: true)
+            .appendingPathComponent(AgentToolImages.directoryName(item: request.item), isDirectory: true)
+        return try await runBlocking {
+            AgentAttachmentReply(attachment: try AgentAttachments.retrieve(descriptor, root: directory))
+        }
+    }
+
+    func checkpoint(_ request: AgentCheckpointRequest) async throws -> AgentCheckpointReply {
+        try request.validate()
+        let known = queue.sync {
+            entries[request.session]?.snapshot.turns?.contains { $0.checkpoint?.id == request.checkpoint } ?? false
+        }
+        guard known else { throw ServiceError(.badRequest, "Checkpoint not found in this conversation") }
+        let file = root.appendingPathComponent("checkpoints", isDirectory: true)
+            .appendingPathComponent(request.session.description, isDirectory: true)
+            .appendingPathComponent(request.checkpoint + ".json")
+        return try await runBlocking {
+            let record = try JSONDecoder().decode(AgentCheckpointRecord.self, from: Data(contentsOf: file))
+            guard request.offset <= record.files.count else { throw ServiceError(.badRequest, "Invalid checkpoint page") }
+            let end = min(record.files.count, request.offset + min(128, record.files.count - request.offset))
+            let files = Array(record.files[request.offset..<end])
+            var diff: GitDiff?
+            if let path = request.path {
+                guard let file = record.files.first(where: { $0.path == path }) else {
+                    throw ServiceError(.badRequest, "File is not part of this checkpoint")
+                }
+                var content = try AgentCheckpointStore().diff(from: record.before, to: record.after, path: path)
+                content.additions = file.additions ?? 0
+                content.deletions = file.deletions ?? 0
+                content.binary = file.additions == nil || file.deletions == nil
+                if content.rows.count > 8000 {
+                    content.rows = Array(content.rows.prefix(8000))
+                    content.truncated = true
+                }
+                diff = content
+            }
+            let reply = AgentCheckpointReply(checkpoint: request.checkpoint, files: files,
+                totalFiles: record.files.count, nextOffset: end < record.files.count ? end : nil, path: request.path, diff: diff)
+            try reply.validate()
+            return reply
         }
     }
 
@@ -222,10 +293,13 @@ final class AgentSessions: @unchecked Sendable {
             if entry.runtime == nil, entry.hasSuccessfulTurn, entry.snapshot.providerSession == nil {
                 throw ServiceError(.badRequest, "The provider has not supplied a session ID to resume this conversation")
             }
+            let userID = UUID().uuidString
+            let attachmentRoot = root.appendingPathComponent("attachments", isDirectory: true)
+                .appendingPathComponent(id.description, isDirectory: true)
+                .appendingPathComponent(userID, isDirectory: true)
             do {
-                stagedAttachments = try AgentAttachments.stage(attachments ?? [], root: root
-                    .appendingPathComponent("attachments", isDirectory: true)
-                    .appendingPathComponent(id.description, isDirectory: true))
+                stagedAttachments = try AgentAttachments.stage(attachments ?? [], root: attachmentRoot)
+                try AgentAttachments.record(stagedAttachments, root: attachmentRoot)
             } catch {
                 throw ServiceError(.badRequest, error.localizedDescription)
             }
@@ -235,10 +309,30 @@ final class AgentSessions: @unchecked Sendable {
                 entry.snapshot.resolvedModel = nil
             }
             entry.snapshot.provider = provider
-            let user = AgentChatItem(kind: .user, text: text,
+            let user = AgentChatItem(id: userID, kind: .user, text: text,
                                      attachments: attachments?.map(\.descriptor))
-            entry.snapshot.items.append(user)
+            entry.snapshot.items.append(observedItem(user, entry: entry))
             entry.snapshot.turns = (entry.snapshot.turns ?? []) + [AgentChatTurn(userItemID: user.id, startedAt: Date())]
+            let priorCheckpoint = entry.checkpointTask
+            let captureDirectory = entry.directory
+            let pendingDirectory = root.appendingPathComponent("checkpoints", isDirectory: true)
+                .appendingPathComponent(id.description, isDirectory: true)
+            entry.baselineTask = Task {
+                await priorCheckpoint?.value
+                return try? await runBlocking {
+                    let store = AgentCheckpointStore()
+                    let before = try store.capture(directory: captureDirectory)
+                    do {
+                        try FileManager.default.createDirectory(at: pendingDirectory, withIntermediateDirectories: true)
+                        try JSONEncoder().encode(AgentCheckpointPending(turnID: user.id, before: before))
+                            .write(to: pendingDirectory.appendingPathComponent("pending-" + user.id + ".json"), options: .atomic)
+                        return before
+                    } catch {
+                        try? store.remove(before)
+                        throw error
+                    }
+                }
+            }
             entry.snapshot.model = model
             entry.snapshot.reasoningEffort = effort
             entry.snapshot.status = .working
@@ -272,6 +366,7 @@ final class AgentSessions: @unchecked Sendable {
         let model = entry.snapshot.model
         let effort = entry.snapshot.reasoningEffort
         let accessTask = entry.accessTask
+        let baselineTask = entry.baselineTask
         if case .approve(_, let request, _) = request { entry.approving.insert(request) }
         if case .interrupt = request {
             guard entry.interrupting == nil else { throw ServiceError(.badRequest, "An interrupt is already pending") }
@@ -298,6 +393,7 @@ final class AgentSessions: @unchecked Sendable {
                 switch request {
                 case .send(_, let text, _, _, _, _):
                     try await accessTask?.value
+                    _ = await baselineTask?.value
                     try Task.checkCancellation()
                     try await runtime.send(text: text, model: model, reasoningEffort: effort, attachments: turnAttachments)
                 case .setAccess: try await accessTask?.value
@@ -361,7 +457,52 @@ final class AgentSessions: @unchecked Sendable {
     private func receive(_ event: AgentRuntimeEvent, session: SessionId, generation: UUID) {
         guard !stopping, let entry = entries[session], entry.generation == generation,
               entry.snapshot.status != .closed else { return }
+        if entry.stagingToolImages {
+            guard !entry.deferredEventOverflow else { return }
+            let bytes = deferredBytes(event)
+            guard entry.deferredEvents.count < 512,
+                  bytes <= Self.maximumDeferredEventBytes - entry.deferredEventBytes else {
+                // Stop the producer instead of retaining an unbounded stream
+                // behind slow disk I/O. The failure follows the in-flight image.
+                entry.deferredEventOverflow = true
+                entry.deferredEvents = [.failure("Agent output exceeded the pending media limit. Send a message to resume.")]
+                entry.deferredEventBytes = 0
+                let runtime = entry.runtime
+                Task { runtime?.stop() }
+                return
+            }
+            entry.deferredEvents.append(event)
+            entry.deferredEventBytes += bytes
+            return
+        }
+        if case .toolItem(let item, let images) = event {
+            guard item.id.utf8.count <= 1024 else { return }
+            let directory = root.appendingPathComponent("attachments", isDirectory: true)
+                .appendingPathComponent(session.description, isDirectory: true)
+                .appendingPathComponent(AgentToolImages.directoryName(item: item.id), isDirectory: true)
+            entry.stagingToolImages = true
+            let stage = stageToolImages
+            Task { [weak self] in
+                var stored = item
+                do { try await runBlocking { try stage(images, directory) } }
+                catch { stored.detail = (stored.detail ?? "") + "\nImage storage failed: " + error.localizedDescription }
+                let completed = stored
+                self?.queue.async { [weak self] in
+                    guard let self, !self.stopping, entry.generation == generation,
+                          entry.snapshot.status != .closed else { return }
+                    let deferred = entry.deferredEvents
+                    entry.stagingToolImages = false
+                    entry.deferredEvents.removeAll()
+                    entry.deferredEventBytes = 0
+                    entry.deferredEventOverflow = false
+                    self.receive(.item(completed), session: session, generation: generation)
+                    for event in deferred { self.receive(event, session: session, generation: generation) }
+                }
+            }
+            return
+        }
         switch event {
+        case .toolItem: return
         case .item(let item):
             guard item.id.utf8.count <= 1024 else { return }
             if item.kind == .approval, !item.isComplete,
@@ -372,15 +513,16 @@ final class AgentSessions: @unchecked Sendable {
                 return
             }
             if let index = entry.snapshot.items.firstIndex(where: { $0.id == item.id }) {
-                entry.snapshot.items[index] = item
-            } else { entry.snapshot.items.append(item) }
+                entry.snapshot.items[index] = observedItem(item, entry: entry, previous: entry.snapshot.items[index])
+            } else { entry.snapshot.items.append(observedItem(item, entry: entry)) }
         case .textDelta(let id, let text):
             guard id.utf8.count <= 1024 else { return }
             if let index = entry.snapshot.items.firstIndex(where: { $0.id == id }) {
                 entry.snapshot.items[index].text += text
+                entry.snapshot.items[index].updatedAt = Date()
             } else {
-                entry.snapshot.items.append(AgentChatItem(id: id, kind: .assistant,
-                                                         text: text, isComplete: false))
+                entry.snapshot.items.append(observedItem(AgentChatItem(id: id, kind: .assistant,
+                                                         text: text, isComplete: false), entry: entry))
             }
         case .status(let status):
             if status == .idle, entry.interrupting == nil,
@@ -388,7 +530,9 @@ final class AgentSessions: @unchecked Sendable {
                 entry.hasSuccessfulTurn = true
             }
             entry.snapshot.status = status
-            updateTurn(entry, status: status)
+            let outcome: AgentChatTurn.Outcome? = status == .idle ? (entry.interrupting == nil ? .completed : .interrupted)
+                : status == .failed ? .failed : status == .closed ? .cancelled : nil
+            updateTurn(entry, status: status, outcome: outcome)
             if status == .idle, entry.interrupting != nil {
                 entry.interrupting = nil
                 entry.snapshot.items.append(AgentChatItem(kind: .notice, text: "Agent interrupted."))
@@ -415,8 +559,9 @@ final class AgentSessions: @unchecked Sendable {
             entry.snapshot.resolvedModel = model
         case .failure(let message):
             entry.snapshot.status = .failed
-            updateTurn(entry, status: .failed)
-            entry.snapshot.items.append(AgentChatItem(kind: .notice, text: message))
+            updateTurn(entry, status: .failed, outcome: .failed)
+            entry.snapshot.items.append(observedItem(AgentChatItem(kind: .notice, text: message,
+                workContext: .init(itemType: "error", sourceStatus: "failed")), entry: entry))
             retireRuntime(entry)
             for index in entry.snapshot.items.indices { entry.snapshot.items[index].isComplete = true }
         }
@@ -430,7 +575,7 @@ final class AgentSessions: @unchecked Sendable {
 
     private func interrupted(_ entry: Entry, message: String) {
         entry.snapshot.status = .failed
-        updateTurn(entry, status: .failed)
+        updateTurn(entry, status: .failed, outcome: .interrupted)
         entry.snapshot.revision &+= 1
         for index in entry.snapshot.items.indices { entry.snapshot.items[index].isComplete = true }
         entry.snapshot.items.append(AgentChatItem(kind: .notice, text: message))
@@ -441,7 +586,7 @@ final class AgentSessions: @unchecked Sendable {
         guard entry.snapshot.status != .closed else { return }
         retireRuntime(entry)
         entry.snapshot.status = .closed
-        updateTurn(entry, status: .closed)
+        updateTurn(entry, status: .closed, outcome: .cancelled)
         for index in entry.snapshot.items.indices { entry.snapshot.items[index].isComplete = true }
         touch(entry)
         persist(entry)
@@ -457,7 +602,34 @@ final class AgentSessions: @unchecked Sendable {
         entry.approving.removeAll()
         entry.interrupting = nil
         entry.accessTask = nil
+        clearDeferredEvents(entry)
         Task { runtime?.stop() }
+    }
+
+    private static let maximumDeferredEventBytes = 8 * AgentChatAttachment.maxPayloadBytes + 512 * 1024
+
+    private func deferredBytes(_ event: AgentRuntimeEvent) -> Int {
+        switch event {
+        case .item(let item): return item.transcriptByteCount
+        case .toolItem(let item, let images):
+            var bytes = min(item.transcriptByteCount, Self.maximumDeferredEventBytes + 1)
+            for image in images {
+                guard image.data.count <= Self.maximumDeferredEventBytes - min(bytes, Self.maximumDeferredEventBytes) else {
+                    return Self.maximumDeferredEventBytes + 1
+                }
+                bytes += image.data.count
+            }
+            return bytes
+        case .textDelta(_, let text), .failure(let text), .providerSession(let text), .resolvedModel(let text): return text.utf8.count
+        default: return 128
+        }
+    }
+
+    private func clearDeferredEvents(_ entry: Entry) {
+        entry.stagingToolImages = false
+        entry.deferredEvents.removeAll()
+        entry.deferredEventBytes = 0
+        entry.deferredEventOverflow = false
     }
 
     @discardableResult
@@ -481,14 +653,112 @@ final class AgentSessions: @unchecked Sendable {
         pending.continuation.resume(returning: entry.snapshot)
     }
 
-    private func updateTurn(_ entry: Entry, status: AgentChatStatus) {
+    private func observedItem(_ value: AgentChatItem, entry: Entry, previous: AgentChatItem? = nil) -> AgentChatItem {
+        var item = value
+        let now = Date()
+        item.createdAt = item.createdAt ?? previous?.createdAt ?? item.tool?.startedAt ?? now
+        item.updatedAt = item.updatedAt ?? now
+        var context = item.workContext ?? previous?.workContext ?? AgentChatWorkContext()
+        context.runID = context.runID ?? previous?.workContext?.runID
+            ?? (item.kind == .user ? "native-turn:" + item.id : entry.snapshot.turns?.last.map { "native-turn:" + $0.userItemID })
+        if context.itemType == nil {
+            switch item.kind {
+            case .user: context.itemType = "user_message"
+            case .assistant: context.itemType = "assistant_message"
+            case .approval: context.itemType = "approval_request"
+            case .notice: context.itemType = "system_notice"
+            case .tool:
+                if item.tool?.presentsCommand == true { context.itemType = "command_execution" }
+                else {
+                    switch item.tool?.presentation {
+                    case .fileChange: context.itemType = "file_change"
+                    case .fileSearch: context.itemType = "file_search"
+                    case .webSearch: context.itemType = "web_search"
+                    default: context.itemType = "dynamic_tool"
+                    }
+                }
+            }
+        }
+        item.workContext = context
+        return item
+    }
+
+    private func updateTurn(_ entry: Entry, status: AgentChatStatus, outcome: AgentChatTurn.Outcome? = nil) {
         guard var turns = entry.snapshot.turns, let index = turns.indices.last,
               turns[index].completedAt == nil else { return }
         turns[index].status = status
         if status == .idle || status == .failed || status == .closed {
             turns[index].completedAt = max(Date(), turns[index].startedAt)
+            turns[index].outcome = outcome
+            captureCompletedTurn(entry, turnID: turns[index].userItemID)
         }
         entry.snapshot.turns = turns
+    }
+
+    /// Startup recovery is idempotent: a final record can precede its transcript
+    /// revision on disk, and a persisted baseline can outlive an interrupted run.
+    private func restoreCheckpoints(_ entry: Entry) {
+        let directory = root.appendingPathComponent("checkpoints", isDirectory: true)
+            .appendingPathComponent(entry.snapshot.session.description, isDirectory: true)
+        guard var turns = entry.snapshot.turns else { return }
+        var pending: AgentCheckpointPending?
+        for index in turns.indices where turns[index].checkpoint == nil {
+            let id = turns[index].userItemID
+            guard UUID(uuidString: id) != nil else { continue }
+            if let data = try? Data(contentsOf: directory.appendingPathComponent(id + ".json")),
+               let record = try? JSONDecoder().decode(AgentCheckpointRecord.self, from: data) {
+                turns[index].checkpoint = record.summary(id: id)
+            } else if index == turns.indices.last,
+                      let data = try? Data(contentsOf: directory.appendingPathComponent("pending-" + id + ".json")),
+                      let value = try? JSONDecoder().decode(AgentCheckpointPending.self, from: data),
+                      value.turnID == id, value.before.directory == entry.directory {
+                pending = value
+            }
+        }
+        entry.snapshot.turns = turns
+        if let pending {
+            entry.baselineTask = Task { pending.before }
+            // Already-terminal turns do not pass through updateTurn on startup.
+            if turns.last?.completedAt != nil { captureCompletedTurn(entry, turnID: pending.turnID) }
+        }
+    }
+
+    private func captureCompletedTurn(_ entry: Entry, turnID: String) {
+        guard let baseline = entry.baselineTask else { return }
+        entry.baselineTask = nil
+        let directory = entry.directory
+        let destination = root.appendingPathComponent("checkpoints", isDirectory: true)
+            .appendingPathComponent(entry.snapshot.session.description, isDirectory: true)
+        entry.checkpointTask = Task { [weak self] in
+            guard let before = await baseline.value else { return }
+            do {
+                let summary = try await runBlocking {
+                    let store = AgentCheckpointStore()
+                    let after = try store.capture(directory: directory)
+                    do {
+                        let files = try store.files(from: before, to: after)
+                        let id = turnID
+                        try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+                        let record = AgentCheckpointRecord(before: before, after: after, files: files)
+                        try JSONEncoder().encode(record).write(to: destination.appendingPathComponent(id + ".json"), options: .atomic)
+                        return record.summary(id: id)
+                    } catch {
+                        try? store.remove(after)
+                        throw error
+                    }
+                }
+                self?.queue.async { [weak self] in
+                    guard let self, !self.stopping,
+                          let index = entry.snapshot.turns?.firstIndex(where: { $0.userItemID == turnID }) else { return }
+                    entry.snapshot.turns?[index].checkpoint = summary
+                    self.touch(entry)
+                    self.persist(entry)
+                }
+            } catch {
+                // Keep the durable baseline pinned so restart recovery can retry.
+                ServerLog.error("agent checkpoint unavailable: \(error)")
+            }
+        }
     }
 
     /// Called before removing a project/worktree, including conversations never attached to a client.
@@ -518,6 +788,7 @@ final class AgentSessions: @unchecked Sendable {
                 entry.approving.removeAll()
                 entry.interrupting = nil
                 entry.accessTask = nil
+                clearDeferredEvents(entry)
                 persist(entry)
                 settleSubmission(entry)
             }
@@ -576,7 +847,7 @@ final class AgentSessions: @unchecked Sendable {
         }
         if entry.snapshot.items.filter({ $0.kind == .approval && !$0.isComplete }).count > 128 {
             entry.snapshot.status = .failed
-            updateTurn(entry, status: .failed)
+            updateTurn(entry, status: .failed, outcome: .failed)
             for index in entry.snapshot.items.indices { entry.snapshot.items[index].isComplete = true }
         }
         // Retain pending permission IDs even when later tool/output rows overflow.
@@ -613,7 +884,18 @@ final class AgentSessions: @unchecked Sendable {
         for index in remove { entry.snapshot.items.remove(at: index) }
         if let turns = entry.snapshot.turns {
             let users = Set(entry.snapshot.items.filter { $0.kind == .user }.map(\.id))
-            entry.snapshot.turns = Array(turns.filter { users.contains($0.userItemID) }.suffix(512))
+            var retained = Array(turns.filter { users.contains($0.userItemID) }.suffix(512))
+            var checkpointBudget = 64 * 1024
+            for index in retained.indices.reversed() {
+                guard var checkpoint = retained[index].checkpoint else { continue }
+                let bytes = checkpoint.files.reduce(0) { $0 + $1.path.utf8.count + 64 }
+                if bytes > checkpointBudget {
+                    checkpoint.files = []
+                    checkpoint.truncated = checkpoint.totalFiles > 0
+                } else { checkpointBudget -= bytes }
+                retained[index].checkpoint = checkpoint
+            }
+            entry.snapshot.turns = retained
         }
     }
 
@@ -621,10 +903,13 @@ final class AgentSessions: @unchecked Sendable {
         guard budget > 0 else { return nil }
         var item = source
         var remaining = budget
-        remaining -= (item.attachments ?? []).reduce(0) { $0 + $1.transcriptByteCount }
+        // Reserve all non-body fields before clipping compatibility text/tool data.
+        // The same accounting as validation includes observed dates and work IDs.
+        remaining -= item.transcriptByteCount - item.text.utf8.count
+            - (item.detail?.utf8.count ?? 0) - (item.tool?.transcriptByteCount ?? 0)
         guard remaining >= 0 else { return nil }
         if let tool = item.tool {
-            item.tool = boundedTool(tool, budget: min(32 * 1024, max(0, budget - 1024)))
+            item.tool = boundedTool(tool, budget: min(32 * 1024, max(0, remaining - 1024)))
             if item.tool == nil {
                 guard pending else { return nil }
                 item.detail = "[Tool metadata truncated]\n" + (item.detail ?? "")
@@ -636,8 +921,8 @@ final class AgentSessions: @unchecked Sendable {
         if textBudget < truncationMarker.utf8.count, item.text.utf8.count > textBudget { return nil }
         item.text = clipped(item.text, bytes: textBudget)
         remaining -= item.text.utf8.count
-        if let detail = item.detail { item.detail = clipped(detail, bytes: min(pending ? 1536 : 16 * 1024, remaining)) }
-        return item
+        if let detail = item.detail { item.detail = clipped(detail, bytes: min(pending ? 1536 : 16 * 1024, max(0, remaining))) }
+        return item.transcriptByteCount <= budget ? item : nil
     }
 
     private func boundedTool(_ source: AgentToolActivity, budget: Int) -> AgentToolActivity? {
@@ -696,6 +981,49 @@ final class AgentSessions: @unchecked Sendable {
             }
             tool.fileChanges = result
         }
+        func reserve(_ bytes: Int) -> Bool {
+            guard remaining >= bytes else { truncated = true; return false }
+            remaining -= bytes
+            return true
+        }
+        tool.searchPatterns = strings(source.searchPatterns, limit: 2048)
+        if let results = source.webResults {
+            if results.count > 32 { truncated = true }
+            tool.webResults = results.prefix(32).compactMap { result in
+                guard reserve(64) else { return nil }
+                return .init(title: take(result.title, limit: 1024), url: take(result.url, limit: 2048),
+                             snippet: take(result.snippet, limit: 8000))
+            }
+        }
+        tool.fileSearchDetails = nil
+        if let details = source.fileSearchDetails, reserve(64) {
+            var bounded = AgentToolActivity.FileSearchDetails(pattern: take(details.pattern, limit: 2048))
+            if let results = details.results {
+                if results.count > 32 { truncated = true }
+                bounded.results = results.prefix(32).compactMap { result in
+                    guard reserve(128), let name = take(result.fileName, limit: 1024), !name.isEmpty else { return nil }
+                    return .init(fileName: name, line: result.line, column: result.column,
+                                 preview: take(result.preview, limit: 8000))
+                }
+            }
+            tool.fileSearchDetails = bounded
+        }
+        tool.fileChangeDetails = nil
+        if let details = source.fileChangeDetails, reserve(128),
+           let name = take(details.fileName, limit: 1024), !name.isEmpty {
+            var bounded = AgentToolActivity.FileChangeDetails(fileName: name, diff: take(details.diff, limit: 8 * 1024),
+                                                               additions: details.additions, deletions: details.deletions)
+            if let operations = details.operations {
+                if operations.count > 32 { truncated = true }
+                bounded.operations = operations.prefix(32).compactMap { operation in
+                    guard reserve(128), let kind = take(operation.operation, limit: 64),
+                          let path = take(operation.path, limit: 1024), !path.isEmpty else { return nil }
+                    return .init(operation: kind, path: path, oldPath: take(operation.oldPath, limit: 1024),
+                                 fileType: take(operation.fileType, limit: 128), mimeType: take(operation.mimeType, limit: 128))
+                }
+            }
+            tool.fileChangeDetails = bounded
+        }
         if truncated { tool.output = (tool.output ?? "") + note }
         return tool
     }
@@ -711,12 +1039,45 @@ final class AgentSessions: @unchecked Sendable {
         return truncationMarker + String(decoding: suffix, as: UTF8.self)
     }
 
+    /// Only this session's own checkpoint refs are retired, after its bounded
+    /// transcript has been persisted. In-flight baselines remain pinned.
+    private func cleanupCheckpoints(_ saved: Saved) {
+        let directory = root.appendingPathComponent("checkpoints", isDirectory: true)
+            .appendingPathComponent(saved.snapshot.session.description, isDirectory: true)
+        guard let files = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else { return }
+        let turns = saved.snapshot.turns ?? []
+        let retained = Set(turns.map(\.userItemID)).union(turns.compactMap { $0.checkpoint?.id })
+        let finished = Set(turns.compactMap { $0.checkpoint?.id })
+        let previous = retainedCheckpointIDs[saved.snapshot.session] ?? retained
+        let retired = previous.subtracting(retained)
+        retainedCheckpointIDs[saved.snapshot.session] = retained
+        let store = AgentCheckpointStore()
+        for file in files where file.pathExtension == "json" {
+            let name = file.deletingPathExtension().lastPathComponent
+            do {
+                if name.hasPrefix("pending-") {
+                    let id = String(name.dropFirst(8))
+                    guard retired.contains(id) || finished.contains(id) else { continue }
+                    let pending = try JSONDecoder().decode(AgentCheckpointPending.self, from: Data(contentsOf: file))
+                    if !finished.contains(id) { try store.remove(pending.before) }
+                } else {
+                    guard retired.contains(name) else { continue }
+                    let record = try JSONDecoder().decode(AgentCheckpointRecord.self, from: Data(contentsOf: file))
+                    try store.remove(record.before)
+                    try store.remove(record.after)
+                }
+                try FileManager.default.removeItem(at: file)
+            } catch { ServerLog.error("agent checkpoint cleanup failed: \(error)") }
+        }
+    }
+
     private func persist(_ entry: Entry) {
         let saved = Saved(snapshot: entry.snapshot, directory: entry.directory, hasSuccessfulTurn: entry.hasSuccessfulTurn)
         let file = root.appendingPathComponent(entry.snapshot.session.description + ".json")
         writer.async {
             do {
                 try JSONEncoder().encode(saved).write(to: file, options: .atomic)
+                self.cleanupCheckpoints(saved)
             } catch { ServerLog.error("agent checkpoint failed: \(error)") }
         }
     }

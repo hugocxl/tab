@@ -132,7 +132,7 @@ private final class LiveAgentEvents: @unchecked Sendable {
     func receive(_ event: AgentRuntimeEvent) {
         locked {
             switch event {
-            case .item(let item):
+            case .item(let item), .toolItem(let item, _):
                 switch item.kind {
                 case .assistant: rows[item.id] = item.text
                 case .approval, .tool:

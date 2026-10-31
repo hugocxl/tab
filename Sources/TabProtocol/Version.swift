@@ -35,8 +35,17 @@ public struct Feature: RawRepresentable, Hashable, Codable, Sendable {
     /// File list and content search on the server.
     public static let fileSearch = Feature(rawValue: "fileSearch")
 
+    /// Bounded, revision-checked file chunks for conversation audio/video.
+    public static let fileByteRanges = Feature(rawValue: "fileByteRanges")
+
+    /// Read-only metadata for an in-message GitHub pull-request card.
+    public static let pullRequestPreview = Feature(rawValue: "pullRequestPreview")
+
+    /// Existing file writes may safely create missing workspace parent directories.
+    public static let fileWriteParents = Feature(rawValue: "fileWriteParents")
+
     /// Features this build's server supports.
-    public static let all: [Feature] = [.terminalInput, .sessionEnvironment, .fileSearch]
+    public static let all: [Feature] = [.terminalInput, .sessionEnvironment, .fileSearch, .fileByteRanges, .pullRequestPreview, .fileWriteParents]
 }
 
 /// What kind of program a client is.

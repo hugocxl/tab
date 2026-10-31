@@ -1,6 +1,6 @@
 # Agent Tabs
 
-Agent Tabs put a native conversation alongside the project's terminal, editor
+Agent Tabs put a conversation pane alongside the project's terminal, editor
 and browser panes. The transcript scrolls above a fixed bottom composer.
 Open **New Agent Tab**, choose a model, reasoning effort and access mode in the bottom
 composer, then send a prompt. Assistant responses render as selectable Markdown;
@@ -63,7 +63,7 @@ automatically answered by any access mode.
 6. Use Stop during a turn. Quit and reopen Tab to check reconnection to the
    server-owned conversation.
 
-## Native chat behavior
+## Chat behavior
 
 ### Composer context and attachments
 
@@ -96,27 +96,51 @@ an estimated percentage; usage is retained across reconnects and restarts.
 - Use the **paperclip**, drop files onto the input box, or paste copied files and
   images. Attachment tiles show filenames, sizes and image thumbnails; each has
   a remove action. Attachment-only messages are supported. Failed sends retain
-  draft attachments, and successful sends leave attachment names in the transcript.
+  draft attachments. Sent images render above the message bubble, or without a
+  bubble when sent alone; multiple images share a rounded collage. Click an image
+  for the source image viewer with zoom, PNG Copy and original-byte Save. Files sent alone use separate 256-point cards; files accompanying text
+  use compact preview/download rows above the body. PDF, Markdown and text files
+  use the available source or isolated native preview, depending on the file type;
+  Copy and Save use scoped native byte access. Specialized preview limitations
+  are recorded in the port ledger.
 - Attach up to **10 files totaling 8 MiB**. Bytes travel to the project server,
   including remote hosts, and are staged privately for provider access. Claude
   receives native image/PDF blocks; Codex receives native image inputs and file
   paths for other formats. Unsupported image formats are converted when possible.
-  Attachment data is not embedded in retained transcript snapshots.
+  Attachment data is not embedded in retained transcript snapshots. New sends
+  also persist a private per-message payload index. The `agentAttachment` request
+  fetches bytes by conversation, message and attachment ID after checking retained
+  transcript ownership; it never accepts a path. This survives daemon reloads and
+  supports remote previews. Older sends without an index remain unavailable to
+  this retrieval path and show an unavailable-preview state. Image thumbnails
+  in the native fallback decode off the main thread and use bounded pixel sizes;
+  native attachment payload reads share a 32 MiB cache.
 
-This first version supports text conversations, streamed tool activity,
-one-time tool approval or denial, interruption and provider conversation resume.
-Responses update incrementally in stable native text views. Sending immediately
-shows activity and Stop, including while the request is being accepted. Scrolling
-away from the end preserves the reading position; **Scroll to end** resumes
-following. Sending a new message returns to the latest turn. The bottom controls
-remain accessible in narrow panes.
+The active conversation body uses the actual upstream components pinned at
+`e5909e53c32a9d5b51caf6352d1f17fd73e86db7` in a local, nonpersistent WKWebView.
+The existing native composer, provider processes and persisted conversations
+remain owned by Tab. Renderer assets execute offline; referenced remote media
+may load subject to browser CORS. A renderer failure restores the native
+transcript at the reading anchor.
 
-The transcript uses viewport virtualization. Offscreen native row views are released after a small cache;
-lightweight row geometry and disclosure state remain. Width/content changes
-invalidate the affected measurements, and streamed text does not remeasure
-unchanged history. Expanded tool and completed-work logs have their own bounded
-scroll viewports. Response sections cache their attributed content and measurements,
-so appending to the final section does not rerender completed code/table sections.
+Responses stream into stable source rows. The source timeline virtualizes
+retained history, folds completed work and preserves selection, expanded tools
+and reading position during updates. **Scroll to end** resumes following;
+sending a new message returns to the latest turn. The server still bounds the
+available history; this is not a full provider-history browser.
+
+Normal text uses the native macOS system stack and code uses the native
+monospace/SF Mono/Menlo stack. Only specialized KaTeX equation fonts are bundled.
+Conversation colors come from the app's existing theme, including syntax and
+terminal colors; changing an app theme updates the body without reloading it.
+There is no separate conversation theme picker or preset catalog.
+
+Current source/native evidence, unavailable backend capabilities and validation
+limits are tracked in [Tab conversation port](CONVERSATION_RENDERER.md). The final
+unfiltered `scripts/validate.sh` gate passed on October 31, 2026, including
+native same-mode palette updates. The scoped conversation-body integration is
+accepted; broader backend migration and the ledger's explicit exclusions remain
+separate.
 
 Tool details retain input and output separately, with running, completed, failed,
 denied and interrupted states when supplied by the provider. Completed turns fold
@@ -135,13 +159,13 @@ as unsupported; ask the agent to use ordinary chat for questions.
 The server keeps a bounded transcript snapshot (up to 512 recent rows and about
 512 KiB of text, with pending approvals retained). Older output can be trimmed;
 this is not a full provider-history browser. The provider's own conversation ID
-is stored separately for resume. The native view exposes the whole retained
-snapshot through a virtualized scroll surface; it does not drop earlier rows
-to limit native view counts. Pending approvals remain accessible in that history.
+is stored separately for resume. The conversation exposes the whole retained
+snapshot through a virtualized scroll surface; it does not discard retained rows
+to limit mounted view counts. Pending approvals remain accessible in that history.
 
-## T3 Code reference
+## Provider reference
 
-This implementation follows [T3 Code](https://github.com/pingdotgg/t3code) at
+The original Swift provider-adapter implementation follows [upstream](../vendor/ConversationRenderer/provenance.json) at
 revision `6fc9144a60c4a5f45089316ddd5f7371bafd3bf2`. Key references:
 
 - `apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts`: Claude message
@@ -158,37 +182,76 @@ revision `6fc9144a60c4a5f45089316ddd5f7371bafd3bf2`. Key references:
   `MessagesTimeline.logic.ts`, and `apps/web/src/components/ChatMarkdown.tsx`:
   user bubbles, activity folding and document-like assistant responses.
 - Provider discovery protocols supply model names and reasoning capabilities;
-  T3's model manifest remains a behavioral reference rather than a picker catalog.
+  the source renderer’s model manifest remains a behavioral reference rather than a picker catalog.
 
-T3's server is TypeScript and its Claude adapter uses the Agent SDK. Tab adapts
+the source renderer’s server is TypeScript and its Claude adapter uses the Agent SDK. Tab adapts
 these behaviors into Swift and drives the installed CLIs over pipes. Claude
 SDK fixture operations such as `query.open` and `permission.request` are not
 literal CLI wire messages; the Swift adapter uses Claude's bidirectional
 `control_request` / `control_response` envelopes instead. Codex runs through
 `codex app-server`.
 
-T3's MIT notice is retained in `THIRD_PARTY_NOTICES.md` and bundled with the app.
+the source renderer’s MIT notice is retained in `THIRD_PARTY_NOTICES.md` and bundled with the app.
 Provider SDKs and executables are not vendored.
 
-### Parity inventory
+## Historical native fallback inventory
 
-This is a native port in progress, not complete 1:1 T3 parity. The reviewed T3
-revision contains substantially more than text chat. The following inventory
-keeps unsupported behavior explicit rather than exposing controls without backing
-functionality. Component paths below are relative to `apps/web/src/components/`.
+The following notes describe the earlier AppKit implementation, retained as a
+failure fallback. They are historical implementation notes, not the active
+source renderer's current gap list. Its pinned source color expectations have been
+superseded by the user's preference for existing app themes. Use the
+[port ledger](CONVERSATION_RENDERER.md) for current coverage and limitations.
 
-| Area | Native implementation | Remaining T3 behavior / reference |
+### Earlier native rendering follow-up
+
+Compared the conversation components against upstream revision
+`e5909e53c32a9d5b51caf6352d1f17fd73e86db7` in this iteration:
+
+- `TimelineWorkGroupRows.tsx`: the live timer is a timeline row before work,
+  with a bottom divider; it does not belong above the composer. Native rendering
+  now uses persisted turn start times and updates only mounted timers.
+- `WorkLog.tsx` and `TimelineWorkEntryRow.tsx`: icon/action/disclosure rows expose
+  tool details directly. Native rows no longer add a second group disclosure or
+  duplicate the tool name and successful status in every action label.
+- Completed work retains its final answer outside the disclosure and now has a
+  trailing disclosure indicator and divider. Bounded expanded work scrolling
+  remains intentional: upstream also virtualizes expanded work groups.
+- `TimelineUserMessageRow.tsx` and `TimelineAssistantRows.tsx`: attachment cards,
+  contextual chips, response footer visibility, and rich media still differ.
+  User bubbles now use the upstream 80% limit and retain full Markdown when
+  clipped; the final answer footer appears on hover or keyboard focus. Collapsed
+  messages use the upstream 28-pixel fade and “Show full message” action. Code
+  blocks default to wrapped text, retaining explicit per-block choices through
+  virtualization.
+
+At that native-only checkpoint, visual sign-off remained incomplete. The
+historical inventory below records its outstanding Markdown and media scope.
+
+### Historical native acceptance criteria
+
+The native comparison below records the limitations that motivated reuse of the
+actual source renderer. It is not an open checklist for the active WK surface.
+Current acceptance evidence and explicit backend exclusions live in the
+[Tab conversation port ledger](CONVERSATION_RENDERER.md).
+
+### Historical fallback parity inventory
+
+The independent native port did not reach complete 1:1 source parity. The reviewed source
+revision contained substantially more than text chat. This historical inventory
+records the native fallback's implementation and original comparison gaps. Component paths below are relative to `apps/web/src/components/`.
+
+| Area | Native implementation | Remaining source behavior / reference |
 | --- | --- | --- |
-| Streaming and resume | Stable partial-response text views; server-owned conversations and provider resume IDs; startup interruption; persisted turn timing | T3's thread lineage, fork/revert and checkpoint workflows are not implemented (`chat/ThreadLineageWorkflowRow.tsx`, `chat/TimelineAssistantRows.tsx`). |
-| Work logs | Compact tool groups; expandable input/output; status and command exit code; ANSI colors; colored changes; file/web links; completed-work folding | Subagent thread navigation, richer checkpoint summaries and provider-specific interactive tools need additional protocol data (`chat/TimelineWorkEntryRow.tsx`, `chat/TimelineWorkGroupRows.tsx`). |
+| Streaming and resume | Stable partial-response text views; server-owned conversations and provider resume IDs; startup interruption; persisted turn timing | the source renderer’s thread lineage, fork/revert and checkpoint workflows are not implemented (`chat/ThreadLineageWorkflowRow.tsx`, `chat/TimelineAssistantRows.tsx`). |
+| Work logs | Individually virtualized tool rows in the main conversation, with 14px labels, 16px pinned Lucide category icons, source insets, keyboard disclosure and conditional chevrons; expandable input/output; shell inspectors keep highlighted source above independently scrolling output (320px limit), show only nonzero exit codes, and use browser-verified 13px/21.125px typography with 6px section gaps; pinned light/dark ANSI palettes, 256/RGB colors, bold/dim/italic/underline/strike/inverse styles and badge contrast, cursor/erase/progress replay in a bounded 64-line live window; colored changes; file/web links; completed-work folding with pinned 14px disclosure chevrons and a 4px text gap; expanded history projects into the main virtualized timeline with child interaction state retained across folding | Source syntax colors and grouped-row geometry remain under review. Terminal normalization and truncation now match upstream byte-for-byte for long plain/styled output, dense style runs, Unicode and cursor edits at the limit; native badges use the measured inline font box and corrected baseline. Inspector identity follows the source renderer’s native-tool classification independently of semantic icon categories, including normalized Claude names and generic fallback for unknown/MCP tools. Codex dynamic tools preserve namespace-qualified names and mixed contentItems, with MCP structured-output precedence and error/result context. Generic tool panels now retain ordered argument names, null/empty values and structured results without generic Input/Output headings. Structured/summarized arguments now scroll independently at 320px with their position retained across row eviction; completed empty results show the italic No output label. Structured JSON arguments use browser-verified source light/dark token colors, including escapes and distinct null/boolean scopes. Recognized js/node_repl.js/cua_repl.js calls place code below its label in an independent 320px scroll block, preserving surrounding arguments and scroll state. REPL syntax currently uses the native TypeScript tokenizer; exact source grammar/colors, other syntax grammars remain under review. Claude streamed/assembled and Codex dynamic-tool arguments retain their original provider JSON order through persistence; JavaScript numeric-key ordering still applies in the inspector. Unmodified structured results preserve provider key order, including Codex MCP error/result wrappers, and scalar JSON results remain visible. Image extraction replaces only selected image blocks in the wire JSON; surrounding fields retain their order. Shadowed duplicate values are cleared without changing first-key/last-value semantics, and images beyond the eight-preview limit are redacted too. Dynamic tool raster results now store up to eight 10 MiB images outside transcript JSON, retain message-owned retrieval across restart, and render above output with 480px width/256px height caps and native previews. Tool-image loading uses a blank framed slot; failures show the centered warning glyph and Image unavailable label without attachment retry text. Animation and media action styling still need full source comparison. File-change inspectors now retain provider patches and operations, show workspace-labelled paths and optional counts, and open immutable recorded diffs; failure text and operation rows follow the typed inspector layout. Diff-window presentation itself still needs comparison against the source renderer. Explicit file-search records render a pattern, workspace-labelled paths, optional line/column positions and whitespace-preserving previews; current Claude/Codex adapters do not emit this type, so Grep/Glob remain generic tools. Typed web-search inspectors retain Codex action patterns and Claude result metadata, with query text, title links, external-link glyphs, hover underlines and snippets; end-to-end live provider verification remains pending. Tool timestamps use source-sized text and appear on disclosure hover/header focus; grouped rows use 24px headers versus 28px standalone rows. Failed/denied and nonzero-exit tools preserve muted summary labels and tint category icons using captured light/dark source colors; interrupted rows remain neutral. Nested-control focus and completed-fold timestamps still need comparison. Subagent thread navigation, richer checkpoint summaries and provider-specific interactive tools need additional protocol data (`chat/TimelineWorkEntryRow.tsx`, `chat/TimelineWorkGroupRows.tsx`). |
 | Approval and composer | Native model/effort/access menus, inline permission actions, Stop, growing text input, @ file/thread suggestions, / native actions and discovered skills, attachment picker/drop/paste, scroll following and scroll-to-end | Structured questionnaires, provider-specific goal/feedback/usage commands, machine/PR mentions and queued/steered messages are not implemented. |
-| Markdown prose | Headings, paragraphs, inline emphasis/code, nested list markers, tasks, quotes, links | Full CommonMark/GFM block nesting, reference links, footnotes, heading-fragment navigation, alerts and HTML details remain (`ChatMarkdown.tsx`, `chat/MarkdownDetails.tsx`, `chat/markdownFragments.ts`). |
-| Code | Tab's native syntax tokenizer, language/filename heading, exact-source copy, wrap toggle and horizontal scrolling | T3's larger grammar set, file icons, persistent wrap preference and guarded Run command action (`chat/MarkdownCodeBlock.tsx`). Nested code/table widgets inside list items or quotes are not equivalent yet. |
-| Tables | Native columns/alignment, horizontal overflow, Markdown and CSV copy | Cross-cell selection and semantic table navigation (`chat/MarkdownTable.tsx`). |
+| Markdown prose | Shared user/assistant interactive rendering (user HTML disabled), browser-measured 14px/22.75px prose and heading leading, collapsed block spacing, headings, paragraphs, inline emphasis/code, nested list markers, tasks, quotes, links, GitHub alert containers, nested expandable details with retained state, and message-local heading links with Unicode/duplicate slugs and reveal-on-navigation, and document-wide full/collapsed/shortcut reference links (including streamed definitions), and numbered footnotes with repeated back-links and rich note bodies; CR/LF/CRLF block recognition preserves original in-node line endings and replaces NULs as in the source renderer; empty/tab-separated ATX headings, closing markers, multiline single-marker Setext headings and four-space code boundaries match browser fixtures; ordered-list runs share browser-sized widest-counter gutters across siblings and nested lists, retained across interactive code/table sections and streaming counter growth, with tabular-digit markers aligned before the text; ordered lists count from the first item, preserve counts across loose-item spacing, restart on delimiter changes, and use matching-ancestor marker styles; unordered lists use browser-measured geometric disc/circle/square markers and 20px nested gutters without changing copyable text; task markers use native 13px checkbox drawing with pinned disabled light/dark colors and measured text gaps, suppressing invisible fallback-glyph metrics while preserving selectable checkbox text; non-one ordered starts require separation before interrupting paragraph text; neutral light/dark prose, heading, link, inline-code, quote-rule and table-rule colors follow captured source tokens, and horizontal rules use full-width native one-pixel sections; fixed-height Markdown line boxes use browser-measured centered-leading baselines, fractional section heights and 1/64-point CSS spacing; inline code uses the source renderer’s SF Mono face and inherits 85% font sizing/weight and draws rounded backgrounds per wrapped line using browser-rounded font bounds and fractional vertical padding; rendered inline whitespace collapses like CSS while explicit backslash/two-space hard breaks remain visible and user messages preserve ordinary line breaks; link labels retain nested emphasis, strike and code with UTF-8/CRLF-safe source recovery | External link prefixes reserve the source 14px icon box and font-relative margins without adding characters to selection/copy; provider artwork and lazy remote favicons now use source host classification, shared loading, sticky globe fallbacks and selection-preserving redraw; plain-link protocol prefixes suppress internal word/hyphen breaks while retaining individual text glyphs, overflow narrower text fragments and contribute to table minimum widths; adjacent links retain separate favicon boxes even when destinations match; remaining long-label wrapping and shaping still need comparison. Inline-code boundary glyphs now reserve browser-sized horizontal borders/padding while preserving text and selection, including linked code and table sizing; prose, hanging-indent list items and table cells now reserve and paint cloned padding on wrapped fragments, excludes collapsed trailing spaces from their backgrounds, and bounds width probes for long spans; broader wrap cases, browser pretty-wrapping and table row/column allocation still need comparison. List identity, parent identity, original delimiter, start/end counters and ancestor marker families now survive parsing and rich-section partitioning; loose paragraphs and outer margins use browser-measured spacing, including ordered task gutters and fenced blank-line exclusions. Full CommonMark/GFM parsing edge cases, explicit HTML anchor IDs, and arbitrary HTML block semantics remain (`ChatMarkdown.tsx`, `chat/MarkdownDetails.tsx`, `chat/markdownFragments.ts`). |
+| Code | Tab's native syntax tokenizer, browser-verified default 13px code with 17.875px leading and source padding, Pierre/source file icons with language aliases and icon-only language headings, compact pinned Lucide copy/check/wrap/run controls, exact-source copy with timed feedback, wrap toggle and horizontal scrolling; completed, closed eligible shell fences can run in a project terminal | the source renderer’s larger grammar set and application wrap preference (`chat/MarkdownCodeBlock.tsx`). Fenced code now follows browser-verified opener/closer indentation and marker rules, info-string restrictions, body de-indentation with tab stops, and empty/unfinished block newline behavior. Nested fenced code and tables retain native widgets in quotes, rich list items, and details; full list-block parsing remains under review. |
+| Tables | One native TextKit table supports continuous cross-cell selection and links, retained selection through resize/streaming, word-based column minimums and horizontal overflow, 14px text, flush outer columns, row-only separators, viewport alpha fades that follow hidden content up to 24px per edge and clear on viewport keyboard focus, and an icon copy menu with 1.2s feedback for Markdown/CSV; CSV matches rendered source cells, JavaScript whitespace normalization and conditional quoting; Markdown export preserves distinct adjacent links, resolves references, pads missing cells and serializes parsed inline formatting, links, entities, code fences and escaped pipes against browser fixtures; browser fixtures cover short separators, pipe-free body rows, block interruptions, list precedence and escaped pipes inside code | Browser-measured fractional header/body padding and shared-row rules now avoid TextKit rounding drift; the 384px cell cap includes padding, and copy controls retain their full hit area in the conversation gutter while respecting viewport clipping. Extreme-width browser column allocation, remaining image/HTML and adjacent emphasis-span Markdown export cases, copy/check morph animation, and table-specific accessibility navigation still need comparison (`chat/MarkdownTable.tsx`). |
 | Links | HTTP/HTTPS/mailto; file paths and line navigation into the project editor | File chips, existence-aware previews/context menus, column positions, favicons, citations and thread/PR/context link presentations (`chat/MarkdownFileLink.tsx`, `chat/MarkdownExternalLink.tsx`, `chat/AssistantCitationChip.tsx`, `chat/MarkdownThreadLink.tsx`). |
 | Copy and selection | Selectable prose/code, response/user copy, exact code copy, table export | Cross-section selection, Markdown-preserving selection copy and selection-to-citation toolbar (`chat/AssistantSelectionToolbar.tsx`, `apps/web/src/markdown-clipboard.ts`). |
 | Math and diagrams | Source remains readable as text/code | Typeset math and Mermaid diagram/source switching (`chat/MarkdownMath.tsx`, `chat/MathTypeset.tsx`, `chat/MarkdownMermaidCodeBlock.tsx`, `chat/MermaidDiagram.tsx`). |
-| Media and embedded apps | File/image attachment transport, draft thumbnails, Claude native image/PDF input and Codex native image input | Assistant image/audio/video rendering, asset loading/retry, galleries/zoom, published HTML, MCP apps and artifact-template cards (`chat/ChatMarkdownMedia.tsx`, `chat/ExpandedImageDialog.tsx`, `chat/HtmlRenderFrame.tsx`, `chat/McpAppFrame.tsx`). |
+| Media and embedded apps | File/image attachment transport, durable message-scoped payload retrieval, draft thumbnails, user image collages with loading/retry and zoomable galleries, native GIF playback in conversation tiles and expanded previews (up to 16,777,216 aggregate frame pixels), window-attached expanded media overlay with 75% backdrop, source-sized controls/caption/failure frame, desktop/narrow layout snapshots and focus restoration, cyclic expanded-gallery navigation, browser-verified fit/zoom geometry without upscaling, click/wheel/keyboard zoom (1–8×), anchored zoom, drag and arrow-key panning with gallery-navigation precedence and resize refitting, image context menus with Shift-F10 access, original-byte saves and full-resolution oriented PNG copies, file cards/downloads and PDF/Markdown/text previews, Claude native image/PDF input and Codex native image input | Assistant image/audio/video rendering, video/audio attachment players, animated WebP/APNG and GIFs above the native decoder allocation limit (currently static thumbnails), media-reference path/URL actions, exact tooltip/toast styling, expanded-viewer transitions and screenshot accessibility-details/original-link controls, specialized Office/font/delimited-file previews, published HTML, MCP apps and artifact-template cards (`chat/ChatMarkdownMedia.tsx`, `chat/ExpandedImageDialog.tsx`, `chat/HtmlRenderFrame.tsx`, `chat/McpAppFrame.tsx`). |
 | Rendering optimization | Viewport-virtualized rows/work logs, bounded native-view caches, row-identity scroll anchors, cached section content/measurements and selection retention | Last-block-only Markdown parsing and reduced-motion-aware streamed-block fades (`ChatMarkdown.tsx`, `apps/web/src/index.css`). |
 
 ## Troubleshooting
@@ -218,7 +281,7 @@ TAB_AGENT_LIVE_TESTS=codex swift test --filter AgentLiveSmokeTests
 Use `TAB_AGENT_LIVE_TESTS=all` to exercise both. Live tests incur normal provider
 usage. Run `scripts/validate.sh` for the full build, offline suite and app bundle.
 
-The October 30, 2026 running-app audit exercised live Claude streaming and Auto
+The historical native-fallback audit on October 30, 2026 exercised live Claude streaming and Auto
 web/read tools, expanded input/output logs, code copy/wrap, CSV table copying,
 project file navigation and narrow layouts. Screenshots and the incremental
 accessibility capture are under `build/validation/agent-ui/` and
@@ -227,3 +290,5 @@ from the visible conversation. The original preview's provider conversation ID
 and all 27 retained items survived relaunch. The 5,000-entry virtualization test
 mounted 12 rows, retained 14 views and performed 14 initial measurements.
 Live Codex validation remains blocked by the installed CLI hanging on launch.
+
+Conversation attachment cards and changed-file leaves use the pinned Pierre/source icon catalog at 16px and 14px respectively, refreshed on theme changes. User attachment cards follow the source renderer’s filename-only resolution; the shared resolver also supports the source renderer’s exact MIME fallback for unknown filenames where callers request it.

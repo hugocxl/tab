@@ -84,11 +84,11 @@ extension ProjectRoot {
     }
 
     /// Replaces the file atomically, keeping an existing file's permissions.
-    func write(_ path: String, _ content: Data) throws -> ServerPath {
+    func write(_ path: String, _ content: Data, createParents: Bool = false) throws -> ServerPath {
         if content.count > Limits.maxFileBytes {
             throw ServiceError(.badRequest, "Content exceeds the 5 MiB limit")
         }
-        let target = try mutation(path)
+        let target = try mutation(path, createParents: createParents)
         var info = Darwin.stat()
         var mode: mode_t?
         if fstatat(target.parent.fd, target.name, &info, AT_SYMLINK_NOFOLLOW) == 0 {

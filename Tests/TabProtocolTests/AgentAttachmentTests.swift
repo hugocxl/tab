@@ -3,6 +3,19 @@ import TabProtocol
 import XCTest
 
 final class AgentAttachmentTests: XCTestCase {
+    func testAttachmentRetrievalWireRoundTripAndPathValidation() throws {
+        let request = AgentAttachmentRequest(session: SessionId(), item: UUID().uuidString, attachment: "client-id")
+        let body = RequestBody.agentAttachment(request)
+        try body.validate()
+        XCTAssertEqual(try WireJSON.decode(RequestBody.self, from: WireJSON.encode(body)), body)
+        let attachment = AgentChatAttachment(id: "client-id", name: "image.png", mimeType: "image/png", data: Data([1, 2, 3]))
+        let reply = ReplyBody.agentAttachment(.init(attachment: attachment))
+        try reply.validate()
+        XCTAssertEqual(try WireJSON.decode(ReplyBody.self, from: WireJSON.encode(reply)), reply)
+        XCTAssertNoThrow(try AgentAttachmentRequest(session: request.session, item: "tool/native-id", attachment: "id").validate())
+        XCTAssertThrowsError(try AgentAttachmentRequest(session: request.session, item: String(repeating: "x", count: 1025), attachment: "id").validate())
+    }
+
     func testAttachmentOnlySendAndLegacySendRoundTrip() throws {
         let attachment = AgentChatAttachment(name: "remote.png", mimeType: "image/png", data: Data([0, 1, 255]))
         let request = AgentChatRequest.send(session: SessionId(), text: "", model: nil, attachments: [attachment])

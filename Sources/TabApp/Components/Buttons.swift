@@ -75,6 +75,7 @@ public final class PillButton: NSButton {
 
     public var style: Style { didSet { applyStyle() } }
     public var onPress: (() -> Void)?
+    public var onFocusChange: ((Bool) -> Void)?
 
     public init(_ title: String, style: Style = .normal, action: (() -> Void)? = nil) {
         self.style = style
@@ -89,6 +90,18 @@ public final class PillButton: NSButton {
     }
 
     public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    public override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        if accepted { onFocusChange?(true) }
+        return accepted
+    }
+
+    public override func resignFirstResponder() -> Bool {
+        let accepted = super.resignFirstResponder()
+        if accepted { onFocusChange?(false) }
+        return accepted
+    }
 
     private func applyStyle() {
         bezelStyle = style == .plain ? .accessoryBarAction : .push

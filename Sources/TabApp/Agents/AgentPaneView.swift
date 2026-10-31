@@ -8,6 +8,8 @@ final class AgentPaneView: ThemedView {
     let effort = AgentReasoningPopUp(label: "Reasoning effort")
     let access = AgentTextPopUp(label: "Access mode")
     let composer = AgentComposerTextView()
+    var citationEnvironmentId: String?
+    var citationThreadId: String?
     let send = AgentRoundButton(kind: .send)
     let stop = AgentRoundButton(kind: .stop)
     let contextIndicator = AgentContextIndicator(frame: .zero)
@@ -20,6 +22,24 @@ final class AgentPaneView: ThemedView {
     let transcriptScroll = NSScrollView()
     let composerScroll = NSScrollView()
     private let transcript = AgentTranscriptDocument()
+    let conversationWebView = AgentConversationWebView()
+    private(set) var usesWebConversation = false
+    private var awaitingConversationRender = true
+    private(set) var conversationRendererFailure: String?
+    private var conversationSnapshot: AgentChatSnapshot?
+    var conversationIdentity: (session: SessionId, project: ProjectId)? {
+        conversationSnapshot.map { ($0.session, $0.project) }
+    }
+    private var nativeThemeDirty = false
+    private var sourceConversationAnchor: AgentConversationAnchor?
+    private let conversationClipboard = AgentConversationClipboardTransfer()
+    var onConversationProjectRefresh: (() -> Void)?
+    var onConversationAction: ((String, [String: Any]) async throws -> Any?)?
+    var conversationCapabilities: [String: Bool] = [:] { didSet { updateConversationCapabilities() } }
+    var conversationProject: [String: Any]? { didSet { conversationWebView.project = conversationProject } }
+    var conversationRemote = false { didSet { conversationWebView.remote = conversationRemote } }
+
+
     private let composerCard = ThemedBackground(color: { $0.floating })
     private let activity = NSView()
     private let activityLabel = makeLabel("", font: AppFont.small)
@@ -34,11 +54,87 @@ final class AgentPaneView: ThemedView {
     private var boundsObserver: NSObjectProtocol?
     private let endButton = AgentEndButton()
     var onApproval: ((String, Bool) -> Void)?
+    var onConversationApproval: ((String, Bool) async throws -> Void)?
+    var onConversationModalChange: (() -> Void)?
+    var onConversationActionFailure: ((Error) -> Void)?
+    var isConversationModal: Bool { usesWebConversation && conversationWebView.isModal }
+    private weak var responderBeforeModal: NSResponder?
+    var onRunShellCommand: ((String) -> Void)? { didSet { transcript.onRunShellCommand = onRunShellCommand } }
+    var onOpenAttachment: ((String, AgentChatAttachmentDescriptor, Bool) -> Void)? { didSet { transcript.onOpenAttachment = onOpenAttachment } }
+    var fetchAttachment: AgentAttachmentCache.Fetch? { didSet {
+        transcript.fetchAttachment = fetchAttachment
+        conversationWebView.fetchAttachment = fetchAttachment
+    } }
+    var onPreviewAttachments: ((String, [AgentChatAttachmentDescriptor], Int) -> Void)? { didSet { transcript.onPreviewAttachments = onPreviewAttachments } }
     var onOpenFile: ((String, Int?) -> Void)?
+    var workspaceRoot: String? { didSet { transcript.workspaceRoot = workspaceRoot } }
+    var onOpenToolDiff: ((String, AgentToolActivity) -> Void)?
+    var onOpenCheckpoint: ((String, String?) -> Void)?
     static let readableWidth: CGFloat = 800
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
+        conversationWebView.isHidden = true
+        awaitingConversationRender = AgentConversationWebView.isAvailable
+        transcriptScroll.isHidden = awaitingConversationRender
+        conversationWebView.onReady = { [weak self] in self?.needsLayout = true }
+        conversationWebView.onRendered = { [weak self] in
+            guard let self, self.conversationWebView.supportsFullTimeline else { return }
+            self.awaitingConversationRender = false
+            self.usesWebConversation = true
+            self.conversationRendererFailure = nil
+            self.transcriptScroll.isHidden = true
+            self.conversationWebView.isHidden = false
+            self.endButton.isHidden = true
+            self.activity.isHidden = true
+            self.needsLayout = true
+        }
+        conversationWebView.onWillReload = { [weak self] in
+            guard let self else { return }
+            self.awaitingConversationRender = true
+            self.usesWebConversation = false
+            self.conversationClipboard.cancel()
+            self.conversationWebView.isHidden = true
+            self.transcriptScroll.isHidden = true
+            self.needsLayout = true
+        }
+        conversationWebView.onFailure = { [weak self] message in
+            guard let self else { return }
+            self.conversationRendererFailure = message
+            self.awaitingConversationRender = false
+            self.usesWebConversation = false
+            self.conversationWebView.isHidden = true
+            self.transcriptScroll.isHidden = false
+            self.conversationClipboard.cancel()
+            self.materializeNativeTranscript()
+            self.restoreSourceConversationAnchor()
+            self.needsLayout = true
+        }
+        conversationWebView.onCite = { [weak self] in self?.insertCitation($0) == true }
+        conversationWebView.onScrollState = { [weak self] in self?.followingEnd = $0 }
+        conversationWebView.onAnchor = { [weak self] in self?.sourceConversationAnchor = $0 }
+        conversationWebView.onActionFailure = { [weak self] in self?.onConversationActionFailure?($0) }
+        conversationWebView.onModalChange = { [weak self] modal in
+            guard let self else { return }
+            if modal {
+                if let responder = self.window?.firstResponder,
+                   responder === self.composer || (responder as? NSView)?.isDescendant(of: self.composerCard) == true {
+                    self.responderBeforeModal = responder
+                }
+                self.window?.makeFirstResponder(self.conversationWebView.webView)
+            }
+            self.onConversationModalChange?()
+            if !modal, let responder = self.responderBeforeModal {
+                self.responderBeforeModal = nil
+                if let current = self.window?.firstResponder as? NSView,
+                   current === self.conversationWebView.webView || current.isDescendant(of: self.conversationWebView.webView),
+                   self.composer.isEditable { self.window?.makeFirstResponder(responder) }
+            }
+        }
+        conversationWebView.onAction = { [weak self] kind, payload in
+            guard let self else { throw ModelError("The conversation was closed.") }
+            return try await self.handleConversationAction(kind, payload)
+        }
         transcriptScroll.drawsBackground = false
         transcriptScroll.hasVerticalScroller = true
         transcriptScroll.autohidesScrollers = true
@@ -50,6 +146,8 @@ final class AgentPaneView: ThemedView {
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.didScroll() }
         }
+        transcript.onOpenToolDiff = { [weak self] id, activity in self?.onOpenToolDiff?(id, activity) }
+        transcript.onOpenCheckpoint = { [weak self] id, path in self?.onOpenCheckpoint?(id, path) }
         transcript.onApproval = { [weak self] id, allow in self?.onApproval?(id, allow) }
         transcript.onOpenFile = { [weak self] path, line in self?.onOpenFile?(path, line) }
         transcript.onDisclosure = { [weak self] in
@@ -112,6 +210,7 @@ final class AgentPaneView: ThemedView {
         feedback.maximumNumberOfLines = 2
         feedback.lineBreakMode = .byTruncatingTail
         for child in [transcriptScroll, activity, composerCard, feedback, retry, endButton] { addSubview(child) }
+        addSubview(conversationWebView)
         addSubview(suggestions)
         suggestions.isHidden = true
         registerForDraggedTypes([.fileURL, .png, .tiff])
@@ -207,9 +306,15 @@ final class AgentPaneView: ThemedView {
         activityLabel.frame = NSRect(x: activityStatus == .waiting ? 0 : 24, y: 4,
                                      width: max(0, activity.bounds.width - 24), height: 20)
         transcriptScroll.frame = NSRect(x: 0, y: 0, width: bounds.width, height: transcriptBottom)
-        transcript.reflow(viewportWidth: transcriptScroll.contentSize.width)
-        if followingEnd || lastViewportWidth == 0 { scrollToEnd() }
-        else { restoreScrollAnchor(anchor) }
+        let fullPane = conversationWebView.supportsFullPaneComposition
+        conversationWebView.frame = fullPane ? bounds : transcriptScroll.frame
+        conversationWebView.setViewport(composer: fullPane
+            ? NSRect(x: 0, y: transcriptBottom, width: bounds.width, height: max(0, bounds.height - transcriptBottom)) : nil)
+        if !usesWebConversation && !awaitingConversationRender {
+            transcript.reflow(viewportWidth: transcriptScroll.contentSize.width)
+            if followingEnd || lastViewportWidth == 0 { scrollToEnd() }
+            else { restoreScrollAnchor(anchor) }
+        }
         endButton.frame = NSRect(x: floor((bounds.width - 126) / 2), y: max(0, transcriptBottom - 36), width: 126, height: 28)
         updateEndButton()
         let suggestionHeight = min(suggestions.preferredHeight, max(0, composerCard.frame.minY - 12))
@@ -256,7 +361,7 @@ final class AgentPaneView: ThemedView {
     }
 
     /// The controller owns enabled states and actions; the surface presents honest activity.
-    /// T3 retains its working indicator through tool work and assistant streaming.
+    /// The conversation retains its working indicator through tool work and assistant streaming.
     func setActivity(status: AgentChatStatus, submitting: Bool) {
         let changed = activityStatus != status || self.submitting != submitting
         activityStatus = status
@@ -264,8 +369,8 @@ final class AgentPaneView: ThemedView {
         let busy = submitting || status == .working || status == .waiting
         send.isHidden = busy
         stop.isHidden = !busy
+        activity.isHidden = awaitingConversationRender || usesWebConversation || (!submitting && status != .waiting)
         guard changed else { return }
-        activity.isHidden = !busy
         let text = submitting ? "Sending…" : status == .waiting ? "Waiting for approval" : "Working…"
         activityLabel.stringValue = busy ? text : ""
         activityLabel.setAccessibilityValue(activityLabel.stringValue)
@@ -276,6 +381,21 @@ final class AgentPaneView: ThemedView {
     }
 
     func render(_ snapshot: AgentChatSnapshot) {
+        conversationSnapshot = snapshot
+        updateConversationCapabilities()
+        conversationWebView.update(snapshot, theme: theme, cwd: workspaceRoot)
+        if usesWebConversation || awaitingConversationRender {
+            setActivity(status: snapshot.status, submitting: submitting)
+            refreshComposer()
+            return
+        }
+        materializeNativeTranscript()
+        refreshComposer()
+    }
+
+    private func materializeNativeTranscript() {
+        guard let snapshot = conversationSnapshot else { return }
+        if nativeThemeDirty { transcript.theme = theme; nativeThemeDirty = false }
         preserveScroll {
             // Keep every retained entry as lightweight data. Native row views are
             // limited by the viewport, not by dropping older conversation items.
@@ -290,14 +410,25 @@ final class AgentPaneView: ThemedView {
             self.layoutSubtreeIfNeeded()
             self.transcript.reflow(viewportWidth: self.transcriptScroll.contentSize.width)
         }
-        refreshComposer()
+    }
+
+    private func restoreSourceConversationAnchor() {
+        guard !followingEnd, let sourceConversationAnchor,
+              let anchor = transcript.resolveConversationAnchor(sourceConversationAnchor) else { return }
+        scrollMutationDepth += 1
+        defer { scrollMutationDepth -= 1 }
+        transcript.reflow(viewportWidth: transcriptScroll.contentSize.width)
+        restoreScrollAnchor(anchor)
+        updateEndButton()
     }
 
     var isAtBottom: Bool {
-        transcript.bounds.height - transcriptScroll.contentView.bounds.maxY <= 36
+        if usesWebConversation { return conversationWebView.isAtBottom }
+        return transcript.bounds.height - transcriptScroll.contentView.bounds.maxY <= 36
     }
 
     func scrollToEnd() {
+        if usesWebConversation { conversationWebView.scrollToEnd(); return }
         followingEnd = true
         scrollMutationDepth += 1
         defer { scrollMutationDepth -= 1 }
@@ -306,11 +437,11 @@ final class AgentPaneView: ThemedView {
     }
 
     private func updateEndButton() {
-        endButton.isHidden = followingEnd || isAtBottom || transcript.bounds.height <= transcriptScroll.contentSize.height
+        endButton.isHidden = awaitingConversationRender || usesWebConversation || followingEnd || isAtBottom || transcript.bounds.height <= transcriptScroll.contentSize.height
     }
 
     private func didScroll() {
-        guard scrollMutationDepth == 0, !transcript.isUpdatingViewport else { return }
+        guard !usesWebConversation, scrollMutationDepth == 0, !transcript.isUpdatingViewport else { return }
         followingEnd = isAtBottom
         scrollMutationDepth += 1
         defer { scrollMutationDepth -= 1 }
@@ -346,7 +477,148 @@ final class AgentPaneView: ThemedView {
         updateEndButton()
     }
 
-    func setApprovalsEnabled(_ enabled: Bool) { transcript.setApprovalsEnabled(enabled) }
+    func setApprovalsEnabled(_ enabled: Bool) {
+        transcript.setApprovalsEnabled(enabled)
+        conversationWebView.setApprovalsEnabled(enabled)
+    }
+    func disposeConversation() {
+        awaitingConversationRender = false
+        usesWebConversation = false
+        transcriptScroll.isHidden = false
+        conversationClipboard.cancel()
+        conversationWebView.dispose()
+    }
+
+    private func updateConversationCapabilities() {
+        let native: [String: Bool] = [
+            "cite": citationEnvironmentId != nil && citationThreadId != nil,
+            "runShellCommand": onRunShellCommand != nil && workspaceRoot != nil,
+            "openToolDiff": onOpenToolDiff != nil,
+            "openTurnDiff": onOpenCheckpoint != nil,
+            "openAttachment": onOpenAttachment != nil,
+            "downloadAttachment": onOpenAttachment != nil,
+        ]
+        conversationWebView.capabilities = native.merging(conversationCapabilities) { _, override in override }
+    }
+
+    func handleConversationAction(_ kind: String, _ payload: [String: Any]) async throws -> Any? {
+        func field(_ name: String) throws -> String {
+            guard let value = payload[name] as? String, !value.isEmpty else { throw ModelError("Missing conversation action field: " + name) }
+            return value
+        }
+        func item(_ id: String) throws -> AgentChatItem {
+            guard let item = conversationSnapshot?.items.first(where: { $0.id == id }) else { throw ModelError("This message is no longer retained.") }
+            return item
+        }
+        switch kind {
+        case "copy":
+            return try conversationClipboard.handle(payload)
+        case "openLink":
+            if payload["mode"] as? String == "preview", let action = onConversationAction {
+                return try await action(kind, payload)
+            }
+            let raw = (payload["url"] ?? payload["href"]) as? String ?? ""
+            if let citation = AgentAssistantCitation.parse(raw) {
+                guard let action = onConversationAction else { throw ModelError("Citation navigation is unavailable.") }
+                return try await action("navigateCitation", ["kind": "navigateCitation", "citation": try JSONSerialization.jsonObject(with: JSONEncoder().encode(citation))])
+            }
+            guard let link = AgentResponseLink.parse(raw) else { throw ModelError("This link cannot be opened.") }
+            switch link {
+            case .external(let url): guard NSWorkspace.shared.open(url) else { throw ModelError("No application could open this link.") }
+            case .file(let path, let line):
+                guard let open = onOpenFile else { throw ModelError("The project editor is unavailable.") }; open(path, line)
+            case .fragment: throw ModelError("Document anchors are handled by the conversation renderer.")
+            }
+            return true
+        case "openFile":
+            if payload["mode"] as? String == "preview", let action = onConversationAction {
+                return try await action(kind, payload)
+            }
+            guard let open = onOpenFile else { throw ModelError("The project editor is unavailable.") }
+            open(try field("path"), payload["line"] as? Int); return true
+        case "runShellCommand":
+            guard let run = onRunShellCommand else { throw ModelError("A project terminal is unavailable.") }
+            run(try field("command")); return true
+        case "approve":
+            let id = try field("requestId")
+            if let decision = payload["decision"] as? String, decision != "accept" && decision != "decline" {
+                throw ModelError("This provider supports one-time approval or denial only.")
+            }
+            guard let pending = conversationSnapshot?.items.first(where: { $0.kind == .approval && !$0.isComplete && ($0.id == id || $0.id == "approval:" + id) }) else { throw ModelError("This approval is no longer pending.") }
+            guard let approve = onConversationApproval else { throw ModelError("Approval controls are unavailable.") }
+            try await approve(pending.id, payload["allow"] as? Bool ?? false); return true
+        case "openToolDiff":
+            let target = payload["target"] as? [String: Any] ?? payload
+            guard let id = target["itemId"] as? String else { throw ModelError("Missing recorded tool identity.") }
+            guard let activity = try item(id).tool, let open = onOpenToolDiff else { throw ModelError("The recorded tool diff is unavailable.") }
+            open(id, activity); return true
+        case "openTurnDiff":
+            let runID = try field("runId")
+            let userID = runID.hasPrefix("native-turn:") ? String(runID.dropFirst("native-turn:".count)) : runID
+            guard let checkpoint = conversationSnapshot?.turns?.first(where: { $0.userItemID == userID })?.checkpoint,
+                  let open = onOpenCheckpoint else { throw ModelError("The recorded turn diff is unavailable.") }
+            open(checkpoint.id, payload["filePath"] as? String); return true
+        case "loadAttachment", "openAttachment", "downloadAttachment":
+            let requested = payload["attachment"] as? [String: Any] ?? payload
+            let sourceID = (requested["attachmentId"] ?? requested["id"]) as? String ?? ""
+            guard let snapshot = conversationSnapshot,
+                  let owner = AgentConversationWebView.ownedAttachment(sourceID, itemID: payload["itemId"] as? String, snapshot: snapshot) else {
+                throw ModelError("This attachment does not belong to a retained message.")
+            }
+            let id = owner.item.id, descriptor = owner.attachment
+            if kind == "loadAttachment" { return ["url": AgentConversationWebView.attachmentURL(item: id, attachment: descriptor.id)?.absoluteString ?? "", "mimeType": descriptor.mimeType] }
+            guard let open = onOpenAttachment else { throw ModelError("The attachment viewer is unavailable.") }
+            open(id, descriptor, kind == "downloadAttachment"); return true
+        case "previewImages":
+            let id = try field("itemId")
+            let images = (try item(id).attachments ?? []).filter { $0.mimeType.hasPrefix("image/") }
+            let index = payload["index"] as? Int ?? 0
+            guard images.indices.contains(index), let preview = onPreviewAttachments else { throw ModelError("The image preview is unavailable.") }
+            preview(id, images, index); return true
+        case "createAssetUrl":
+            let input = payload["input"] as? [String: Any] ?? payload
+            let resource = input["resource"] as? [String: Any] ?? [:]
+            if resource["renderIntent"] as? String == "mcp-app" {
+                guard resource["_tag"] as? String == "attachment", let id = resource["attachmentId"] as? String,
+                      let snapshot = conversationSnapshot,
+                      let match = AgentConversationMcpAsset.match(attachmentID: id, items: snapshot.items) else {
+                    throw ModelError("This MCP app has no matching retained HTML resource.")
+                }
+                let url = try await conversationWebView.prepareMcpAsset(match)
+                return ["relativeUrl": url.absoluteString, "expiresAt": Date.distantFuture.timeIntervalSince1970 * 1000]
+            }
+            var ownerID: String?, descriptor: AgentChatAttachmentDescriptor?
+            if resource["_tag"] as? String == "attachment", let id = resource["attachmentId"] as? String {
+                if let url = try await conversationWebView.prepareHtmlRenderAsset(attachmentID: id) {
+                    return ["relativeUrl": url.absoluteString, "expiresAt": Date.distantFuture.timeIntervalSince1970 * 1000]
+                }
+                if let snapshot = conversationSnapshot,
+                   let owner = AgentConversationWebView.ownedAttachment(id, snapshot: snapshot) {
+                    ownerID = owner.item.id; descriptor = owner.attachment
+                }
+            } else if resource["_tag"] as? String == "tool-output-image", let id = resource["itemId"] as? String,
+                      resource["threadId"] as? String == conversationSnapshot?.session.description {
+                let images = (try item(id).attachments ?? []).filter { $0.mimeType.hasPrefix("image/") }
+                let index = resource["index"] as? Int ?? -1
+                if images.indices.contains(index) { ownerID = id; descriptor = images[index] }
+            }
+            if let ownerID, let descriptor, let url = AgentConversationWebView.attachmentURL(item: ownerID, attachment: descriptor.id) {
+                return ["relativeUrl": url.absoluteString, "expiresAt": Date.distantFuture.timeIntervalSince1970 * 1000]
+            }
+            guard let action = onConversationAction else { throw ModelError("This conversation asset is unavailable.") }
+            return try await action(kind, payload)
+        case "cite":
+            guard let value = payload["citation"], JSONSerialization.isValidJSONObject(value) else { throw ModelError("Invalid assistant citation.") }
+            let citation = try JSONDecoder().decode(AgentAssistantCitation.self, from: JSONSerialization.data(withJSONObject: value))
+            return insertCitation(citation)
+        case "reportFailure":
+            throw ModelError(payload["message"] as? String ?? "A conversation action failed.")
+        default:
+            guard let action = onConversationAction else { throw ModelError("This conversation action is unavailable: " + kind) }
+            return try await action(kind, payload)
+        }
+    }
+
 
     override var wantsUpdateLayer: Bool { true }
 
@@ -372,7 +644,9 @@ final class AgentPaneView: ThemedView {
         send.chatTheme = theme
         stop.chatTheme = theme
         endButton.chatTheme = theme
-        transcript.theme = theme
+        if usesWebConversation { nativeThemeDirty = true }
+        else { transcript.theme = theme; nativeThemeDirty = false }
+        conversationWebView.updateTheme(theme)
         composer.needsDisplay = true
     }
 }

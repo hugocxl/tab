@@ -162,6 +162,10 @@ extension Message {
 extension RequestBody {
     public func validate() throws(ErrorCode) {
         switch self {
+        case .agentAttachment(let request):
+            try request.validate()
+        case .agentCheckpoint(let request):
+            try request.validate()
         case .agentChat(let request):
             try request.validate()
         case .agentComposerContext, .agentModelCatalog:
@@ -247,6 +251,10 @@ extension ServerSettingsDoc {
 extension ReplyBody {
     public func validate() throws(ErrorCode) {
         switch self {
+        case .agentAttachment(let attachment):
+            try attachment.validate()
+        case .agentCheckpoint(let checkpoint):
+            try checkpoint.validate()
         case .agentChat(let snapshot):
             try snapshot.validate()
         case .agentComposerContext(let context):
@@ -632,6 +640,8 @@ extension GitPullRequestAction {
         switch self {
         case .info, .number:
             break
+        case .preview(let host, let repository, let number):
+            try GitPullRequestPreview.validateTarget(host: host, repository: repository, number: number)
         case .diff(let number, let lineLimit):
             try Validation.number(number)
             try Validation.lineLimit(lineLimit)
@@ -663,7 +673,12 @@ extension FilesRequest {
         switch action {
         case .list(let path), .read(let path), .readBytes(let path), .stat(let path), .mkdir(let path):
             try path.validateRelative()
-        case .write(let path, let content):
+        case .readRange(let path, let offset, let length, let revision):
+            try path.validateRelative()
+            guard length > 0, length <= UInt32(FileByteRange.maximumChunkBytes),
+                  offset <= UInt64(Int64.max) - UInt64(length),
+                  revision == nil || (revision?.isEmpty == false && (revision?.utf8.count ?? 0) <= 256 && !Validation.hasNul(revision ?? "")) else { throw .badRequest }
+        case .write(let path, let content, _):
             try path.validateRelative()
             if content.utf8.count > Limits.maxFileBytes { throw .badRequest }
         case .writeBytes(let path, let bytes):
@@ -717,6 +732,12 @@ extension FilesReply {
         case .bytes(let file):
             try file.path.validateRelative()
             if file.bytes.count > Limits.maxFileBytes { throw .badRequest }
+        case .byteRange(let file):
+            try file.path.validateRelative()
+            guard file.totalSize <= UInt64(Int64.max), file.offset <= UInt64(Int64.max),
+                  !file.revision.isEmpty, file.revision.utf8.count <= 256, !Validation.hasNul(file.revision),
+                  file.bytes.count <= FileByteRange.maximumChunkBytes,
+                  UInt64(file.bytes.count) <= file.totalSize - min(file.offset, file.totalSize) else { throw .badRequest }
         case .info(let info):
             try info.path.validateRelative()
         case .path(let path):

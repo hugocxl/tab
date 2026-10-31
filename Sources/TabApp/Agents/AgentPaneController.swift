@@ -15,8 +15,16 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     var titleDidChange: (() -> Void)?
 
     private let request: (AgentChatRequest) async throws -> AgentChatSnapshot
+    private let attachmentCache = AgentAttachmentCache()
+    private var filePreview: AgentFilePreviewWindow?
+    private var mediaPreview: AgentMediaPreviewWindow?
+    private var toolDiffWindows: [String: (activity: AgentToolActivity, window: AgentCheckpointDiffWindow)] = [:]
+    private var checkpointWindows: [String: AgentCheckpointDiffWindow] = [:]
+    var loadCheckpoint: AgentCheckpointDiffWindow.Fetch?
     private var refreshTask: Task<Void, Never>?
     private var commandTask: Task<Void, Never>?
+    private var approvalToken: UUID?
+    private var approvalInFlight: Bool { approvalToken != nil }
     private var stopTask: Task<Void, Never>?
     private var refreshPending = false
     private var created = false
@@ -36,6 +44,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     private var connectionGeneration: UInt64 = 0
     private var needsAuthoritativeSnapshot = false
     private(set) var snapshot: AgentChatSnapshot?
+    private var authoritativeProject: ProjectId?
     private(set) var errorMessage: String?
     private(set) var draftAttachments: [AgentDraftAttachment] = []
     private var attachmentTask: Task<Void, Never>?
@@ -49,6 +58,11 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     private var unavailableModelCatalogs = Set<TabProtocol.AgentChatProvider>()
     private var modelMenuOpen = false
 
+    @MainActor
+    private final class ProjectRoute {
+        var project: ProjectId?
+    }
+
     convenience init(context: PaneContext) {
         self.init(context: context) { client, request in try await client.agentChat(request) }
     }
@@ -61,8 +75,9 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         }
         let model = context.model
         let pane = context.pane.id
+        let route = ProjectRoute()
         self.init(session: session, project: context.project.id, provider: provider) { [weak model] request in
-            guard let model, let project = model.state.paneProject(pane),
+            guard let model, let project = route.project ?? model.state.paneProject(pane),
                   let client = model.sideClient(for: project) else {
                 throw AgentPaneError.offline
             }
@@ -72,12 +87,66 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
             } else {
                 routed = request
             }
-            return try await send(client, routed)
+            let result = try await send(client, routed)
+            guard result.session == session, result.project == project else {
+                throw ModelError("The conversation reply does not match its owning session and project.")
+            }
+            route.project = project
+            return result
+        }
+        let owningProject: () -> ProjectId? = { [weak self, weak model] in
+            self?.authoritativeProject ?? route.project ?? model?.state.paneProject(pane)
+        }
+        surface.workspaceRoot = context.project.directory.rawValue
+        AgentConversationNativeActions.install(surface: surface, model: model, pane: pane, session: session)
+        loadCheckpoint = { [weak model] request in
+            guard let model, let project = owningProject(), let client = model.sideClient(for: project) else {
+                throw AgentPaneError.offline
+            }
+            return try await client.agentCheckpoint(request)
+        }
+        attachmentCache.fetch = { [weak model] item, attachment in
+            guard let model, let project = owningProject(), let client = model.sideClient(for: project) else { throw AgentPaneError.offline }
+            let reply = try await client.agentAttachment(.init(session: session, item: item, attachment: attachment.id))
+            guard reply.attachment.descriptor == attachment else { throw ModelError("The attachment does not match this message.") }
+            return reply.attachment.data
+        }
+        surface.fetchAttachment = { [weak self] item, attachment in
+            guard let self else { throw AgentPaneError.offline }
+            return try await self.attachmentCache.data(item: item, attachment: attachment)
+        }
+        surface.onOpenAttachment = { [weak self] item, attachment, download in
+            guard let self, let fetch = self.surface.fetchAttachment else { return }
+            if download {
+                Task { [weak self] in
+                    do {
+                        let data = try await fetch(item, attachment)
+                        guard let self, !self.disposed else { return }
+                        AgentFilePreviewWindow.save(data, name: attachment.name, window: self.view.window) { [weak self] error in self?.showError(error) }
+                    } catch { if self?.disposed == false { self?.showError(error) } }
+                }
+            } else {
+                self.mediaPreview?.close(); self.filePreview?.close()
+                let preview = AgentFilePreviewWindow(item: item, attachment: attachment, fetch: fetch, theme: self.surface.theme)
+                self.filePreview = preview; preview.showWindow(nil)
+            }
+        }
+        surface.onPreviewAttachments = { [weak self] item, attachments, index in
+            guard let self, let fetch = self.surface.fetchAttachment else { return }
+            self.mediaPreview?.close()
+            self.filePreview?.close()
+            let preview = AgentMediaPreviewWindow(item: item, attachments: attachments, index: index, fetch: fetch, theme: self.surface.theme)
+            self.mediaPreview = preview
+            preview.present(in: self.view.window)
         }
         surface.theme = model.theme
         surface.themeDidChange()
+        surface.onRunShellCommand = { [weak model] command in
+            guard let model, let project = owningProject(), let target = model.state.project(project) else { return }
+            model.newTerminal(in: project, command: command, directory: target.directory)
+        }
         surface.onOpenFile = { [weak model] path, line in
-            guard let model, let project = model.state.paneProject(pane) else { return }
+            guard let model, let project = owningProject() else { return }
             model.openEditor(project: project, path: path, line: line)
         }
         composerCoordinator.loadFiles = { [weak model] in
@@ -130,6 +199,8 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         self.selection = AgentModelSelection(provider: provider, model: nil)
         self.request = request
         super.init()
+        surface.citationEnvironmentId = project.description
+        surface.citationThreadId = session.description
         surface.composer.delegate = self
         surface.model.target = self
         surface.model.action = #selector(modelSelected)
@@ -145,7 +216,38 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         surface.send.onPress = { [weak self] in self?.send() }
         surface.stop.onPress = { [weak self] in self?.stop() }
         surface.retry.onPress = { [weak self] in self?.refresh() }
+        surface.onOpenToolDiff = { [weak self] id, activity in
+            guard let self else { return }
+            if let existing = self.toolDiffWindows[id], existing.activity == activity { existing.window.showWindow(nil); return }
+            self.toolDiffWindows[id]?.window.close()
+            let controller = AgentToolDiff.makeWindow(session: self.session, activity: activity, theme: self.surface.theme)
+            controller.onClose = { [weak self, weak controller] in
+                if self?.toolDiffWindows[id]?.window === controller { self?.toolDiffWindows.removeValue(forKey: id) }
+            }
+            self.toolDiffWindows[id] = (activity, controller)
+            controller.showWindow(nil)
+        }
+        surface.onOpenCheckpoint = { [weak self] id, path in
+            guard let self, let fetch = self.loadCheckpoint else { return }
+            let key = id + "\0" + (path ?? "")
+            if let existing = self.checkpointWindows[key] { existing.showWindow(nil); return }
+            let controller = AgentCheckpointDiffWindow(session: self.session, checkpoint: id, path: path,
+                theme: self.surface.theme, fetch: fetch)
+            controller.onClose = { [weak self] in self?.checkpointWindows.removeValue(forKey: key) }
+            self.checkpointWindows[key] = controller
+            controller.showWindow(nil)
+        }
         surface.onApproval = { [weak self] id, allow in self?.approve(id, allow: allow) }
+        surface.onConversationApproval = { [weak self] id, allow in
+            guard let self else { throw CancellationError() }
+            try await self.approveAndWait(id, allow: allow)
+        }
+        surface.onConversationModalChange = { [weak self] in
+            guard let self else { return }
+            if self.surface.isConversationModal { self.composerCoordinator.dismiss() }
+            self.updateControls()
+        }
+        surface.onConversationActionFailure = { [weak self] in self?.showError($0) }
         surface.attach.onPress = { [weak self] in self?.chooseAttachments() }
         surface.composer.onAttachFiles = { [weak self] in self?.attachFiles($0) }
         surface.composer.onAttachImage = { [weak self] data, mime in self?.attachImage(data, mimeType: mime) }
@@ -163,7 +265,9 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         updateControls()
     }
 
-    func focusContent() { view.window?.makeFirstResponder(surface.composer) }
+    func focusContent() {
+        view.window?.makeFirstResponder(surface.isConversationModal ? surface.conversationWebView.webView : surface.composer)
+    }
     func didShow() { refresh() }
     func didHide() {} // Keep the draft, transcript and scroll position when switching projects.
 
@@ -188,7 +292,18 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     }
 
     func dispose() {
+        surface.disposeConversation()
+        attachmentCache.cancel()
+        filePreview?.close()
+        filePreview = nil
+        mediaPreview?.close()
+        mediaPreview = nil
+        for controller in Array(checkpointWindows.values) { controller.close() }
+        checkpointWindows.removeAll()
+        for entry in Array(toolDiffWindows.values) { entry.window.close() }
+        toolDiffWindows.removeAll()
         disposed = true
+        approvalToken = nil
         refreshTask?.cancel()
         commandTask?.cancel()
         stopTask?.cancel()
@@ -206,6 +321,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     func connectionChanged() {
         guard !disposed else { return }
         connectionGeneration &+= 1
+        approvalToken = nil
         modelCatalogTask?.cancel()
         modelCatalogTask = nil
         modelCatalogLoadedAt = .distantPast
@@ -267,8 +383,9 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     }
 
     func send() {
+        guard !surface.isConversationModal, !approvalInFlight else { return }
         if composerCoordinator.performTypedAction() { return }
-        let text = surface.composer.string
+        let text = AgentComposerCitation.prompt(from: surface.composer.attributedString())
         guard !disposed, commandTask == nil, created, canSend,
               preparingAttachments == 0,
               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !draftAttachments.isEmpty else { return }
@@ -290,10 +407,37 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     }
 
     func approve(_ id: String, allow: Bool) {
-        guard !disposed, !needsAuthoritativeSnapshot, commandTask == nil, snapshot?.items.contains(where: {
+        guard !disposed, !needsAuthoritativeSnapshot, !approvalInFlight, commandTask == nil, snapshot?.items.contains(where: {
             $0.id == id && $0.kind == .approval && !$0.isComplete
         }) == true else { return }
         run(.approve(session: session, request: id, allow: allow))
+    }
+
+    /// The web action is acknowledged only after the server accepts it. Keeping
+    /// this await in the bridge task also propagates page disposal cancellation.
+    private func approveAndWait(_ id: String, allow: Bool) async throws {
+        try Task.checkCancellation()
+        guard !disposed, !needsAuthoritativeSnapshot, !approvalInFlight, commandTask == nil,
+              snapshot?.items.contains(where: { $0.id == id && $0.kind == .approval && !$0.isComplete }) == true else {
+            throw ModelError("This approval is no longer available.")
+        }
+        let generation = connectionGeneration
+        let token = UUID()
+        approvalToken = token
+        updateControls()
+        defer {
+            if approvalToken == token { approvalToken = nil; updateControls() }
+        }
+        do {
+            let result = try await request(.approve(session: session, request: id, allow: allow))
+            try Task.checkCancellation()
+            guard !disposed, generation == connectionGeneration, result.session == session,
+                  result.project == (authoritativeProject ?? project) else { throw CancellationError() }
+            accept(result, generation: generation)
+        } catch {
+            if !Task.isCancelled, !disposed, generation == connectionGeneration { showError(error) }
+            throw error
+        }
     }
 
     private func chooseAttachments() {
@@ -445,7 +589,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     }
 
     func stop() {
-        guard !disposed, !needsAuthoritativeSnapshot, stopTask == nil,
+        guard !surface.isConversationModal, !disposed, !needsAuthoritativeSnapshot, stopTask == nil,
               submitting || snapshot?.status == .working || snapshot?.status == .waiting else { return }
         guard snapshot?.status == .working || snapshot?.status == .waiting else {
             // Do not interrupt ahead of the send's server acceptance. Revision events
@@ -478,6 +622,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     }
 
     private func run(_ command: AgentChatRequest, onSuccess: (() -> Void)? = nil) {
+        guard !approvalInFlight else { return }
         let generation = connectionGeneration
         if case .send = command { submitting = true }
         commandTask = Task { [weak self] in
@@ -506,7 +651,8 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     }
 
     private func accept(_ result: AgentChatSnapshot, generation: UInt64, authoritative: Bool = false) {
-        guard !disposed, generation == connectionGeneration, result.session == session else { return }
+        guard !disposed, generation == connectionGeneration, result.session == session,
+              authoritativeProject == nil || result.project == authoritativeProject else { return }
         if needsAuthoritativeSnapshot {
             guard authoritative else { return }
             needsAuthoritativeSnapshot = false
@@ -514,6 +660,10 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
             guard result.revision >= (snapshot?.revision ?? 0) else { return }
         }
         snapshot = result
+        // Home may remap during bootstrap. Bind the first authoritative session
+        // owner, then reject foreign-project replies for this controller's life.
+        authoritativeProject = result.project
+        surface.citationEnvironmentId = result.project.description
         errorMessage = nil
         if !selectionEdited || (result.providerSession != nil && selection.provider != result.provider) {
             selection = AgentModelSelection(provider: result.provider, model: result.model)
@@ -521,6 +671,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
             selectionEdited = false
         }
         surface.render(result)
+        if authoritative { surface.onConversationProjectRefresh?() }
         updateControls()
         if stopRequested && (result.status == .working || result.status == .waiting) { stop() }
         titleDidChange?()
@@ -537,16 +688,20 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     }
 
     private func updateControls() {
-        surface.send.isEnabled = !disposed && created && commandTask == nil && canSend &&
+        surface.conversationWebView.connectionState = created && !needsAuthoritativeSnapshot ? "live" : (snapshot == nil ? "empty" : "cached")
+        let modal = surface.isConversationModal
+        surface.composer.isEditable = !modal && !disposed
+        surface.attach.isEnabled = !modal && !disposed
+        surface.send.isEnabled = !modal && !approvalInFlight && !disposed && created && commandTask == nil && canSend &&
             preparingAttachments == 0 && (!surface.composer.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !draftAttachments.isEmpty)
-        surface.stop.isEnabled = !disposed && !needsAuthoritativeSnapshot && stopTask == nil && !stopRequested &&
+        surface.stop.isEnabled = !modal && !disposed && !needsAuthoritativeSnapshot && stopTask == nil && !stopRequested &&
             (submitting || snapshot?.status == .working || snapshot?.status == .waiting)
         let busy = submitting || snapshot?.status == .working || snapshot?.status == .waiting
         surface.send.isHidden = busy
         surface.stop.isHidden = !busy
-        surface.model.isEnabled = canEditSelection && !needsAuthoritativeSnapshot
+        surface.model.isEnabled = !modal && canEditSelection && !needsAuthoritativeSnapshot
         surface.effort.isEnabled = surface.model.isEnabled && !supportedEfforts.isEmpty
-        surface.access.isEnabled = !disposed && created && !needsAuthoritativeSnapshot && commandTask == nil && snapshot?.status != .closed
+        surface.access.isEnabled = !modal && !disposed && created && !needsAuthoritativeSnapshot && commandTask == nil && snapshot?.status != .closed
         let mode = snapshot?.accessMode ?? .standard
         surface.access.select(surface.access.itemArray.first { ($0.representedObject as? AgentAccessMode) == mode })
         surface.access.symbol = mode == .fullAccess ? "lock.open" : mode == .ask ? "hand.raised" : "shield.lefthalf.filled"
@@ -555,7 +710,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
                                         contextWindow: snapshot?.contextUsage?.contextWindow)
         surface.setActivity(status: snapshot?.status ?? .idle, submitting: submitting)
         updateSelectionMenus()
-        surface.setApprovalsEnabled(commandTask == nil && !disposed && !needsAuthoritativeSnapshot)
+        surface.setApprovalsEnabled(!approvalInFlight && commandTask == nil && !disposed && !needsAuthoritativeSnapshot)
         surface.feedback.stringValue = errorMessage ?? statusText
         surface.feedback.toolTip = surface.feedback.stringValue
         surface.feedback.setAccessibilityValue(surface.feedback.stringValue)

@@ -85,10 +85,15 @@ public struct AgentChatItem: Codable, Hashable, Sendable, Identifiable {
     public var isComplete: Bool
     public var tool: AgentToolActivity?
     public var attachments: [AgentChatAttachmentDescriptor]?
+    /// First/last server observation. Absent on older persisted transcripts.
+    public var createdAt: Date?
+    public var updatedAt: Date?
+    public var workContext: AgentChatWorkContext?
 
     public init(id: String = UUID().uuidString, kind: Kind, text: String,
                 detail: String? = nil, isComplete: Bool = true, tool: AgentToolActivity? = nil,
-                attachments: [AgentChatAttachmentDescriptor]? = nil) {
+                attachments: [AgentChatAttachmentDescriptor]? = nil, createdAt: Date? = nil,
+                updatedAt: Date? = nil, workContext: AgentChatWorkContext? = nil) {
         self.id = id
         self.kind = kind
         self.text = text
@@ -96,6 +101,7 @@ public struct AgentChatItem: Codable, Hashable, Sendable, Identifiable {
         self.isComplete = isComplete
         self.tool = tool
         self.attachments = attachments
+        self.createdAt = createdAt; self.updatedAt = updatedAt; self.workContext = workContext
     }
 }
 

@@ -35,6 +35,12 @@ final class AgentComposerTextView: NSTextView {
         registerForDraggedTypes(AgentAttachmentPasteboard.types)
     }
 
+    override func shouldChangeText(in affectedCharRange: NSRange, replacementString: String?) -> Bool {
+        guard super.shouldChangeText(in: affectedCharRange, replacementString: replacementString) else { return false }
+        AgentComposerCitation.prepareEdit(in: textStorage, range: affectedCharRange)
+        return true
+    }
+
     override func paste(_ sender: Any?) {
         if !receiveAttachment(from: .general) { pasteAsPlainText(sender) }
     }

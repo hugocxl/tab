@@ -202,7 +202,22 @@ struct GitRepository: Sendable {
         let common = try absolute("--git-common-dir")
         return GitRepoInfo(root: ServerPath(path), gitDir: ServerPath(gitDirectory),
                            isWorktree: canonical(gitDirectory) != canonical(common),
-                           currentBranch: try summary().branch)
+                           currentBranch: try summary().branch, originURL: Self.sanitizedOriginURL(config("remote.origin.url")))
+    }
+
+    /// Repository matching never forwards URL credentials or query tokens to the renderer.
+    static func sanitizedOriginURL(_ raw: String?) -> String? {
+        guard let raw, !raw.isEmpty, raw.utf8.count <= 4096, !raw.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else { return nil }
+        if var value = URLComponents(string: raw), let scheme = value.scheme?.lowercased(), ["http", "https", "ssh", "git"].contains(scheme), value.host != nil {
+            value.user = nil; value.password = nil; value.query = nil; value.fragment = nil
+            return value.string
+        }
+        guard let expression = try? NSRegularExpression(pattern: #"^(?:[^@/:\s]+@)?([^@/:\s]+):([^\s]+/[^\s]+)$"#),
+              let match = expression.firstMatch(in: raw, range: NSRange(raw.startIndex..., in: raw)),
+              let host = Range(match.range(at: 1), in: raw), let path = Range(match.range(at: 2), in: raw) else { return nil }
+        var value = URLComponents()
+        value.scheme = "ssh"; value.host = String(raw[host]); value.path = "/" + String(raw[path])
+        return value.string
     }
 
     func remoteBranches() throws -> [String] {

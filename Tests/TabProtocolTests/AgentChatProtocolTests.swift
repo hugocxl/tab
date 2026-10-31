@@ -28,6 +28,34 @@ final class AgentChatProtocolTests: XCTestCase {
         }
     }
 
+    func testCheckpointWireMessagesAndInvalidIdentifiers() throws {
+        let id = UUID().uuidString
+        let session = SessionId()
+        let messages: [Message] = [
+            .request(RequestId(1), .agentCheckpoint(.init(session: session, checkpoint: id, path: "file\nname.swift"))),
+            .reply(RequestId(1), .agentCheckpoint(.init(checkpoint: id,
+                files: [.init(path: "file\nname.swift", additions: 1, deletions: 2)], totalFiles: 1,
+                path: "file\nname.swift", diff: .init(rows: [.init(kind: .addition, text: "+new")], additions: 1))))
+        ]
+        for message in messages {
+            try message.validate()
+            XCTAssertEqual(try WireJSON.decode(Message.self, from: WireJSON.encode(message)), message)
+        }
+        XCTAssertThrowsError(try AgentCheckpointRequest(session: session, checkpoint: "../outside").validate())
+        XCTAssertThrowsError(try AgentCheckpointRequest(session: session, checkpoint: id, offset: -1).validate())
+    }
+
+    func testTypedToolMetadataCountsTowardTranscriptLimit() throws {
+        var tool = AgentToolActivity(presentation: .fileChange)
+        let original = tool.transcriptByteCount
+        tool.fileChangeDetails = .init(fileName: "file.txt", diff: String(repeating: "x", count: 1000), operations: [.init(operation: "update", path: "new.txt", oldPath: "old.txt")])
+        tool.fileSearchDetails = .init(pattern: "query", results: [.init(fileName: "file.swift", line: 12, column: 3, preview: "match")])
+        tool.searchPatterns = ["search query"]
+        tool.webResults = [.init(title: "Title", url: "https://example.com", snippet: String(repeating: "y", count: 1000))]
+        XCTAssertGreaterThan(tool.transcriptByteCount, original + 2000)
+        XCTAssertEqual(try WireJSON.decode(AgentToolActivity.self, from: WireJSON.encode(tool)), tool)
+    }
+
     func testPromptAndModelLimits() throws {
         let session = SessionId()
         XCTAssertThrowsError(try AgentChatRequest.send(session: session, text: " ", model: nil).validate())

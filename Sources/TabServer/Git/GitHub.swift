@@ -61,8 +61,11 @@ final class GitHub: @unchecked Sendable {
     // MARK: - Actions
 
     func apply(_ action: GitPullRequestAction, in repository: GitRepository) throws -> GitReply {
-        let identity = try identity(repository)
+        let identity: String
+        if case .preview = action { identity = "" } else { identity = try self.identity(repository) }
         switch action {
+        case .preview(let host, let target, let number):
+            return .pullRequestPreview(try preview(repository, host: host, target: target, number: number))
         case .info:
             return .pullRequest(try current(repository, identity: identity))
         case .number:
@@ -103,6 +106,48 @@ final class GitHub: @unchecked Sendable {
             try updateBranch(repository, identity: identity, number: number, expectedHead: expectedHead)
             return .done
         }
+    }
+
+    /// The inline card reads only metadata. It cannot mutate a PR or forward a web token.
+    private func preview(_ repository: GitRepository, host: String, target: String, number: UInt64) throws -> GitPullRequestPreview {
+        try GitPullRequestPreview.validateTarget(host: host, repository: target, number: number)
+        if host != "github.com" {
+            let projectHost = URL(string: try identity(repository))?.host?.lowercased()
+            guard projectHost == host else { throw gitError("This GitHub host is not configured for the project") }
+        }
+        let fields = "{number,html_url,title,state,draft,created_at,merged_at,user:(if .user then (.user|{login,name,avatar_url}) else null end)}"
+        let output = try run(repository, ["api", "--method", "GET", "--hostname", host,
+                                          "repos/" + target + "/pulls/" + String(number), "--jq", fields], truncate: 128 * 1024)
+        guard !output.truncated, let value = try JSONSerialization.jsonObject(with: output.stdout) as? [String: Any],
+              Self.unsigned(value["number"]) == number,
+              let title = value["title"] as? String, !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, title.utf8.count <= 16_384,
+              let rawURL = value["html_url"] as? String, let url = URL(string: rawURL), url.scheme == "https", url.host?.lowercased() == host,
+              url.port == nil, url.user == nil, url.password == nil,
+              url.path.lowercased() == "/" + target.lowercased() + "/pull/" + String(number),
+              let draft = value["draft"] as? Bool,
+              let createdAt = value["created_at"] as? String, createdAt.utf8.count <= 128,
+              let rawState = value["state"] as? String, ["open", "closed"].contains(rawState) else {
+            throw gitError("GitHub CLI returned invalid pull-request preview metadata")
+        }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if formatter.date(from: createdAt) == nil {
+            formatter.formatOptions = [.withInternetDateTime]
+            guard formatter.date(from: createdAt) != nil else { throw gitError("GitHub CLI returned an invalid pull-request creation date") }
+        }
+        let author: GitPullRequestPreview.Author?
+        if let user = value["user"] as? [String: Any], let login = user["login"] as? String, !login.isEmpty, login.utf8.count <= 256 {
+            let name = user["name"] as? String
+            let avatar = user["avatar_url"] as? String
+            guard (name?.utf8.count ?? 0) <= 1024, (avatar?.utf8.count ?? 0) <= 4096,
+                  avatar == nil || ["http", "https"].contains(URL(string: avatar ?? "")?.scheme ?? "") else {
+                throw gitError("GitHub CLI returned invalid pull-request author metadata")
+            }
+            author = .init(login: login, name: name, avatarURL: avatar)
+        } else { author = nil }
+        let merged = value["merged_at"] as? String
+        return .init(repository: target, number: number, title: title, url: rawURL, author: author,
+                     state: merged?.isEmpty == false ? .merged : rawState == "open" ? .open : .closed, isDraft: draft, createdAt: createdAt)
     }
 
     /// The branch a pull request worktree checks out, fetched and tracking

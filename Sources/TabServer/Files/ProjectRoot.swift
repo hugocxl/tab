@@ -80,11 +80,22 @@ final class ProjectRoot: @unchecked Sendable {
 
     /// Resolves a path relative to the project, following links only while
     /// they stay inside it. The last component may not exist yet.
-    func resolve(_ path: String) throws -> Target {
+    func resolve(_ path: String, createParents: Bool = false) throws -> Target {
         if path.hasPrefix("/") || path.utf8.contains(0) {
             throw FilesFailure.path("Expected a path relative to the project")
         }
-        var pending = ArraySlice(Self.components(path))
+        var components = Self.components(path)
+        if createParents {
+            var normalized: [String] = []
+            for name in components {
+                if name == "." { continue }
+                if name == ".." {
+                    guard normalized.popLast() != nil else { throw FilesFailure.path("Path escapes the project folder") }
+                } else { normalized.append(name) }
+            }
+            components = normalized
+        }
+        var pending = ArraySlice(components)
         var names: [String] = []
         var parents = [directory]
         var links = 0
@@ -123,7 +134,12 @@ final class ProjectRoot: @unchecked Sendable {
                 if !found, code != ENOENT { throw FilesFailure.system(name, code) }
                 return Target(parent: parent, name: name, components: names + [name])
             }
-            guard found else { throw FilesFailure.system((names + [name]).joined(separator: "/"), code) }
+            if !found {
+                guard createParents, code == ENOENT else { throw FilesFailure.system((names + [name]).joined(separator: "/"), code) }
+                guard mkdirat(parent.fd, name, 0o777) == 0 || errno == EEXIST else {
+                    throw FilesFailure.system((names + [name]).joined(separator: "/"))
+                }
+            }
             let child = openat(parent.fd, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
             guard child >= 0 else { throw FilesFailure.system((names + [name]).joined(separator: "/")) }
             names.append(name)
@@ -134,8 +150,8 @@ final class ProjectRoot: @unchecked Sendable {
     }
 
     /// A target that may be changed: never the project folder itself.
-    func mutation(_ path: String) throws -> Target {
-        let target = try resolve(path)
+    func mutation(_ path: String, createParents: Bool = false) throws -> Target {
+        let target = try resolve(path, createParents: createParents)
         if target.components.isEmpty { throw FilesFailure.path("The project folder itself can't be changed") }
         if target.name == "." { return try resolve(target.relative) }
         return target

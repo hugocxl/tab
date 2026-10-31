@@ -56,7 +56,7 @@ final class AgentRenderingTests: XCTestCase {
 
     func testMarkdownStreamingFenceAndUnsafeLinksRemainNonExecutable() {
         XCTAssertEqual(AgentMarkdown.blocks("Intro\n\n```swift\nlet value = 1"), [
-            .paragraph("Intro"), .code("swift", "let value = 1"),
+            .paragraph("Intro"), .code("swift", "let value = 1\n", closed: false),
         ])
         let rendered = AgentMarkdown.render("[Not a command](javascript:alert) and [Not a file opener](file:///etc/hosts)",
                                             theme: AppTheme(systemIsDark: false))
@@ -70,6 +70,7 @@ final class AgentRenderingTests: XCTestCase {
     private func surface(width: CGFloat = 1000, height: CGFloat = 800) -> AgentPaneView {
         _ = NSApplication.shared
         let surface = AgentPaneView(frame: NSRect(x: 0, y: 0, width: width, height: height))
+        surface.disposeConversation() // This fixture exercises the native fallback.
         surface.model.addItems(withTitles: ["Claude Sonnet", "Codex"])
         surface.effort.addItems(withTitles: ["High", "Medium", "Low"])
         surface.access.addItem(withTitle: "Auto")
@@ -89,13 +90,14 @@ final class AgentRenderingTests: XCTestCase {
         surface.render(snapshot)
         let document = try XCTUnwrap(surface.transcriptScroll.documentView)
         let rows = document.subviews.compactMap { $0 as? AgentTimelineRow }
-        XCTAssertEqual(rows.count, 3, "Consecutive tools share one activity group")
+        XCTAssertEqual(rows.count, 4, "Each tool call is a separately virtualized timeline row")
         for row in rows {
             XCTAssertLessThanOrEqual(row.frame.width, 800)
             XCTAssertEqual(row.frame.midX, document.bounds.midX, accuracy: 1)
         }
         let user = try XCTUnwrap(rows.first)
-        let userText = try XCTUnwrap(user.subviews.compactMap { $0 as? AgentRichTextView }.first)
+        let userResponse = try XCTUnwrap(user.subviews.compactMap { $0 as? AgentResponseView }.first)
+        let userText = try XCTUnwrap(descendants(userResponse).compactMap { $0 as? AgentRichTextView }.first)
         XCTAssertEqual(userText.string, "Please preserve the composer draft.")
         XCTAssertGreaterThan(userText.frame.height, 14, "Rendered text needs a real TextKit storage and layout stack")
         let answer = try XCTUnwrap(rows[1].subviews.compactMap { $0 as? AgentResponseView }.first)
@@ -155,10 +157,9 @@ final class AgentRenderingTests: XCTestCase {
         Setext title
         ---
         """)
-        XCTAssertTrue(parsed.contains(.list("•", "outer", 0)))
-        XCTAssertTrue(parsed.contains(.list("◦", "nested", 1)))
-        XCTAssertTrue(parsed.contains(.list("iii.", "deep\ncontinuation", 2)))
-        XCTAssertTrue(parsed.contains(.list("☑", "done", 0)))
+        XCTAssertTrue(parsed.contains { if case .list("•", "outer", 0, _) = $0 { return true }; return false })
+        XCTAssertTrue(parsed.contains { if case .list("◦", "nested\n3. deep\ncontinuation", 1, _) = $0 { return true }; return false })
+        XCTAssertTrue(parsed.contains { if case .list("☑", "done", 0, _) = $0 { return true }; return false })
         XCTAssertTrue(parsed.contains(.quote("quoted text\n- quoted child")))
         XCTAssertTrue(parsed.contains(.heading(2, "Setext title")))
     }
@@ -167,7 +168,7 @@ final class AgentRenderingTests: XCTestCase {
         let parsed = AgentMarkdown.blocks("""
         | Name | Value |
         | :--- | ---: |
-        | `a|b` | [source](Sources/App.swift:19) |
+        | `a\\|b` | [source](Sources/App.swift:19) |
         | escaped\\|pipe | **bold** |
         """)
         guard case .table(let headers, let rows, let alignments) = try XCTUnwrap(parsed.first) else {
@@ -181,13 +182,13 @@ final class AgentRenderingTests: XCTestCase {
         response.setContent("| Name | Value |\n| --- | --- |\n| text | \"quoted\" |", theme: AppTheme(systemIsDark: false))
         _ = response.height(for: 180)
         let table = try XCTUnwrap(response.subviews.compactMap { $0 as? AgentResponseTable }.first)
-        XCTAssertEqual(table.copyText(.csv), "\"Name\",\"Value\"\n\"text\",\"\"\"quoted\"\"\"")
+        XCTAssertEqual(table.copyText(.csv), "Name,Value\ntext,\"\"\"quoted\"\"\"")
         XCTAssertTrue(table.copyText(.markdown).contains("| Name | Value |"))
         XCTAssertTrue(table.scroll.hasHorizontalScroller)
-        // Two short columns each use the 90pt minimum: 180pt is an exact fit, not overflow.
+        // Short columns fit the lane, with no arbitrary per-column minimum.
         XCTAssertEqual(try XCTUnwrap(table.scroll.documentView).frame.width, table.scroll.bounds.width, accuracy: 1)
-        _ = response.height(for: 140)
-        // A genuinely narrower viewport must scroll rather than compress columns below that minimum.
+        _ = response.height(for: 40)
+        // Below the longest words plus cell padding, the table scrolls.
         XCTAssertGreaterThan(try XCTUnwrap(table.scroll.documentView).frame.width, table.scroll.bounds.width)
     }
 
@@ -214,6 +215,8 @@ final class AgentRenderingTests: XCTestCase {
     }
 
     func testCodeUsesEditorTokenizerAndKeepsSelectionAsOpenFenceStreams() throws {
+        let restoreClipboard = preserveAgentTestClipboard()
+        defer { restoreClipboard() }
         let theme = AppTheme(systemIsDark: true)
         let response = AgentResponseView(frame: .zero)
         response.setContent("Intro\n\n```swift title=\"Example.swift\"\nlet count = 42", theme: theme)
@@ -238,8 +241,10 @@ final class AgentRenderingTests: XCTestCase {
     func testLongCodeOverflowsHorizontallyAndWrapRemeasuresThroughCallback() throws {
         let response = AgentResponseView(frame: .zero)
         response.setContent("```swift\nlet longLine = \"" + String(repeating: "long ", count: 40) + "\"\n```", theme: AppTheme(systemIsDark: true))
-        let unwrappedHeight = response.height(for: 280)
         let code = try XCTUnwrap(response.subviews.compactMap { $0 as? AgentResponseCode }.first)
+        XCTAssertTrue(code.wrapped, "Conversation defaults code blocks to wrapped text")
+        code.setWrapped(false)
+        let unwrappedHeight = response.height(for: 280)
         XCTAssertGreaterThan(code.text.frame.width, code.scroll.frame.width)
         var invalidated = false
         response.onHeightChanged = { invalidated = true }
@@ -301,6 +306,15 @@ final class AgentRenderingTests: XCTestCase {
                 let name = "agent-response-\(dark ? "dark" : "light")-\(width).png"
                 try XCTUnwrap(rep.representation(using: .png, properties: [:]))
                     .write(to: URL(fileURLWithPath: output).appendingPathComponent(name))
+                let metrics: [[String: Any]] = descendants(response).compactMap { view in
+                    guard view is AgentResponseSection || view is NSTextView else { return nil }
+                    let frame = view.convert(view.bounds, to: root)
+                    return ["type": String(describing: type(of: view)), "x": frame.minX, "y": frame.minY,
+                            "width": frame.width, "height": frame.height,
+                            "text": (view as? NSTextView)?.string ?? ""]
+                }
+                try JSONSerialization.data(withJSONObject: metrics, options: [.prettyPrinted, .sortedKeys])
+                    .write(to: URL(fileURLWithPath: output).appendingPathComponent(name + ".json"))
             }
         }
     }

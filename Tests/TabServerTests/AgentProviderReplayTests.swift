@@ -3,15 +3,121 @@ import TabProtocol
 import XCTest
 @testable import TabServer
 
-/// Offline excerpts from T3 Code 6fc9144a60c4a5f45089316ddd5f7371bafd3bf2 (MIT).
+/// Offline excerpts from the provider source 6fc9144a60c4a5f45089316ddd5f7371bafd3bf2 (MIT).
 /// Source root: apps/server/src/orchestration-v2/testkit/fixtures/.
 /// Only normalization-relevant fields are retained; IDs, text, block boundaries,
 /// delta boundaries and event order are from the recordings, not invented wire data.
 /// Claude `emit_inbound.frame` is the SDK message, not the query.open wrapper.
 /// SDK permission callbacks are deliberately excluded: they are not CLI control frames.
-final class AgentT3ReplayTests: XCTestCase {
+final class AgentProviderReplayTests: XCTestCase {
+    func testTypedSearchDataFlowsThroughProviderEvents() throws {
+        let transcript = ProviderReplayTranscript()
+        let claude = ClaudeAgentRuntime(onEvent: { transcript.receive($0) })
+        claude.beginTurn()
+        claude.receive(["type": "assistant", "message": ["id": "assistant", "content": [
+            ["type": "tool_use", "id": "search", "name": "WebSearch", "input": ["query": "Swift docs"]],
+        ]]])
+        claude.receive(["type": "user", "message": ["content": [
+            ["type": "tool_result", "tool_use_id": "search", "content": "Search completed"],
+        ]], "tool_use_result": ["query": "Swift docs", "durationSeconds": 0.5, "results": [
+            ["content": [["title": "Guide", "url": "https://example.com/docs"]]],
+        ]]])
+        let result = try XCTUnwrap(transcript.items["search"]?.tool)
+        XCTAssertEqual(result.presentation, .webSearch)
+        XCTAssertEqual(result.searchPatterns, ["Swift docs"])
+        XCTAssertEqual(result.webResults, [.init(title: "Guide", url: "https://example.com/docs")])
+
+        let codex = CodexAgentRuntime(onEvent: { transcript.receive($0) })
+        codex.receive(["method": "item/completed", "params": ["item": [
+            "id": "codex-search", "type": "webSearch", "query": "Swift docs",
+            "action": ["type": "search", "queries": ["AppKit", "TextKit"]],
+        ]]])
+        XCTAssertEqual(transcript.items["codex-search"]?.tool?.searchPatterns, ["AppKit", "TextKit", "Swift docs"])
+        XCTAssertEqual(transcript.items["codex-search"]?.tool?.presentation, .webSearch)
+    }
+
+    func testCodexDynamicResultsKeepNamespacesBlocksAndMcpErrorContext() throws {
+        let transcript = ProviderReplayTranscript()
+        let codex = CodexAgentRuntime(onEvent: { transcript.receive($0) })
+        func receive(_ item: [String: Any]) { codex.receive(["method": "item/completed", "params": ["item": item]]) }
+        receive(["id": "repl", "type": "dynamicToolCall", "namespace": " node_repl ", "tool": "js",
+                 "arguments": ["code": "1 + 1"], "success": true, "contentItems": [
+                    ["type": "text", "text": "2"], ["type": "resource_link", "uri": "file:///tmp/result"],
+                 ]])
+        let repl = try XCTUnwrap(transcript.items["repl"]?.tool)
+        XCTAssertEqual(repl.name, "node_repl.js")
+        XCTAssertEqual(repl.presentation, .dynamicTool)
+        XCTAssertEqual(repl.outputIsJSON, true)
+        let blocks = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(try XCTUnwrap(repl.output).utf8)) as? [[String: Any]])
+        XCTAssertEqual(blocks.count, 2)
+        XCTAssertEqual(blocks.last?["uri"] as? String, "file:///tmp/result")
+        receive(["id": "mcp", "type": "mcpToolCall", "server": "docs", "tool": "read", "arguments": [:],
+                 "result": ["content": [["type": "text", "text": "plain fallback"]], "structuredContent": ["answer": 42]],
+                 "error": ["message": "Partial failure"], "status": "failed"])
+        let mcp = try XCTUnwrap(transcript.items["mcp"]?.tool)
+        XCTAssertEqual(mcp.name, "docs.read")
+        XCTAssertEqual(mcp.status, .failed)
+        let output = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(try XCTUnwrap(mcp.output).utf8)) as? [String: Any])
+        XCTAssertEqual(output["error"] as? String, "Partial failure")
+        XCTAssertEqual((output["result"] as? [String: Any])?["answer"] as? Int, 42)
+        receive(["id": "failed", "type": "dynamicToolCall", "tool": "custom", "success": false, "contentItems": NSNull()])
+        XCTAssertEqual(transcript.items["failed"]?.tool?.output, #"{"success":false}"#)
+        XCTAssertEqual(transcript.items["failed"]?.tool?.status, .failed)
+        let restored = try JSONDecoder().decode(AgentToolActivity.self, from: JSONEncoder().encode(repl))
+        XCTAssertEqual(restored, repl)
+    }
+
+    func testTypedFileChangesRetainMovesAndRecordedPatch() throws {
+        let transcript = ProviderReplayTranscript()
+        let codex = CodexAgentRuntime(onEvent: { transcript.receive($0) })
+        codex.receive(["method": "item/completed", "params": ["item": [
+            "id": "moved-file", "type": "fileChange", "status": "completed", "changes": [
+                ["path": "old.swift", "kind": ["type": "update", "move_path": "new.swift"], "diff": "-before\n+after"],
+            ],
+        ]]])
+        let tool = try XCTUnwrap(transcript.items["moved-file"]?.tool)
+        XCTAssertEqual(tool.presentation, .fileChange)
+        XCTAssertEqual(tool.fileChangeDetails?.fileName, "old.swift")
+        XCTAssertEqual(tool.fileChangeDetails?.diff, "-before\n+after")
+        XCTAssertEqual(tool.fileChangeDetails?.operations, [.init(operation: "update", path: "new.swift", oldPath: "old.swift")])
+        XCTAssertNil(tool.fileChangeDetails?.additions)
+        let claude = ClaudeAgentRuntime(onEvent: { transcript.receive($0) })
+        claude.beginTurn()
+        claude.receive(["type": "assistant", "message": ["id": "edit-message", "content": [
+            ["type": "tool_use", "id": "edit", "name": "Edit", "input": ["file_path": "file.txt"]],
+        ]]])
+        claude.receive(["type": "user", "message": ["content": [
+            ["type": "tool_result", "tool_use_id": "edit", "content": "Updated"],
+        ]], "tool_use_result": ["filePath": "file.txt", "structuredPatch": [
+            ["oldStart": 1, "oldLines": 1, "newStart": 1, "newLines": 1, "lines": ["-before", "+after"]],
+        ]]])
+        XCTAssertEqual(transcript.items["edit"]?.tool?.fileChangeDetails?.diff, "--- file.txt\n+++ file.txt\n@@ -1,1 +1,1 @@\n-before\n+after\n")
+    }
+
+    func testCommandInspectorIdentitySurvivesSemanticReadCategoryAndPersistence() throws {
+        let transcript = ProviderReplayTranscript()
+        let normalizer = CodexAgentRuntime(onEvent: { transcript.receive($0) })
+        normalizer.receive(["method": "item/completed", "params": ["item": [
+            "id": "read-command", "type": "commandExecution", "command": "cat README.md",
+            "status": "completed", "exitCode": 0, "aggregatedOutput": "Read me",
+            "commandActions": [["type": "read", "path": "README.md"]],
+        ]]])
+        let tool = try XCTUnwrap(transcript.items["read-command"]?.tool)
+        XCTAssertEqual(tool.category, .read)
+        XCTAssertEqual(tool.presentation, .command)
+        XCTAssertTrue(tool.presentsCommand)
+        let restored = try JSONDecoder().decode(AgentToolActivity.self, from: JSONEncoder().encode(tool))
+        XCTAssertEqual(restored, tool)
+        XCTAssertTrue(restored.presentsCommand)
+        let legacy = try JSONDecoder().decode(AgentToolActivity.self, from: Data(#"{"category":"command"}"#.utf8))
+        XCTAssertTrue(legacy.presentsCommand)
+        XCTAssertFalse(agentToolOutputIsJSON("null"))
+        XCTAssertFalse(agentToolOutputIsJSON(["content": [["type": "text", "text": "{}"]]]))
+        XCTAssertTrue(agentToolOutputIsJSON(["result": [1, 2, 3]]))
+    }
+
     func testClaudeRecordedMultiTurnKeepsFreshMessageIdentity() throws {
-        let transcript = T3ReplayTranscript()
+        let transcript = ProviderReplayTranscript()
         let normalizer = ClaudeAgentRuntime(onEvent: { transcript.receive($0) })
         let frames = try decode(Self.claudeMultiTurn)
         normalizer.beginTurn()
@@ -25,7 +131,7 @@ final class AgentT3ReplayTests: XCTestCase {
     }
 
     func testClaudeRecordedCommandPreservesBlocksToolOutputAndDistinctAnswer() throws {
-        let transcript = T3ReplayTranscript()
+        let transcript = ProviderReplayTranscript()
         let normalizer = ClaudeAgentRuntime(onEvent: { transcript.receive($0) })
         normalizer.beginTurn()
         let frames = try decode(Self.claudeCommand)
@@ -48,7 +154,7 @@ final class AgentT3ReplayTests: XCTestCase {
     }
 
     func testClaudeRecordedRestrictedToolCompletesUnderNativeToolID() throws {
-        let transcript = T3ReplayTranscript()
+        let transcript = ProviderReplayTranscript()
         let normalizer = ClaudeAgentRuntime(onEvent: { transcript.receive($0) })
         normalizer.beginTurn()
         let frames = try decode(Self.claudeRestricted)
@@ -64,7 +170,7 @@ final class AgentT3ReplayTests: XCTestCase {
     }
 
     func testCodexRecordedMultiTurnDoesNotAppendCompletedTextTwice() throws {
-        let transcript = T3ReplayTranscript()
+        let transcript = ProviderReplayTranscript()
         let normalizer = CodexAgentRuntime(onEvent: { transcript.receive($0) })
         try decode(Self.codexMultiTurn).forEach(normalizer.receive)
         XCTAssertEqual(transcript.assistantTexts, ["first fixture turn complete", "second fixture turn complete"])
@@ -74,7 +180,7 @@ final class AgentT3ReplayTests: XCTestCase {
     }
 
     func testCodexRecordedCommandReplacesOutputAggregateAndRetainsCommentary() throws {
-        let transcript = T3ReplayTranscript()
+        let transcript = ProviderReplayTranscript()
         let normalizer = CodexAgentRuntime(onEvent: { transcript.receive($0) })
         let frames = try decode(Self.codexCommand)
         let id = "exec-1a2dcd5e-1591-48a8-bb8e-47cb40883d2c"
@@ -97,7 +203,7 @@ final class AgentT3ReplayTests: XCTestCase {
     }
 
     func testCodexRecordedRestrictedFileChangeRetainsDiffAndSeparateMessages() throws {
-        let transcript = T3ReplayTranscript()
+        let transcript = ProviderReplayTranscript()
         let normalizer = CodexAgentRuntime(onEvent: { transcript.receive($0) })
         let frames = try decode(Self.codexRestricted)
         let id = "exec-114e8eef-018a-444d-8542-aa0232ff1f38"
@@ -110,7 +216,7 @@ final class AgentT3ReplayTests: XCTestCase {
         let tool = try XCTUnwrap(transcript.items[id])
         XCTAssertTrue(tool.isComplete)
         let changes = try XCTUnwrap(JSONSerialization.jsonObject(with: Data((tool.detail ?? "").utf8)) as? [[String: Any]])
-        XCTAssertEqual(changes.first?["path"] as? String, "/home/replay-user/t3code/packages/effect-codex-app-server/.codex-probe-write-action.txt")
+        XCTAssertEqual(changes.first?["path"] as? String, "/home/replay-user/conversation/packages/effect-codex-app-server/.codex-probe-write-action.txt")
         XCTAssertEqual(changes.first?["diff"] as? String, "codex app-server approval fixture.\n")
         XCTAssertEqual(transcript.assistantTexts, ["Created `.codex-probe-write-action.txt` with exactly:\n\n```text\ncodex app-server approval fixture.\n```", "I’ll create the requested fixture file locally with that exact single-line content."])
         XCTAssertEqual(transcript.items.count, 3, "Reasoning and approval RPC are not additional transcript items")
@@ -207,16 +313,16 @@ final class AgentT3ReplayTests: XCTestCase {
     {"method":"item/started","params":{"item":{"type":"reasoning","id":"rs_08bfce1a588b6283016ab5c3b2f48487d08c265fbb08c31486","summary":[],"content":[]}}}
     {"method":"item/completed","params":{"item":{"type":"reasoning","id":"rs_08bfce1a588b6283016ab5c3b2f48487d08c265fbb08c31486","summary":["**Planning patch application despite sandbox restrictions**"],"content":[]}}}
     {"method":"item/completed","params":{"item":{"type":"agentMessage","id":"msg_08bfce1a588b6283016ab5c3b41e5c87d0badb0d609ab7ddf4","text":"I’ll create the requested fixture file locally with that exact single-line content.","phase":"commentary"}}}
-    {"method":"item/started","params":{"item":{"type":"fileChange","id":"exec-114e8eef-018a-444d-8542-aa0232ff1f38","changes":[{"path":"/home/replay-user/t3code/packages/effect-codex-app-server/.codex-probe-write-action.txt","kind":{"type":"add"},"diff":"codex app-server approval fixture.\n"}],"status":"inProgress"}}}
+    {"method":"item/started","params":{"item":{"type":"fileChange","id":"exec-114e8eef-018a-444d-8542-aa0232ff1f38","changes":[{"path":"/home/replay-user/conversation/packages/effect-codex-app-server/.codex-probe-write-action.txt","kind":{"type":"add"},"diff":"codex app-server approval fixture.\n"}],"status":"inProgress"}}}
     {"method":"item/fileChange/requestApproval","id":0,"params":{"itemId":"exec-114e8eef-018a-444d-8542-aa0232ff1f38","reason":null,"grantRoot":null}}
-    {"method":"item/completed","params":{"item":{"type":"fileChange","id":"exec-114e8eef-018a-444d-8542-aa0232ff1f38","changes":[{"path":"/home/replay-user/t3code/packages/effect-codex-app-server/.codex-probe-write-action.txt","kind":{"type":"add"},"diff":"codex app-server approval fixture.\n"}],"status":"completed"}}}
+    {"method":"item/completed","params":{"item":{"type":"fileChange","id":"exec-114e8eef-018a-444d-8542-aa0232ff1f38","changes":[{"path":"/home/replay-user/conversation/packages/effect-codex-app-server/.codex-probe-write-action.txt","kind":{"type":"add"},"diff":"codex app-server approval fixture.\n"}],"status":"completed"}}}
     {"method":"item/completed","params":{"item":{"type":"agentMessage","id":"msg_08bfce1a588b6283016ab5c3b7ef0c87d096aba0299c914020","text":"Created `.codex-probe-write-action.txt` with exactly:\n\n```text\ncodex app-server approval fixture.\n```","phase":"final_answer"}}}
     {"method":"turn/completed","params":{"turn":{"id":"01a0d604-6358-72f1-bb89-7361cce0045c","status":"completed","error":null}}}
     """#
 }
 
 /// Applies the same replacement/delta semantics as AgentSessions without a provider process.
-private final class T3ReplayTranscript: @unchecked Sendable {
+private final class ProviderReplayTranscript: @unchecked Sendable {
     private(set) var items: [String: AgentChatItem] = [:]
     private(set) var deltas: [String: String] = [:]
 
@@ -226,7 +332,7 @@ private final class T3ReplayTranscript: @unchecked Sendable {
 
     func receive(_ event: AgentRuntimeEvent) {
         switch event {
-        case .item(let item): items[item.id] = item
+        case .item(let item), .toolItem(let item, _): items[item.id] = item
         case .textDelta(let id, let text):
             items[id]?.text += text
             deltas[id, default: ""] += text

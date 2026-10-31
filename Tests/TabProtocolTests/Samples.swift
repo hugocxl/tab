@@ -101,6 +101,7 @@ enum Samples {
                                  action: .checkoutPullRequest(project: project, directory: "/tmp/pr", number: 4))),
         .inspectRemoval, .worktreeHooks(teardown: true),
         .pullRequest(.info), .pullRequest(.number), .pullRequest(.diff(number: 3, lineLimit: nil)),
+        .pullRequest(.preview(host: "github.com", repository: "example/repository", number: 3)),
         .pullRequest(.list(filter: .merged, limit: 20, checks: true)),
         .pullRequest(.create(title: "T", body: "B", baseBranch: "main", draft: false)),
         .pullRequest(.merge(number: 3, method: .squash, deleteBranch: true, expectedHead: "abc")),
@@ -137,6 +138,8 @@ enum Samples {
                       additions: 1, deletions: 1, truncated: false, binary: false)),
         .commit("abcdef"), .pullRequest(pullRequest), .pullRequest(nil), .pullRequestNumber(12),
         .pullRequestNumber(nil), .pullRequests([pullRequest]),
+        .pullRequestPreview(GitPullRequestPreview(repository: "example/repository", number: 3, title: "Preview", url: "https://github.com/example/repository/pull/3",
+                                                  author: .init(login: "author", name: nil, avatarURL: nil), state: .open, isDraft: false, createdAt: "2026-10-31T10:00:00Z")),
         .changesPreview(GitChangesPreview(branch: "b", head: "abc", tree: "def", diff: rawDiff,
                                           files: [GitPreviewFile(path: "a", added: 1, removed: 2, untracked: true)],
                                           destination: GitPushDestination(remote: "origin", branch: "b"))),
@@ -146,7 +149,7 @@ enum Samples {
     ]
 
     static let filesActions: [FilesAction] = [
-        .list(""), .read("a.txt"), .readBytes("img.png"), .write(path: "a.txt", content: "hi\n"),
+        .list(""), .read("a.txt"), .readBytes("img.png"), .readRange(path: "movie.mp4", offset: 2, length: 3, expectedRevision: "revision"), .write(path: "a.txt", content: "hi\n"), .write(path: "plans/nested.md", content: "# Plan\n", createParents: true),
         .writeBytes(path: "b.bin", bytes: Data([0, 255])), .stat("a"), .mkdir("dir"),
         .rename(path: "a", name: "b"), .move(paths: ["a", "b"], into: "dir"), .delete(["a"]), .watch, .unwatch,
         .searchFiles(limit: 5000),
@@ -157,6 +160,7 @@ enum Samples {
         .entries([FileEntry(name: "a", path: "dir/a", isDirectory: false, isIgnored: true)]),
         .content(FileContent(path: "a", content: "héllo", size: 6)),
         .bytes(FileBytes(path: "b", bytes: Data([1, 2, 3]))),
+        .byteRange(FileByteRange(path: "movie.mp4", offset: 2, totalSize: 5, revision: "revision", bytes: Data([3, 4, 5]))),
         .info(FileInfo(name: "a", path: "a", isDirectory: true, size: 0)),
         .path("new"), .paths(["a", "b"]), .done,
         .fileList(FileList(paths: ["a.swift", "b/c.swift"], truncated: true)),

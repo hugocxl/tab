@@ -42,7 +42,16 @@ extension AgentChatSnapshot {
                 throw .badRequest
             }
         }
+        for turn in turns ?? [] { try turn.checkpoint?.validate() }
         for item in items {
+            if let context = item.workContext {
+                guard [context.runID, context.providerTurnID, context.itemType, context.sourceStatus, context.toolNonExecutionKind, context.requestKind, context.planStatus]
+                    .allSatisfy({ ($0?.utf8.count ?? 0) <= 4096 && $0?.contains("\0") != true }) else { throw .badRequest }
+                guard [context.beforeTokenCount, context.afterTokenCount].allSatisfy({
+                    guard let count = $0 else { return true }
+                    return count >= 0 && count <= 9_007_199_254_740_991
+                }) else { throw .badRequest }
+            }
             if let attachments = item.attachments {
                 guard attachments.count <= AgentChatAttachment.maxCount else { throw .badRequest }
                 for attachment in attachments { try attachment.validate() }
@@ -60,6 +69,11 @@ extension AgentChatItem {
     public var transcriptByteCount: Int {
         text.utf8.count + (detail?.utf8.count ?? 0) + (tool?.transcriptByteCount ?? 0)
             + (attachments ?? []).reduce(0) { $0 + $1.transcriptByteCount }
+            + (createdAt == nil ? 0 : 48) + (updatedAt == nil ? 0 : 48)
+            + (workContext.map { context in
+                400 + [context.runID, context.providerTurnID, context.itemType, context.sourceStatus, context.toolNonExecutionKind, context.requestKind, context.planStatus]
+                    .reduce(0) { $0 + ($1?.utf8.count ?? 0) }
+            } ?? 0)
     }
 }
 
@@ -71,6 +85,23 @@ extension AgentToolActivity {
         for url in urls ?? [] { bytes += 8 + url.utf8.count }
         for change in fileChanges ?? [] {
             bytes += 64 + change.path.utf8.count + (change.diff?.utf8.count ?? 0) + (change.kind?.utf8.count ?? 0)
+        }
+        for pattern in searchPatterns ?? [] { bytes += 8 + pattern.utf8.count }
+        for result in webResults ?? [] {
+            bytes += 64 + (result.title?.utf8.count ?? 0) + (result.url?.utf8.count ?? 0) + (result.snippet?.utf8.count ?? 0)
+        }
+        if let details = fileSearchDetails {
+            bytes += 64 + (details.pattern?.utf8.count ?? 0)
+            for result in details.results ?? [] {
+                bytes += 128 + result.fileName.utf8.count + (result.preview?.utf8.count ?? 0)
+            }
+        }
+        if let details = fileChangeDetails {
+            bytes += 128 + details.fileName.utf8.count + (details.diff?.utf8.count ?? 0)
+            for operation in details.operations ?? [] {
+                bytes += 128 + operation.operation.utf8.count + operation.path.utf8.count + (operation.oldPath?.utf8.count ?? 0)
+                    + (operation.fileType?.utf8.count ?? 0) + (operation.mimeType?.utf8.count ?? 0)
+            }
         }
         return bytes
     }

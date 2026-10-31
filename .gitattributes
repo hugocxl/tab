@@ -1,0 +1,2 @@
+# Generated renderer assets contain significant whitespace inside JavaScript strings.
+Sources/TabApp/Resources/ConversationRenderer/assets/** linguist-generated=true -whitespace

@@ -98,7 +98,7 @@ final class AgentStreamingIntegrationTests: XCTestCase {
         if let root { try? FileManager.default.removeItem(at: root) }
     }
 
-    func testPartialAssistantIsVisibleAndUpdatesSameTextViewBeforeProviderCanFinish() async throws {
+    func testPartialAssistantIsLaidOutAndUpdatesSameSourceNodeBeforeProviderCanFinish() async throws {
         let model = try XCTUnwrap(model)
         let id = try XCTUnwrap(model.newAgent())
         let pane = try XCTUnwrap(model.controller(for: id) as? AgentPaneController)
@@ -109,6 +109,7 @@ final class AgentStreamingIntegrationTests: XCTestCase {
         window.orderFront(nil)
         self.window = window
         try await wait("initial agent snapshot") { pane.snapshot?.status == .idle }
+        try await wait("actual source renderer activation") { pane.surface.usesWebConversation }
         pane.surface.composer.string = "Exercise streaming, not the final answer"
         pane.selectModel(provider: .claude, model: "claude-sonnet-5-5")
         pane.selectEffort(.medium)
@@ -130,22 +131,22 @@ final class AgentStreamingIntegrationTests: XCTestCase {
         XCTAssertEqual(pane.snapshot?.status, .working)
         XCTAssertFalse(exists("final-emitted"))
         XCTAssertFalse(exists("allow-second"))
-        let body = try await visibleAssistant(pane, text: "FIRST-PARTIAL")
-        assertVisibleGlyphs(body, in: pane)
+        let first = try await sourceAssistant(pane, text: "FIRST-PARTIAL")
+        XCTAssertEqual(first["count"] as? Int, 1)
+        _ = try await pane.surface.conversationWebView.evaluate("window.__streamingMessageNode=document.querySelector('[data-message-id=\"stream-answer\"][data-message-role=\"assistant\"]');return window.__streamingMessageNode.isConnected")
 
         try Data().write(to: root.appendingPathComponent("allow-second"))
         let expanded = "FIRST-PARTIAL SECOND-PARTIAL"
-        try await wait("second delta on existing TextKit view") {
+        try await wait("second delta in controller") {
             pane.snapshot?.items.contains { $0.id == "stream-answer" && $0.text == expanded && !$0.isComplete } == true
-                && body.string == expanded
         }
         XCTAssertGreaterThan(try XCTUnwrap(pane.snapshot?.revision), firstRevision)
         XCTAssertEqual(pane.snapshot?.status, .working)
         XCTAssertFalse(exists("final-emitted"))
         XCTAssertFalse(exists("allow-final"))
-        let updatedBody = try await visibleAssistant(pane, text: expanded)
-        XCTAssertTrue(updatedBody === body)
-        assertVisibleGlyphs(body, in: pane)
+        let second = try await sourceAssistant(pane, text: expanded)
+        XCTAssertEqual(second["sameNode"] as? Bool, true, "The second partial must update the still-mounted source message node")
+        XCTAssertEqual(second["count"] as? Int, 1)
 
         // Only after BOTH interim displays are proven can the subprocess emit its
         // assembled assistant/result frames. A final-message-only UI cannot pass.
@@ -157,35 +158,27 @@ final class AgentStreamingIntegrationTests: XCTestCase {
         }
         XCTAssertTrue(exists("final-emitted"))
         XCTAssertEqual(pane.snapshot?.items.filter { $0.kind == .assistant }.count, 1)
-        XCTAssertEqual(body.string, expanded)
+        let final = try await sourceAssistant(pane, text: expanded)
+        XCTAssertEqual(final["count"] as? Int, 1)
     }
 
-    private func visibleAssistant(_ pane: AgentPaneController, text: String) async throws -> AgentRichTextView {
-        try await wait("partial text in visible transcript view: \(text)") {
-            self.descendants(pane.surface.transcriptScroll).compactMap { $0 as? AgentRichTextView }.contains {
-                $0.string == text && !$0.visibleRect.isEmpty && !$0.isHiddenOrHasHiddenAncestor
+    /// The desktop may be locked. This checks actual source DOM text and layout,
+    /// not an on-screen screenshot, a stored snapshot string or hidden native rows.
+    private func sourceAssistant(_ pane: AgentPaneController, text: String) async throws -> [String: Any] {
+        var last: [String: Any] = [:]
+        for _ in 0..<400 {
+            guard pane.surface.usesWebConversation else {
+                XCTFail("Source renderer fell back: \(pane.surface.conversationRendererFailure ?? "unknown")")
+                throw Failure.timeout("actual source renderer remained active")
             }
+            last = try await pane.surface.conversationWebView.evaluate("const nodes=document.querySelectorAll('[data-message-id=\"stream-answer\"][data-message-role=\"assistant\"]');const node=nodes[0];if(!node)return {count:0};const rect=node.getBoundingClientRect();const style=getComputedStyle(node);const viewport=window.TabConversation.snapshot?.viewport;const bottom=viewport?.mode==='full-pane'?viewport.composer.y:innerHeight;return {count:nodes.length,text:node.innerText,matches:node.innerText.includes(expected),laidOut:rect.width>0&&rect.height>0&&rect.right>0&&rect.left<innerWidth&&rect.bottom>0&&rect.top<bottom&&style.display!=='none'&&style.visibility!=='hidden',sameNode:window.__streamingMessageNode===node&&node.isConnected}", arguments: ["expected": text], timeout: .seconds(2)) as? [String: Any] ?? [:]
+            if last["matches"] as? Bool == true, last["laidOut"] as? Bool == true { return last }
+            try await Task.sleep(for: .milliseconds(20))
         }
-        return try XCTUnwrap(descendants(pane.surface.transcriptScroll).compactMap { $0 as? AgentRichTextView }
-            .first { $0.string == text && !$0.visibleRect.isEmpty })
+        XCTFail("Partial text never reached laid-out source DOM: \(text); state: \(last); daemon log: \(serverLog)")
+        throw Failure.timeout("partial text in actual source DOM")
     }
 
-    private func assertVisibleGlyphs(_ body: AgentRichTextView, in pane: AgentPaneController,
-                                     file: StaticString = #filePath, line: UInt = #line) {
-        XCTAssertTrue(body.window === window, file: file, line: line)
-        XCTAssertTrue(body.isDescendant(of: pane.surface.transcriptScroll), file: file, line: line)
-        guard let layout = body.layoutManager, let container = body.textContainer else {
-            return XCTFail("Partial text has no TextKit layout", file: file, line: line)
-        }
-        let glyphs = layout.glyphRange(for: container)
-        XCTAssertGreaterThan(glyphs.length, 0, file: file, line: line)
-        let glyphRect = layout.boundingRect(forGlyphRange: glyphs, in: container)
-            .offsetBy(dx: body.textContainerOrigin.x, dy: body.textContainerOrigin.y)
-        XCTAssertFalse(glyphRect.intersection(body.visibleRect).isEmpty,
-                       "Partial snapshot must have visible laid-out glyphs, not merely a stored string", file: file, line: line)
-    }
-
-    private func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap { descendants($0) } }
     private func exists(_ name: String) -> Bool { FileManager.default.fileExists(atPath: root.appendingPathComponent(name).path) }
     private var serverLog: String { (try? String(contentsOf: root.appendingPathComponent("server.log"), encoding: .utf8)) ?? "" }
 

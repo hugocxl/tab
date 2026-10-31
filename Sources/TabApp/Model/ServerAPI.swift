@@ -8,6 +8,7 @@ import TabProtocol
 public protocol ServerAPI: AnyObject, Sendable {
     /// The server build and identity from the handshake.
     var server: ServerInfo { get }
+    func supports(_ feature: Feature) -> Bool
     /// Control-channel events; finishes after `disconnected`.
     var events: AsyncStream<ClientEvent> { get }
     /// Terminal panes attach through this.
@@ -15,6 +16,8 @@ public protocol ServerAPI: AnyObject, Sendable {
     func close()
 
     func sessions() async throws -> [SessionInfo]
+    func agentAttachment(_ request: AgentAttachmentRequest) async throws -> AgentAttachmentReply
+    func agentCheckpoint(_ request: AgentCheckpointRequest) async throws -> AgentCheckpointReply
     func agentChat(_ request: AgentChatRequest) async throws -> AgentChatSnapshot
     func agentComposerContext(_ request: AgentComposerContextRequest) async throws -> AgentComposerContextReply
     func agentModelCatalog(_ request: AgentModelCatalogRequest) async throws -> AgentModelCatalogReply
@@ -54,6 +57,16 @@ extension ServerClient: ServerAPI {
 }
 
 extension ServerAPI {
+    public func supports(_ feature: Feature) -> Bool { false }
+
+    public func agentAttachment(_ request: AgentAttachmentRequest) async throws -> AgentAttachmentReply {
+        throw ModelError("Conversation attachment previews are unsupported by this server.")
+    }
+
+    public func agentCheckpoint(_ request: AgentCheckpointRequest) async throws -> AgentCheckpointReply {
+        throw ModelError("Turn diffs are unsupported by this server.")
+    }
+
     public func agentModelCatalog(_ request: AgentModelCatalogRequest) async throws -> AgentModelCatalogReply {
         throw ModelError("Model discovery is unsupported by this server.")
     }
@@ -64,6 +77,14 @@ extension ServerAPI {
 
     public func agentChat(_ request: AgentChatRequest) async throws -> AgentChatSnapshot {
         throw ModelError("Agent chat is unsupported by this server.")
+    }
+
+    /// Fetches one bounded revision-checked chunk for conversation audio/video.
+    public func readFileRange(_ project: ProjectId, path: ServerPath, offset: UInt64, length: UInt32,
+                              expectedRevision: String? = nil) async throws -> FileByteRange {
+        let reply = try await files(FilesRequest(project: project, action: .readRange(path: path, offset: offset, length: length, expectedRevision: expectedRevision)))
+        guard case .byteRange(let range) = reply else { throw ModelError("The server returned an invalid media byte range.") }
+        return range
     }
 
     /// Every file of `project`, for Go to File and the root search.

@@ -4,6 +4,8 @@ import Foundation
 public struct AgentChatAttachment: Codable, Hashable, Sendable, Identifiable {
     // 8 MiB expands to ~10.7 MiB base64, leaving ample envelope/escaped-text
     // space below the 16 MiB frame cap without introducing partial uploads.
+    /// Retrieval supports tool images up to 10 MiB within the 16 MiB wire frame.
+    public static let maxPayloadBytes = 10 * 1024 * 1024
     public static let maxFileBytes = 8 * 1024 * 1024
     public static let maxTotalBytes = 8 * 1024 * 1024
     public static let maxCount = 10
@@ -57,7 +59,7 @@ public struct AgentChatAttachmentDescriptor: Codable, Hashable, Sendable, Identi
               !name.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }),
               !mimeType.isEmpty, mimeType.utf8.count <= 128,
               mimeType.utf8.allSatisfy({ $0 > 32 && $0 < 127 }),
-              byteCount >= 0, byteCount <= AgentChatAttachment.maxFileBytes else { throw .badRequest }
+              byteCount >= 0, byteCount <= AgentChatAttachment.maxPayloadBytes else { throw .badRequest }
     }
 
     public var transcriptByteCount: Int { 128 + id.utf8.count + name.utf8.count + mimeType.utf8.count }

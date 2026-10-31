@@ -90,13 +90,29 @@ enum AgentAttachmentImporter {
     /// Lazy popover preview: no full-resolution decode or larger draft cache.
     /// Like draft thumbnails, the immutable image is handed to the main actor
     /// only after the background worker has finished constructing it.
-    static func previewImage(data: Data) async -> NSImage? {
-        guard !data.isEmpty, data.count <= maximumFileSize else { return nil }
+    static func previewImage(data: Data, pixels: Int = 1200) async -> NSImage? {
+        guard !data.isEmpty, data.count <= AgentChatAttachment.maxPayloadBytes else { return nil }
         let worker = Task.detached(priority: .userInitiated) { () -> PreviewImage? in
             guard !Task.isCancelled,
-                  let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
-                  let image = makeThumbnail(source, pixels: 1200),
-                  !Task.isCancelled else { return nil }
+                  let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary) else { return nil }
+            // NSImageView plays GIF bitmap representations directly. Keep the
+            // original frames and timing instead of flattening to frame zero.
+            // Bound native decoder allocation independently of compressed size.
+            if CGImageSourceGetType(source) as String? == UTType.gif.identifier,
+               CGImageSourceGetCount(source) > 1,
+               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+               let width = properties[kCGImagePropertyPixelWidth] as? NSNumber,
+               let height = properties[kCGImagePropertyPixelHeight] as? NSNumber,
+               width.doubleValue > 0, height.doubleValue > 0,
+               width.doubleValue * height.doubleValue * Double(CGImageSourceGetCount(source)) <= 16_777_216,
+               let bitmap = NSBitmapImageRep(data: data),
+               (bitmap.value(forProperty: .frameCount) as? NSNumber)?.intValue ?? 0 > 1 {
+                guard !Task.isCancelled else { return nil }
+                let image = NSImage(size: NSSize(width: width.doubleValue, height: height.doubleValue))
+                image.addRepresentation(bitmap)
+                return PreviewImage(image: image)
+            }
+            guard let image = makeThumbnail(source, pixels: pixels), !Task.isCancelled else { return nil }
             return PreviewImage(image: NSImage(cgImage: image, size: NSSize(width: CGFloat(image.width), height: CGFloat(image.height))))
         }
         return await withTaskCancellationHandler(operation: { await worker.value?.image }, onCancel: { worker.cancel() })

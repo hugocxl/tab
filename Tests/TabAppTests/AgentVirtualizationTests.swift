@@ -5,6 +5,11 @@ import XCTest
 
 @MainActor
 final class AgentVirtualizationTests: XCTestCase {
+    override func tearDown() async throws {
+        await finishAgentNativeFixtureCleanup()
+        try await super.tearDown()
+    }
+
     private func makeDocument(_ items: [AgentChatItem]) -> AgentTranscriptDocument {
         let document = AgentTranscriptDocument(frame: .zero)
         document.reflow(viewportWidth: 720)
@@ -87,7 +92,7 @@ final class AgentVirtualizationTests: XCTestCase {
         let document = makeDocument(items)
         let original = try XCTUnwrap(document.subviews.compactMap { $0 as? AgentMessageRow }
             .first { descendants($0).compactMap { $0 as? NSTextView }.contains { $0.string.contains("user context") } })
-        let showMore = try XCTUnwrap(descendants(original).compactMap { $0 as? PillButton }.first { $0.title == "Show more" })
+        let showMore = try XCTUnwrap(descendants(original).compactMap { $0 as? PillButton }.first { $0.title == "Show full message" })
         showMore.onPress?()
         XCTAssertTrue(original.captureState().expanded)
         for index in 1...20 {
@@ -105,7 +110,7 @@ final class AgentVirtualizationTests: XCTestCase {
     func testCollapsedCompletedWorkDoesNotConstructItsHistory() {
         let row = AgentCompletedWorkRow(frame: .zero)
         row.update(messages(1_000))
-        XCTAssertEqual(row.preferredHeight(for: 700), 24)
+        XCTAssertEqual(row.preferredHeight(for: 700), 37)
         XCTAssertTrue(descendants(row).compactMap { $0 as? AgentMessageRow }.isEmpty)
     }
 

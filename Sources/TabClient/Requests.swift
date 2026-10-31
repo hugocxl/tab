@@ -16,6 +16,18 @@ extension ServerClient {
         return context
     }
 
+    public func agentAttachment(_ request: AgentAttachmentRequest) async throws -> AgentAttachmentReply {
+        let reply = try await self.request(.agentAttachment(request))
+        guard case .agentAttachment(let attachment) = reply else { throw unexpected(reply) }
+        return attachment
+    }
+
+    public func agentCheckpoint(_ request: AgentCheckpointRequest) async throws -> AgentCheckpointReply {
+        let reply = try await self.request(.agentCheckpoint(request), timeout: max(defaultTimeout, 60))
+        guard case .agentCheckpoint(let checkpoint) = reply else { throw unexpected(reply) }
+        return checkpoint
+    }
+
     /// Reads or changes a server-owned agent conversation. Disconnecting does not close it.
     public func agentChat(_ request: AgentChatRequest) async throws -> AgentChatSnapshot {
         // Startup can include initialize, resume and turn/start RPCs. The server

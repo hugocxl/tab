@@ -4,6 +4,7 @@ import TabProtocol
 
 internal enum AgentRuntimeEvent: Sendable {
     case item(AgentChatItem)
+    case toolItem(AgentChatItem, images: [AgentChatAttachment])
     case textDelta(id: String, text: String)
     case status(AgentChatStatus)
     case providerSession(String)
@@ -19,7 +20,7 @@ internal struct AgentRuntimeError: LocalizedError {
 }
 
 /// All protocol state is confined to queue; process readers never call client code directly.
-// Raw control envelope reference: T3 Code
+// Raw control envelope reference: the provider source
 // apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts:2366–2402.
 // Codex handshake/request lifecycle: the adjacent CodexAdapterV2.ts,
 // ensureInitialized, ensureThread/resumeThread, startNativeTurn, interruptTurn.
@@ -143,7 +144,7 @@ internal final class AgentRuntime: @unchecked Sendable {
     }
 
     private func restartClaudeSelection() throws {
-        // T3's query identity includes model and effort. Clearing effort must
+        // the source renderer's query identity includes model and effort. Clearing effort must
         // reload provider settings, not silently retain the previous override.
         guard let session = claude.sessionID ?? resumeSession else {
             throw AgentRuntimeError("Claude has not supplied a session ID to resume after changing model or effort.")
@@ -244,7 +245,7 @@ internal final class AgentRuntime: @unchecked Sendable {
                 do {
                     let (wireModel, effort) = try selection.get()
                     var params: [String: Any] = ["threadId": threadID, "input": AgentAttachments.codexInput(text: text, attachments: attachments)]
-                    // T3 codexRuntimeModeTurnDefaults: explicitly reset on every
+                    // Source codexRuntimeModeTurnDefaults: explicitly reset on every
                     // turn so leaving Full access restores native prompting/sandboxing.
                     params["approvalPolicy"] = self.accessMode == .fullAccess ? "never" : self.accessMode == .ask ? "untrusted" : "on-request"
                     params["sandboxPolicy"] = ["type": self.accessMode == .fullAccess ? "dangerFullAccess" : self.accessMode == .ask ? "readOnly" : "workspaceWrite"]
@@ -274,7 +275,7 @@ internal final class AgentRuntime: @unchecked Sendable {
 
     private func claudeWireEffort(_ effort: AgentReasoningEffort, model: String?) -> String {
         let model = (model ?? "").lowercased().replacingOccurrences(of: ".", with: "-")
-        // T3 manifest adapter.claudeCode.effortMap for the two legacy profiles.
+        // Source manifest adapter.claudeCode.effortMap for the two legacy profiles.
         if effort == .xhigh, model.contains("opus-4-7") { return "max" }
         if effort == .max, model.contains("sonnet-4-6") { return "high" }
         return effort.rawValue
@@ -462,11 +463,12 @@ internal final class AgentRuntime: @unchecked Sendable {
             guard let message = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                 throw AgentRuntimeError("Expected a JSON object from agent.")
             }
-            if provider == .claude { try receiveClaude(message) } else { try receiveCodex(message) }
+            let source = AgentProviderJSON(data: data)
+            if provider == .claude { try receiveClaude(message, source: source) } else { try receiveCodex(message, source: source) }
         } catch { fail("Invalid \(provider.name) protocol: \(error.localizedDescription)") }
     }
 
-    private func receiveClaude(_ message: [String: Any]) throws {
+    private func receiveClaude(_ message: [String: Any], source: AgentProviderJSON) throws {
         let type = message["type"] as? String
         if type == "control_response", let response = message["response"] as? [String: Any],
            let id = response["request_id"] as? String, let completion = pending.removeValue(forKey: id) {
@@ -489,13 +491,19 @@ internal final class AgentRuntime: @unchecked Sendable {
                 onEvent(.item(AgentChatItem(kind: .notice, text: "Claude requested a structured question. Ask it to use plain chat instead.")))
                 return
             }
+            if request["tool_name"] as? String == "ExitPlanMode" {
+                // Capture actual supplied proposal content without changing this
+                // native provider's existing approval/permission behavior.
+                claude.capturePlan(nativeID: request["tool_use_id"] as? String ?? id, name: "ExitPlanMode", input: request["input"])
+            }
             approvals[id] = request
             if automaticallyAllows(request) {
                 try resolveApproval(id, allow: true, automatic: true)
                 return
             }
             onEvent(.item(AgentChatItem(id: id, kind: .approval, text: request["tool_name"] as? String ?? "Tool approval",
-                                       detail: agentRuntimeJSON(request["input"]), isComplete: false)))
+                                       detail: agentRuntimeJSON(request["input"]), isComplete: false,
+                                       workContext: .init(requestKind: agentClaudeApprovalKind(request["tool_name"] as? String ?? "")))))
             onEvent(.status(.waiting))
             return
         }
@@ -506,7 +514,7 @@ internal final class AgentRuntime: @unchecked Sendable {
             }
             return
         }
-        claude.receive(message)
+        claude.receive(message, source: source)
         if type == "result" {
             if message["is_error"] as? Bool == true {
                 fail((message["errors"] as? [String])?.joined(separator: "\n") ?? message["result"] as? String ?? "Claude turn failed.")
@@ -514,7 +522,7 @@ internal final class AgentRuntime: @unchecked Sendable {
         }
     }
 
-    private func receiveCodex(_ message: [String: Any]) throws {
+    private func receiveCodex(_ message: [String: Any], source: AgentProviderJSON) throws {
         let method = message["method"] as? String
         let params = message["params"] as? [String: Any] ?? [:]
         if method == nil, let wireID = message["id"], let completion = pending.removeValue(forKey: agentRuntimeID(wireID)) {
@@ -534,7 +542,9 @@ internal final class AgentRuntime: @unchecked Sendable {
                     return
                 }
                 onEvent(.item(AgentChatItem(id: id, kind: .approval, text: params["command"] as? String ?? params["reason"] as? String ?? "Approve file changes",
-                                           detail: agentRuntimeJSON(params), isComplete: false)))
+                                           detail: agentRuntimeJSON(params), isComplete: false,
+                                           workContext: .init(providerTurnID: params["turnId"] as? String,
+                                                              requestKind: method == "item/fileChange/requestApproval" ? "file-change" : "command"))))
                 onEvent(.status(.waiting))
             } else {
                 try write(["id": wireID, "error": ["code": -32601, "message": "Tab does not support this interaction: \(method)"]])
@@ -543,7 +553,7 @@ internal final class AgentRuntime: @unchecked Sendable {
             return
         }
         if method == "thread/tokenUsage/updated", params["threadId"] as? String != threadID { return }
-        codex.receive(message)
+        codex.receive(message, source: source)
         if method == "turn/started", let turn = params["turn"] as? [String: Any] { turnID = turn["id"] as? String }
         if method == "turn/completed" {
             let turn = params["turn"] as? [String: Any] ?? [:]
@@ -592,9 +602,16 @@ internal final class AgentRuntime: @unchecked Sendable {
 
 internal func agentRuntimeID(_ value: Any) -> String { (value as? String) ?? String(describing: value) }
 
-internal func agentRuntimeJSON(_ value: Any?) -> String? {
+internal func agentRuntimeJSON(_ value: Any?, originalJSON: String? = nil) -> String? {
+    if let value, JSONSerialization.isValidJSONObject(value), let originalJSON { return originalJSON }
     guard let value, JSONSerialization.isValidJSONObject(value),
           let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]),
           let text = String(data: data, encoding: .utf8) else { return value as? String }
     return text
+}
+
+internal func agentRuntimeStructuredJSON(_ value: Any) -> String? {
+    guard let data = try? JSONSerialization.data(withJSONObject: value, options: [.fragmentsAllowed, .sortedKeys]),
+          let string = String(data: data, encoding: .utf8) else { return nil }
+    return string
 }

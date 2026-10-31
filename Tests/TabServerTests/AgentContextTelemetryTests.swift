@@ -22,7 +22,7 @@ final class AgentContextTelemetryTests: XCTestCase {
         // A tool continuation is a fresh context measurement, not an increment.
         runtime.receive(try json(#"{"type":"assistant","message":{"id":"second","model":"claude-sonnet-4-6","content":[],"usage":{"input_tokens":3,"cache_read_input_tokens":40369,"cache_creation_input_tokens":444}}}"#))
         XCTAssertEqual(recorder.values.last, .init(usedTokens: 40_816))
-        // Recorded T3 background-wake modelUsage is cumulative, unlike message usage.
+        // Recorded Source background-wake modelUsage is cumulative, unlike message usage.
         runtime.receive(try json(#"{"type":"result","modelUsage":{"claude-sonnet-4-6":{"inputTokens":17,"cacheReadInputTokens":163318,"cacheCreationInputTokens":26790,"contextWindow":200000},"claude-haiku-4-5":{"inputTokens":999999,"contextWindow":1000000}}}"#))
         XCTAssertEqual(recorder.values.last, .init(usedTokens: 40_816, contextWindow: 200_000))
         runtime.beginTurn()
@@ -42,7 +42,7 @@ final class AgentContextTelemetryTests: XCTestCase {
     func testCodexUsesLastRequestNotLifetimeTotalsAndDoesNotDoubleCountCaches() throws {
         let recorder = ContextUsageRecorder()
         let runtime = CodexAgentRuntime(onEvent: { recorder.receive($0) })
-        // T3 proposed_plan notification shape, with intentionally different lifetime usage.
+        // Source proposed_plan notification shape, with intentionally different lifetime usage.
         runtime.receive(try json(#"{"method":"thread/tokenUsage/updated","params":{"threadId":"root","tokenUsage":{"total":{"totalTokens":900000,"inputTokens":800000},"last":{"totalTokens":21575,"inputTokens":21310,"cachedInputTokens":6912,"outputTokens":265},"modelContextWindow":258400}}}"#))
         XCTAssertEqual(recorder.values.last, .init(usedTokens: 21_575, contextWindow: 258_400))
         runtime.receive(try json(#"{"method":"thread/tokenUsage/updated","params":{"tokenUsage":{"total":{"totalTokens":999999},"last":{"inputTokens":1234},"modelContextWindow":null}}}"#))

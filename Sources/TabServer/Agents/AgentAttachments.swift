@@ -18,6 +18,21 @@ internal enum AgentAttachments {
                 throw AgentRuntimeError("Unsupported image type for \(attachment.name): \(attachment.mimeType). Use PNG, JPEG, GIF or WebP.")
             }
         }
+        return try write(attachments, root: root)
+    }
+
+    static func stageToolImages(_ attachments: [AgentChatAttachment], root: URL) throws -> [StagedAgentAttachment] {
+        guard attachments.count <= 8 else { throw AgentRuntimeError("Too many tool images.") }
+        for attachment in attachments {
+            try attachment.descriptor.validate()
+            guard imageTypes.contains(attachment.mimeType), attachment.data.count <= AgentChatAttachment.maxPayloadBytes else {
+                throw AgentRuntimeError("Invalid tool image.")
+            }
+        }
+        return try write(attachments, root: root)
+    }
+
+    private static func write(_ attachments: [AgentChatAttachment], root: URL) throws -> [StagedAgentAttachment] {
         guard !attachments.isEmpty else { return [] }
         let directory = root.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
@@ -41,7 +56,56 @@ internal enum AgentAttachments {
         }
     }
 
+    private struct Record: Codable {
+        let descriptor: AgentChatAttachmentDescriptor
+        let path: String
+    }
+
+    static func record(_ staged: [StagedAgentAttachment], root: URL) throws {
+        guard !staged.isEmpty else { return }
+        let records = staged.map {
+            Record(descriptor: $0.attachment.descriptor,
+                   path: $0.url.deletingLastPathComponent().lastPathComponent + "/" + $0.url.lastPathComponent)
+        }
+        let url = root.appendingPathComponent("index.json")
+        try JSONEncoder().encode(records).write(to: url, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+    }
+
+    static func retrieve(_ descriptor: AgentChatAttachmentDescriptor, root: URL) throws -> AgentChatAttachment {
+        try descriptor.validate()
+        let base = root.resolvingSymlinksInPath().standardizedFileURL
+        let index = base.appendingPathComponent("index.json")
+        guard index.resolvingSymlinksInPath().standardizedFileURL == index,
+              let size = try index.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= 64 * 1024 else {
+            throw AgentRuntimeError("Attachment preview index is unavailable.")
+        }
+        let records = try JSONDecoder().decode([Record].self, from: Data(contentsOf: index))
+        guard let record = records.first(where: { $0.descriptor == descriptor }) else {
+            throw AgentRuntimeError("Attachment preview is unavailable for this message.")
+        }
+        let components = record.path.split(separator: "/", omittingEmptySubsequences: false)
+        guard components.count == 2, UUID(uuidString: String(components[0])) != nil,
+              UUID(uuidString: (String(components[1]) as NSString).deletingPathExtension) != nil else {
+            throw AgentRuntimeError("Invalid stored attachment path.")
+        }
+        let file = base.appendingPathComponent(record.path).standardizedFileURL
+        guard file.path.hasPrefix(base.path + "/"), file.resolvingSymlinksInPath().standardizedFileURL == file else {
+            throw AgentRuntimeError("Invalid stored attachment path.")
+        }
+        let info = try file.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+        guard info.isRegularFile == true, info.fileSize == descriptor.byteCount else {
+            throw AgentRuntimeError("Stored attachment is missing or has changed.")
+        }
+        let handle = try FileHandle(forReadingFrom: file)
+        defer { try? handle.close() }
+        let data = try handle.read(upToCount: AgentChatAttachment.maxPayloadBytes + 1) ?? Data()
+        guard data.count == descriptor.byteCount else { throw AgentRuntimeError("Stored attachment size changed.") }
+        return AgentChatAttachment(id: descriptor.id, name: descriptor.name, mimeType: descriptor.mimeType, data: data)
+    }
+
     static func prompt(text: String, attachments: [StagedAgentAttachment]) -> String {
+        let text = AgentAssistantCitation.expandForProvider(text)
         guard !attachments.isEmpty else { return text }
         let references = attachments.map { staged in
             // JSON quoting preserves boundaries even with unusual display names.
@@ -54,7 +118,7 @@ internal enum AgentAttachments {
     }
 
     static func claudeContent(text: String, attachments: [StagedAgentAttachment]) -> Any {
-        guard !attachments.isEmpty else { return text }
+        guard !attachments.isEmpty else { return prompt(text: text, attachments: attachments) }
         var content: [[String: Any]] = [["type": "text", "text": prompt(text: text, attachments: attachments)]]
         for staged in attachments {
             let attachment = staged.attachment

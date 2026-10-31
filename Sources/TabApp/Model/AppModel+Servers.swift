@@ -256,7 +256,8 @@ extension AppModel {
                 var command: String?
                 edit { command = $0.takeStartupCommand(pane) }
                 if let command {
-                    try? await main.writeInput(session: info.id, bytes: Data((command + "\r").utf8))
+                    do { try await main.writeInput(session: info.id, bytes: Data((command + "\r").utf8)) }
+                    catch { report("Could not run command in terminal: \(error.message)") }
                 }
             } catch {
                 guard state.pane(pane) != nil else { return }

@@ -141,6 +141,141 @@ final class AgentSessionsTests: XCTestCase {
         XCTAssertNil(latest.contextUsage)
     }
 
+    func testCheckpointsSeparateImmediateFollowupTurnsAndPersist() async throws {
+        let storage = try root()
+        let repo = try GitTestRepo(commit: false)
+        try repo.write("file.txt", "before\n")
+        try repo.commit("initial")
+        let directory = repo.path
+        let sends = AgentEventCount()
+        let sessions = try AgentSessions(root: storage, projectDirectory: { _ in directory }, factory: { _, _, _, callback in
+            let runtime = FakeAgentRuntime(callback)
+            runtime.onSend = {
+                sends.increment()
+                let text = sends.count == 1 ? "first\n" : "second\nextra\n"
+                try text.write(toFile: directory + "/file.txt", atomically: true, encoding: .utf8)
+                callback(.status(.idle))
+            }
+            return runtime
+        })
+        let id = SessionId()
+        _ = try await sessions.handle(.create(session: id, project: ProjectId(), provider: .codex))
+        _ = try await sessions.handle(.send(session: id, text: "first", model: nil))
+        _ = try await sessions.handle(.send(session: id, text: "follow up immediately", model: nil))
+        var snapshot = try await sessions.handle(.read(session: id))
+        for _ in 0..<100 where snapshot.turns?.last?.checkpoint == nil {
+            try await Task.sleep(for: .milliseconds(30))
+            snapshot = try await sessions.handle(.read(session: id))
+        }
+        let turns = try XCTUnwrap(snapshot.turns)
+        XCTAssertEqual(turns.count, 2)
+        let first = try XCTUnwrap(turns[0].checkpoint)
+        let second = try XCTUnwrap(turns[1].checkpoint)
+        XCTAssertEqual(first.files.map(\.path), ["file.txt"])
+        XCTAssertEqual(first.additions, 1)
+        XCTAssertEqual(first.deletions, 1)
+        XCTAssertEqual(second.additions, 2)
+        XCTAssertEqual(second.deletions, 1)
+        XCTAssertNotEqual(first.id, second.id)
+        let historical = try await sessions.checkpoint(.init(session: id, checkpoint: first.id, path: "file.txt"))
+        XCTAssertTrue(historical.diff?.rows.contains { $0.text == "+first" } == true)
+        XCTAssertFalse(historical.diff?.rows.contains { $0.text == "+second" } == true,
+                       "Opening a turn diff must not read the current worktree")
+        do {
+            _ = try await sessions.checkpoint(.init(session: SessionId(), checkpoint: first.id))
+            XCTFail("A checkpoint is scoped to its owning conversation")
+        } catch {}
+        do {
+            _ = try await sessions.checkpoint(.init(session: id, checkpoint: first.id, path: "../outside"))
+            XCTFail("Only paths recorded in this checkpoint may be read")
+        } catch {}
+
+        for checkpoint in [first, second] {
+            let recordURL = storage.appendingPathComponent("checkpoints/" + id.description + "/" + checkpoint.id + ".json")
+            let record = try JSONDecoder().decode(AgentCheckpointRecord.self, from: Data(contentsOf: recordURL))
+            XCTAssertEqual(record.files, checkpoint.files)
+        }
+        sessions.shutdown()
+        let restored = try AgentSessions(root: storage, projectDirectory: { _ in directory })
+        defer { restored.shutdown() }
+        let saved = try await restored.handle(.read(session: id))
+        XCTAssertEqual(saved.turns, turns)
+    }
+
+    func testRestartRecoversPersistedBaselineAndCompletedRecordBeforeTranscriptUpdate() async throws {
+        for finalRecordExists in [false, true] {
+            let storage = try root()
+            let repo = try GitTestRepo(commit: false)
+            try repo.write("file", "before\n")
+            try repo.commit("initial")
+            let store = AgentCheckpointStore()
+            let before = try store.capture(directory: repo.path)
+            try repo.write("file", "after\n")
+            let id = SessionId(), userID = UUID().uuidString
+            let folder = storage.appendingPathComponent("checkpoints/" + id.description)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try JSONEncoder().encode(AgentCheckpointPending(turnID: userID, before: before))
+                .write(to: folder.appendingPathComponent("pending-" + userID + ".json"))
+            if finalRecordExists {
+                let after = try store.capture(directory: repo.path)
+                let record = AgentCheckpointRecord(before: before, after: after,
+                    files: [.init(path: "file", additions: 1, deletions: 1)])
+                try JSONEncoder().encode(record).write(to: folder.appendingPathComponent(userID + ".json"))
+            }
+            let started = Date(timeIntervalSince1970: 100)
+            let snapshot = AgentChatSnapshot(session: id, project: ProjectId(), provider: .codex,
+                turns: [.init(userItemID: userID, startedAt: started,
+                    completedAt: finalRecordExists ? started.addingTimeInterval(2) : nil,
+                    status: finalRecordExists ? .idle : .working)],
+                status: finalRecordExists ? .idle : .working,
+                items: [.init(id: userID, kind: .user, text: "Edit the file")])
+            let snapshotJSON = try JSONSerialization.jsonObject(with: JSONEncoder().encode(snapshot))
+            let saved = try JSONSerialization.data(withJSONObject: ["snapshot": snapshotJSON, "directory": repo.path])
+            try saved.write(to: storage.appendingPathComponent(id.description + ".json"))
+            let directory = repo.path
+            let sessions = try AgentSessions(root: storage, projectDirectory: { _ in directory })
+            var recovered = try await sessions.handle(.read(session: id))
+            for _ in 0..<100 where recovered.turns?.first?.checkpoint == nil {
+                try await Task.sleep(for: .milliseconds(20))
+                recovered = try await sessions.handle(.read(session: id))
+            }
+            let checkpoint = try XCTUnwrap(recovered.turns?.first?.checkpoint)
+            XCTAssertEqual(checkpoint.id, userID)
+            XCTAssertEqual(checkpoint.additions, 1)
+            XCTAssertEqual(checkpoint.deletions, 1)
+            let historical = try await sessions.checkpoint(.init(session: id, checkpoint: userID, path: "file"))
+            XCTAssertTrue(historical.diff?.rows.contains { $0.text == "-before" } == true)
+            sessions.shutdown()
+            XCTAssertFalse(FileManager.default.fileExists(atPath: folder.appendingPathComponent("pending-" + userID + ".json").path))
+        }
+    }
+
+    func testStartupRetiresOrphanedCheckpointRecordsAndTheirPrivateRefs() async throws {
+        let storage = try root()
+        let repo = try GitTestRepo(commit: true)
+        let store = AgentCheckpointStore()
+        let before = try store.capture(directory: repo.path)
+        let after = try store.capture(directory: repo.path)
+        let id = SessionId(), oldTurn = UUID().uuidString
+        let folder = storage.appendingPathComponent("checkpoints/" + id.description)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try JSONEncoder().encode(AgentCheckpointRecord(before: before, after: after, files: []))
+            .write(to: folder.appendingPathComponent(oldTurn + ".json"))
+        try JSONEncoder().encode(AgentCheckpointPending(turnID: oldTurn, before: before))
+            .write(to: folder.appendingPathComponent("pending-" + oldTurn + ".json"))
+        let snapshot = AgentChatSnapshot(session: id, project: ProjectId(), provider: .codex)
+        let snapshotJSON = try JSONSerialization.jsonObject(with: JSONEncoder().encode(snapshot))
+        try JSONSerialization.data(withJSONObject: ["snapshot": snapshotJSON, "directory": repo.path])
+            .write(to: storage.appendingPathComponent(id.description + ".json"))
+        let directory = repo.path
+        let sessions = try AgentSessions(root: storage, projectDirectory: { _ in directory })
+        sessions.shutdown()
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: folder.path), [])
+        XCTAssertThrowsError(try repo.run("rev-parse", "--verify", before.reference))
+        XCTAssertThrowsError(try repo.run("rev-parse", "--verify", after.reference))
+        XCTAssertNoThrow(try repo.run("rev-parse", "--verify", "HEAD"))
+    }
+
     private func root() throws -> URL {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("agent-tests-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -267,6 +402,7 @@ final class AgentSessionsTests: XCTestCase {
         XCTAssertGreaterThan(read.revision, snapshot.revision)
         XCTAssertTrue(read.items.allSatisfy(\.isComplete))
         XCTAssertEqual(read.turns?.last?.status, .failed)
+        XCTAssertEqual(read.turns?.last?.outcome, .interrupted)
         XCTAssertNotNil(read.turns?.last?.completedAt)
     }
 
@@ -426,6 +562,7 @@ final class AgentSessionsTests: XCTestCase {
         let completed = try await sessions.handle(.read(session: session))
         XCTAssertEqual(completed.status, .idle)
         XCTAssertTrue(completed.items.contains { $0.kind == .notice && $0.text == "Agent interrupted." })
+        XCTAssertEqual(completed.turns?.last?.outcome, .interrupted, "The reusable idle state must retain an observed user stop")
         XCTAssertEqual(runtime.stops, 0)
         let next = try await sessions.handle(.send(session: session, text: "next turn", model: nil))
         XCTAssertEqual(next.status, .working)
@@ -817,18 +954,122 @@ final class AgentSessionsTests: XCTestCase {
         let end = try XCTUnwrap(finished.completedAt)
         XCTAssertGreaterThanOrEqual(end, finished.startedAt)
         XCTAssertEqual(finished.status, .idle)
+        XCTAssertEqual(finished.outcome, .completed)
+        XCTAssertNotNil(completed.items.first { $0.kind == .user }?.createdAt)
         let second = try await sessions.handle(.send(session: session, text: "second turn", model: nil))
         XCTAssertEqual(second.turns?.count, 2)
         XCTAssertEqual(second.turns?.first, finished)
         let closed = try await sessions.handle(.close(session: session))
         XCTAssertEqual(closed.turns?.first, finished, "Closing a later turn must not replace a previous completion time/status")
         XCTAssertEqual(closed.turns?.last?.status, .closed)
+        XCTAssertEqual(closed.turns?.last?.outcome, .cancelled)
         XCTAssertNotNil(closed.turns?.last?.completedAt)
         let read = try await sessions.handle(.read(session: session))
         XCTAssertEqual(read.turns, closed.turns)
         let decoded = try WireJSON.decode(AgentChatSnapshot.self, from: WireJSON.encode(closed))
         XCTAssertEqual(decoded.turns, closed.turns)
         try decoded.validate()
+    }
+
+    func testObservedItemDatesAndRunIdentitySurviveProviderReplacements() async throws {
+        let root = try root(), box = AgentRuntimeBox()
+        let sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, callback in
+            let runtime = FakeAgentRuntime(callback); box.install(runtime); return runtime
+        })
+        defer { sessions.shutdown() }
+        let session = SessionId()
+        _ = try await sessions.handle(.create(session: session, project: ProjectId(), provider: .codex))
+        let sent = try await sessions.handle(.send(session: session, text: "First", model: nil))
+        let runtime = try XCTUnwrap(box.runtime)
+        runtime.callback(.item(.init(id: "answer", kind: .assistant, text: "A", isComplete: false)))
+        let initial = try await sessions.handle(.read(session: session))
+        let first = try XCTUnwrap(initial.items.first { $0.id == "answer" })
+        XCTAssertNotNil(first.createdAt)
+        XCTAssertEqual(first.workContext?.runID, "native-turn:" + (sent.turns?.last?.userItemID ?? ""))
+        runtime.callback(.textDelta(id: "answer", text: "B"))
+        runtime.callback(.item(.init(id: "answer", kind: .assistant, text: "AB")))
+        let replaced = try await sessions.handle(.read(session: session))
+        let final = try XCTUnwrap(replaced.items.first { $0.id == "answer" })
+        XCTAssertEqual(final.createdAt, first.createdAt)
+        XCTAssertGreaterThanOrEqual(try XCTUnwrap(final.updatedAt), try XCTUnwrap(first.updatedAt))
+        XCTAssertEqual(final.workContext?.runID, first.workContext?.runID)
+        runtime.callback(.status(.idle))
+        let next = try await sessions.handle(.send(session: session, text: "Next", model: nil))
+        let secondUser = try XCTUnwrap(next.items.last { $0.kind == .user })
+        XCTAssertEqual(secondUser.workContext?.runID, "native-turn:" + secondUser.id)
+        XCTAssertNotEqual(secondUser.workContext?.runID, first.workContext?.runID)
+    }
+
+    func testObservedPlanBodiesRemainBudgetedAndRuntimeFailureKeepsErrorSemantics() async throws {
+        let root = try root()
+        let content = String(repeating: "Plan detail 🙂 ", count: 4000)
+        let detail = try XCTUnwrap(agentRuntimeJSON(["steps": [["id": "step-1", "text": content, "status": "running"]]]))
+        let sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, callback in
+            let runtime = FakeAgentRuntime(callback)
+            runtime.onSend = {
+                for index in 0..<40 {
+                    callback(.item(AgentChatItem(id: "plan-\(index)", kind: .tool, text: "Updated plan", detail: detail,
+                        workContext: .init(itemType: "todo_list", sourceStatus: "running", planStatus: "active"))))
+                }
+                callback(.failure("Observed provider disconnect"))
+            }
+            return runtime
+        })
+        defer { sessions.shutdown() }
+        let session = SessionId()
+        _ = try await sessions.handle(.create(session: session, project: ProjectId(), provider: .codex))
+        let snapshot = try await sessions.handle(.send(session: session, text: "Retain my plan", model: nil))
+        XCTAssertLessThanOrEqual(snapshot.items.reduce(0, { $0 + $1.transcriptByteCount }), 512 * 1024)
+        let plans = snapshot.items.filter { $0.workContext?.itemType == "todo_list" }
+        XCTAssertFalse(plans.isEmpty)
+        XCTAssertTrue(plans.contains { $0.detail?.contains("[Earlier text truncated]") == true })
+        XCTAssertTrue(plans.allSatisfy { ($0.detail?.utf8.count ?? 0) <= 16 * 1024 })
+        let failure = try XCTUnwrap(snapshot.items.last { $0.workContext?.itemType == "error" })
+        XCTAssertEqual(failure.text, "Observed provider disconnect")
+        XCTAssertEqual(failure.workContext?.sourceStatus, "failed")
+        XCTAssertNotNil(failure.createdAt)
+        XCTAssertNotNil(failure.workContext?.runID)
+        try snapshot.validate()
+        XCTAssertLessThan(try FrameEncoder.encode(Message.reply(RequestId(1), .agentChat(snapshot))).count, Limits.maxFrame)
+    }
+
+    func testLargeTypedToolMetadataIsBoundedWithoutDroppingItsRow() async throws {
+        let root = try root()
+        let large = String(repeating: "typed result 🙂 ", count: 8000)
+        var change = AgentToolActivity(name: "Edit", status: .completed, presentation: .fileChange)
+        change.fileChangeDetails = .init(fileName: "changed.swift", diff: large, operations: [
+            .init(operation: "update", path: "changed.swift", oldPath: large)
+        ])
+        var search = AgentToolActivity(name: "Search", status: .completed, presentation: .fileSearch)
+        search.fileSearchDetails = .init(pattern: "needle", results: (0..<100).map {
+            .init(fileName: "file-\($0).swift", line: 12, preview: large)
+        })
+        var web = AgentToolActivity(name: "WebSearch", status: .completed, presentation: .webSearch)
+        web.searchPatterns = ["query"]
+        web.webResults = (0..<100).map { _ in .init(title: "Found", url: "https://example.com", snippet: large) }
+        let tools = [change, search, web]
+        let sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, callback in
+            let runtime = FakeAgentRuntime(callback)
+            runtime.onSend = {
+                for (index, tool) in tools.enumerated() {
+                    callback(.item(.init(id: "typed-\(index)", kind: .tool, text: tool.name ?? "Tool", tool: tool)))
+                }
+                callback(.status(.idle))
+            }
+            return runtime
+        })
+        defer { sessions.shutdown() }
+        let session = SessionId()
+        _ = try await sessions.handle(.create(session: session, project: ProjectId(), provider: .codex))
+        let snapshot = try await sessions.handle(.send(session: session, text: "Inspect typed results", model: nil))
+        let retained = snapshot.items.filter { $0.id.hasPrefix("typed-") }
+        XCTAssertEqual(retained.count, 3, "Large typed payloads must not remove the tool call itself")
+        XCTAssertTrue(retained.allSatisfy { ($0.tool?.transcriptByteCount ?? Int.max) <= 32 * 1024 })
+        XCTAssertEqual(retained.first?.tool?.fileChangeDetails?.fileName, "changed.swift")
+        XCTAssertEqual(retained.dropFirst().first?.tool?.fileSearchDetails?.results?.first?.fileName, "file-0.swift")
+        XCTAssertEqual(retained.last?.tool?.webResults?.first?.title, "Found")
+        try snapshot.validate()
+        XCTAssertLessThan(try FrameEncoder.encode(Message.reply(RequestId(1), .agentChat(snapshot))).count, Limits.maxFrame)
     }
 
     func testToolMetadataDuplicatesAreBudgetedAndLatestUserAndTurnSurviveOutputTrimming() async throws {

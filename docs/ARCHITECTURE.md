@@ -3,7 +3,8 @@
 Tab is a macOS terminal workspace for running agents and shells: projects and
 Git worktrees, each with one workspace of split panes (terminals, editors,
 diffs, browsers, agent chats), with terminals that keep running in a background server after
-the app quits. It is a Swift-only rewrite of Codesh. The product behavior is the
+the app quits. Its application and server are a Swift rewrite of Codesh, with
+the active bundled source web renderer for agent conversation bodies. The product behavior is the
 one documented in `~/repos/codesh/docs` (product, features, user guide); this
 document is how Tab is built.
 
@@ -95,8 +96,8 @@ The complete request list to support, grouped (names are the Swift cases):
   `repoInfo`, `init`, `pull`, `push`, `fetch`, `checkout`, `cherryPick`,
   `revert`, `worktrees`, `worktree(create | register | remove | checkoutPR)`,
   `inspectRemoval`, `worktreeHooks`, `pullRequest(number | info | list)`,
-  `watch`, `unwatch`, `switchToBase`.
-- Files: `list`, `read`, `readBytes`, `write`, `stat`, `mkdir`, `rename`,
+  `watch`, `unwatch`, `switchToBase`, `pullRequestPreview`.
+- Files: `list`, `read`, `readBytes`, `readRange`, `write`, `stat`, `mkdir`, `rename`,
   `delete`, `watch`, `unwatch`; `search(files | content)` using `rg`, falling
   back to `git ls-files` for file lists.
 - Exec: `exec(project, program, args, env)`, `cancelExec`.
@@ -129,11 +130,16 @@ The complete request list to support, grouped (names are the Swift cases):
 - Agent chats are separate from terminal detection and PTYs. `AgentSessions`
   owns their normalized transcripts and `AgentRuntime` drives installed Claude
   Code and Codex processes over JSONL pipes. Claude uses stream-json control
-  messages; Codex uses `app-server` threads and turns. The adapters follow T3
+  messages; Codex uses `app-server` threads and turns. The adapters follow source
   Code's provider behavior (see [Agent Tabs](AGENT_TABS.md) and the bundled
   third-party notice). Agent requests and coalesced revision notifications
   travel over the existing control channel. App disconnects do not end agents;
-  daemon restart requires resuming the provider conversation.
+  daemon restart requires resuming the provider conversation. Per-turn Git
+  checkpoints use isolated indexes and private refs; capture runs on blocking
+  workers and serializes across follow-up turns. Bounded summaries travel with
+  the transcript. `agentCheckpoint` retrieves paged file lists and immutable
+  per-file diffs over the same control channel, scoped to the owning session.
+  Full checkpoint records are persisted separately from transcript previews.
 - Shell integration scripts live in `Resources/Shell`; zsh and fish load
   automatically through `ZDOTDIR` / `XDG_DATA_DIRS`, bash is opt-in with
   `TAB_SHELL_INTEGRATION=1`.
@@ -143,11 +149,25 @@ The complete request list to support, grouped (names are the Swift cases):
 
 ## Inside the app
 
+- Agent conversation bodies use the pinned upstream components in an isolated,
+  nonpersistent `WKWebView`. `vendor/ConversationRenderer` extracts the actual source
+  components and bundles their styles, syntax engines, math and lazy assets
+  locally. Swift owns the composer, pane, providers, persistence and filesystem
+  services; a scoped snapshot/action bridge adapts those services without a source
+  server or authentication. Renderer failure restores the native transcript.
+  Normal text and code use native macOS font stacks; only specialized KaTeX
+  WOFF2 equation fonts are bundled. Existing `AppTheme` is the color authority:
+  semantic colors, `SyntaxColors` and `TerminalPalette` flow through snapshots,
+  including live palette changes within the same light/dark mode. There is no
+  separate conversation theme catalog. The native fallback reuses these colors.
+  See [the port acceptance ledger](CONVERSATION_RENDERER.md) for source/native
+  evidence and service boundaries. The final unfiltered `scripts/validate.sh`
+  gate passed on October 31, 2026, including live palette propagation tests.
 - AppKit for the window, sidebar, split container, pane cards, terminal view,
   panels, palette and menus. SwiftUI (in `NSHostingView`) is allowed for the
   Settings window forms and for static dialogs. Never put SwiftUI on the
   terminal rendering path.
-- Controls are native: the `Components` buttons, switches, pop-ups,
+- Application-shell controls are native: the `Components` buttons, switches, pop-ups,
   segmented controls, text and search fields and spinners subclass their
   AppKit controls (`NSButton`, `NSSwitch`, `NSPopUpButton`, …) and only add
   closures. They follow the window's appearance, which tracks the theme.
@@ -171,15 +191,50 @@ The complete request list to support, grouped (names are the Swift cases):
   bindings from `terminal.json` win while a terminal is focused.
 - Browser panes are `WKWebView`s with one `WKWebsiteDataStore` per profile and
   the app's own history. `tab browser` reaches the app over `app.sock`.
-- Agent panes are native AppKit Markdown transcripts with a fixed bottom composer,
-  model, effort and access pickers, folded tool activity, inline approvals and interruption.
-  They use the same card background as terminal panes. Native response blocks retain
+- Agent tool snapshots retain optional inspector identity separately from semantic
+  category, plus whether an output string encodes a structured provider result.
+  Claude uses the source renderer’s normalized native-tool whitelist; semantic aliases and unknown
+  MCP names remain generic inspectors. Codex selects its inspector from native item type,
+  retains namespace-qualified tool names and contentItems, and preserves MCP structured
+  output precedence plus error/result context without flattening mixed content blocks.
+  This keeps read/search shell commands in the command inspector and distinguishes
+  text such as `null` from a JSON null. Optional search patterns and typed web-result
+  titles, URLs and snippets survive persistence for native search inspectors.
+  File-change metadata retains the provider patch, optional counts and move/type
+  operations. Native file inspectors open immutable tool snapshots in the diff
+  window; this action never diffs the current worktree. Claude structured patches
+  and Codex native changes normalize on the server. Older snapshots decode without
+  these fields. Dynamic tool raster images use an internal item-plus-payload event;
+  the session owner stages up to eight images before publishing descriptors. Tool
+  blobs never enter transcript JSON. Retrieval accepts provider item IDs, verifies
+  message ownership, and hashes non-UUID IDs into storage directory names. Single
+  retrieved payloads support 10 MiB; user-send aggregate limits remain unchanged.
+  Provider NDJSON accepts bounded 128 MiB lines for eight encoded images and scans
+  only newly received bytes while waiting for a newline. Original Claude/Codex
+  argument subtrees are selected from the validated wire JSON before dictionary
+  serialization can reorder keys. The byte scanner skips unrelated image strings
+  without decoding them again; persisted activity input keeps that original JSON.
+  Unmodified structured outputs reuse original subtrees as well, including MCP
+  error/result wrappers. Image-rewritten output uses a batch of exact byte-range
+  replacements, preserving surrounding order without copying removed blobs into
+  output strings. Shadowed duplicate values are cleared, including ignored image
+  payloads; failed path matching falls back to the sanitized projection. Structured scalar results serialize as JSON
+  fragments instead of disappearing through object/array-only serialization.
+  Explicit file-search records carry a pattern and typed file/position/preview
+  results; provider Grep and Glob calls remain generic inspectors, matching the source renderer.
+- Agent panes keep a native fixed bottom composer, model, effort and access
+  pickers. Their conversation body uses the bundled source renderer described
+  above, with an AppKit Markdown transcript as its failure fallback. Both use
+  the same card background as terminal panes. Fallback response blocks retain
   selectable text, highlighted code, copy actions and project-aware file navigation.
-  Transcript geometry is separate from native row views: only the viewport and an
+  In the native fallback, transcript geometry is separate from row views: only the viewport and an
   overscan buffer are mounted, with a bounded detached-view cache. Cached heights
   avoid remeasuring unchanged history during streaming. Lightweight disclosure and
   code-wrap state survives view eviction; scrolling is anchored by row identity.
-  Expanded work logs have bounded, independently virtualized scroll surfaces.
+  Expanded completed-work entries share the main timeline geometry and viewport;
+  folding retains child state without retaining their native views. Consecutive
+  tool calls are separate main-timeline entries, with selection pinned during
+  scrolling. Only individual expanded output details use bounded scroll surfaces.
   Their persisted pane state identifies the server-owned session and initial provider;
   the server snapshot owns the current provider, model and reasoning effort. One connection event
   consumer routes conversation revisions to matching panes; panes reread state
@@ -224,7 +279,7 @@ builds), URL scheme `tab://`, environment prefix `TAB_`, executables `TabDesktop
 | D3 | JSON control messages, binary screen rows | JSON through Codable is native and additive; rows are the volume |
 | D4 | One merged frame in flight per session per client | A slow client never piles up |
 | D5 | AppKit + Core Text renderer, redraw on change only | Native, predictable, no GPU framework to debug first; Metal can come behind the same protocol |
-| D6 | No third-party packages | Fully native, nothing to audit or update |
+| D6 | No third-party Swift packages; pinned Tab conversation assets are bundled separately | Preserve native application services while using the actual source conversation renderer; asset and dependency licenses are recorded in its manifest |
 | D7 | Config files are JSON | Codable is built in; TOML is not |
 | D8 | Only macOS, only Apple silicon | Removes every Linux and Intel branch |
 | D9 | The terminal UI (Ratatui) and the phone SDK are not ported | Neither is a native macOS app; the server keeps serving phones |

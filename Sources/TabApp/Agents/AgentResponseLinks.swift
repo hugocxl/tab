@@ -5,6 +5,7 @@ import AppKit
 enum AgentResponseLink: Equatable {
     case external(URL)
     case file(String, Int?)
+    case fragment(String)
 
     /// Inline code often contains member names such as NSColor.labelColor.
     /// Infer only recognizable filenames; explicit Markdown destinations remain unrestricted.
@@ -26,10 +27,13 @@ enum AgentResponseLink: Equatable {
     static func parse(_ destination: String) -> Self? {
         let raw = destination.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !raw.isEmpty else { return nil }
+        if raw.hasPrefix("#") { return .fragment(String(raw.dropFirst())) }
         if raw.hasPrefix("//"), let url = URL(string: "https:" + raw) { return .external(url) }
         if let url = URL(string: raw), let scheme = url.scheme?.lowercased() {
             if ["http", "https"].contains(scheme), url.host != nil { return .external(url) }
             if scheme == "mailto", raw.count > "mailto:".count { return .external(url) }
+            if scheme == "tab-agent-footnote", let parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
+               let target = parts.queryItems?.first(where: { $0.name == "target" })?.value { return .fragment(target) }
             if scheme == "tab-agent-file" {
                 guard let parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
                       let path = parts.queryItems?.first(where: { $0.name == "path" })?.value else { return nil }
@@ -74,6 +78,7 @@ enum AgentResponseLink: Equatable {
 
     var attributeURL: URL? {
         switch self {
+        case .fragment(let id): return URL(string: "#" + id)
         case .external(let url): return url
         case .file(let path, let line):
             var parts = URLComponents()

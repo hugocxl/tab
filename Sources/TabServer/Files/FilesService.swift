@@ -78,10 +78,12 @@ public final class FilesService: FilesServiceProtocol, @unchecked Sendable {
             return try lock.reading { .content(try root.read(path.rawValue)) }
         case .readBytes(let path):
             return try lock.reading { .bytes(try root.readBytes(path.rawValue)) }
+        case .readRange(let path, let offset, let length, let revision):
+            return try lock.reading { .byteRange(try root.readRange(path.rawValue, offset: offset, length: length, expectedRevision: revision)) }
         case .stat(let path):
             return try lock.reading { .info(try root.info(root.resolve(path.rawValue))) }
-        case .write(let path, let content):
-            return try lock.writing { .path(try root.write(path.rawValue, Data(content.utf8))) }
+        case .write(let path, let content, let createParents):
+            return try lock.writing { .path(try root.write(path.rawValue, Data(content.utf8), createParents: createParents)) }
         case .writeBytes(let path, let bytes):
             return try lock.writing { .path(try root.write(path.rawValue, bytes)) }
         case .mkdir(let path):

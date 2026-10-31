@@ -22,6 +22,9 @@ final class Actions {
         if let pane = model.activePane,
            let browser = model.controller(for: pane) as? BrowserPaneContent,
            browser.controller.perform(id) { return true }
+        if let pane = model.activePane,
+           let agent = model.controller(for: pane) as? AgentPaneController,
+           agent.performConversationShortcut(id) { return true }
         switch id {
         case .newTab: model.newTerminal()
         case .newAgent, .newClaudeAgent, .newCodexAgent: model.newAgent()

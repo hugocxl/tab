@@ -5,13 +5,19 @@ import TabProtocol
 /// Snapshot grouping is O(n); native text layout is confined to changed/visible rows.
 @MainActor
 final class AgentTranscriptDocument: ThemedView {
-    private enum Kind: Equatable { case message, activity, work }
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        AgentTableCopyHitTesting.hitTest(point, in: self) ?? super.hitTest(point)
+    }
+
+    private enum Kind: Equatable { case message, activity, work, working, changes }
     private struct Entry: Equatable {
         var id: String
         var kind: Kind
         var items: [AgentChatItem]
         var turn: AgentChatTurn? = nil
         var timestamp: Date? = nil
+        var groupedWork = false
+        var showsResponseActions = true
     }
     private struct Height {
         var value: CGFloat
@@ -31,6 +37,8 @@ final class AgentTranscriptDocument: ThemedView {
     }
 
     private var entries: [Entry] = []
+    private var sourceItems: [AgentChatItem] = []
+    private var sourceTurns: [AgentChatTurn] = []
     private var positions: [String: Int] = [:]
     private var heights: [String: Height] = [:]
     private var cache: [String: CachedRow] = [:]
@@ -60,10 +68,16 @@ final class AgentTranscriptDocument: ThemedView {
     var isUpdatingViewport: Bool { updatingViewport }
     var onApproval: ((String, Bool) -> Void)?
     var onDisclosure: (() -> Void)?
+    var onRunShellCommand: ((String) -> Void)? { didSet { cache.values.forEach { $0.row.onRunShellCommand = onRunShellCommand } } }
+    var onOpenAttachment: ((String, AgentChatAttachmentDescriptor, Bool) -> Void)?
+    var fetchAttachment: AgentAttachmentCache.Fetch?
+    var onPreviewAttachments: ((String, [AgentChatAttachmentDescriptor], Int) -> Void)?
     var onOpenFile: ((String, Int?) -> Void)?
+    var workspaceRoot: String?
+    var onOpenToolDiff: ((String, AgentToolActivity) -> Void)?
+    var onOpenCheckpoint: ((String, String?) -> Void)?
     var onEarlier: (() -> Void)?
     var isNested = false
-
     /// Capture live state before returning; evicted rows retain only these value records.
     var rowStates: [String: AgentTimelineRowState] {
         get {
@@ -72,12 +86,14 @@ final class AgentTranscriptDocument: ThemedView {
         }
         set {
             savedStates = newValue
+            migrateToolGroupStates()
             for (id, cached) in cache {
                 cached.row.restoreState(savedStates[id] ?? AgentTimelineRowState())
                 cached.needsMeasurement = true
                 cached.needsLayout = true
                 heights[id]?.valid = false
             }
+            update(sourceItems, omittedCount: omittedCount, turns: sourceTurns)
         }
     }
 
@@ -98,12 +114,33 @@ final class AgentTranscriptDocument: ThemedView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     func update(_ sourceItems: [AgentChatItem], omittedCount: Int, turns: [AgentChatTurn] = []) {
+        self.sourceItems = sourceItems
+        sourceTurns = turns
         // Approval decisions remain in the authoritative audit snapshot, not the chat.
         let items = sourceItems.filter { $0.kind != .approval || !$0.isComplete }
         let anchor = captureAnchor(at: lastViewport.minY)
         captureStates()
+        migrateToolGroupStates()
         let previous = Dictionary(uniqueKeysWithValues: entries.map { ($0.id, $0) })
-        let next = makeEntries(items, turns: turns)
+        let grouped = makeEntries(items, turns: turns)
+        // Work history is projected into the same timeline as its answer. Keeping its
+        // entries separate gives it the main scrollbar and the normal viewport budget.
+        var allIDs = Set(grouped.map(\.id))
+        let next = grouped.flatMap { entry -> [Entry] in
+            guard entry.kind == .work else { return [entry] }
+            let children = makeEntries(entry.items, turns: []).map { child in
+                var child = child
+                child.groupedWork = true
+                child.showsResponseActions = false
+                return child
+            }
+            allIDs.formUnion(children.map(\.id))
+            // Migrate value-only state from the previous nested history renderer.
+            for (id, state) in savedStates[entry.id]?.children ?? [:] where savedStates[id] == nil {
+                savedStates[id] = state
+            }
+            return savedStates[entry.id]?.expanded == true ? [entry] + children : [entry]
+        }
         // A newly folded work group inherits the disclosure states of its former rows.
         var previousOwner: [String: String] = [:]
         for entry in entries { for item in entry.items { previousOwner[item.id] = entry.id } }
@@ -116,8 +153,8 @@ final class AgentTranscriptDocument: ThemedView {
         }
         let retained = Set(next.map(\.id))
         for id in Array(cache.keys) where !retained.contains(id) { removeCachedRow(id) }
-        savedStates = savedStates.filter { retained.contains($0.key) }
-        heights = heights.filter { retained.contains($0.key) }
+        savedStates = savedStates.filter { allIDs.contains($0.key) }
+        heights = heights.filter { allIDs.contains($0.key) }
         for entry in next {
             if heights[entry.id] == nil { heights[entry.id] = Height(value: estimate(entry)) }
             if previous[entry.id] != entry { heights[entry.id]?.valid = false }
@@ -126,7 +163,16 @@ final class AgentTranscriptDocument: ThemedView {
         positions = Dictionary(uniqueKeysWithValues: entries.enumerated().map { ($0.element.id, $0.offset) })
         self.omittedCount = omittedCount
         earlier.stringValue = "Earlier messages are saved · Showing \(items.count) retained entries"
-        geometry.reset(heights: entries.map { heights[$0.id]?.value ?? 80 })
+        geometry.reset(heights: entries.map { heights[$0.id]?.value ?? 80 },
+                       trailingSpaces: entries.enumerated().map { index, entry in
+            if entry.groupedWork, entry.kind == .activity {
+                return index + 1 < entries.count && entries[index + 1].groupedWork && entries[index + 1].kind == .activity ? 0 : 4
+            }
+            if entry.kind == .working || entry.kind == .work || entry.kind == .activity { return 8 }
+            if entry.items.first?.kind == .assistant, index + 1 < entries.count,
+               entries[index + 1].kind == .activity { return 8 }
+            return 26
+        })
         layoutHeader()
         lastViewport.origin.y = offset(for: anchor)
         pendingAnchor = anchor
@@ -206,6 +252,30 @@ final class AgentTranscriptDocument: ThemedView {
         positions[id].map { entryFrame(at: $0) }
     }
 
+    func resolveConversationAnchor(_ source: AgentConversationAnchor) -> AgentTranscriptAnchor? {
+        let targetID = source.messageID ?? source.itemID
+        if let targetID, let owner = entries.first(where: { $0.items.contains(where: { $0.id == targetID }) }) {
+            if owner.kind == .work {
+                // Source can be reading an item inside an expanded completed
+                // group. Reveal the corresponding native rows before anchoring.
+                var states = rowStates
+                var state = states[owner.id] ?? AgentTimelineRowState()
+                state.expanded = true
+                states[owner.id] = state
+                rowStates = states
+            }
+            if let entry = entries.first(where: { $0.kind != .work && $0.items.contains(where: { $0.id == targetID }) }) {
+                return AgentTranscriptAnchor(rowID: entry.id, localOffset: source.offset, fallback: lastViewport.minY)
+            }
+        }
+        if let runID = source.runID, runID.hasPrefix("native-turn:") {
+            let userID = String(runID.dropFirst("native-turn:".count))
+            let id = positions["work:" + userID] != nil ? "work:" + userID : userID
+            if positions[id] != nil { return AgentTranscriptAnchor(rowID: id, localOffset: source.offset, fallback: lastViewport.minY) }
+        }
+        return nil
+    }
+
     func captureAnchor(at y: CGFloat) -> AgentTranscriptAnchor {
         guard let index = geometry.index(at: y), entries.indices.contains(index) else {
             return AgentTranscriptAnchor(rowID: nil, localOffset: 0, fallback: y)
@@ -216,7 +286,7 @@ final class AgentTranscriptDocument: ThemedView {
 
     func offset(for anchor: AgentTranscriptAnchor) -> CGFloat {
         guard let id = anchor.rowID, let index = positions[id] else { return anchor.fallback }
-        return geometry.top(at: index) + min(anchor.localOffset, geometry.heights[index] + geometry.spacing - 1)
+        return geometry.top(at: index) + min(anchor.localOffset, geometry.heights[index] + geometry.spacing(at: index) - 1)
     }
 
     /// Preserve the exact logical anchor across a prepend or width correction,
@@ -286,6 +356,8 @@ final class AgentTranscriptDocument: ThemedView {
             case .message: row = AgentMessageRow()
             case .activity: row = AgentActivityRow()
             case .work: row = AgentCompletedWorkRow()
+            case .working: row = AgentWorkingRow()
+            case .changes: row = AgentChangedFilesRow()
             }
             cached = CachedRow(row: row, kind: entry.kind)
             cache[entry.id] = cached
@@ -298,10 +370,21 @@ final class AgentTranscriptDocument: ThemedView {
                 self.cache[id]?.needsMeasurement = true
                 self.cache[id]?.needsLayout = true
                 guard !self.updatingViewport else { return }
+                if row is AgentCompletedWorkRow {
+                    self.lastFollowingEnd = false
+                    self.update(self.sourceItems, omittedCount: self.omittedCount, turns: self.sourceTurns)
+                }
                 if let onDisclosure = self.onDisclosure { onDisclosure() }
                 else { self.reflow(viewportWidth: self.viewportWidth) }
             }
             row.onApproval = { [weak self] id, allow in self?.onApproval?(id, allow) }
+            row.workspaceRoot = workspaceRoot
+            row.onOpenToolDiff = { [weak self] id, activity in self?.onOpenToolDiff?(id, activity) }
+            row.onOpenCheckpoint = { [weak self] id, path in self?.onOpenCheckpoint?(id, path) }
+            row.onOpenAttachment = onOpenAttachment
+            row.fetchAttachment = fetchAttachment
+            row.onPreviewAttachments = onPreviewAttachments
+            row.onRunShellCommand = onRunShellCommand
             row.onOpenFile = { [weak self] path, line in self?.onOpenFile?(path, line) }
         }
         let row = cached.row
@@ -312,7 +395,14 @@ final class AgentTranscriptDocument: ThemedView {
             cached.needsMeasurement = true
         }
         if cached.rendered != entry {
+            if let activity = row as? AgentActivityRow { activity.grouped = entry.groupedWork }
             if let work = row as? AgentCompletedWorkRow { work.turn = entry.turn }
+            if let working = row as? AgentWorkingRow { working.turn = entry.turn }
+            if let message = row as? AgentMessageRow {
+                message.showsResponseActions = entry.showsResponseActions
+                message.checkpoint = entry.turn?.checkpoint
+            }
+            if let changes = row as? AgentChangedFilesRow { changes.checkpoint = entry.turn?.checkpoint }
             row.update(entry.items)
             row.setTimestamp(entry.timestamp)
             cached.rendered = entry
@@ -338,6 +428,16 @@ final class AgentTranscriptDocument: ThemedView {
 
     private func captureStates() {
         for (id, cached) in cache { savedStates[id] = cached.row.captureState() }
+    }
+
+    private func migrateToolGroupStates() {
+        // Earlier versions stored all consecutive tools under the first tool's ID.
+        // Split that value state before those entries are independently restored.
+        for state in Array(savedStates.values) {
+            for id in state.toolExpandedIDs where savedStates["activity:" + id] == nil {
+                savedStates["activity:" + id] = AgentTimelineRowState(toolExpandedIDs: [id])
+            }
+        }
     }
 
     private func focusedRowID() -> String? {
@@ -371,6 +471,7 @@ final class AgentTranscriptDocument: ThemedView {
     }
 
     private func estimate(_ entry: Entry) -> CGFloat {
+        if entry.kind == .activity { return entry.groupedWork ? 24 : 28 }
         if entry.kind != .message { return 24 }
         guard let item = entry.items.first else { return 40 }
         let lines = min(40, max(1, item.text.utf16.count / 70 + item.text.reduce(0) { $0 + ($1 == "\n" ? 1 : 0) }))
@@ -416,6 +517,7 @@ final class AgentTranscriptDocument: ThemedView {
             groups[start + 1] = (turn, answer)
         }
         var result: [Entry] = []
+        let activeTurns = Dictionary(turns.filter { $0.completedAt == nil }.map { ($0.userItemID, $0) }, uniquingKeysWith: { _, last in last })
         var index = 0
         while index < items.endIndex {
             let item = items[index]
@@ -424,15 +526,42 @@ final class AgentTranscriptDocument: ThemedView {
                                     items: Array(items[index..<end]), turn: turn))
                 index = end
                 continue
-            } else if item.kind == .tool, result.last?.kind == .activity {
-                result[result.count - 1].items.append(item)
             } else {
                 result.append(Entry(id: item.kind == .tool ? "activity:" + item.id : item.id,
                                     kind: item.kind == .tool ? .activity : .message,
                                     items: [item], timestamp: timestamps[item.id]))
             }
+            if let turn = activeTurns[item.id] {
+                result.append(Entry(id: "working:" + item.id, kind: .working, items: [], turn: turn))
+            }
             index += 1
         }
-        return result
+        var foundAnswer = false
+        for position in result.indices.reversed() {
+            if result[position].items.first?.kind == .user { foundAnswer = false }
+            if result[position].kind == .message, result[position].items.first?.kind == .assistant {
+                result[position].showsResponseActions = !foundAnswer && !isNested
+                foundAnswer = true
+            }
+        }
+        guard !isNested else { return result }
+        var owners: [String: String] = [:]
+        for entry in result { for item in entry.items { owners[item.id] = entry.id } }
+        var cards: [String: AgentChatTurn] = [:]
+        for turn in turns where turn.checkpoint?.totalFiles ?? 0 > 0 {
+            guard let end = userEnds[turn.userItemID], let answer = answers[turn.userItemID],
+                  let start = itemIndices[turn.userItemID], end > start + 1 else { continue }
+            let target = answer < end ? answer : end - 1
+            if let owner = owners[items[target].id] { cards[owner] = turn }
+        }
+        return result.flatMap { entry -> [Entry] in
+            guard let turn = cards[entry.id] else { return [entry] }
+            if entry.kind == .message, entry.items.first?.kind == .assistant {
+                var answer = entry
+                answer.turn = turn
+                return [answer]
+            }
+            return [entry, Entry(id: "changes:" + turn.userItemID, kind: .changes, items: [], turn: turn)]
+        }
     }
 }

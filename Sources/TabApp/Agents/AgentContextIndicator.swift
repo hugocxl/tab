@@ -1,6 +1,6 @@
 import AppKit
 
-/// Like T3's ContextWindowMeter, measures the latest prompt, not lifetime billed tokens.
+/// Like the source renderer's ContextWindowMeter, measures the latest prompt, not lifetime billed tokens.
 @MainActor
 final class AgentContextIndicator: AgentComposerButton {
     var chatTheme: AppTheme = .shared { didSet { needsDisplay = true } }

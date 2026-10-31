@@ -4,6 +4,8 @@ import TabProtocol
 
 /// NDJSON transport. Readers drain both pipes independently; stdout EOF precedes exit delivery.
 internal final class AgentProcess: @unchecked Sendable {
+    // Eight 10 MiB tool images expand to about 107 MiB of base64, plus metadata.
+    static let maxLineBytes = 128 * 1024 * 1024
     struct Launch: Sendable {
         var executable: URL
         var arguments: [String]
@@ -74,19 +76,26 @@ internal final class AgentProcess: @unchecked Sendable {
         }
         Thread.detachNewThread { [output, process] in
             var buffer = Data()
-            while let chunk = Self.readAvailable(output.fileHandleForReading.fileDescriptor), !chunk.isEmpty {
+            var searchedThrough = 0
+            var oversized = false
+            readLoop: while let chunk = Self.readAvailable(output.fileHandleForReading.fileDescriptor), !chunk.isEmpty {
                 buffer.append(chunk)
-                while let newline = buffer.firstIndex(of: 10) {
+                while let newline = buffer[buffer.index(buffer.startIndex, offsetBy: searchedThrough)...].firstIndex(of: 10) {
+                    let length = buffer.distance(from: buffer.startIndex, to: newline)
+                    if length > Self.maxLineBytes { oversized = true; process.terminate(); break readLoop }
                     let line = Data(buffer[..<newline])
                     buffer.removeSubrange(...newline)
+                    searchedThrough = 0
                     if !line.isEmpty { onLine(line) }
                 }
-                if buffer.count > 16 * 1_024 * 1_024 {
+                searchedThrough = buffer.count
+                if buffer.count > Self.maxLineBytes {
+                    oversized = true
                     process.terminate()
                     break
                 }
             }
-            if !buffer.isEmpty { onLine(buffer) }
+            if !oversized && !buffer.isEmpty { onLine(buffer) }
             try? output.fileHandleForReading.close()
             process.waitUntilExit()
             // Do not wait for descendants that inherited stderr indefinitely.

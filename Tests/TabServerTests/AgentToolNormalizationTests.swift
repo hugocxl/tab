@@ -4,7 +4,7 @@ import XCTest
 @testable import TabServer
 
 final class AgentToolNormalizationTests: XCTestCase {
-    // T3 tool_call_restricted_granular/claude_transcript.ndjson:8,12.
+    // Source tool_call_restricted_granular/claude_transcript.ndjson:8,12.
     func testClaudeRecordedToolKeepsInputAfterResultAndTimestamp() throws {
         let transcript = ToolNormalizationRecorder()
         let runtime = ClaudeAgentRuntime(onEvent: { transcript.receive($0) })
@@ -21,18 +21,20 @@ final class AgentToolNormalizationTests: XCTestCase {
         XCTAssertTrue(tool.summary.hasPrefix("printf"))
     }
 
-    // T3 tool_call_denied_write/claude_transcript.ndjson:76. This is a denial, not a tool crash.
+    // Source tool_call_denied_write/claude_transcript.ndjson:76. This is a denial, not a tool crash.
     func testClaudeRecordedDeclinedResultIsDenied() throws {
         let transcript = ToolNormalizationRecorder()
         let runtime = ClaudeAgentRuntime(onEvent: { transcript.receive($0) })
         runtime.receive(try json(#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"User declined tool execution.","is_error":true,"tool_use_id":"toolu_016StH6rgvnkDxU2MWt46gYE"}]},"parent_tool_use_id":null,"timestamp":"2026-09-14T18:53:09.168Z","tool_result_meta":[{"id":"toolu_016StH6rgvnkDxU2MWt46gYE","non_execution_kind":"permission-rule"}]}"#))
         XCTAssertEqual(transcript.item?.tool?.status, .denied)
+        XCTAssertEqual(transcript.item?.workContext?.sourceStatus, "failed", "Pinned Claude V2 records permission-rule failures independently of the fallback denial label")
+        XCTAssertEqual(transcript.item?.workContext?.toolNonExecutionKind, "permission-rule")
         XCTAssertEqual(transcript.item?.tool?.output, "User declined tool execution.")
         XCTAssertTrue(transcript.item?.isComplete == true)
         XCTAssertNil(transcript.item?.tool?.startedAt, "A result without its start must not fabricate a start time")
     }
 
-    // T3 command_output_streaming/codex_transcript.ndjson:47–52, selected fields.
+    // Source command_output_streaming/codex_transcript.ndjson:47–52, selected fields.
     func testCodexRecordedCommandKeepsInputAndReplacesAggregate() throws {
         let transcript = ToolNormalizationRecorder()
         let runtime = CodexAgentRuntime(onEvent: { transcript.receive($0) })
@@ -55,11 +57,11 @@ final class AgentToolNormalizationTests: XCTestCase {
         XCTAssertEqual(tool.completedAt?.timeIntervalSince1970 ?? 0, 1791001639.846, accuracy: 0.001)
     }
 
-    // T3 tool_call_restricted_granular/codex_transcript.ndjson:49.
+    // Source tool_call_restricted_granular/codex_transcript.ndjson:49.
     func testCodexRecordedFileChangeKeepsActualDiffAndPath() throws {
         let transcript = ToolNormalizationRecorder()
         let runtime = CodexAgentRuntime(onEvent: { transcript.receive($0) })
-        runtime.receive(try json(#"{"method":"item/completed","params":{"item":{"type":"fileChange","id":"exec-114e8eef-018a-444d-8542-aa0232ff1f38","changes":[{"path":"/home/replay-user/t3code/packages/effect-codex-app-server/.codex-probe-write-action.txt","kind":{"type":"add"},"diff":"codex app-server approval fixture.\n"}],"status":"completed"},"completedAtMs":1790297014355}}"#))
+        runtime.receive(try json(#"{"method":"item/completed","params":{"item":{"type":"fileChange","id":"exec-114e8eef-018a-444d-8542-aa0232ff1f38","changes":[{"path":"/home/replay-user/conversation/packages/effect-codex-app-server/.codex-probe-write-action.txt","kind":{"type":"add"},"diff":"codex app-server approval fixture.\n"}],"status":"completed"},"completedAtMs":1790297014355}}"#))
         let tool = try XCTUnwrap(transcript.item?.tool)
         XCTAssertEqual(tool.category, .edit)
         XCTAssertEqual(tool.fileChanges?.first?.kind, "add")
@@ -69,7 +71,7 @@ final class AgentToolNormalizationTests: XCTestCase {
         XCTAssertNil(tool.startedAt)
     }
 
-    // T3 thread_rollback_to_stopped_turn/codex_transcript.ndjson:66.
+    // Source thread_rollback_to_stopped_turn/codex_transcript.ndjson:66.
     func testCodexRecordedFailedCommandIsNotPresentedAsSuccessful() throws {
         let transcript = ToolNormalizationRecorder()
         let runtime = CodexAgentRuntime(onEvent: { transcript.receive($0) })
@@ -82,6 +84,28 @@ final class AgentToolNormalizationTests: XCTestCase {
 
     private func json(_ source: String) throws -> [String: Any] {
         try XCTUnwrap(JSONSerialization.jsonObject(with: Data(source.utf8)) as? [String: Any])
+    }
+
+    func testObservedSourceLifecycleIsIndependentOfFallbackExitFailure() {
+        let transcript = ToolNormalizationRecorder()
+        let runtime = CodexAgentRuntime(onEvent: { transcript.receive($0) })
+        runtime.receive(["method": "item/completed", "params": ["turnId": "actual-provider-turn", "item": ["id": "command", "type": "commandExecution", "command": "false", "status": "completed", "exitCode": 1]]])
+        XCTAssertEqual(transcript.item?.tool?.status, .failed)
+        XCTAssertEqual(transcript.item?.workContext?.sourceStatus, "completed")
+        XCTAssertEqual(transcript.item?.workContext?.providerTurnID, "actual-provider-turn")
+        runtime.receive(["method": "item/completed", "params": ["item": ["id": "denied", "type": "commandExecution", "command": "pwd", "status": "declined"]]])
+        XCTAssertEqual(transcript.item?.workContext?.sourceStatus, "cancelled")
+        XCTAssertEqual(agentClaudeApprovalKind("Multi_Edit"), "file-change")
+        XCTAssertEqual(agentClaudeApprovalKind("Read"), "file-read")
+        XCTAssertEqual(agentClaudeApprovalKind("mcp__tools__Read"), "command")
+    }
+
+    func testClaudeExplicitCancellationRetainsSourceNonExecutionKind() {
+        let transcript = ToolNormalizationRecorder()
+        let runtime = ClaudeAgentRuntime(onEvent: { transcript.receive($0) })
+        runtime.receive(["type": "user", "message": ["content": [["type": "tool_result", "tool_use_id": "cancelled", "content": "Stopped", "is_error": true]]], "tool_result_meta": [["id": "cancelled", "non_execution_kind": "cancelled"]]])
+        XCTAssertEqual(transcript.item?.workContext?.sourceStatus, "cancelled")
+        XCTAssertEqual(transcript.item?.workContext?.toolNonExecutionKind, "cancelled")
     }
 }
 

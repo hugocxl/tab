@@ -74,7 +74,7 @@ final class AgentRuntimeTests: XCTestCase {
         }
     }
 
-    // Protocol replays are synthetic, derived from the T3 reference paths cited in the
+    // Protocol replays are synthetic, derived from the provider reference paths cited in the
     // provider implementations; no authentication, CLI install or billable request is used.
     func testClaudeStreamingApprovalToolResultAndNoDuplicateAnswer() async throws {
         let recorder = AgentRuntimeRecorder()
@@ -536,7 +536,7 @@ final class AgentRuntimeRecorder: @unchecked Sendable {
         var items: [String: AgentChatItem] = [:]
         for event in snapshot {
             switch event {
-            case .item(let item): items[item.id] = item
+            case .item(let item), .toolItem(let item, _): items[item.id] = item
             case .textDelta(let id, let text): items[id]?.text += text
             default: break
             }

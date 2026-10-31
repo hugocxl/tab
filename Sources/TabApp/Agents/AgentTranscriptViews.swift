@@ -3,9 +3,17 @@ import TabProtocol
 
 @MainActor
 class AgentTimelineRow: ThemedView {
+    var onOpenAttachment: ((String, AgentChatAttachmentDescriptor, Bool) -> Void)?
+    var fetchAttachment: AgentAttachmentCache.Fetch?
+    var onPreviewAttachments: ((String, [AgentChatAttachmentDescriptor], Int) -> Void)?
     var onDisclosure: (() -> Void)?
     var onApproval: ((String, Bool) -> Void)?
+    var onRunShellCommand: ((String) -> Void)? { didSet { runCommandHandlerDidChange() } }
+    func runCommandHandlerDidChange() {}
     var onOpenFile: ((String, Int?) -> Void)?
+    var workspaceRoot: String?
+    var onOpenToolDiff: ((String, AgentToolActivity) -> Void)?
+    var onOpenCheckpoint: ((String, String?) -> Void)?
     func update(_ items: [AgentChatItem]) {}
     func preferredHeight(for width: CGFloat) -> CGFloat { 0 }
     func layoutRow(width: CGFloat) {}
@@ -23,10 +31,25 @@ class AgentTimelineRow: ThemedView {
 @MainActor
 final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
     private var item: AgentChatItem?
+    private var hoverArea: NSTrackingArea?
+    private var hovered = false
+    private var actionsFocused = false
+    private let messageFade = CAGradientLayer()
+    var showsResponseActions = true { didSet { if oldValue != showsResponseActions { renderText() } } }
     private let body = AgentRichTextView(frame: .zero)
     private let response = AgentResponseView(frame: .zero)
+    private let media = AgentMessageMediaView(frame: .zero)
+    private var mediaSize = NSSize.zero
+    private let changes = AgentChangedFilesRow(frame: .zero)
+    private var changesHeight: CGFloat = 0
+    var checkpoint: AgentTurnCheckpoint? {
+        didSet {
+            changes.checkpoint = checkpoint
+            changes.isHidden = (checkpoint?.totalFiles ?? 0) == 0
+        }
+    }
     private let copy = PillButton("Copy", style: .plain)
-    private let expandMessage = PillButton("Show more", style: .plain)
+    private let expandMessage = PillButton("Show full message", style: .plain)
     private var messageExpanded = false
     private let timestamp = makeLabel("", font: AppFont.footnote)
     private var timestampDate: Date?
@@ -39,16 +62,24 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
     private var bubbleWidth: CGFloat = 0
     private var bodyHeight: CGFloat = 0
     private var detailHeight: CGFloat = 0
-    private var attachmentLabels: [NSTextField] = []
+    private var attachmentCards: [AgentFileAttachmentCard] = []
+    private var filesOnly = false
     private var attachmentsHeight: CGFloat = 0
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        bubble.cornerRadius = 15
+        bubble.cornerRadius = 16
         addSubview(bubble)
         addSubview(body)
         body.delegate = self
         addSubview(response)
+        addSubview(media)
+        media.onHeightChanged = { [weak self] in self?.onDisclosure?() }
+        changes.isHidden = true
+        addSubview(changes)
+        changes.onDisclosure = { [weak self] in self?.onDisclosure?() }
+        changes.onOpenFile = { [weak self] path, line in self?.onOpenFile?(path, line) }
+        changes.onOpenCheckpoint = { [weak self] id, path in self?.onOpenCheckpoint?(id, path) }
         copy.translatesAutoresizingMaskIntoConstraints = true
         copy.font = AppFont.footnote
         copy.toolTip = "Copy response as Markdown"
@@ -66,20 +97,30 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
             self.renderText()
             self.onDisclosure?()
         }
+        copy.onFocusChange = { [weak self] focused in
+            self?.actionsFocused = focused
+            self?.updateActionVisibility()
+        }
         copy.onPress = { [weak self] in
             guard let text = self?.item?.text else { return }
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(text, forType: .string)
-            self?.copy.title = "Copied"
+            self?.copy.image = AgentConversationIcon.check.image()
             self?.copyReset?.cancel()
             self?.copyReset = Task { [weak self] in
                 try? await Task.sleep(for: .seconds(2))
                 guard !Task.isCancelled else { return }
-                self?.copy.title = "Copy"
+                self?.copy.image = AgentConversationIcon.copy.image()
             }
         }
         response.onOpenFile = { [weak self] path, line in self?.onOpenFile?(path, line) }
         response.onHeightChanged = { [weak self] in self?.onDisclosure?() }
+        response.onReveal = { [weak self] in
+            guard let self, self.item?.kind == .user, !self.messageExpanded else { return }
+            self.messageExpanded = true
+            self.renderText()
+            self.onDisclosure?()
+        }
         addSubview(detail)
         for child in [permissionTitle, deny, allow] {
             child.translatesAutoresizingMaskIntoConstraints = true
@@ -103,48 +144,59 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
         renderText()
     }
 
+    override func runCommandHandlerDidChange() {
+        response.onRunShellCommand = item?.kind == .assistant ? onRunShellCommand : nil
+    }
+
     private func renderText() {
         guard let item else { return }
-        var text = item.text
+        let text = item.text
+        response.isStreaming = !item.isComplete
+        runCommandHandlerDidChange()
         let collapsible = item.kind == .user && (text.count > 600 || text.components(separatedBy: "\n").count > 8)
         expandMessage.isHidden = !collapsible
-        expandMessage.title = messageExpanded ? "Show less" : "Show more"
+        expandMessage.title = messageExpanded ? "Show less" : "Show full message"
         expandMessage.setTitleColor(theme.fgDim)
-        if collapsible && !messageExpanded {
-            text = String(text.prefix(600)).components(separatedBy: "\n").prefix(8).joined(separator: "\n") + "…"
-        }
-        body.isHidden = item.kind == .assistant
-        let attachments = item.kind == .user ? item.attachments ?? [] : []
-        while attachmentLabels.count > attachments.count { attachmentLabels.removeLast().removeFromSuperview() }
-        while attachmentLabels.count < attachments.count {
-            let label = makeLabel("", font: AppFont.small)
-            label.lineBreakMode = .byTruncatingMiddle
-            label.isSelectable = true
-            addSubview(label)
-            attachmentLabels.append(label)
+        body.isHidden = item.kind == .assistant || item.kind == .user
+        let allAttachments = item.kind == .user ? item.attachments ?? [] : []
+        let images = allAttachments.filter { $0.mimeType.lowercased().hasPrefix("image/") }
+        let attachments = allAttachments.filter { !$0.mimeType.lowercased().hasPrefix("image/") }
+        media.fetch = fetchAttachment
+        media.onPreview = onPreviewAttachments
+        media.update(item: item.id, attachments: images, theme: theme)
+        filesOnly = item.kind == .user && images.isEmpty && !attachments.isEmpty && item.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        while attachmentCards.count > attachments.count { attachmentCards.removeLast().removeFromSuperview() }
+        while attachmentCards.count < attachments.count {
+            let card = AgentFileAttachmentCard(frame: .zero)
+            addSubview(card)
+            attachmentCards.append(card)
         }
         for (index, attachment) in attachments.enumerated() {
-            let size = ByteCountFormatter.string(fromByteCount: Int64(attachment.byteCount), countStyle: .file)
-            let label = attachmentLabels[index]
-            label.stringValue = "📎 \(attachment.name) · \(size)"
-            label.toolTip = attachment.name
-            label.textColor = theme.fgMuted
-            label.setAccessibilityLabel("Attachment: \(attachment.name), \(size)")
+            let card = attachmentCards[index]
+            card.update(attachment, standalone: filesOnly, theme: theme)
+            card.onOpen = { [weak self] download in self?.onOpenAttachment?(item.id, attachment, download) }
         }
-        response.isHidden = item.kind != .assistant
-        copy.isHidden = (item.kind != .assistant && item.kind != .user) || !item.isComplete
+        response.isHidden = item.kind != .assistant && item.kind != .user
+        copy.isHidden = (item.kind != .assistant && item.kind != .user) || (item.kind == .user && item.text.isEmpty) || !item.isComplete || (item.kind == .assistant && !showsResponseActions)
         copy.toolTip = item.kind == .user ? "Copy message" : "Copy response as Markdown"
         copy.setAccessibilityLabel(item.kind == .user ? "Copy message" : "Copy response")
-        copy.title = "Copy"
+        copy.title = ""
+        copy.image = AgentConversationIcon.copy.image()
+        copy.imagePosition = .imageOnly
+        updateActionVisibility()
         copy.setTitleColor(theme.fgDim)
         timestamp.textColor = theme.fgDim
-        if item.kind == .assistant { response.setContent(text, theme: theme) }
-        else if item.kind == .user { body.setContent(AgentMarkdown.render(text, theme: theme)) }
+        if item.kind == .assistant || item.kind == .user {
+            response.parseRawHTML = item.kind == .assistant
+            response.lineBreaks = item.kind == .user
+            response.setContent(text, theme: theme)
+        }
         else { body.setContent(AgentMarkdown.plain(text, theme: theme, muted: item.kind == .notice)) }
         detail.setContent(AgentMarkdown.plain(Self.bounded(item.detail ?? ""), theme: theme, muted: true, monospaced: true))
         body.selectedTextAttributes = [.backgroundColor: theme.accent.withAlphaComponent(0.22)]
         detail.selectedTextAttributes = body.selectedTextAttributes
-        bubble.isHidden = item.kind != .user
+        bubble.isHidden = item.kind != .user || filesOnly || (!media.isHidden && item.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty)
+        media.joinsTextBubble = !bubble.isHidden
         let pending = item.kind == .approval && !item.isComplete
         permissionTitle.isHidden = item.kind != .approval
         permissionTitle.stringValue = pending ? "Approval needed" : "Approval resolved"
@@ -157,40 +209,65 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
     override func preferredHeight(for width: CGFloat) -> CGFloat {
         guard let item else { return 0 }
         if item.kind == .user {
-            let plain = body.string as NSString
-            let natural = plain.boundingRect(with: NSSize(width: max(1, width * 0.85 - 28), height: .greatestFiniteMagnitude),
+            let plain = item.text as NSString
+            let natural = plain.boundingRect(with: NSSize(width: max(1, width * 0.8 - 28), height: .greatestFiniteMagnitude),
                 options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: [.font: AppFont.system(14)]).width
-            let attachmentWidth = attachmentLabels.map {
-                ($0.stringValue as NSString).size(withAttributes: [.font: AppFont.small]).width
-            }.max() ?? 0
-            bubbleWidth = min(width * 0.85, max(48, ceil(max(natural, attachmentWidth)) + 28))
-            bodyHeight = body.string.isEmpty ? 0 : body.height(for: max(1, bubbleWidth - 28))
+            let attachmentWidth = attachmentCards.map(\.naturalWidth).max() ?? 0
+            bubbleWidth = min(width * 0.8, max(48, ceil(max(natural, attachmentWidth)) + 28))
+            let hasRichBlocks = AgentResponsePart.partition(AgentResponseParser.parse(item.text, parseRawHTML: false)).contains { $0.kind != 0 }
+            if hasRichBlocks { bubbleWidth = width * 0.8 }
+            bodyHeight = item.text.isEmpty ? 0 : response.height(for: max(1, bubbleWidth - 28))
             if !expandMessage.isHidden && !messageExpanded { bodyHeight = min(176, bodyHeight) }
-            attachmentsHeight = attachmentLabels.isEmpty ? 0 : CGFloat(attachmentLabels.count) * 22 + (bodyHeight > 0 ? 8 : 0)
-            return bodyHeight + attachmentsHeight + 22 + (expandMessage.isHidden ? 0 : 26) + 28
+            attachmentsHeight = attachmentCards.reduce(0) { $0 + $1.preferredHeight } + CGFloat(max(0, attachmentCards.count - 1)) * 4
+            if !attachmentCards.isEmpty && bodyHeight > 0 { attachmentsHeight += 8 }
+            if filesOnly { bubbleWidth = min(width * 0.8, 256); return attachmentsHeight + 28 }
+            mediaSize = media.measuredSize(maxWidth: max(1, width * 0.8))
+            if bubble.isHidden { return mediaSize.height + 28 }
+            return mediaSize.height + (mediaSize.height > 0 ? 4 : 0) + bodyHeight + attachmentsHeight + 22 + (expandMessage.isHidden ? 0 : 26) + 28
         }
         bodyHeight = item.kind == .assistant ? response.height(for: width) : body.height(for: width)
         detailHeight = detail.isHidden ? 0 : detail.height(for: max(1, width - 24))
         if item.kind == .approval {
             return 24 + bodyHeight + (detail.isHidden ? 0 : detailHeight + 14) + (item.isComplete ? 0 : 42)
         }
-        return bodyHeight + (copy.isHidden ? 0 : 28)
+        changesHeight = item.kind == .assistant && !changes.isHidden ? changes.preferredHeight(for: width) : 0
+        return bodyHeight + (changesHeight > 0 ? 16 + changesHeight : 0) + (copy.isHidden ? 0 : 28)
     }
 
     override func layoutRow(width: CGFloat) {
         guard let item else { return }
         if item.kind == .user {
             let left = width - bubbleWidth
-            bubble.frame = NSRect(x: left, y: 0, width: bubbleWidth, height: bounds.height - 28)
-            body.frame = NSRect(x: left + 14, y: 11, width: max(1, bubbleWidth - 28), height: bodyHeight)
-            expandMessage.frame = NSRect(x: left + 10, y: body.frame.maxY + 4, width: 90, height: 24)
-            let attachmentTop = body.frame.maxY + (expandMessage.isHidden ? 0 : 26) + (bodyHeight > 0 ? 8 : 0)
-            for (index, label) in attachmentLabels.enumerated() {
-                label.frame = NSRect(x: left + 14, y: attachmentTop + CGFloat(index) * 22,
-                                     width: max(1, bubbleWidth - 28), height: 20)
+            media.frame = NSRect(x: width - mediaSize.width, y: 0, width: mediaSize.width, height: mediaSize.height)
+            media.layoutSubtreeIfNeeded()
+            let bubbleY = mediaSize.height + (mediaSize.height > 0 && !bubble.isHidden ? 4 : 0)
+            bubble.frame = NSRect(x: left, y: bubbleY, width: bubbleWidth, height: max(0, bounds.height - 28 - bubbleY))
+            if !media.isHidden && !bubble.isHidden {
+                bubble.cornerRadius = 0
+                AgentMessageShape.apply(to: bubble, topRight: 6)
+            } else { bubble.cornerRadius = 16; bubble.layer?.mask = nil }
+            response.frame = NSRect(x: left + 14, y: bubbleY + 11 + attachmentsHeight, width: max(1, bubbleWidth - 28), height: bodyHeight)
+            expandMessage.frame = NSRect(x: max(left, width - 146), y: response.frame.maxY + 4, width: min(140, bubbleWidth), height: 24)
+            response.layoutSubtreeIfNeeded()
+            response.wantsLayer = true
+            response.layer?.masksToBounds = true
+            if !expandMessage.isHidden && !messageExpanded {
+                messageFade.frame = response.bounds
+                messageFade.colors = [NSColor.black.cgColor, NSColor.black.cgColor, NSColor.clear.cgColor]
+                messageFade.locations = [0, NSNumber(value: Double(max(0, 1 - 28 / max(1, bodyHeight)))), 1]
+                messageFade.startPoint = CGPoint(x: 0.5, y: 0)
+                messageFade.endPoint = CGPoint(x: 0.5, y: 1)
+                response.layer?.mask = messageFade
+            } else { response.layer?.mask = nil }
+            var attachmentTop: CGFloat = filesOnly ? 0 : bubbleY + 11
+            for card in attachmentCards {
+                card.frame = NSRect(x: filesOnly ? left : left + 14, y: attachmentTop,
+                                    width: max(1, filesOnly ? bubbleWidth : bubbleWidth - 28), height: card.preferredHeight)
+                card.layoutSubtreeIfNeeded()
+                attachmentTop += card.preferredHeight + 4
             }
-            copy.frame = NSRect(x: width - 60, y: bubble.frame.maxY + 4, width: 60, height: 24)
-            timestamp.frame = NSRect(x: max(0, width - 220), y: copy.frame.minY + 4, width: 150, height: 18)
+            copy.frame = NSRect(x: width - 60, y: (filesOnly ? attachmentsHeight : bubble.isHidden ? media.frame.maxY : bubble.frame.maxY) + 4, width: 60, height: 24)
+            timestamp.frame = NSRect(x: max(0, width - (copy.isHidden ? 150 : 220)), y: copy.frame.minY + 4, width: 150, height: 18)
             timestamp.alignment = .right
         } else if item.kind == .approval {
             permissionTitle.frame = NSRect(x: 0, y: 0, width: width, height: 18)
@@ -202,12 +279,33 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
         } else if item.kind == .assistant {
             response.frame = NSRect(x: 0, y: 0, width: width, height: bodyHeight)
             response.layoutSubtreeIfNeeded()
-            copy.frame = NSRect(x: -4, y: bodyHeight + 4, width: 60, height: 24)
-            timestamp.frame = NSRect(x: 64, y: copy.frame.minY + 4, width: max(0, width - 64), height: 18)
+            let footerY = bodyHeight + (changesHeight > 0 ? 16 + changesHeight : 0)
+            changes.frame = NSRect(x: 0, y: bodyHeight + 16, width: width, height: changesHeight)
+            changes.layoutRow(width: width)
+            copy.frame = NSRect(x: -4, y: footerY + 4, width: 28, height: 24)
+            timestamp.frame = NSRect(x: 30, y: copy.frame.minY + 4, width: max(0, width - 30), height: 18)
             timestamp.alignment = .left
         } else {
             body.frame = NSRect(x: 0, y: 0, width: width, height: bodyHeight)
         }
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverArea { removeTrackingArea(hoverArea) }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self)
+        addTrackingArea(area)
+        hoverArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) { hovered = true; updateActionVisibility() }
+    override func mouseExited(with event: NSEvent) { hovered = false; updateActionVisibility() }
+
+    private func updateActionVisibility() {
+        // Keep controls in the accessibility tree while matching the quiet resting footer.
+        let opacity: CGFloat = hovered || actionsFocused ? 1 : 0
+        copy.alphaValue = opacity
+        timestamp.alphaValue = opacity
     }
 
     override func setApprovalsEnabled(_ enabled: Bool) {
@@ -217,7 +315,7 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
     }
 
     override func setTimestamp(_ date: Date?) {
-        timestamp.isHidden = date == nil || copy.isHidden
+        timestamp.isHidden = date == nil || (copy.isHidden && item?.kind != .user)
         guard timestampDate != date else { return }
         timestampDate = date
         guard let date else { return }
@@ -232,11 +330,13 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
 
     override func themeDidChange() {
         bubble.theme = theme
+        changes.theme = theme
+        changes.themeDidChange()
         renderText()
     }
 
     override func captureState() -> AgentTimelineRowState {
-        AgentTimelineRowState(expanded: messageExpanded, wrappedCodeSections: response.wrappedCodeSections)
+        AgentTimelineRowState(expanded: messageExpanded, responseState: response.captureState(), wrappedCodeSections: response.wrappedCodeSections, children: ["changes": changes.captureState()])
     }
 
     override func restoreState(_ state: AgentTimelineRowState) {
@@ -244,133 +344,103 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
             messageExpanded = state.expanded
             renderText()
         }
-        response.wrappedCodeSections = state.wrappedCodeSections
+        if let state = state.responseState { response.restoreState(state) }
+        else if let wrapped = state.wrappedCodeSections { response.wrappedCodeSections = wrapped }
+        changes.restoreState(state.children["changes"] ?? AgentTimelineRowState())
     }
 
     func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
         let destination = (link as? URL)?.absoluteString ?? (link as? String) ?? ""
         guard let target = AgentResponseLink.parse(destination) else { return true }
         switch target {
+        case .fragment(let id): _ = response.openFragment(id); return true
         case .file(let path, let line): onOpenFile?(path, line); return true
         case .external: return false
         }
     }
 }
 
-/// Consecutive tool events occupy one quiet work-log disclosure, never a wall of cards.
+/// Tool entries expose their own disclosure directly, without a second group toggle.
 @MainActor
 final class AgentActivityRow: AgentTimelineRow {
-    private var items: [AgentChatItem] = []
+    private let tool = AgentToolDisclosure(frame: .zero)
+    private var item: AgentChatItem?
+    var grouped = false { didSet { tool.grouped = grouped } }
     private var expanded = false
-    private let disclosure = PillButton("", style: .plain)
-    private let log = AgentToolDetailView(frame: .zero)
-    private var logHeight: CGFloat = 0
-    private var logLoaded = false
-    private var savedToolExpandedIDs: Set<String> = []
-    private var savedLogOffset: NSPoint = .zero
-
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        disclosure.translatesAutoresizingMaskIntoConstraints = true
-        disclosure.alignment = .left
-        disclosure.font = AppFont.small
-        disclosure.imagePosition = .imageLeading
-        disclosure.imageScaling = .scaleProportionallyDown
-        addSubview(disclosure)
-        addSubview(log)
-        log.onOpenFile = { [weak self] path, line in self?.onOpenFile?(path, line) }
-        log.onDisclosure = { [weak self] in self?.onDisclosure?() }
-        disclosure.onPress = { [weak self] in
+        addSubview(tool)
+        tool.onHeightChanged = { [weak self] in self?.onDisclosure?() }
+        tool.onOpenToolDiff = { [weak self] id, activity in self?.onOpenToolDiff?(id, activity) }
+        tool.onOpenFile = { [weak self] path, line in self?.onOpenFile?(path, line) }
+        tool.onDisclosure = { [weak self] in
             guard let self else { return }
             self.expanded.toggle()
-            if self.expanded { self.updateLog() }
-            else { self.unloadLog() }
-            self.updateDisclosure()
+            self.refresh()
             self.onDisclosure?()
         }
     }
-
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
     override func update(_ items: [AgentChatItem]) {
-        guard self.items != items else { return }
-        self.items = items
-        if expanded { updateLog() }
-        updateDisclosure()
+        item = items.first
+        refresh()
     }
-
-    private func updateDisclosure() {
-        let running = items.contains { !$0.isComplete }
-        let summary: String
-        if items.count == 1 {
-            let item = items[0]
-            let action = item.tool?.summary ?? String(item.text.prefix(220)).components(separatedBy: "\n").first ?? "Tool activity"
-            let state: String
-            switch item.tool?.status {
-            case .failed: state = " · Failed"
-            case .denied: state = " · Denied"
-            case .interrupted: state = " · Interrupted"
-            default: state = running ? " · Running" : ""
-            }
-            summary = action + state
-        } else {
-            let failures = items.filter { $0.tool?.status == .failed || $0.tool?.status == .denied }.count
-            summary = (running ? "Using \(items.count) tools…" : "\(items.count) tools used") + (failures > 0 ? " · \(failures) failed or denied" : "")
-        }
-        disclosure.title = (expanded ? "⌄  " : "›  ") + summary
-        disclosure.setTitleColor(theme.fgDim)
-        disclosure.setAccessibilityLabel((expanded ? "Collapse activity: " : "Expand activity: ") + summary)
-        disclosure.toolTip = summary
-        log.isHidden = !expanded
+    private func refresh() {
+        tool.workspaceRoot = workspaceRoot
+        tool.fetchAttachment = fetchAttachment
+        tool.onPreviewAttachments = onPreviewAttachments
+        if let item { tool.update(item, expanded: expanded, theme: theme) }
     }
-
-    private func updateLog() {
-        log.update(items: items, theme: theme)
-        if !logLoaded {
-            log.expandedIDs = savedToolExpandedIDs
-            log.scrollOffset = savedLogOffset
-        }
-        logLoaded = true
-    }
-
-    private func unloadLog() {
-        guard logLoaded else { return }
-        savedToolExpandedIDs = log.expandedIDs
-        savedLogOffset = log.scrollOffset
-        log.update(items: [], theme: theme)
-        logLoaded = false
-    }
-
-    override func preferredHeight(for width: CGFloat) -> CGFloat {
-        logHeight = expanded ? log.height(for: max(1, width - 20)) : 0
-        return expanded ? 32 + logHeight : 24
-    }
-
-    override func layoutRow(width: CGFloat) {
-        disclosure.frame = NSRect(x: -4, y: 0, width: width + 4, height: 24)
-        log.frame = NSRect(x: 20, y: 32, width: max(1, width - 20), height: logHeight)
-        log.layoutSubtreeIfNeeded()
-    }
-
-    override func themeDidChange() {
-        if expanded { updateLog() }
-        updateDisclosure()
-    }
-
+    override func preferredHeight(for width: CGFloat) -> CGFloat { tool.height(for: width) }
+    override func layoutRow(width: CGFloat) { tool.frame = bounds; tool.layoutSubtreeIfNeeded() }
+    override func themeDidChange() { tool.refresh(theme: theme) }
     override func captureState() -> AgentTimelineRowState {
-        AgentTimelineRowState(expanded: expanded, toolExpandedIDs: logLoaded ? log.expandedIDs : savedToolExpandedIDs,
-                              scrollOffset: logLoaded ? log.scrollOffset : savedLogOffset)
+        AgentTimelineRowState(toolExpandedIDs: expanded ? Set(item.map { [$0.id] } ?? []) : [],
+                              argumentScrollOffset: tool.argumentScrollPosition, scrollOffset: tool.outputScrollPosition)
     }
-
     override func restoreState(_ state: AgentTimelineRowState) {
-        expanded = state.expanded
-        savedToolExpandedIDs = state.toolExpandedIDs
-        savedLogOffset = state.scrollOffset
-        if expanded {
-            updateLog()
-            log.expandedIDs = savedToolExpandedIDs
-            log.scrollOffset = savedLogOffset
-        } else { unloadLog() }
-        updateDisclosure()
+        expanded = item.map { state.toolExpandedIDs.contains($0.id) } ?? false
+        tool.restoreOutputScrollPosition(state.scrollOffset)
+        tool.restoreArgumentScrollPosition(state.argumentScrollOffset)
+        refresh()
+    }
+}
+
+@MainActor
+final class AgentWorkingRow: AgentTimelineRow {
+    var turn: AgentChatTurn?
+    private let label = makeLabel("", font: AppFont.small)
+    private var ticker: Timer?
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        label.translatesAutoresizingMaskIntoConstraints = true
+        addSubview(label)
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        ticker?.invalidate()
+        ticker = nil
+        if window != nil {
+            ticker = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated { self?.refresh() }
+            }
+        }
+    }
+    deinit { ticker?.invalidate() }
+    private func refresh() {
+        let seconds = max(0, Int(Date().timeIntervalSince(turn?.startedAt ?? Date())))
+        let duration = seconds >= 60 ? "\(seconds / 60)m \(seconds % 60)s" : "\(seconds)s"
+        label.stringValue = "Working for " + duration
+        label.textColor = theme.fgDim
+    }
+    override func update(_ items: [AgentChatItem]) { refresh() }
+    override func preferredHeight(for width: CGFloat) -> CGFloat { 37 }
+    override func layoutRow(width: CGFloat) { label.frame = NSRect(x: 4, y: 4, width: max(0, width - 8), height: 24) }
+    override func themeDidChange() { refresh(); needsDisplay = true }
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        theme.fg.withAlphaComponent(0.1).setFill()
+        NSRect(x: 0, y: bounds.height - 1, width: bounds.width, height: 1).fill()
     }
 }

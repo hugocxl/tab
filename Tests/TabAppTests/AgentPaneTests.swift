@@ -20,6 +20,9 @@ final class AgentPaneTests: XCTestCase {
         var gateNextRead = false
         var sendGate: CheckedContinuation<Void, Never>?
         var gateNextSend = false
+        var approvalGate: CheckedContinuation<Void, Never>?
+        var gateNextApproval = false
+        var failApproval = false
         lazy var snapshot = AgentChatSnapshot(session: session, project: project, provider: .claude)
 
         func request(_ request: AgentChatRequest) async throws -> AgentChatSnapshot {
@@ -50,6 +53,11 @@ final class AgentPaneTests: XCTestCase {
                     return beforeReconnect
                 }
             case .approve(_, let id, _):
+                if gateNextApproval {
+                    gateNextApproval = false
+                    await withCheckedContinuation { approvalGate = $0 }
+                }
+                if failApproval { throw NSError(domain: "Approval failed", code: 3) }
                 if let index = snapshot.items.firstIndex(where: { $0.id == id }) {
                     snapshot.items[index].isComplete = true
                 }
@@ -620,6 +628,7 @@ final class AgentPaneTests: XCTestCase {
     func testComposerIsOutsideTranscriptAndRemainsFixedAsTranscriptGrows() {
         let backend = Backend()
         let pane = backend.controller()
+        pane.surface.disposeConversation() // Native fallback geometry is under test.
         defer { pane.dispose() }
         pane.view.frame = NSRect(x: 0, y: 0, width: 680, height: 700)
         pane.view.layoutSubtreeIfNeeded()
@@ -645,6 +654,7 @@ final class AgentPaneTests: XCTestCase {
     func testStreamingDoesNotPullReaderAwayFromEarlierMessages() {
         let backend = Backend()
         let pane = backend.controller()
+        pane.surface.disposeConversation() // Native fallback geometry is under test.
         defer { pane.dispose() }
         pane.view.frame = NSRect(x: 0, y: 0, width: 680, height: 700)
         backend.snapshot.items = (0..<40).map {
@@ -663,13 +673,52 @@ final class AgentPaneTests: XCTestCase {
         XCTAssertEqual(clip.bounds.minY, readingPosition, accuracy: 1)
     }
 
-    func testSendingFromEarlierHistoryFollowsTheNewTurn() async throws {
+    func testWebApprovalWaitsForServerAcknowledgementAndPropagatesRejection() async throws {
+        let backend = Backend()
+        backend.snapshot.status = .waiting
+        backend.snapshot.items = [.init(id: "approval:pending", kind: .approval, text: "Run", isComplete: false)]
+        let pane = backend.controller()
+        defer { pane.dispose() }
+        pane.refresh()
+        try await wait { pane.snapshot != nil }
+        backend.gateNextApproval = true
+        var acknowledged = false
+        let action = Task {
+            _ = try await pane.surface.handleConversationAction("approve", ["requestId": "pending", "allow": true, "decision": "accept"])
+            acknowledged = true
+        }
+        try await wait { backend.approvalGate != nil }
+        XCTAssertFalse(acknowledged)
+        XCTAssertFalse(pane.snapshot?.items[0].isComplete ?? true)
+        backend.approvalGate?.resume(); backend.approvalGate = nil
+        try await action.value
+        XCTAssertTrue(acknowledged)
+        XCTAssertTrue(pane.snapshot?.items[0].isComplete == true)
+
+        backend.snapshot.items = [.init(id: "rejected", kind: .approval, text: "Run", isComplete: false)]
+        backend.snapshot.status = .waiting
+        backend.snapshot.revision += 1
+        pane.refresh()
+        try await wait { pane.snapshot?.items.first?.id == "rejected" }
+        backend.failApproval = true
+        do {
+            _ = try await pane.surface.handleConversationAction("approve", ["requestId": "rejected", "allow": false, "decision": "decline"])
+            XCTFail("A failed server reply must reject the source action promise")
+        } catch {}
+        XCTAssertFalse(pane.snapshot?.items[0].isComplete ?? true)
+        XCTAssertNotNil(pane.errorMessage)
+    }
+
+    func testNativeFallbackSendingFromEarlierHistoryFollowsTheNewTurn() async throws {
         let backend = Backend()
         backend.snapshot.items = (0..<40).map {
             AgentChatItem(id: "message-\($0)", kind: .assistant, text: "Earlier answer \($0)")
         }
         let pane = backend.controller()
         defer { pane.dispose() }
+        // This assertion exercises the native fallback's scroll coordinates. The
+        // bundled renderer activates asynchronously and owns a separate viewport.
+        pane.surface.disposeConversation()
         pane.view.frame = NSRect(x: 0, y: 0, width: 680, height: 700)
         pane.view.layoutSubtreeIfNeeded()
         pane.refresh()
@@ -707,6 +756,7 @@ final class AgentPaneTests: XCTestCase {
         ]
         let pane = backend.controller()
         defer { pane.dispose() }
+        pane.surface.disposeConversation() // AppKit cacheDisplay fixture exercises native fallback.
         pane.refresh()
         try await wait { pane.snapshot != nil }
         pane.surface.composer.string = "Also verify the narrow split layout."

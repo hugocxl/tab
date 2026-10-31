@@ -31,6 +31,21 @@ final class AgentPaneStateTests: XCTestCase {
         XCTAssertTrue(state.pendingCancellations(.local).isEmpty)
     }
 
+    func testSavedConversationLinkOpensAndReusesItsExistingSessionIdentity() throws {
+        var state = try AppState.bootstrap()
+        let project = try state.addProject(server: .local, directory: FileManager.default.currentDirectoryPath)
+        let savedSession = SessionId()
+        let first = try state.openAgent(project, session: savedSession, provider: .codex)
+        XCTAssertEqual(state.pane(first)?.content, .agent(session: savedSession, provider: .codex))
+        let other = try state.openAgent(project)
+        XCTAssertEqual(state.window.activePane, other)
+        let second = try state.openAgent(project, session: savedSession, provider: .codex)
+        XCTAssertEqual(second, first)
+        XCTAssertEqual(state.window.activePane, first)
+        XCTAssertEqual(state.project(project)?.tabs.flatMap(\.panes).count, 2)
+        XCTAssertEqual(try AppStateStore.decode(AppStateStore.encode(state)).pane(first)?.content, .agent(session: savedSession, provider: .codex))
+    }
+
     func testHomeAgentsOpenStandaloneAndCanSplitWithTerminals() throws {
         var state = try AppState.bootstrap()
         try state.openTerminalTab(state.home.id)

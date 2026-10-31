@@ -1,6 +1,6 @@
 import AppKit
 
-/// T3 useComposerMenuItems combines real workspace paths and thread matches for
+/// Source useComposerMenuItems combines real workspace paths and thread matches for
 /// @, and supported actions plus discovered skill metadata for /. Keep lookup
 /// and execution in the coordinator; the native surface never invents results.
 struct AgentComposerSuggestion: Equatable, Identifiable {
@@ -33,7 +33,7 @@ struct AgentComposerTrigger: Equatable {
 }
 
 enum AgentComposerTriggerParser {
-    /// Based on T3 apps/web/src/composer-logic.ts detectComposerTrigger: inspect the
+    /// Based on Source apps/web/src/composer-logic.ts detectComposerTrigger: inspect the
     /// whitespace-delimited token *before the caret*, not the end of the draft.
     /// Native differences: slash actions are prompt-leading only, code is excluded,
     /// selections are left untouched, and replacement consumes a mid-token suffix.
@@ -107,7 +107,7 @@ enum AgentComposerTriggerParser {
     }
 }
 
-/// Mirrors T3 useComposerTriggerState: Escape stays dismissed for the current
+/// Mirrors Source useComposerTriggerState: Escape stays dismissed for the current
 /// token even while its query changes; leaving the token re-arms suggestions.
 struct AgentComposerTriggerState {
     private var dismissed: AgentComposerTrigger?
@@ -123,7 +123,7 @@ struct AgentComposerTriggerState {
 }
 
 /// A non-modal child surface: the composer remains first responder while typing.
-/// T3 ComposerCommandMenu scrolls the active item into view and prevents mouse
+/// Source ComposerCommandMenu scrolls the active item into view and prevents mouse
 /// down from stealing editor focus; this native table follows both behaviors.
 @MainActor
 final class AgentComposerSuggestionsView: NSView, NSTableViewDataSource, NSTableViewDelegate {

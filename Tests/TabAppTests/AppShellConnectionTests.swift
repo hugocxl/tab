@@ -43,7 +43,7 @@ final class AppShellConnectionTests: XCTestCase {
         }
         connection.start()
         let ready = await ModelFixtures.wait { connection.state.isReady }
-        XCTAssertTrue(ready)
+        XCTAssertTrue(ready, "Expected ready; state=\(connection.state)")
         side.send(.gitChanged(project: home.id))
         side.send(.filesChanged(project: home.id, changes: FileChanges(rescan: true)))
         side.send(.changed(topic: .activity, revision: 1))

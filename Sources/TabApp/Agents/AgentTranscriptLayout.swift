@@ -6,16 +6,19 @@ struct AgentTranscriptLayout {
     private var sums: [CGFloat] = [0]
     var leading: CGFloat = 28
     let spacing: CGFloat = 26
+    private var trailingSpaces: [CGFloat] = []
+    func spacing(at index: Int) -> CGFloat { trailingSpaces.indices.contains(index) ? trailingSpaces[index] : spacing }
 
     var count: Int { heights.count }
     var height: CGFloat { count == 0 ? 214 : leading + prefix(count) + 4 }
 
-    mutating func reset(heights: [CGFloat]) {
+    mutating func reset(heights: [CGFloat], trailingSpaces: [CGFloat] = []) {
+        self.trailingSpaces = trailingSpaces
         self.heights = heights.map { max(1, $0) }
         sums = Array(repeating: 0, count: heights.count + 1)
         for index in self.heights.indices {
             let position = index + 1
-            sums[position] += self.heights[index] + spacing
+            sums[position] += self.heights[index] + spacing(at: index)
             let parent = position + (position & -position)
             if parent < sums.count { sums[parent] += sums[position] }
         }

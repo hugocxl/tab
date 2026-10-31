@@ -3,6 +3,21 @@ import XCTest
 @testable import TabClient
 
 final class AgentChatClientTests: XCTestCase {
+    func testTypedAttachmentFetchPreservesMessageScopeAndPayload() async throws {
+        let request = AgentAttachmentRequest(session: SessionId(), item: UUID().uuidString, attachment: "image")
+        let payload = AgentAttachmentReply(attachment: .init(id: "image", name: "image.png", mimeType: "image/png", data: Data([0, 1, 2])))
+        let server = try FakeServer { id, body, server in
+            if case .agentAttachment(let received) = body {
+                XCTAssertEqual(received, request)
+                server.reply(id, .agentAttachment(payload))
+            } else { FakeServer.standard(id, body, server) }
+        }
+        let client = try await server.connect()
+        defer { client.close() }
+        let reply = try await client.agentAttachment(request)
+        XCTAssertEqual(reply, payload)
+    }
+
     func testSetAccessCarriesExplicitModeAndReturnsAuthoritativeSnapshot() async throws {
         let session = SessionId()
         let snapshot = AgentChatSnapshot(session: session, project: ProjectId(), provider: .claude,

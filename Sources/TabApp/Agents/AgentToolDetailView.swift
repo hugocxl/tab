@@ -1,292 +1,61 @@
 import AppKit
 import TabProtocol
 
-/// Native counterpart to T3's WorkLog disclosures: stable, independently expandable tool rows.
 @MainActor
-final class AgentToolDetailView: ThemedView {
-    var onOpenFile: ((String, Int?) -> Void)?
-    var onDisclosure: (() -> Void)?
-    var expandedIDs: Set<String> {
-        get { expanded }
-        set {
-            guard expanded != newValue else { return }
-            let wasUpdating = updating
-            updating = true
-            defer { updating = wasUpdating }
-            let changed = expanded.symmetricDifference(newValue)
-            let anchor = captureAnchor()
-            expanded = newValue
-            for id in changed { heights.removeValue(forKey: id); dirty.insert(id) }
-            rebuildOffsets()
-            restoreAnchor(anchor)
-            needsLayout = true
-        }
-    }
-    var scrollOffset: NSPoint {
-        get { requestedScrollOffset ?? scroll.contentView.bounds.origin }
-        set { requestedScrollOffset = newValue; needsLayout = true }
-    }
-    var mountedRowCount: Int { mounted.count }
-    var retainedRowCount: Int { mounted.count + detached.count }
-    private(set) var measurementCount = 0
-
-    private let scroll = NSScrollView(frame: .zero)
-    private let document = AgentToolLogDocument(frame: .zero)
-    private var items: [AgentChatItem] = []
-    private var indexByID: [String: Int] = [:]
-    private var expanded: Set<String> = []
-    private var mounted: [String: AgentToolDisclosure] = [:]
-    private var detached: [String: AgentToolDisclosure] = [:]
-    private var detachedOrder: [String] = []
-    private var innerOffsets: [String: NSPoint] = [:]
-    private var heights: [String: CGFloat] = [:]
-    private var dirty: Set<String> = []
-    private var offsets: [CGFloat] = [0]
-    private var measuredWidth: CGFloat = 0
-    private var contentWidth: CGFloat = 0
-    private var updating = false
-    private var notificationPending = false
-    private var boundsObserver: NSObjectProtocol?
-    private var requestedScrollOffset: NSPoint?
-
-    convenience init(items: [AgentChatItem], theme: AppTheme) {
-        self.init(frame: .zero)
-        update(items: items, theme: theme)
-    }
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        scroll.drawsBackground = false
-        scroll.hasVerticalScroller = true
-        scroll.autohidesScrollers = true
-        scroll.borderType = .noBorder
-        scroll.documentView = document
-        scroll.contentView.postsBoundsChangedNotifications = true
-        addSubview(scroll)
-        boundsObserver = NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification,
-            object: scroll.contentView, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.mountVisibleRows() }
-            }
-    }
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-    deinit { if let boundsObserver { NotificationCenter.default.removeObserver(boundsObserver) } }
-
-    func update(items: [AgentChatItem], theme: AppTheme) {
-        updating = true
-        defer { updating = false }
-        let themeChanged = self.theme !== theme
-        let anchor = captureAnchor()
-        let old = Dictionary(self.items.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
-        if themeChanged { self.theme = theme }
-        let ids = Set(items.map(\.id))
-        for (id, row) in mounted where !ids.contains(id) { row.removeFromSuperview(); mounted.removeValue(forKey: id) }
-        detached = detached.filter { ids.contains($0.key) }
-        detachedOrder.removeAll { !ids.contains($0) }
-        heights = heights.filter { ids.contains($0.key) }
-        innerOffsets = innerOffsets.filter { ids.contains($0.key) }
-        expanded.formIntersection(ids)
-        self.items = items
-        indexByID = Dictionary(items.enumerated().map { ($0.element.id, $0.offset) }, uniquingKeysWith: { _, last in last })
-        for item in items where old[item.id] != item || themeChanged { dirty.insert(item.id) }
-        dirty.formIntersection(ids)
-        if themeChanged {
-            detached.removeAll(); detachedOrder.removeAll()
-            for row in mounted.values { row.refresh(theme: theme) }
-        }
-        rebuildOffsets()
-        restoreAnchor(anchor)
-        needsLayout = true
-    }
-
-    func height(for width: CGFloat) -> CGFloat {
-        prepareWidth(width)
-        return min(360, offsets.last ?? 0)
-    }
-
-    override func layout() {
-        super.layout()
-        updating = true
-        prepareWidth(bounds.width)
-        scroll.frame = bounds
-        if let position = requestedScrollOffset, bounds.width > 0, bounds.height > 0, !items.isEmpty {
-            scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, min(position.y, (offsets.last ?? 0) - scroll.contentSize.height))))
-            scroll.reflectScrolledClipView(scroll.contentView)
-            requestedScrollOffset = nil
-        }
-        updating = false
-        mountVisibleRows()
-    }
-
-    override func themeDidChange() {
-        dirty.formUnion(items.map(\.id))
-        detached.removeAll(); detachedOrder.removeAll()
-        for row in mounted.values { row.refresh(theme: theme) }
-        needsLayout = true
-    }
-
-    private func prepareWidth(_ width: CGFloat) {
-        let width = max(1, width)
-        guard measuredWidth != width else { return }
-        measuredWidth = width
-        dirty.formUnion(items.map(\.id))
-    }
-
-    private func rebuildOffsets() {
-        offsets = [0]
-        offsets.reserveCapacity(items.count + 1)
-        for item in items {
-            let height = expanded.contains(item.id) ? heights[item.id] ?? 180 : 28
-            offsets.append((offsets.last ?? 0) + height + 4)
-        }
-        document.frame.size = NSSize(width: max(1, scroll.contentSize.width), height: offsets.last ?? 0)
-    }
-
-    private func index(at y: CGFloat) -> Int {
-        var low = 0
-        var high = items.count
-        while low < high {
-            let middle = (low + high) / 2
-            if offsets[middle + 1] <= y { low = middle + 1 } else { high = middle }
-        }
-        return low
-    }
-
-    private func captureAnchor() -> (String, CGFloat)? {
-        let y = scroll.contentView.bounds.minY
-        let index = index(at: y)
-        guard items.indices.contains(index) else { return nil }
-        return (items[index].id, y - offsets[index])
-    }
-
-    private func restoreAnchor(_ anchor: (String, CGFloat)?) {
-        guard let anchor, let index = indexByID[anchor.0] else { return }
-        let withinRow = min(anchor.1, max(0, offsets[index + 1] - offsets[index] - 1))
-        let y = max(0, min(offsets[index] + withinRow, (offsets.last ?? 0) - scroll.contentSize.height))
-        scroll.contentView.scroll(to: NSPoint(x: 0, y: y))
-        scroll.reflectScrolledClipView(scroll.contentView)
-    }
-
-    private func mountVisibleRows() {
-        guard !updating, bounds.width > 0, bounds.height > 0 else { return }
-        updating = true
-        defer { updating = false }
-        if contentWidth != scroll.contentSize.width {
-            contentWidth = scroll.contentSize.width
-            dirty.formUnion(items.map(\.id))
-        }
-        // Refine estimates only around the viewport; shrinking rows can reveal more rows.
-        // Four bounded passes cover even the shortest expanded tools without a blank viewport.
-        for _ in 0..<4 {
-            if !reconcileVisibleRows() { break }
-        }
-    }
-
-    private func reconcileVisibleRows() -> Bool {
-        let previousHeight = min(360, offsets.last ?? 0)
-        let anchor = captureAnchor()
-        let viewport = scroll.contentView.bounds
-        let first = index(at: max(0, viewport.minY - 96))
-        let end = min(items.count, index(at: viewport.maxY + 96) + 1)
-        var indices = first < end ? Array(first..<end) : []
-        if let responder = window?.firstResponder as? NSView,
-           let focused = mounted.first(where: { responder === $0.value || responder.isDescendant(of: $0.value) }),
-           let focusedIndex = indexByID[focused.key], !indices.contains(focusedIndex) {
-            indices.append(focusedIndex)
-        }
-        let visibleIDs = Set(indices.map { items[$0].id })
-        for (id, row) in mounted where !visibleIDs.contains(id) {
-            innerOffsets[id] = row.outputScrollPosition
-            row.removeFromSuperview()
-            mounted.removeValue(forKey: id)
-            detached[id] = row
-            detachedOrder.removeAll { $0 == id }
-            detachedOrder.append(id)
-        }
-        while detachedOrder.count > 24 {
-            detached.removeValue(forKey: detachedOrder.removeFirst())
-        }
-        var refined = false
-        for index in indices {
-            let item = items[index]
-            let row: AgentToolDisclosure
-            if let existing = mounted[item.id] { row = existing }
-            else {
-                row = detached.removeValue(forKey: item.id) ?? AgentToolDisclosure(frame: .zero)
-                detachedOrder.removeAll { $0 == item.id }
-                mounted[item.id] = row
-                document.addSubview(row)
-                row.restoreOutputScrollPosition(innerOffsets[item.id])
-                row.onOpenFile = { [weak self] path, line in self?.onOpenFile?(path, line) }
-                let id = item.id
-                row.onDisclosure = { [weak self] in
-                    guard let self else { return }
-                    var ids = self.expandedIDs
-                    if ids.contains(id) { ids.remove(id) } else { ids.insert(id) }
-                    self.expandedIDs = ids
-                    self.notifyDisclosure()
-                }
-            }
-            row.update(item, expanded: expanded.contains(item.id), theme: theme)
-            if dirty.contains(item.id) || heights[item.id] == nil {
-                if expanded.contains(item.id) {
-                    let previous = heights[item.id] ?? 180
-                    let height = row.height(for: max(1, scroll.contentSize.width))
-                    measurementCount += 1
-                    heights[item.id] = height
-                    if previous != height { refined = true }
-                } else { heights[item.id] = 28 }
-                dirty.remove(item.id)
-            }
-        }
-        if refined { rebuildOffsets(); restoreAnchor(anchor) }
-        document.frame.size.width = max(1, scroll.contentSize.width)
-        for index in indices {
-            let item = items[index]
-            mounted[item.id]?.frame = NSRect(x: 0, y: offsets[index], width: document.bounds.width,
-                                           height: offsets[index + 1] - offsets[index] - 4)
-        }
-        if previousHeight != min(360, offsets.last ?? 0) { notifyDisclosure() }
-        return refined
-    }
-
-    private func notifyDisclosure() {
-        guard !notificationPending else { return }
-        notificationPending = true
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.notificationPending = false
-            self.onDisclosure?()
-        }
-    }
-}
-
-@MainActor
-private final class AgentToolLogDocument: NSView {
+final class AgentToolDisclosure: NSView, NSTextViewDelegate {
     override var isFlipped: Bool { true }
-}
-
-@MainActor
-private final class AgentToolDisclosure: NSView, NSTextViewDelegate {
-    override var isFlipped: Bool { true }
+    var fetchAttachment: AgentAttachmentCache.Fetch?
+    var onPreviewAttachments: ((String, [AgentChatAttachmentDescriptor], Int) -> Void)?
+    var onHeightChanged: (() -> Void)?
+    private let images = AgentToolImagesView(frame: .zero)
     var onOpenFile: ((String, Int?) -> Void)?
+    var workspaceRoot: String?
+    var onOpenToolDiff: ((String, AgentToolActivity) -> Void)?
     var onDisclosure: (() -> Void)?
-    private let header = PillButton("", style: .plain)
+    private let header = AgentToolHeader(frame: .zero)
+    private var hoverArea: NSTrackingArea?
     private let body = AgentRichTextView(frame: .zero)
+    private let command = AgentRichTextView(frame: .zero)
+    private let exitStatus = AgentRichTextView(frame: .zero)
+    private let replArguments = AgentReplArguments(frame: .zero)
+    private var usesReplArguments: Bool { usesArgumentPanel && AgentReplArguments.accepts(item?.tool) }
+    private let argumentScroll = NSScrollView(frame: .zero)
+    private var restoredArgumentPosition: NSPoint?
+    var argumentScrollPosition: NSPoint { usesReplArguments ? replArguments.scrollPosition : restoredArgumentPosition ?? argumentScroll.contentView.bounds.origin }
+    func restoreArgumentScrollPosition(_ position: NSPoint) { restoredArgumentPosition = position; replArguments.restoreScrollPosition(position) }
+    private var scrollsArguments: Bool { usesArgumentPanel && AgentToolPresentation.argumentsNeedScroll(item?.tool?.input) }
     private let scroll = NSScrollView(frame: .zero)
+    private let fileSearch = AgentFileSearchPanel(frame: .zero)
+    private let fileChange = AgentFileChangePanel(frame: .zero)
+    private let webSearch = AgentWebSearchPanel(frame: .zero)
     private var item: AgentChatItem?
     private var expanded = false
+    var grouped = false { didSet { needsLayout = true } }
+    private var headerHeight: CGFloat { grouped ? 24 : 28 }
     private var theme = AppTheme.shared
     private var restoredScrollPosition: NSPoint?
     private var bodyHeights: [CGFloat: CGFloat] = [:]
+    private var usesArgumentPanel: Bool {
+        guard let activity = item?.tool, !activity.presentsCommand else { return false }
+        if activity.presentation == .dynamicTool { return true }
+        return activity.presentation == nil && (activity.fileChanges ?? []).isEmpty
+            && [.read, .search, .other].contains(activity.category ?? .other)
+    }
 
-    var outputScrollPosition: NSPoint { restoredScrollPosition ?? scroll.contentView.bounds.origin }
-    func restoreOutputScrollPosition(_ position: NSPoint?) { restoredScrollPosition = position }
+    var outputScrollPosition: NSPoint {
+        if item?.tool?.presentation == .fileChange { return fileChange.outputScrollPosition }
+        return restoredScrollPosition ?? scroll.contentView.bounds.origin
+    }
+    func restoreOutputScrollPosition(_ position: NSPoint?) {
+        restoredScrollPosition = position
+        fileChange.restoreOutputScrollPosition(position)
+    }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         header.translatesAutoresizingMaskIntoConstraints = true
         header.alignment = .left
-        header.font = AppFont.small
+        header.font = AppFont.system(14)
         header.lineBreakMode = .byTruncatingTail
         header.imagePosition = .imageLeading
         header.imageScaling = .scaleProportionallyDown
@@ -300,11 +69,48 @@ private final class AgentToolDisclosure: NSView, NSTextViewDelegate {
         scroll.autohidesScrollers = true
         scroll.borderType = .noBorder
         scroll.documentView = body
+        addSubview(images)
+        images.isHidden = true
+        images.onHeightChanged = { [weak self] in self?.onHeightChanged?() }
+        images.onPreview = { [weak self] item, attachments, index in self?.onPreviewAttachments?(item, attachments, index) }
         addSubview(header)
         addSubview(scroll)
+        argumentScroll.drawsBackground = false
+        argumentScroll.hasVerticalScroller = true
+        argumentScroll.autohidesScrollers = true
+        argumentScroll.borderType = .noBorder
+        argumentScroll.isHidden = true
+        addSubview(argumentScroll)
+        addSubview(replArguments)
+        replArguments.isHidden = true
+        addSubview(command)
+        addSubview(exitStatus)
+        addSubview(fileSearch)
+        fileSearch.isHidden = true
+        addSubview(fileChange)
+        fileChange.isHidden = true
+        fileChange.onOpenDiff = { [weak self] in
+            guard let self, let item = self.item, let activity = item.tool else { return }
+            self.onOpenToolDiff?(item.id, activity)
+        }
+        addSubview(webSearch)
+        webSearch.isHidden = true
+        webSearch.onOpenURL = { NSWorkspace.shared.open($0) }
+        command.isHidden = true
+        exitStatus.isHidden = true
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverArea { removeTrackingArea(hoverArea) }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self)
+        addTrackingArea(area)
+        hoverArea = area
+    }
+    override func mouseEntered(with event: NSEvent) { header.hovered = true }
+    override func mouseExited(with event: NSEvent) { header.hovered = false }
 
     func update(_ item: AgentChatItem, expanded: Bool, theme: AppTheme) {
         guard self.item != item || self.theme !== theme || self.expanded != expanded else { return }
@@ -319,41 +125,125 @@ private final class AgentToolDisclosure: NSView, NSTextViewDelegate {
         bodyHeights.removeAll(keepingCapacity: true)
         let activity = item.tool
         let status = activity?.status ?? (item.isComplete ? .completed : .running)
-        let symbol: String
-        switch status {
-        case .running: symbol = "◌"
-        case .completed: symbol = "✓"
-        case .failed: symbol = "!"
-        case .denied: symbol = "⊘"
-        case .interrupted: symbol = "■"
-        }
-        let name = activity?.name ?? item.text
-        let summary = activity?.summary ?? String(item.text.prefix(240))
-        let title = name == summary ? name : name + " · " + summary
+        let title = activity?.summary ?? String(item.text.prefix(240))
         let statusText = status.rawValue.capitalized
-        let icon: String
         switch activity?.category {
-        case .command: icon = "terminal"
-        case .read: icon = "doc.text"
-        case .search: icon = "magnifyingglass"
-        case .edit: icon = "pencil"
-        case .web: icon = "globe"
-        case .subagent: icon = "person.2"
-        default: icon = "wrench.and.screwdriver"
+        case .command: header.activityIcon = .terminal
+        case .read: header.activityIcon = .eye
+        case .search: header.activityIcon = .search
+        case .edit: header.activityIcon = .edit
+        case .web: header.activityIcon = .globe
+        case .subagent: header.activityIcon = .bot
+        default: header.activityIcon = .wrench
         }
-        header.image = NSImage(systemSymbolName: icon, accessibilityDescription: activity?.category?.rawValue)
-        header.title = "\(expanded ? "⌄" : "›")  \(symbol)  \(title) · \(statusText)"
-        header.setTitleColor(status == .failed || status == .denied ? .systemRed : theme.fgDim)
-        header.toolTip = title + " · " + statusText
-        header.setAccessibilityLabel((expanded ? "Collapse " : "Expand ") + title + ", " + statusText)
-        scroll.isHidden = !expanded
-        if expanded { body.setContent(AgentToolText.content(item, theme: theme)) }
+        let hasText = [item.detail, activity?.input, activity?.output].contains { $0?.isEmpty == false }
+        header.isEnabled = hasText || activity?.exitCode != nil || !(activity?.filePaths ?? []).isEmpty
+            || !(activity?.fileChanges ?? []).isEmpty || !(activity?.urls ?? []).isEmpty
+            || (usesArgumentPanel && (item.attachments ?? []).contains { $0.mimeType.hasPrefix("image/") })
+        header.expanded = expanded
+        header.timestamp = activity?.startedAt
+        header.timestampColor = theme.fgDim
+        let indicatesFailure = AgentToolRowPresentation.indicatesFailure(activity, status: status)
+        header.iconColor = indicatesFailure ? AgentToolRowPresentation.failureIconColor(theme: theme) : theme.fgDim
+        header.focusColor = theme.accent
+        header.title = title
+        header.labelColor = theme.fgMuted
+        header.needsDisplay = true
+        header.toolTip = ([title + " · " + statusText] + [header.timestampTooltip].compactMap { $0 }).joined(separator: "\n")
+        let isFileSearch = activity?.presentation == .fileSearch
+        fileSearch.isHidden = !expanded || !isFileSearch
+        if isFileSearch {
+            fileSearch.update(activity?.fileSearchDetails, root: workspaceRoot, theme: theme)
+            header.isEnabled = fileSearch.hasContent
+        }
+        let isFileChange = activity?.presentation == .fileChange
+        fileChange.isHidden = !expanded || !isFileChange
+        if isFileChange, let activity {
+            fileChange.update(activity, root: workspaceRoot, theme: theme)
+            header.isEnabled = true
+        }
+        let isWebSearch = activity?.presentation == .webSearch
+        webSearch.isHidden = !expanded || !isWebSearch
+        if isWebSearch, let activity {
+            webSearch.update(activity, theme: theme)
+            header.isEnabled = webSearch.hasContent
+        }
+        header.setAccessibilityLabel((header.isEnabled ? (expanded ? "Collapse " : "Expand ") : "") + title + ", " + statusText
+            + (indicatesFailure ? ", tool call failed" : ""))
+        scroll.isHidden = !expanded || isWebSearch || isFileChange || isFileSearch
+        images.isHidden = !expanded || !usesArgumentPanel
+        images.fetch = fetchAttachment
+        if expanded, usesArgumentPanel { images.update(item, theme: theme) }
+        let isCommand = activity?.presentsCommand == true
+        argumentScroll.isHidden = !expanded || !scrollsArguments
+        if scrollsArguments {
+            if command.superview !== argumentScroll.contentView { argumentScroll.documentView = command }
+        } else if command.superview !== self {
+            argumentScroll.documentView = nil
+            addSubview(command)
+        }
+        replArguments.isHidden = !expanded || !usesReplArguments
+        if usesReplArguments, let activity { replArguments.update(activity, theme: theme) }
+        command.isHidden = !expanded || !(isCommand || usesArgumentPanel) || usesReplArguments
+        exitStatus.isHidden = !expanded || !isCommand || activity?.exitCode == nil || activity?.exitCode == 0
+        if expanded, isCommand, var activity {
+            activity.status = status
+            command.setContent(AgentCommandPresentation.source(activity, theme: theme))
+            body.setContent(AgentCommandPresentation.output(activity, theme: theme))
+            exitStatus.setContent(AgentCommandPresentation.text(exitStatus.isHidden ? "" : "exit \(activity.exitCode ?? 0)", color: .systemRed))
+        } else if expanded, usesArgumentPanel {
+            command.setContent(AgentToolPresentation.arguments(activity?.input, theme: theme))
+            var presented = activity ?? AgentToolActivity()
+            presented.status = status
+            body.setContent(images.hasImages ? AgentToolPresentation.output(presented.output, isJSON: presented.outputIsJSON == true, theme: theme) : AgentToolPresentation.completedOutput(presented, theme: theme))
+            exitStatus.setContent(AgentCommandPresentation.text("", color: theme.fgMuted))
+        } else if expanded && !isWebSearch && !isFileChange && !isFileSearch { body.setContent(AgentToolText.content(item, theme: theme)) }
         body.selectedTextAttributes = [.backgroundColor: theme.accent.withAlphaComponent(0.22)]
+        command.selectedTextAttributes = body.selectedTextAttributes
+        exitStatus.selectedTextAttributes = body.selectedTextAttributes
         needsLayout = true
     }
 
     func height(for width: CGFloat) -> CGFloat {
-        expanded ? 38 + min(320, bodyHeight(for: max(1, width - 46))) : 28
+        guard expanded else { return headerHeight }
+        if item?.tool?.presentation == .fileSearch { return headerHeight + 16 + fileSearch.arrange(width: max(1, width - 4), apply: false) }
+        if item?.tool?.presentation == .fileChange {
+            fileChange.compactControls = (window?.contentView?.bounds.width ?? 640) >= 640
+            return headerHeight + 16 + fileChange.arrange(width: max(1, width - 4), apply: false)
+        }
+        if item?.tool?.presentation == .webSearch { return headerHeight + 16 + webSearch.arrange(width: max(1, width - 4), apply: false) }
+        if item?.tool?.presentsCommand == true || usesArgumentPanel {
+            return commandLayout(width: width).height
+        }
+        return headerHeight + 10 + min(256, bodyHeight(for: max(1, width - 46)))
+    }
+
+    private func commandLayout(width: CGFloat) -> (source: NSRect, images: NSRect, output: NSRect, exit: NSRect, height: CGFloat) {
+        let width = max(1, width - 4)
+        var y = headerHeight
+        func frame(_ text: AgentRichTextView, limit: CGFloat = .greatestFiniteMagnitude) -> NSRect {
+            guard !text.string.isEmpty else { return NSRect(x: 2, y: y, width: width, height: 0) }
+            if y > headerHeight { y += 6 }
+            let rounded = text.height(for: width)
+            let measured = text.textContainer.flatMap { text.layoutManager?.usedRect(for: $0).maxY } ?? rounded
+            let rect = NSRect(x: 2, y: y, width: width, height: min(limit, measured))
+            y = rect.maxY
+            return rect
+        }
+        let source: NSRect
+        if usesReplArguments {
+            source = NSRect(x: 2, y: y, width: width, height: replArguments.arrange(width: width, apply: false))
+            y = source.maxY
+        } else { source = frame(command, limit: scrollsArguments ? 320 : .greatestFiniteMagnitude) }
+        var imageFrame = NSRect(x: 2, y: y, width: width, height: 0)
+        if usesArgumentPanel && images.hasImages {
+            if y > headerHeight { y += 6 }
+            imageFrame = NSRect(x: 2, y: y, width: width, height: images.arrange(width: width, apply: false))
+            y = imageFrame.maxY
+        }
+        let output = frame(body, limit: 320)
+        let exit = frame(exitStatus)
+        return (source, imageFrame, output, exit, y + 16)
     }
 
     private func bodyHeight(for width: CGFloat) -> CGFloat {
@@ -366,16 +256,51 @@ private final class AgentToolDisclosure: NSView, NSTextViewDelegate {
 
     override func layout() {
         super.layout()
-        header.frame = NSRect(x: 0, y: 0, width: bounds.width, height: 26)
+        header.frame = NSRect(x: 0, y: 0, width: bounds.width, height: headerHeight)
+        if expanded, item?.tool?.presentation == .fileSearch {
+            fileSearch.frame = NSRect(x: 2, y: headerHeight, width: max(1, bounds.width - 4), height: max(0, bounds.height - headerHeight - 16))
+            fileSearch.layoutSubtreeIfNeeded()
+            return
+        }
+        if expanded, item?.tool?.presentation == .fileChange {
+            fileChange.frame = NSRect(x: 2, y: headerHeight, width: max(1, bounds.width - 4), height: max(0, bounds.height - headerHeight - 16))
+            fileChange.layoutSubtreeIfNeeded()
+            return
+        }
+        if expanded, item?.tool?.presentation == .webSearch {
+            webSearch.frame = NSRect(x: 2, y: headerHeight, width: max(1, bounds.width - 4), height: max(0, bounds.height - headerHeight - 16))
+            webSearch.layoutSubtreeIfNeeded()
+            return
+        }
         if expanded {
             let follow = scroll.contentView.bounds.maxY >= body.bounds.height - 8
-            scroll.frame = NSRect(x: 26, y: 32, width: max(1, bounds.width - 32), height: max(1, bounds.height - 38))
+            if item?.tool?.presentsCommand == true || usesArgumentPanel {
+                let frames = commandLayout(width: bounds.width)
+                if usesReplArguments {
+                    replArguments.frame = frames.source
+                    replArguments.layoutSubtreeIfNeeded()
+                } else if scrollsArguments {
+                    argumentScroll.frame = frames.source
+                    let contentWidth = max(1, argumentScroll.contentSize.width)
+                    command.frame = NSRect(x: 0, y: 0, width: contentWidth, height: command.height(for: contentWidth))
+                    if let position = restoredArgumentPosition {
+                        command.scroll(NSPoint(x: 0, y: min(max(0, position.y), max(0, command.frame.height - argumentScroll.contentSize.height))))
+                        restoredArgumentPosition = nil
+                    }
+                } else { command.frame = frames.source }
+                images.frame = frames.images
+                images.layoutSubtreeIfNeeded()
+                scroll.frame = frames.output
+                exitStatus.frame = frames.exit
+            } else {
+                scroll.frame = NSRect(x: 26, y: headerHeight + 4, width: max(1, bounds.width - 32), height: max(1, bounds.height - headerHeight - 10))
+            }
             let width = max(1, scroll.contentSize.width)
             body.frame = NSRect(x: 0, y: 0, width: width, height: bodyHeight(for: width))
             if let position = restoredScrollPosition {
                 body.scroll(NSPoint(x: 0, y: min(position.y, max(0, body.bounds.height - scroll.contentSize.height))))
                 restoredScrollPosition = nil
-            } else if follow, item?.tool?.category == .command {
+            } else if follow, item?.tool?.presentsCommand == true {
                 body.scroll(NSPoint(x: 0, y: max(0, body.bounds.height - scroll.contentSize.height)))
             }
         }
@@ -405,7 +330,7 @@ enum AgentToolText {
             result.append(NSAttributedString(string: text + "\n", attributes: [.font: AppFont.system(11, weight: .semibold), .foregroundColor: theme.fgDim]))
         }
         if let input = activity?.input, !input.isEmpty {
-            heading(activity?.category == .command ? "Command" : "Input")
+            heading(activity?.presentsCommand == true ? "Command" : "Input")
             result.append(AgentMarkdown.plain(readableInput(input), theme: theme, monospaced: true))
         }
         for change in activity?.fileChanges ?? [] {
@@ -418,7 +343,7 @@ enum AgentToolText {
         }
         if let output = activity?.output ?? (activity == nil ? item.detail : nil), !output.isEmpty {
             heading("Output")
-            result.append(terminalText(output, theme: theme, terminal: activity?.category == .command))
+            result.append(terminalText(output, theme: theme, terminal: activity?.presentsCommand == true))
         }
         if let code = activity?.exitCode {
             heading("Exit code: \(code)")
@@ -460,7 +385,7 @@ enum AgentToolText {
     }
 
     static func terminalText(_ source: String, theme: AppTheme, terminal: Bool) -> NSAttributedString {
-        // A carriage return overwrites the current progress line, as in T3's command fixture.
+        // A carriage return overwrites the current progress line, as in the source renderer's command fixture.
         let source = bounded(source).components(separatedBy: "\n").map {
             $0.components(separatedBy: "\r").last ?? ""
         }.joined(separator: "\n")
@@ -519,5 +444,19 @@ enum AgentToolText {
                 search = NSRange(location: NSMaxRange(range), length: ns.length - NSMaxRange(range))
             }
         }
+    }
+}
+
+/// Ordinary tool failures keep the source label quiet and mark the category icon.
+/// Provider error/result flags have already been normalized into the lifecycle status.
+@MainActor
+enum AgentToolRowPresentation {
+    static func indicatesFailure(_ activity: AgentToolActivity?, status: AgentToolActivity.Status) -> Bool {
+        if status == .failed || status == .denied { return true }
+        return activity?.presentsCommand == true && (activity?.exitCode ?? 0) != 0
+    }
+
+    static func failureIconColor(theme: AppTheme) -> NSColor {
+        theme.danger.withAlphaComponent(theme.danger.alphaComponent * 0.28)
     }
 }
