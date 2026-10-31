@@ -3,6 +3,19 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.10.0 - 2026-10-31
+
+### Added
+
+- Native Agent Tabs for Claude Code and Codex, with streaming responses,
+  tool activity, permission controls, and conversations that resume when reopened.
+- Agent composers support @ context, slash actions and skills, and file
+  attachments through the picker, paste, or drag-and-drop.
+- Model and reasoning choices load from the installed providers, with cached
+  catalogs for offline use and a Refresh models action.
+- Agent Tabs show provider-reported context usage and offer compact, themed
+  model, reasoning, and access controls.
+
 ## 0.9.1 - 2026-10-30
 
 ### Fixed
