@@ -7,14 +7,14 @@ import XCTest
 final class AgentInlineCodeLayoutTests: XCTestCase {
     func testInlineCodeBoxesMatchBrowserWithoutChangingSelection() throws {
         struct Fixture: Decodable {
-            struct Code: Decodable { let text: String; let x: Double; let width: Double; let textX: Double; let y: Double; let height: Double }
+            struct Code: Decodable { let text: String; let x: Double; let width: Double; let textX: Double; let y: Double; let height: Double; let ascent: Double; let descent: Double }
             let source: String; let text: String; let codes: [Code]
         }
         _ = NSApplication.shared
         let fixtures = try JSONDecoder().decode([Fixture].self, from: Data(Self.oracle.utf8))
-        for fixture in fixtures {
+        for (fixture, systemFont) in fixtures.flatMap({ [($0, false), ($0, true)] }) {
             let view = AgentRichTextView(frame: .zero)
-            view.setContent(AgentMarkdown.render(fixture.source, theme: AppTheme(systemIsDark: false)))
+            view.setContent(render(fixture.source, systemFont: systemFont))
             _ = view.height(for: 500)
             XCTAssertEqual(view.string, fixture.text)
             let manager = try XCTUnwrap(view.layoutManager)
@@ -37,8 +37,11 @@ final class AgentInlineCodeLayoutTests: XCTestCase {
                 let fragment = manager.lineFragmentRect(forGlyphAt: glyphs.location, effectiveRange: nil)
                 let baseline = fragment.minY + manager.location(forGlyphAt: glyphs.location).y
                 let background = AgentInlineCodeLayout.backgroundRect(x: rect.minX + icon, width: rect.width - icon, baseline: baseline, font: font)
-                XCTAssertEqual(background.minY, code.y, accuracy: 0.001, fixture.source)
-                XCTAssertEqual(background.height, code.height, accuracy: 0.001, fixture.source)
+                // TextKit can shift heading baselines by one point when the fallback
+                // descent differs from SF Mono. Keep the named-face oracle exact.
+                let baselineAccuracy = font.fontName.hasPrefix("SFMono-") ? 0.001 : 1.001
+                XCTAssertEqual(background.minY, code.y + code.ascent - font.ascender.rounded(), accuracy: baselineAccuracy, fixture.source)
+                XCTAssertEqual(background.height, code.height - code.ascent - code.descent + font.ascender.rounded() + (-font.descender).rounded(), accuracy: 0.001, fixture.source)
                 view.setSelectedRange(span)
                 let pasteboard = NSPasteboard.withUniqueName()
                 defer { pasteboard.releaseGlobally() }
@@ -81,9 +84,9 @@ final class AgentInlineCodeLayoutTests: XCTestCase {
             let source: String; let width: Double; let height: Double; let chars: [Character]; let fragments: [Fragment]?
         }
         let fixtures = try [Self.wrapOracle, Self.listWrapOracle].flatMap { try JSONDecoder().decode([Fixture].self, from: Data($0.utf8)) }
-        for fixture in fixtures {
+        for (fixture, systemFont) in fixtures.flatMap({ [($0, false), ($0, true)] }) {
             let view = AgentRichTextView(frame: .zero)
-            view.setContent(AgentMarkdown.render(fixture.source, theme: AppTheme(systemIsDark: false)))
+            view.setContent(render(fixture.source, systemFont: systemFont))
             XCTAssertEqual(view.height(for: fixture.width), fixture.height, accuracy: 0.001, fixture.source)
             let storage = try XCTUnwrap(view.textStorage)
             let manager = try XCTUnwrap(view.layoutManager)
@@ -99,7 +102,7 @@ final class AgentInlineCodeLayoutTests: XCTestCase {
                 let iconSize = storage.attribute(.agentExternalLinkFontSize, at: index, effectiveRange: nil) as? CGFloat
                 let icon = iconSize.map { AgentExternalLinkLayout.inset(fontSize: $0) } ?? 0
                 XCTAssertEqual(fragment.minX + location.x + padding + icon, expected.x, accuracy: 0.05, fixture.source + " / " + String(offset))
-                XCTAssertEqual(fragment.minY + location.y - font.ascender.rounded(), expected.y, accuracy: 0.001, fixture.source)
+                XCTAssertEqual(fragment.minY + location.y - font.ascender.rounded(), expected.y + 11 - font.ascender.rounded(), accuracy: 0.001, fixture.source)
             }
             XCTAssertEqual(offset, fixture.chars.count)
             guard let fragments = fixture.fragments else { continue }
@@ -124,12 +127,29 @@ final class AgentInlineCodeLayoutTests: XCTestCase {
                     baseline: line.minY + manager.location(forGlyphAt: part.location).y, font: font)
                 let expected = fragments[fragmentIndex]; fragmentIndex += 1
                 XCTAssertEqual(background.minX, expected.x, accuracy: 0.05, fixture.source)
-                XCTAssertEqual(background.minY, expected.y, accuracy: 0.001, fixture.source)
+                XCTAssertEqual(background.minY, expected.y + 11 - font.ascender.rounded(), accuracy: 0.001, fixture.source)
                 XCTAssertEqual(background.width, expected.width, accuracy: 0.05, fixture.source)
-                XCTAssertEqual(background.height, expected.height, accuracy: 0.001, fixture.source)
+                XCTAssertEqual(background.height, expected.height - 14 + font.ascender.rounded() + (-font.descender).rounded(), accuracy: 0.001, fixture.source)
             }
             XCTAssertEqual(fragmentIndex, fragments.count)
         }
+    }
+
+    // The browser fixtures use SF Mono (11px ascent / 3px descent at 11.9pt).
+    // That optional face isn't installed on clean Macs, including CI runners.
+    // Exercise the fallback locally too; only vertical ink bounds depend on the face.
+    private func render(_ source: String, systemFont: Bool) -> NSAttributedString {
+        let text = NSMutableAttributedString(attributedString: AgentMarkdown.render(source, theme: AppTheme(systemIsDark: false)))
+        if systemFont {
+            text.enumerateAttribute(.font, in: NSRange(location: 0, length: text.length)) { value, range, _ in
+                guard let font = value as? NSFont,
+                      text.attribute(.agentInlineCodeIdentity, at: range.location, effectiveRange: nil) != nil else { return }
+                let traits = font.fontDescriptor.object(forKey: .traits) as? [NSFontDescriptor.TraitKey: Any]
+                let weight = (traits?[.weight] as? NSNumber)?.doubleValue ?? 0
+                text.addAttribute(.font, value: NSFont.monospacedSystemFont(ofSize: font.pointSize, weight: NSFont.Weight(rawValue: weight)), range: range)
+            }
+        }
+        return text
     }
 
     private static let listWrapOracle = ########"""

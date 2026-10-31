@@ -15,7 +15,7 @@ final class AgentInlineCodeTests: XCTestCase {
         let secondFont = try XCTUnwrap(source.attribute(.font, at: second.location, effectiveRange: nil) as? NSFont)
         XCTAssertEqual(firstFont.pointSize, 11.9, accuracy: 0.001)
         XCTAssertEqual(secondFont.pointSize, 15.3, accuracy: 0.001)
-        let expected = try XCTUnwrap(NSFont(name: "SFMono-Semibold", size: 15.3))
+        let expected = NSFont(name: "SFMono-Semibold", size: 15.3) ?? .monospacedSystemFont(ofSize: 15.3, weight: .semibold)
         XCTAssertEqual(secondFont.fontDescriptor.object(forKey: .traits) as? NSDictionary,
                        expected.fontDescriptor.object(forKey: .traits) as? NSDictionary)
         XCTAssertNotNil(source.attribute(.agentInlineCodeBackground, at: first.location, effectiveRange: nil))
@@ -28,7 +28,7 @@ final class AgentInlineCodeTests: XCTestCase {
         let code = try XCTUnwrap(source.attribute(.font, at: 0, effectiveRange: nil) as? NSFont)
         let bold = try XCTUnwrap(source.attribute(.font, at: 9, effectiveRange: nil) as? NSFont)
         XCTAssertEqual(code.pointSize, 11.9, accuracy: 0.001)
-        let expectedCode = try XCTUnwrap(NSFont(name: "SFMono-Semibold", size: 11.9))
+        let expectedCode = NSFont(name: "SFMono-Semibold", size: 11.9) ?? .monospacedSystemFont(ofSize: 11.9, weight: .semibold)
         let expectedBold = AppFont.system(14, weight: .semibold)
         XCTAssertEqual(code.fontDescriptor.object(forKey: .traits) as? NSDictionary, expectedCode.fontDescriptor.object(forKey: .traits) as? NSDictionary)
         XCTAssertEqual(bold.fontDescriptor.object(forKey: .traits) as? NSDictionary, expectedBold.fontDescriptor.object(forKey: .traits) as? NSDictionary)
