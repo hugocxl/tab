@@ -322,6 +322,42 @@ final class PrimaryBadge: ThemedView {
     }
 }
 
+/// A host heading above its terminals and projects.
+final class HostHeaderRow: ThemedView {
+    private let iconView: NSImageView
+    private let titleLabel: NSTextField
+
+    init(title: String, remote: Bool) {
+        iconView = NSImageView(image: (remote ? AppIcon.globe.image(size: 18) : NSImage(
+            systemSymbolName: "laptopcomputer", accessibilityDescription: nil
+        )) ?? NSImage())
+        titleLabel = makeLabel(title, font: AppFont.system(13, weight: .semibold))
+        super.init(frame: .zero)
+        addSubview(iconView)
+        addSubview(titleLabel)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.staticText)
+        setAccessibilityLabel(title)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override var intrinsicContentSize: NSSize { NSSize(width: NSView.noIntrinsicMetric, height: 30) }
+
+    override func themeDidChange() {
+        iconView.contentTintColor = theme.fgMuted
+        titleLabel.textColor = theme.fgMuted
+    }
+
+    override func layout() {
+        super.layout()
+        iconView.frame = CGRect(x: 10, y: (bounds.height - 18) / 2, width: 20, height: 18)
+        let height = titleLabel.intrinsicContentSize.height
+        titleLabel.frame = CGRect(x: 40, y: ((bounds.height - height) / 2).rounded(),
+                                 width: max(bounds.width - 50, 0), height: height)
+    }
+}
+
 /// A project's header, as Codesh's 28pt row: its icon when it has one, the
 /// name in 12pt semibold, and the settings and New Worktree buttons.
 final class ProjectHeaderRow: HoverView {
@@ -344,9 +380,9 @@ final class ProjectHeaderRow: HoverView {
         self.project = project.id
         missing = project.status == .missing
         titleLabel = makeLabel(title, font: AppFont.system(12, weight: .semibold))
-        if let remoteName, !project.isRemoteHome {
-            let view = NSImageView(image: AppIcon.network.image(size: 10) ?? NSImage())
-            view.toolTip = "Remote project on \(remoteName) · \(project.directory.rawValue)"
+        if !project.serverId.isLocal {
+            let view = NSImageView(image: AppIcon.globe.image(size: 10) ?? NSImage())
+            view.toolTip = "Remote project on \(remoteName ?? "Remote") · \(project.directory.rawValue)"
             remote = view
         } else {
             remote = nil

@@ -161,11 +161,26 @@ final class SidebarViewController: NSViewController {
 
     private func buildExpanded(_ snapshot: SidebarSnapshot) {
         var cardNumber = 0
-        for card in snapshot.terminals {
+        for (index, host) in snapshot.hosts.enumerated() {
+            if snapshot.showsHostHeaders {
+                if index > 0, let previous = list.arrangedSubviews.last {
+                    list.setCustomSpacing(20, after: previous)
+                }
+                add(HostHeaderRow(title: host.title, remote: !host.server.isLocal))
+            }
+            buildHost(host, cardNumber: &cardNumber)
+        }
+        let addRow = AddProjectRow()
+        addRow.onClick = { [weak self] view in self?.actions?.addProject(anchor: view) }
+        add(addRow)
+    }
+
+    private func buildHost(_ host: SidebarSnapshot.HostEntry, cardNumber: inout Int) {
+        for card in host.terminals {
             let view = cardView(card, hint: hint(.tabs, &cardNumber))
             add(view)
         }
-        for group in snapshot.groups {
+        for group in host.groups {
             let stack = NSStackView()
             stack.orientation = .vertical
             stack.spacing = 2
@@ -189,9 +204,6 @@ final class SidebarViewController: NSViewController {
             }
             add(stack)
         }
-        let addRow = AddProjectRow()
-        addRow.onClick = { [weak self] view in self?.actions?.addProject(anchor: view) }
-        add(addRow)
     }
 
     private enum HintKind { case tabs }

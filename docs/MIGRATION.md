@@ -157,6 +157,8 @@ crates. Behavior is 1:1 unless listed under "Intentionally changed".
 
 ## Intentionally changed or dropped
 
+- Sidebar projects and Home terminals are grouped by host when remote servers are configured, with a laptop heading for This Mac, globe headings for remotes, and spacing between hosts. Number shortcuts follow the grouped card order; every remote project, including Home, has a globe indicator.
+
 - Linux desktop, Linux CLI/server builds, Intel builds: dropped (macOS 14+, Apple silicon only).
 - Terminal UI (`codesh` with no arguments, Ratatui): not ported. `tab` with no arguments prints help; `tab <folder>` opens the app.
 - Phone SDK (`codesh-mobile`, Swift/Kotlin bindings): not ported. The server's mobile access is ported, so existing phone clients need a Tab-speaking SDK later.

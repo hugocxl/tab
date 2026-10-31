@@ -1,8 +1,8 @@
 import Foundation
 import TabCore
 
-/// What the sidebar lists, in order: Home terminals as cards, then each
-/// listed project's header with its primary checkout and worktrees as cards.
+/// What the sidebar lists, grouped by host: Home terminals as cards, then
+/// each project's header with its primary checkout and worktrees as cards.
 /// Pure, so the order and the name filter are tested without views.
 public struct SidebarListing: Equatable {
     public struct Group: Equatable {
@@ -24,18 +24,33 @@ public struct SidebarListing: Equatable {
         case project(ProjectId)
     }
 
-    public var terminals: [(project: ProjectId, tab: TabId)]
-    public var groups: [Group]
+    public struct Host: Equatable {
+        public var server: ServerId
+        public var terminals: [(project: ProjectId, tab: TabId)]
+        public var groups: [Group]
+
+        public static func == (left: Host, right: Host) -> Bool {
+            left.server == right.server && left.groups == right.groups
+                && left.terminals.map(\.tab) == right.terminals.map(\.tab)
+                && left.terminals.map(\.project) == right.terminals.map(\.project)
+        }
+
+        public var targets: [Target] {
+            terminals.map { .tab($0.tab) } + groups.flatMap { $0.cards.map { .project($0.project) } }
+        }
+    }
+
+    public var hosts: [Host]
+    public var terminals: [(project: ProjectId, tab: TabId)] { hosts.flatMap(\.terminals) }
+    public var groups: [Group] { hosts.flatMap(\.groups) }
 
     public static func == (left: SidebarListing, right: SidebarListing) -> Bool {
-        left.groups == right.groups
-            && left.terminals.map(\.tab) == right.terminals.map(\.tab)
-            && left.terminals.map(\.project) == right.terminals.map(\.project)
+        left.hosts == right.hosts
     }
 
     /// Cards in sidebar order, for the number shortcuts.
     public var targets: [Target] {
-        terminals.map { .tab($0.tab) } + groups.flatMap { $0.cards.map { .project($0.project) } }
+        hosts.flatMap(\.targets)
     }
 
     /// Top-level projects in sidebar order, for Ctrl+1–9 and next/previous.
@@ -85,7 +100,17 @@ public struct SidebarListingBuilder {
             }
             groups.append(SidebarListing.Group(project: parent.id, cards: cards))
         }
-        return SidebarListing(terminals: terminals, groups: groups)
+        var serverOrder: [ServerId] = [.local] + servers.map(\.id)
+        for project in state.projects where !serverOrder.contains(project.serverId) {
+            serverOrder.append(project.serverId)
+        }
+        let hosts = serverOrder.compactMap { server -> SidebarListing.Host? in
+            let hostTerminals = terminals.filter { state.project($0.project)?.serverId == server }
+            let hostGroups = groups.filter { state.project($0.project)?.serverId == server }
+            guard !hostTerminals.isEmpty || !hostGroups.isEmpty else { return nil }
+            return SidebarListing.Host(server: server, terminals: hostTerminals, groups: hostGroups)
+        }
+        return SidebarListing(hosts: hosts)
     }
 
     /// The name a project goes by: another computer's Home by its server.

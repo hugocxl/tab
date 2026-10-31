@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.11.0 - 2026-10-31
+
+### Changed
+
+- When remote servers are configured, the sidebar groups terminals and projects
+  under host headings, with extra space between hosts and globe icons for remotes.
+
 ## 0.10.0 - 2026-10-31
 
 ### Added

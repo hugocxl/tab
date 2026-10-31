@@ -115,4 +115,42 @@ final class SidebarListingTests: XCTestCase {
         XCTAssertEqual(ActivityCardData.taskTitle("✳ Fix the merge errors", provider: .claude), "Fix the merge errors")
         XCTAssertNil(ActivityCardData.taskTitle("⠂ Claude Code", provider: .claude))
     }
+
+    func testHostGroupsKeepTerminalsProjectsAndShortcutsTogether() async throws {
+        let local = try XCTUnwrap(model.addProject(try ModelFixtures.folder("local")))
+        model.newHomeTerminal()
+        XCTAssertFalse(SidebarSnapshot(model: model, filterShown: false).showsHostHeaders)
+
+        let first = ServerEntry(name: "Build Mac", ssh: "build")
+        let second = ServerEntry(name: "Dev Mac", ssh: "dev")
+        var settings = model.settings
+        settings.servers = [first, second]
+        model.apply(settings: settings)
+        var remoteProjects: [ProjectId] = []
+        var remoteTabs: [TabId] = []
+        // Catalogs arrive out of order; headings still follow the server list.
+        for entry in [second, first] {
+            let identity = ServerId()
+            let home = ProjectDescriptor.home(directory: "/remote/home")
+            let project = ProjectDescriptor(directory: "/remote/repo", name: "repo")
+            model.applyCatalog(entry.id, CatalogPage(server: identity, home: home.id, revision: 1, projects: [home, project]))
+            model.edit { state in remoteTabs.append(try state.openTerminalTab(home.id)) }
+            remoteProjects.append(project.id)
+        }
+
+        let listing = model.sidebarListing
+        XCTAssertEqual(listing.hosts.map(\.server), [.local, first.id, second.id])
+        XCTAssertEqual(listing.hosts[0].groups.map(\.project), [local])
+        XCTAssertEqual(listing.hosts[1].groups.last?.project, remoteProjects[1])
+        XCTAssertEqual(listing.hosts[2].groups.last?.project, remoteProjects[0])
+        XCTAssertEqual(listing.targets, listing.hosts.flatMap(\.targets))
+        XCTAssertLessThan(try XCTUnwrap(listing.targets.firstIndex(of: .project(local))),
+                          try XCTUnwrap(listing.targets.firstIndex(of: .tab(remoteTabs[1]))))
+
+        let snapshot = SidebarSnapshot(model: model, filterShown: false)
+        XCTAssertTrue(snapshot.showsHostHeaders)
+        XCTAssertEqual(snapshot.hosts.map(\.title), ["This Mac", "Build Mac", "Dev Mac"])
+        model.nameFilter = "local"
+        XCTAssertEqual(model.sidebarListing.hosts.map(\.server), [.local], "empty host groups are omitted")
+    }
 }
