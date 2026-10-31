@@ -68,6 +68,33 @@ final class DiffDocumentTests: XCTestCase {
         XCTAssertEqual(document.totalColumns(split: false), 6 + 10 + 2)
     }
 
+    func testEachSideIsHighlightedAsItsOwnFile() {
+        let rows = [
+            GitDiffRow(kind: .context, oldLineNumber: 1, newLineNumber: 1, oldText: "let a = 1", newText: "let a = 1", text: " let a = 1"),
+            GitDiffRow(kind: .deletion, oldLineNumber: 2, oldText: "/* open", text: "-/* open"),
+            GitDiffRow(kind: .addition, newLineNumber: 2, newText: "let b = 2", text: "+let b = 2"),
+            GitDiffRow(kind: .context, oldLineNumber: 3, newLineNumber: 3, oldText: "x */ var", newText: "x */ var", text: " x */ var"),
+        ]
+        let document = DiffDocument(GitDiff(rows: rows), language: .swift)
+        XCTAssertEqual(document.runs(0, old: false).first, DiffDocument.Run(length: 3, kind: .keyword))
+        XCTAssertEqual(document.runs(1, old: false), [])
+        XCTAssertEqual(document.runs(2, old: true), [])
+        // The old side's comment spans into the next line; the new side has none.
+        XCTAssertEqual(document.runs(3, old: true).first, DiffDocument.Run(length: 4, kind: .comment))
+        XCTAssertNotEqual(document.runs(3, old: false).first?.kind, .comment)
+        XCTAssertEqual(DiffDocument(GitDiff(rows: rows)).runs(0, old: false), [])
+    }
+
+    func testRunsCountTabsAsFourSpacesAndSplitVisibleText() {
+        let runs = DiffDocument.runs("\tlet x", tokens: [TokenRange(location: 1, length: 3, kind: .keyword)])
+        XCTAssertEqual(runs, [DiffDocument.Run(length: 4, kind: nil), DiffDocument.Run(length: 3, kind: .keyword),
+                              DiffDocument.Run(length: 2, kind: nil)])
+        let pieces = DiffDocument.colored("  let", skip: 2, runs: runs)
+        XCTAssertEqual(pieces.map { String($0.text) }, ["  ", "let"])
+        XCTAssertEqual(pieces.map(\.kind), [nil, .keyword])
+        XCTAssertEqual(DiffDocument.colored("et x", skip: 5, runs: runs).map { String($0.text) }, ["et", " x"])
+    }
+
     @MainActor
     func testPaneShowsTruncationAndRefreshesOnlyWhenVisible() async {
         let host = StubNativeHost()

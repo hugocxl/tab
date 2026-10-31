@@ -177,10 +177,13 @@ public final class DiffPaneController: NSViewController {
         let request = GitRequest(project: host.nativeProject.id, action: .diff(GitDiffRequest(
             path: ServerPath(path), staged: staged, lineLimit: Self.lineLimit, context: 1_000_000
         )))
+        let language = SyntaxLanguage.detect(fileName: path)
         Task { [weak self] in
             do {
-                let reply = try await transport.git(request)
-                self?.received(reply)
+                guard case .diff(let diff) = try await transport.git(request) else { return }
+                // Highlighting a long diff takes a while: keep it off the main thread.
+                let document = await Task.detached(priority: .userInitiated) { DiffDocument(diff, language: language) }.value
+                self?.received(document)
             } catch {
                 self?.error = NativeErrors.friendly(error, folder: false)
                 self?.render()
@@ -188,10 +191,9 @@ public final class DiffPaneController: NSViewController {
         }
     }
 
-    func received(_ reply: GitReply) {
-        guard case .diff(let diff) = reply else { return }
+    func received(_ document: DiffDocument) {
         error = nil
-        document = DiffDocument(diff)
+        self.document = document
         render()
     }
 
@@ -230,20 +232,35 @@ public final class DiffPaneController: NSViewController {
 }
 
 /// Draws the visible diff rows only: tinted backgrounds, dim line numbers,
-/// markers and source text in the code font, clipped to the visible columns.
+/// markers and syntax-colored source text in the code font, clipped to the
+/// visible columns.
 final class DiffRowsView: ThemedView {
     var document: DiffDocument? { didSet { needsDisplay = true } }
     var split = false { didSet { needsDisplay = true } }
     var font: NSFont = AppFont.mono(12) {
         didSet {
             cell = NativeStyle.cell(font)
+            tokenAttributes = Self.tokenAttributes(theme: theme, font: font)
             needsDisplay = true
         }
     }
     private(set) var cell = NativeStyle.cell(AppFont.mono(12))
     private var visibleWidth: CGFloat = 0
+    private var tokenAttributes: [TokenKind: [NSAttributedString.Key: Any]] = [:]
 
-    override func themeDidChange() { needsDisplay = true }
+    override func themeDidChange() {
+        tokenAttributes = Self.tokenAttributes(theme: theme, font: font)
+        needsDisplay = true
+    }
+
+    private static func tokenAttributes(theme: AppTheme, font: NSFont) -> [TokenKind: [NSAttributedString.Key: Any]] {
+        let colors = theme.syntaxColors
+        var attributes: [TokenKind: [NSAttributedString.Key: Any]] = [:]
+        for kind in TokenKind.allCases {
+            attributes[kind] = [.font: font].merging(colors.attributes(kind, font: font)) { $1 }
+        }
+        return attributes
+    }
 
     override var acceptsFirstResponder: Bool { true }
 
@@ -272,20 +289,20 @@ final class DiffRowsView: ThemedView {
             let y = CGFloat(index) * cell.height
             if split {
                 let pair = document.split[index]
-                drawCell(pair.left.map { document.rows[$0] }, old: true, unified: false,
+                drawCell(pair.left, old: true, unified: false,
                          frame: NSRect(x: 0, y: y, width: half, height: cell.height), dirty: dirtyRect, document: document)
-                drawCell(pair.right.map { document.rows[$0] }, old: false, unified: false,
+                drawCell(pair.right, old: false, unified: false,
                          frame: NSRect(x: half, y: y, width: half, height: cell.height), dirty: dirtyRect, document: document)
             } else {
-                let row = document.rows[index]
-                drawCell(row, old: row.kind == .deletion, unified: true,
+                drawCell(index, old: document.rows[index].kind == .deletion, unified: true,
                          frame: NSRect(x: 0, y: y, width: bounds.width, height: cell.height), dirty: dirtyRect, document: document)
             }
         }
     }
 
-    private func drawCell(_ row: GitDiffRow?, old: Bool, unified: Bool, frame: NSRect, dirty: NSRect, document: DiffDocument) {
-        guard let row else { return }
+    private func drawCell(_ index: Int?, old: Bool, unified: Bool, frame: NSRect, dirty: NSRect, document: DiffDocument) {
+        guard let index else { return }
+        let row = document.rows[index]
         switch row.kind {
         case .addition:
             theme.diffAdd.withAlphaComponent(0.12).setFill()
@@ -302,10 +319,21 @@ final class DiffRowsView: ThemedView {
         guard lastColumn > firstColumn else { return }
         let color = row.kind == .hunk ? theme.diffHunk : theme.fg
         let baseline = frame.minY + (cell.height - (font.ascender - font.descender)) / 2
-        for segment in DiffDocument.segments(row, old: old, unified: unified, numberColumns: document.numberColumns) {
+        let segments = DiffDocument.segments(row, old: old, unified: unified, numberColumns: document.numberColumns)
+        for (position, segment) in segments.enumerated() {
             guard let (column, text) = DiffDocument.visible(segment, first: firstColumn, last: lastColumn) else { continue }
+            let point = NSPoint(x: origin + CGFloat(column) * cell.width, y: baseline)
             let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: segment.dim ? theme.fgDim : color]
-            (text as NSString).draw(at: NSPoint(x: origin + CGFloat(column) * cell.width, y: baseline), withAttributes: attributes)
+            let runs = position == segments.count - 1 ? document.runs(index, old: old) : []
+            guard !runs.isEmpty else {
+                (text as NSString).draw(at: point, withAttributes: attributes)
+                continue
+            }
+            let colored = NSMutableAttributedString()
+            for piece in DiffDocument.colored(text, skip: column - segment.column, runs: runs) {
+                colored.append(NSAttributedString(string: String(piece.text), attributes: piece.kind.flatMap { tokenAttributes[$0] } ?? attributes))
+            }
+            colored.draw(at: point)
         }
     }
 }

@@ -18,6 +18,13 @@ public struct DiffDocument: Equatable, Sendable {
         public var dim: Bool
     }
 
+    /// Source characters, after tabs become spaces, drawn in one token
+    /// color; `kind` is `nil` for plain text.
+    public struct Run: Equatable, Sendable {
+        public var length: Int
+        public var kind: TokenKind?
+    }
+
     public private(set) var diff: GitDiff
     public var rows: [GitDiffRow] { diff.rows }
     public private(set) var split: [SplitRow]
@@ -25,12 +32,18 @@ public struct DiffDocument: Equatable, Sendable {
     public private(set) var numberColumns: Int
     /// Cells of the widest line's source.
     public private(set) var maxColumns: Int
+    /// Each row's token runs on its old and new side, empty when the
+    /// language has no highlighting.
+    public private(set) var oldRuns: [[Run]]
+    public private(set) var newRuns: [[Run]]
 
-    public init(_ diff: GitDiff) {
+    public init(_ diff: GitDiff, language: SyntaxLanguage = .plain) {
         var diff = diff
         Self.hideSingleHunk(&diff.rows)
         self.diff = diff
         split = Self.splitRows(diff.rows)
+        oldRuns = Self.highlight(diff.rows, old: true, language: language)
+        newRuns = Self.highlight(diff.rows, old: false, language: language)
         let largest = diff.rows.flatMap { [$0.oldLineNumber, $0.newLineNumber] }.compactMap { $0 }.max() ?? 1
         numberColumns = String(largest).count + 1
         maxColumns = diff.rows.map { max(Self.columns(Self.content($0, old: true)), Self.columns(Self.content($0, old: false))) }.max() ?? 0
@@ -64,6 +77,70 @@ public struct DiffDocument: Equatable, Sendable {
             }
         }
         return layout
+    }
+
+    /// Tokenizes one side of the diff as the file it shows: context lines and
+    /// that side's changes, in order, so comments and strings spanning lines
+    /// carry over. Each hunk starts afresh, since lines between are missing.
+    static func highlight(_ rows: [GitDiffRow], old: Bool, language: SyntaxLanguage) -> [[Run]] {
+        guard language != .plain else { return [] }
+        let changed: GitDiffKind = old ? .deletion : .addition
+        var state = LineState.start
+        return rows.map { row in
+            if row.kind == .hunk { state = .start }
+            guard row.kind == .context || row.kind == changed else { return [] }
+            let text = content(row, old: old)
+            let (tokens, next) = Tokenizer.tokenize(Array(text.utf16), state: state, language: language)
+            state = next
+            return runs(text, tokens: tokens)
+        }
+    }
+
+    /// `tokens` (UTF-16 offsets into `text`) as runs of characters of `text`
+    /// with tabs drawn as four spaces.
+    static func runs(_ text: String, tokens: [TokenRange]) -> [Run] {
+        guard !tokens.isEmpty else { return [] }
+        var runs: [Run] = []
+        var offset = 0
+        var token = 0
+        for character in text {
+            while token < tokens.count, NSMaxRange(tokens[token].range) <= offset { token += 1 }
+            let kind = token < tokens.count && tokens[token].range.location <= offset ? tokens[token].kind : nil
+            let length = character == "\t" ? 4 : 1
+            if let last = runs.last, last.kind == kind {
+                runs[runs.count - 1].length += length
+            } else {
+                runs.append(Run(length: length, kind: kind))
+            }
+            offset += character.utf16.count
+        }
+        return runs
+    }
+
+    /// `text`, the visible part of a source segment starting `skip`
+    /// characters in, cut where `runs` change color.
+    public static func colored(_ text: String, skip: Int, runs: [Run]) -> [(text: Substring, kind: TokenKind?)] {
+        guard !runs.isEmpty else { return [(text[...], nil)] }
+        var pieces: [(text: Substring, kind: TokenKind?)] = []
+        var start = text.startIndex
+        var runStart = 0
+        for run in runs {
+            let runEnd = runStart + run.length
+            defer { runStart = runEnd }
+            guard runEnd > skip else { continue }
+            guard start < text.endIndex else { break }
+            let end = text.index(start, offsetBy: runEnd - max(runStart, skip), limitedBy: text.endIndex) ?? text.endIndex
+            pieces.append((text[start..<end], run.kind))
+            start = end
+        }
+        if start < text.endIndex { pieces.append((text[start...], nil)) }
+        return pieces
+    }
+
+    /// The token runs of `row` (by index) on one side.
+    public func runs(_ index: Int, old: Bool) -> [Run] {
+        let runs = old ? oldRuns : newRuns
+        return runs.indices.contains(index) ? runs[index] : []
     }
 
     /// The source text of a row's old or new side, without the diff marker.

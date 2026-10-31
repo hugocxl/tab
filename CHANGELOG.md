@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.12.0 - 2026-10-31
+
+### Added
+
+- The diff viewer colors code with the same syntax highlighting as the editor,
+  in both unified and split views.
+
 ## 0.11.1 - 2026-10-31
 
 ### Fixed
