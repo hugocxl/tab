@@ -1,5 +1,17 @@
 #!/bin/bash
-# Builds the Apple silicon app, DMG and GitHub Releases update.json.
+# Builds the Apple silicon app, DMG and GitHub Releases update.json into
+# build/release/. The Release workflow runs it on every push to main; locally,
+# without credentials, it makes an ad-hoc signed build for inspection.
+#
+#   RELEASE_VERSION         required: X.Y.Z or X.Y.Z-beta.N
+#   CODESIGN_IDENTITY       Developer ID Application identity (default: ad-hoc)
+#   Notarization, first set found: NOTARY_KEYCHAIN_PROFILE;
+#     APPLE_API_KEY_PATH + APPLE_API_KEY_ID + APPLE_API_ISSUER_ID;
+#     APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD + APPLE_TEAM_ID
+#   UPDATE_SIGNING_KEY      base64 Ed25519 key that signs update.json; installed
+#                           apps refuse feeds it didn't sign. It lives in the
+#                           maintainer's login keychain as "Tab update signing key".
+#   REQUIRE_NOTARIZATION=1  makes missing signing or notarization an error
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"

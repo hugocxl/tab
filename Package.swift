@@ -1,8 +1,8 @@
 // swift-tools-version: 6.0
 import PackageDescription
 
-// Tab is a native macOS terminal workspace. See docs/ARCHITECTURE.md for the
-// module boundaries; keep this dependency graph in sync with that document.
+// Tab is a native macOS terminal workspace. See AGENTS.md for the
+// module boundaries; keep this dependency graph in sync with it.
 let swift5 = [SwiftSetting.swiftLanguageMode(.v5)]
 
 let package = Package(

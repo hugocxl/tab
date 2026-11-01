@@ -1,7 +1,7 @@
 Provider icon artwork ported from T3 Code, revision e5909e53c32a9d5b51caf6352d1f17fd73e86db7.
 Source: packages/source-control-{github,gitlab,bitbucket,forgejo,gitcafe}/src/shared/icon.ts.
 The SVG view boxes, paths, paints and gradients are preserved from those definitions.
-T3 Code source is licensed under MIT; see the repository's T3 license attribution.
+T3 Code source is licensed under MIT; see THIRD_PARTY_NOTICES.md.
 
 MIT License
 

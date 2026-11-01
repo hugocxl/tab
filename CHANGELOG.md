@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.21.2 - 2026-11-01
+
+### Changed
+
+- The bundled third-party notices now credit Ghostty and herdr and list only the
+  T3 Code artwork Tab still uses.
+
 ## 0.21.1 - 2026-11-01
 
 ### Changed

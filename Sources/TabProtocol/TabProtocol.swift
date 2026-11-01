@@ -1,1 +1,1 @@
-// `TabProtocol` module. See docs/ARCHITECTURE.md.
+// `TabProtocol` module: messages, framing and the screen codec. See AGENTS.md.

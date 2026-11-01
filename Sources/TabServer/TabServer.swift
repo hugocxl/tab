@@ -1,1 +1,1 @@
-// `TabServer` module. See docs/ARCHITECTURE.md.
+// `TabServer` module: everything `tabd` does. See AGENTS.md.

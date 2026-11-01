@@ -1,13 +1,15 @@
 #!/bin/bash
 # Assembles Tab.app from a SwiftPM build. Usage: scripts/bundle.sh [debug|release]
-# The bundle lands in build/<config>/ and holds TabDesktop, tabd and tab.
+# The bundle lands in build/<config>/ and holds TabDesktop, tabd and tab. Its
+# version is RELEASE_VERSION, or CHANGELOG.md's newest; the build number is the
+# commit count.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CONFIG="${1:-debug}"
 case "$CONFIG" in debug|release) ;; *) echo "Usage: $0 [debug|release]" >&2; exit 1 ;; esac
 source "$ROOT/scripts/swift-settings.sh"
 BUILD_NUMBER="$(git -C "$ROOT" rev-list --count HEAD 2>/dev/null || echo 0)"
-VERSION="${RELEASE_VERSION:-$(cat "$ROOT/VERSION").$BUILD_NUMBER}"
+VERSION="${RELEASE_VERSION:-$("$ROOT/scripts/changelog.sh" version)}"
 if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-beta\.([1-9][0-9]*))?$ ]]; then
     echo "Error: expected an X.Y.Z or X.Y.Z-beta.N release version, got $VERSION" >&2
     exit 1

@@ -5,7 +5,7 @@ import XCTest
 @testable import TabApp
 
 /// Renders Settings, the panels and the feature sheets offscreen to PNGs for
-/// comparing with `design/reference`. Runs only with `TAB_SNAPSHOT_DIR` set.
+/// visual review. Runs only with `TAB_SNAPSHOT_DIR` set.
 @MainActor
 final class PanelsSnapshotTests: XCTestCase {
     private var output = ""

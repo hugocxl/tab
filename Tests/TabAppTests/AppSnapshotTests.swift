@@ -4,8 +4,8 @@ import TabCore
 import TabProtocol
 @testable import TabApp
 
-/// Renders the main window offscreen to PNGs for comparing with
-/// `design/reference`. Runs only with `TAB_SNAPSHOT_DIR` set.
+/// Renders the main window offscreen to PNGs for visual review. Runs only
+/// with `TAB_SNAPSHOT_DIR` set.
 @MainActor
 final class AppSnapshotTests: XCTestCase {
     func testRenderMainWindowAndPalette() async throws {
