@@ -5,6 +5,21 @@ import XCTest
 
 @MainActor
 final class AgentComposerCoordinatorTests: XCTestCase {
+    func testProviderCommandSelectionPreservesCommandForNativeExecution() async throws {
+        let surface = AgentPaneView(frame: NSRect(x: 0, y: 0, width: 700, height: 700))
+        let coordinator = AgentComposerCoordinator(surface: surface)
+        coordinator.providerCommands = ["compact", "context", "clear"]
+        surface.composer.string = "/compact"
+        surface.composer.setSelectedRange(NSRange(location: 8, length: 0))
+        coordinator.changed()
+        XCTAssertEqual(surface.suggestions.items.first?.kind, .providerCommand)
+        XCTAssertTrue(coordinator.handle(#selector(NSResponder.insertTab(_:))))
+        XCTAssertEqual(surface.composer.string, "/compact ")
+        XCTAssertFalse(coordinator.performTypedAction(), "Provider commands must reach the provider")
+        surface.composer.string = "/clear"
+        XCTAssertFalse(coordinator.performTypedAction(), "Clear must not silently erase the draft")
+    }
+
     func testMentionSelectionReplacesOnlyTokenAndAttachesThreadContext() async throws {
         let surface = AgentPaneView(frame: NSRect(x: 0, y: 0, width: 700, height: 700))
         let coordinator = AgentComposerCoordinator(surface: surface)

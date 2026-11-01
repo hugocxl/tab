@@ -309,7 +309,7 @@ extension AppModel {
 
     func sessionPanes(_ server: ServerId, _ session: SessionId) -> [PaneId] {
         state.projects.filter { $0.serverId == server }.flatMap(\.tabs).flatMap(\.panes)
-            .filter { $0.content.session == session }.map(\.id)
+            .filter { $0.content.activitySession == session }.map(\.id)
     }
 
     private func sessionMetadata(_ server: ServerId, _ session: SessionId, _ metadata: SessionMetadata) {
@@ -414,7 +414,7 @@ extension AppModel {
     /// Rechecks pane ownership and visibility after a notification claim returns.
     private func notificationEvents(_ server: ServerId) -> [AgentEvent] {
         let focused = focusedSession()
-        let referenced = Set(state.sessionReferences(server))
+        let referenced = Set(state.projects.filter { $0.serverId == server }.flatMap(\.tabs).flatMap(\.panes).compactMap(\.content.activitySession))
         return connections[server]?.activity.events.filter { event in
             !event.read && referenced.contains(event.session)
                 && !(focused?.0 == server && focused?.1 == event.session)
@@ -424,7 +424,7 @@ extension AppModel {
     /// Detached and closed terminals no longer leave a notification behind.
     func clearUnreferencedNotifications() {
         for (server, connection) in connections {
-            let referenced = Set(state.sessionReferences(server))
+            let referenced = Set(state.projects.filter { $0.serverId == server }.flatMap(\.tabs).flatMap(\.panes).compactMap(\.content.activitySession))
             let removed = connection.activity.events.filter { !referenced.contains($0.session) }.map(\.id)
             notifier.clear(removed, server: server)
         }
@@ -441,7 +441,7 @@ extension AppModel {
     /// The server and session the user is looking at, if any.
     func focusedSession() -> (ServerId, SessionId)? {
         guard windowActive, presenter?.terminalActivityObscured != true, let pane = activePane, let server = state.paneServer(pane),
-              let session = state.pane(pane)?.content.session else { return nil }
+              let session = state.pane(pane)?.content.activitySession else { return nil }
         return (server, session)
     }
 
@@ -467,9 +467,9 @@ extension AppModel {
         controller(for: pane)?.focusContent()
     }
 
-    /// The agent running in a pane's terminal.
+    /// The agent associated with a terminal or native chat pane.
     public func agent(in pane: PaneId) -> AgentActivity? {
-        guard let server = state.paneServer(pane), let session = state.pane(pane)?.content.session else { return nil }
+        guard let server = state.paneServer(pane), let session = state.pane(pane)?.content.activitySession else { return nil }
         return connections[server]?.agent(session)
     }
 

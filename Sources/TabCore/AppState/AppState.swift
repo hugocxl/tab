@@ -10,6 +10,8 @@ public struct AppState: Codable, Equatable, Sendable {
     /// The state format this build writes.
     public static let currentVersion = 1
 
+    public var agentComposerDefaults: AgentComposerPreferences?
+    public internal(set) var agentComposerDrafts: [PaneId: AgentComposerPreferences] = [:]
     var servers: [ServerId: ServerState]
     /// Where each pane's terminal starts, kept until its server creates it.
     var startingDirectories: [PaneId: ServerPath]
@@ -21,7 +23,7 @@ public struct AppState: Codable, Equatable, Sendable {
     public internal(set) var window: WindowState
 
     enum CodingKeys: String, CodingKey {
-        case servers, startingDirectories, startupCommands, version, projects, workspaces, window
+        case agentComposerDefaults, agentComposerDrafts, servers, startingDirectories, startupCommands, version, projects, workspaces, window
     }
 
     /// A fresh state: just this computer's Home.
@@ -77,6 +79,8 @@ public struct AppState: Codable, Equatable, Sendable {
             workspaces: try container.value(.workspaces, []),
             window: try container.decode(WindowState.self, forKey: .window)
         )
+        agentComposerDefaults = try container.decodeIfPresent(AgentComposerPreferences.self, forKey: .agentComposerDefaults)
+        agentComposerDrafts = try container.value(.agentComposerDrafts, [:])
         do {
             try repairLoaded()
         } catch {
@@ -86,6 +90,8 @@ public struct AppState: Codable, Equatable, Sendable {
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(agentComposerDefaults, forKey: .agentComposerDefaults)
+        if !agentComposerDrafts.isEmpty { try container.encode(agentComposerDrafts, forKey: .agentComposerDrafts) }
         try container.encode(servers, forKey: .servers)
         try container.encode(startingDirectories, forKey: .startingDirectories)
         if !startupCommands.isEmpty { try container.encode(startupCommands, forKey: .startupCommands) }
@@ -110,6 +116,7 @@ public struct AppState: Codable, Equatable, Sendable {
             window.activePane = tab.layout.leaves.first
         }
         let panes = Set(projects.flatMap(\.tabs).flatMap(\.panes).map(\.id))
+        agentComposerDrafts = agentComposerDrafts.filter { panes.contains($0.key) }
         window.focusHistory.removeAll { !panes.contains($0) }
         try validate()
         normalizeProjects()

@@ -6,6 +6,7 @@ protocol AgentSessionRuntime: Sendable {
     func send(text: String, model: String?, reasoningEffort: AgentReasoningEffort?) async throws
     func send(text: String, model: String?, reasoningEffort: AgentReasoningEffort?,
               attachments: [StagedAgentAttachment]) async throws
+    func steer(text: String, attachments: [StagedAgentAttachment]) async throws
     func approve(request: String, allow: Bool) async throws
     func setAccess(_ mode: AgentAccessMode) async throws
     func interrupt() async throws
@@ -13,6 +14,10 @@ protocol AgentSessionRuntime: Sendable {
 }
 
 extension AgentSessionRuntime {
+    func steer(text: String, attachments: [StagedAgentAttachment]) async throws {
+        throw AgentRuntimeError("This runtime does not support messages during an active response.")
+    }
+
     func send(text: String, model: String?, reasoningEffort: AgentReasoningEffort?,
               attachments: [StagedAgentAttachment]) async throws {
         guard attachments.isEmpty else { throw AgentRuntimeError("This agent runtime does not support attachments.") }
@@ -79,6 +84,7 @@ final class AgentSessions: @unchecked Sendable {
     private let projectDirectory: @Sendable (ProjectId) throws -> String
     private let submissionTimeout: TimeInterval
     private let interruptTimeout: TimeInterval
+    var activityChanged: @Sendable (AgentChatSnapshot) -> Void = { _ in }
     var changed: @Sendable (SessionId, UInt64) -> Void
     var checkDirectory: @Sendable (String) throws -> Void = { _ in }
     var stageToolImages: @Sendable ([AgentChatAttachment], URL) throws -> Void = { images, directory in
@@ -136,6 +142,10 @@ final class AgentSessions: @unchecked Sendable {
                 ServerLog.error("agent snapshot unavailable: \(file.lastPathComponent): \(error)")
             }
         }
+    }
+
+    func publishActivity() {
+        queue.sync { for entry in entries.values { activityChanged(entry.snapshot) } }
     }
 
     var hasSessions: Bool {
@@ -268,6 +278,44 @@ final class AgentSessions: @unchecked Sendable {
         }
         var stagedAttachments: [StagedAgentAttachment] = []
         if case .send(_, let text, let model, let effort, let requestedProvider, let attachments) = request {
+            _ = try projectDirectory(entry.snapshot.project)
+            try checkDirectory(entry.directory)
+            if !entry.submitting, entry.snapshot.status == .working, let runtime = entry.runtime {
+                guard requestedProvider == nil || requestedProvider == entry.snapshot.provider,
+                      model == entry.snapshot.model, effort == entry.snapshot.reasoningEffort else {
+                    throw ServiceError(.badRequest, "Model and reasoning changes apply after the current response.")
+                }
+                let userID = UUID().uuidString
+                let attachmentRoot = root.appendingPathComponent("attachments", isDirectory: true)
+                    .appendingPathComponent(id.description).appendingPathComponent(userID)
+                let staged = try AgentAttachments.stage(attachments ?? [], root: attachmentRoot)
+                try AgentAttachments.record(staged, root: attachmentRoot)
+                let generation = entry.generation
+                entry.submitting = true
+                Task {
+                    do {
+                        try await runtime.steer(text: text, attachments: staged)
+                        self.queue.async {
+                            guard entry.generation == generation else {
+                                continuation.resume(throwing: AgentRuntimeError("The conversation changed before the message was accepted."))
+                                return
+                            }
+                            entry.submitting = false
+                            entry.snapshot.items.append(self.observedItem(.init(id: userID, kind: .user, text: text,
+                                attachments: attachments?.map(\.descriptor)), entry: entry))
+                            self.touch(entry)
+                            self.persist(entry)
+                            continuation.resume(returning: entry.snapshot)
+                        }
+                    } catch {
+                        self.queue.async {
+                            if entry.generation == generation { entry.submitting = false }
+                            continuation.resume(throwing: error)
+                        }
+                    }
+                }
+                return
+            }
             guard !entry.submitting, entry.snapshot.status != .working, entry.snapshot.status != .waiting else {
                 throw ServiceError(.badRequest, "The agent is already handling a message")
             }
@@ -553,6 +601,11 @@ final class AgentSessions: @unchecked Sendable {
             guard usage.usedTokens >= 0, usage.contextWindow.map({ $0 > 0 }) ?? true,
                   entry.snapshot.contextUsage != usage else { return }
             entry.snapshot.contextUsage = usage
+        case .commands(let commands):
+            entry.snapshot.commands = Array(commands.filter {
+                !$0.isEmpty && $0.utf8.count <= 128 &&
+                $0.unicodeScalars.allSatisfy { CharacterSet.alphanumerics.contains($0) || "-_:.".unicodeScalars.contains($0) }
+            }.prefix(256))
         case .resolvedModel(let model):
             guard !model.isEmpty, model.utf8.count <= 256, !model.contains("\0"),
                   entry.snapshot.resolvedModel != model else { return }
@@ -620,6 +673,7 @@ final class AgentSessions: @unchecked Sendable {
                 bytes += image.data.count
             }
             return bytes
+        case .commands(let commands): return commands.reduce(0) { $0 + $1.utf8.count }
         case .textDelta(_, let text), .failure(let text), .providerSession(let text), .resolvedModel(let text): return text.utf8.count
         default: return 128
         }
@@ -814,6 +868,7 @@ final class AgentSessions: @unchecked Sendable {
     }
 
     private func touch(_ entry: Entry) {
+        activityChanged(entry.snapshot)
         bound(entry)
         entry.snapshot.revision &+= 1
         if !entry.notifying {

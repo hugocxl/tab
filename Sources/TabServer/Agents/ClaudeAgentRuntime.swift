@@ -53,6 +53,9 @@ internal final class ClaudeAgentRuntime {
         switch message["type"] as? String {
         case "system":
             receiveCompaction(message)
+            if message["subtype"] as? String == "init", let commands = message["slash_commands"] as? [String] {
+                onEvent(.commands(commands))
+            }
             if message["subtype"] as? String == "init", let model = message["model"] as? String {
                 onEvent(.resolvedModel(model))
             }

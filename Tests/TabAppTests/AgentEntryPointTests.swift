@@ -6,6 +6,31 @@ import XCTest
 
 @MainActor
 final class AgentEntryPointTests: XCTestCase {
+    func testNativeSidebarUsesSharedActivityForHiddenChats() throws {
+        let model = AppModel(dirs: try ModelFixtures.profile(), connectorFactory: { _, _ in nil })
+        model.panes.register(.agent) { EntryTestController(title: $0.pane.title) }
+        let pane = try XCTUnwrap(model.newAgent(provider: .codex))
+        guard case .agent(let session, _) = model.state.pane(pane)?.content else { return XCTFail("Expected agent") }
+        let connection = ServerConnection(id: .local, connector: InactiveAgentConnector())
+        model.connections[.local] = connection
+        connection.activity = ActivitySnapshot(agents: [
+            .init(session: session, project: model.currentProject.id, provider: .codex,
+                  state: .working, title: "Fix the sidebar")
+        ])
+        var card = ActivityCardData.make(project: model.currentProject, tab: model.activeTab, primary: false, model: model)
+        XCTAssertEqual(card.headline, .agent(provider: .codex, task: "Fix the sidebar"))
+        XCTAssertEqual(card.status, .working)
+        connection.activity.agents[0].state = .blocked
+        card = ActivityCardData.make(project: model.currentProject, tab: model.activeTab, primary: false, model: model)
+        XCTAssertEqual(card.status, .attention)
+        connection.activity.agents[0].state = .idle
+        connection.activity.events = [.init(id: 1, session: session, project: model.currentProject.id,
+                                            provider: .codex, timestamp: 0, kind: .completed)]
+        card = ActivityCardData.make(project: model.currentProject, tab: model.activeTab, primary: false, model: model)
+        XCTAssertEqual(card.status, .attention)
+        XCTAssertTrue(model.state.sessionReferences(.local).isEmpty, "Activity must not claim terminal ownership")
+    }
+
     func testClosingTabDoesNotCommitAgentCloseUntilEveryPaneApproves() async throws {
         let model = AppModel(dirs: try ModelFixtures.profile(), connectorFactory: { _, _ in nil })
         let agentController = EntryTestController(title: "Agent")
@@ -91,7 +116,7 @@ final class AgentEntryPointTests: XCTestCase {
         XCTAssertEqual(PaneKind.agent.glyph, .code)
         XCTAssertEqual(PaneKind.agent.name, "Agent")
         let card = ActivityCardData.make(project: model.currentProject, tab: model.activeTab, primary: false, model: model)
-        XCTAssertEqual(card.headline, .agentTab)
+        XCTAssertEqual(card.headline, .agent(provider: .claude, task: nil))
         XCTAssertEqual(card.name, "Agent")
         model.saveNow()
         let restored = AppModel(dirs: model.dirs, connectorFactory: { _, _ in nil })
@@ -150,7 +175,7 @@ final class AgentEntryPointTests: XCTestCase {
         }
         XCTAssertEqual(model.state.pane(pane)?.title, "Agent")
         let card = ActivityCardData.make(project: model.currentProject, tab: model.activeTab, primary: false, model: model)
-        XCTAssertEqual(card.headline, .agentTab)
+        XCTAssertEqual(card.headline, .agent(provider: .codex, task: nil))
         XCTAssertEqual(card.name, "Agent")
     }
 }
@@ -176,4 +201,9 @@ private final class EntryTestController: PaneContentController {
     }
     func didShow() {}
     func didHide() {}
+}
+
+
+private struct InactiveAgentConnector: ServerConnector {
+    func connect() async throws -> ServerAPI { throw CancellationError() }
 }

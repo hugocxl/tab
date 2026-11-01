@@ -39,6 +39,12 @@ public enum PaneContent: Codable, Hashable, Sendable {
         return nil
     }
 
+    /// Session used for agent activity; terminal ownership remains separate.
+    public var activitySession: SessionId? {
+        if case .agent(let session, _) = self { return session }
+        return session
+    }
+
     /// The title of an editor or diff pane of its path.
     public var nativeTitle: String? {
         switch self {

@@ -3,6 +3,26 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.18.0 - 2026-11-01
+
+### Added
+
+- Send follow-up messages while an agent works, with active-response steering
+  for Codex, queued input for Claude Code, and separate Send and Stop buttons.
+- Browse provider-specific chat commands, including Claude session commands
+  and personal command files, plus native Codex compaction and code review.
+
+### Changed
+
+- The model picker now groups models into provider submenus.
+- Agent chat model, reasoning and access choices persist across restarts and
+  become defaults for new conversations.
+- Native agent sidebar cards show provider icons, conversation titles and the
+  same working, attention and unread completion states as terminal agents.
+- The chat input uses a lighter elevated background in light mode.
+- Use /new, /skills, /status and /permissions in chat; /clear-draft clears the
+  draft without conflicting with provider conversation commands.
+
 ## 0.17.0 - 2026-11-01
 
 ### Changed

@@ -1,11 +1,22 @@
 import AppKit
-import TabCore
+@testable import TabCore
 import TabProtocol
 import XCTest
 @testable import TabApp
 
 @MainActor
 final class AgentComposerSurfaceTests: XCTestCase {
+    func testComposerElevationPreservesDarkModeAndBrightensLightMode() {
+        for dark in [false, true] {
+            let scheme = ColorScheme(background: RGBColor(dark ? 0x102030 : 0xF0E0D0),
+                                     foreground: RGBColor(dark ? 0xD0E0F0 : 0x203040))
+            let theme = AppTheme(catalog: ThemeCatalog(entries: [ThemeEntry(name: "Fixture", scheme: scheme)]),
+                                 darkTheme: "Fixture", lightTheme: "Fixture", systemIsDark: dark)
+            if dark { XCTAssertEqual(theme.agentComposer, theme.floating) }
+            else { XCTAssertGreaterThan(RGBColor(theme.agentComposer).red, RGBColor(theme.card).red) }
+        }
+    }
+
     private func surface(width: CGFloat = 680) -> AgentPaneView {
         let surface = AgentPaneView(frame: NSRect(x: 0, y: 0, width: width, height: 700))
         surface.model.addItem(withTitle: "A custom model with a very long name")
@@ -41,7 +52,7 @@ final class AgentComposerSurfaceTests: XCTestCase {
     func testImmediateSubmissionActivityContinuesThroughToolsAndStreamingThenHidesAtIdle() throws {
         let surface = surface()
         surface.setActivity(status: .idle, submitting: true)
-        XCTAssertTrue(surface.send.isHidden)
+        XCTAssertFalse(surface.send.isHidden)
         XCTAssertFalse(surface.stop.isHidden)
         XCTAssertTrue(visibleLabels(surface).contains("Sending…"))
         var snapshot = AgentChatSnapshot(session: SessionId(), project: ProjectId(), provider: .claude,

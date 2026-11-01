@@ -7,6 +7,7 @@ private final class FakeAgentRuntime: AgentSessionRuntime, @unchecked Sendable {
     let callback: @Sendable (AgentRuntimeEvent) -> Void
     let lock = NSLock()
     var onSend: (@Sendable () async throws -> Void)?
+    var onSteer: (@Sendable () async throws -> Void)?
     var onApprove: (@Sendable (String, Bool) async throws -> Void)?
     var onInterrupt: (@Sendable () async throws -> Void)?
     var onStop: (@Sendable () -> Void)?
@@ -26,6 +27,10 @@ private final class FakeAgentRuntime: AgentSessionRuntime, @unchecked Sendable {
         lock.withLock { submittedModels.append(model); submittedEfforts.append(reasoningEffort) }
         if let providerSession { callback(.providerSession(providerSession)) }
         if let onSend { try await onSend() }
+    }
+    func steer(text: String, attachments: [StagedAgentAttachment]) async throws {
+        guard let onSteer else { throw AgentRuntimeError("Unsupported") }
+        try await onSteer()
     }
     func approve(request: String, allow: Bool) async throws {
         if let onApprove { try await onApprove(request, allow) } else { callback(.status(.idle)) }
@@ -74,6 +79,25 @@ private actor AgentSubmissionGate {
 }
 
 final class AgentSessionsTests: XCTestCase {
+    func testActiveFollowupIsPersistedWithoutReplacingTurnOrRestartingRuntime() async throws {
+        let root = try root()
+        let sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, callback in
+            let runtime = FakeAgentRuntime(callback)
+            runtime.onSteer = {}
+            return runtime
+        })
+        defer { sessions.shutdown() }
+        let id = SessionId()
+        _ = try await sessions.handle(.create(session: id, project: ProjectId(), provider: .codex))
+        let first = try await sessions.handle(.send(session: id, text: "Start", model: nil))
+        let next = try await sessions.handle(.send(session: id, text: "Focus on tests", model: nil))
+        XCTAssertEqual(next.status, .working)
+        XCTAssertEqual(next.items.filter { $0.kind == .user }.map(\.text), ["Start", "Focus on tests"])
+        XCTAssertEqual(next.turns, first.turns)
+        let read = try await sessions.handle(.read(session: id))
+        XCTAssertEqual(read, next)
+    }
+
     func testContextTelemetryPersistsAndModelChangesClearItWithoutChangingDefaultSelection() async throws {
         let root = try root(), box = AgentRuntimeBox()
         let sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, callback in

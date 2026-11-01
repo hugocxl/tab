@@ -20,7 +20,7 @@ actor AgentComposerContextService {
         switch request.provider {
         case .claude:
             roots = [(project, ".claude/skills", false), (project, ".claude/commands", true),
-                     (home, ".claude/skills", false)]
+                     (home, ".claude/skills", false), (home, ".claude/commands", true)]
         case .codex:
             roots = [(project, ".agents/skills", false), (home, ".agents/skills", false),
                      (home, ".codex/skills", false)]

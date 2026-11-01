@@ -186,6 +186,10 @@ public final class AppTheme: ObservableObject {
     /// Surfaces floating over the window, such as the command palette: a
     /// faint tint of the background in light themes, raised in dark ones.
     public var floating: NSColor { (Self.isLight(palette) ? Self.tint(palette) : palette.raised).nsColor }
+    /// Composer elevation brightens light themes while retaining the dark surface.
+    var agentComposer: NSColor {
+        isLight ? ChromeColor(red: 1, green: 1, blue: 1).blended(over: palette.bg, amount: 0.65).nsColor : floating
+    }
     /// Whether the palette is a light one.
     public var isLight: Bool { Self.isLight(palette) }
     /// Pills and chips at rest.

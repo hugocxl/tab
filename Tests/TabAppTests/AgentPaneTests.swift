@@ -7,6 +7,28 @@ import XCTest
 
 @MainActor
 final class AgentPaneTests: XCTestCase {
+    private func modelItems(_ pane: AgentPaneController) -> [NSMenuItem] {
+        pane.surface.model.itemArray.flatMap { $0.submenu?.items ?? [$0] }
+    }
+
+    func testModelMenuGroupsProvidersAndDispatchesSubmenuSelections() async throws {
+        let backend = Backend()
+        let pane = backend.controller()
+        defer { pane.dispose() }
+        pane.refresh()
+        try await wait { pane.surface.model.isEnabled && self.modelItems(pane).contains { $0.title == "GPT-6 Astra" } }
+        let root = try XCTUnwrap(pane.surface.model.menu)
+        XCTAssertEqual(root.items.prefix(2).map(\.title), ["Claude Code", "Codex"])
+        XCTAssertTrue(root.items.prefix(2).allSatisfy { $0.submenu != nil })
+        let item = try XCTUnwrap(root.items[1].submenu?.items.first { $0.title == "GPT-6 Astra" })
+        XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(item.action), to: item.target, from: item))
+        XCTAssertEqual(pane.selection.provider, .codex)
+        XCTAssertEqual(pane.selection.model, "gpt-6-astra")
+        let selected = modelItems(pane).filter { $0.state == .on }
+        XCTAssertEqual(selected.map(\.title), ["GPT-6 Astra"])
+        XCTAssertEqual(pane.surface.model.labelText, "GPT-6 Astra")
+    }
+
     @MainActor
     private final class Backend {
         let session = SessionId()
@@ -154,7 +176,7 @@ final class AgentPaneTests: XCTestCase {
         defer { pane.dispose() }
         pane.refresh()
         try await wait { pane.snapshot != nil }
-        pane.surface.composer.string = "/clear"
+        pane.surface.composer.string = "/clear-draft"
         pane.send()
         XCTAssertTrue(pane.surface.composer.string.isEmpty)
         XCTAssertFalse(backend.requests.contains { if case .send = $0 { return true }; return false })
@@ -172,7 +194,7 @@ final class AgentPaneTests: XCTestCase {
         pane.view.layoutSubtreeIfNeeded()
         XCTAssertNil(pane.selection.model, "A resolved provider model is display metadata, not a settings override")
         XCTAssertEqual(pane.surface.model.labelText, "Claude Sonnet 5.5")
-        XCTAssertFalse(pane.surface.model.itemArray.contains {
+        XCTAssertFalse(modelItems(pane).contains {
             guard let choice = $0.representedObject as? AgentModelSelection else { return false }
             return choice.model == nil
         })
@@ -197,8 +219,8 @@ final class AgentPaneTests: XCTestCase {
                           reasoningEfforts: [.low, .high, .init(rawValue: "next-generation")], defaultReasoningEffort: .low)]
         }
         pane.refresh()
-        try await wait { pane.snapshot != nil && pane.surface.model.itemTitles.contains("Future Codex Model") }
-        XCTAssertFalse(pane.surface.model.itemTitles.contains("GPT-6 Astra"), "Only provider-discovered models belong in the menu")
+        try await wait { pane.snapshot != nil && modelItems(pane).map(\.title).contains("Future Codex Model") }
+        XCTAssertFalse(modelItems(pane).map(\.title).contains("GPT-6 Astra"), "Only provider-discovered models belong in the menu")
         pane.selectModel(provider: .codex, model: "future-codex-model")
         XCTAssertEqual(pane.surface.model.labelText, "Future Codex Model")
         XCTAssertEqual(pane.surface.effort.itemTitles, ["Auto", "Low", "High", AgentReasoningEffort(rawValue: "next-generation").title])
@@ -226,12 +248,12 @@ final class AgentPaneTests: XCTestCase {
                           reasoningEfforts: [.high])]
         }
         pane.refresh()
-        try await wait { pane.snapshot != nil && pane.surface.model.itemTitles.contains("Existing") }
+        try await wait { pane.snapshot != nil && modelItems(pane).map(\.title).contains("Existing") }
         pane.surface.model.selectItem(withTitle: "Refresh models…")
         _ = (pane.surface.model.target as? NSObject)?.perform(try XCTUnwrap(pane.surface.model.action), with: pane.surface.model)
-        try await wait { pane.surface.model.itemTitles.contains("New release") }
+        try await wait { modelItems(pane).map(\.title).contains("New release") }
         XCTAssertEqual(refreshes, [false, true])
-        XCTAssertFalse(pane.surface.model.itemTitles.contains("Existing"))
+        XCTAssertFalse(modelItems(pane).map(\.title).contains("Existing"))
         XCTAssertFalse(backend.requests.contains { if case .send = $0 { return true }; return false })
     }
 
@@ -382,14 +404,52 @@ final class AgentPaneTests: XCTestCase {
         XCTAssertTrue(missingCanClose)
     }
 
+    func testComposerChoicesRestoreBeforeSendingAndSeedNewChats() async throws {
+        let backend = Backend()
+        let pane = backend.controller()
+        defer { pane.dispose() }
+        let prefs = AgentComposerPreferences(provider: .codex, model: "gpt-6.1-sol", effort: .high, access: .fullAccess)
+        var saved: AgentComposerPreferences?
+        pane.restorePreferences(defaults: prefs, draft: prefs) { saved = $0 }
+        pane.didShow()
+        let loaded = await ModelFixtures.wait { pane.snapshot?.accessMode == .fullAccess }
+        XCTAssertTrue(loaded)
+        XCTAssertEqual(pane.selection.provider, .codex)
+        XCTAssertEqual(pane.selection.model, prefs.model)
+        XCTAssertEqual(pane.reasoningEffort, .high)
+        pane.selectEffort(.low)
+        XCTAssertEqual(saved?.effort, .low)
+
+        let freshBackend = Backend()
+        let fresh = freshBackend.controller()
+        defer { fresh.dispose() }
+        fresh.restorePreferences(defaults: prefs, draft: nil) { _ in }
+        fresh.didShow()
+        let seeded = await ModelFixtures.wait { fresh.snapshot?.accessMode == .fullAccess }
+        XCTAssertTrue(seeded)
+        XCTAssertEqual(fresh.selection.model, prefs.model)
+        XCTAssertEqual(fresh.reasoningEffort, .high)
+
+        backend.snapshot.revision = 4
+        let next = backend.controller()
+        defer { next.dispose() }
+        next.restorePreferences(defaults: prefs, draft: nil) { _ in }
+        next.didShow()
+        let restored = await ModelFixtures.wait { next.snapshot != nil }
+        XCTAssertTrue(restored)
+        // This session already has a persisted access change and must retain its own choices.
+        XCTAssertEqual(next.selection.provider, .claude)
+    }
+
     func testModelAndEffortSelectionReachSendAndSurviveReconnect() async throws {
         let backend = Backend()
         let pane = backend.controller()
         defer { pane.dispose() }
         pane.refresh()
         try await wait { pane.snapshot != nil }
-        pane.surface.model.selectItem(withTitle: "GPT-6.1 Sol")
-        _ = (pane.surface.model.target as? NSObject)?.perform(try XCTUnwrap(pane.surface.model.action), with: pane.surface.model)
+        try await wait { pane.surface.model.isEnabled && self.modelItems(pane).contains { $0.title == "GPT-6.1 Sol" } }
+        let modelItem = try XCTUnwrap(modelItems(pane).first { $0.title == "GPT-6.1 Sol" })
+        XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(modelItem.action), to: modelItem.target, from: modelItem))
         pane.surface.effort.selectItem(withTitle: "High")
         _ = (pane.surface.effort.target as? NSObject)?.perform(try XCTUnwrap(pane.surface.effort.action), with: pane.surface.effort)
         pane.connectionChanged()
@@ -401,8 +461,8 @@ final class AgentPaneTests: XCTestCase {
         try await wait { pane.snapshot?.status == .working }
         XCTAssertEqual(backend.requests.last, .send(session: backend.session, text: "Review the code",
             model: "gpt-6.1-sol", reasoningEffort: .high, provider: .codex))
-        XCTAssertEqual(pane.title, "Agent")
-        XCTAssertTrue(pane.surface.send.isHidden)
+        XCTAssertEqual(pane.title, "Review the code")
+        XCTAssertFalse(pane.surface.send.isHidden)
         XCTAssertFalse(pane.surface.stop.isHidden)
         XCTAssertFalse(pane.surface.effort.isEnabled)
         pane.selectModel(provider: .claude, model: nil)
@@ -424,7 +484,7 @@ final class AgentPaneTests: XCTestCase {
         XCTAssertEqual(pane.reasoningEffort, .high)
         pane.selectModel(provider: .claude, model: "claude-opus-5-5")
         XCTAssertEqual(pane.selection.provider, .codex)
-        let otherModels = pane.surface.model.itemArray.filter {
+        let otherModels = modelItems(pane).filter {
             ($0.representedObject as? AgentModelSelection)?.provider == .claude
         }
         XCTAssertFalse(otherModels.isEmpty)

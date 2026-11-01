@@ -113,6 +113,7 @@ public struct AgentChatSnapshot: Codable, Hashable, Sendable {
     public var providerSession: String?
     public var model: String?
     /// Actual provider model, independent of the user's optional model override.
+    public var commands: [String]?
     public var resolvedModel: String?
     public var contextUsage: AgentContextUsage?
     public var reasoningEffort: AgentReasoningEffort?

@@ -231,7 +231,10 @@ The complete request list to support, grouped (names are the Swift cases):
   tool calls are separate main-timeline entries, with selection pinned during
   scrolling. Only individual expanded output details use bounded scroll surfaces.
   Their persisted pane state identifies the server-owned session and initial provider;
-  the server snapshot owns the current provider, model and reasoning effort. One connection event
+  the server snapshot owns the current provider, model and reasoning effort. Unsent
+  composer overrides and defaults for new conversations persist in app state; existing
+  conversations retain their server settings. Native chats publish into the same
+  activity tracker as terminal agents for sidebar status and unread events. One connection event
   consumer routes conversation revisions to matching panes; panes reread state
   when notified or reconnected rather than polling.
 - Native panels (Files, Source Control) are tabs of the right sidebar

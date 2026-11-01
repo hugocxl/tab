@@ -26,6 +26,23 @@ final class Activity: @unchecked Sendable {
 
     var currentRevision: UInt64 { lock.withLock { revision } }
 
+    /// Native chats share terminal agents' attention and completion tracking.
+    func updateChat(_ snapshot: AgentChatSnapshot) {
+        guard snapshot.status != .closed else { remove(snapshot.session); return }
+        let previous = lock.withLock { agents[snapshot.session]?.state }
+        let state: AgentState
+        switch snapshot.status {
+        case .working: state = .working
+        case .waiting, .failed: state = .blocked
+        case .idle, .closed: state = .idle
+        }
+        let title = snapshot.items.first { $0.kind == .user }?.text
+            .split(whereSeparator: \.isNewline).first.map { String($0.prefix(160)) }
+        update(AgentActivity(session: snapshot.session, project: snapshot.project,
+                             provider: snapshot.provider == .claude ? .claude : .codex, state: state, title: title),
+               completed: previous == .working && state == .idle)
+    }
+
     /// Records an agent's state. A newly blocked agent gets an attention event;
     /// `completed` (working became idle) a completion event.
     func update(_ activity: AgentActivity, completed: Bool) {

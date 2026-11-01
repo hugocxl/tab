@@ -12,8 +12,6 @@ struct ActivityCardData: Equatable {
         case browser(String)
         case editor(String)
         case diff(String)
-        /// A native conversation, independent of its selected provider.
-        case agentTab
         /// An agent and what it is working on.
         case agent(provider: AgentProvider, task: String?)
         /// An idle shell: its name and folder.
@@ -53,8 +51,11 @@ struct ActivityCardData: Equatable {
         let agent = shownPane.flatMap { model.agent(in: $0.id) }
         let headline: Headline
         switch shownPane?.content {
-        case .agent?:
-            headline = .agentTab
+        case .agent(_, let seed)?:
+            let controller = shownPane.flatMap { model.panes.controller(for: $0.id) as? AgentPaneController }
+            let provider: AgentProvider = controller.map { $0.selection.provider == .claude ? .claude : .codex } ?? agent?.provider ?? (seed == .claude ? .claude : .codex)
+            let task = agent?.title ?? controller?.title
+            headline = .agent(provider: provider, task: task == "Agent" ? nil : task)
         case .editor(let path)?:
             headline = .editor(basename(path))
         case .diff(let path, _)?:
@@ -93,7 +94,7 @@ struct ActivityCardData: Equatable {
     @MainActor
     private static func status(tabs: [Tab], server: ServerId, model: AppModel) -> Status {
         let panes = tabs.flatMap(\.panes)
-        let sessions = panes.compactMap(\.content.session)
+        let sessions = panes.compactMap(\.content.activitySession)
         guard let connection = model.connections[server] else { return .idle }
         let agents = connection.activity.agents.filter { sessions.contains($0.session) }
         if agents.contains(where: { $0.state == .blocked }) { return .attention }

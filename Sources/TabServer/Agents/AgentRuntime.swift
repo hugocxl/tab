@@ -10,6 +10,7 @@ internal enum AgentRuntimeEvent: Sendable {
     case providerSession(String)
     case contextUsage(AgentContextUsage)
     case resolvedModel(String)
+    case commands([String])
     case failure(String)
 }
 
@@ -37,6 +38,7 @@ internal final class AgentRuntime: @unchecked Sendable {
     private var closed = false
     private var failed = false
     private var busy = false
+    private var queuedClaudeInputs = 0
     private var ready = false
     private var sequence = 0
     private var pending: [String: (Result<[String: Any], Error>) -> Void] = [:]
@@ -143,6 +145,34 @@ internal final class AgentRuntime: @unchecked Sendable {
         }
     }
 
+    func steer(text: String, attachments: [StagedAgentAttachment]) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            queue.async {
+                do {
+                    guard self.busy, self.ready, !self.closed, !self.failed else {
+                        throw AgentRuntimeError("The response has finished. Send the message again to start a follow-up.")
+                    }
+                    if self.provider == .claude {
+                        try self.write(["type": "user", "message": ["role": "user",
+                            "content": AgentAttachments.claudeContent(text: text, attachments: attachments)],
+                            "parent_tool_use_id": NSNull(), "session_id": self.claude.sessionID ?? self.resumeSession ?? ""])
+                        self.queuedClaudeInputs += 1
+                        continuation.resume()
+                    } else {
+                        guard let thread = self.threadID, let turn = self.turnID else {
+                            throw AgentRuntimeError("The response is still starting. Try sending again shortly.")
+                        }
+                        try self.request("turn/steer", params: ["threadId": thread, "expectedTurnId": turn,
+                            "input": AgentAttachments.codexInput(text: text, attachments: attachments)]) { result in
+                            do { _ = try result.get(); continuation.resume() }
+                            catch { continuation.resume(throwing: error) }
+                        }
+                    }
+                } catch { continuation.resume(throwing: error) }
+            }
+        }
+    }
+
     private func restartClaudeSelection() throws {
         // the source renderer's query identity includes model and effort. Clearing effort must
         // reload provider settings, not silently retain the previous override.
@@ -241,6 +271,18 @@ internal final class AgentRuntime: @unchecked Sendable {
             submitUser(.success([:]))
         } else {
             guard let threadID else { throw AgentRuntimeError("Codex thread is not initialized.") }
+            let command = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if command == "/compact" || command == "/review" {
+                guard attachments.isEmpty else { throw AgentRuntimeError("This command does not accept attachments.") }
+                let method = command == "/compact" ? "thread/compact/start" : "review/start"
+                var params: [String: Any] = ["threadId": threadID]
+                if command == "/review" { params["target"] = ["type": "uncommittedChanges"]; params["delivery"] = "inline" }
+                try request(method, params: params) { result in
+                    do { _ = try result.get(); continuation.resume() }
+                    catch { self.fail(error.localizedDescription); continuation.resume(throwing: error) }
+                }
+                return
+            }
             try codexSelection(model: model, reasoningEffort: reasoningEffort) { selection in
                 do {
                     let (wireModel, effort) = try selection.get()
@@ -401,6 +443,17 @@ internal final class AgentRuntime: @unchecked Sendable {
         try await perform {
             guard self.busy else { return }
             if self.provider == .claude {
+                if self.queuedClaudeInputs > 0 {
+                    self.resumeSession = self.claude.sessionID ?? self.resumeSession
+                    self.processGeneration = UUID()
+                    self.process?.stop()
+                    self.process = nil
+                    self.ready = false
+                    self.queuedClaudeInputs = 0
+                    self.resolvePending(AgentRuntimeError("Interrupted"))
+                    self.completeTurn()
+                    return
+                }
                 try self.request("interrupt", params: [:]) { result in
                     if case .failure(let error) = result { self.fail(error.localizedDescription) }
                 }
@@ -569,6 +622,13 @@ internal final class AgentRuntime: @unchecked Sendable {
     }
 
     private func completeTurn() {
+        if provider == .claude, queuedClaudeInputs > 0 {
+            queuedClaudeInputs -= 1
+            claude.beginTurn()
+            finishApprovals()
+            onEvent(.status(.working))
+            return
+        }
         busy = false
         turnID = nil
         finishApprovals()

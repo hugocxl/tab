@@ -113,7 +113,8 @@ final class AgentRenderingTests: XCTestCase {
         surface.frame.size.width = 360
         surface.needsLayout = true
         surface.layoutSubtreeIfNeeded()
-        XCTAssertEqual(surface.send.frame, surface.stop.frame)
+        XCTAssertFalse(surface.send.frame.intersects(surface.stop.frame))
+        XCTAssertFalse(surface.contextIndicator.frame.intersects(surface.stop.frame))
         XCTAssertGreaterThan(surface.send.frame.minX, surface.effort.frame.maxX)
         XCTAssertLessThanOrEqual(surface.send.frame.maxX, composerParent.bounds.maxX)
     }

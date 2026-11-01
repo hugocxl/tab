@@ -46,7 +46,7 @@ final class AgentPaneView: ThemedView {
     /// Images, video and audio of assistant Markdown, cached for this conversation.
     let mediaLoader = AgentMediaLoader()
 
-    private let composerCard = ThemedBackground(color: { $0.floating })
+    private let composerCard = ThemedBackground(color: { $0.agentComposer })
     private let activity = NSView()
     private let activityLabel = makeLabel("", font: AppFont.small)
     private let activitySpinner = NSProgressIndicator()
@@ -213,9 +213,9 @@ final class AgentPaneView: ThemedView {
         var separatorFrames: [NSRect?] = []
         var x: CGFloat = 46
         var row: CGFloat = 0
-        let fitsSingleRow = 46 + [model, effort, access].reduce(CGFloat(26)) { $0 + $1.intrinsicContentSize.width } <= width - 82
+        let fitsSingleRow = 46 + [model, effort, access].reduce(CGFloat(26)) { $0 + $1.intrinsicContentSize.width } <= width - 122
         for (index, picker) in [model, effort, access].enumerated() {
-            var right = row == 0 ? width - 82 : width - 14
+            var right = row == 0 ? width - 122 : width - 14
             let desired = picker.intrinsicContentSize.width
             let gap: CGFloat = index == 0 ? 0 : 13
             var wraps = false
@@ -245,8 +245,8 @@ final class AgentPaneView: ThemedView {
         attach.frame = NSRect(x: 12, y: controlsY + 1, width: 28, height: 28)
         let actionFrame = NSRect(x: max(0, width - 44), y: controlsY, width: 30, height: 30)
         send.frame = actionFrame
-        stop.frame = actionFrame
-        contextIndicator.frame = NSRect(x: max(0, width - 78), y: controlsY + 1, width: 28, height: 28)
+        stop.frame = actionFrame.offsetBy(dx: -40, dy: 0)
+        contextIndicator.frame = NSRect(x: max(0, width - 118), y: controlsY + 1, width: 28, height: 28)
         for (picker, frame) in zip([model, effort, access], pickerFrames) {
             picker.frame = frame.offsetBy(dx: 0, dy: controlsY + 1)
         }
@@ -319,7 +319,7 @@ final class AgentPaneView: ThemedView {
         activityStatus = status
         self.submitting = submitting
         let busy = submitting || status == .working || status == .waiting
-        send.isHidden = busy
+        send.isHidden = false
         stop.isHidden = !busy
         activity.isHidden = !submitting && status != .waiting
         guard changed else { return }

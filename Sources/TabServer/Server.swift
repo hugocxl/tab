@@ -102,6 +102,8 @@ public final class Server: @unchecked Sendable {
                           server: catalog.serverId)
         catalog.onChange = { [weak self] revision in self?.catalogChanged(revision) }
         activity.onChange = { [weak self] revision in self?.activityChanged(revision) }
+        agents.activityChanged = { [weak self] snapshot in self?.activity.updateChat(snapshot) }
+        agents.publishActivity()
         agents.changed = { [weak self] session, revision in
             self?.broadcast(.agentChatChanged(session: session, revision: revision))
         }

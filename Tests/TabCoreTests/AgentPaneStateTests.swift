@@ -2,6 +2,16 @@ import XCTest
 @testable import TabCore
 
 final class AgentPaneStateTests: XCTestCase {
+    func testUnsentComposerChoicesSurviveStateRoundTrip() throws {
+        var state = try AppState.bootstrap()
+        let pane = try state.openAgent(state.home.id)
+        let prefs = AgentComposerPreferences(provider: .codex, model: "chosen-model", effort: .high, access: .fullAccess)
+        state.setAgentComposerDraft(prefs, for: pane)
+        let restored = try JSONDecoder().decode(AppState.self, from: JSONEncoder().encode(state))
+        XCTAssertEqual(restored.agentComposerDrafts[pane], prefs)
+        XCTAssertEqual(restored.agentComposerDefaults, prefs)
+    }
+
     func testProjectAgentsShareTerminalLayoutAndPersistIdentityWithoutTerminalSemantics() throws {
         var state = try AppState.bootstrap()
         let project = try state.addProject(server: .local, directory: FileManager.default.currentDirectoryPath)

@@ -4,7 +4,7 @@ import AppKit
 /// @, and supported actions plus discovered skill metadata for /. Keep lookup
 /// and execution in the coordinator; the native surface never invents results.
 struct AgentComposerSuggestion: Equatable, Identifiable {
-    enum Kind: String { case file, thread, skill, action }
+    enum Kind: String { case file, thread, skill, action, providerCommand }
     struct SkillMetadata: Equatable {
         let name: String
         var path: String? = nil

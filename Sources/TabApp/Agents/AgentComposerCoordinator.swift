@@ -11,6 +11,7 @@ struct AgentMentionThread: Sendable {
 /// Keeps async context search separate from editing, so stale results cannot replace a new query.
 @MainActor
 final class AgentComposerCoordinator {
+    var providerCommands: [String] = []
     var loadFiles: (() async throws -> [String])?
     var loadThreads: (() async throws -> [AgentMentionThread])?
     var loadSkills: (() async throws -> [AgentComposerSkill])?
@@ -28,12 +29,16 @@ final class AgentComposerCoordinator {
     private var loadedAt = Date.distantPast
     private var actions: [AgentComposerSuggestion] {
         [
+            .init(id: "skills", title: "/skills", subtitle: "Browse installed skills", symbol: "sparkles", kind: .action),
+            .init(id: "status", title: "/status", subtitle: "Show current conversation settings", symbol: "info.circle", kind: .action),
+            .init(id: "new", title: "/new", subtitle: "Start a new conversation", symbol: "plus.bubble", kind: .action),
+            .init(id: "access", title: "/permissions", subtitle: "Change tool permissions", symbol: "lock.shield", kind: .action),
             .init(id: "model", title: "/model", subtitle: "Choose the model for this conversation", symbol: "cpu", kind: .action),
             .init(id: "effort", title: "/effort", subtitle: "Change reasoning effort", symbol: "dial.low", kind: .action),
             .init(id: "access", title: "/access", subtitle: "Change tool permissions", symbol: "lock.shield", kind: .action),
             .init(id: "attach", title: "/attach", subtitle: "Attach files or images", symbol: "paperclip", kind: .action),
             .init(id: "stop", title: "/stop", subtitle: "Stop the current response", symbol: "stop.circle", kind: .action),
-            .init(id: "clear", title: "/clear", subtitle: "Clear the current draft and attachments", symbol: "eraser", kind: .action)
+            .init(id: "clear", title: "/clear-draft", subtitle: "Clear the current draft and attachments", symbol: "eraser", kind: .action)
         ]
     }
 
@@ -128,6 +133,13 @@ final class AgentComposerCoordinator {
         return true
     }
 
+    func browseSkills() {
+        surface.composer.string = "/skill:"
+        surface.composer.setSelectedRange(NSRange(location: 7, length: 0))
+        surface.refreshComposer()
+        changed()
+    }
+
     func dismiss() { triggerState.dismiss(trigger); task?.cancel(); hide() }
 
     private func hide() {
@@ -146,7 +158,10 @@ final class AgentComposerCoordinator {
     private func matches(_ trigger: AgentComposerTrigger) -> [AgentComposerSuggestion] {
         let query = trigger.query
         if trigger.kind == .command {
-            let candidates = actions + (skills ?? []).map {
+            let native = providerCommands.filter { name in !actions.contains { $0.title == "/" + name } }.map {
+                AgentComposerSuggestion(id: $0, title: "/" + $0, subtitle: "Provider command", symbol: "terminal", kind: .providerCommand)
+            }
+            let candidates = actions + native + (skills ?? []).map {
                 AgentComposerSuggestion(id: $0.id, title: "/skill:\($0.name)", subtitle: $0.description,
                                         symbol: "sparkles", kind: .skill)
             }
@@ -172,6 +187,7 @@ final class AgentComposerCoordinator {
         var replacement: String?
         switch item.kind {
         case .action: replacement = ""
+        case .providerCommand: replacement = item.title + " "
         case .file:
             replacement = item.id.contains(where: { $0.isWhitespace }) ? "@\"\(item.id)\" " : "@\(item.id) "
         case .thread:

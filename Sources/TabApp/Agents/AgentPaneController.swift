@@ -11,7 +11,17 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     let project: ProjectId
     let surface = AgentPaneView()
     var view: NSView { surface }
-    var title: String { "Agent" }
+    var title: String {
+        snapshot?.items.first(where: { $0.kind == .user })?.text
+            .split(whereSeparator: \.isNewline).first.map { String($0.prefix(160)) } ?? "Agent"
+    }
+    private var initialPreferences: AgentComposerPreferences?
+    private var savePreferences: ((AgentComposerPreferences?) -> Void)?
+    private func persistSelection(access: AgentAccessMode? = nil) {
+        savePreferences?(.init(provider: selection.provider, model: selection.model,
+                               effort: reasoningEffort, access: access ?? snapshot?.accessMode))
+    }
+    var onNewConversation: (() -> Void)?
     var titleDidChange: (() -> Void)?
 
     private let request: (AgentChatRequest) async throws -> AgentChatSnapshot
@@ -94,8 +104,15 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
             route.project = project
             return result
         }
+        restorePreferences(defaults: model.state.agentComposerDefaults, draft: model.state.agentComposerDrafts[pane]) { [weak model] preferences in
+            model?.edit { $0.setAgentComposerDraft(preferences, for: pane) }
+        }
         let owningProject: () -> ProjectId? = { [weak self, weak model] in
             self?.authoritativeProject ?? route.project ?? model?.state.paneProject(pane)
+        }
+        onNewConversation = { [weak model] in
+            guard let model, let project = owningProject() else { return }
+            model.newAgent(in: project)
         }
         surface.workspaceRoot = context.project.directory.rawValue
         AgentConversationProjectActions.install(surface: surface, model: model, pane: pane, session: session)
@@ -191,6 +208,17 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         }
     }
 
+    func restorePreferences(defaults: AgentComposerPreferences?, draft: AgentComposerPreferences?,
+                            save: @escaping (AgentComposerPreferences?) -> Void) {
+        initialPreferences = draft ?? defaults
+        savePreferences = save
+        if let draft {
+            selection = AgentModelSelection(provider: draft.provider, model: draft.model)
+            reasoningEffort = draft.effort
+            selectionEdited = true
+        }
+    }
+
     /// Request injection keeps failure, reconnect and event races testable without a server.
     init(session: SessionId, project: ProjectId, provider: TabCore.AgentChatProvider,
          request: @escaping (AgentChatRequest) async throws -> AgentChatSnapshot) {
@@ -204,7 +232,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         surface.citationThreadId = session.description
         surface.composer.delegate = self
         surface.model.target = self
-        surface.model.action = #selector(modelSelected)
+        surface.model.action = #selector(modelSelected(_:))
         surface.effort.target = self
         surface.effort.action = #selector(effortSelected)
         surface.access.target = self
@@ -370,8 +398,22 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
                         ? .read(session: self.session)
                         : .create(session: self.session, project: self.project, provider: self.provider))
                     guard !Task.isCancelled, !self.disposed, generation == self.connectionGeneration else { return }
+                    let firstSnapshot = !self.created
+                    if firstSnapshot, result.items.isEmpty, result.providerSession == nil, result.revision <= 1,
+                       let defaults = self.initialPreferences {
+                        if !self.selectionEdited {
+                            self.selection = AgentModelSelection(provider: defaults.provider, model: defaults.model)
+                            self.reasoningEffort = defaults.effort
+                            self.selectionEdited = true
+                            self.persistSelection(access: defaults.access)
+                        }
+                    }
                     self.created = true
                     self.accept(result, generation: generation, authoritative: true)
+                    if firstSnapshot, result.items.isEmpty, result.providerSession == nil, result.revision <= 1,
+                       let access = self.initialPreferences?.access, access != result.accessMode {
+                        self.run(.setAccess(session: self.session, mode: access))
+                    }
                 } catch is CancellationError { return }
                 catch {
                     guard !Task.isCancelled, !self.disposed, generation == self.connectionGeneration else { return }
@@ -389,6 +431,17 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         guard !disposed, commandTask == nil, created, canSend,
               preparingAttachments == 0,
               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !draftAttachments.isEmpty else { return }
+        let commandText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if selection.provider == .codex, commandText.hasPrefix("/"), !commandText.hasPrefix("/skill:"),
+           !["/compact", "/review"].contains(commandText) {
+            showComposerError("This Codex command is not supported in Agent Tabs. Use / to choose an available command.")
+            return
+        }
+        if snapshot?.status == .working, text.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("/"),
+           !text.hasPrefix("/skill:") {
+            showComposerError("Run provider commands after the current response finishes.")
+            return
+        }
         let attachments = draftAttachments.map { AgentChatAttachment(id: $0.id, name: $0.name, mimeType: $0.mimeType, data: $0.data) }
         let sentIDs = Set(attachments.map(\.id))
         composerCoordinator.dismiss()
@@ -397,6 +450,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
                   reasoningEffort: reasoningEffort, provider: selection.provider,
                   attachments: attachments.isEmpty ? nil : attachments)) { [weak self] in
             self?.selectionEdited = false
+            self?.savePreferences?(nil)
             self?.draftAttachments.removeAll { sentIDs.contains($0.id) }
             self?.updateAttachments()
             // Don't lose edits typed while the request was in flight, or a failed send.
@@ -568,6 +622,11 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     private func performComposerAction(_ action: String) {
         let control: NSControl?
         switch action {
+        case "skills": composerCoordinator.browseSkills(); return
+        case "status":
+            showComposerError("\(selection.provider.name) · \(effectiveModel ?? "Provider default") · \(reasoningEffort?.title ?? "Auto") · \((snapshot?.accessMode ?? .standard).title)")
+            return
+        case "new": onNewConversation?(); return
         case "model": control = surface.model
         case "effort": control = surface.effort
         case "access": control = surface.access
@@ -684,10 +743,12 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
 
     private var canSend: Bool {
         guard !needsAuthoritativeSnapshot, let snapshot else { return false }
-        return snapshot.status == .idle || snapshot.status == .failed
+        return snapshot.status == .idle || snapshot.status == .failed || snapshot.status == .working
     }
 
     private func updateControls() {
+        composerCoordinator.providerCommands = selection.provider == .codex
+            ? ["compact", "review"] : (snapshot?.provider == .claude ? (snapshot?.commands ?? []) : [])
         surface.composer.isEditable = !disposed
         surface.attach.isEnabled = !disposed
         surface.send.isEnabled = !approvalInFlight && !disposed && created && commandTask == nil && canSend &&
@@ -695,7 +756,10 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         surface.stop.isEnabled = !disposed && !needsAuthoritativeSnapshot && stopTask == nil && !stopRequested &&
             (submitting || snapshot?.status == .working || snapshot?.status == .waiting)
         let busy = submitting || snapshot?.status == .working || snapshot?.status == .waiting
-        surface.send.isHidden = busy
+        surface.send.isHidden = false
+        surface.send.toolTip = busy
+            ? (selection.provider == .codex ? "Send instructions to the active response" : "Queue a follow-up message")
+            : "Send message"
         surface.stop.isHidden = !busy
         surface.model.isEnabled = canEditSelection && !needsAuthoritativeSnapshot
         surface.effort.isEnabled = surface.model.isEnabled && !supportedEfforts.isEmpty
@@ -805,6 +869,8 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         composerCoordinator.invalidate()
         if let effort = reasoningEffort, !supportedEfforts.contains(effort) { reasoningEffort = nil }
         selectionEdited = true
+        persistSelection()
+        titleDidChange?()
         updateControls()
     }
 
@@ -813,11 +879,13 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         if let effort, !supportedEfforts.contains(effort) { return }
         reasoningEffort = effort
         selectionEdited = true
+        persistSelection()
+        titleDidChange?()
         updateControls()
     }
 
-    @objc private func modelSelected() {
-        guard let item = surface.model.selectedItem else { return }
+    @objc private func modelSelected(_ sender: Any?) {
+        guard let item = (sender as? NSMenuItem) ?? surface.model.selectedItem else { return }
         if let value = item.representedObject as? AgentModelSelection {
             selectModel(provider: value.provider, model: value.model)
         } else if item.representedObject as? String == "refresh-models" {
@@ -850,7 +918,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
 
     func selectAccess(_ mode: AgentAccessMode) {
         guard surface.access.isEnabled else { return }
-        run(.setAccess(session: session, mode: mode))
+        run(.setAccess(session: session, mode: mode)) { [weak self] in self?.persistSelection(access: mode) }
     }
 
     @objc private func accessSelected() {
@@ -871,9 +939,12 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         var menuLogos: [Int: AgentProvider] = [:]
         menu.autoenablesItems = false
         for provider in TabCore.AgentChatProvider.allCases {
-            if !menu.items.isEmpty { menu.addItem(.separator()) }
             let heading = NSMenuItem(title: provider.name, action: nil, keyEquivalent: "")
-            heading.isEnabled = false
+            let models = NSMenu(title: provider.name)
+            models.autoenablesItems = false
+            heading.submenu = models
+            heading.state = selection.provider == provider ? .on : .off
+            menuLogos[menu.items.count] = provider == .claude ? .claude : .codex
             menu.addItem(heading)
             var choices = (modelCatalogs[provider] ?? []).map { AgentModelSelection(provider: provider, model: $0.id) }
             let shownModel = descriptor(for: displayedSelection)
@@ -884,19 +955,20 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
                 let title = unavailableModelCatalogs.contains(provider) ? "Models unavailable" : modelCatalogs[provider] == nil ? "Loading models…" : "No models reported"
                 let status = NSMenuItem(title: title, action: nil, keyEquivalent: "")
                 status.isEnabled = false
-                status.indentationLevel = 1
-                menu.addItem(status)
+                models.addItem(status)
             }
             for choice in choices {
                 let item = NSMenuItem(title: modelTitle(choice), action: nil, keyEquivalent: "")
                 item.representedObject = choice
-                menuLogos[menu.items.count] = provider == .claude ? .claude : .codex
-                item.indentationLevel = 1
+                item.target = self
+                item.action = #selector(modelSelected(_:))
+                let current = selectedModelDescriptor.map { AgentModelSelection(provider: selection.provider, model: $0.id) } ?? displayedSelection
+                item.state = choice == current ? .on : .off
                 let reported = descriptor(for: choice) != nil
                 item.isEnabled = reported && (canChangeProvider || provider == snapshot?.provider)
                 item.toolTip = !reported ? "Current model is not listed in the provider catalog."
                     : item.isEnabled ? choice.model : "Open a new Agent Tab to use another provider."
-                menu.addItem(item)
+                models.addItem(item)
             }
         }
         menu.addItem(.separator())
@@ -906,8 +978,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         surface.model.menu = menu
         surface.model.menuLogos = menuLogos
         surface.model.providerLogo = selection.provider == .claude ? .claude : .codex
-        let currentChoice = selectedModelDescriptor.map { AgentModelSelection(provider: selection.provider, model: $0.id) } ?? displayedSelection
-        surface.model.select(menu.items.first { ($0.representedObject as? AgentModelSelection) == currentChoice })
+        surface.model.select(nil)
         surface.model.displayedTitle = modelTitle(displayedSelection)
         surface.model.symbol = selection.provider == .claude ? "sparkle" : "cpu"
         surface.model.toolTip = "Model · \(selection.provider.name). Changes apply to the next message."

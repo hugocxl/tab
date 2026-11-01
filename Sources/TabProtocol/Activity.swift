@@ -76,13 +76,15 @@ public struct AgentActivity: Hashable, Codable, Sendable {
     public var session: SessionId
     public var project: ProjectId
     public var provider: AgentProvider
+    public var title: String?
     public var state: AgentState
 
-    public init(session: SessionId, project: ProjectId, provider: AgentProvider, state: AgentState) {
+    public init(session: SessionId, project: ProjectId, provider: AgentProvider, state: AgentState, title: String? = nil) {
         self.session = session
         self.project = project
         self.provider = provider
         self.state = state
+        self.title = title
     }
 }
 
