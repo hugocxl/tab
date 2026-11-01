@@ -14,6 +14,14 @@ public enum RightPanelKind: String, CaseIterable, Sendable {
         }
     }
 
+    /// The shortcut that shows or hides the tab.
+    var shortcut: ShortcutId {
+        switch self {
+        case .files: return .toggleFiles
+        case .sourceControl: return .toggleSourceControl
+        }
+    }
+
     var sidePanel: SidePanel {
         switch self {
         case .files: return .files

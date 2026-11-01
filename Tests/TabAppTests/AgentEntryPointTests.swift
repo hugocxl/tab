@@ -97,8 +97,8 @@ final class AgentEntryPointTests: XCTestCase {
         let model = AppModel(dirs: try ModelFixtures.profile(), connectorFactory: { _, _ in nil })
         model.panes.register(.agent) { EntryTestController(title: $0.pane.title) }
         let menu = model.newPaneMenu()
-        XCTAssertEqual(menu.items.map(\.title), ["New Terminal", "New Agent Tab"])
-        let item = try XCTUnwrap(menu.items.last)
+        XCTAssertEqual(menu.items.map(\.title), ["New Terminal", "New Agent Tab", "New Browser"])
+        let item = try XCTUnwrap(menu.items.first { $0.title == "New Agent Tab" })
         XCTAssertNil(item.submenu, "An Agent Tab opens directly, without choosing a provider")
         for _ in 0..<2 {
             _ = (item.target as? NSObject)?.perform(try XCTUnwrap(item.action), with: item)

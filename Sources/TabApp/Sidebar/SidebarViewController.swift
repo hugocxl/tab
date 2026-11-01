@@ -5,7 +5,8 @@ import TabProtocol
 
 /// The project sidebar: the top row beside the window buttons, Home
 /// terminals and projects with their worktree cards, the update card, and
-/// the footer with the host filter, Add Project and New Browser.
+/// the footer with the host and name filter, Add Project and the Remote
+/// Servers host menu.
 /// A collapsed sidebar is hidden, as in Codesh; its toggle moves into the
 /// top-left pane. It rebuilds only when what it shows changed.
 @MainActor
@@ -19,19 +20,17 @@ final class SidebarViewController: NSViewController {
     private let topRow = FlippedView()
     private let toggle = ChromeButton(.panelLeft, label: "Toggle Sidebar")
     private let commandPalette = ChromeButton(.command, label: "Command Palette")
-    private let newTerminal = ChromeButton(.plus, label: "New Terminal")
+    private let newTerminal = ChromeButton(.plusCircle, label: "New")
     private let scroll = ScrollView()
     private let list = NSStackView()
     private let footer = FlippedView()
-    private let hostButton = ChromeButton(.filterCircle, label: "Filter by Host")
-    private let addButton = ChromeButton(.plus, label: "Add Project")
-    private let browserButton = ChromeButton(.globe, label: "New Browser")
-    private let filterField = SearchField(placeholder: "Filter")
+    private let filter = SidebarFilterView()
+    private let addButton = ChromeButton(.addProject, label: "Add Project")
+    private let serversButton = ChromeButton(.globeBadgePlus, label: "Remote Servers")
     private let resizeHandle = SidebarResizeHandle()
     private let updateCard = UpdateCardView()
     private var snapshot: SidebarSnapshot?
     private var subscription: AnyCancellable?
-    private var filterShown = false
 
     /// Where the window buttons end, from the window's left edge.
     var trafficLightsEnd: CGFloat = 78 {
@@ -75,23 +74,22 @@ final class SidebarViewController: NSViewController {
         root.addSubview(updateCard)
         root.addSubview(resizeHandle)
         for button in [toggle, commandPalette, newTerminal] { topRow.addSubview(button) }
-        for button in [hostButton, addButton, browserButton] { footer.addSubview(button) }
-        filterField.translatesAutoresizingMaskIntoConstraints = true
-        filterField.isHidden = true
-        footer.addSubview(filterField)
+        for view in [filter, addButton, serversButton] as [NSView] { footer.addSubview(view) }
 
+        toggle.shortcut = .toggleSidebar
+        commandPalette.shortcut = .toggleCommandPalette
+        addButton.shortcut = .addProject
         toggle.onPress = { [weak self] _ in self?.model.toggleSidebar() }
         commandPalette.onPress = { [weak self] _ in self?.actions?.openPalette(.root) }
         newTerminal.onPress = { [weak self] button in
             guard let self else { return }
             self.model.newPaneMenu().popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.height), in: button)
         }
-        hostButton.onPress = { [weak self] button in self?.model.remoteController.toggleHostMenu(relativeTo: button) }
-        hostButton.menuProvider = { [weak self] in self?.filterMenu() }
+        filter.hostMenu = { [weak self] in self?.hostMenu() }
+        filter.contextMenu = { [weak self] in self?.filterMenu() }
+        filter.onChange = { [weak self] text in self?.model.nameFilter = text }
         addButton.onPress = { [weak self] button in self?.actions?.addProject(anchor: button) }
-        browserButton.onPress = { [weak self] _ in self?.model.openBrowser() }
-        filterField.onChange = { [weak self] text in self?.model.nameFilter = text }
-        filterField.onSubmit = { [weak self] in self?.view.window?.makeFirstResponder(nil) }
+        serversButton.onPress = { [weak self] button in self?.model.remoteController.toggleHostMenu(relativeTo: button) }
         updateCard.onAction = { [weak self] action in self?.model.updater.handle(action) }
         updateCard.onDismiss = { [weak self] in self?.model.updater.dismissCard() }
         resizeHandle.onDrag = { [weak self] width in self?.onResize?(width) }
@@ -108,22 +106,18 @@ final class SidebarViewController: NSViewController {
 
     /// Clears the name filter, as Escape does in the sidebar.
     func clearFilter() {
-        filterShown = false
-        filterField.stringValue = ""
+        filter.text = ""
         model.nameFilter = ""
-        reload()
     }
 
     func showFilter() {
-        filterShown = true
-        reload()
-        view.window?.makeFirstResponder(filterField.field)
+        filter.focus()
     }
 
     // MARK: Building
 
     func reload() {
-        let next = SidebarSnapshot(model: model, filterShown: filterShown)
+        let next = SidebarSnapshot(model: model)
         updateChrome(next)
         guard next != snapshot else { return }
         snapshot = next
@@ -132,7 +126,7 @@ final class SidebarViewController: NSViewController {
 
     private func updateChrome(_ snapshot: SidebarSnapshot) {
         toggle.toolTip = isExpanded ? "Hide Sidebar" : "Show Sidebar"
-        filterField.isHidden = !(snapshot.filterShown || !model.nameFilter.isEmpty) || !isExpanded
+        if filter.text != model.nameFilter { filter.text = model.nameFilter }
         updateUpdateCard()
         root.needsLayout = true
     }
@@ -168,13 +162,10 @@ final class SidebarViewController: NSViewController {
                 if index > 0, let previous = list.arrangedSubviews.last {
                     list.setCustomSpacing(20, after: previous)
                 }
-                add(HostHeaderRow(title: host.title, remote: !host.server.isLocal))
+                add(HostHeaderRow(title: host.title, remote: !host.server.isLocal, match: snapshot.query))
             }
             buildHost(host, cardNumber: &cardNumber)
         }
-        let addRow = AddProjectRow()
-        addRow.onClick = { [weak self] view in self?.actions?.addProject(anchor: view) }
-        add(addRow)
     }
 
     private func buildHost(_ host: SidebarSnapshot.HostEntry, cardNumber: inout Int) {
@@ -235,7 +226,8 @@ final class SidebarViewController: NSViewController {
         guard let project = model.state.project(group.project) else { return NSView() }
         let header = ProjectHeaderRow(
             project: project, title: group.title, icon: model.projectIcon(project.id),
-            remoteName: model.serverName(project.serverId), canCreateWorktree: group.canCreateWorktree
+            remoteName: model.serverName(project.serverId), canCreateWorktree: group.canCreateWorktree,
+            match: model.nameFilter
         )
         header.onGear = { [weak self] anchor in
             self?.projectMenu(project.id, anchor: anchor)?.popUp(below: anchor)
@@ -372,16 +364,19 @@ final class SidebarViewController: NSViewController {
         return items
     }
 
-    /// The host button's right-click menu: which hosts and workspace the
-    /// sidebar lists, and the name filter.
-    private func filterMenu() -> NSMenu {
-        let menu = model.remoteController.hostFilterMenu(selected: model.appearance.sidebarHost) { [weak self] host in
+    /// The filter glyph's menu: which hosts the sidebar lists.
+    private func hostMenu() -> NSMenu {
+        model.remoteController.hostFilterMenu(selected: model.appearance.sidebarHost) { [weak self] host in
             self?.model.setSidebarHost(host)
             if case .server(let id) = host { self?.model.connectOnDemand(id) }
         }
+    }
+
+    /// The filter glyph's right-click menu: the hosts, then the workspace.
+    private func filterMenu() -> NSMenu {
+        let menu = hostMenu()
         menu.addItem(.separator())
-        menu.addItem(.submenu("Workspace", workspaceFilterItems(anchor: hostButton)))
-        menu.addItem(ClosureMenuItem("Filter by Name…") { [weak self] in self?.showFilter() })
+        menu.addItem(.submenu("Workspace", workspaceFilterItems(anchor: filter)))
         return menu
     }
 
@@ -419,20 +414,15 @@ final class SidebarViewController: NSViewController {
         let bounds = root.bounds
         let rowHeight = Metrics.headerHeight
         let side = ChromeButton.side
-        let step = side + ChromeButton.gap
         topRow.frame = CGRect(x: 0, y: Metrics.gutter, width: bounds.width, height: rowHeight)
         let mid = (rowHeight - side) / 2
         toggle.frame = CGRect(x: max(trafficLightsEnd, Metrics.gutter), y: mid, width: side, height: side)
-        newTerminal.frame = CGRect(x: bounds.width - step, y: mid, width: side, height: side)
-        commandPalette.frame = CGRect(x: newTerminal.frame.minX - step, y: mid, width: side, height: side)
+        CircleButton.layOut([commandPalette, newTerminal], trailingAt: bounds.width - ChromeButton.gap, y: mid)
         let footerHeight = Self.footerHeight
         footer.frame = CGRect(x: 0, y: bounds.height - footerHeight, width: bounds.width, height: footerHeight)
         let y = Metrics.gutter
-        hostButton.frame = CGRect(x: Metrics.gutter, y: y, width: side, height: side)
-        browserButton.frame = CGRect(x: bounds.width - side, y: y, width: side, height: side)
-        addButton.frame = CGRect(x: browserButton.frame.minX - ChromeButton.gap - side, y: y, width: side, height: side)
-        let filterX = hostButton.frame.maxX + ChromeButton.gap
-        filterField.frame = CGRect(x: filterX, y: y, width: max(addButton.frame.minX - ChromeButton.gap - filterX, 0), height: side)
+        CircleButton.layOut([addButton, serversButton], trailingAt: bounds.width - ChromeButton.gap, y: y)
+        filter.frame = CGRect(x: Metrics.gutter, y: y, width: max(addButton.frame.minX - ChromeButton.gap - Metrics.gutter, side), height: side)
         let inset = Metrics.radiusMedium
         let cardHeight = updateCard.isHidden ? 0 : updateCard.height(for: max(bounds.width - inset * 2, 0))
         updateCard.frame = CGRect(x: inset, y: footer.frame.minY - cardHeight, width: max(bounds.width - inset * 2, 0), height: cardHeight)

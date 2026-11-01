@@ -41,17 +41,16 @@ public final class RemoteServersController {
         popover = shown
     }
 
-    /// The sidebar's host filter menu: All hosts, This Mac, each server,
-    /// then Manage Remote Servers….
+    /// The sidebar's host filter menu: All hosts, then This Mac and each
+    /// server, each with its glyph.
     public func hostFilterMenu(selected: SidebarHost, choose: @escaping (SidebarHost) -> Void) -> NSMenu {
         var builder = MenuBuilder()
-        builder.add("All hosts", checked: selected == .all) { choose(.all) }
-        builder.add("This Mac", checked: selected == .local) { choose(.local) }
-        for server in model.listedIDs.compactMap(model.status(of:)) {
-            builder.add(server.entry.name, checked: selected == .server(server.id)) { choose(.server(server.id)) }
-        }
+        builder.add("All hosts", icon: .layers, checked: selected == .all) { choose(.all) }
         builder.section()
-        builder.add("Manage Remote Servers…") { [weak self] in self?.host?.showRemoteServersPane() }
+        builder.add("This Mac", icon: .laptop, checked: selected == .local) { choose(.local) }
+        for server in model.listedIDs.compactMap(model.status(of:)) {
+            builder.add(server.entry.name, icon: .globe, checked: selected == .server(server.id)) { choose(.server(server.id)) }
+        }
         return builder.menu
     }
 

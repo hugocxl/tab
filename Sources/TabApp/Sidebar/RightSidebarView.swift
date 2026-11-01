@@ -16,11 +16,10 @@ final class RightSidebarView: ThemedView {
         }
     }
 
-    /// The tab in front; its button is tinted over a filled background.
+    /// The tab in front; its button stays filled.
     var selected: RightPanelKind? {
         didSet {
             for (kind, button) in tabs { button.isOn = kind == selected }
-            needsLayout = true
         }
     }
 
@@ -30,17 +29,17 @@ final class RightSidebarView: ThemedView {
     var onResize: ((CGFloat?) -> Void)?
 
     private let tabs: [(RightPanelKind, ChromeButton)] = RightPanelKind.allCases.map { kind in
-        (kind, ChromeButton(kind.icon, label: kind.title))
+        let button = ChromeButton(kind.icon, label: kind.title)
+        button.shortcut = kind.shortcut
+        return (kind, button)
     }
     private let toggle = ChromeButton(.panelRight, label: "Hide Sidebar")
-    private let selection = TabSelectionView()
     private let card = RightSidebarCard()
     private let handle = PanelResizeHandle()
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         addSubview(card)
-        addSubview(selection)
         for (kind, button) in tabs {
             button.onPress = { [weak self] _ in self?.onSelect?(kind) }
             addSubview(button)
@@ -77,36 +76,11 @@ final class RightSidebarView: ThemedView {
         let side = ChromeButton.side
         let cardWidth = max(bounds.width - gutter, 0)
         let mid = gutter + ((Metrics.headerHeight - side) / 2).rounded()
-        var x: CGFloat = 0
-        for (_, button) in tabs {
-            button.frame = CGRect(x: x, y: mid, width: side, height: side)
-            x += side + ChromeButton.gap
-        }
-        let active = tabs.first { $0.0 == selected }?.1
-        selection.isHidden = active == nil
-        selection.frame = active?.frame ?? .zero
+        CircleButton.layOut(tabs.map(\.1), leadingAt: 0, y: mid)
         toggle.frame = CGRect(x: cardWidth - side, y: mid, width: side, height: side)
         let top = gutter + Metrics.headerHeight
         card.frame = CGRect(x: 0, y: top, width: cardWidth, height: max(bounds.height - top - gutter, 0))
         handle.frame = CGRect(x: 0, y: 0, width: 5, height: bounds.height)
-    }
-}
-
-/// The fill behind the selected tab's button.
-private final class TabSelectionView: ThemedView {
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        wantsLayer = true
-        layer?.cornerRadius = Metrics.radiusMedium
-        layer?.cornerCurve = .continuous
-    }
-
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    override var wantsUpdateLayer: Bool { true }
-
-    override func updateLayer() {
-        layer?.backgroundColor = theme.selection.cgColor
     }
 }
 

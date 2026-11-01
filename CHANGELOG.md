@@ -3,6 +3,29 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.23.0 - 2026-11-01
+
+### Added
+
+- Sidebar and pane header buttons show a glass tooltip with the action's
+  shortcut.
+- The sidebar filter opens from its icon into a Filter field, and its menu
+  picks All hosts, This Mac or a remote server.
+- Typing a host's name in the sidebar filter keeps everything on that host,
+  and the matching text is highlighted in the headings.
+
+### Changed
+
+- Sidebar buttons are full circles, and pane header buttons smaller circles;
+  the collapsed sidebar toggles match the pane header buttons.
+- The + button in the sidebar is a circled plus and its menu also opens a new
+  browser, replacing the globe button.
+- Add Project moves to a button in the sidebar footer, replacing the row at the
+  end of the list.
+- Remote server management opens from its own globe button in the sidebar
+  footer.
+- Buttons side by side in the sidebars keep the same space between their icons.
+
 ## 0.22.1 - 2026-11-01
 
 ### Changed

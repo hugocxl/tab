@@ -26,16 +26,17 @@ struct SidebarSnapshot: Equatable {
     }
 
     var expanded: Bool
-    var filterShown: Bool
     var hints: ChordModifiers?
+    /// The name filter, which the headers mark where it matched.
+    var query: String
     var showsHostHeaders: Bool
     var hosts: [HostEntry]
 
     @MainActor
-    init(model: AppModel, filterShown: Bool) {
+    init(model: AppModel) {
         expanded = model.appearance.sidebarExpanded
-        self.filterShown = filterShown
         hints = model.shortcutHints
+        query = model.nameFilter
         let listing = model.sidebarListing
         showsHostHeaders = model.knownServers.count > 1
         hosts = listing.hosts.map { host in

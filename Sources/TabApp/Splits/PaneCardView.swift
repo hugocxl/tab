@@ -16,9 +16,9 @@ final class PaneCardView: HoverView {
     private let suffixLabel = makeLabel("", font: AppFont.header)
     private let progressGlyph = ActivityGlyph()
     private let leading = NSView()
-    private var actionButtons: [IconButton] = []
-    private var extraButtons: [IconButton] = []
-    private let zoomButton: IconButton
+    private var actionButtons: [HeaderButton] = []
+    private var extraButtons: [HeaderButton] = []
+    private let zoomButton: HeaderButton
     private let body = FlippedView()
 
     var isActive = false {
@@ -58,7 +58,7 @@ final class PaneCardView: HoverView {
     init(pane: PaneId, model: AppModel) {
         self.pane = pane
         self.model = model
-        zoomButton = IconButton(.maximize, label: "Zoom Pane", side: 22)
+        zoomButton = HeaderButton(.maximize, label: "Zoom Pane")
         super.init(frame: .zero)
         wantsLayer = true
         layer?.cornerRadius = Metrics.cardRadius
@@ -77,16 +77,20 @@ final class PaneCardView: HoverView {
         addSubview(header)
         for view in [glyph, titleLabel, suffixLabel, progressGlyph] as [NSView] { header.addSubview(view) }
 
-        let split = IconButton(.columns, label: "Split Right", side: 22) { [weak self] in self?.run { $0.split(.right) } }
-        let down = IconButton(.rows, label: "Split Down", side: 22) { [weak self] in self?.run { $0.split(.down) } }
+        let split = HeaderButton(.columns, label: "Split Right") { [weak self] in self?.run { $0.split(.right) } }
+        let down = HeaderButton(.rows, label: "Split Down") { [weak self] in self?.run { $0.split(.down) } }
         zoomButton.onPress = { [weak self] in
             guard let self else { return }
             self.model?.toggleZoom(self.pane)
         }
-        let close = IconButton(.close, label: "Close Pane", side: 22) { [weak self] in
+        let close = HeaderButton(.close, label: "Close Pane") { [weak self] in
             guard let self else { return }
             self.model?.closePane(self.pane)
         }
+        split.shortcut = .splitRight
+        down.shortcut = .splitDown
+        zoomButton.shortcut = .toggleZoomPane
+        close.shortcut = .closePane
         actionButtons = [split, down, zoomButton, close]
         for button in actionButtons {
             button.translatesAutoresizingMaskIntoConstraints = true
@@ -157,7 +161,7 @@ final class PaneCardView: HoverView {
         if actions.map(\.id) != extraButtons.map(\.identifier?.rawValue) || zip(actions, extraButtons).contains(where: { $0.isActive != $1.isActive }) {
             extraButtons.forEach { $0.removeFromSuperview() }
             extraButtons = actions.map { action in
-                let button = IconButton(action.icon, label: action.label, side: 22) { action.perform() }
+                let button = HeaderButton(action.icon, label: action.label) { action.perform() }
                 button.identifier = NSUserInterfaceItemIdentifier(action.id)
                 button.isActive = action.isActive
                 button.translatesAutoresizingMaskIntoConstraints = true
@@ -227,8 +231,9 @@ final class PaneCardView: HoverView {
             right -= Metrics.controlGap
         }
         for button in (extraButtons + actionButtons).reversed() {
-            right -= 22
-            button.frame = CGRect(x: right, y: (height - 22) / 2, width: 22, height: 22)
+            let side = HeaderButton.side
+            right -= side
+            button.frame = CGRect(x: right, y: (height - side) / 2, width: side, height: side)
             right -= 4
         }
         if progressGlyph.style != .none {

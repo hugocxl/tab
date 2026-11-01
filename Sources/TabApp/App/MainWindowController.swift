@@ -36,6 +36,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, A
         workspace = WorkspaceView(model: model, sidebar: sidebar)
         actions = Actions(model: model)
         keys = KeyDispatcher(model: model, actions: actions)
+        GlassTooltip.chord = { [weak model] id in model?.settings.keymap.chord(id) }
         settingsHost = SettingsHostImpl(model: model)
         let window = MainWindow(contentRect: Self.initialFrame(model), styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                                 backing: .buffered, defer: false)

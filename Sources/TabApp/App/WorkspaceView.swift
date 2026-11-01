@@ -19,7 +19,7 @@ final class WorkspaceView: ThemedView {
     private var subscription: AnyCancellable?
     private var lastPanelLayout: (RightPanelKind?, CGFloat)?
     private let sidebarToggle = SidebarToggleSlot()
-    private let rightSidebarToggle = ChromeButton(.panelRight, label: "Show Sidebar")
+    private let rightSidebarToggle = HeaderButton(.panelRight, label: "Show Sidebar")
 
     init(model: AppModel, sidebar: SidebarViewController) {
         self.model = model
@@ -48,8 +48,9 @@ final class WorkspaceView: ThemedView {
         }
         rightSidebar.onSelect = { [weak model] kind in model?.selectRightPanel(kind) }
         rightSidebar.onToggle = { [weak model] in model?.toggleRightSidebar() }
-        sidebarToggle.button.onPress = { [weak model] _ in model?.toggleSidebar() }
-        rightSidebarToggle.onPress = { [weak model] _ in model?.toggleRightSidebar() }
+        sidebarToggle.button.shortcut = .toggleSidebar
+        sidebarToggle.button.onPress = { [weak model] in model?.toggleSidebar() }
+        rightSidebarToggle.onPress = { [weak model] in model?.toggleRightSidebar() }
         subscription = model.changes.sink { [weak self] changes in self?.modelChanged(changes) }
         splits.reload()
         syncPanel()
@@ -162,9 +163,9 @@ final class WorkspaceView: ThemedView {
 }
 
 /// The sidebar toggle as the top-left card shows it while the sidebar is
-/// collapsed: past the window buttons, then the 28pt chrome button.
+/// collapsed: past the window buttons, then a pane header button.
 final class SidebarToggleSlot: NSView {
-    let button = ChromeButton(.panelLeft, label: "Show Sidebar")
+    let button = HeaderButton(.panelLeft, label: "Show Sidebar")
     var reserve: CGFloat = 0 {
         didSet {
             guard reserve != oldValue else { return }
@@ -182,11 +183,11 @@ final class SidebarToggleSlot: NSView {
 
     override var isFlipped: Bool { true }
     override var mouseDownCanMoveWindow: Bool { false }
-    override var intrinsicContentSize: NSSize { NSSize(width: reserve + ChromeButton.side, height: ChromeButton.side) }
+    override var intrinsicContentSize: NSSize { NSSize(width: reserve + HeaderButton.side, height: HeaderButton.side) }
 
     override func layout() {
         super.layout()
-        button.frame = NSRect(x: reserve, y: 0, width: ChromeButton.side, height: ChromeButton.side)
+        button.frame = NSRect(x: reserve, y: 0, width: HeaderButton.side, height: HeaderButton.side)
     }
 }
 

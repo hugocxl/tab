@@ -15,6 +15,13 @@ struct MenuBuilder {
         addItem(ClosureMenuItem(title, checked: checked, enabled: enabled, handler: handler))
     }
 
+    @MainActor
+    mutating func add(_ title: String, icon: AppIcon, checked: Bool = false, _ handler: @escaping () -> Void) {
+        let item = ClosureMenuItem(title, checked: checked, handler: handler)
+        item.image = icon.image()
+        addItem(item)
+    }
+
     mutating func submenu(_ title: String, _ items: NSMenu) {
         let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
         item.submenu = items

@@ -79,7 +79,7 @@ public struct SidebarListingBuilder {
     public func build() -> SidebarListing {
         let needle = query.trimmingCharacters(in: .whitespaces).lowercased()
         let terminals = standaloneTerminals().filter { project, tab in
-            needle.isEmpty || matches(terminalTitle(project, tab), needle)
+            needle.isEmpty || hostMatches(project.serverId, needle) || matches(terminalTitle(project, tab), needle)
         }.map { (project: $0.0.id, tab: $0.1.id) }
         var groups: [SidebarListing.Group] = []
         for parent in listedParents() {
@@ -88,7 +88,7 @@ public struct SidebarListingBuilder {
                 cards.append(SidebarListing.Card(project: parent.id, primary: repositories.contains(parent.id)))
                 cards += children(of: parent.id).map { SidebarListing.Card(project: $0.id, primary: false) }
             }
-            if !needle.isEmpty {
+            if !needle.isEmpty, !hostMatches(parent.serverId, needle) {
                 let parentMatches = matches(title(parent), needle)
                 if !parentMatches {
                     cards = cards.filter { card in
@@ -119,6 +119,17 @@ public struct SidebarListingBuilder {
             return server.name
         }
         return project.name
+    }
+
+    /// The heading a host goes by in the sidebar.
+    public func hostTitle(_ server: ServerId) -> String {
+        if server.isLocal { return "This Mac" }
+        return servers.first(where: { $0.id == server })?.name ?? "Remote"
+    }
+
+    /// Whether the filter names the host: then it keeps all the host's rows.
+    private func hostMatches(_ server: ServerId, _ needle: String) -> Bool {
+        matches(hostTitle(server), needle)
     }
 
     private func matches(_ text: String, _ needle: String) -> Bool {

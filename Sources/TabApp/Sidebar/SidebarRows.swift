@@ -2,62 +2,31 @@ import AppKit
 import TabCore
 import TabProtocol
 
-/// A native borderless glyph button for chrome rows: a 28pt box that shows
-/// the system hover bezel, kept while its panel is open (`isOn`).
-final class ChromeButton: NSButton {
-    var icon: AppIcon { didSet { updateImage() } }
+/// A glyph button for the sidebars' chrome rows: a 30pt circle that fills
+/// while hovered, and stays filled while its panel is open (`isOn`).
+final class ChromeButton: CircleButton {
     var onPress: ((ChromeButton) -> Void)?
     var menuProvider: (() -> NSMenu?)?
-    var isOn = false { didSet { if isOn != oldValue { updateBezel() } } }
-    let side: CGFloat
-    let glyphSize: CGFloat
-    private let palette = PaletteObserver()
+    var isOn = false { didSet { if isOn != oldValue { updateAppearance() } } }
 
-    init(_ icon: AppIcon, label: String, side: CGFloat = ChromeButton.side, glyph: CGFloat = Metrics.glyph, action: ((ChromeButton) -> Void)? = nil) {
-        self.icon = icon
-        self.side = side
-        glyphSize = glyph
+    init(_ icon: AppIcon, label: String, side: CGFloat = ChromeButton.side, glyph: CGFloat = ChromeButton.glyph, action: ((ChromeButton) -> Void)? = nil) {
         onPress = action
-        super.init(frame: NSRect(x: 0, y: 0, width: side, height: side))
-        bezelStyle = .accessoryBarAction
-        refusesFirstResponder = true
-        imagePosition = .imageOnly
-        imageScaling = .scaleNone
-        title = ""
-        toolTip = label
-        setAccessibilityLabel(label)
-        target = self
-        self.action = #selector(pressed)
-        updateImage()
+        super.init(icon: icon, label: label, side: side, glyph: glyph)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    /// The sidebar chrome's button box.
-    static let side: CGFloat = 28
-    /// The space after each chrome button.
+    /// The sidebar chrome's button circle.
+    static let side: CGFloat = 30
+    /// The sidebar chrome's glyph.
+    static let glyph: CGFloat = 17
+    /// The space between buttons side by side anywhere in the sidebars.
     static let gap: CGFloat = 4
 
-    override var intrinsicContentSize: NSSize { NSSize(width: side, height: side) }
+    override var isFilled: Bool { isOn }
     override var mouseDownCanMoveWindow: Bool { false }
 
-    private func updateImage() {
-        updateBezel()
-    }
-
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        palette.observe(self) { [weak self] in self?.updateBezel() }
-    }
-
-    /// The glyph is pre-tinted in the theme's colors: AppKit would wash out
-    /// a template image in an inactive window, unlike the theme's chrome.
-    private func updateBezel() {
-        showsBorderOnlyWhileMouseInside = !isOn
-        image = icon.image(size: glyphSize)?.tinted(isOn ? AppTheme.shared.fg : AppTheme.shared.fgMuted)
-    }
-
-    @objc private func pressed() {
+    override func pressed() {
         onPress?(self)
     }
 
@@ -365,8 +334,10 @@ final class PrimaryBadge: ThemedView {
 final class HostHeaderRow: ThemedView {
     private let iconView: NSImageView
     private let titleLabel: NSTextField
+    private let match: String
 
-    init(title: String, remote: Bool) {
+    init(title: String, remote: Bool, match: String = "") {
+        self.match = match
         iconView = NSImageView(image: (remote ? AppIcon.globe.image(size: 18) : NSImage(
             systemSymbolName: "laptopcomputer", accessibilityDescription: nil
         )) ?? NSImage())
@@ -385,7 +356,7 @@ final class HostHeaderRow: ThemedView {
 
     override func themeDidChange() {
         iconView.contentTintColor = theme.fgMuted
-        titleLabel.textColor = theme.fgMuted
+        titleLabel.showMatch(match, color: theme.fgMuted, accent: theme.accent)
     }
 
     override func layout() {
@@ -412,11 +383,13 @@ final class ProjectHeaderRow: HoverView {
     private let gear = ChromeButton(.settings, label: "Project Settings", side: 20, glyph: 12)
     private let plus: ChromeButton?
     private let missing: Bool
+    private let match: String
 
     static let height: CGFloat = 28
 
-    init(project: Project, title: String, icon: NSImage?, remoteName: String?, canCreateWorktree: Bool) {
+    init(project: Project, title: String, icon: NSImage?, remoteName: String?, canCreateWorktree: Bool, match: String = "") {
         self.project = project.id
+        self.match = match
         missing = project.status == .missing
         titleLabel = makeLabel(title, font: AppFont.system(12, weight: .semibold))
         if !project.serverId.isLocal {
@@ -427,6 +400,7 @@ final class ProjectHeaderRow: HoverView {
             remote = nil
         }
         plus = canCreateWorktree ? ChromeButton(.plus, label: "New Worktree", side: 20, glyph: 12) : nil
+        plus?.shortcut = .newWorktree
         super.init(frame: .zero)
         if let remoteName { toolTip = "\(remoteName) · \(project.directory.rawValue)" }
         iconView.image = icon
@@ -448,7 +422,7 @@ final class ProjectHeaderRow: HoverView {
     override var mouseDownCanMoveWindow: Bool { false }
 
     override func themeDidChange() {
-        titleLabel.textColor = theme.fgMuted
+        titleLabel.showMatch(match, color: theme.fgMuted, accent: theme.accent)
         remote?.contentTintColor = theme.fgMuted
     }
 
@@ -468,6 +442,7 @@ final class ProjectHeaderRow: HoverView {
         if let plus {
             right -= 20
             plus.frame = CGRect(x: right, y: middle - 10, width: 20, height: 20)
+            right -= ChromeButton.gap
         }
         right -= 20
         gear.frame = CGRect(x: right, y: middle - 10, width: 20, height: 20)
@@ -519,55 +494,18 @@ final class CreatingRow: ThemedView {
     }
 }
 
-/// The Add Project row at the end of the list.
-final class AddProjectRow: HoverView {
-    var onClick: ((NSView) -> Void)?
-    private let label = makeLabel("Add Project", font: AppFont.system(12, weight: .medium))
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        label.translatesAutoresizingMaskIntoConstraints = true
-        addSubview(label)
-        setAccessibilityElement(true)
-        setAccessibilityRole(.button)
-        setAccessibilityLabel("Add Project")
-    }
-
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    override var intrinsicContentSize: NSSize { NSSize(width: NSView.noIntrinsicMetric, height: 28) }
-    override var mouseDownCanMoveWindow: Bool { false }
-
-    override func themeDidChange() {
-        label.textColor = theme.fgMuted
-        needsDisplay = true
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        if isHovered {
-            theme.hover.setFill()
-            NSBezierPath(roundedRect: bounds, xRadius: Metrics.radiusLarge, yRadius: Metrics.radiusLarge).fill()
+extension NSTextField {
+    /// Shows the label in `color` with each case-insensitive occurrence of
+    /// `match` in `accent`, as the sidebar marks what its filter matched.
+    func showMatch(_ match: String, color: NSColor, accent: NSColor) {
+        let text = stringValue
+        let string = NSMutableAttributedString(string: text, attributes: [.foregroundColor: color, .font: font ?? AppFont.body])
+        let needle = match.trimmingCharacters(in: .whitespaces)
+        var searchRange = text.startIndex..<text.endIndex
+        while !needle.isEmpty, let found = text.range(of: needle, options: .caseInsensitive, range: searchRange) {
+            string.addAttribute(.foregroundColor, value: accent, range: NSRange(found, in: text))
+            searchRange = found.upperBound..<text.endIndex
         }
-        if let image = AppIcon.plus.image(size: 15) {
-            let rect = NSRect(x: 10, y: ((bounds.height - image.size.height) / 2).rounded(), width: image.size.width, height: image.size.height)
-            image.tinted(theme.fgMuted).draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
-        }
-    }
-
-    override func layout() {
-        super.layout()
-        let height = label.intrinsicContentSize.height
-        label.frame = CGRect(x: 34, y: ((bounds.height - height) / 2).rounded(), width: max(bounds.width - 40, 0), height: height)
-    }
-
-    override func mouseDown(with event: NSEvent) {}
-
-    override func mouseUp(with event: NSEvent) {
-        if bounds.contains(convert(event.locationInWindow, from: nil)) { onClick?(self) }
-    }
-
-    override func accessibilityPerformPress() -> Bool {
-        onClick?(self)
-        return true
+        attributedStringValue = string
     }
 }

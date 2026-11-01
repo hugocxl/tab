@@ -12,6 +12,7 @@ public enum AppIcon: String, CaseIterable, Sendable {
     case filter, filterCircle, history, arrowDownCircle, arrowUpCircle, chevronsUpDown
     case circle, circleCheck, clock, file, gitMerge, gitPullRequest, octagonX, copy, pause, pencil
     case play, quote, stop, triangleAlert, phone, trash, minus, qrcode, arrowDown
+    case plusCircle, filterCircleFill, addProject, layers, laptop, globeBadgePlus, clearField
 
     /// The SF Symbol drawn for the icon.
     public var symbolName: String? {
@@ -79,6 +80,13 @@ public enum AppIcon: String, CaseIterable, Sendable {
         case .minus: return "minus"
         case .qrcode: return "qrcode"
         case .arrowDown: return "arrow.down"
+        case .plusCircle: return "plus.circle"
+        case .filterCircleFill: return "line.3.horizontal.decrease.circle.fill"
+        case .addProject: return "rectangle.stack.badge.plus"
+        case .layers: return "square.3.layers.3d"
+        case .laptop: return "laptopcomputer"
+        case .globeBadgePlus: return nil
+        case .clearField: return "xmark.circle.fill"
         }
     }
 
@@ -143,7 +151,8 @@ public enum AppIcon: String, CaseIterable, Sendable {
         case .quote: return "text-quote"
         case .stop: return "square"
         case .triangleAlert: return "triangle-alert"
-        case .command, .phone, .trash, .minus, .qrcode, .arrowDown: return nil
+        case .command, .phone, .trash, .minus, .qrcode, .arrowDown, .plusCircle, .filterCircleFill, .addProject, .layers,
+             .laptop, .globeBadgePlus, .clearField: return nil
         }
     }
 
@@ -153,7 +162,10 @@ public enum AppIcon: String, CaseIterable, Sendable {
         let key = "\(rawValue)-\(size)-\(weight.rawValue)"
         if let cached = IconCache.images[key] { return cached }
         var image: NSImage?
-        if let symbolName, let symbol = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil) {
+        if self == .globeBadgePlus {
+            image = Self.badged(AppIcon.globe.symbolImage(size: size, weight: weight))
+        }
+        if image == nil, let symbolName, let symbol = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil) {
             let configuration = NSImage.SymbolConfiguration(pointSize: size * 0.8, weight: weight, scale: .medium)
             image = symbol.withSymbolConfiguration(configuration)
         }
@@ -165,11 +177,76 @@ public enum AppIcon: String, CaseIterable, Sendable {
         IconCache.images[key] = image
         return image
     }
+
+    private func symbolImage(size: CGFloat, weight: NSFont.Weight) -> NSImage? {
+        guard let symbolName, let symbol = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil) else { return nil }
+        return symbol.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: size * 0.8, weight: weight, scale: .medium))
+    }
+
+    /// `base` with a filled plus badge sticking out at its bottom left and
+    /// cut out of the glyph, like the system's `.badge.plus` symbols, so the
+    /// glyph keeps its full size.
+    private static func badged(_ base: NSImage?) -> NSImage? {
+        guard let base else { return nil }
+        let glyph = base.size
+        let diameter = (glyph.height * 0.5).rounded()
+        let overhang = (diameter * 0.4).rounded()
+        let gap: CGFloat = 1.5
+        let badge = NSImage(systemSymbolName: "plus.circle.fill", accessibilityDescription: nil)?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: diameter * 0.85, weight: .semibold))
+        let size = NSSize(width: glyph.width + overhang, height: glyph.height + overhang)
+        return NSImage(size: size, flipped: false) { _ in
+            base.draw(in: NSRect(x: overhang, y: overhang, width: glyph.width, height: glyph.height))
+            let badgeRect = NSRect(x: 0, y: 0, width: diameter, height: diameter)
+            NSGraphicsContext.current?.compositingOperation = .destinationOut
+            NSBezierPath(ovalIn: badgeRect.insetBy(dx: -gap, dy: -gap)).fill()
+            NSGraphicsContext.current?.compositingOperation = .sourceOver
+            badge?.draw(in: badgeRect)
+            return true
+        }
+    }
 }
 
 @MainActor
 private enum IconCache {
     static var images: [String: NSImage] = [:]
+    static var ink: [ObjectIdentifier: NSRect] = [:]
+}
+
+extension NSImage {
+    /// The part of the image that is drawn, in its own points: glyphs leave
+    /// uneven margins, which matters when spacing them by what is visible.
+    @MainActor
+    var inkBounds: NSRect {
+        if let cached = IconCache.ink[ObjectIdentifier(self)] { return cached }
+        let scale = 4
+        let width = Int(ceil(size.width)) * scale, height = Int(ceil(size.height)) * scale
+        var bounds = NSRect(origin: .zero, size: size)
+        if width > 0, height > 0, let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height, bitsPerSample: 8, samplesPerPixel: 4,
+            hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: width * 4, bitsPerPixel: 32
+        ), let data = rep.bitmapData {
+            rep.size = NSSize(width: ceil(size.width), height: ceil(size.height))
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+            draw(in: NSRect(origin: .zero, size: size))
+            NSGraphicsContext.restoreGraphicsState()
+            var minX = width, maxX = -1, minY = height, maxY = -1
+            for y in 0..<height {
+                for x in 0..<width where data[(y * width + x) * 4 + 3] > 76 {
+                    minX = min(minX, x); maxX = max(maxX, x); minY = min(minY, y); maxY = max(maxY, y)
+                }
+            }
+            if maxX >= 0 {
+                let unit = 1 / CGFloat(scale)
+                // Bitmap rows run top down; the image's points run bottom up.
+                bounds = NSRect(x: CGFloat(minX) * unit, y: size.height - CGFloat(maxY + 1) * unit,
+                                width: CGFloat(maxX + 1 - minX) * unit, height: CGFloat(maxY + 1 - minY) * unit)
+            }
+        }
+        IconCache.ink[ObjectIdentifier(self)] = bounds
+        return bounds
+    }
 }
 
 /// Images shipped in `Resources/Icons`.

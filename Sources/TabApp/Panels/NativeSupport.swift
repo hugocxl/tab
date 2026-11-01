@@ -208,7 +208,7 @@ final class NativePanelHeader: ThemedView {
         iconView.translatesAutoresizingMaskIntoConstraints = false
         titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         trailing.orientation = .horizontal
-        trailing.spacing = 2
+        trailing.spacing = ChromeButton.gap
         trailing.translatesAutoresizingMaskIntoConstraints = false
         addSubview(iconView)
         addSubview(titleLabel)

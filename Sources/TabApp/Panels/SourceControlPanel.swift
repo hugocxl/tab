@@ -626,7 +626,7 @@ final class ChangeFileCell: HoverView {
         unstageButton.onPress = { [weak self] in self?.onUnstage?() }
         discardButton.onPress = { [weak self] in self?.onDiscard?() }
         actions.orientation = .horizontal
-        actions.spacing = 0
+        actions.spacing = ChromeButton.gap
         actions.addArrangedSubview(stageButton)
         actions.addArrangedSubview(unstageButton)
         actions.addArrangedSubview(discardButton)

@@ -119,7 +119,7 @@ final class SidebarListingTests: XCTestCase {
     func testHostGroupsKeepTerminalsProjectsAndShortcutsTogether() async throws {
         let local = try XCTUnwrap(model.addProject(try ModelFixtures.folder("local")))
         model.newHomeTerminal()
-        XCTAssertFalse(SidebarSnapshot(model: model, filterShown: false).showsHostHeaders)
+        XCTAssertFalse(SidebarSnapshot(model: model).showsHostHeaders)
 
         let first = ServerEntry(name: "Build Mac", ssh: "build")
         let second = ServerEntry(name: "Dev Mac", ssh: "dev")
@@ -147,10 +147,15 @@ final class SidebarListingTests: XCTestCase {
         XCTAssertLessThan(try XCTUnwrap(listing.targets.firstIndex(of: .project(local))),
                           try XCTUnwrap(listing.targets.firstIndex(of: .tab(remoteTabs[1]))))
 
-        let snapshot = SidebarSnapshot(model: model, filterShown: false)
+        let snapshot = SidebarSnapshot(model: model)
         XCTAssertTrue(snapshot.showsHostHeaders)
         XCTAssertEqual(snapshot.hosts.map(\.title), ["This Mac", "Build Mac", "Dev Mac"])
         model.nameFilter = "local"
         XCTAssertEqual(model.sidebarListing.hosts.map(\.server), [.local], "empty host groups are omitted")
+        model.nameFilter = "dev"
+        let named = model.sidebarListing.hosts
+        XCTAssertEqual(named.map(\.server), [second.id], "a filter naming a host keeps all of its rows")
+        XCTAssertEqual(named.first?.groups.last?.project, remoteProjects[0])
+        XCTAssertEqual(named.first?.terminals.map(\.tab), [remoteTabs[0]])
     }
 }

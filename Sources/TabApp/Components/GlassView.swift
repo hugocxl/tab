@@ -24,6 +24,8 @@ public final class GlassView: NSView {
 
         /// The selected sidebar card: a faint clear glass over the card fill.
         public static let card = Style(cornerRadius: 8, opacity: 0.4)
+        /// The chrome's tooltip capsule.
+        public static let tooltip = Style(cornerRadius: 10, fallbackMaterial: .toolTip)
     }
 
     private let material: NSView
