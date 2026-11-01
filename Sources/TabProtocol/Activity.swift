@@ -78,13 +78,19 @@ public struct AgentActivity: Hashable, Codable, Sendable {
     public var provider: AgentProvider
     public var title: String?
     public var state: AgentState
+    /// Unix milliseconds when the agent started its current turn: set when it
+    /// starts working and kept while it works or waits for you. Older servers
+    /// leave it out.
+    public var workingSince: UInt64?
 
-    public init(session: SessionId, project: ProjectId, provider: AgentProvider, state: AgentState, title: String? = nil) {
+    public init(session: SessionId, project: ProjectId, provider: AgentProvider, state: AgentState, title: String? = nil,
+                workingSince: UInt64? = nil) {
         self.session = session
         self.project = project
         self.provider = provider
         self.state = state
         self.title = title
+        self.workingSince = workingSince
     }
 }
 

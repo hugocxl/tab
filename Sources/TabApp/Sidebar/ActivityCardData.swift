@@ -37,6 +37,8 @@ struct ActivityCardData: Equatable {
     var primary: Bool
     var pullRequest: UInt64?
     var status: Status
+    /// When the longest-running working agent started its turn.
+    var workingSince: Date?
     var selected: Bool
     var unavailable: Bool
 
@@ -84,9 +86,11 @@ struct ActivityCardData: Equatable {
         } else {
             selected = model.currentProject.id == project.id
         }
+        let status = status(tabs: tabs, server: project.serverId, model: model)
         return ActivityCardData(
             headline: headline, name: name, branch: branch, primary: primary, pullRequest: info?.pullRequest,
-            status: status(tabs: tabs, server: project.serverId, model: model), selected: selected,
+            status: status, workingSince: status == .working ? workingSince(tabs: tabs, server: project.serverId, model: model) : nil,
+            selected: selected,
             unavailable: project.status == .missing || model.worktreeRemovals.contains(project.id)
         )
     }
@@ -109,6 +113,32 @@ struct ActivityCardData: Equatable {
         if connection.activity.events.contains(where: { !$0.read && sessions.contains($0.session) }) { return .attention }
         if agents.contains(where: { $0.state == .working }) { return .working }
         return .idle
+    }
+
+    @MainActor
+    private static func workingSince(tabs: [Tab], server: ServerId, model: AppModel) -> Date? {
+        let sessions = tabs.flatMap(\.panes).compactMap(\.content.activitySession)
+        guard let agents = model.connections[server]?.activity.agents else { return nil }
+        let since = agents.filter { $0.state == .working && sessions.contains($0.session) }.compactMap(\.workingSince).min()
+        return since.map { Date(timeIntervalSince1970: TimeInterval($0) / 1000) }
+    }
+
+    /// How long a turn has run: `43s` under a minute, `3m` under an hour,
+    /// then `1h 3m`.
+    static func elapsedText(_ seconds: TimeInterval) -> String {
+        let total = Int(max(seconds, 0))
+        if total < 60 { return "\(total)s" }
+        let minutes = total / 60
+        if minutes < 60 { return "\(minutes)m" }
+        return "\(minutes / 60)h \(minutes % 60)m"
+    }
+
+    /// Seconds until `elapsedText` changes: the next second under a minute,
+    /// the next minute after.
+    static func secondsUntilElapsedChanges(_ seconds: TimeInterval) -> TimeInterval {
+        let seconds = max(seconds, 0)
+        let step: TimeInterval = seconds < 60 ? 1 : 60
+        return step - seconds.truncatingRemainder(dividingBy: step)
     }
 
     static func basename(_ path: String) -> String {

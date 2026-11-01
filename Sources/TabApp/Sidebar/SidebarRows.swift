@@ -103,6 +103,8 @@ final class SidebarCardView: HoverView {
     private let primaryBadge = PrimaryBadge()
     private let prLabel = makeLabel("", font: AppFont.footnote)
     private let dot = ActivityGlyph()
+    private let elapsedLabel = makeLabel("", font: .monospacedDigitSystemFont(ofSize: 11, weight: .regular))
+    private var elapsedTimer: Timer?
     private let glass = GlassView(style: .card)
 
     /// 1pt border, 6pt padding, the 18pt headline, a 3pt gap and the 13pt
@@ -154,7 +156,7 @@ final class SidebarCardView: HoverView {
         nameLabel.stringValue = data.name
         branchLabel.stringValue = data.branch ?? ""
         prLabel.stringValue = data.pullRequest.map { "#\($0)" } ?? ""
-        for view in [lead, headline, nameLabel, branchLabel, primaryBadge, prLabel, dot] as [NSView] {
+        for view in [lead, headline, nameLabel, branchLabel, primaryBadge, prLabel, elapsedLabel, dot] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = true
             addSubview(view)
         }
@@ -162,6 +164,8 @@ final class SidebarCardView: HoverView {
         primaryBadge.isHidden = !data.primary
         branchLabel.isHidden = data.branch == nil
         prLabel.isHidden = data.pullRequest == nil
+        elapsedLabel.isHidden = data.workingSince == nil
+        dot.isHidden = data.status == .idle
         alphaValue = data.unavailable ? 0.5 : 1
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
@@ -194,14 +198,40 @@ final class SidebarCardView: HoverView {
         nameLabel.textColor = theme.fgMuted
         branchLabel.textColor = theme.fgDim
         prLabel.textColor = theme.accent
+        elapsedLabel.textColor = theme.fgDim
         switch data.status {
         case .attention: dot.style = .dot(theme.accent, diameter: 8)
         case .error: dot.style = .dot(theme.danger, diameter: 8)
         case .paused: dot.style = .dot(theme.warning, diameter: 8)
         case .working: dot.style = .dots(theme.accent)
-        case .idle: dot.style = .dot(theme.fgDim, diameter: 8)
+        case .idle: dot.style = .none
         }
         needsDisplay = true
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        updateElapsed()
+    }
+
+    /// Shows the turn's running time and schedules one timer for the moment
+    /// the text next changes, only while the card is on screen.
+    private func updateElapsed() {
+        elapsedTimer?.invalidate()
+        elapsedTimer = nil
+        guard let since = data.workingSince, window != nil else { return }
+        let elapsed = Date().timeIntervalSince(since)
+        let text = ActivityCardData.elapsedText(elapsed)
+        if elapsedLabel.stringValue != text {
+            elapsedLabel.stringValue = text
+            needsLayout = true
+        }
+        let timer = Timer(timeInterval: ActivityCardData.secondsUntilElapsedChanges(elapsed) + 0.01, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.updateElapsed() }
+        }
+        timer.tolerance = 0.1
+        RunLoop.main.add(timer, forMode: .common)
+        elapsedTimer = timer
     }
 
     override var wantsUpdateLayer: Bool { true }
@@ -237,7 +267,12 @@ final class SidebarCardView: HoverView {
         let smallHeight = nameLabel.intrinsicContentSize.height
         let y2 = (line2Center - smallHeight / 2).rounded()
         dot.frame = CGRect(x: right - 12, y: line2Center - 6, width: 12, height: 12)
-        var trailing = right - 12 - 6
+        var trailing = dot.isHidden ? right : right - 12 - 6
+        if !elapsedLabel.isHidden {
+            let width = elapsedLabel.textWidth
+            elapsedLabel.frame = CGRect(x: trailing - width, y: y2, width: width, height: smallHeight)
+            trailing -= width + 6
+        }
         if !prLabel.isHidden {
             let width = prLabel.textWidth
             prLabel.frame = CGRect(x: trailing - width, y: y2, width: width, height: smallHeight)

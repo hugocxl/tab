@@ -121,4 +121,22 @@ final class CoreServerTests: XCTestCase {
         activity.acknowledge([id])
         XCTAssertTrue(activity.snapshot().events.isEmpty)
     }
+
+    func testActivityKeepsTurnStartWhileWorkingOrBlocked() {
+        let activity = Activity()
+        let session = SessionId()
+        let project = ProjectId()
+        func update(_ state: AgentState) -> UInt64? {
+            activity.update(AgentActivity(session: session, project: project, provider: .claude, state: state,
+                                          workingSince: 1), completed: false)
+            return activity.snapshot().agents.first?.workingSince
+        }
+        let start = update(.working)
+        XCTAssertNotNil(start)
+        XCTAssertNotEqual(start, 1, "the server stamps the turn, not the reporter")
+        XCTAssertEqual(update(.blocked), start)
+        XCTAssertEqual(update(.working), start, "approving a request continues the same turn")
+        XCTAssertNil(update(.idle))
+        XCTAssertNil(update(.blocked), "waiting without a turn starts no clock")
+    }
 }

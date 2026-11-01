@@ -3,6 +3,17 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.22.0 - 2026-11-01
+
+### Added
+
+- Sidebar cards show how long an agent has been working next to its activity
+  indicator.
+
+### Removed
+
+- Sidebar cards no longer show a gray dot when nothing is happening.
+
 ## 0.21.2 - 2026-11-01
 
 ### Changed

@@ -48,6 +48,8 @@ final class Activity: @unchecked Sendable {
     func update(_ activity: AgentActivity, completed: Bool) {
         let changed: UInt64? = lock.withLock {
             let previous = agents[activity.session]
+            var activity = activity
+            activity.workingSince = Self.workingSince(activity.state, previous: previous)
             guard previous != activity else { return nil }
             var kind: EventKind?
             if activity.state == .blocked, previous?.state != .blocked || previous?.provider != activity.provider {
@@ -70,6 +72,18 @@ final class Activity: @unchecked Sendable {
             return revision
         }
         notify(changed)
+    }
+
+    /// A turn starts when the agent starts working and lasts while it works
+    /// or waits for you.
+    private static func workingSince(_ state: AgentState, previous: AgentActivity?) -> UInt64? {
+        switch state {
+        case .working, .blocked:
+            if let since = previous?.workingSince { return since }
+            return state == .working ? Clock.nowMilliseconds() : nil
+        case .idle, .unknown:
+            return nil
+        }
     }
 
     /// The session no longer runs an agent; its unread event stays.
