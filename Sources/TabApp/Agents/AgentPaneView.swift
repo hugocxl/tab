@@ -161,8 +161,8 @@ final class AgentPaneView: ThemedView {
         feedback.font = AppFont.footnote
         feedback.maximumNumberOfLines = 2
         feedback.lineBreakMode = .byTruncatingTail
-        for child in [transcriptScroll, activity, composerCard, feedback, retry, endButton] { addSubview(child) }
-        addSubview(suggestions)
+        // Suggestions sit behind the composer card so their lower edge tucks under it.
+        for child in [transcriptScroll, activity, endButton, suggestions, composerCard, feedback, retry] { addSubview(child) }
         suggestions.isHidden = true
         selectionToolbar.isHidden = true
         selectionToolbar.onCite = { [weak self] in self?.citeSelection() }
@@ -256,7 +256,7 @@ final class AgentPaneView: ThemedView {
         }
 
         let activityHeight: CGFloat = activity.isHidden ? 0 : 30
-        let transcriptBottom = max(0, composerCard.frame.minY - 12 - activityHeight)
+        let transcriptBottom = max(0, composerCard.frame.minY - activityHeight)
         activity.frame = NSRect(x: left + 4, y: transcriptBottom, width: max(0, width - 8), height: activityHeight)
         activitySpinner.frame = NSRect(x: 0, y: 5, width: 16, height: 16)
         activityLabel.frame = NSRect(x: activityStatus == .waiting ? 0 : 24, y: 4,
@@ -269,9 +269,10 @@ final class AgentPaneView: ThemedView {
         findBar?.frame = NSRect(x: 0, y: 0, width: bounds.width, height: AgentConversationFindBar.height)
         endButton.frame = NSRect(x: floor((bounds.width - 126) / 2), y: max(0, transcriptBottom - 36), width: 126, height: 28)
         updateEndButton()
-        let suggestionHeight = min(suggestions.preferredHeight, max(0, composerCard.frame.minY - 12))
-        suggestions.frame = NSRect(x: left, y: max(0, composerCard.frame.minY - suggestionHeight - 6),
-                                   width: width, height: suggestionHeight)
+        let suggestionTop = max(0, composerCard.frame.minY + AgentComposerSuggestionsView.tuck - suggestions.preferredHeight)
+        let suggestionWidth = floor(width * 0.9)
+        suggestions.frame = NSRect(x: left + floor((width - suggestionWidth) / 2), y: suggestionTop,
+                                   width: suggestionWidth, height: composerCard.frame.minY + AgentComposerSuggestionsView.tuck - suggestionTop)
         lastViewportWidth = bounds.width
         super.layout()
     }

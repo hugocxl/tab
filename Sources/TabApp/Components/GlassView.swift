@@ -28,6 +28,8 @@ public final class GlassView: NSView {
         public static let chip = Style(cornerRadius: UpdateChipView.height / 2, opacity: 0.4)
         /// The chrome's tooltip capsule.
         public static let tooltip = Style(cornerRadius: 10, fallbackMaterial: .toolTip)
+        /// Popups anchored to a control, such as the agent composer's suggestions.
+        public static let popover = Style(cornerRadius: 10, fallbackMaterial: .menu)
     }
 
     private let material: NSView

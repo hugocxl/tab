@@ -133,23 +133,34 @@ final class AgentComposerSuggestionsView: NSView, NSTableViewDataSource, NSTable
     private(set) var selectedIndex = -1
     let tableView = AgentComposerSuggestionTable()
     private let scrollView = NSScrollView()
+    private let glass = GlassView(style: .popover)
+    /// Sits above the glass: a layer's own background would draw beneath it and be lightened.
+    private let fill = NSView()
     private let emptyLabel = NSTextField(labelWithString: "No matches")
     var emptyStateText: String = "No matches" {
         didSet { emptyLabel.stringValue = emptyStateText; emptyLabel.setAccessibilityLabel(emptyStateText) }
     }
     private var theme: AppTheme = .shared
     private var isUpdatingItems = false
-    private let rowHeight: CGFloat = 44
-    var preferredHeight: CGFloat { CGFloat(max(1, min(items.count, 6))) * rowHeight + 12 }
+    private let rowHeight: CGFloat = 26
+    /// How far the popup extends under the composer card, which hides its lower edge.
+    static let tuck: CGFloat = 12
+    var preferredHeight: CGFloat { CGFloat(max(1, min(items.count, 8))) * rowHeight + 4 + Self.tuck }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
-        layer?.cornerRadius = 12
+        layer?.cornerRadius = GlassView.Style.popover.cornerRadius
+        layer?.cornerCurve = .continuous
         layer?.borderWidth = 1
         layer?.masksToBounds = true
+        addSubview(glass)
+        fill.wantsLayer = true
+        addSubview(fill)
         setAccessibilityLabel("Composer suggestions")
         tableView.headerView = nil
+        // The default inset style pads rows by 10pt, which the fixed table height would clip.
+        tableView.style = .plain
         tableView.rowHeight = rowHeight
         tableView.intercellSpacing = .zero
         tableView.selectionHighlightStyle = .none
@@ -173,7 +184,7 @@ final class AgentComposerSuggestionsView: NSView, NSTableViewDataSource, NSTable
         scrollView.borderType = .noBorder
         scrollView.documentView = tableView
         addSubview(scrollView)
-        emptyLabel.font = AppFont.system(12)
+        emptyLabel.font = AppFont.system(11)
         emptyLabel.lineBreakMode = .byTruncatingTail
         emptyLabel.setAccessibilityLabel("No matches")
         addSubview(emptyLabel)
@@ -188,14 +199,23 @@ final class AgentComposerSuggestionsView: NSView, NSTableViewDataSource, NSTable
         super.layout()
         // Hidden popup surfaces begin at .zero. Never pass negative inset sizes
         // into NSScrollView, whose scroller calculations can produce infinity.
+        glass.frame = bounds
+        fill.frame = bounds
+        // Only the top corners round; the lower edge is hidden under the composer.
+        if let layer {
+            layer.maskedCorners = layer.contentsAreFlipped()
+                ? [.layerMinXMinYCorner, .layerMaxXMinYCorner]
+                : [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
+        }
         guard bounds.width.isFinite, bounds.height.isFinite,
-              bounds.width > 12, bounds.height > 12 else {
+              bounds.width > 8, bounds.height > 8 + Self.tuck else {
             scrollView.frame = .zero
             emptyLabel.frame = .zero
             return
         }
-        scrollView.frame = NSRect(x: 6, y: 6, width: bounds.width - 12, height: bounds.height - 12)
-        emptyLabel.frame = NSRect(x: 16, y: 18, width: max(0, bounds.width - 32), height: 18)
+        // The list ends exactly at the composer's top edge, so rows clip where they meet it.
+        scrollView.frame = NSRect(x: 4, y: 4, width: bounds.width - 8, height: bounds.height - 4 - Self.tuck)
+        emptyLabel.frame = NSRect(x: 12, y: 9, width: max(0, bounds.width - 24), height: 16)
         let contentSize = scrollView.contentSize
         let width = contentSize.width.isFinite ? max(0, contentSize.width) : 0
         let height = contentSize.height.isFinite ? max(0, contentSize.height) : 0
@@ -212,8 +232,10 @@ final class AgentComposerSuggestionsView: NSView, NSTableViewDataSource, NSTable
         defer { isUpdatingItems = false }
         self.items = items
         self.theme = theme
-        layer?.backgroundColor = theme.floating.cgColor
-        layer?.borderColor = theme.border.cgColor
+        glass.appearance = theme.nsAppearance
+        // The sidebar's darker chrome keeps rows legible over the transcript.
+        fill.layer?.backgroundColor = theme.chrome.withAlphaComponent(0.92).cgColor
+        layer?.borderColor = theme.cardBorder.cgColor
         emptyLabel.textColor = theme.fgMuted
         emptyLabel.isHidden = !items.isEmpty
         scrollView.isHidden = items.isEmpty
@@ -309,7 +331,7 @@ private final class AgentComposerSuggestionRow: NSTableRowView {
     override func drawBackground(in dirtyRect: NSRect) {
         guard active else { return }
         fill.setFill()
-        NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 1), xRadius: 7, yRadius: 7).fill()
+        NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 1), xRadius: 6, yRadius: 6).fill()
     }
 }
 
@@ -322,10 +344,10 @@ private final class AgentComposerSuggestionCell: NSTableCellView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         for child in [icon, titleLabel, subtitleLabel] as [NSView] { addSubview(child) }
-        titleLabel.font = AppFont.system(13)
+        titleLabel.font = AppFont.system(12, weight: .medium)
         subtitleLabel.font = AppFont.system(11)
         titleLabel.lineBreakMode = .byTruncatingMiddle
-        subtitleLabel.lineBreakMode = .byTruncatingMiddle
+        subtitleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.maximumNumberOfLines = 1
         subtitleLabel.maximumNumberOfLines = 1
         icon.imageScaling = .scaleProportionallyDown
@@ -349,9 +371,15 @@ private final class AgentComposerSuggestionCell: NSTableCellView {
 
     override func layout() {
         super.layout()
-        icon.frame = NSRect(x: 10, y: (bounds.height - 16) / 2, width: 16, height: 16)
-        let width = max(0, bounds.width - 48)
-        titleLabel.frame = NSRect(x: 36, y: subtitleLabel.isHidden ? 13 : 5, width: width, height: 18)
-        subtitleLabel.frame = NSRect(x: 36, y: 23, width: width, height: 15)
+        icon.frame = NSRect(x: 6, y: (bounds.height - 14) / 2, width: 14, height: 14)
+        // Title and subtitle share one line; the title always gets its full width
+        // and only the subtitle truncates into what remains.
+        let textX: CGFloat = 26
+        let available = max(0, bounds.width - textX - 8)
+        let titleWidth = min(titleLabel.textWidth, available)
+        titleLabel.frame = NSRect(x: textX, y: (bounds.height - 16) / 2, width: titleWidth, height: 16)
+        let subtitleX = textX + titleWidth + 8
+        subtitleLabel.frame = NSRect(x: subtitleX, y: (bounds.height - 15) / 2 + 0.5,
+                                     width: max(0, bounds.width - subtitleX - 8), height: 15)
     }
 }

@@ -3,6 +3,14 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.27.0 - 2026-11-02
+
+### Changed
+
+- Agent chat suggestions for `/` and `@` are now a compact, translucent list with
+  one line per option, centered and tucked behind the message box.
+- Agent conversations now run right up to the message box, without a gap.
+
 ## 0.26.0 - 2026-11-02
 
 ### Changed

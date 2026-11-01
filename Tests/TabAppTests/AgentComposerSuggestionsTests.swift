@@ -159,11 +159,11 @@ final class AgentComposerSuggestionsViewTests: XCTestCase {
     }
 
     func testNativeTableKeepsAllResultsScrollableWithoutIncreasingPopupHeight() {
-        let view = AgentComposerSuggestionsView(frame: NSRect(x: 0, y: 0, width: 440, height: 276))
+        let view = AgentComposerSuggestionsView(frame: NSRect(x: 0, y: 0, width: 440, height: 224))
         view.update(suggestions(1000), theme: .shared)
         view.layoutSubtreeIfNeeded()
         XCTAssertEqual(view.tableView.numberOfRows, 1000)
-        XCTAssertEqual(view.preferredHeight, 276)
+        XCTAssertEqual(view.preferredHeight, 224)
         XCTAssertGreaterThan(view.tableView.frame.height, view.bounds.height)
         view.moveSelection(-1)
         XCTAssertEqual(view.selectedIndex, 999)
