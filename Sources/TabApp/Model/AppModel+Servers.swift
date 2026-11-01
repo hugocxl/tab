@@ -28,6 +28,15 @@ extension AppModel {
         connection.start()
     }
 
+    /// Connects every listed remote server so its cards show live agents,
+    /// branches and activity. Servers that log in with a password wait until
+    /// one of their projects is opened, so launching never asks.
+    func startServers() {
+        for entry in settings.servers where !entry.passwordLogin {
+            connectOnDemand(entry.id)
+        }
+    }
+
     /// Every server the app knows, this computer's first.
     public var knownServers: [ServerId] {
         [.local] + settings.servers.map(\.id)

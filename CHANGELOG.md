@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.24.1 - 2026-11-01
+
+### Fixed
+
+- Remote servers reconnect when the app starts, so their sidebar cards show
+  live agents, branches and activity without being clicked first.
+
 ## 0.24.0 - 2026-11-01
 
 ### Changed

@@ -219,9 +219,11 @@ public final class AppModel {
 
     // MARK: Starting
 
-    /// Connects this computer's server and starts following activity.
+    /// Connects this computer's server and every remote server, and starts
+    /// following activity.
     public func start() {
         connection(.local)?.start()
+        startServers()
         startIntegrations()
         notifier.start()
         syncVisible()
