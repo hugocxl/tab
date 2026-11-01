@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.24.4 - 2026-11-01
+
+### Changed
+
+- Contributor guidelines no longer ask agents to watch every release build.
+
 ## 0.24.3 - 2026-11-01
 
 ### Fixed

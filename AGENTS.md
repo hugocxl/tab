@@ -110,7 +110,7 @@ input. Measure with Instruments when in doubt.
 Every push to `main` runs the Release workflow. It tags each pushed commit with its
 changelog version and publishes the newest one. Don't tag stable versions by hand.
 
-- After pushing, check that the workflow succeeds.
+- After pushing, don't watch or check the Release workflow unless asked.
 - Make a beta with `scripts/tag-beta.sh` only when asked.
 - Signing and notarization inputs are documented at the top of `scripts/release.sh`.
 - GitHub secrets are set with `scripts/setup-release-secrets.sh`.
