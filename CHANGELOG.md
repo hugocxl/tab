@@ -3,6 +3,20 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.22.1 - 2026-11-01
+
+### Changed
+
+- `/clear` in an agent chat starts a new conversation instead of resetting
+  Claude's context under the old transcript.
+- The `/` menu no longer lists Claude commands that don't work in a chat, or
+  skills twice; `/permissions` replaces the duplicate `/access`.
+
+### Fixed
+
+- Messages that start with a file path are sent normally instead of being
+  rejected as unknown commands, including follow-ups while the agent works.
+
 ## 0.22.0 - 2026-11-01
 
 ### Added

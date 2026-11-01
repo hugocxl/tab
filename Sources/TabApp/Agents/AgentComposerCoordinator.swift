@@ -32,14 +32,39 @@ final class AgentComposerCoordinator {
             .init(id: "skills", title: "/skills", subtitle: "Browse installed skills", symbol: "sparkles", kind: .action),
             .init(id: "status", title: "/status", subtitle: "Show current conversation settings", symbol: "info.circle", kind: .action),
             .init(id: "new", title: "/new", subtitle: "Start a new conversation", symbol: "plus.bubble", kind: .action),
-            .init(id: "access", title: "/permissions", subtitle: "Change tool permissions", symbol: "lock.shield", kind: .action),
+            .init(id: "clear-conversation", title: "/clear", subtitle: "Start a new conversation with a fresh context",
+                  symbol: "plus.bubble", kind: .action),
+            .init(id: "access", title: "/permissions", subtitle: "Change tool access", symbol: "lock.shield", kind: .action),
             .init(id: "model", title: "/model", subtitle: "Choose the model for this conversation", symbol: "cpu", kind: .action),
             .init(id: "effort", title: "/effort", subtitle: "Change reasoning effort", symbol: "dial.low", kind: .action),
-            .init(id: "access", title: "/access", subtitle: "Change tool permissions", symbol: "lock.shield", kind: .action),
             .init(id: "attach", title: "/attach", subtitle: "Attach files or images", symbol: "paperclip", kind: .action),
             .init(id: "stop", title: "/stop", subtitle: "Stop the current response", symbol: "stop.circle", kind: .action),
             .init(id: "clear", title: "/clear-draft", subtitle: "Clear the current draft and attachments", symbol: "eraser", kind: .action)
         ]
+    }
+
+    /// Claude lists these in headless mode, but they are internal, unavailable outside its
+    /// terminal UI, or replaced by a Tab action: its `/clear` would reset the provider's
+    /// context underneath a transcript that still shows the old conversation.
+    static let hiddenProviderCommands: Set<String> = [
+        "agents", "auto-mode-setup", "clear", "color", "extra-usage", "fast", "focus", "heapdump", "workflow-launch-exec"
+    ]
+
+    /// The command a prompt starts with, such as `compact` for `/compact now`. A leading
+    /// path like `/Users/me/App.swift` is a prompt, not a command.
+    static func commandName(in text: String) -> String? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("/") else { return nil }
+        let token = trimmed.dropFirst().prefix { !$0.isWhitespace }
+        guard !token.isEmpty, token.allSatisfy({ $0.isLetter || $0.isNumber || "-_:".contains($0) }) else { return nil }
+        return String(token)
+    }
+
+    private var visibleProviderCommands: [String] {
+        providerCommands.filter { name in
+            !name.hasPrefix("__") && !Self.hiddenProviderCommands.contains(name)
+                && !actions.contains { $0.title == "/" + name }
+        }
     }
 
     init(surface: AgentPaneView) {
@@ -158,10 +183,17 @@ final class AgentComposerCoordinator {
     private func matches(_ trigger: AgentComposerTrigger) -> [AgentComposerSuggestion] {
         let query = trigger.query
         if trigger.kind == .command {
-            let native = providerCommands.filter { name in !actions.contains { $0.title == "/" + name } }.map {
-                AgentComposerSuggestion(id: $0, title: "/" + $0, subtitle: "Provider command", symbol: "terminal", kind: .providerCommand)
+            let provided = visibleProviderCommands
+            let native = provided.map {
+                AgentComposerSuggestion(id: "provider:" + $0, title: "/" + $0, subtitle: "Provider command", symbol: "terminal",
+                                        kind: .providerCommand)
             }
-            let candidates = actions + native + (skills ?? []).map {
+            // The provider already runs its own skills by name; list a file skill once unless
+            // the user is explicitly browsing `/skill:`.
+            let providedNames = Set(provided.map { $0.lowercased() })
+            let browsingSkills = query.lowercased().hasPrefix("skill:")
+            let fileSkills = (skills ?? []).filter { browsingSkills || !providedNames.contains($0.name.lowercased()) }
+            let candidates = actions + native + fileSkills.map {
                 AgentComposerSuggestion(id: $0.id, title: "/skill:\($0.name)", subtitle: $0.description,
                                         symbol: "sparkles", kind: .skill)
             }

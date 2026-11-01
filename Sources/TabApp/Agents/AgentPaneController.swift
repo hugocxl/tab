@@ -443,13 +443,14 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
               preparingAttachments == 0,
               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !draftAttachments.isEmpty else { return }
         let commandText = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if selection.provider == .codex, commandText.hasPrefix("/"), !commandText.hasPrefix("/skill:"),
-           !["/compact", "/review"].contains(commandText) {
+        let command = AgentComposerCoordinator.commandName(in: commandText)
+        // A lone `/name` is meant as a command; `/tmp is full` or a path is an ordinary prompt.
+        if selection.provider == .codex, let command, commandText == "/" + command, !command.hasPrefix("skill:"),
+           !composerCoordinator.providerCommands.contains(command) {
             showComposerError("This Codex command is not supported in Agent Tabs. Use / to choose an available command.")
             return
         }
-        if snapshot?.status == .working, text.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("/"),
-           !text.hasPrefix("/skill:") {
+        if snapshot?.status == .working, let command, composerCoordinator.providerCommands.contains(command) {
             showComposerError("Run provider commands after the current response finishes.")
             return
         }
@@ -637,7 +638,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         case "status":
             showComposerError("\(selection.provider.name) · \(effectiveModel ?? "Provider default") · \(reasoningEffort?.title ?? "Auto") · \((snapshot?.accessMode ?? .standard).title)")
             return
-        case "new": onNewConversation?(); return
+        case "new", "clear-conversation": onNewConversation?(); return
         case "model": control = surface.model
         case "effort": control = surface.effort
         case "access": control = surface.access
