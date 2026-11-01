@@ -175,7 +175,7 @@ final class TerminalKeyMappingTests: XCTestCase {
                            replacementRange: NSRange(location: NSNotFound, length: 0))
         view.unmarkText()
         view.unmarkText()
-        XCTAssertEqual(host.inputs, [.text("a界c"), .text("é")], "unmark commits once, matching Codesh")
+        XCTAssertEqual(host.inputs, [.text("a界c"), .text("é")], "unmark commits once")
     }
 
     @MainActor

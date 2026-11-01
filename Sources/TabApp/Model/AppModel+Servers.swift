@@ -354,7 +354,7 @@ extension AppModel {
     }
 
     /// Watches the current project's working tree on its side connection,
-    /// so its card follows changes made in a shell, as Codesh's `sync_git`.
+    /// so its card follows changes made in a shell.
     /// The server keeps one watch per connection; a new connection needs it
     /// again.
     func syncGitWatch() {

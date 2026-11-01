@@ -119,7 +119,7 @@ public final class BrowserHistoryStore {
         return added
     }
 
-    /// Suggestions follow Codesh's history query: literal text in the URL
+    /// Suggestions follow the history query: literal text in the URL
     /// or title, most visited first, with ties broken by recency. An empty
     /// query shows recent visits. Unvisited bookmarks do not appear.
     public func suggestions(for query: String, limit: Int = suggestionLimit) -> [BrowserHistoryEntry] {

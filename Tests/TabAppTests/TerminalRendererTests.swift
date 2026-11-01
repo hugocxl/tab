@@ -177,8 +177,7 @@ final class TerminalRendererTests: XCTestCase {
         }
     }
 
-    /// Codesh sends changed rows at about 60 Hz (docs/tech/README.md) and
-    /// benchmarks 600 single-row updates in element/cache_tests.rs. Reserve
+    /// The server sends changed rows at about 60 Hz. Reserve
     /// one quarter of a 16 ms tick for Tab: 4 ms/frame, 4 s/1000 frames in Debug.
     func testThousandSingleRowFramesBudget() {
         var grid = F.grid((0..<50).map { [F.output("row \($0)")] }, cols: 200)

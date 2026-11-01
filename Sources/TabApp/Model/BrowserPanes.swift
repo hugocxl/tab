@@ -156,7 +156,7 @@ extension AppModel: BrowserHost {
     }
 
     /// Resolves IDs, names and canonical paths, preferring the current family
-    /// before searching all worktrees, as Codesh's `resolve_target` does.
+    /// before searching all worktrees.
     func browserProject(project: String?, worktree: String?) throws -> ProjectId {
         let root = try project.map { name in
             try uniqueBrowserProject(state.projects.filter { Self.browserNames($0, name) },

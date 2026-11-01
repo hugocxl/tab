@@ -60,7 +60,7 @@ final class BrowserPanesTests: XCTestCase {
         XCTAssertEqual(restored.state.browser(pane), saved)
     }
 
-    func testTargetResolutionMatchesCodeshNamesIDsCanonicalPathsFamiliesAndErrors() async throws {
+    func testTargetResolutionMatchesNamesIDsCanonicalPathsFamiliesAndErrors() async throws {
         let root = URL(fileURLWithPath: try ModelFixtures.folder("targets")).resolvingSymlinksInPath().path
         let web = ProjectDescriptor(directory: ServerPath(root + "/web"), name: "web")
         let api = ProjectDescriptor(directory: ServerPath(root + "/api"), name: "api")

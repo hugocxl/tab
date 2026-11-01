@@ -265,7 +265,7 @@ final class DropPreviewView: ThemedView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
-/// A project with no panes, as Codesh draws it in the pane card frame: the
+/// A project with no panes, drawn in the pane card frame: the
 /// window glyph, "Nothing open in <project>", a hint and New Terminal; or
 /// that the folder is missing.
 final class EmptyProjectView: ThemedView {

@@ -6,7 +6,7 @@ import XCTest
 @testable import TabApp
 
 final class UpdaterProcessTests: XCTestCase {
-    func testCodeshPlatformManifestAndChannelFeed() throws {
+    func testPlatformManifestAndChannelFeed() throws {
         let asset: [String: Any] = [
             "url": "https://github.com/hugocxl/tab/releases/download/v1.1.0/Tab-1.1.0-arm64.dmg",
             "size": 123,

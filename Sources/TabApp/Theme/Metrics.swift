@@ -1,6 +1,6 @@
 import AppKit
 
-/// The desktop style's geometry, from Codesh's `docs/codesh/style.md`: one
+/// The desktop style's geometry: one
 /// 8pt gutter, 10pt card radius, 1pt border, 36pt headers and 8pt control
 /// gaps. Views use these instead of literal numbers so the chrome stays one
 /// system.

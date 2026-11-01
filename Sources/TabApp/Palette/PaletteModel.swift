@@ -1,7 +1,7 @@
 import AppKit
 import TabCore
 
-/// The palette's geometry from `docs/codesh/style.md`, in points. Every
+/// The palette's geometry, in points. Every
 /// height comes from row counts; the panel never measures itself.
 public enum PaletteLayout {
     public static let width: CGFloat = 740

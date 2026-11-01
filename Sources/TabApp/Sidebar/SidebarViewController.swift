@@ -7,7 +7,7 @@ import TabProtocol
 /// terminals and projects with their worktree cards, the update card, and
 /// the footer with the host and name filter, Add Project and the Remote
 /// Servers host menu.
-/// A collapsed sidebar is hidden, as in Codesh; its toggle moves into the
+/// A collapsed sidebar is hidden; its toggle moves into the
 /// top-left pane. It rebuilds only when what it shows changed.
 @MainActor
 final class SidebarViewController: NSViewController {

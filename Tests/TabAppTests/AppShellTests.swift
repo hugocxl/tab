@@ -46,7 +46,7 @@ final class AppKeyDispatchTests: XCTestCase {
         XCTAssertNil(MenuBarBuilder.keyEquivalent("unknown"))
     }
 
-    func testMenuTreeMatchesCodeshWithNativeAboutAndHelp() throws {
+    func testMenuTreeWithNativeAboutAndHelp() throws {
         _ = NSApplication.shared
         let model = AppModel(dirs: try ModelFixtures.profile())
         let menu = MenuBarBuilder.build(keymap: Keymap(), actions: Actions(model: model),

@@ -184,7 +184,7 @@ public enum AppSocket {
         return try encoder.encode(value)
     }
 
-    /// Sends `request` with the read/write timeout Codesh uses; an error reply
+    /// Sends `request` with a read/write timeout; an error reply
     /// throws `failed`. Each successful I/O operation renews the timeout.
     public static func call(socket: URL, _ request: AppRequest, timeout: TimeInterval) throws -> JSONValue {
         let stream: FileDescriptorStream

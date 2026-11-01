@@ -21,18 +21,18 @@ final class AppSnapshotTests: XCTestCase {
         let model = AppModel(dirs: dirs, theme: theme) { id, _ in id.isLocal ? FakeConnector(server: server) : nil }
         model.start()
         _ = await ModelFixtures.wait { model.state.serverIdentity(.local) != nil }
-        let codesh = try XCTUnwrap(model.addProject(try ModelFixtures.folder("codesh")))
+        let workspace = try XCTUnwrap(model.addProject(try ModelFixtures.folder("workspace")))
         _ = await ModelFixtures.wait { model.state.projectIntents(.local).isEmpty }
         let worktree = try ModelFixtures.folder("cmd-palette")
         try Data("gitdir: /tmp/x".utf8).write(to: URL(fileURLWithPath: worktree + "/.git"))
         var page = server.catalogPage
-        page.projects.append(ProjectDescriptor(directory: ServerPath(worktree), name: "cmd-palette", kind: .worktree, parentId: codesh))
+        page.projects.append(ProjectDescriptor(directory: ServerPath(worktree), name: "cmd-palette", kind: .worktree, parentId: workspace))
         page.revision += 1
         model.applyCatalog(.local, page)
-        model.git[codesh] = GitInfo(summary: GitSummary(branch: "main"), pullRequest: 616)
+        model.git[workspace] = GitInfo(summary: GitSummary(branch: "main"), pullRequest: 616)
         model.newHomeTerminal()
-        model.selectProject(codesh)
-        model.newTerminal(in: codesh)
+        model.selectProject(workspace)
+        model.newTerminal(in: workspace)
         model.split(.right)
         _ = await ModelFixtures.wait { (model.activeTab?.panes.count ?? 0) == 2 }
         let controller = MainWindowController(model: model)

@@ -114,7 +114,7 @@ final class BrowserWebViewTests: XCTestCase {
         XCTAssertEqual(title["url"], .string(url))
     }
 
-    func testEveryPageCommandAndCodeshOutputShapes() async throws {
+    func testEveryPageCommandAndOutputShapes() async throws {
         let pane = try await fixture("form", """
         <html><head><title>Form Fixture</title></head><body>
         <h1>Welcome</h1><form onsubmit="event.preventDefault(); document.querySelector('#out').textContent = 'Submitted';">
@@ -289,7 +289,7 @@ final class BrowserWebViewTests: XCTestCase {
         XCTAssertTrue(first.cookieStore === second.cookieStore)
     }
 
-    func testOpenUsesHomePageAndCodeshEvalWireName() async throws {
+    func testOpenUsesHomePageAndEvalWireName() async throws {
         host.browserSettings.homePage = "https://home.example.test/start"
         let opened = try await command("open")
         let id = try XCTUnwrap(opened.string)

@@ -25,7 +25,7 @@ public enum TerminalMouseMapping {
     }
 }
 
-/// Fractional scroll input, with the same reversal and flood limits as Codesh.
+/// Fractional scroll input, with reversal and flood limits.
 struct TerminalScrollAccumulator {
     private(set) var remainder: CGFloat = 0
 

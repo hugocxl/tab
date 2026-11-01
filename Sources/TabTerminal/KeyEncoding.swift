@@ -79,7 +79,7 @@ final class Keyboard {
 }
 
 /// Key names in Ghostty's vocabulary (`arrow_up`, `page_down`, `numpad_1`),
-/// plus the short names Codesh clients used (`up`, `pageup`, `numpad1`).
+/// plus the short names older clients use (`up`, `pageup`, `numpad1`).
 enum KeyNames {
     static func key(_ name: String) -> GhosttyKey {
         if let key = table[name] { return key }

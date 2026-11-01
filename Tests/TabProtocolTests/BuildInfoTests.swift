@@ -2,7 +2,7 @@ import XCTest
 @testable import TabProtocol
 
 final class BuildInfoTests: XCTestCase {
-    func testBuildMetadataUsesCodeshFieldsAndReadsEarlierTabBuilds() throws {
+    func testBuildMetadataFieldsAndReadsEarlierTabBuilds() throws {
         let build = BuildInfo(version: "1.2.3")
         let data = try WireJSON.encode(build)
         let object = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])

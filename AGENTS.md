@@ -1,10 +1,8 @@
 # Tab
 
 Tab is a native macOS terminal workspace written only in Swift, for macOS 14+ on
-Apple silicon. It rewrites Codesh (`~/repos/codesh`, Rust + GPUI). The Codesh
-source and its tests define the product's behavior. When you port a feature, read
-the Rust implementation and its tests first. Then write it natively in Swift: same
-behavior, no Linux or Intel paths, no settings that do nothing.
+Apple silicon. Write everything natively in Swift: no Linux or Intel paths, no
+settings that do nothing.
 
 ## Commands
 

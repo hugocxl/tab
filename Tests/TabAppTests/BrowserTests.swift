@@ -26,7 +26,7 @@ final class BrowserHistoryTests: XCTestCase {
         XCTAssertNil(settings.resolve("   "))
     }
 
-    func testSuggestionsMatchCodeshLiteralTextAndVisitOrder() {
+    func testSuggestionsMatchLiteralTextAndVisitOrder() {
         let history = BrowserHistoryStore(file: folder.appendingPathComponent("browser-history.json"))
         let old = Date(timeIntervalSince1970: 1_000)
         history.recordVisit(url: "https://docs.swift.org/guide", title: "The Swift Guide", at: old)
@@ -220,7 +220,7 @@ final class BrowserScriptTests: XCTestCase {
         XCTAssertThrowsError(try BrowserScripts.condition(.waitFor, args: .object([:])))
     }
 
-    func testMalformedTimeoutsUseCodeshDefaults() {
+    func testMalformedTimeoutsUseDefaults() {
         XCTAssertEqual(BrowserScripts.timeout(.object(["timeoutMs": .int(-1)]), default: 5), 5)
         XCTAssertEqual(BrowserScripts.timeout(.object(["timeoutMs": .double(100.5)]), default: 5), 5)
     }

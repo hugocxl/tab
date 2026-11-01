@@ -24,7 +24,7 @@ public enum TerminalLinkTarget: Hashable, Sendable {
     case file(path: String, line: Int?, column: Int?)
 }
 
-/// Finds links in a row's text, the way Codesh does: whitespace-separated
+/// Finds links in a row's text: whitespace-separated
 /// words (or quoted strings), surrounding punctuation trimmed, URLs found
 /// inside words.
 public enum TerminalLinkDetector {

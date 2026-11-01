@@ -1,7 +1,7 @@
 import CoreGraphics
 import TabCore
 
-/// The split layout's geometry from `docs/codesh/style.md`: an 8pt gutter
+/// The split layout's geometry: an 8pt gutter
 /// between the two sides of each split, only the shared edge snapped to
 /// device pixels, and a ratio that follows the pointer.
 public enum SplitGeometry {
@@ -108,7 +108,7 @@ public enum SplitGeometry {
 
 /// Where a pane dragged with Command lands: on another pane's edge to dock
 /// beside it (or beside the row or column around it), or in its middle to
-/// swap places. Ported from Codesh's drop walker.
+/// swap places.
 public enum DropTargets {
     /// Share of a pane, from each edge, that docks instead of swapping.
     public static let edgeZone: CGFloat = 0.3

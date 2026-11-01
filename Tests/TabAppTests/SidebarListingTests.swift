@@ -108,7 +108,7 @@ final class SidebarListingTests: XCTestCase {
     }
 
     func testCardHeadlinesReadTerminalTitles() {
-        XCTAssertEqual(ActivityCardData.idleDirectory("hugo@mac:~/repos/codesh"), "codesh")
+        XCTAssertEqual(ActivityCardData.idleDirectory("hugo@mac:~/repos/workspace"), "workspace")
         XCTAssertEqual(ActivityCardData.idleDirectory("(mini) ~/repos/vitruve"), "vitruve")
         XCTAssertNil(ActivityCardData.idleDirectory("cargo test"))
         XCTAssertEqual(ActivityCardData.withoutHost("(mini) cargo test"), "cargo test")

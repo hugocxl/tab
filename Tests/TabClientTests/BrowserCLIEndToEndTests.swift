@@ -222,7 +222,7 @@ final class BrowserCLIEndToEndTests: XCTestCase {
         }
     }
 
-    func testErrorsMalformedRepliesAndNotRunningMatchCodesh() throws {
+    func testErrorsMalformedRepliesAndNotRunning() throws {
         for (reply, message) in [
             (#"{"ok":false,"error":"browser tab not found missing"}"#, "browser tab not found missing"),
             (#"{"ok":false}"#, "Tab did not handle the request"),
@@ -272,7 +272,7 @@ final class BrowserCLIEndToEndTests: XCTestCase {
         XCTAssertEqual(invalidTimeout.stderr, "tab: TAB_CLI_TIMEOUT must be a whole number of seconds\n")
     }
 
-    func testWaitAddsItsDurationAndTimeoutFailsWithCodeshMessage() throws {
+    func testWaitAddsItsDurationAndTimeoutFailsWithMessage() throws {
         let (_, waited) = try exchange(["browser", "wait", "T", "--timeout-ms", "2000"],
                                        reply: #"{"ok":true,"value":false}"#, delay: 1.2, timeout: "1")
         XCTAssertEqual(waited.status, 0, waited.stderr)

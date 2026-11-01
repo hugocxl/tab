@@ -77,7 +77,7 @@ final class SidebarCardView: HoverView {
     private let glass = GlassView(style: .card)
 
     /// 1pt border, 6pt padding, the 18pt headline, a 3pt gap and the 13pt
-    /// second line, as Codesh lays the card out.
+    /// second line.
     static let height: CGFloat = 48
 
     init(data: ActivityCardData, hint: String?) {
@@ -167,7 +167,7 @@ final class SidebarCardView: HoverView {
         nameLabel.textColor = theme.fgMuted
         branchLabel.textColor = theme.fgDim
         prLabel.textColor = theme.accent
-        elapsedLabel.textColor = theme.fgDim
+        elapsedLabel.textColor = theme.accent
         switch data.status {
         case .attention: dot.style = .dot(theme.accent, diameter: 8)
         case .error: dot.style = .dot(theme.danger, diameter: 8)
@@ -238,9 +238,11 @@ final class SidebarCardView: HoverView {
         dot.frame = CGRect(x: right - 12, y: line2Center - 6, width: 12, height: 12)
         var trailing = dot.isHidden ? right : right - 12 - 6
         if !elapsedLabel.isHidden {
+            // The dots glyph is narrower than its 12pt box, so hug it.
             let width = elapsedLabel.textWidth
-            elapsedLabel.frame = CGRect(x: trailing - width, y: y2, width: width, height: smallHeight)
-            trailing -= width + 6
+            let labelTrailing = dot.isHidden ? trailing : right - 12 - 1
+            elapsedLabel.frame = CGRect(x: labelTrailing - width, y: y2, width: width, height: smallHeight)
+            trailing = labelTrailing - width - 6
         }
         if !prLabel.isHidden {
             let width = prLabel.textWidth
@@ -368,7 +370,7 @@ final class HostHeaderRow: ThemedView {
     }
 }
 
-/// A project's header, as Codesh's 28pt row: its icon when it has one, the
+/// A project's header, a 28pt row: its icon when it has one, the
 /// name in 12pt semibold, and the settings and New Worktree buttons.
 final class ProjectHeaderRow: HoverView {
     let project: ProjectId

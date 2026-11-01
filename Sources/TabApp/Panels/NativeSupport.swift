@@ -56,7 +56,7 @@ public protocol NativeHost: AnyObject {
 
 extension NativeHost {
     /// Asks the project's server to report repository changes as
-    /// `gitChanged`, as Codesh does for the current project. A server keeps
+    /// `gitChanged` for the current project. A server keeps
     /// one repository watch per connection, so the latest project shown wins.
     public func watchRepository() {
         guard let transport = nativeTransport else { return }
@@ -165,7 +165,7 @@ public enum NativeStyle {
     }
 }
 
-/// The rounded card a side panel sits in, as in Codesh: 10pt radius, hairline
+/// The rounded card a side panel sits in: 10pt radius, hairline
 /// border and the panel fill. The shell places it 8pt from the window's top,
 /// right and bottom edges.
 public final class NativePanelCard: ThemedView {

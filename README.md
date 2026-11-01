@@ -1,7 +1,7 @@
 # Tab
 
-A Swift-only, native macOS terminal workspace, rewritten from
-[Codesh](https://github.com/hugocxl/codesh). Apple silicon; macOS 14 or later.
+A Swift-only, native macOS terminal workspace. Apple silicon; macOS 14 or
+later.
 Terminals run in a separate `tabd` process and survive closing the desktop app.
 
 Agent Tabs provide native Claude Code and Codex conversations

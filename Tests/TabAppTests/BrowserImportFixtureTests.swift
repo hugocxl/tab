@@ -190,7 +190,7 @@ final class BrowserSecurityTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: file), original)
     }
 
-    func testCookieFiltersMatchCodeshHostPathAndSecureRules() throws {
+    func testCookieFiltersMatchHostPathAndSecureRules() throws {
         let secure = try XCTUnwrap(ImportedCookie(name: "sid", value: "x", domain: ".example.test", path: "/app", secure: true).httpCookie)
         XCTAssertTrue(BrowserAutomation.cookie(secure, matches: "www.example.test", path: "/app/page"))
         XCTAssertFalse(BrowserAutomation.cookie(secure, matches: "www.example.test", path: "/apple"))

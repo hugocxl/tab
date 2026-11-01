@@ -7,7 +7,7 @@ import XCTest
 
 final class UpdaterTests: XCTestCase {
     @MainActor
-    func testAutomaticUpdateChecksMatchCodeshHourlySchedule() {
+    func testAutomaticUpdateChecksFollowHourlySchedule() {
         XCTAssertEqual(UpdaterController.checkInterval, 3600)
     }
 

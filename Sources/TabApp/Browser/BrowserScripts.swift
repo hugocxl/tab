@@ -1,8 +1,7 @@
 import Foundation
 import TabClient
 
-/// The page side of browser automation, ported from Codesh's
-/// `automation.rs`: each command becomes the body of an async JavaScript
+/// The page side of browser automation: each command becomes the body of an async JavaScript
 /// function that runs in the page, and what it returns is the command's
 /// result.
 public enum BrowserScripts {

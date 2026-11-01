@@ -24,7 +24,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, A
     private var subscriptions: Set<AnyCancellable> = []
 
     /// The window buttons' top-left corner, centring them on the 36pt
-    /// header row 8pt from the top, as Codesh places them.
+    /// header row 8pt from the top.
     static let trafficLights = CGPoint(x: 2 * Metrics.gutter, y: Metrics.gutter + (Metrics.headerHeight - 14) / 2)
     /// The space between the window buttons' origins, as AppKit first
     /// lays them out.

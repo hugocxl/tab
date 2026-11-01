@@ -3,7 +3,7 @@ import Foundation
 import TabCore
 import TabProtocol
 
-/// A release from Codesh's schema-1 `update.json` format, selecting the
+/// A release from the schema-1 `update.json` format, selecting the
 /// `macos-aarch64` platform asset. The earlier flat Tab format remains
 /// readable for existing pending records and feeds.
 public struct UpdateManifest: Codable, Equatable, Sendable {

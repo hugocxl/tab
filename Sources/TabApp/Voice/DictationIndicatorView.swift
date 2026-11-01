@@ -1,7 +1,7 @@
 import AppKit
 import QuartzCore
 
-/// The floating dictation overlay, as in Codesh: a transcript chip, then a
+/// The floating dictation overlay: a transcript chip, then a
 /// panel with the recording dot, the clock, an input meter and Cancel,
 /// Pause and Finish buttons, then key hints. While transcribing only Cancel
 /// stays; a failure shows its message and a Close button.

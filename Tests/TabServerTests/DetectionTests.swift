@@ -64,7 +64,7 @@ final class DetectionClassificationTests: XCTestCase {
             (.ohMyPi,
              "╭─── ✎ Write: 🗒 test.txt · 1 line ─────╮\n│   1 hello                         ╯\n[↑ ↓ to navigate, ⏎ to select, ⎋ to deny]",
              "", .blocked),
-            (.ohMyPi, " π · ◉ glm-5.2 · 🗑 /tmp ↳ codesh-pr · ⑂ fix/1x-icon-import", "", .idle),
+            (.ohMyPi, " π · ◉ glm-5.2 · 🗑 /tmp ↳ tab-pr · ⑂ fix/1x-icon-import", "", .idle),
         ]
         for (provider, screen, title, expected) in fixtures {
             XCTAssertEqual(classify(provider, screen, title: title)?.state, expected, "\(provider): \(screen) / \(title)")

@@ -168,7 +168,7 @@ final class ServerParityEndToEndTests: XCTestCase {
             let result = try run(name, ["--build-info"], env: env)
             XCTAssertEqual(result.status, 0, result.text)
             XCTAssertTrue(result.stderr.isEmpty, result.text)
-            XCTAssertFalse(result.stdout.contains(10), "Codesh prints one JSON value without a newline")
+            XCTAssertFalse(result.stdout.contains(10), "prints one JSON value without a newline")
             let object = try XCTUnwrap(try JSONSerialization.jsonObject(with: result.stdout) as? [String: Any])
             XCTAssertEqual(Set(object.keys), ["version", "compatibility", "protocol"])
             XCTAssertEqual(object["compatibility"] as? Int, 21)

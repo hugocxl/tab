@@ -4,7 +4,7 @@ import TabCore
 import TabProtocol
 @testable import TabApp
 
-/// The Files panel's tree, ported from Codesh's `files_panel` tests.
+/// The Files panel's tree.
 final class PanelsFilesTreeTests: XCTestCase {
     private func names(_ tree: FilesTree) -> [String] { tree.visible().map(\.node.name) }
 
@@ -208,8 +208,7 @@ final class PanelsFilesControllerTests: XCTestCase {
     }
 }
 
-/// The Source Control panel's grouping and commit rules, ported from
-/// Codesh's `git_panel` tests.
+/// The Source Control panel's grouping and commit rules.
 final class PanelsSourceControlTests: XCTestCase {
     private func status() -> GitStatus {
         let files: [(String, Character, Character)] = [

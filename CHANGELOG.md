@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.24.2 - 2026-11-01
+
+### Changed
+
+- The readme, license and documentation describe Tab on its own.
+
 ## 0.24.1 - 2026-11-01
 
 ### Fixed
@@ -425,7 +431,7 @@ Changelog.
 
 ### Added
 
-- First release of Tab, the native macOS rewrite of Codesh: projects and
+- First release of Tab, a native macOS terminal workspace: projects and
   worktrees in a sidebar, terminal tabs and splits, a command palette, the
   Files and Source Control panels, an editor and diff view, a built-in
   browser, agent sessions, remote servers, mobile access, voice dictation,

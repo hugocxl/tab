@@ -223,7 +223,7 @@ final class ValidationTests: XCTestCase {
             invite.link + "&x=1",
             invite.link + "&p=7419",
             invite.link.replacingOccurrences(of: "h=mac.local", with: "h=mac.local:22"),
-            "codesh://pair?v=1",
+            "other://pair?v=1",
         ] {
             XCTAssertThrowsError(try PairingInvite(link: bad), bad)
         }
