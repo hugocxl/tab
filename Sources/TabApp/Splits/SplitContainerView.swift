@@ -194,6 +194,16 @@ final class SplitContainerView: ThemedView {
     /// A Command-click on a pane may start dragging it to another place.
     /// Returns whether the click was taken; a click that never moves goes
     /// on to the pane as a Command-click.
+    /// A click anywhere in a pane makes it the active one, whatever its kind.
+    func activatePane(for event: NSEvent) {
+        guard let tab, let window, event.window === window else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        let pane = tab.zoomed ?? SplitGeometry.frames(tab.layout, in: content, scale: scale)
+            .first(where: { $0.1.contains(point) })?.0
+        guard let pane, cards[pane]?.frame.contains(point) == true else { return }
+        model.activatePane(pane)
+    }
+
     func handleCommandMouseDown(_ event: NSEvent) -> Bool {
         guard event.modifierFlags.contains(.command), let tab, tab.zoomed == nil, tab.panes.count > 1,
               let window, event.window === window else { return false }

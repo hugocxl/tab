@@ -3,6 +3,22 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.21.0 - 2026-11-01
+
+### Changed
+
+- Pane headers show a spinner while an agent works and a dot while it waits
+  for you, for agent tabs and agents in a terminal alike.
+- Agent tabs show Claude Code's or Codex's logo in their header, as a terminal
+  running the same agent does.
+
+### Fixed
+
+- Clicking inside an agent, editor or browser pane makes it the focused pane
+  and clears its finished-agent dot.
+- Agent tabs take their conversation's title in the tab, window title, sidebar
+  filter and Command Palette instead of staying "Agent".
+
 ## 0.20.0 - 2026-11-01
 
 ### Added

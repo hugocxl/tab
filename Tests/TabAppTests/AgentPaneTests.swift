@@ -121,6 +121,21 @@ final class AgentPaneTests: XCTestCase {
         XCTFail("Agent pane did not settle")
     }
 
+    func testConversationTitleReachesThePaneTitleLikeATerminalsDoes() async throws {
+        let backend = Backend()
+        let pane = backend.controller()
+        defer { pane.dispose() }
+        var titles: [String] = []
+        pane.onTitleChange = { titles.append($0) }
+        pane.refresh()
+        try await wait { pane.snapshot != nil }
+        XCTAssertEqual(titles.last, "Agent")
+        XCTAssertNotNil(pane.icon)
+        pane.surface.composer.string = "Fix the sidebar spinner\nand its tests"
+        pane.send()
+        try await wait { titles.last == "Fix the sidebar spinner" }
+    }
+
     func testFailedSendRetainsDraftAndRetrySendsExactlyOnceWithDefaultModel() async throws {
         let backend = Backend()
         let pane = backend.controller()

@@ -15,6 +15,13 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         snapshot?.items.first(where: { $0.kind == .user })?.text
             .split(whereSeparator: \.isNewline).first.map { String($0.prefix(160)) } ?? "Agent"
     }
+    /// The provider's logo, as a terminal running the same agent shows it.
+    var icon: NSImage? {
+        AgentLogo.image(for: selection.provider == .claude ? .claude : .codex, lightBackground: AppTheme.shared.palette.isLight)
+    }
+    /// Keeps the pane's saved title in step with the conversation, for the
+    /// tab title, sidebar filter and palette.
+    var onTitleChange: ((String) -> Void)?
     private var initialPreferences: AgentComposerPreferences?
     private var savePreferences: ((AgentComposerPreferences?) -> Void)?
     private func persistSelection(access: AgentAccessMode? = nil) {
@@ -109,6 +116,10 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         }
         let owningProject: () -> ProjectId? = { [weak self, weak model] in
             self?.authoritativeProject ?? route.project ?? model?.state.paneProject(pane)
+        }
+        onTitleChange = { [weak model] title in
+            guard let model, let current = model.state.pane(pane), current.title != title else { return }
+            model.edit { try $0.setPaneTitle(pane, title) }
         }
         onNewConversation = { [weak model] in
             guard let model, let project = owningProject() else { return }
@@ -734,6 +745,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         updateControls()
         if stopRequested && (result.status == .working || result.status == .waiting) { stop() }
         titleDidChange?()
+        onTitleChange?(title)
     }
 
     private func showError(_ error: Error) {

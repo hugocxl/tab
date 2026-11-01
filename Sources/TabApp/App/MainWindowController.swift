@@ -63,6 +63,10 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, A
             guard let self, !self.palette.isOpen else { return false }
             return self.workspace.splits.handleCommandMouseDown(event)
         }
+        keys.paneMouseDown = { [weak self] event in
+            guard let self, !self.palette.isOpen, self.window?.attachedSheet == nil else { return }
+            self.workspace.splits.activatePane(for: event)
+        }
         keys.paletteKeyDown = { [weak self] event in
             guard let self, self.palette.isOpen else { return nil }
             return self.palette.handleKey(event)

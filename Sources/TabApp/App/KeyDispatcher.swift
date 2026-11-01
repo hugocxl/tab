@@ -57,6 +57,8 @@ final class KeyDispatcher {
     weak var window: NSWindow?
     /// Command-clicks may drag panes.
     var commandMouseDown: ((NSEvent) -> Bool)?
+    /// Every other click, seen before the view under it handles it.
+    var paneMouseDown: ((NSEvent) -> Void)?
     private var mouseMonitor: Any?
     /// Routes palette keys before the pane and app shortcuts.
     var paletteKeyDown: ((NSEvent) -> Bool?)?
@@ -77,8 +79,12 @@ final class KeyDispatcher {
             return event
         }
         mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
-            guard let self, event.window === self.window, event.modifierFlags.contains(.command) else { return event }
+            guard let self, event.window === self.window else { return event }
             let box = EventBox(event)
+            guard event.modifierFlags.contains(.command) else {
+                MainActor.assumeIsolated { self.paneMouseDown?(box.event) }
+                return event
+            }
             return MainActor.assumeIsolated { self.commandMouseDown?(box.event) ?? false } ? nil : event
         }
     }

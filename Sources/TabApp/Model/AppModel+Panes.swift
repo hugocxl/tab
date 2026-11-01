@@ -173,6 +173,14 @@ extension AppModel {
         controller(for: pane)?.focusContent()
     }
 
+    /// Makes `pane` the active one when a click lands in it, leaving the
+    /// keyboard to whatever the click gives it, as a terminal gaining focus
+    /// does for itself.
+    public func activatePane(_ pane: PaneId) {
+        guard state.window.activePane != pane || state.currentProject.id != state.paneProject(pane) else { return }
+        edit { try $0.focusPane(pane) }
+    }
+
     /// Gives the keyboard to the active pane's content.
     public func focusActiveContent() {
         guard let pane = activePane else { return }
