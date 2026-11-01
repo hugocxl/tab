@@ -310,7 +310,16 @@ final class AgentSessions: @unchecked Sendable {
                     } catch {
                         self.queue.async {
                             if entry.generation == generation { entry.submitting = false }
-                            continuation.resume(throwing: error)
+                            try? FileManager.default.removeItem(at: attachmentRoot)
+                            // The turn ended while the follow-up was on its way; its idle
+                            // status is already applied, so the message starts a new turn.
+                            guard error is AgentTurnFinishedError, entry.generation == generation,
+                                  entry.snapshot.status != .working else {
+                                continuation.resume(throwing: error)
+                                return
+                            }
+                            do { try self.begin(request, continuation: continuation) }
+                            catch { continuation.resume(throwing: error) }
                         }
                     }
                 }

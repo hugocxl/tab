@@ -98,6 +98,29 @@ final class AgentSessionsTests: XCTestCase {
         XCTAssertEqual(read, next)
     }
 
+    func testFollowupArrivingAsTheTurnEndsStartsANewTurn() async throws {
+        let root = try root(), box = AgentRuntimeBox()
+        let sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, callback in
+            let runtime = FakeAgentRuntime(callback)
+            runtime.onSteer = {
+                callback(.status(.idle))
+                throw AgentTurnFinishedError()
+            }
+            box.install(runtime)
+            return runtime
+        })
+        defer { sessions.shutdown() }
+        let id = SessionId()
+        _ = try await sessions.handle(.create(session: id, project: ProjectId(), provider: .claude))
+        let first = try await sessions.handle(.send(session: id, text: "Start", model: nil))
+        XCTAssertEqual(first.status, .working)
+        let next = try await sessions.handle(.send(session: id, text: "Late follow-up", model: nil))
+        XCTAssertEqual(next.status, .working)
+        XCTAssertEqual(next.items.filter { $0.kind == .user }.map(\.text), ["Start", "Late follow-up"])
+        XCTAssertEqual(next.turns?.count, 2)
+        XCTAssertEqual(box.runtime?.models.count, 2)
+    }
+
     func testContextTelemetryPersistsAndModelChangesClearItWithoutChangingDefaultSelection() async throws {
         let root = try root(), box = AgentRuntimeBox()
         let sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, callback in

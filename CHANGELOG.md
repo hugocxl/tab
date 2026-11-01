@@ -3,6 +3,15 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.19.1 - 2026-11-01
+
+### Fixed
+
+- A Claude Code follow-up sent while a tool runs no longer leaves the chat
+  stuck on working.
+- A follow-up sent just as the response finishes starts a new response instead
+  of failing.
+
 ## 0.19.0 - 2026-11-01
 
 ### Changed

@@ -37,16 +37,19 @@ final class AgentRuntimeTests: XCTestCase {
         XCTAssertEqual((sent[6]["params"] as? [String: Any])?["model"] as? String, "later-page")
     }
 
-    func testClaudeAcceptsFollowupAndStaysWorkingUntilBothResults() async throws {
+    func testClaudeFollowupQueuedPastTheResultGetsItsOwnTurn() async throws {
         let recorder = AgentRuntimeRecorder()
         let idle = expectation(description: "both responses finish")
         recorder.observe = { if case .status(.idle) = $0 { idle.fulfill() } }
+        // Claude 2.1 answers a follow-up sent without a tool boundary after the
+        // current result, echoing it when that second turn starts.
         let fixture = try AgentRuntimeFixture("""
         take
         emit '{"type":"control_response","response":{"subtype":"success","request_id":"1","response":{}}}'
         take
         take
         emit '{"type":"result","subtype":"success","result":"First"}'
+        replay
         emit '{"type":"result","subtype":"success","result":"Second"}'
         hold
         """)
@@ -56,9 +59,43 @@ final class AgentRuntimeTests: XCTestCase {
         try await runtime.send(text: "Start", model: nil)
         try await runtime.steer(text: "Follow up", attachments: [])
         await fulfillment(of: [idle], timeout: 5)
+        XCTAssertEqual(recorder.statuses, [.working, .working, .idle])
+        let launch = try XCTUnwrap(fixture.launches().first)
+        XCTAssertTrue(launch.contains("--replay-user-messages"))
         let users = try fixture.messages().filter { $0["type"] as? String == "user" }
         XCTAssertEqual(users.count, 2)
         XCTAssertEqual((users[1]["message"] as? [String: Any])?["content"] as? String, "Follow up")
+        XCTAssertNotNil(users[1]["uuid"] as? String)
+    }
+
+    func testClaudeFollowupFoldedIntoTheRunningTurnFinishesWithItsSingleResult() async throws {
+        let recorder = AgentRuntimeRecorder()
+        let idle = expectation(description: "the folded turn finishes")
+        recorder.observe = { if case .status(.idle) = $0 { idle.fulfill() } }
+        // A follow-up sent during a tool call joins the current turn at the tool
+        // boundary: Claude echoes it there and emits a single result.
+        let fixture = try AgentRuntimeFixture("""
+        take
+        emit '{"type":"control_response","response":{"subtype":"success","request_id":"1","response":{}}}'
+        take
+        take
+        replay
+        emit '{"type":"result","subtype":"success","result":"Both"}'
+        hold
+        """)
+        defer { fixture.remove() }
+        let runtime = fixture.runtime(.claude, recorder: recorder)
+        defer { runtime.stop() }
+        try await runtime.send(text: "Start", model: nil)
+        try await runtime.steer(text: "Follow up", attachments: [])
+        await fulfillment(of: [idle], timeout: 5)
+        XCTAssertEqual(recorder.statuses, [.working, .idle])
+        do {
+            try await runtime.steer(text: "Too late", attachments: [])
+            XCTFail("A finished turn must not accept a follow-up")
+        } catch {
+            XCTAssertTrue(error is AgentTurnFinishedError)
+        }
     }
 
     func testCodexCompactUsesNativeAPIInsteadOfSendingSlashText() async throws {
@@ -637,6 +674,10 @@ struct AgentRuntimeFixture: Sendable {
         take() { IFS= read -r line || exit 0; printf '%s\\n' "$line" >> "$log"; }
         emit() { printf '%s\\n' "$1"; }
         hold() { while IFS= read -r line; do :; done; }
+        replay() {
+            uuid=$(printf '%s' "$line" | sed -n 's/.*"uuid":"\\([^"]*\\)".*/\\1/p')
+            printf '{"type":"user","isReplay":true,"uuid":"%s","message":{"role":"user","content":"echo"}}\\n' "$uuid"
+        }
         \(body)
         """
         try source.write(to: script, atomically: true, encoding: .utf8)

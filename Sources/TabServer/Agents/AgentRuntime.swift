@@ -14,6 +14,11 @@ internal enum AgentRuntimeEvent: Sendable {
     case failure(String)
 }
 
+/// A follow-up arrived after the provider finished its turn; it needs a turn of its own.
+internal struct AgentTurnFinishedError: LocalizedError {
+    var errorDescription: String? { "The response has finished. Send the message again to start a follow-up." }
+}
+
 internal struct AgentRuntimeError: LocalizedError {
     var message: String
     init(_ message: String) { self.message = message }
@@ -38,7 +43,10 @@ internal final class AgentRuntime: @unchecked Sendable {
     private var closed = false
     private var failed = false
     private var busy = false
-    private var queuedClaudeInputs = 0
+    /// Follow-ups written to Claude that it has not echoed back yet. Claude folds a
+    /// follow-up into the running turn at a tool boundary, or else answers it in
+    /// its own turn after the current result; only the echo tells which.
+    private var unconsumedClaudeInputs: Set<String> = []
     private var ready = false
     private var sequence = 0
     private var pending: [String: (Result<[String: Any], Error>) -> Void] = [:]
@@ -149,14 +157,17 @@ internal final class AgentRuntime: @unchecked Sendable {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             queue.async {
                 do {
-                    guard self.busy, self.ready, !self.closed, !self.failed else {
-                        throw AgentRuntimeError("The response has finished. Send the message again to start a follow-up.")
+                    guard !self.closed, !self.failed else {
+                        throw AgentRuntimeError("Agent is closed or failed; open a new Agent Tab to resume.")
                     }
+                    guard self.busy, self.ready else { throw AgentTurnFinishedError() }
                     if self.provider == .claude {
+                        let input = UUID().uuidString.lowercased()
                         try self.write(["type": "user", "message": ["role": "user",
                             "content": AgentAttachments.claudeContent(text: text, attachments: attachments)],
-                            "parent_tool_use_id": NSNull(), "session_id": self.claude.sessionID ?? self.resumeSession ?? ""])
-                        self.queuedClaudeInputs += 1
+                            "parent_tool_use_id": NSNull(), "session_id": self.claude.sessionID ?? self.resumeSession ?? "",
+                            "uuid": input])
+                        self.unconsumedClaudeInputs.insert(input)
                         continuation.resume()
                     } else {
                         guard let thread = self.threadID, let turn = self.turnID else {
@@ -194,7 +205,7 @@ internal final class AgentRuntime: @unchecked Sendable {
         environment.removeValue(forKey: "CLAUDECODE")
         var arguments = provider == .claude
             ? ["--print", "--verbose", "--input-format", "stream-json", "--output-format", "stream-json",
-               "--include-partial-messages", "--permission-prompt-tool", "stdio", "--permission-mode", "default"]
+               "--include-partial-messages", "--replay-user-messages", "--permission-prompt-tool", "stdio", "--permission-mode", "default"]
             : ["app-server"]
         if provider == .claude {
             if let resumeSession { arguments += ["--resume", resumeSession] }
@@ -443,13 +454,13 @@ internal final class AgentRuntime: @unchecked Sendable {
         try await perform {
             guard self.busy else { return }
             if self.provider == .claude {
-                if self.queuedClaudeInputs > 0 {
+                if !self.unconsumedClaudeInputs.isEmpty {
                     self.resumeSession = self.claude.sessionID ?? self.resumeSession
                     self.processGeneration = UUID()
                     self.process?.stop()
                     self.process = nil
                     self.ready = false
-                    self.queuedClaudeInputs = 0
+                    self.unconsumedClaudeInputs.removeAll()
                     self.resolvePending(AgentRuntimeError("Interrupted"))
                     self.completeTurn()
                     return
@@ -567,6 +578,9 @@ internal final class AgentRuntime: @unchecked Sendable {
             }
             return
         }
+        if type == "user", message["isReplay"] as? Bool == true, let input = message["uuid"] as? String {
+            unconsumedClaudeInputs.remove(input.lowercased())
+        }
         claude.receive(message, source: source)
         if type == "result" {
             if message["is_error"] as? Bool == true {
@@ -622,8 +636,8 @@ internal final class AgentRuntime: @unchecked Sendable {
     }
 
     private func completeTurn() {
-        if provider == .claude, queuedClaudeInputs > 0 {
-            queuedClaudeInputs -= 1
+        if provider == .claude, !unconsumedClaudeInputs.isEmpty {
+            // Claude answers the remaining follow-ups in a turn of their own.
             claude.beginTurn()
             finishApprovals()
             onEvent(.status(.working))
