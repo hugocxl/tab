@@ -542,6 +542,21 @@ final class AppStateTests: XCTestCase {
         XCTAssertNil(state.serverIdentity(server))
     }
 
+    func testRemoteHomeTerminalKeepsTheSidebarFilter() throws {
+        var state = try AppState.bootstrap()
+        let local = try state.addProject(server: .local, directory: currentDirectory)
+        let workspace = try state.createWorkspace("Work")
+        try state.setWorkspaceMember(workspace, project: local, member: true)
+        try state.selectWorkspace(workspace)
+        let home = ProjectId()
+        try state.applyCatalog(ServerId(), remoteCatalog(home: home, identity: ServerId(), projects: []))
+        try state.openTerminalTab(home)
+        state.revealCurrentProject()
+        XCTAssertEqual(state.window.currentProject, home)
+        XCTAssertEqual(state.window.workspace, workspace)
+        XCTAssertFalse(state.remoteServersSelected)
+    }
+
     func testEqualSessionIdsOnTwoServersNeverMix() throws {
         var state = try AppState.bootstrap()
         let server = ServerId()

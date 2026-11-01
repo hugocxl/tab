@@ -417,16 +417,18 @@ extension AppState {
         window.remoteServers = false
     }
 
-    /// Keeps the current project listed by switching to Remote Servers for
-    /// a remote server's Home, otherwise to a workspace that contains it, or
-    /// to all projects.
+    /// Whether the sidebar shows `project`'s tabs: every Home's tabs are
+    /// listed under their host whatever the workspace, other projects only
+    /// when listed.
+    public func showsTabs(of project: Project) -> Bool {
+        project.home || isListed(project)
+    }
+
+    /// Keeps the current project shown by switching to a workspace that
+    /// contains it, or to all projects.
     public mutating func revealCurrentProject() {
         let current = currentProject
-        guard !isListed(current) else { return }
-        if current.isRemoteHome {
-            selectRemoteServers()
-            return
-        }
+        guard !showsTabs(of: current) else { return }
         let root = current.parentId ?? current.id
         window.remoteServers = false
         window.workspace = workspaces.first { $0.projects.contains(root) }?.id

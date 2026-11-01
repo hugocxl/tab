@@ -112,7 +112,7 @@ extension AppModel {
     public func selectWorkspace(_ id: WorkspaceId?) {
         edit { state in
             try state.selectWorkspace(id)
-            if !state.isListed(state.currentProject) { try state.selectProject(state.home.id) }
+            if !state.showsTabs(of: state.currentProject) { try state.selectProject(state.home.id) }
         }
     }
 

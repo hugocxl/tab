@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.24.3 - 2026-11-01
+
+### Fixed
+
+- A new terminal on a remote server's Home opens under that server in the
+  sidebar instead of switching the sidebar to Remote Servers.
+
 ## 0.24.2 - 2026-11-01
 
 ### Changed
