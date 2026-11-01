@@ -171,6 +171,9 @@ The complete request list to support, grouped (names are the Swift cases):
   segmented controls, text and search fields and spinners subclass their
   AppKit controls (`NSButton`, `NSSwitch`, `NSPopUpButton`, …) and only add
   closures. They follow the window's appearance, which tracks the theme.
+  Glass surfaces are a `GlassView` behind the host's content: Liquid Glass
+  on macOS 26 and later, a frosted `NSVisualEffectView` before, configured
+  by a named `GlassView.Style` such as `.card` for the selected sidebar card.
   Settings pages describe rows as `SettingControl` data rendered by a SwiftUI
   grouped `Form`. The Changelog page is the exception: it renders the
   `CHANGELOG.md` that `scripts/bundle.sh` copies into the app's resources.

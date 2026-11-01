@@ -103,6 +103,7 @@ final class SidebarCardView: HoverView {
     private let primaryBadge = PrimaryBadge()
     private let prLabel = makeLabel("", font: AppFont.footnote)
     private let dot = ActivityGlyph()
+    private let glass = GlassView(style: .card)
 
     /// 1pt border, 6pt padding, the 18pt headline, a 3pt gap and the 13pt
     /// second line, as Codesh lays the card out.
@@ -151,6 +152,7 @@ final class SidebarCardView: HoverView {
         layer?.cornerRadius = 8
         layer?.cornerCurve = .continuous
         layer?.borderWidth = 1
+        addSubview(glass)
         nameLabel.stringValue = data.name
         branchLabel.stringValue = data.branch ?? ""
         prLabel.stringValue = data.pullRequest.map { "#\($0)" } ?? ""
@@ -184,6 +186,7 @@ final class SidebarCardView: HoverView {
     override var mouseDownCanMoveWindow: Bool { false }
 
     override func themeDidChange() {
+        glass.appearance = theme.nsAppearance
         switch data.headline {
         case .agent(_, nil), .empty: headline.textColor = data.headline == .empty ? theme.fgDim : theme.fgMuted
         case .shell: headline.textColor = theme.fgDim
@@ -206,15 +209,17 @@ final class SidebarCardView: HoverView {
     override var wantsUpdateLayer: Bool { true }
 
     override func updateLayer() {
-        let background: NSColor = data.selected ? theme.surface : (isHovered && !data.unavailable ? theme.hover : .clear)
-        layer?.backgroundColor = background.cgColor
-        layer?.borderColor = (data.selected ? theme.cardBorder : .clear).cgColor
+        glass.isHidden = !data.selected
+        let hovered = !data.selected && isHovered && !data.unavailable
+        layer?.backgroundColor = (data.selected ? theme.surface : hovered ? theme.hover : .clear).cgColor
+        layer?.borderColor = (data.selected ? theme.fg(alpha: 0.08) : .clear).cgColor
     }
 
     override func hoverDidChange() { needsDisplay = true }
 
     override func layout() {
         super.layout()
+        glass.frame = bounds
         let inset = Metrics.border + 10
         let top = Metrics.border + 6
         let left = inset

@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.16.0 - 2026-11-01
+
+### Changed
+
+- The selected sidebar card now has a Liquid Glass finish on macOS 26, with
+  a frosted look on earlier versions.
+
 ## 0.15.0 - 2026-11-01
 
 ### Changed

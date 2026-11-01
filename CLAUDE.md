@@ -88,6 +88,10 @@ count and maintenance status.
 - Persisted formats are JSON through `Codable`. Decoders must tolerate unknown
   keys and missing optional keys so settings and state files only grow.
 - Follow existing patterns. Fix root causes, not symptoms.
+- Glass surfaces use `GlassView` (`Sources/TabApp/Components/GlassView.swift`):
+  Liquid Glass on macOS 26, frosted material before. Add a `Style` preset
+  for a new use instead of creating `NSGlassEffectView` or
+  `NSVisualEffectView` directly.
 
 ## Testing
 
