@@ -197,7 +197,7 @@ final class SidebarCardView: HoverView {
         case .attention: dot.style = .dot(theme.accent, diameter: 8)
         case .error: dot.style = .dot(theme.danger, diameter: 8)
         case .paused: dot.style = .dot(theme.warning, diameter: 8)
-        case .working: dot.style = .spinner(theme.accent)
+        case .working: dot.style = .dots(theme.accent)
         case .idle: dot.style = .dot(theme.fgDim, diameter: 8)
         }
         needsDisplay = true

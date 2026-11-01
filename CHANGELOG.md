@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.15.0 - 2026-11-01
+
+### Changed
+
+- Working sessions in the sidebar now show an animated six-dot indicator.
+
 ## 0.14.1 - 2026-10-31
 
 ### Fixed

@@ -9,6 +9,7 @@ final class ActivityGlyph: NSView {
         case none
         case dot(NSColor, diameter: CGFloat)
         case spinner(NSColor)
+        case dots(NSColor)
         case ring(fraction: CGFloat, NSColor)
     }
 
@@ -18,6 +19,7 @@ final class ActivityGlyph: NSView {
 
     private let shape = CAShapeLayer()
     private let track = CAShapeLayer()
+    private var dots: [CAShapeLayer] = []
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -54,6 +56,8 @@ final class ActivityGlyph: NSView {
         track.frame = bounds
         shape.removeAnimation(forKey: "spin")
         track.path = nil
+        dots.forEach { $0.removeFromSuperlayer() }
+        dots.removeAll()
         switch style {
         case .none:
             shape.path = nil
@@ -78,6 +82,27 @@ final class ActivityGlyph: NSView {
             spin.repeatCount = .infinity
             spin.isRemovedOnCompletion = false
             shape.add(spin, forKey: "spin")
+        case .dots(let color):
+            shape.path = nil
+            let diameter: CGFloat = 2.5
+            for index in 0..<6 {
+                let dot = CAShapeLayer()
+                let x = center.x + (CGFloat(index % 2) - 0.5) * 4
+                let y = center.y + (CGFloat(index / 2) - 1) * 4
+                dot.path = CGPath(ellipseIn: CGRect(x: x - diameter / 2, y: y - diameter / 2, width: diameter, height: diameter), transform: nil)
+                dot.fillColor = color.cgColor
+                dot.opacity = 0.35
+                layer?.addSublayer(dot)
+                dots.append(dot)
+                if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+                    let pulse = CAKeyframeAnimation(keyPath: "opacity")
+                    pulse.values = [0.35, 1, 0.35]
+                    pulse.duration = 1
+                    pulse.beginTime = CACurrentMediaTime() + Double(index) / 6
+                    pulse.repeatCount = .infinity
+                    dot.add(pulse, forKey: "pulse")
+                }
+            }
         case let .ring(fraction, color):
             let radius = side / 2 - 1.5
             let rect = CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)
