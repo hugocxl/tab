@@ -3,8 +3,8 @@
 Tab is a macOS terminal workspace for running agents and shells: projects and
 Git worktrees, each with one workspace of split panes (terminals, editors,
 diffs, browsers, agent chats), with terminals that keep running in a background server after
-the app quits. Its application and server are a Swift rewrite of Codesh, with
-the active bundled source web renderer for agent conversation bodies. The product behavior is the
+the app quits. Its application and server are a Swift rewrite of Codesh, and
+agent conversations are a native AppKit transcript. The product behavior is the
 one documented in `~/repos/codesh/docs` (product, features, user guide); this
 document is how Tab is built.
 
@@ -130,7 +130,7 @@ The complete request list to support, grouped (names are the Swift cases):
 - Agent chats are separate from terminal detection and PTYs. `AgentSessions`
   owns their normalized transcripts and `AgentRuntime` drives installed Claude
   Code and Codex processes over JSONL pipes. Claude uses stream-json control
-  messages; Codex uses `app-server` threads and turns. The adapters follow source
+  messages; Codex uses `app-server` threads and turns. The adapters follow T3
   Code's provider behavior (see [Agent Tabs](AGENT_TABS.md) and the bundled
   third-party notice). Agent requests and coalesced revision notifications
   travel over the existing control channel. App disconnects do not end agents;
@@ -149,20 +149,13 @@ The complete request list to support, grouped (names are the Swift cases):
 
 ## Inside the app
 
-- Agent conversation bodies use the pinned upstream components in an isolated,
-  nonpersistent `WKWebView`. `vendor/ConversationRenderer` extracts the actual source
-  components and bundles their styles, syntax engines, math and lazy assets
-  locally. Swift owns the composer, pane, providers, persistence and filesystem
-  services; a scoped snapshot/action bridge adapts those services without a source
-  server or authentication. Renderer failure restores the native transcript.
-  Normal text and code use native macOS font stacks; only specialized KaTeX
-  WOFF2 equation fonts are bundled. Existing `AppTheme` is the color authority:
-  semantic colors, `SyntaxColors` and `TerminalPalette` flow through snapshots,
-  including live palette changes within the same light/dark mode. There is no
-  separate conversation theme catalog. The native fallback reuses these colors.
-  See [the port acceptance ledger](CONVERSATION_RENDERER.md) for source/native
-  evidence and service boundaries. The final unfiltered `scripts/validate.sh`
-  gate passed on October 31, 2026, including live palette propagation tests.
+- Agent conversation bodies are a native AppKit transcript
+  (`AgentTranscriptDocument`): rows are mounted only around the viewport, and
+  Markdown, code, tables, tool details and media are AppKit views. Privileged
+  actions (files, clipboard, approvals, attachments, previews, citations,
+  project reads) go through the typed `AgentConversationActions`,
+  which checks each target against the retained snapshot and the session's own
+  project. `AppTheme` is the only color authority for the transcript.
 - AppKit for the window, sidebar, split container, pane cards, terminal view,
   panels, palette and menus. SwiftUI (in `NSHostingView`) is allowed for the
   Settings window forms and for static dialogs. Never put SwiftUI on the
@@ -196,7 +189,7 @@ The complete request list to support, grouped (names are the Swift cases):
   the app's own history. `tab browser` reaches the app over `app.sock`.
 - Agent tool snapshots retain optional inspector identity separately from semantic
   category, plus whether an output string encodes a structured provider result.
-  Claude uses the source renderer’s normalized native-tool whitelist; semantic aliases and unknown
+  Claude uses T3 Code's normalized native-tool whitelist; semantic aliases and unknown
   MCP names remain generic inspectors. Codex selects its inspector from native item type,
   retains namespace-qualified tool names and contentItems, and preserves MCP structured
   output precedence plus error/result context without flattening mixed content blocks.
@@ -224,13 +217,12 @@ The complete request list to support, grouped (names are the Swift cases):
   payloads; failed path matching falls back to the sanitized projection. Structured scalar results serialize as JSON
   fragments instead of disappearing through object/array-only serialization.
   Explicit file-search records carry a pattern and typed file/position/preview
-  results; provider Grep and Glob calls remain generic inspectors, matching the source renderer.
+  results; provider Grep and Glob calls remain generic inspectors, matching T3 Code.
 - Agent panes keep a native fixed bottom composer, model, effort and access
-  pickers. Their conversation body uses the bundled source renderer described
-  above, with an AppKit Markdown transcript as its failure fallback. Both use
-  the same card background as terminal panes. Fallback response blocks retain
-  selectable text, highlighted code, copy actions and project-aware file navigation.
-  In the native fallback, transcript geometry is separate from row views: only the viewport and an
+  pickers above the native transcript described above, on the same card
+  background as terminal panes. Response blocks keep selectable text,
+  highlighted code, copy actions and project-aware file navigation.
+  Transcript geometry is separate from row views: only the viewport and an
   overscan buffer are mounted, with a bounded detached-view cache. Cached heights
   avoid remeasuring unchanged history during streaming. Lightweight disclosure and
   code-wrap state survives view eviction; scrolling is anchored by row identity.
@@ -282,7 +274,7 @@ builds), URL scheme `tab://`, environment prefix `TAB_`, executables `TabDesktop
 | D3 | JSON control messages, binary screen rows | JSON through Codable is native and additive; rows are the volume |
 | D4 | One merged frame in flight per session per client | A slow client never piles up |
 | D5 | AppKit + Core Text renderer, redraw on change only | Native, predictable, no GPU framework to debug first; Metal can come behind the same protocol |
-| D6 | No third-party Swift packages; pinned Tab conversation assets are bundled separately | Preserve native application services while using the actual source conversation renderer; asset and dependency licenses are recorded in its manifest |
+| D6 | No third-party Swift packages; the agent conversation is rendered natively in AppKit | Keep native application services and one dependency-free renderer for transcripts, Markdown and diagrams |
 | D7 | Config files are JSON | Codable is built in; TOML is not |
 | D8 | Only macOS, only Apple silicon | Removes every Linux and Intel branch |
 | D9 | The terminal UI (Ratatui) and the phone SDK are not ported | Neither is a native macOS app; the server keeps serving phones |

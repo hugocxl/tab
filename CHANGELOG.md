@@ -3,6 +3,49 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.17.0 - 2026-11-01
+
+### Changed
+
+- Agent conversations are now fully native: the bundled web renderer is gone
+  and messages, tools, code, tables, images and completed work draw directly
+  with AppKit, so the pane opens instantly, uses less memory and no longer runs
+  JavaScript.
+- The app bundle is about 28 MB smaller without the web renderer's scripts,
+  styles and fonts.
+
+### Added
+
+- Math in assistant messages is typeset natively: inline `$…$` and display
+  `$$…$$` equations, fractions, roots, sums and integrals, matrices, cases,
+  accents and the usual symbol sets, with Copy LaTeX on every equation.
+- Mermaid diagrams render natively: flowcharts, state, sequence and class
+  diagrams, pie charts, Gantt charts and XY charts, with a Diagram/Source
+  toggle, Copy and an Expand view that zooms and pans.
+- Code highlighting now covers more than 50 additional languages, including
+  Java, Kotlin, C#, PHP, Haskell, Elixir, Terraform, GraphQL, diffs and logs,
+  and recognizes the common Markdown fence names for each.
+- Find in conversation (Cmd+F) with a match counter, Cmd+G / Shift+Cmd+G
+  stepping and highlighted matches in messages, code, tables and plans.
+- Select text in an assistant reply to Cite it into the composer, copy it with
+  formatting, or copy its original Markdown; following a citation scrolls to
+  the quote and highlights it.
+- Proposed plans, todo lists, context compactions, errors and notices appear as
+  native cards; plans can be copied, downloaded or saved into the workspace.
+- Pull-request links show a native card with state, title and author, file
+  links show size and modification date on hover, and Codex artifact templates
+  offer a Use template button.
+- Published HTML and MCP app documents show a native card with an isolated
+  preview window, download and copy source.
+- Images, videos and audio linked from assistant replies render as native tiles
+  and collages with a zoomable gallery, and inline HTML such as `<br>`, `<kbd>`,
+  `<sub>`/`<sup>`, anchors and right-to-left spans renders safely.
+- Unclosed bold, italic, code and links no longer flash raw markers while a
+  reply streams.
+- File links offer Open in Editor, Open at Line, Preview, Reveal in Finder and
+  Copy Path from their context menu, and @-mentions of other conversations
+  render as chips that open that conversation.
+
 ## 0.16.0 - 2026-11-01
 
 ### Changed

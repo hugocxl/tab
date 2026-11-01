@@ -19,18 +19,31 @@ enum AgentMarkdown {
         case details(String, String, Bool)
         case divider
         case table([String], [[String]], [TableAlignment])
+        /// A display equation: `$$…$$`, `\[…\]` or a closed `math`, `latex` or `katex` fence.
+        case math(String)
+        /// A closed `mermaid` fence's source.
+        case diagram(String)
+
+        /// Code fences and diagrams share the compatibility renderer's code surface.
+        var isCodeLike: Bool {
+            switch self {
+            case .code, .diagram: return true
+            default: return false
+            }
+        }
     }
 
     static func blocks(_ source: String) -> [Block] {
         AgentResponseParser.parse(source)
     }
-
     static func render(_ source: String, theme: AppTheme) -> NSAttributedString {
         let blocks = blocks(source)
-        return render(AgentMarkdownFootnotes.prepare(blocks, parseRawHTML: true), theme: theme, references: AgentMarkdownReferences.collect(blocks, parseRawHTML: true))
+        return render(AgentMarkdownFootnotes.prepare(blocks, parseRawHTML: true), theme: theme, references: AgentMarkdownReferences.collect(blocks, parseRawHTML: true), rawHTML: true)
     }
 
-    static func render(_ blocks: [Block], theme: AppTheme, fileLinks: Bool = false, references: [String: String] = [:], compact: Bool = false, lineBreaks: Bool = false, listIndents suppliedListIndents: [Int: CGFloat] = [:]) -> NSAttributedString {
+    /// Renders blocks as one attributed string. `rawHTML` enables the sanitized inline-HTML subset
+    /// of assistant Markdown; user text keeps its tags literal.
+    static func render(_ blocks: [Block], theme: AppTheme, fileLinks: Bool = false, references: [String: String] = [:], compact: Bool = false, lineBreaks: Bool = false, listIndents suppliedListIndents: [Int: CGFloat] = [:], rawHTML: Bool = false) -> NSAttributedString {
         let colors = AgentMarkdownPalette(theme: theme)
         let output = NSMutableAttributedString(string: "")
         let listIndents = AgentListLayout.indents(blocks, font: AppFont.system(compact ? 12 : 14)).merging(suppliedListIndents) { _, supplied in supplied }
@@ -44,22 +57,22 @@ enum AgentMarkdown {
             let text: NSAttributedString
             switch block {
             case .reference, .footnoteDefinition: continue
-            case .nested(_, let blocks): text = render(blocks, theme: theme, fileLinks: fileLinks, references: references, lineBreaks: lineBreaks)
+            case .nested(_, let blocks): text = render(blocks, theme: theme, fileLinks: fileLinks, references: references, lineBreaks: lineBreaks, rawHTML: rawHTML)
             case .footnotes(let notes):
                 let content = NSMutableAttributedString(string: "")
                 for note in notes {
                     content.append(NSAttributedString(string: "\(note.number). ", attributes: [.font: AppFont.system(12), .foregroundColor: colors.muted]))
-                    content.append(render(note.blocks, theme: theme, fileLinks: fileLinks, references: references, compact: true, lineBreaks: lineBreaks))
+                    content.append(render(note.blocks, theme: theme, fileLinks: fileLinks, references: references, compact: true, lineBreaks: lineBreaks, rawHTML: rawHTML))
                 }
                 text = content
             case .paragraph(let content):
-                text = inline(content, theme: theme, font: AppFont.system(compact ? 12 : 14), color: compact ? colors.muted : nil, fileLinks: fileLinks, references: references, lineBreaks: lineBreaks)
+                text = inline(content, theme: theme, font: AppFont.system(compact ? 12 : 14), color: compact ? colors.muted : nil, fileLinks: fileLinks, references: references, lineBreaks: lineBreaks, rawHTML: rawHTML)
             case .heading(let level, let content):
                 let size: CGFloat = level == 1 ? 20 : level == 2 ? 18 : level == 3 ? 16 : 14
                 paragraph.paragraphSpacingBefore = blockIndex == 0 ? 0 : 20
                 paragraph.minimumLineHeight = AgentMarkdownLayout.units(size * 1.3)
                 paragraph.maximumLineHeight = AgentMarkdownLayout.units(size * 1.3)
-                text = inline(content, theme: theme, font: AppFont.system(size, weight: .semibold), color: level == 6 ? colors.muted : colors.heading, fileLinks: fileLinks, references: references, lineBreaks: lineBreaks)
+                text = inline(content, theme: theme, font: AppFont.system(size, weight: .semibold), color: level == 6 ? colors.muted : colors.heading, fileLinks: fileLinks, references: references, lineBreaks: lineBreaks, rawHTML: rawHTML)
             case .list(let marker, let content, let depth, let structure):
                 paragraph.headIndent = listIndents[blockIndex] ?? CGFloat(depth + 1) * 20
                 let markerFont = marker.hasSuffix(".") ? NSFont.monospacedDigitSystemFont(ofSize: compact ? 12 : 14, weight: .regular) : AppFont.system(compact ? 12 : 14)
@@ -83,9 +96,20 @@ enum AgentMarkdown {
                     // must not enlarge the line through a fallback symbol font.
                     item.addAttributes([.agentTaskCheckbox: state, .foregroundColor: NSColor.clear, .font: AppFont.system(1), .agentMarkdownLineFont: markerFont], range: NSRange(location: 0, length: 1))
                 }
-                item.append(inline(content, theme: theme, font: AppFont.system(compact ? 12 : 14), color: compact ? colors.muted : nil, fileLinks: fileLinks, references: references, lineBreaks: lineBreaks))
+                item.append(inline(content, theme: theme, font: AppFont.system(compact ? 12 : 14), color: compact ? colors.muted : nil, fileLinks: fileLinks, references: references, lineBreaks: lineBreaks, rawHTML: rawHTML))
                 text = item
-            case .code(let language, let content, _):
+            case .math(let latex):
+                paragraph.alignment = .center
+                paragraph.minimumLineHeight = 0
+                paragraph.maximumLineHeight = 0
+                let math = NSMutableAttributedString(string: "\u{E000}", attributes: [.font: AppFont.system(compact ? 12 : 14), .foregroundColor: colors.body])
+                AgentMarkdownMath.substitute(["\u{E000}": AgentMarkdownMath.Span(latex: latex, display: true)], in: math, theme: theme)
+                text = math
+            case .code, .diagram:
+                let language: String, content: String
+                if case .code(let info, let body, _) = block { language = info; content = body }
+                else if case .diagram(let source) = block { language = "mermaid"; content = source }
+                else { continue }
                 paragraph.lineSpacing = 4
                 paragraph.paragraphSpacingBefore = 0
                 paragraph.paragraphSpacing = 0
@@ -103,7 +127,7 @@ enum AgentMarkdown {
             case .quote(let content):
                 paragraph.headIndent = 16
                 paragraph.firstLineHeadIndent = 16
-                let quote = NSMutableAttributedString(attributedString: render(AgentResponseParser.parse(content), theme: theme, fileLinks: fileLinks, references: references, lineBreaks: lineBreaks))
+                let quote = NSMutableAttributedString(attributedString: render(AgentResponseParser.parse(content, parseRawHTML: rawHTML), theme: theme, fileLinks: fileLinks, references: references, lineBreaks: lineBreaks, rawHTML: rawHTML))
                 if quote.length > 0 {
                     quote.addAttribute(.agentQuoteBorder, value: colors.quoteRule, range: NSRange(location: 0, length: quote.length))
                 }
@@ -112,12 +136,12 @@ enum AgentMarkdown {
                 paragraph.firstLineHeadIndent = CGFloat(depth) * 18
                 paragraph.headIndent = CGFloat(depth) * 18 + 20
                 let nested = NSMutableAttributedString(string: marker + "  ", attributes: [.font: AppFont.system(14), .foregroundColor: colors.muted])
-                nested.append(render(Self.blocks(source), theme: theme, fileLinks: fileLinks, references: references, lineBreaks: lineBreaks))
+                nested.append(render(AgentResponseParser.parse(source, parseRawHTML: rawHTML), theme: theme, fileLinks: fileLinks, references: references, lineBreaks: lineBreaks, rawHTML: rawHTML))
                 text = nested
             case .details(let summary, let source, _):
-                let nested = NSMutableAttributedString(attributedString: inline(summary, theme: theme, fileLinks: fileLinks, references: references, lineBreaks: lineBreaks))
+                let nested = NSMutableAttributedString(attributedString: inline(summary, theme: theme, fileLinks: fileLinks, references: references, lineBreaks: lineBreaks, rawHTML: rawHTML))
                 nested.append(NSAttributedString(string: "\n"))
-                nested.append(render(Self.blocks(source), theme: theme, fileLinks: fileLinks, references: references, lineBreaks: lineBreaks))
+                nested.append(render(AgentResponseParser.parse(source, parseRawHTML: rawHTML), theme: theme, fileLinks: fileLinks, references: references, lineBreaks: lineBreaks, rawHTML: rawHTML))
                 text = nested
             case .divider:
                 paragraph.paragraphSpacingBefore = 4
@@ -125,7 +149,7 @@ enum AgentMarkdown {
             case .table(let headers, let rows, _):
                 // Compatibility renderer: the rich response view uses a real native column grid.
                 let table = ([headers] + rows).map { $0.joined(separator: "\t") }.joined(separator: "\n")
-                text = inline(table, theme: theme, fileLinks: fileLinks, references: references, lineBreaks: lineBreaks)
+                text = inline(table, theme: theme, fileLinks: fileLinks, references: references, lineBreaks: lineBreaks, rawHTML: rawHTML)
             }
             let part = NSMutableAttributedString(attributedString: text)
             if case .heading = block, part.length > 0 {
@@ -142,7 +166,8 @@ enum AgentMarkdown {
             } else {
                 part.addAttribute(.paragraphStyle, value: paragraph, range: NSRange(location: 0, length: part.length))
             }
-            if case .code = block {
+            if rawHTML { AgentInlineHTML.applyBaseDirection(to: part) }
+            if block.isCodeLike {
                 let first = (part.string as NSString).paragraphRange(for: NSRange(location: 0, length: 0))
                 let firstStyle = paragraph.mutableCopy() as? NSMutableParagraphStyle ?? paragraph
                 firstStyle.paragraphSpacingBefore = 10
@@ -169,17 +194,36 @@ enum AgentMarkdown {
     }
 
     static func inline(_ text: String, theme: AppTheme, font: NSFont = AppFont.system(14), color: NSColor? = nil,
-                       fileLinks: Bool = false, references: [String: String] = [:], lineBreaks: Bool = false, normalizeWhitespace: Bool = true) -> NSAttributedString {
+                       fileLinks: Bool = false, references: [String: String] = [:], lineBreaks: Bool = false, normalizeWhitespace: Bool = true,
+                       rawHTML: Bool = false) -> NSAttributedString {
         let colors = AgentMarkdownPalette(theme: theme)
-        let text = AgentMarkdownSource.inlineSource(AgentMarkdownWhitespace.prepare(AgentMarkdownReferences.resolve(text, definitions: references)))
+        // Math is cut out first so references, escapes and emphasis never rewrite LaTeX.
+        let math = AgentMarkdownMath.extract(text)
+        // Assistant HTML becomes Markdown and placeholders before Foundation sees the source.
+        let html = rawHTML ? AgentInlineHTML.extract(math.text) : AgentInlineHTML.Extraction(text: math.text)
+        let text = AgentMarkdownSource.inlineSource(AgentMarkdownWhitespace.prepare(AgentMarkdownReferences.resolve(html.text, definitions: references)))
         var options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
         options.appliesSourcePositionAttributes = true
         let labels = AgentMarkdownSource.InlineLabels(text)
         guard let parsed = try? AttributedString(markdown: text, options: options) else {
-            return NSAttributedString(string: text, attributes: [.font: font, .foregroundColor: color ?? colors.body])
+            let plain = NSMutableAttributedString(string: text, attributes: [.font: font, .foregroundColor: color ?? colors.body])
+            AgentMarkdownMath.substitute(math.spans, in: plain, theme: theme)
+            AgentInlineHTML.apply(html.pairs, to: plain, theme: theme)
+            return plain
         }
         let result = NSMutableAttributedString(string: "")
+        var lastThreadChip: String?
         for (runIndex, run) in parsed.runs.enumerated() {
+            if let url = run.link, let thread = AgentThreadLink(url.absoluteString) {
+                // One chip per link, even when emphasis splits its label into several runs.
+                guard url.absoluteString != lastThreadChip else { continue }
+                lastThreadChip = url.absoluteString
+                let label = String(parsed[run.range].characters)
+                result.append(AgentThreadLink.chip(thread, title: thread.chipTitle(label: label, knownTitle: nil), font: font,
+                                                   color: colors.link, background: colors.link.withAlphaComponent(0.12), identity: "thread:\(runIndex)"))
+                continue
+            }
+            lastThreadChip = nil
             let intent = run.inlinePresentationIntent ?? []
             let inheritedWeight = (font.fontDescriptor.object(forKey: .traits) as? [NSFontDescriptor.TraitKey: Any])?[.weight] as? NSNumber
             var runFont = intent.contains(.code)
@@ -203,6 +247,8 @@ enum AgentMarkdown {
                 attributes[.agentInlineCodeIdentity] = String(runIndex)
             }
             if intent.contains(.strikethrough) { attributes[.strikethroughStyle] = NSUnderlineStyle.single.rawValue }
+            // Inline images keep their alternative text; assistant prose swaps it for a thumbnail.
+            if run.link == nil, let image = run.imageURL { attributes[.agentInlineMediaSource] = image.relativeString }
             let value = String(parsed[run.range].characters)
             let originalLabel = run.markdownSourcePosition.flatMap { labels.label(at: $0) } ?? value
             let protocolLabel = originalLabel.lowercased()
@@ -218,8 +264,9 @@ enum AgentMarkdown {
                 case .external(let url) where run.link != nil:
                     attributes[.link] = url
                     attributes[.foregroundColor] = colors.link
-                case .file where fileLinks:
-                    attributes[.link] = target.attributeURL
+                case .file(let path, let line) where fileLinks:
+                    let column = run.link.flatMap { AgentConversationFileTarget.parse($0.relativeString)?.column }
+                    attributes[.link] = AgentResponseLink.fileURL(path: path, line: line, column: column)
                     attributes[.foregroundColor] = colors.link
                 default: break
                 }
@@ -259,6 +306,8 @@ enum AgentMarkdown {
             }
         }
         if normalizeWhitespace { result.setAttributedString(AgentMarkdownWhitespace.collapse(result, lineBreaks: lineBreaks)) }
+        AgentMarkdownMath.substitute(math.spans, in: result, theme: theme)
+        AgentInlineHTML.apply(html.pairs, to: result, theme: theme)
         if let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) {
             detector.enumerateMatches(in: result.string, range: NSRange(location: 0, length: result.length)) { match, _, _ in
                 guard let match, let url = match.url, match.range.length > 0,
@@ -287,6 +336,10 @@ extension NSAttributedString.Key {
     static let agentMarkdownLineFont = NSAttributedString.Key("TabAgentMarkdownLineFont")
     static let agentTerminalBackground = NSAttributedString.Key("TabAgentTerminalBackground")
     static let agentInlineCodeBackground = NSAttributedString.Key("TabAgentInlineCodeBackground")
+    /// A layout-manager temporary attribute (an `NSColor`) that Find paints behind its
+    /// matches. It has its own key so that other temporary backgrounds, such as a followed
+    /// citation, never erase it or are erased by it.
+    static let agentFindHighlight = NSAttributedString.Key("TabFindHighlight")
 }
 
 /// Draw a single full-width surface around each fenced block, including wrapped lines.
@@ -496,8 +549,27 @@ private final class AgentTextLayoutManager: NSLayoutManager, NSLayoutManagerDele
                 color.setFill()
                 NSBezierPath(roundedRect: rect, xRadius: 8, yRadius: 8).fill()
             }
+            drawFindHighlights(in: characterRange(forGlyphRange: glyphsToShow, actualGlyphRange: nil), container: container, at: origin)
         }
         super.drawBackground(forGlyphRange: glyphsToShow, at: origin)
+    }
+
+    /// Find's matches, above block backgrounds and below text, selection and citations.
+    private func drawFindHighlights(in visible: NSRange, container: NSTextContainer, at origin: NSPoint) {
+        var location = visible.location
+        while location < NSMaxRange(visible) {
+            var effective = NSRange()
+            let color = temporaryAttribute(.agentFindHighlight, atCharacterIndex: location,
+                                           longestEffectiveRange: &effective, in: visible) as? NSColor
+            defer { location = max(location + 1, NSMaxRange(effective)) }
+            guard let color, effective.length > 0 else { continue }
+            color.setFill()
+            let glyphs = glyphRange(forCharacterRange: effective, actualCharacterRange: nil)
+            enumerateEnclosingRects(forGlyphRange: glyphs, withinSelectedGlyphRange: NSRange(location: NSNotFound, length: 0),
+                                    in: container) { rect, _ in
+                rect.offsetBy(dx: origin.x, dy: origin.y).fill()
+            }
+        }
     }
 }
 
@@ -532,6 +604,8 @@ private final class AgentTextContainer: NSTextContainer {
 @MainActor
 final class AgentRichTextView: NSTextView {
     private let ownedStorage: NSTextStorage?
+    /// Metadata tooltips over file links; nil unless a conversation supplies its services.
+    private(set) var fileLinkHover: AgentFileLinkHover?
 
     override init(frame frameRect: NSRect, textContainer container: NSTextContainer? = nil) {
         let resolved: NSTextContainer
@@ -562,6 +636,73 @@ final class AgentRichTextView: NSTextView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    /// The nearest enclosing view that offers transcript selection actions.
+    var textSelectionHost: AgentTextSelectionHost? {
+        var ancestor = superview
+        while let view = ancestor {
+            if let host = view as? AgentTextSelectionHost { return host }
+            ancestor = view.superview
+        }
+        return nil
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let host = textSelectionHost
+        host?.textSelectionWillBegin(in: self, extending: !event.modifierFlags.intersection([.shift, .command]).isEmpty)
+        // NSTextView tracks the drag until mouse-up before returning.
+        super.mouseDown(with: event)
+        host?.textSelectionDidEnd(in: self)
+    }
+
+    override func setSelectedRanges(_ ranges: [NSValue], affinity: NSSelectionAffinity, stillSelecting: Bool) {
+        super.setSelectedRanges(ranges, affinity: affinity, stillSelecting: stillSelecting)
+        guard !stillSelecting, selectedRange().length == 0 else { return }
+        textSelectionHost?.textSelectionDidCollapse(in: self)
+    }
+
+    override func resignFirstResponder() -> Bool {
+        guard super.resignFirstResponder() else { return false }
+        textSelectionHost?.textSelectionDidCollapse(in: self)
+        return true
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 53, textSelectionHost?.transcriptDidPressEscape() == true { return }
+        super.keyDown(with: event)
+    }
+
+    override func copy(_ sender: Any?) {
+        if textSelectionHost?.copyTextSelection(from: self) == true { return }
+        super.copy(sender)
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let menu = selectionMenu(super.menu(for: event))
+        let links = linkMenuItems(at: convert(event.locationInWindow, from: nil))
+        guard !links.isEmpty else { return menu }
+        // A right-clicked file or web link puts its own actions first.
+        let result = menu ?? NSMenu()
+        for (index, item) in links.enumerated() { result.insertItem(item, at: index) }
+        if result.items.count > links.count { result.insertItem(.separator(), at: links.count) }
+        return result
+    }
+
+    private func selectionMenu(_ menu: NSMenu?) -> NSMenu? {
+        guard let menu, let items = textSelectionHost?.textSelectionMenuItems(for: self), !items.isEmpty else { return menu }
+        // The transcript's Copy replaces the standard item; it adds HTML and a context fragment.
+        for item in menu.items where item.action == #selector(NSText.copy(_:)) { menu.removeItem(item) }
+        for (index, item) in items.enumerated() { menu.insertItem(item, at: index) }
+        menu.insertItem(.separator(), at: items.count)
+        return menu
+    }
+
+    /// The context-menu actions of the file or web link at `point`, when the conversation supplies them.
+    func linkMenuItems(at point: NSPoint) -> [NSMenuItem] {
+        guard let services = fileLinkHover?.services,
+              let target = AgentLinkMenu.Target(link: AgentLinkMenu.link(at: point, in: self)) else { return [] }
+        return AgentLinkMenu.menuItems(for: target, services: services)
+    }
+
     func setContent(_ content: NSAttributedString) {
         guard textStorage?.isEqual(to: content) != true else { return }
         let selection = selectedRanges
@@ -571,6 +712,25 @@ final class AgentRichTextView: NSTextView {
             let range = value.rangeValue
             return NSValue(range: NSRange(location: min(range.location, length), length: min(range.length, max(0, length - range.location))))
         }
+    }
+
+    /// Enables file-link metadata tooltips backed by `services`, or removes them.
+    func setFileLinkServices(_ services: AgentConversationLinkServices?, missingColor: NSColor) {
+        guard let services else {
+            fileLinkHover?.cancelRequests()
+            fileLinkHover?.uninstall()
+            fileLinkHover = nil
+            return
+        }
+        let hover = fileLinkHover ?? AgentFileLinkHover(text: self)
+        hover.services = services
+        hover.missingColor = missingColor
+        fileLinkHover = hover
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil { fileLinkHover?.cancelRequests() }
     }
 
     func height(for width: CGFloat) -> CGFloat {

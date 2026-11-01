@@ -7,13 +7,23 @@ import WebKit
 final class AgentConversationMediaWindow: NSWindowController, WKNavigationDelegate, WKUIDelegate, NSWindowDelegate {
     private let resource: AgentConversationPreviewResource
     let webView: WKWebView
+    /// Opens a clicked http, https or mailto link; defaults to the system handler.
+    var onOpenLink: ((URL) -> Void)?
+    /// The MIME type the isolated page was served with.
+    var mimeType: String { resource.resource.mimeType }
+    /// The number of bytes of the served resource.
+    var byteCount: UInt64 { resource.resource.length }
+
+    /// A provider-supplied HTML document. Its scripts run only inside the CSP sandbox
+    /// of the response; the page has no app JavaScript, bridge or navigation.
+    static func htmlDocument(data: Data, name: String) throws -> AgentConversationMediaWindow {
+        var resource = AgentConversationRangedResource(data: data, mimeType: "text/html", revision: UUID().uuidString)
+        resource.contentSecurityPolicy = AgentConversationRangedResource.htmlDocumentPolicy
+        return try AgentConversationMediaWindow(resource: resource, name: name)
+    }
 
     convenience init(data: Data, name: String, mimeType: String) throws {
-        let resource = AgentConversationRangedResource(length: UInt64(data.count), mimeType: mimeType, revision: UUID().uuidString, read: { offset, length in
-            guard offset <= UInt64(data.count), UInt64(length) <= UInt64(data.count) - offset else { throw ModelError("Invalid preview byte range.") }
-            return data.subdata(in: Int(offset)..<Int(offset) + Int(length))
-        })
-        try self.init(resource: resource, name: name)
+        try self.init(resource: AgentConversationRangedResource(data: data, mimeType: mimeType, revision: UUID().uuidString), name: name)
     }
 
     init(resource value: AgentConversationRangedResource, name: String) throws {
@@ -52,7 +62,9 @@ final class AgentConversationMediaWindow: NSWindowController, WKNavigationDelega
         if local?.url == resource.url || local?.url == resource.entryURL || url?.absoluteString == "about:blank" { decisionHandler(.allow); return }
         decisionHandler(.cancel)
         if navigationAction.navigationType == .linkActivated, let url,
-           ["http", "https", "mailto"].contains(url.scheme?.lowercased() ?? "") { NSWorkspace.shared.open(url) }
+           ["http", "https", "mailto"].contains(url.scheme?.lowercased() ?? "") {
+            if let onOpenLink { onOpenLink(url) } else { NSWorkspace.shared.open(url) }
+        }
     }
     func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String,
                  initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) { completionHandler() }

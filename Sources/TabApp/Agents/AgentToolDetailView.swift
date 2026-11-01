@@ -8,6 +8,15 @@ final class AgentToolDisclosure: NSView, NSTextViewDelegate {
     var onPreviewAttachments: ((String, [AgentChatAttachmentDescriptor], Int) -> Void)?
     var onHeightChanged: (() -> Void)?
     private let images = AgentToolImagesView(frame: .zero)
+    private let htmlCard = AgentHtmlDocumentCard(frame: .zero)
+    private var htmlTitles: [String: String] = [:]
+    private var htmlTitleTask: Task<Void, Never>?
+    private var htmlTitleKey: String?
+    /// Called when a button of the HTML document card is pressed.
+    var onHTMLDocument: ((AgentHtmlDocumentCard.Action, AgentHtmlDocumentReference) -> Void)?
+    /// Whether the card of the current item is showing.
+    var showsHTMLDocument: Bool { !htmlCard.isHidden }
+    var htmlDocumentCard: AgentHtmlDocumentCard { htmlCard }
     var onOpenFile: ((String, Int?) -> Void)?
     var workspaceRoot: String?
     var onOpenToolDiff: ((String, AgentToolActivity) -> Void)?
@@ -74,6 +83,12 @@ final class AgentToolDisclosure: NSView, NSTextViewDelegate {
         images.onHeightChanged = { [weak self] in self?.onHeightChanged?() }
         images.onPreview = { [weak self] item, attachments, index in self?.onPreviewAttachments?(item, attachments, index) }
         addSubview(header)
+        addSubview(htmlCard)
+        htmlCard.isHidden = true
+        htmlCard.onAction = { [weak self] action in
+            guard let reference = self?.htmlCard.reference else { return }
+            self?.onHTMLDocument?(action, reference)
+        }
         addSubview(scroll)
         argumentScroll.drawsBackground = false
         argumentScroll.hasVerticalScroller = true
@@ -147,9 +162,11 @@ final class AgentToolDisclosure: NSView, NSTextViewDelegate {
         header.iconColor = indicatesFailure ? AgentToolRowPresentation.failureIconColor(theme: theme) : theme.fgDim
         header.focusColor = theme.accent
         header.title = title
+        let skipped = AgentToolNonExecution.label(item.workContext?.toolNonExecutionKind)
+        header.suffix = skipped
         header.labelColor = theme.fgMuted
         header.needsDisplay = true
-        header.toolTip = ([title + " · " + statusText] + [header.timestampTooltip].compactMap { $0 }).joined(separator: "\n")
+        header.toolTip = ([([title, statusText, skipped].compactMap { $0 }).joined(separator: " · ")] + [header.timestampTooltip].compactMap { $0 }).joined(separator: "\n")
         let isFileSearch = activity?.presentation == .fileSearch
         fileSearch.isHidden = !expanded || !isFileSearch
         if isFileSearch {
@@ -169,9 +186,10 @@ final class AgentToolDisclosure: NSView, NSTextViewDelegate {
             header.isEnabled = webSearch.hasContent
         }
         header.setAccessibilityLabel((header.isEnabled ? (expanded ? "Collapse " : "Expand ") : "") + title + ", " + statusText
-            + (indicatesFailure ? ", tool call failed" : ""))
+            + (skipped.map { ", " + $0 } ?? "") + (indicatesFailure ? ", tool call failed" : ""))
         scroll.isHidden = !expanded || isWebSearch || isFileChange || isFileSearch
         images.isHidden = !expanded || !usesArgumentPanel
+        refreshHTMLDocument(item, status: status, theme: theme)
         images.fetch = fetchAttachment
         if expanded, usesArgumentPanel { images.update(item, theme: theme) }
         let isCommand = activity?.presentsCommand == true
@@ -204,8 +222,39 @@ final class AgentToolDisclosure: NSView, NSTextViewDelegate {
         needsLayout = true
     }
 
+    /// Shows the card for a provider HTML document below the header, collapsed or expanded,
+    /// so the document is visible without opening the tool call. The title is read once
+    /// from the retained bytes.
+    private func refreshHTMLDocument(_ item: AgentChatItem, status: AgentToolActivity.Status, theme: AppTheme) {
+        let reference = usesArgumentPanel ? AgentHtmlDocumentReference.find(in: item) : nil
+        guard let reference else {
+            htmlTitleTask?.cancel(); htmlTitleTask = nil
+            htmlCard.isHidden = true
+            return
+        }
+        let available = item.isComplete && status == .completed && fetchAttachment != nil
+        let key = reference.itemID + "/" + reference.attachmentID
+        let cached = htmlTitles[key]
+        htmlCard.isHidden = false
+        htmlCard.update(reference, documentTitle: cached.flatMap { $0.isEmpty ? nil : $0 }, available: available, theme: theme)
+        if htmlTitleKey != key { htmlTitleTask?.cancel(); htmlTitleTask = nil }
+        guard available, cached == nil, htmlTitleTask == nil, let fetch = fetchAttachment,
+              let attachment = item.attachments?.first(where: { $0.id == reference.attachmentID }) else { return }
+        htmlTitleKey = key
+        htmlTitleTask = Task { [weak self] in
+            let data = try? await fetch(reference.itemID, attachment)
+            guard !Task.isCancelled, let self else { return }
+            self.htmlTitleTask = nil
+            if self.htmlTitles.count >= 16 { self.htmlTitles.removeAll() }
+            let title = data.flatMap { AgentHtmlDocumentReference.title(in: $0) }
+            self.htmlTitles[key] = title ?? ""
+            guard let title, self.htmlCard.reference == reference else { return }
+            self.htmlCard.update(reference, documentTitle: title, available: self.htmlCard.isAvailable, theme: self.theme)
+        }
+    }
+
     func height(for width: CGFloat) -> CGFloat {
-        guard expanded else { return headerHeight }
+        guard expanded else { return headerHeight + (htmlCard.isHidden ? 0 : AgentHtmlDocumentCard.height + 8) }
         if item?.tool?.presentation == .fileSearch { return headerHeight + 16 + fileSearch.arrange(width: max(1, width - 4), apply: false) }
         if item?.tool?.presentation == .fileChange {
             fileChange.compactControls = (window?.contentView?.bounds.width ?? 640) >= 640
@@ -218,9 +267,14 @@ final class AgentToolDisclosure: NSView, NSTextViewDelegate {
         return headerHeight + 10 + min(256, bodyHeight(for: max(1, width - 46)))
     }
 
-    private func commandLayout(width: CGFloat) -> (source: NSRect, images: NSRect, output: NSRect, exit: NSRect, height: CGFloat) {
+    private func commandLayout(width: CGFloat) -> (card: NSRect, source: NSRect, images: NSRect, output: NSRect, exit: NSRect, height: CGFloat) {
         let width = max(1, width - 4)
         var y = headerHeight
+        var card = NSRect(x: 2, y: y, width: width, height: 0)
+        if !htmlCard.isHidden {
+            card.size.height = AgentHtmlDocumentCard.height
+            y = card.maxY
+        }
         func frame(_ text: AgentRichTextView, limit: CGFloat = .greatestFiniteMagnitude) -> NSRect {
             guard !text.string.isEmpty else { return NSRect(x: 2, y: y, width: width, height: 0) }
             if y > headerHeight { y += 6 }
@@ -243,7 +297,7 @@ final class AgentToolDisclosure: NSView, NSTextViewDelegate {
         }
         let output = frame(body, limit: 320)
         let exit = frame(exitStatus)
-        return (source, imageFrame, output, exit, y + 16)
+        return (card, source, imageFrame, output, exit, y + 16)
     }
 
     private func bodyHeight(for width: CGFloat) -> CGFloat {
@@ -257,6 +311,11 @@ final class AgentToolDisclosure: NSView, NSTextViewDelegate {
     override func layout() {
         super.layout()
         header.frame = NSRect(x: 0, y: 0, width: bounds.width, height: headerHeight)
+        if !expanded, !htmlCard.isHidden {
+            htmlCard.frame = NSRect(x: 2, y: headerHeight, width: max(1, bounds.width - 4), height: AgentHtmlDocumentCard.height)
+            htmlCard.layoutSubtreeIfNeeded()
+            return
+        }
         if expanded, item?.tool?.presentation == .fileSearch {
             fileSearch.frame = NSRect(x: 2, y: headerHeight, width: max(1, bounds.width - 4), height: max(0, bounds.height - headerHeight - 16))
             fileSearch.layoutSubtreeIfNeeded()
@@ -288,6 +347,8 @@ final class AgentToolDisclosure: NSView, NSTextViewDelegate {
                         restoredArgumentPosition = nil
                     }
                 } else { command.frame = frames.source }
+                htmlCard.frame = frames.card
+                htmlCard.layoutSubtreeIfNeeded()
                 images.frame = frames.images
                 images.layoutSubtreeIfNeeded()
                 scroll.frame = frames.output
@@ -323,8 +384,12 @@ final class AgentToolDisclosure: NSView, NSTextViewDelegate {
 @MainActor
 enum AgentToolText {
     static func content(_ item: AgentChatItem, theme: AppTheme) -> NSAttributedString {
-        let result = NSMutableAttributedString(string: "")
         let activity = item.tool
+        // Reasoning is prose that streams into one row, not tool output.
+        if activity == nil, item.workContext?.itemType == "reasoning" {
+            return AgentMarkdown.plain(bounded(item.detail ?? item.text), theme: theme, muted: true)
+        }
+        let result = NSMutableAttributedString(string: "")
         func heading(_ text: String) {
             if result.length > 0 { result.append(NSAttributedString(string: "\n\n")) }
             result.append(NSAttributedString(string: text + "\n", attributes: [.font: AppFont.system(11, weight: .semibold), .foregroundColor: theme.fgDim]))

@@ -1,4 +1,5 @@
 import AppKit
+import TabProtocol
 
 @MainActor
 final class AgentResponseFootnotes: AgentResponseSection {
@@ -7,10 +8,17 @@ final class AgentResponseFootnotes: AgentResponseSection {
     var onRunShellCommand: ((String) -> Void)? { didSet { bodies.forEach { $0.onRunShellCommand = onRunShellCommand } } }
     var onOpenFile: ((String, Int?) -> Void)?
     var onOpenFragment: ((String) -> Bool)?
+    var onOpenCitation: ((AgentAssistantCitation) -> Void)?
+    var onOpenThread: ((AgentThreadLink) -> Void)?
     private var numbers: [AgentRichTextView] = []
     private var bodies: [AgentResponseView] = []
     private var heights: [CGFloat] = []
     private var border = NSColor.separatorColor
+
+    /// Each note's number, then its body, in reading order.
+    var textViews: [AgentRichTextView] {
+        bodies.indices.flatMap { [numbers[$0]] + bodies[$0].textViews }
+    }
 
     var headingTargets: [AgentMarkdownHeadingTarget] {
         bodies.indices.flatMap { AgentMarkdownHeadingTarget.collect(in: numbers[$0]) + bodies[$0].headingTargets }
@@ -30,6 +38,8 @@ final class AgentResponseFootnotes: AgentResponseSection {
             body.onHeightChanged = { [weak self] in self?.invalidateMeasurement(); self?.onHeightChanged?() }
             body.onOpenFile = { [weak self] path, line in self?.onOpenFile?(path, line) }
             body.onOpenFragment = { [weak self] id in self?.onOpenFragment?(id) ?? false }
+            body.onOpenCitation = { [weak self] citation in self?.onOpenCitation?(citation) }
+            body.onOpenThread = { [weak self] link in self?.onOpenThread?(link) }
             bodies.append(body); numbers.append(number)
             addSubview(body); addSubview(number)
         }
@@ -40,6 +50,7 @@ final class AgentResponseFootnotes: AgentResponseSection {
             numbers[index].setContent(number)
             numbers[index].setAccessibilityLabel("Footnote \(note.number)")
             bodies[index].lineBreaks = lineBreaks
+            bodies[index].parseRawHTML = rawHTML
             bodies[index].inheritedReferences = references
             bodies[index].setPreparedContent(note.blocks, theme: theme)
         }

@@ -5,6 +5,7 @@ import TabProtocol
 class AgentTimelineRow: ThemedView {
     var onOpenAttachment: ((String, AgentChatAttachmentDescriptor, Bool) -> Void)?
     var fetchAttachment: AgentAttachmentCache.Fetch?
+    var onHTMLDocument: ((AgentHtmlDocumentCard.Action, AgentHtmlDocumentReference) -> Void)?
     var onPreviewAttachments: ((String, [AgentChatAttachmentDescriptor], Int) -> Void)?
     var onDisclosure: (() -> Void)?
     var onApproval: ((String, Bool) -> Void)?
@@ -14,6 +15,12 @@ class AgentTimelineRow: ThemedView {
     var workspaceRoot: String?
     var onOpenToolDiff: ((String, AgentToolActivity) -> Void)?
     var onOpenCheckpoint: ((String, String?) -> Void)?
+    var onOpenCitation: ((AgentAssistantCitation) -> Void)?
+    var onOpenThread: ((AgentThreadLink) -> Void)?
+    /// Link cards and file-link tooltips of assistant responses.
+    var linkServices: AgentConversationLinkServices?
+    /// The services' pull-request hosts changed; rows render their responses again.
+    func linkServicesDidChange() {}
     func update(_ items: [AgentChatItem]) {}
     func preferredHeight(for width: CGFloat) -> CGFloat { 0 }
     func layoutRow(width: CGFloat) {}
@@ -21,6 +28,33 @@ class AgentTimelineRow: ThemedView {
     func setTimestamp(_ date: Date?) {}
     func captureState() -> AgentTimelineRowState { AgentTimelineRowState() }
     func restoreState(_ state: AgentTimelineRowState) {}
+    /// The text views showing this row's searchable text, in reading order, for Find;
+    /// empty for rows Find does not search. Hidden views, such as a folded `<details>`,
+    /// are included: Find counts their text and opens them to show a match.
+    var findTextViews: [AgentRichTextView] { [] }
+    private var cachedFindText: AgentMessageTextMap?
+    /// Changes whenever the row may show other text, so Find knows what it painted is stale.
+    private(set) var findTextGeneration = 0
+
+    /// The row's searchable text as rendered, built once per content generation.
+    var findText: AgentMessageTextMap {
+        if let cachedFindText { return cachedFindText }
+        let text = AgentMessageTextMap(views: findTextViews)
+        cachedFindText = text
+        return text
+    }
+
+    /// The row rendered or measured again (tables build their text when measured).
+    func invalidateFindText() {
+        cachedFindText = nil
+        findTextGeneration &+= 1
+    }
+
+    /// Opens what hides `range` of `view`, one of `findTextViews`: a folded `<details>`
+    /// block, or a collapsed message. True when the row changed.
+    func revealFindText(_ view: AgentRichTextView, range: NSRange) -> Bool {
+        AgentResponseContainer.revealAncestors(of: view, below: self)
+    }
 
     static func bounded(_ text: String) -> String {
         guard text.utf8.count > 32_000 else { return text }
@@ -50,6 +84,10 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
     }
     private let copy = PillButton("Copy", style: .plain)
     private let expandMessage = PillButton("Show full message", style: .plain)
+    /// A long user message shows this much of its text until "Show full message".
+    static let collapsedMessageHeight: CGFloat = 176
+    /// The bottom of a collapsed message that fades out.
+    static let collapsedMessageFade: CGFloat = 28
     private var messageExpanded = false
     private let timestamp = makeLabel("", font: AppFont.footnote)
     private var timestampDate: Date?
@@ -114,6 +152,8 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
             }
         }
         response.onOpenFile = { [weak self] path, line in self?.onOpenFile?(path, line) }
+        response.onOpenCitation = { [weak self] citation in self?.onOpenCitation?(citation) }
+        response.onOpenThread = { [weak self] link in self?.onOpenThread?(link) }
         response.onHeightChanged = { [weak self] in self?.onDisclosure?() }
         response.onReveal = { [weak self] in
             guard let self, self.item?.kind == .user, !self.messageExpanded else { return }
@@ -138,6 +178,12 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    /// The rendered assistant message, or nil for user, notice and approval rows.
+    var assistantItem: AgentChatItem? { item?.kind == .assistant ? item : nil }
+
+    /// The message as rendered, for selections, citations and highlights.
+    var textMap: AgentMessageTextMap { AgentMessageTextMap(views: response.textViews) }
+
     override func update(_ items: [AgentChatItem]) {
         guard let next = items.first, next != item else { return }
         item = next
@@ -147,6 +193,8 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
     override func runCommandHandlerDidChange() {
         response.onRunShellCommand = item?.kind == .assistant ? onRunShellCommand : nil
     }
+
+    override func linkServicesDidChange() { renderText() }
 
     private func renderText() {
         guard let item else { return }
@@ -189,6 +237,7 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
         if item.kind == .assistant || item.kind == .user {
             response.parseRawHTML = item.kind == .assistant
             response.lineBreaks = item.kind == .user
+            response.linkServices = item.kind == .assistant ? linkServices : nil
             response.setContent(text, theme: theme)
         }
         else { body.setContent(AgentMarkdown.plain(text, theme: theme, muted: item.kind == .notice)) }
@@ -217,7 +266,7 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
             let hasRichBlocks = AgentResponsePart.partition(AgentResponseParser.parse(item.text, parseRawHTML: false)).contains { $0.kind != 0 }
             if hasRichBlocks { bubbleWidth = width * 0.8 }
             bodyHeight = item.text.isEmpty ? 0 : response.height(for: max(1, bubbleWidth - 28))
-            if !expandMessage.isHidden && !messageExpanded { bodyHeight = min(176, bodyHeight) }
+            if !expandMessage.isHidden && !messageExpanded { bodyHeight = min(Self.collapsedMessageHeight, bodyHeight) }
             attachmentsHeight = attachmentCards.reduce(0) { $0 + $1.preferredHeight } + CGFloat(max(0, attachmentCards.count - 1)) * 4
             if !attachmentCards.isEmpty && bodyHeight > 0 { attachmentsHeight += 8 }
             if filesOnly { bubbleWidth = min(width * 0.8, 256); return attachmentsHeight + 28 }
@@ -254,7 +303,7 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
             if !expandMessage.isHidden && !messageExpanded {
                 messageFade.frame = response.bounds
                 messageFade.colors = [NSColor.black.cgColor, NSColor.black.cgColor, NSColor.clear.cgColor]
-                messageFade.locations = [0, NSNumber(value: Double(max(0, 1 - 28 / max(1, bodyHeight)))), 1]
+                messageFade.locations = [0, NSNumber(value: Double(max(0, 1 - Self.collapsedMessageFade / max(1, bodyHeight)))), 1]
                 messageFade.startPoint = CGPoint(x: 0.5, y: 0)
                 messageFade.endPoint = CGPoint(x: 0.5, y: 1)
                 response.layer?.mask = messageFade
@@ -335,6 +384,32 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
         renderText()
     }
 
+    override var findTextViews: [AgentRichTextView] {
+        guard item?.kind == .user || item?.kind == .assistant else { return [] }
+        return response.textViews
+    }
+
+    /// Also expands a collapsed long user message when the match is below its fold.
+    override func revealFindText(_ view: AgentRichTextView, range: NSRange) -> Bool {
+        let opened = super.revealFindText(view, range: range)
+        guard item?.kind == .user, !expandMessage.isHidden, !messageExpanded,
+              !isShownWhileCollapsed(range, in: view) else { return opened }
+        messageExpanded = true
+        renderText()
+        onDisclosure?()
+        return true
+    }
+
+    /// True when `range` lies above the fade of the collapsed message.
+    private func isShownWhileCollapsed(_ range: NSRange, in view: AgentRichTextView) -> Bool {
+        guard !view.isHiddenOrHasHiddenAncestor, let manager = view.layoutManager, let container = view.textContainer else { return false }
+        manager.ensureLayout(for: container)
+        let glyphs = manager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        var rect = manager.boundingRect(forGlyphRange: glyphs, in: container)
+        rect.origin.y += view.textContainerOrigin.y
+        return response.convert(rect, from: view).maxY <= Self.collapsedMessageHeight - Self.collapsedMessageFade
+    }
+
     override func captureState() -> AgentTimelineRowState {
         AgentTimelineRowState(expanded: messageExpanded, responseState: response.captureState(), wrappedCodeSections: response.wrappedCodeSections, children: ["changes": changes.captureState()])
     }
@@ -389,6 +464,7 @@ final class AgentActivityRow: AgentTimelineRow {
         tool.workspaceRoot = workspaceRoot
         tool.fetchAttachment = fetchAttachment
         tool.onPreviewAttachments = onPreviewAttachments
+        tool.onHTMLDocument = onHTMLDocument
         if let item { tool.update(item, expanded: expanded, theme: theme) }
     }
     override func preferredHeight(for width: CGFloat) -> CGFloat { tool.height(for: width) }

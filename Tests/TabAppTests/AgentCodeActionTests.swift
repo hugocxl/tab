@@ -38,6 +38,19 @@ final class AgentCodeActionTests: XCTestCase {
         XCTAssertEqual(commands.count, 1)
     }
 
+    func testCopyGoesThroughTheConversationActionsWhenAvailable() throws {
+        _ = NSApplication.shared
+        let response = AgentResponseView(frame: .zero)
+        let services = AgentConversationLinkServices()
+        var copied: [String] = []
+        services.copyText = { copied.append($0) }
+        response.linkServices = services
+        response.setContent("```sh\necho hello\n```", theme: AppTheme(systemIsDark: false))
+        let code = try XCTUnwrap(response.subviews.compactMap { $0 as? AgentResponseCode }.first)
+        code.copyCode()
+        XCTAssertEqual(copied, ["echo hello\n"])
+    }
+
     func testNestedCodeAndUserMessagesRespectRunAvailability() throws {
         let theme = AppTheme(systemIsDark: false)
         let response = AgentResponseView(frame: .zero)

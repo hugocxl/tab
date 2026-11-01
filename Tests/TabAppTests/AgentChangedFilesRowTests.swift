@@ -34,7 +34,6 @@ final class AgentChangedFilesRowTests: XCTestCase {
     func testCardFollowsFinalAnswerOutsideCompletedWorkAndRendersReferenceFixture() throws {
         _ = NSApplication.shared
         let surface = AgentPaneView(frame: NSRect(x: 0, y: 0, width: 900, height: 720))
-        surface.disposeConversation() // This fixture exercises the native fallback.
         let items = [
             AgentChatItem(id: "user", kind: .user, text: "Reduce the spacing between the server name and icon."),
             AgentChatItem(id: "progress", kind: .assistant, text: "I’ll find the multi-server header and tighten the spacing."),

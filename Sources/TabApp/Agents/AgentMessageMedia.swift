@@ -139,6 +139,8 @@ final class AgentMediaTile: NSControl {
     private var generation = 0
     private let animatedImage = AgentAnimatedImageView()
     var isToolResult = false { didSet { updateToolPlaceholder() } }
+    /// Assistant Markdown media keep their alt text as tooltip while loading or failed.
+    var keepsNameToolTip = false { didSet { updateToolPlaceholder() } }
     private var failureMessage: String?
     private var placeholderColor = NSColor.secondaryLabelColor
     var transparentBackground = false
@@ -191,7 +193,7 @@ final class AgentMediaTile: NSControl {
         label.isHidden = true
         setAccessibilityRole(image == nil ? .group : .button)
         setAccessibilityLabel(image == nil ? (failureMessage == nil ? "Loading image" : "Image unavailable · " + name) : "Preview " + name)
-        toolTip = image == nil ? nil : name
+        toolTip = image == nil && !keepsNameToolTip ? nil : name
         needsDisplay = true
     }
     func load(_ fetch: @escaping () async throws -> NSImage, changed: @escaping () -> Void) {
@@ -206,23 +208,30 @@ final class AgentMediaTile: NSControl {
             do {
                 let image = try await fetch()
                 guard !Task.isCancelled, let self, self.generation == token else { return }
-                self.image = image
-                let animated = image.representations.contains {
-                    (($0 as? NSBitmapImageRep)?.value(forProperty: .frameCount) as? NSNumber)?.intValue ?? 0 > 1
-                }
-                self.animatedImage.image = animated ? image : nil
-                self.animatedImage.animates = animated && self.window != nil
-                self.needsLayout = true
-                self.updateToolPlaceholder()
-                self.label.isHidden = true
-                self.toolTip = self.name
-                self.needsDisplay = true
+                self.show(image)
                 changed()
             } catch {
                 guard !Task.isCancelled, let self, self.generation == token else { return }
                 self.fail(error.localizedDescription)
             }
         }
+    }
+    /// Shows an already decoded image now, ending any pending load; GIFs play.
+    func show(_ image: NSImage) {
+        generation += 1
+        task?.cancel(); task = nil
+        failureMessage = nil
+        self.image = image
+        let animated = image.representations.contains {
+            (($0 as? NSBitmapImageRep)?.value(forProperty: .frameCount) as? NSNumber)?.intValue ?? 0 > 1
+        }
+        animatedImage.image = animated ? image : nil
+        animatedImage.animates = animated && window != nil
+        needsLayout = true
+        updateToolPlaceholder()
+        label.isHidden = true
+        toolTip = name
+        needsDisplay = true
     }
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()

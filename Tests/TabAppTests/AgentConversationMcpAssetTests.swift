@@ -1,7 +1,6 @@
 import AppKit
 import TabCore
 import TabProtocol
-import WebKit
 import XCTest
 @testable import TabApp
 
@@ -37,55 +36,58 @@ final class AgentConversationMcpAssetTests: XCTestCase {
         XCTAssertNil(AgentConversationMcpAsset.match(attachmentID: "html", items: [tool(String(repeating: " ", count: 16385) + output)]))
     }
 
-    func testActualWKPreparedOwnedDocumentExecutesOnlyInAnOpaqueFrame() async throws {
-        _ = NSApplication.shared
+    func testHTMLDocumentIsServedOnlyWhileItsToolCallIsRetained() async throws {
         let surface = AgentPaneView()
-        let host = surface.conversationWebView
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 680, height: 700), styleMask: .borderless, backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
-        defer { surface.disposeConversation(); window.close() }
-        window.contentView = surface
-        surface.frame = NSRect(x: 0, y: 0, width: 680, height: 700); surface.layoutSubtreeIfNeeded()
-        let html = #"<!doctype html><html><body><script>document.body.textContent='Executable retained MCP';let blocked=false;try{parent.__mcpEscaped=true}catch{blocked=true};parent.postMessage({fixture:'mcp-executed',blocked},'*');</script></body></html>"#
+        let html = #"<!doctype html><html><body><script>document.body.textContent='Retained MCP'</script></body></html>"#
         let bytes = Data(html.utf8)
         var item = tool(output)
         item.attachments?[0].byteCount = bytes.count
+        var fetched: [String] = []
         surface.fetchAttachment = { owner, descriptor in
-            guard owner == "tool", descriptor.id == "html" else { throw ModelError("Wrong resource owner") }
+            fetched.append(owner + "/" + descriptor.id)
             return bytes
         }
         var snapshot = AgentChatSnapshot(session: SessionId(), project: ProjectId(), provider: .codex, status: .idle, revision: 1, items: [item])
         surface.render(snapshot)
-        for _ in 0..<1000 where !host.isReady { try await Task.sleep(for: .milliseconds(10)) }
-        XCTAssertTrue(host.isReady)
-        guard host.isReady else { return }
-        let resource: [String: Any] = ["_tag": "attachment", "attachmentId": "html", "renderIntent": "mcp-app", "mimeType": "text/html", "disposition": "inline"]
-        let result = try await surface.handleConversationAction("createAssetUrl", ["input": ["resource": resource]]) as? [String: Any]
-        let url = try XCTUnwrap((result?["relativeUrl"] as? String).flatMap(URL.init(string:)))
-        XCTAssertFalse(AgentConversationWebView.isRendererEntryURL(url))
-        let prepared = try await host.registeredAssetData(url)
-        let text = String(decoding: prepared, as: UTF8.self)
-        XCTAssertTrue(text.contains("default-src 'none'"))
-        XCTAssertTrue(text.contains("connect-src https://example.com"))
-        let executionScript = "return await new Promise(resolve=>{const frame=document.createElement('iframe');frame.sandbox='allow-scripts allow-forms';const listener=event=>{if(event.source===frame.contentWindow&&event.data?.fixture==='mcp-executed'){window.removeEventListener('message',listener);resolve({origin:event.origin,blocked:event.data.blocked,escaped:window.__mcpEscaped===true});}};window.addEventListener('message',listener);frame.src=url;document.body.append(frame);setTimeout(()=>resolve({timeout:true}),3000);})"
-        let state = try await host.evaluate(executionScript, arguments: ["url": url.absoluteString], timeout: .seconds(5)) as? [String: Any]
-        XCTAssertEqual(state?["origin"] as? String, "null", "Prepared MCP execution: \(String(describing: state))")
-        XCTAssertEqual(state?["blocked"] as? Bool, true)
-        XCTAssertEqual(state?["escaped"] as? Bool, false)
+        let document = try await surface.actions.htmlDocument(attachmentID: "html")
+        XCTAssertEqual(document.data, bytes)
+        XCTAssertFalse(document.match.publishedHTML)
+        XCTAssertEqual(fetched, ["tool/html"])
+
         snapshot.revision = 2; snapshot.items.removeAll(); surface.render(snapshot)
-        do { _ = try await host.registeredAssetData(url); XCTFail("Prepared documents must lose ownership when their tool leaves retained history") } catch {}
-        do { _ = try await surface.handleConversationAction("createAssetUrl", ["input": ["resource": resource]]); XCTFail("A caller renderIntent cannot create an app without owned bytes") } catch {}
+        do {
+            _ = try await surface.actions.htmlDocument(attachmentID: "html")
+            XCTFail("A document must lose ownership when its tool leaves retained history")
+        } catch {}
+
+        var mismatched = item
+        mismatched.attachments?[0].byteCount = bytes.count + 1
+        snapshot.revision = 3; snapshot.items = [mismatched]; surface.render(snapshot)
+        do {
+            _ = try await surface.actions.htmlDocument(attachmentID: "html")
+            XCTFail("Bytes that differ from the retained descriptor must be rejected")
+        } catch {}
+
         let htmlOutput = #"{"htmlRender":{"attachmentId":"html","title":"Supplied published HTML","height":320}}"#
         var published = tool(htmlOutput, name: "html_render")
         published.attachments?[0].byteCount = bytes.count
-        snapshot.revision = 3; snapshot.items = [published]; surface.render(snapshot)
-        let htmlResource: [String: Any] = ["_tag": "attachment", "attachmentId": "html", "mimeType": "text/html", "disposition": "inline"]
-        let htmlResult = try await surface.handleConversationAction("createAssetUrl", ["input": ["resource": htmlResource]]) as? [String: Any]
-        let publishedURL = try XCTUnwrap((htmlResult?["relativeUrl"] as? String).flatMap(URL.init(string:)))
-        let publishedBytes = try await host.registeredAssetData(publishedURL)
-        XCTAssertEqual(publishedBytes, bytes, "Already published html_render bytes must not receive a second bootstrap")
-        let htmlState = try await host.evaluate(executionScript, arguments: ["url": publishedURL.absoluteString], timeout: .seconds(5)) as? [String: Any]
-        XCTAssertEqual(htmlState?["origin"] as? String, "null", "Published HTML execution: \(String(describing: htmlState))")
-        XCTAssertEqual(htmlState?["blocked"] as? Bool, true)
+        snapshot.revision = 4; snapshot.items = [published]; surface.render(snapshot)
+        let rendered = try await surface.actions.htmlDocument(attachmentID: "html")
+        XCTAssertEqual(rendered.data, bytes, "Published html_render bytes are served verbatim")
+        XCTAssertTrue(rendered.match.publishedHTML)
+    }
+
+    func testDocumentReferenceUsesTheSameOwnershipChecksAsTheMatcher() {
+        XCTAssertNotNil(AgentHtmlDocumentReference.find(in: tool(output)))
+        XCTAssertNil(AgentHtmlDocumentReference.find(in: tool(output, name: "other.show")))
+        XCTAssertNil(AgentHtmlDocumentReference.find(in: tool(output, htmlID: "missing")))
+        XCTAssertNil(AgentHtmlDocumentReference.find(in: tool(String(repeating: " ", count: 16385) + output)))
+    }
+
+    func testHtmlRenderCandidateNeedsAnOwnedHTMLAttachment() {
+        let render = #"{"htmlRender":{"attachmentId":"html"}}"#
+        XCTAssertEqual(AgentConversationMcpAsset.htmlRenderCandidates(attachmentID: "html", items: [tool(render, name: "html_render")]).count, 1)
+        XCTAssertTrue(AgentConversationMcpAsset.htmlRenderCandidates(attachmentID: "html", items: [tool(render, htmlID: "other")]).isEmpty)
+        XCTAssertTrue(AgentConversationMcpAsset.htmlRenderCandidates(attachmentID: "other", items: [tool(render)]).isEmpty)
     }
 }

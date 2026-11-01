@@ -55,7 +55,7 @@ let package = Package(
         .target(
             name: "TabApp",
             dependencies: ["TabClient", "TabCore", "TabProtocol"],
-            resources: [.copy("Resources/Icons"), .copy("Resources/ConversationRenderer")],
+            resources: [.copy("Resources/Icons")],
             swiftSettings: swift5
         ),
         .executableTarget(name: "TabDesktop", dependencies: ["TabApp"], swiftSettings: swift5),

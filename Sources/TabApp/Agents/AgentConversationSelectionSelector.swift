@@ -48,6 +48,30 @@ enum AgentConversationSelectionSelector {
         return contextual ?? (count == 1 ? only : nil)
     }
 
+    /// `find` reports a range of the whitespace-normalized text; this maps it back to `source`.
+    /// A collapsed whitespace run maps to the whole run.
+    static func sourceRange(ofNormalized range: NSRange, in source: String) -> NSRange? {
+        let text = source as NSString
+        var normalized = 0, index = 0, start: Int?, end: Int?
+        while index < text.length {
+            var next = index + 1
+            if isWhitespace(text.character(at: index)) {
+                while next < text.length, isWhitespace(text.character(at: next)) { next += 1 }
+            }
+            if normalized == range.location { start = index }
+            normalized += 1
+            if normalized == NSMaxRange(range) { end = next; break }
+            index = next
+        }
+        guard let start, let end, end > start else { return nil }
+        return NSRange(location: start, length: end - start)
+    }
+
+    /// Like `find`, in `source` offsets rather than normalized ones.
+    static func findInSource(_ citation: AgentAssistantCitation, in source: String) -> NSRange? {
+        find(citation, in: source).flatMap { sourceRange(ofNormalized: $0, in: source) }
+    }
+
     static func normalize(_ source: String) -> String {
         var result = String.UnicodeScalarView(), previousWhitespace = false
         for scalar in source.unicodeScalars {

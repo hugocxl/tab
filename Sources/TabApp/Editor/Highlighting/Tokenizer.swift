@@ -143,6 +143,10 @@ enum Tokenizer {
         case .html, .xml: return markup(line, state)
         case .css: return css(line, state)
         case .makefile: return makefile(line, state)
+        case .ini: return ini(line, state)
+        case .diff: return diff(line, state)
+        case .log: return log(line, state)
+        case .http: return http(line, state)
         default: return ([], state)
         }
     }
@@ -155,6 +159,11 @@ enum Tokenizer {
         let blockOpen = grammar.blockComment.map { Array($0.open.utf16) } ?? []
         let blockClose = grammar.blockComment.map { Array($0.close.utf16) } ?? []
         let lineComments = grammar.lineComments.map { Array($0.utf16) }
+        let leadingComments = grammar.leadingLineComments.map { Array($0.utf16) }
+        let firstSignificant = line.firstIndex(where: { !Ch.isSpace($0) }) ?? line.count
+        var identifierExtra = grammar.identifierExtras
+        if grammar.dollarInIdentifiers { identifierExtra.insert(Ch.dollar) }
+        if grammar.rubySymbols { identifierExtra.formUnion([utf16Unit("?"), Ch.bang]) }
 
         // Finish what the previous line left open.
         switch state.mode {
@@ -181,6 +190,7 @@ enum Tokenizer {
                 s.index = start
             }
         }
+        if s.index == 0 { linePrelude(&s, grammar) }
         if grammar.preprocessor {
             s.skipWhitespace()
             if !s.atEnd, s.current == Ch.hash {
@@ -208,14 +218,6 @@ enum Tokenizer {
                 s.index += 1
                 continue
             }
-            if let comment = lineComments.first(where: { s.matches($0) }) {
-                let boundary = !grammar.hashCommentNeedsBoundary || start == 0 || Ch.isSpace(line[start - 1])
-                if boundary || comment != [Ch.hash] {
-                    s.add(start, line.count, .comment)
-                    s.index = line.count
-                    break loop
-                }
-            }
             if !blockOpen.isEmpty, s.matches(blockOpen) {
                 s.index += blockOpen.count
                 state.mode = .comment
@@ -224,8 +226,25 @@ enum Tokenizer {
                 s.add(start, end, .comment)
                 continue
             }
+            if let comment = lineComments.first(where: { s.matches($0) }) {
+                let boundary = !grammar.hashCommentNeedsBoundary || start == 0 || Ch.isSpace(line[start - 1])
+                if boundary || comment != [Ch.hash] {
+                    s.add(start, line.count, .comment)
+                    s.index = line.count
+                    break loop
+                }
+            }
+            if start == firstSignificant, leadingComments.contains(where: { s.matches($0) }) {
+                s.add(start, line.count, .comment)
+                s.index = line.count
+                break loop
+            }
             if let ruleIndex = grammar.strings.firstIndex(where: { s.matches($0.open) }) {
                 let rule = grammar.strings[ruleIndex]
+                if grammar.primeSuffixes, rule.open == [Ch.apostrophe], start > 0, isPrimeContext(line[start - 1]) {
+                    s.index += 1
+                    continue
+                }
                 if grammar.rustMacros && rule.open == [Ch.apostrophe] {
                     // handled below as char literal or lifetime
                 } else {
@@ -253,6 +272,32 @@ enum Tokenizer {
             if Ch.isDigit(char) || (char == Ch.dot && (s.peek(1).map(Ch.isDigit) ?? false)) {
                 s.number()
                 s.add(start, s.index, .number)
+                continue
+            }
+            if grammar.backslashCommands, char == Ch.backslash {
+                s.index += 1
+                if let next = s.peek(), Ch.isLetter(next) {
+                    s.add(start, s.identifier(), .keyword)
+                } else if !s.atEnd {
+                    s.index += 1
+                }
+                continue
+            }
+            if grammar.percentVariables, char == utf16Unit("%") {
+                s.index += 1
+                if s.peek() == utf16Unit("%") { s.index += 1 }
+                if let next = s.peek(), Ch.isDigit(next) || next == Ch.star {
+                    s.index += 1
+                } else {
+                    _ = s.identifier()
+                    if s.peek() == utf16Unit("%") { s.index += 1 }
+                }
+                s.add(start, s.index, .attribute)
+                continue
+            }
+            if grammar.colonLabels, char == Ch.colon, let next = s.peek(1), Ch.isIdentifierStart(next) {
+                s.index += 1
+                s.add(start, s.identifier(), .function)
                 continue
             }
             if grammar.attributePrefixes.contains(char), let next = s.peek(1), Ch.isIdentifierStart(next) {
@@ -319,10 +364,14 @@ enum Tokenizer {
                 continue
             }
             if Ch.isIdentifierStart(char) || (grammar.dollarInIdentifiers && char == Ch.dollar) {
-                let extra: Set<UInt16> = grammar.dollarInIdentifiers ? [Ch.dollar] : (grammar.rubySymbols ? [utf16Unit("?"), Ch.bang] : [])
-                let end = s.identifier(extra: extra)
+                let end = s.identifier(extra: identifierExtra)
                 let word = s.text(start, end)
                 let key = grammar.caseInsensitive ? word.lowercased() : word
+                if start == firstSignificant, grammar.wordLineComments.contains(key) {
+                    s.add(start, line.count, .comment)
+                    s.index = line.count
+                    break loop
+                }
                 if grammar.rustMacros && s.peek() == Ch.bang && s.peek(1) != Ch.equals {
                     s.index += 1
                     s.add(start, s.index, .function)
@@ -332,6 +381,10 @@ enum Tokenizer {
                     s.add(start, end, .number)
                 } else if grammar.types.contains(key) {
                     s.add(start, end, .type)
+                } else if grammar.cmdlets, Ch.isUpper(char), word.utf16.contains(Ch.dash) {
+                    s.add(start, end, .function)
+                } else if grammar.callsAfterOpenParen, start > 0, line[start - 1] == Ch.paren {
+                    s.add(start, end, .function)
                 } else if s.nextSignificant(from: end) == Ch.paren {
                     s.add(start, end, .function)
                 } else if grammar.capitalizedTypes && Ch.isUpper(char) {
@@ -347,6 +400,62 @@ enum Tokenizer {
             s.index += 1
         }
         return (s.tokens, state)
+    }
+
+    /// Whether an apostrophe after `previous` is a prime or a transpose.
+    @inline(__always)
+    private static func isPrimeContext(_ previous: UInt16) -> Bool {
+        Ch.isIdentifier(previous) || previous == utf16Unit(")") || previous == Ch.closeBracket || previous == Ch.closeBrace
+            || previous == Ch.apostrophe
+    }
+
+    /// What can only start a line: a label, a directive, a leading word or
+    /// an attribute in brackets.
+    private static func linePrelude(_ s: inout LineScanner, _ grammar: Grammar) {
+        guard grammar.labels || grammar.lineStartBrackets || grammar.leadingWordKind != nil
+            || !grammar.leadingPrefixAttributes.isEmpty
+        else { return }
+        s.skipWhitespace()
+        guard !s.atEnd else { return }
+        let start = s.index
+        let char = s.current
+        if grammar.labels, Ch.isIdentifierStart(char) || char == Ch.dot {
+            var end = start
+            while end < s.chars.count, Ch.isIdentifier(s.chars[end]) || s.chars[end] == Ch.dot || s.chars[end] == Ch.dollar { end += 1 }
+            if end < s.chars.count, s.chars[end] == Ch.colon, end + 1 == s.chars.count || s.chars[end + 1] != Ch.colon {
+                s.add(start, end, .function)
+                s.index = end + 1
+                return
+            }
+        }
+        if grammar.leadingPrefixAttributes.contains(char), let next = s.peek(1), Ch.isIdentifierStart(next) {
+            s.index += 1
+            s.add(start, s.identifier(extra: grammar.identifierExtras), .attribute)
+            return
+        }
+        if grammar.lineStartBrackets, char == Ch.bracket, let next = s.peek(1), Ch.isLetter(next) || next == Ch.less {
+            var depth = 0
+            while !s.atEnd {
+                if s.current == Ch.bracket { depth += 1 }
+                if s.current == Ch.closeBracket {
+                    depth -= 1
+                    if depth == 0 {
+                        s.index += 1
+                        break
+                    }
+                }
+                s.index += 1
+            }
+            s.add(start, s.index, .attribute)
+            return
+        }
+        if let kind = grammar.leadingWordKind, Ch.isIdentifierStart(char) {
+            let end = s.identifier(extra: grammar.identifierExtras)
+            let word = s.text(start, end)
+            let key = grammar.caseInsensitive ? word.lowercased() : word
+            s.add(start, end, grammar.keywords.contains(key) ? .keyword : kind)
+            return
+        }
     }
 
     /// Where a JSX tag's name starts, if `<` at `start` opens one.

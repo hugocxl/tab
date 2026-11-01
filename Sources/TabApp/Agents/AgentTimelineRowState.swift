@@ -15,5 +15,7 @@ struct AgentTimelineRowState {
 struct AgentResponseState {
     var wrapped: Bool? = nil
     var expanded: Bool? = nil
+    /// A diagram section shows its Mermaid source instead of the drawing.
+    var showsSource: Bool? = nil
     var children: [Int: AgentResponseState] = [:]
 }

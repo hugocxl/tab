@@ -156,7 +156,8 @@ final class FilesServiceTests: XCTestCase {
         await assertFilesThrows(try await workspace.files(.list("missing")))
 
         guard case .info(let info) = try await workspace.files(.stat("a.log")) else { return XCTFail() }
-        XCTAssertEqual(info, FileInfo(name: "a.log", path: "a.log", isDirectory: false, size: 1))
+        XCTAssertNotNil(info.modifiedAt)
+        XCTAssertEqual(info, FileInfo(name: "a.log", path: "a.log", isDirectory: false, size: 1, modifiedAt: info.modifiedAt))
     }
 
     func testMkdirRenameAndMoveNeverOverwrite() async throws {

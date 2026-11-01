@@ -9,7 +9,16 @@ final class AgentTranscriptDocument: ThemedView {
         AgentTableCopyHitTesting.hitTest(point, in: self) ?? super.hitTest(point)
     }
 
-    private enum Kind: Equatable { case message, activity, work, working, changes }
+    private enum Kind: Equatable {
+        case message, activity, work, working, changes
+        case card(AgentTypedCardKind)
+        /// Work and tool rows can own nested scroll surfaces; only plain rows stay as spares.
+        var isCard: Bool { if case .card = self { return true }; return false }
+        var retainedWhenUnmounted: Bool {
+            if case .card = self { return true }
+            return self == .message
+        }
+    }
     private struct Entry: Equatable {
         var id: String
         var kind: Kind
@@ -18,6 +27,8 @@ final class AgentTranscriptDocument: ThemedView {
         var timestamp: Date? = nil
         var groupedWork = false
         var showsResponseActions = true
+        /// Only compaction cards name the provider, so a provider change re-renders them alone.
+        var provider: AgentChatProvider? = nil
     }
     private struct Height {
         var value: CGFloat
@@ -36,6 +47,8 @@ final class AgentTranscriptDocument: ThemedView {
         init(row: AgentTimelineRow, kind: Kind) { self.row = row; self.kind = kind }
     }
 
+    /// Remembers todo-list validity per item across snapshots.
+    let classifier = AgentTypedCardClassifier()
     private var entries: [Entry] = []
     private var sourceItems: [AgentChatItem] = []
     private var sourceTurns: [AgentChatTurn] = []
@@ -71,12 +84,25 @@ final class AgentTranscriptDocument: ThemedView {
     var onRunShellCommand: ((String) -> Void)? { didSet { cache.values.forEach { $0.row.onRunShellCommand = onRunShellCommand } } }
     var onOpenAttachment: ((String, AgentChatAttachmentDescriptor, Bool) -> Void)?
     var fetchAttachment: AgentAttachmentCache.Fetch?
+    var onHTMLDocument: ((AgentHtmlDocumentCard.Action, AgentHtmlDocumentReference) -> Void)?
     var onPreviewAttachments: ((String, [AgentChatAttachmentDescriptor], Int) -> Void)?
     var onOpenFile: ((String, Int?) -> Void)?
     var workspaceRoot: String?
     var onOpenToolDiff: ((String, AgentToolActivity) -> Void)?
     var onOpenCheckpoint: ((String, String?) -> Void)?
     var onEarlier: (() -> Void)?
+    /// Saves a plan through the conversation's project actions: `(relativePath, contents, cwd)`.
+    var writeProjectFile: ((String, String, String?) async throws -> String)?
+    var pasteboard: NSPasteboard = .general
+    var provider: AgentChatProvider? {
+        didSet {
+            guard oldValue != provider, !entries.isEmpty else { return }
+            update(sourceItems, omittedCount: omittedCount, turns: sourceTurns)
+        }
+    }
+    var onOpenCitation: ((AgentAssistantCitation) -> Void)?
+    var onOpenThread: ((AgentThreadLink) -> Void)?
+    var linkServices: AgentConversationLinkServices?
     var isNested = false
     /// Capture live state before returning; evicted rows retain only these value records.
     var rowStates: [String: AgentTimelineRowState] {
@@ -165,6 +191,7 @@ final class AgentTranscriptDocument: ThemedView {
         earlier.stringValue = "Earlier messages are saved · Showing \(items.count) retained entries"
         geometry.reset(heights: entries.map { heights[$0.id]?.value ?? 80 },
                        trailingSpaces: entries.enumerated().map { index, entry in
+            if case .card = entry.kind { return entry.groupedWork ? 6 : 14 }
             if entry.groupedWork, entry.kind == .activity {
                 return index + 1 < entries.count && entries[index + 1].groupedWork && entries[index + 1].kind == .activity ? 0 : 4
             }
@@ -177,6 +204,16 @@ final class AgentTranscriptDocument: ThemedView {
         lastViewport.origin.y = offset(for: anchor)
         pendingAnchor = anchor
         reflow(viewportWidth: viewportWidth)
+    }
+
+    /// Renders retained rows again after the link services' pull-request hosts changed.
+    func linkServicesDidChange() {
+        for (id, cached) in cache {
+            cached.row.linkServicesDidChange()
+            cached.needsMeasurement = true
+            cached.needsLayout = true
+            heights[id]?.valid = false
+        }
     }
 
     func reflow(viewportWidth: CGFloat) {
@@ -233,7 +270,11 @@ final class AgentTranscriptDocument: ThemedView {
             let target = entryFrame(at: index)
             let needsLayout = cached.needsLayout || cached.row.frame.size != target.size
             cached.row.frame = target
-            if needsLayout { cached.row.layoutRow(width: rowWidth); cached.needsLayout = false }
+            if needsLayout {
+                cached.row.layoutRow(width: rowWidth)
+                cached.row.invalidateFindText()
+                cached.needsLayout = false
+            }
         }
         trimCache()
         viewportOrigin = origin
@@ -244,7 +285,42 @@ final class AgentTranscriptDocument: ThemedView {
             clip.scroll(to: NSPoint(x: rect.minX, y: origin))
             clip.enclosingScrollView?.reflectScrolledClipView(clip)
         }
+        onViewportSettled?()
         return frame.height
+    }
+
+    /// Called after every viewport pass, once mounted rows are laid out. Nil unless
+    /// a decoration such as Find needs to follow mounting, so it costs nothing otherwise.
+    var onViewportSettled: (() -> Void)?
+
+    /// Each mounted row that shows a single retained item, with that item's ID.
+    func forEachMountedItemRow(_ body: (_ itemID: String, _ row: AgentTimelineRow) -> Void) {
+        for id in mounted {
+            guard let index = positions[id], let cached = cache[id], cached.row.superview === self,
+                  entries[index].kind == .message || entries[index].kind == .activity || entries[index].kind.isCard,
+                  let item = entries[index].items.first else { continue }
+            body(item.id, cached.row)
+        }
+    }
+
+    /// The entry that shows `itemID` on its own row; nil while it is folded into a
+    /// completed work group or no longer retained.
+    func entryID(showing itemID: String) -> String? {
+        entries.first { $0.kind != .work && $0.items.contains { $0.id == itemID } }?.id
+    }
+
+    /// The mounted row of an entry, if it is mounted.
+    func mountedRow(_ entryID: String) -> AgentTimelineRow? {
+        guard mounted.contains(entryID), let row = cache[entryID]?.row, row.superview === self else { return nil }
+        return row
+    }
+
+    /// The mounted row showing `item` as it is now, if any; O(1), for Find's rendered text.
+    func mountedRow(showing item: AgentChatItem) -> AgentTimelineRow? {
+        let id = item.kind == .tool ? "activity:" + item.id : item.id
+        guard mounted.contains(id), let cached = cache[id], cached.row.superview === self,
+              cached.rendered?.items.first == item else { return nil }
+        return cached.row
     }
 
     /// Geometry lookup does not instantiate the target row.
@@ -252,28 +328,33 @@ final class AgentTranscriptDocument: ThemedView {
         positions[id].map { entryFrame(at: $0) }
     }
 
-    func resolveConversationAnchor(_ source: AgentConversationAnchor) -> AgentTranscriptAnchor? {
-        let targetID = source.messageID ?? source.itemID
-        if let targetID, let owner = entries.first(where: { $0.items.contains(where: { $0.id == targetID }) }) {
+    /// The row showing a retained item (`.item`) or a turn's work group (`.turn`, by its
+    /// user item), expanding a completed work group so the item has a row to anchor to.
+    func anchor(revealing target: AgentTranscriptTarget, offset: CGFloat = 0) -> AgentTranscriptAnchor? {
+        switch target {
+        case .item(let targetID):
+            guard let owner = entries.first(where: { $0.items.contains(where: { $0.id == targetID }) }) else { return nil }
             if owner.kind == .work {
-                // Source can be reading an item inside an expanded completed
-                // group. Reveal the corresponding native rows before anchoring.
                 var states = rowStates
                 var state = states[owner.id] ?? AgentTimelineRowState()
                 state.expanded = true
                 states[owner.id] = state
                 rowStates = states
             }
-            if let entry = entries.first(where: { $0.kind != .work && $0.items.contains(where: { $0.id == targetID }) }) {
-                return AgentTranscriptAnchor(rowID: entry.id, localOffset: source.offset, fallback: lastViewport.minY)
-            }
-        }
-        if let runID = source.runID, runID.hasPrefix("native-turn:") {
-            let userID = String(runID.dropFirst("native-turn:".count))
+            guard let entry = entries.first(where: { $0.kind != .work && $0.items.contains(where: { $0.id == targetID }) }) else { return nil }
+            return AgentTranscriptAnchor(rowID: entry.id, localOffset: offset, fallback: lastViewport.minY)
+        case .turn(let userID):
             let id = positions["work:" + userID] != nil ? "work:" + userID : userID
-            if positions[id] != nil { return AgentTranscriptAnchor(rowID: id, localOffset: source.offset, fallback: lastViewport.minY) }
+            guard positions[id] != nil else { return nil }
+            return AgentTranscriptAnchor(rowID: id, localOffset: offset, fallback: lastViewport.minY)
         }
-        return nil
+    }
+
+    /// The mounted row showing a retained message, if it is in the viewport's overscan.
+    func messageRow(for itemID: String) -> AgentMessageRow? {
+        guard let entry = entries.first(where: { $0.kind == .message && $0.items.contains(where: { $0.id == itemID }) }),
+              mounted.contains(entry.id) else { return nil }
+        return cache[entry.id]?.row as? AgentMessageRow
     }
 
     func captureAnchor(at y: CGFloat) -> AgentTranscriptAnchor {
@@ -358,6 +439,7 @@ final class AgentTranscriptDocument: ThemedView {
             case .work: row = AgentCompletedWorkRow()
             case .working: row = AgentWorkingRow()
             case .changes: row = AgentChangedFilesRow()
+            case .card(let card): row = AgentCardRow.make(card)
             }
             cached = CachedRow(row: row, kind: entry.kind)
             cache[entry.id] = cached
@@ -383,9 +465,13 @@ final class AgentTranscriptDocument: ThemedView {
             row.onOpenCheckpoint = { [weak self] id, path in self?.onOpenCheckpoint?(id, path) }
             row.onOpenAttachment = onOpenAttachment
             row.fetchAttachment = fetchAttachment
+            row.onHTMLDocument = onHTMLDocument
             row.onPreviewAttachments = onPreviewAttachments
             row.onRunShellCommand = onRunShellCommand
             row.onOpenFile = { [weak self] path, line in self?.onOpenFile?(path, line) }
+            row.onOpenCitation = { [weak self] citation in self?.onOpenCitation?(citation) }
+            row.onOpenThread = { [weak self] link in self?.onOpenThread?(link) }
+            row.linkServices = linkServices
         }
         let row = cached.row
         if cached.epoch != themeEpoch || row.theme !== theme {
@@ -403,11 +489,18 @@ final class AgentTranscriptDocument: ThemedView {
                 message.checkpoint = entry.turn?.checkpoint
             }
             if let changes = row as? AgentChangedFilesRow { changes.checkpoint = entry.turn?.checkpoint }
+            if let compaction = row as? AgentCompactionRow { compaction.provider = entry.provider }
             row.update(entry.items)
+            row.invalidateFindText()
             row.setTimestamp(entry.timestamp)
             cached.rendered = entry
             cached.needsMeasurement = true
             cached.needsLayout = true
+        }
+        if let plan = row as? AgentPlanCardRow {
+            plan.services.writeProjectFile = writeProjectFile
+            plan.services.pasteboard = pasteboard
+            plan.services.cwd = workspaceRoot
         }
         if fresh, let state = savedStates[entry.id] { row.restoreState(state) }
         row.setApprovalsEnabled(approvalsEnabled)
@@ -418,6 +511,7 @@ final class AgentTranscriptDocument: ThemedView {
         let old = heights[entry.id]
         guard cached.needsMeasurement || old?.valid != true || old?.width != rowWidth || old?.epoch != themeEpoch else { return false }
         let height = max(1, row.preferredHeight(for: rowWidth))
+        row.invalidateFindText()
         measurementCount += 1
         heights[entry.id] = Height(value: height, width: rowWidth, epoch: themeEpoch, valid: true)
         geometry.setHeight(height, at: index)
@@ -452,7 +546,7 @@ final class AgentTranscriptDocument: ThemedView {
             cached.row.removeFromSuperview()
             // A work/tool row can own another virtualized scroll surface. Do not
             // multiply the spare-view budget by retaining its entire child cache.
-            if cached.kind != .message { removeCachedRow(id) }
+            if !cached.kind.retainedWhenUnmounted { removeCachedRow(id) }
         }
         mounted.formIntersection(retained)
         trimCache()
@@ -472,6 +566,7 @@ final class AgentTranscriptDocument: ThemedView {
 
     private func estimate(_ entry: Entry) -> CGFloat {
         if entry.kind == .activity { return entry.groupedWork ? 24 : 28 }
+        if case .card(let card) = entry.kind { return card == .compaction || card == .notice ? 28 : 120 }
         if entry.kind != .message { return 24 }
         guard let item = entry.items.first else { return 40 }
         let lines = min(40, max(1, item.text.utf16.count / 70 + item.text.reduce(0) { $0 + ($1 == "\n" ? 1 : 0) }))
@@ -516,20 +611,28 @@ final class AgentTranscriptDocument: ThemedView {
                   approvalCounts[answer] == approvalCounts[start + 1] else { continue }
             groups[start + 1] = (turn, answer)
         }
+        func entry(for item: AgentChatItem) -> Entry {
+            let card = classifier.classify(item)
+            return Entry(id: item.kind == .tool ? "activity:" + item.id : item.id,
+                         kind: card.map { .card($0) } ?? (item.kind == .tool ? .activity : .message),
+                         items: [item], timestamp: timestamps[item.id],
+                         provider: card == .compaction ? provider : nil)
+        }
         var result: [Entry] = []
         let activeTurns = Dictionary(turns.filter { $0.completedAt == nil }.map { ($0.userItemID, $0) }, uniquingKeysWith: { _, last in last })
         var index = 0
         while index < items.endIndex {
             let item = items[index]
             if let (turn, end) = groups[index] {
-                result.append(Entry(id: "work:" + turn.userItemID, kind: .work,
-                                    items: Array(items[index..<end]), turn: turn))
+                // Failures stay visible below the fold; every other card folds like a tool.
+                let work = items[index..<end]
+                let folded = work.filter { classifier.classify($0)?.folds != false }
+                result.append(Entry(id: "work:" + turn.userItemID, kind: .work, items: folded, turn: turn))
+                result.append(contentsOf: work.filter { classifier.classify($0)?.folds == false }.map(entry(for:)))
                 index = end
                 continue
             } else {
-                result.append(Entry(id: item.kind == .tool ? "activity:" + item.id : item.id,
-                                    kind: item.kind == .tool ? .activity : .message,
-                                    items: [item], timestamp: timestamps[item.id]))
+                result.append(entry(for: item))
             }
             if let turn = activeTurns[item.id] {
                 result.append(Entry(id: "working:" + item.id, kind: .working, items: [], turn: turn))

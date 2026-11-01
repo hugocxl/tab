@@ -98,7 +98,7 @@ final class AgentStreamingIntegrationTests: XCTestCase {
         if let root { try? FileManager.default.removeItem(at: root) }
     }
 
-    func testPartialAssistantIsLaidOutAndUpdatesSameSourceNodeBeforeProviderCanFinish() async throws {
+    func testPartialAssistantIsLaidOutAndUpdatesSameTextViewBeforeProviderCanFinish() async throws {
         let model = try XCTUnwrap(model)
         let id = try XCTUnwrap(model.newAgent())
         let pane = try XCTUnwrap(model.controller(for: id) as? AgentPaneController)
@@ -109,7 +109,6 @@ final class AgentStreamingIntegrationTests: XCTestCase {
         window.orderFront(nil)
         self.window = window
         try await wait("initial agent snapshot") { pane.snapshot?.status == .idle }
-        try await wait("actual source renderer activation") { pane.surface.usesWebConversation }
         pane.surface.composer.string = "Exercise streaming, not the final answer"
         pane.selectModel(provider: .claude, model: "claude-sonnet-5-5")
         pane.selectEffort(.medium)
@@ -131,9 +130,7 @@ final class AgentStreamingIntegrationTests: XCTestCase {
         XCTAssertEqual(pane.snapshot?.status, .working)
         XCTAssertFalse(exists("final-emitted"))
         XCTAssertFalse(exists("allow-second"))
-        let first = try await sourceAssistant(pane, text: "FIRST-PARTIAL")
-        XCTAssertEqual(first["count"] as? Int, 1)
-        _ = try await pane.surface.conversationWebView.evaluate("window.__streamingMessageNode=document.querySelector('[data-message-id=\"stream-answer\"][data-message-role=\"assistant\"]');return window.__streamingMessageNode.isConnected")
+        let first = try await assistantTextView(pane, text: "FIRST-PARTIAL")
 
         try Data().write(to: root.appendingPathComponent("allow-second"))
         let expanded = "FIRST-PARTIAL SECOND-PARTIAL"
@@ -144,9 +141,8 @@ final class AgentStreamingIntegrationTests: XCTestCase {
         XCTAssertEqual(pane.snapshot?.status, .working)
         XCTAssertFalse(exists("final-emitted"))
         XCTAssertFalse(exists("allow-final"))
-        let second = try await sourceAssistant(pane, text: expanded)
-        XCTAssertEqual(second["sameNode"] as? Bool, true, "The second partial must update the still-mounted source message node")
-        XCTAssertEqual(second["count"] as? Int, 1)
+        let second = try await assistantTextView(pane, text: expanded)
+        XCTAssertTrue(second === first, "The second partial must update the still-mounted text view in place")
 
         // Only after BOTH interim displays are proven can the subprocess emit its
         // assembled assistant/result frames. A final-message-only UI cannot pass.
@@ -158,26 +154,28 @@ final class AgentStreamingIntegrationTests: XCTestCase {
         }
         XCTAssertTrue(exists("final-emitted"))
         XCTAssertEqual(pane.snapshot?.items.filter { $0.kind == .assistant }.count, 1)
-        let final = try await sourceAssistant(pane, text: expanded)
-        XCTAssertEqual(final["count"] as? Int, 1)
+        let final = try await assistantTextView(pane, text: expanded)
+        XCTAssertTrue(final === first, "Completing the message must keep its text view")
     }
 
-    /// The desktop may be locked. This checks actual source DOM text and layout,
-    /// not an on-screen screenshot, a stored snapshot string or hidden native rows.
-    private func sourceAssistant(_ pane: AgentPaneController, text: String) async throws -> [String: Any] {
-        var last: [String: Any] = [:]
+    /// The desktop may be locked. This checks the transcript's mounted, laid-out
+    /// text views, not an on-screen screenshot or the stored snapshot string.
+    private func assistantTextView(_ pane: AgentPaneController, text: String) async throws -> NSTextView {
+        var matches: [NSTextView] = []
         for _ in 0..<400 {
-            guard pane.surface.usesWebConversation else {
-                XCTFail("Source renderer fell back: \(pane.surface.conversationRendererFailure ?? "unknown")")
-                throw Failure.timeout("actual source renderer remained active")
+            let document = pane.surface.transcriptScroll.documentView ?? pane.surface
+            matches = descendants(document).compactMap { $0 as? NSTextView }.filter { view in
+                view.string.contains("FIRST-PARTIAL") && view.window != nil && !view.isHiddenOrHasHiddenAncestor &&
+                    view.frame.width > 0 && view.frame.height > 0
             }
-            last = try await pane.surface.conversationWebView.evaluate("const nodes=document.querySelectorAll('[data-message-id=\"stream-answer\"][data-message-role=\"assistant\"]');const node=nodes[0];if(!node)return {count:0};const rect=node.getBoundingClientRect();const style=getComputedStyle(node);const viewport=window.TabConversation.snapshot?.viewport;const bottom=viewport?.mode==='full-pane'?viewport.composer.y:innerHeight;return {count:nodes.length,text:node.innerText,matches:node.innerText.includes(expected),laidOut:rect.width>0&&rect.height>0&&rect.right>0&&rect.left<innerWidth&&rect.bottom>0&&rect.top<bottom&&style.display!=='none'&&style.visibility!=='hidden',sameNode:window.__streamingMessageNode===node&&node.isConnected}", arguments: ["expected": text], timeout: .seconds(2)) as? [String: Any] ?? [:]
-            if last["matches"] as? Bool == true, last["laidOut"] as? Bool == true { return last }
+            if matches.count == 1, matches[0].string.contains(text) { return matches[0] }
             try await Task.sleep(for: .milliseconds(20))
         }
-        XCTFail("Partial text never reached laid-out source DOM: \(text); state: \(last); daemon log: \(serverLog)")
-        throw Failure.timeout("partial text in actual source DOM")
+        XCTFail("Partial text never reached one laid-out transcript text view: \(text); views: \(matches.map(\.string)); daemon log: \(serverLog)")
+        throw Failure.timeout("partial text in the native transcript")
     }
+
+    private func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
 
     private func exists(_ name: String) -> Bool { FileManager.default.fileExists(atPath: root.appendingPathComponent(name).path) }
     private var serverLog: String { (try? String(contentsOf: root.appendingPathComponent("server.log"), encoding: .utf8)) ?? "" }

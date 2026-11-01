@@ -1,11 +1,11 @@
 import Foundation
 import TabProtocol
 
-/// Only an already retained tool resource may become a source MCP document.
-/// Tool/UI services that were not supplied by the provider remain unavailable.
+/// Only an already retained tool resource may become an MCP app or `html_render`
+/// document. Tool/UI services that were not supplied by the provider remain unavailable.
 @MainActor
 enum AgentConversationMcpAsset {
-    static let maximumHTMLBytes = 5 * 1024 * 1024 // pinned MCP_APP_MAX_HTML_BYTES
+    nonisolated static let maximumHTMLBytes = 5 * 1024 * 1024 // pinned MCP_APP_MAX_HTML_BYTES
     struct Ownership {
         var itemID: String
         var attachment: AgentChatAttachmentDescriptor
@@ -20,7 +20,9 @@ enum AgentConversationMcpAsset {
     struct Match {
         var ownership: Ownership
         var reference: [String: Any]
+        /// `html_render` bytes were prepared when published and are served verbatim.
         var publishedHTML = false
+        var maximumBytes: Int { publishedHTML ? 25 * 1024 * 1024 : maximumHTMLBytes }
     }
     static func htmlRenderCandidates(attachmentID: String, items: [AgentChatItem]) -> [Match] {
         items.compactMap { item in
@@ -29,7 +31,7 @@ enum AgentConversationMcpAsset {
             var budget = ReadBudget()
             guard let object = read(output, budget: &budget), !budget.exceeded,
                   let reference = object["htmlRender"] as? [String: Any], let id = boundedName(reference["attachmentId"]),
-                  id == attachmentID || AgentConversationWebView.bridgeAttachmentID(item: item.id, attachment: id) == attachmentID,
+                  id == attachmentID,
                   let attachment = item.attachments?.first(where: { $0.id == id }),
                   attachment.mimeType.split(separator: ";", maxSplits: 1).first?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "text/html",
                   attachment.byteCount <= 25 * 1024 * 1024 else { return nil }
@@ -47,7 +49,7 @@ enum AgentConversationMcpAsset {
                   let server = boundedName(app["server"]), let name = boundedName(app["tool"]),
                   toolName == server + "." + name,
                   let uri = app["resourceUri"] as? String, uri.utf16.count <= 4096, uri.hasPrefix("ui://"),
-                  id == attachmentID || AgentConversationWebView.bridgeAttachmentID(item: item.id, attachment: id) == attachmentID,
+                  id == attachmentID,
                   let attachment = item.attachments?.first(where: { $0.id == id }),
                   attachment.mimeType.split(separator: ";", maxSplits: 1).first?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "text/html",
                   attachment.byteCount <= maximumHTMLBytes else { continue }

@@ -98,7 +98,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
             self?.authoritativeProject ?? route.project ?? model?.state.paneProject(pane)
         }
         surface.workspaceRoot = context.project.directory.rawValue
-        AgentConversationNativeActions.install(surface: surface, model: model, pane: pane, session: session)
+        AgentConversationProjectActions.install(surface: surface, model: model, pane: pane, session: session)
         loadCheckpoint = { [weak model] request in
             guard let model, let project = owningProject(), let client = model.sideClient(for: project) else {
                 throw AgentPaneError.offline
@@ -155,7 +155,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
             }
             return try await client.searchFiles(project).paths
         }
-        composerCoordinator.loadThreads = { [weak model] in
+        composerCoordinator.loadThreads = { [weak model, weak self] in
             guard let model, let projectID = model.state.paneProject(pane),
                   let project = model.state.project(projectID), let client = model.sideClient(for: projectID) else {
                 throw AgentPaneError.offline
@@ -174,6 +174,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
                 threads.append(AgentMentionThread(id: "\(other)", title: String(first.text.prefix(90)),
                                                    context: String(context.suffix(24_000))))
             }
+            for thread in threads { self?.surface.linkServices.threadTitles[thread.id] = thread.title }
             return threads
         }
         composerCoordinator.loadSkills = { [weak model, weak self] in
@@ -214,7 +215,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
             surface.access.lastItem?.toolTip = mode.tooltip
         }
         surface.send.onPress = { [weak self] in self?.send() }
-        surface.stop.onPress = { [weak self] in self?.stop() }
+        surface.stop.onPress = { [weak self] in try? self?.surface.actions.interrupt() }
         surface.retry.onPress = { [weak self] in self?.refresh() }
         surface.onOpenToolDiff = { [weak self] id, activity in
             guard let self else { return }
@@ -237,17 +238,17 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
             self.checkpointWindows[key] = controller
             controller.showWindow(nil)
         }
-        surface.onApproval = { [weak self] id, allow in self?.approve(id, allow: allow) }
-        surface.onConversationApproval = { [weak self] id, allow in
+        surface.onApproval = { [weak self] id, allow in
+            guard let actions = self?.surface.actions else { return }
+            // A stale button is ignored; real failures are shown by `approveAndWait`.
+            Task { @MainActor in try? await actions.approve(requestID: id, allow: allow) }
+        }
+        surface.actions.onApprove = { [weak self] id, allow in
             guard let self else { throw CancellationError() }
             try await self.approveAndWait(id, allow: allow)
         }
-        surface.onConversationModalChange = { [weak self] in
-            guard let self else { return }
-            if self.surface.isConversationModal { self.composerCoordinator.dismiss() }
-            self.updateControls()
-        }
-        surface.onConversationActionFailure = { [weak self] in self?.showError($0) }
+        surface.actions.onInterrupt = { [weak self] in self?.stop() }
+        surface.onActionError = { [weak self] message in self?.showComposerError(message) }
         surface.attach.onPress = { [weak self] in self?.chooseAttachments() }
         surface.composer.onAttachFiles = { [weak self] in self?.attachFiles($0) }
         surface.composer.onAttachImage = { [weak self] data, mime in self?.attachImage(data, mimeType: mime) }
@@ -266,7 +267,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     }
 
     func focusContent() {
-        view.window?.makeFirstResponder(surface.isConversationModal ? surface.conversationWebView.webView : surface.composer)
+        view.window?.makeFirstResponder(surface.composer)
     }
     func didShow() { refresh() }
     func didHide() {} // Keep the draft, transcript and scroll position when switching projects.
@@ -292,7 +293,6 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     }
 
     func dispose() {
-        surface.disposeConversation()
         attachmentCache.cancel()
         filePreview?.close()
         filePreview = nil
@@ -383,7 +383,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     }
 
     func send() {
-        guard !surface.isConversationModal, !approvalInFlight else { return }
+        guard !approvalInFlight else { return }
         if composerCoordinator.performTypedAction() { return }
         let text = AgentComposerCitation.prompt(from: surface.composer.attributedString())
         guard !disposed, commandTask == nil, created, canSend,
@@ -589,7 +589,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     }
 
     func stop() {
-        guard !surface.isConversationModal, !disposed, !needsAuthoritativeSnapshot, stopTask == nil,
+        guard !disposed, !needsAuthoritativeSnapshot, stopTask == nil,
               submitting || snapshot?.status == .working || snapshot?.status == .waiting else { return }
         guard snapshot?.status == .working || snapshot?.status == .waiting else {
             // Do not interrupt ahead of the send's server acceptance. Revision events
@@ -671,7 +671,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
             selectionEdited = false
         }
         surface.render(result)
-        if authoritative { surface.onConversationProjectRefresh?() }
+        if authoritative { surface.actions.project?.refreshProjectMetadata() }
         updateControls()
         if stopRequested && (result.status == .working || result.status == .waiting) { stop() }
         titleDidChange?()
@@ -688,20 +688,18 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     }
 
     private func updateControls() {
-        surface.conversationWebView.connectionState = created && !needsAuthoritativeSnapshot ? "live" : (snapshot == nil ? "empty" : "cached")
-        let modal = surface.isConversationModal
-        surface.composer.isEditable = !modal && !disposed
-        surface.attach.isEnabled = !modal && !disposed
-        surface.send.isEnabled = !modal && !approvalInFlight && !disposed && created && commandTask == nil && canSend &&
+        surface.composer.isEditable = !disposed
+        surface.attach.isEnabled = !disposed
+        surface.send.isEnabled = !approvalInFlight && !disposed && created && commandTask == nil && canSend &&
             preparingAttachments == 0 && (!surface.composer.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !draftAttachments.isEmpty)
-        surface.stop.isEnabled = !modal && !disposed && !needsAuthoritativeSnapshot && stopTask == nil && !stopRequested &&
+        surface.stop.isEnabled = !disposed && !needsAuthoritativeSnapshot && stopTask == nil && !stopRequested &&
             (submitting || snapshot?.status == .working || snapshot?.status == .waiting)
         let busy = submitting || snapshot?.status == .working || snapshot?.status == .waiting
         surface.send.isHidden = busy
         surface.stop.isHidden = !busy
-        surface.model.isEnabled = !modal && canEditSelection && !needsAuthoritativeSnapshot
+        surface.model.isEnabled = canEditSelection && !needsAuthoritativeSnapshot
         surface.effort.isEnabled = surface.model.isEnabled && !supportedEfforts.isEmpty
-        surface.access.isEnabled = !modal && !disposed && created && !needsAuthoritativeSnapshot && commandTask == nil && snapshot?.status != .closed
+        surface.access.isEnabled = !disposed && created && !needsAuthoritativeSnapshot && commandTask == nil && snapshot?.status != .closed
         let mode = snapshot?.accessMode ?? .standard
         surface.access.select(surface.access.itemArray.first { ($0.representedObject as? AgentAccessMode) == mode })
         surface.access.symbol = mode == .fullAccess ? "lock.open" : mode == .ask ? "hand.raised" : "shield.lefthalf.filled"

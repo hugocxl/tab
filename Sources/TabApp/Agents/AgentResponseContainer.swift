@@ -36,11 +36,31 @@ final class AgentResponseContainer: AgentResponseSection {
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
     private func changed() { invalidateMeasurement(); onHeightChanged?() }
+    /// True for a folded `<details>` block, whose content is hidden.
+    var isCollapsed: Bool {
+        guard case .details = container else { return false }
+        return !expanded
+    }
+
     func reveal() {
-        guard case .details = container, !expanded else { return }
+        guard isCollapsed else { return }
         expanded = true
         refreshDisclosure()
         changed()
+    }
+
+    /// Opens every folded `<details>` block that hides `view`, outermost first, up to
+    /// `root`. True when one was opened.
+    @discardableResult
+    static func revealAncestors(of view: NSView, below root: NSView) -> Bool {
+        var folded: [AgentResponseContainer] = []
+        var ancestor = view.superview
+        while let current = ancestor, current !== root {
+            if let container = current as? AgentResponseContainer, container.isCollapsed { folded.append(container) }
+            ancestor = current.superview
+        }
+        for container in folded.reversed() { container.reveal() }
+        return !folded.isEmpty
     }
     override func update(_ part: AgentResponsePart, theme: AppTheme, delegate: NSTextViewDelegate) {
         let next: AgentResponsePart.Container

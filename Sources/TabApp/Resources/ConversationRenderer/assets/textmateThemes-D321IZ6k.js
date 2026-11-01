@@ -1,1 +1,0 @@
-import{t as e}from"./preload-helper-CRzLMJPS.js";var t={"pierre-light":()=>e(()=>import(`./pierre-light-CoaEpmwp.js`),[],import.meta.url),"pierre-dark":()=>e(()=>import(`./pierre-dark-CpLgRqie.js`),[],import.meta.url)},n={getTheme(e){let n=t[e];return n?{name:e,load:n}:void 0}};export{n as themes};

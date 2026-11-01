@@ -8,6 +8,8 @@ final class AgentToolHeader: NSButton {
     var iconColor = NSColor.secondaryLabelColor
     var focusColor = NSColor.controlAccentColor
     var activityIcon: AgentConversationIcon = .wrench
+    /// A muted note after the title, such as why a tool did not run.
+    var suffix: String? { didSet { if oldValue != suffix { needsDisplay = true } } }
     var expanded = false
     var hovered = false { didSet { needsDisplay = true } }
     var timestampColor = NSColor.secondaryLabelColor
@@ -63,8 +65,15 @@ final class AgentToolHeader: NSButton {
         ]
         let timestampSize = (timestampText as NSString).size(withAttributes: timestampAttributes)
         let trailingWidth: CGFloat = showsTimestamp ? ceil(timestampSize.width) + 10 : 0
-        (title as NSString).draw(in: NSRect(x: 32, y: (bounds.height - lineHeight) / 2,
-            width: max(0, bounds.width - 58 - trailingWidth), height: lineHeight), withAttributes: attributes)
+        let line = NSMutableAttributedString(string: title, attributes: attributes)
+        if let suffix, !suffix.isEmpty {
+            var muted = attributes
+            muted[.foregroundColor] = timestampColor
+            line.append(NSAttributedString(string: " · " + suffix, attributes: muted))
+        }
+        line.draw(with: NSRect(x: 32, y: (bounds.height - lineHeight) / 2,
+            width: max(0, bounds.width - 58 - trailingWidth), height: lineHeight),
+            options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
         if showsTimestamp {
             (timestampText as NSString).draw(at: NSPoint(x: max(32, bounds.width - 26 - timestampSize.width),
                 y: (bounds.height - timestampSize.height) / 2), withAttributes: timestampAttributes)

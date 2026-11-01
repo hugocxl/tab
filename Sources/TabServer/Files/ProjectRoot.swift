@@ -161,7 +161,8 @@ final class ProjectRoot: @unchecked Sendable {
         let info = try target.stat()
         let name = target.components.last ?? (path as NSString).lastPathComponent
         return FileInfo(name: ServerPath(name), path: target.serverPath,
-                        isDirectory: info.st_mode & S_IFMT == S_IFDIR, size: UInt64(max(0, info.st_size)))
+                        isDirectory: info.st_mode & S_IFMT == S_IFDIR, size: UInt64(max(0, info.st_size)),
+                        modifiedAt: Double(info.st_mtimespec.tv_sec) + Double(info.st_mtimespec.tv_nsec) / 1_000_000_000)
     }
 
     private func readLink(parent: Descriptor, name: String) throws -> String {

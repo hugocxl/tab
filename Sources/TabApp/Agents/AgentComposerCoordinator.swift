@@ -169,14 +169,19 @@ final class AgentComposerCoordinator {
     private func select(_ item: AgentComposerSuggestion) {
         guard let trigger,
               AgentComposerTrigger.parse(text: surface.composer.string, selection: surface.composer.selectedRange()) == trigger else { return }
-        let replacement: String
+        var replacement: String?
         switch item.kind {
         case .action: replacement = ""
         case .file:
             replacement = item.id.contains(where: { $0.isWhitespace }) ? "@\"\(item.id)\" " : "@\(item.id) "
         case .thread:
-            replacement = "@\"\(item.title)\" "
-            if let thread = threads.first(where: { $0.id == item.id }) {
+            let thread = threads.first(where: { $0.id == item.id })
+            if let session = SessionId(string: item.id),
+               surface.insertThreadMention(AgentThreadLink(session: session, project: surface.snapshot?.project),
+                                           title: thread?.title ?? item.title, replacing: trigger.range) {
+                replacement = nil
+            } else { replacement = "@\"\(item.title)\" " }
+            if let thread {
                 onContext?("Thread-\(thread.id).txt", "Referenced conversation: \(thread.title)\n\n\(thread.context)")
             }
         case .skill:
@@ -186,7 +191,7 @@ final class AgentComposerCoordinator {
                 onContext?("Skill-\(skill.name).md", "Use the following skill instructions for this request. Resolve skill-relative resources from \(directory).\n\n\(skill.instructions)")
             }
         }
-        surface.composer.insertText(replacement, replacementRange: trigger.range)
+        if let replacement { surface.composer.insertText(replacement, replacementRange: trigger.range) }
         task?.cancel()
         triggerState.reset()
         hide()

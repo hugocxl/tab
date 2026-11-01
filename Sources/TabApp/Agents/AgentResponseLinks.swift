@@ -80,13 +80,20 @@ enum AgentResponseLink: Equatable {
         switch self {
         case .fragment(let id): return URL(string: "#" + id)
         case .external(let url): return url
-        case .file(let path, let line):
-            var parts = URLComponents()
-            parts.scheme = "tab-agent-file"
-            parts.host = "open"
-            parts.queryItems = [URLQueryItem(name: "path", value: path)]
-            if let line { parts.queryItems?.append(URLQueryItem(name: "line", value: String(line))) }
-            return parts.url
+        case .file(let path, let line): return Self.fileURL(path: path, line: line)
         }
+    }
+
+    /// The `tab-agent-file` link attribute of a project file; a column needs a line.
+    static func fileURL(path: String, line: Int?, column: Int? = nil) -> URL? {
+        var parts = URLComponents()
+        parts.scheme = "tab-agent-file"
+        parts.host = "open"
+        parts.queryItems = [URLQueryItem(name: "path", value: path)]
+        if let line {
+            parts.queryItems?.append(URLQueryItem(name: "line", value: String(line)))
+            if let column { parts.queryItems?.append(URLQueryItem(name: "column", value: String(column))) }
+        }
+        return parts.url
     }
 }

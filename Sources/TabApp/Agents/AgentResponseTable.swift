@@ -53,7 +53,7 @@ final class AgentResponseTable: AgentResponseSection {
         cellContents = ([headers] + rows).enumerated().flatMap { row, values in
             headers.indices.map { column in
                 AgentMarkdown.inline(values.indices.contains(column) ? values[column] : "", theme: theme,
-                    font: AppFont.system(14, weight: row == 0 ? .semibold : .regular), fileLinks: true, references: references, lineBreaks: lineBreaks)
+                    font: AppFont.system(14, weight: row == 0 ? .semibold : .regular), fileLinks: true, references: references, lineBreaks: lineBreaks, rawHTML: rawHTML)
             }
         }
         text.delegate = delegate

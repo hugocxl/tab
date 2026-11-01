@@ -90,8 +90,12 @@ enum AgentAttachmentImporter {
     /// Lazy popover preview: no full-resolution decode or larger draft cache.
     /// Like draft thumbnails, the immutable image is handed to the main actor
     /// only after the background worker has finished constructing it.
+    /// The largest encoded image a preview decodes: attachments are smaller, assistant
+    /// Markdown media may reach this bound.
+    static let maximumPreviewBytes = max(AgentChatAttachment.maxPayloadBytes, 16 * 1024 * 1024)
+
     static func previewImage(data: Data, pixels: Int = 1200) async -> NSImage? {
-        guard !data.isEmpty, data.count <= AgentChatAttachment.maxPayloadBytes else { return nil }
+        guard !data.isEmpty, data.count <= maximumPreviewBytes else { return nil }
         let worker = Task.detached(priority: .userInitiated) { () -> PreviewImage? in
             guard !Task.isCancelled,
                   let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary) else { return nil }

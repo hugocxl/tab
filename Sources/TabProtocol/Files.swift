@@ -133,12 +133,15 @@ public struct FileInfo: Hashable, Codable, Sendable {
     public var path: ServerPath
     public var isDirectory: Bool
     public var size: UInt64
+    /// Last modification, in seconds since 1970. Older servers omit it.
+    public var modifiedAt: Double?
 
-    public init(name: ServerPath, path: ServerPath, isDirectory: Bool, size: UInt64) {
+    public init(name: ServerPath, path: ServerPath, isDirectory: Bool, size: UInt64, modifiedAt: Double? = nil) {
         self.name = name
         self.path = path
         self.isDirectory = isDirectory
         self.size = size
+        self.modifiedAt = modifiedAt
     }
 }
 

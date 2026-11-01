@@ -8,6 +8,11 @@ final class AgentImageActions: NSObject {
     var name: String
     var mimeType = "image/png"
     var fetch: (() async throws -> Data)?
+    /// The media's link; with it the menu offers Copy link, and Open link with `onOpenLink`.
+    var link: String?
+    var onOpenLink: ((String) -> Void)?
+    /// False for video and audio, whose menu offers only the link items.
+    var includesImageItems = true
     weak var view: NSView?
     private var task: Task<Void, Never>?
 
@@ -18,11 +23,21 @@ final class AgentImageActions: NSObject {
     func menu() -> NSMenu {
         let menu = NSMenu()
         menu.autoenablesItems = false
-        for (title, selector) in [("Save image", #selector(saveImage)), ("Copy image", #selector(copyImage))] {
+        for (title, selector) in [("Save image", #selector(saveImage)), ("Copy image", #selector(copyImage))] where includesImageItems {
             let item = NSMenuItem(title: title, action: selector, keyEquivalent: "")
             item.target = self
             item.isEnabled = fetch != nil
             menu.addItem(item)
+        }
+        guard let link, !link.isEmpty else { return menu }
+        if includesImageItems { menu.addItem(.separator()) }
+        let copyLink = NSMenuItem(title: "Copy link", action: #selector(copyLink), keyEquivalent: "")
+        copyLink.target = self
+        menu.addItem(copyLink)
+        if onOpenLink != nil {
+            let open = NSMenuItem(title: "Open link", action: #selector(openLink), keyEquivalent: "")
+            open.target = self
+            menu.addItem(open)
         }
         return menu
     }
@@ -36,6 +51,18 @@ final class AgentImageActions: NSObject {
         try Task.checkCancellation()
         pasteboard.clearContents()
         pasteboard.setData(png, forType: .png)
+    }
+
+    @objc func copyLink() {
+        guard let link else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(link, forType: .string)
+        announce("Link copied")
+    }
+
+    @objc func openLink() {
+        guard let link else { return }
+        onOpenLink?(link)
     }
 
     @objc func copyImage() {

@@ -59,6 +59,17 @@ public final class FindBar: NSView, NSTextFieldDelegate {
 
     public var isCaseSensitive = false { didSet { applyStyle() } }
 
+    /// The field's placeholder and accessibility name, for hosts other than a terminal.
+    public var placeholder = "Find in terminal…" { didSet { applyStyle() } }
+
+    /// Hosts that only search case-insensitively hide the Aa toggle.
+    public var showsCaseToggle = true {
+        didSet {
+            caseButton.isHidden = !showsCaseToggle
+            needsLayout = true
+        }
+    }
+
     private let fieldBox = NSView()
     private let field = NSTextField()
     private let counterLabel = NSTextField(labelWithString: "")
@@ -77,12 +88,10 @@ public final class FindBar: NSView, NSTextFieldDelegate {
         field.isBezeled = false
         field.drawsBackground = false
         field.focusRingType = .none
-        field.placeholderString = "Find in terminal…"
         field.delegate = self
         field.cell?.isScrollable = true
         field.cell?.wraps = false
         field.lineBreakMode = .byClipping
-        field.setAccessibilityLabel("Find in terminal")
         counterLabel.lineBreakMode = .byTruncatingTail
         counterLabel.alignment = .right
         configure(previousButton, symbol: "chevron.left", label: "Previous match", action: #selector(previous))
@@ -127,7 +136,7 @@ public final class FindBar: NSView, NSTextFieldDelegate {
             right -= 2
         }
         place(closeButton, width: button)
-        place(caseButton, width: 30)
+        if showsCaseToggle { place(caseButton, width: 30) }
         place(nextButton, width: button)
         place(previousButton, width: button)
         let counterWidth = min(140, ceil(counterLabel.intrinsicContentSize.width) + 4)
@@ -188,8 +197,9 @@ public final class FindBar: NSView, NSTextFieldDelegate {
         fieldBox.layer?.borderColor = style.fieldBorder.cgColor
         field.font = .systemFont(ofSize: style.fontSize)
         field.textColor = style.text
+        field.setAccessibilityLabel(placeholder.trimmingCharacters(in: CharacterSet(charactersIn: "…")))
         field.placeholderAttributedString = NSAttributedString(
-            string: "Find in terminal…",
+            string: placeholder,
             attributes: [.foregroundColor: style.muted, .font: NSFont.systemFont(ofSize: style.fontSize)])
         counterLabel.font = .systemFont(ofSize: style.captionSize)
         counterLabel.textColor = style.muted

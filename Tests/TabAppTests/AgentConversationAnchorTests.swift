@@ -5,7 +5,7 @@ import XCTest
 
 @MainActor
 final class AgentConversationAnchorTests: XCTestCase {
-    func testResolvesSourceMessageAndRevealsNestedCompletedTool() throws {
+    func testRevealsRetainedMessageAndNestedCompletedTool() throws {
         let document = AgentTranscriptDocument()
         let date = Date()
         let turn = AgentChatTurn(userItemID: "prompt", startedAt: date, completedAt: date.addingTimeInterval(2), status: .idle, outcome: .completed)
@@ -15,24 +15,14 @@ final class AgentConversationAnchorTests: XCTestCase {
         document.update(items, omittedCount: 0, turns: [turn])
         document.reflow(viewportWidth: 680)
         XCTAssertNil(document.frameForEntry("activity:tool"))
-        let source = try XCTUnwrap(AgentConversationAnchor(["itemId": "tool", "offset": 5]))
-        let resolved = try XCTUnwrap(document.resolveConversationAnchor(source))
+        let resolved = try XCTUnwrap(document.anchor(revealing: .item("tool"), offset: 5))
         XCTAssertEqual(resolved.rowID, "activity:tool")
         XCTAssertEqual(resolved.localOffset, 5)
         XCTAssertTrue(document.rowStates["work:prompt"]?.expanded == true)
         XCTAssertNotNil(document.frameForEntry("activity:tool"))
-        let message = try XCTUnwrap(AgentConversationAnchor(["messageId": "answer", "offset": 8]))
-        XCTAssertEqual(document.resolveConversationAnchor(message)?.rowID, "answer")
-        let folded = try XCTUnwrap(AgentConversationAnchor(["runId": "native-turn:prompt"]))
-        XCTAssertEqual(document.resolveConversationAnchor(folded)?.rowID, "work:prompt")
-        let removed = try XCTUnwrap(AgentConversationAnchor(["messageId": "no-longer-retained"]))
-        XCTAssertNil(document.resolveConversationAnchor(removed))
-    }
-
-    func testAnchorValidationKeepsUnknownAndUnboundedCoordinatesOut() throws {
-        XCTAssertNil(AgentConversationAnchor([:]))
-        XCTAssertNil(AgentConversationAnchor(["messageId": "bad\0identity"]))
-        XCTAssertEqual(try XCTUnwrap(AgentConversationAnchor(["messageId": "answer", "offset": Double.infinity])).offset, 0)
-        XCTAssertEqual(try XCTUnwrap(AgentConversationAnchor(["messageId": "answer", "offset": -10])).offset, 0)
+        XCTAssertEqual(document.anchor(revealing: .item("answer"))?.rowID, "answer")
+        XCTAssertEqual(document.anchor(revealing: .turn("prompt"))?.rowID, "work:prompt")
+        XCTAssertNil(document.anchor(revealing: .item("no-longer-retained")))
+        XCTAssertNil(document.anchor(revealing: .turn("no-longer-retained")))
     }
 }

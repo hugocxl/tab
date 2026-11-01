@@ -25,32 +25,37 @@ final class AgentConversationSavedNavigationTests: XCTestCase {
             } catch {}
         }
     }
-    func testExistingTargetBecomesReadyBeforeActualSourceCitationNavigation() async throws {
+
+    func testExistingTargetShowsTheSnapshotBeforeRevealingTheCitation() async throws {
         _ = NSApplication.shared
-        guard AgentConversationWebView.isAvailable else { throw XCTSkip("Build the bundled source conversation") }
         let session = SessionId(), project = ProjectId()
+        let filler = (0..<30).map { AgentChatItem(id: "filler-\($0)", kind: .assistant, text: "Earlier answer \($0)\n\nwith a second paragraph.", isComplete: true) }
         let snapshot = AgentChatSnapshot(session: session, project: project, provider: .codex, status: .idle, revision: 2,
-                                         items: [.init(id: "saved-answer", kind: .assistant, text: "Saved quote with more context.", isComplete: true)])
+                                         items: [.init(id: "saved-answer", kind: .assistant, text: "Saved quote with more context.", isComplete: true)] + filler)
         var requests: [AgentChatRequest] = []
         let controller = AgentPaneController(session: session, project: project, provider: .codex) { request in requests.append(request); return snapshot }
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 1100), styleMask: .borderless, backing: .buffered, defer: false)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 680, height: 500), styleMask: .borderless, backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false; window.contentView = controller.surface
-        controller.surface.frame = NSRect(x: 0, y: 0, width: 900, height: 1100); controller.surface.layoutSubtreeIfNeeded()
+        controller.surface.frame = NSRect(x: 0, y: 0, width: 680, height: 500); controller.surface.layoutSubtreeIfNeeded()
         defer { controller.dispose(); window.close() }
-        do { try await AgentConversationSavedNavigation.awaitRenderer(controller, snapshot: snapshot) }
-        catch { XCTFail("The existing target renderer did not become authoritative/ready: \(error)"); return }
+        try await AgentConversationSavedNavigation.awaitTranscript(controller, snapshot: snapshot)
+        let clip = controller.surface.transcriptScroll.contentView
+        XCTAssertGreaterThan(clip.bounds.minY, 0, "The pane follows the end of a long conversation")
         let citation = AgentAssistantCitation(environmentId: project.description, threadId: session.description, messageId: "saved-answer",
                                              text: "Saved quote", start: 0, end: 11, prefix: "", suffix: " with more context.")
-        let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(citation))
-        let accepted = try await controller.surface.conversationWebView.evaluate("return window.TabConversation.navigateCitation(citation)", arguments: ["citation": json]) as? Bool
-        XCTAssertEqual(accepted, true)
+        XCTAssertTrue(controller.surface.revealCitation(citation))
+        XCTAssertLessThan(clip.bounds.minY, 40, "The cited message is scrolled into view")
+        var missing = citation
+        missing.text = "Not in the message"
+        XCTAssertFalse(controller.surface.revealCitation(missing))
+        var foreign = citation
+        foreign.threadId = SessionId().description
+        XCTAssertFalse(controller.surface.revealCitation(foreign))
         XCTAssertEqual(controller.snapshot?.session, session)
-        XCTAssertEqual(controller.snapshot?.project, project)
         XCTAssertTrue(requests.allSatisfy { request in
             switch request { case .create(let found, let owner, _): return found == session && owner == project
             case .read(let found): return found == session
             default: return false }
         }, "Navigation must not send a prompt or allocate another session")
     }
-
 }

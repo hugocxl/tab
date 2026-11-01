@@ -77,3 +77,9 @@ struct AgentTranscriptAnchor {
     var localOffset: CGFloat
     var fallback: CGFloat
 }
+
+/// What the transcript can scroll to: a retained item, or a turn by its user item.
+enum AgentTranscriptTarget: Equatable {
+    case item(String)
+    case turn(String)
+}

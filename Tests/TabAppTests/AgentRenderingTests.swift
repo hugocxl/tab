@@ -70,7 +70,6 @@ final class AgentRenderingTests: XCTestCase {
     private func surface(width: CGFloat = 1000, height: CGFloat = 800) -> AgentPaneView {
         _ = NSApplication.shared
         let surface = AgentPaneView(frame: NSRect(x: 0, y: 0, width: width, height: height))
-        surface.disposeConversation() // This fixture exercises the native fallback.
         surface.model.addItems(withTitles: ["Claude Sonnet", "Codex"])
         surface.effort.addItems(withTitles: ["High", "Medium", "Low"])
         surface.access.addItem(withTitle: "Auto")

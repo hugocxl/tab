@@ -87,6 +87,12 @@ enum AgentResponseParser {
                     opening.range(of: #"\sopen(?:\s|=|>)"#, options: [.regularExpression, .caseInsensitive]) != nil))
                 continue
             }
+            if parseRawHTML, trimmed.hasPrefix("<"), let html = AgentInlineHTML.block(in: lines, at: i) {
+                flush()
+                result.append(contentsOf: parse(html.markdown, parseRawHTML: true, listAncestors: listAncestors))
+                i += html.count
+                continue
+            }
             if let fence = openingFence(line) {
                 flush()
                 var code: [String] = []
@@ -106,7 +112,22 @@ enum AgentResponseParser {
                 if !closed, code.last == "", lines.last == "" { code.removeLast() }
                 var content = input.join(code, startingAt: codeStart)
                 if !content.isEmpty { content += "\n" }
-                result.append(.code(fence.info, content, closed: closed))
+                // Math and diagrams render once their fence closes; until then they stream as code.
+                let language = AgentMarkdownMath.fenceLanguage(fence.info)
+                if closed, AgentMarkdownMath.fenceLanguages.contains(language),
+                   !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    result.append(.math(content.trimmingCharacters(in: .whitespacesAndNewlines)))
+                } else if closed, language == "mermaid", !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    result.append(.diagram(content))
+                } else {
+                    result.append(.code(fence.info, content, closed: closed))
+                }
+                continue
+            }
+            if let math = AgentMarkdownMath.displayBlock(in: lines, at: i) {
+                flush()
+                result.append(.math(math.latex))
+                i += math.count
                 continue
             }
             if i + 1 < lines.count, line.contains("|"), !startsTableBoundary(line), let alignments = tableSeparator(lines[i + 1]) {
@@ -196,6 +217,7 @@ enum AgentResponseParser {
                 let rich = hasLooseParagraph || candidate.contains { line in
                     let value = line.trimmingCharacters(in: .whitespaces)
                     return value.hasPrefix("```") || value.hasPrefix("~~~") || value.hasPrefix(">") || value.hasPrefix("<details")
+                        || value.hasPrefix("$$") || value.hasPrefix("\\[")
                 } || zip(candidate, candidate.dropFirst()).contains { pair in
                     pair.0.contains("|") && tableSeparator(pair.1) != nil
                 }

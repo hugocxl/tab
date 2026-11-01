@@ -11,6 +11,14 @@ enum AgentConversationIcon: String, CaseIterable {
     case terminal, eye, search, globe, bot, wrench
     case edit = "square-pen"
     case externalLink = "external-link"
+    case circle, info, download
+    case circleCheck = "circle-check"
+    case loader = "loader-circle"
+    case listTodo = "list-todo"
+    case fileText = "file-text"
+    case folderDown = "folder-down"
+    case foldVertical = "fold-vertical"
+    case maximize = "maximize-2"
 
     private static var images: [String: NSImage] = [:]
 

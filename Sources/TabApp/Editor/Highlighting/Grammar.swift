@@ -31,12 +31,12 @@ struct LineState: Hashable, Sendable {
         case string(Int)
         /// Inside an HTML or XML tag spanning lines.
         case tag
-        /// Inside a Markdown code fence.
+        /// Inside a Markdown code fence, or an HTTP message body.
         case fence
     }
 
     var mode: Mode = .normal
-    /// Nested block comments, or CSS braces.
+    /// Nested block comments, CSS braces, or whether an HTTP message started.
     var depth = 0
 
     static let start = LineState()
@@ -90,6 +90,39 @@ struct Grammar: Sendable {
     var hashCommentNeedsBoundary = false
     /// The first word of a line is an instruction, as in a Dockerfile.
     var lineInstructions: Set<String> = []
+    /// Extra characters inside identifiers, such as Lisp's `-` and `?` or
+    /// Haskell's `'`.
+    var identifierExtras: Set<UInt16> = []
+    /// Line comments that only count as the first thing on a line, such as
+    /// Vim's `"`.
+    var leadingLineComments: [String] = []
+    /// An apostrophe right after a word, `)`, `]` or `}` is a prime or a
+    /// transpose, not the start of a string, as in Haskell, Julia and MATLAB.
+    var primeSuffixes = false
+    /// A `[` at the start of a line opens an attribute, as in C#'s
+    /// `[Serializable]`.
+    var lineStartBrackets = false
+    /// Colors the first word of a line, when it is not a keyword, as this
+    /// kind: nginx directives, HCL attributes.
+    var leadingWordKind: TokenKind?
+    /// A word right after `(` is a function, as in Lisp.
+    var callsAfterOpenParen = false
+    /// A character at the start of a line followed by a word is a directive
+    /// colored as an attribute: Erlang's `-module`, assembly's `.text`.
+    var leadingPrefixAttributes: Set<UInt16> = []
+    /// A `name:` at the start of a line is a label, as in assembly.
+    var labels = false
+    /// A `:name` is a label, as in batch files.
+    var colonLabels = false
+    /// Words that start a comment running to the end of the line when they
+    /// begin it, such as batch `rem`.
+    var wordLineComments: Set<String> = []
+    /// Batch's `%name%`, `%1` and `%%i`.
+    var percentVariables = false
+    /// TeX's `\command`; a backslash and the next symbol is skipped.
+    var backslashCommands = false
+    /// Capitalized `Verb-Noun` words are functions, as PowerShell cmdlets.
+    var cmdlets = false
 }
 
 enum Grammars {
@@ -302,6 +335,8 @@ enum Grammars {
         case .shell: return shell
         case .dockerfile: return dockerfile
         case .json, .yaml, .toml, .markdown, .html, .xml, .css, .makefile, .plain: return nil
+        case .ini, .diff, .log, .http: return nil
+        default: return more(language)
         }
     }
 }

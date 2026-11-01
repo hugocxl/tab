@@ -14,8 +14,9 @@ enum AgentConversationSavedNavigation {
         return snapshot
     }
 
-    static func awaitRenderer(_ controller: AgentPaneController, snapshot: AgentChatSnapshot,
-                              timeout: TimeInterval = 10) async throws {
+    /// Waits until `controller` shows `snapshot` or a newer revision of the same conversation.
+    static func awaitTranscript(_ controller: AgentPaneController, snapshot: AgentChatSnapshot,
+                                timeout: TimeInterval = 10) async throws {
         controller.refresh()
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
@@ -26,11 +27,8 @@ enum AgentConversationSavedNavigation {
             if let current = controller.snapshot, current.project != snapshot.project {
                 throw ModelError("The cited conversation changed projects while it was opening.")
             }
-            if let current = controller.snapshot, current.session == snapshot.session, current.project == snapshot.project,
-               current.revision >= snapshot.revision, controller.surface.usesWebConversation,
-               controller.surface.conversationWebView.isReady,
-               let delivered = controller.surface.conversationWebView.lastDeliveredRevision,
-               delivered >= snapshot.revision { return }
+            if let current = controller.snapshot, current.session == snapshot.session,
+               current.revision >= snapshot.revision { return }
             try await Task.sleep(for: .milliseconds(25))
         }
         throw ModelError("The cited conversation could not finish loading. Try its source link again.")

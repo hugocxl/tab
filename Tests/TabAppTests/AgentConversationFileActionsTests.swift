@@ -10,46 +10,55 @@ final class AgentConversationFileActionsTests: XCTestCase {
 
     func testMetadataAnchorsAbsolutePathsAndPreservesMissingEntries() async throws {
         var paths: [String] = []
-        let reply = try await AgentConversationFileActions.perform("filesystemMetadata", payload: ["input": ["paths": ["/workspace/Sources/main.swift", "/workspace/missing"]]], scope: scope,
+        let values = try await AgentConversationFileActions.filesystemMetadata(["/workspace/Sources/main.swift", "/workspace/missing"], scope: scope,
             read: { request in
                 XCTAssertEqual(request.project, self.scope.project)
                 guard case .stat(let path) = request.action else { throw ModelError("Unexpected read") }
                 paths.append(path.rawValue)
                 if path.rawValue == "missing" { throw ClientError.server(ErrorReply(code: .badPath, message: "Not found")) }
                 return .info(FileInfo(name: ServerPath("main.swift"), path: path, isDirectory: false, size: 12))
-            }, register: { _, _, _ in throw ModelError("Metadata must not mint assets") })
+            })
         XCTAssertEqual(paths, ["Sources/main.swift", "missing"])
-        let values = try XCTUnwrap((reply as? [String: Any])?["entries"] as? [Any])
-        XCTAssertEqual((values[0] as? [String: Any])?["kind"] as? String, "file")
-        XCTAssertTrue(values[1] is NSNull)
+        XCTAssertEqual(values, [.init(isDirectory: false, byteLength: 12, mimeType: AgentConversationFileActions.mimeType(path: "main.swift")), nil])
+        do {
+            _ = try await AgentConversationFileActions.filesystemMetadata(["/elsewhere/secret"], scope: scope,
+                read: { _ in XCTFail("Paths outside the project cannot reach the server"); throw ModelError("Unexpected read") })
+            XCTFail("Expected scope rejection")
+        } catch {}
     }
 
-    func testWorkspaceMediaReturnsScopedURLAndRejectsCrossConversationBeforeRead() async throws {
+    func testSearchFiltersProjectEntriesAndReportsTruncation() async throws {
+        let read: AgentConversationFileActions.Read = { request in
+            guard case .searchFiles = request.action else { throw ModelError("Unexpected read") }
+            return .fileList(FileList(paths: ["Sources/App.swift", "Sources/AppModel.swift", "README.md"], truncated: false))
+        }
+        let found = try await AgentConversationFileActions.searchProjectEntries("app", limit: 1, scope: scope, read: read)
+        XCTAssertEqual(found, .init(paths: ["Sources/App.swift"], truncated: true))
+        let all = try await AgentConversationFileActions.searchProjectEntries("", limit: 10, scope: scope, read: read)
+        XCTAssertEqual(all.paths.count, 3)
+        XCTAssertFalse(all.truncated)
+    }
+
+    func testWorkspaceMediaIsScopedAndRejectsCrossConversationBeforeRead() async throws {
         let image = try XCTUnwrap(Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZ1sAAAAASUVORK5CYII="))
-        var registered = false
-        let payload: [String: Any] = ["environmentId": scope.project.description, "input": ["resource": ["_tag": "media-file", "threadId": scope.session.description, "path": "/workspace/pixel.png"]]]
-        let reply = try await AgentConversationFileActions.perform("createAssetUrl", payload: payload, scope: scope,
+        let media = try await AgentConversationFileActions.media("/workspace/pixel.png", session: scope.session, scope: scope, ranged: false,
             read: { request in
                 switch request.action {
                 case .stat(let path): return .info(FileInfo(name: ServerPath("pixel.png"), path: path, isDirectory: false, size: UInt64(image.count)))
                 case .readBytes(let path): XCTAssertEqual(path.rawValue, "pixel.png"); return .bytes(FileBytes(path: path, bytes: image))
                 default: throw ModelError("Unexpected read")
                 }
-            }, register: { bytes, mime, path in
-                XCTAssertEqual(path, "pixel.png")
-                XCTAssertEqual(bytes, image); XCTAssertEqual(mime, "image/png"); registered = true
-                return try XCTUnwrap(URL(string: "tab-conversation://resource/scoped"))
             })
-        XCTAssertTrue(registered)
-        let value = try XCTUnwrap(reply as? [String: Any])
-        XCTAssertEqual(value["relativeUrl"] as? String, "tab-conversation://resource/scoped")
-        XCTAssertEqual(value["sourcePath"] as? String, "/workspace/pixel.png")
-        XCTAssertNotNil(value["fileRevision"])
-        XCTAssertFalse(value.values.contains { $0 is Data })
+        XCTAssertEqual(media.path, "pixel.png")
+        XCTAssertEqual(media.sourcePath, "/workspace/pixel.png")
+        XCTAssertEqual(media.mimeType, "image/png")
+        XCTAssertEqual(media.pixelSize, CGSize(width: 1, height: 1))
+        XCTAssertFalse(media.revision.isEmpty)
+        let bytes = try await media.resource.read(0, UInt32(image.count))
+        XCTAssertEqual(bytes, image)
         do {
-            _ = try await AgentConversationFileActions.perform("createAssetUrl", payload: ["input": ["resource": ["_tag": "media-file", "threadId": SessionId().description, "path": "pixel.png"]]], scope: scope,
-                read: { _ in XCTFail("A foreign conversation cannot read project bytes"); throw ModelError("Unexpected read") },
-                register: { _, _, _ in throw ModelError("Unexpected mint") })
+            _ = try await AgentConversationFileActions.media("pixel.png", session: SessionId(), scope: scope, ranged: false,
+                read: { _ in XCTFail("A foreign conversation cannot read project bytes"); throw ModelError("Unexpected read") })
             XCTFail("Expected scope rejection")
         } catch {}
     }
@@ -57,12 +66,12 @@ final class AgentConversationFileActionsTests: XCTestCase {
     func testLargeMediaIsRejectedBeforeFetchingBytes() async throws {
         var reads = 0
         do {
-            _ = try await AgentConversationFileActions.perform("createAssetUrl", payload: ["input": ["resource": ["_tag": "media-file", "path": "large.mp4"]]], scope: scope,
+            _ = try await AgentConversationFileActions.media("large.mp4", scope: scope, ranged: false,
                 read: { request in
                     reads += 1
                     guard case .stat(let path) = request.action else { XCTFail("Oversized media must not fetch bytes"); throw ModelError("Unexpected read") }
                     return .info(FileInfo(name: ServerPath("large.mp4"), path: path, isDirectory: false, size: UInt64(AgentConversationFileActions.maximumAssetBytes + 1)))
-                }, register: { _, _, _ in throw ModelError("Unexpected mint") })
+                })
             XCTFail("Expected size rejection")
         } catch {}
         XCTAssertEqual(reads, 1)
@@ -70,46 +79,45 @@ final class AgentConversationFileActionsTests: XCTestCase {
         XCTAssertThrowsError(try AgentConversationFileActions.resolve("/workspace-other/private", scope: scope))
     }
 
-    func testLargeMediaUsesBoundedRevisionMetadataAndNeverReadsWholeFile() async throws {
+    func testLargeMediaUsesBoundedRevisionPinnedRangesAndNeverReadsWholeFile() async throws {
         let size: UInt64 = 250 * 1024 * 1024
-        var requests = 0, registered = false
-        let reply = try await AgentConversationFileActions.perform("createAssetUrl", payload: ["input": ["resource": ["_tag": "media-file", "path": "large.mp4"]]], scope: scope,
+        var requests: [FilesAction] = []
+        let media = try await AgentConversationFileActions.media("large.mp4", scope: scope, ranged: true,
             read: { request in
-                requests += 1
+                requests.append(request.action)
                 switch request.action {
                 case .stat(let path): return .info(FileInfo(name: "large.mp4", path: path, isDirectory: false, size: size))
-                case .readRange(let path, let offset, let length, let revision):
-                    XCTAssertEqual(offset, 0); XCTAssertEqual(length, UInt32(FileByteRange.maximumChunkBytes)); XCTAssertNil(revision)
-                    return .byteRange(FileByteRange(path: path, offset: 0, totalSize: size, revision: "observed-revision", bytes: Data(repeating: 0, count: Int(length))))
+                case .readRange(let path, let offset, let length, _):
+                    return .byteRange(FileByteRange(path: path, offset: offset, totalSize: size, revision: "observed-revision", bytes: Data(repeating: 0, count: Int(length))))
                 default: XCTFail("Media streaming must not fetch the whole file"); throw ModelError("Unexpected read")
                 }
-            }, register: { _, _, _ in XCTFail("Media streaming must not register the whole file"); throw ModelError("Unexpected register") },
-            registerRange: { range, mime, path in
-                XCTAssertEqual(range.totalSize, size); XCTAssertEqual(range.revision, "observed-revision")
-                XCTAssertEqual(mime, "video/mp4"); XCTAssertEqual(path, "large.mp4"); registered = true
-                return URL(string: "tab-conversation://resource/ranged")!
             })
-        XCTAssertEqual(requests, 2)
-        XCTAssertTrue(registered)
-        XCTAssertEqual((reply as? [String: Any])?["fileRevision"] as? String, "observed-revision")
+        XCTAssertEqual(requests.count, 2)
+        guard case .readRange(_, 0, let length, nil) = requests[1] else { return XCTFail("The first range carries no revision: \(requests)") }
+        XCTAssertEqual(length, UInt32(FileByteRange.maximumChunkBytes))
+        XCTAssertEqual(media.revision, "observed-revision")
+        XCTAssertEqual(media.mimeType, "video/mp4")
+        XCTAssertEqual(media.resource.length, size)
+        _ = try await media.resource.read(1024, 16)
+        guard case .readRange(_, 1024, 16, "observed-revision") = requests[2] else { return XCTFail("Later ranges are pinned to the revision: \(requests)") }
     }
 
-    func testProposedPlanSaveUsesExistingScopedWriteAndReturnsSourceRelativePath() async throws {
+    func testProposedPlanSaveUsesExistingScopedWriteAndReturnsRelativePath() async throws {
         let markdown = "# Proposed plan\n\n- Preserve 🐈 exactly.\n"
         var writes = 0
-        let result = try await AgentConversationFileActions.perform("writeProjectFile", payload: ["environmentId": scope.project.description, "input": ["cwd": scope.directory, "relativePath": "plan.md", "contents": markdown]], scope: scope,
+        let path = try await AgentConversationFileActions.writeProjectFile("plan.md", contents: markdown, cwd: scope.directory, scope: scope, createParents: true,
             read: { request in
                 XCTAssertEqual(request.project, self.scope.project)
                 guard case .write(let path, let contents, let createParents) = request.action else { throw ModelError("Unexpected plan request") }
                 writes += 1; XCTAssertEqual(path.rawValue, "plan.md"); XCTAssertEqual(contents, markdown); XCTAssertTrue(createParents)
                 return .path(path)
-            }, register: { _, _, _ in throw ModelError("Plan saves must not register media") }, createWriteParents: true)
+            })
         XCTAssertEqual(writes, 1)
-        XCTAssertEqual((result as? [String: String])?["relativePath"], "plan.md")
-        for path in ["../outside.md", "/workspace/absolute.md"] {
+        XCTAssertEqual(path, "plan.md")
+        for (relative, cwd) in [("../outside.md", scope.directory), ("/workspace/absolute.md", scope.directory), ("plan.md", "/workspace/Sources")] {
             do {
-                _ = try await AgentConversationFileActions.perform("writeProjectFile", payload: ["environmentId": scope.project.description, "input": ["cwd": scope.directory, "relativePath": path, "contents": markdown]], scope: scope,
-                    read: { _ in XCTFail("Unsafe plan paths cannot reach the project server"); throw ModelError("Unexpected write") }, register: { _, _, _ in throw ModelError("Unexpected media") })
+                _ = try await AgentConversationFileActions.writeProjectFile(relative, contents: markdown, cwd: cwd, scope: scope,
+                    read: { _ in XCTFail("Unsafe plan paths cannot reach the project server"); throw ModelError("Unexpected write") })
                 XCTFail("Expected path rejection")
             } catch {}
         }

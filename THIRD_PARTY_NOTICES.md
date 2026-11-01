@@ -8,22 +8,13 @@ behaviors, model presets, interface patterns and test scenarios adapted to nativ
 Swift. The native conversation terminal-output renderer adapts the SGR palettes,
 contrast rules and bounded cursor-window behavior in `packages/shared/src/terminalOutput.ts`.
 
-Tab owns and maintains its conversation integration and application adapters.
-The underlying third-party code remains under its original copyright and license;
-renaming the integration does not transfer that ownership. The build records
-its pinned provenance and product-namespace compatibility transforms in
-`vendor/ConversationRenderer/provenance.json`. Legacy persisted citation, clipboard
-and embedded-app metadata identifiers remain readable where required.
-
-The conversation renderer also bundles the actual pinned T3 web components,
-styles, fonts and rendering engines through `vendor/ConversationRenderer`. Its resource
-directory includes `UPSTREAM-LICENSE.txt`, `third-party-licenses.json` and a revision,
-dependency-lock and asset-hash manifest. The dependency notices accompany the
-renderer in the application resource bundle.
+The underlying third-party code remains under its original copyright and license.
+Legacy persisted citation, clipboard and embedded-app metadata identifiers remain
+readable where required.
 
 Source: https://github.com/pingdotgg/t3code
 Reference revisions: `6fc9144a60c4a5f45089316ddd5f7371bafd3bf2` (initial integration)
-and `e5909e53c32a9d5b51caf6352d1f17fd73e86db7` (conversation rendering).
+and `e5909e53c32a9d5b51caf6352d1f17fd73e86db7` (conversation components and file icons).
 
 MIT License
 

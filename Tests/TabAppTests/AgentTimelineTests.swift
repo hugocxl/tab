@@ -149,7 +149,6 @@ final class AgentTimelineTests: XCTestCase {
 
     func testPendingApprovalSurvivesVisibleTranscriptWindow() throws {
         let surface = AgentPaneView(frame: NSRect(x: 0, y: 0, width: 700, height: 700))
-        surface.disposeConversation() // This fixture exercises the native fallback.
         let approval = AgentChatItem(id: "pending", kind: .approval, text: "Allow pending command?", isComplete: false)
         let later = (0..<250).map { AgentChatItem(id: "tool-\($0)", kind: .tool, text: "Read source \($0)") }
         surface.render(AgentChatSnapshot(session: SessionId(), project: ProjectId(), provider: .claude,

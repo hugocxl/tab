@@ -8,7 +8,6 @@ import XCTest
 final class AgentComposerSurfaceTests: XCTestCase {
     private func surface(width: CGFloat = 680) -> AgentPaneView {
         let surface = AgentPaneView(frame: NSRect(x: 0, y: 0, width: width, height: 700))
-        surface.disposeConversation() // This fixture exercises the native fallback.
         surface.model.addItem(withTitle: "A custom model with a very long name")
         surface.effort.addItem(withTitle: "Extra high")
         surface.access.addItem(withTitle: "Full access")

@@ -41,6 +41,15 @@ enum AgentMarkdownFragments {
         return result
     }
 
+    /// An HTML `id` or `name` attribute as an explicit fragment target: trimmed, bounded,
+    /// without whitespace and without the sanitizer's `user-content-` prefix.
+    static func anchorID(_ raw: String) -> String? {
+        let id = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty, id.count <= 256, !id.contains(where: \.isWhitespace) else { return nil }
+        let normalized = normalize(id)
+        return normalized.isEmpty ? nil : normalized
+    }
+
     static func identifiers(for titles: [String]) -> [String?] {
         var taken: Set<String> = []
         var suffixes: [String: Int] = [:]

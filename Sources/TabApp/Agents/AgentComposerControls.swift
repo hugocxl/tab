@@ -1,5 +1,6 @@
 import AppKit
 import TabCore
+import TabProtocol
 
 /// Native text input with a drawn placeholder: no overlay intercepts selection or clicks.
 @MainActor
@@ -8,6 +9,10 @@ final class AgentComposerTextView: NSTextView {
     var onAttachFiles: (([URL]) -> Void)?
     /// The second argument is the image MIME type, not a filename.
     var onAttachImage: ((Data, String) -> Void)?
+    /// A click on a quotation chip asks to show the quoted message.
+    var onOpenCitation: ((AgentAssistantCitation) -> Void)?
+    /// Copied assistant text of this conversation pastes as a quotation when this returns true.
+    var onPasteContext: ((NSPasteboard) -> Bool)?
     var placeholderColor = NSColor.secondaryLabelColor
     private var acceptingAttachmentDrop = false { didSet { needsDisplay = true } }
     private let ownedStorage: NSTextStorage?
@@ -42,7 +47,29 @@ final class AgentComposerTextView: NSTextView {
     }
 
     override func paste(_ sender: Any?) {
-        if !receiveAttachment(from: .general) { pasteAsPlainText(sender) }
+        if receiveAttachment(from: .general) { return }
+        if onPasteContext?(.general) == true { return }
+        pasteAsPlainText(sender)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard event.clickCount == 1, event.modifierFlags.intersection([.shift, .command, .option, .control]).isEmpty,
+              let citation = citation(at: convert(event.locationInWindow, from: nil)) else {
+            super.mouseDown(with: event)
+            return
+        }
+        onOpenCitation?(citation)
+    }
+
+    /// The quotation chip drawn at `point`, in view coordinates.
+    func citation(at point: NSPoint) -> AgentAssistantCitation? {
+        guard let layoutManager, let textContainer, let storage = textStorage, storage.length > 0 else { return nil }
+        let local = NSPoint(x: point.x - textContainerOrigin.x, y: point.y - textContainerOrigin.y)
+        let glyph = layoutManager.glyphIndex(for: local, in: textContainer)
+        guard layoutManager.boundingRect(forGlyphRange: NSRange(location: glyph, length: 1), in: textContainer).contains(local) else { return nil }
+        let index = layoutManager.characterIndexForGlyph(at: glyph)
+        guard index < storage.length, let href = storage.attribute(.agentAssistantCitation, at: index, effectiveRange: nil) as? String else { return nil }
+        return AgentAssistantCitation.parse(href)
     }
 
     @discardableResult

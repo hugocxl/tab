@@ -1,8 +1,8 @@
 import Foundation
 import WebKit
 
-/// One immutable, caller-owned resource. This responder has no file paths,
-/// conversation delegates or JavaScript privileges and is also used by previews.
+/// One immutable, caller-owned resource read in bounded chunks. It has no file
+/// paths or conversation delegates; media previews serve it to an isolated page.
 @MainActor
 struct AgentConversationRangedResource {
     typealias Read = @MainActor (UInt64, UInt32) async throws -> Data
@@ -10,7 +10,26 @@ struct AgentConversationRangedResource {
     let mimeType: String
     let revision: String
     let read: Read
+    /// Response `Content-Security-Policy`; the default allows no script and no network.
+    var contentSecurityPolicy = AgentConversationRangedResource.passivePolicy
+    static let passivePolicy = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data: blob:"
+    /// A provider-supplied HTML document: scripts run only inside an opaque-origin sandbox
+    /// with no network, no forms, no popups and no navigation.
+    static let htmlDocumentPolicy = "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
+        + "img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'"
     static let chunkSize: UInt32 = 256 * 1024
+
+    /// An in-memory resource.
+    init(data: Data, mimeType: String, revision: String) {
+        self.init(length: UInt64(data.count), mimeType: mimeType, revision: revision, read: { offset, length in
+            guard offset <= UInt64(data.count), UInt64(length) <= UInt64(data.count) - offset else { throw ModelError("Invalid preview byte range.") }
+            return data.subdata(in: Int(offset)..<Int(offset) + Int(length))
+        })
+    }
+
+    init(length: UInt64, mimeType: String, revision: String, read: @escaping Read) {
+        self.length = length; self.mimeType = mimeType; self.revision = revision; self.read = read
+    }
 
     enum Selection: Equatable { case full, range(UInt64, UInt64), unsatisfiable }
     static func selection(_ request: URLRequest, length: UInt64) -> Selection {
@@ -52,7 +71,7 @@ struct AgentConversationRangedResource {
         let selection = Self.selection(task.request, length: length)
         var headers = ["Content-Type": mimeType, "Accept-Ranges": "bytes", "Cache-Control": "private, no-store",
                        "X-Content-Type-Options": "nosniff",
-                       "Content-Security-Policy": "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data: blob: tab-conversation:"]
+                       "Content-Security-Policy": contentSecurityPolicy]
         let start: UInt64, count: UInt64, status: Int
         switch selection {
         case .full: start = 0; count = length; status = 200

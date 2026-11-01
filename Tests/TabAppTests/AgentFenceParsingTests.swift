@@ -7,6 +7,13 @@ final class AgentFenceParsingTests: XCTestCase {
     private struct Node: Codable, Equatable { var tag: String; var text: String }
     private struct Fixture: Decodable { var source: String; var blocks: [Node] }
 
+    func testImagesInsideFencesAndIndentedCodeStayCode() {
+        for markdown in ["```markdown\n![shot](a.png)\n```", "```\nhttps://example.com/a.png\n", "    ![shot](a.png)"] {
+            let parts = AgentResponsePart.partition(AgentResponseParser.parse(markdown), media: true)
+            XCTAssertEqual(parts.map(\.kind), [1], markdown)
+        }
+    }
+
     func testFenceBodiesMatchSourceIncludingStreamingAndTabs() throws {
         _ = NSApplication.shared
         let fixtures = try JSONDecoder().decode([Fixture].self, from: Data(Self.oracle.utf8))
@@ -28,6 +35,17 @@ final class AgentFenceParsingTests: XCTestCase {
                        [.code("sh", "echo safe\n    ```\n", closed: false)])
         XCTAssertEqual(AgentResponseParser.parse("```sh\necho safe\n    ```\n```"),
                        [.code("sh", "echo safe\n    ```\n", closed: true)])
+    }
+
+    func testFenceKindsForMathAndDiagrams() {
+        XCTAssertEqual(AgentResponseParser.parse("```math\na^2\n```"), [.math("a^2")])
+        XCTAssertEqual(AgentResponseParser.parse("```latex title=x\nb\n```"), [.math("b")])
+        XCTAssertEqual(AgentResponseParser.parse("```mermaid\npie\n```"), [.diagram("pie\n")])
+        XCTAssertEqual(AgentResponseParser.parse("```math\n\n```"), [.code("math", "", closed: true)],
+                       "An empty math fence has nothing to typeset")
+        XCTAssertEqual(AgentResponseParser.parse("```mermaidx\npie\n```"), [.code("mermaidx", "pie\n", closed: true)])
+        XCTAssertEqual(AgentResponseParser.parse("    ```math\n    a\n    ```"), [.code("", "```math\na\n```\n", closed: true)],
+                       "Indented code is never math")
     }
 
     // Real ChatMarkdown DOM at source e5909e53, including code-node trailing newlines.
