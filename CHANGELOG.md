@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.24.0 - 2026-11-01
+
+### Changed
+
+- Agent conversations draw their controls and tool icons with system symbols,
+  matching the rest of the app.
+
 ## 0.23.0 - 2026-11-01
 
 ### Added

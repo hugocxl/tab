@@ -1,9 +1,9 @@
 import AppKit
 import TabCore
 
-/// The icons the chrome uses, drawn with SF Symbols where one matches and
-/// with the bundled Lucide SVG otherwise. Images are templates, so they tint
-/// with `contentTintColor` or the drawing color.
+/// The icons the chrome uses, drawn with SF Symbols, except the terminal
+/// stack, which is a bundled SVG. Images are templates, so they tint with
+/// `contentTintColor` or the drawing color.
 public enum AppIcon: String, CaseIterable, Sendable {
     case appWindow, arrowUpDown, chevronDown, chevronLeft, chevronRight, chevronUp, check, circleX, command
     case code, circleUser, columns, ellipsis, folder, gitBranch, globe, eye, keyboard, lightbulb
@@ -14,7 +14,8 @@ public enum AppIcon: String, CaseIterable, Sendable {
     case play, quote, stop, triangleAlert, phone, trash, minus, qrcode, arrowDown
     case plusCircle, filterCircleFill, addProject, layers, laptop, globeBadgePlus, clearField
 
-    /// The SF Symbol drawn for the icon.
+    /// The SF Symbol drawn for the icon, or `nil` for the icons composed or
+    /// bundled instead.
     public var symbolName: String? {
         switch self {
         case .appWindow: return "macwindow"
@@ -90,72 +91,6 @@ public enum AppIcon: String, CaseIterable, Sendable {
         }
     }
 
-    /// The bundled SVG in `Resources/Icons`, the fallback when the symbol is
-    /// missing.
-    public var resourceName: String? {
-        switch self {
-        case .appWindow: return "app-window"
-        case .arrowUpDown: return "arrow-up-down"
-        case .chevronDown: return "chevron-down"
-        case .chevronLeft: return "chevron-left"
-        case .chevronRight: return "chevron-right"
-        case .chevronUp: return "chevron-up"
-        case .check: return "check"
-        case .circleX: return "circle-x"
-        case .code: return "code"
-        case .circleUser: return "circle-user"
-        case .columns: return "columns-2"
-        case .ellipsis: return "ellipsis"
-        case .folder: return "folder"
-        case .gitBranch: return "git-branch"
-        case .globe: return "globe"
-        case .eye: return "eye"
-        case .keyboard: return "keyboard"
-        case .lightbulb: return "lightbulb"
-        case .maximize: return "maximize"
-        case .network: return "network"
-        case .palette: return "palette"
-        case .panelBottom: return "panel-bottom"
-        case .panelLeft: return "panel-left"
-        case .panelRight: return "panel-right"
-        case .pin: return "pin"
-        case .pinOff: return "pin-off"
-        case .plus: return "plus"
-        case .puzzle: return "puzzle"
-        case .restore: return "restore"
-        case .refresh: return "rotate-cw"
-        case .rows: return "rows-2"
-        case .search: return "search"
-        case .settings: return "settings"
-        case .terminal: return "terminal"
-        case .terminalStack: return "terminal-stack"
-        case .close: return "window-close"
-        case .externalLink: return "square-arrow-out-up-right"
-        case .filter: return "list-filter"
-        case .filterCircle: return "filter-circle"
-        case .history: return "history"
-        case .arrowDownCircle: return "circle-arrow-down"
-        case .arrowUpCircle: return "circle-arrow-up"
-        case .chevronsUpDown: return "chevrons-up-down"
-        case .circle: return "circle"
-        case .circleCheck: return "circle-check"
-        case .clock: return "clock"
-        case .file: return "file"
-        case .gitMerge: return "git-merge"
-        case .gitPullRequest: return "git-pull-request"
-        case .octagonX: return "octagon-x"
-        case .copy: return "copy"
-        case .pause: return "pause"
-        case .pencil: return "pencil"
-        case .play: return "play"
-        case .quote: return "text-quote"
-        case .stop: return "square"
-        case .triangleAlert: return "triangle-alert"
-        case .command, .phone, .trash, .minus, .qrcode, .arrowDown, .plusCircle, .filterCircleFill, .addProject, .layers,
-             .laptop, .globeBadgePlus, .clearField: return nil
-        }
-    }
-
     /// A template image `size` points tall.
     @MainActor
     public func image(size: CGFloat = Metrics.glyph, weight: NSFont.Weight = .regular) -> NSImage? {
@@ -165,13 +100,12 @@ public enum AppIcon: String, CaseIterable, Sendable {
         if self == .globeBadgePlus {
             image = Self.badged(AppIcon.globe.symbolImage(size: size, weight: weight))
         }
-        if image == nil, let symbolName, let symbol = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil) {
-            let configuration = NSImage.SymbolConfiguration(pointSize: size * 0.8, weight: weight, scale: .medium)
-            image = symbol.withSymbolConfiguration(configuration)
-        }
-        if image == nil, let resourceName, let bundled = BundledImage.load(resourceName, extension: "svg") {
+        if self == .terminalStack, let bundled = BundledImage.load("terminal-stack", extension: "svg") {
             bundled.size = NSSize(width: size, height: size)
             image = bundled
+        }
+        if image == nil {
+            image = symbolImage(size: size, weight: weight)
         }
         image?.isTemplate = true
         IconCache.images[key] = image
