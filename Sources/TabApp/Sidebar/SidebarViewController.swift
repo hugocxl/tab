@@ -4,8 +4,7 @@ import TabCore
 import TabProtocol
 
 /// The project sidebar: the top row beside the window buttons, Home
-/// terminals and projects with their worktree cards, the update card, and
-/// the footer with the host and name filter, Add Project and the Remote
+/// terminals and projects with their worktree cards, and the footer with the host and name filter, Add Project and the Remote
 /// Servers host menu.
 /// A collapsed sidebar is hidden; its toggle moves into the
 /// top-left pane. It rebuilds only when what it shows changed.
@@ -28,7 +27,6 @@ final class SidebarViewController: NSViewController {
     private let addButton = ChromeButton(.addProject, label: "Add Project")
     private let serversButton = ChromeButton(.globeBadgePlus, label: "Remote Servers")
     private let resizeHandle = SidebarResizeHandle()
-    private let updateCard = UpdateCardView()
     private var snapshot: SidebarSnapshot?
     private var subscription: AnyCancellable?
 
@@ -69,8 +67,6 @@ final class SidebarViewController: NSViewController {
         root.addSubview(scroll)
         root.addSubview(topRow)
         root.addSubview(footer)
-        updateCard.isHidden = true
-        root.addSubview(updateCard)
         root.addSubview(resizeHandle)
         for button in [toggle, commandPalette, newTerminal] { topRow.addSubview(button) }
         for view in [filter, addButton, serversButton] as [NSView] { footer.addSubview(view) }
@@ -89,8 +85,6 @@ final class SidebarViewController: NSViewController {
         filter.onChange = { [weak self] text in self?.model.nameFilter = text }
         addButton.onPress = { [weak self] button in self?.actions?.addProject(anchor: button) }
         serversButton.onPress = { [weak self] button in self?.model.remoteController.toggleHostMenu(relativeTo: button) }
-        updateCard.onAction = { [weak self] action in self?.model.updater.handle(action) }
-        updateCard.onDismiss = { [weak self] in self?.model.updater.dismissCard() }
         resizeHandle.onDrag = { [weak self] width in self?.onResize?(width) }
         resizeHandle.widthAtStart = { [weak self] in self?.model.sidebarWidth ?? Metrics.sidebarExpandedWidth }
 
@@ -126,14 +120,7 @@ final class SidebarViewController: NSViewController {
     private func updateChrome(_ snapshot: SidebarSnapshot) {
         toggle.toolTip = isExpanded ? "Hide Sidebar" : "Show Sidebar"
         if filter.text != model.nameFilter { filter.text = model.nameFilter }
-        updateUpdateCard()
         root.needsLayout = true
-    }
-
-    private func updateUpdateCard() {
-        let card = isExpanded ? model.updater.card : nil
-        updateCard.isHidden = card == nil
-        updateCard.card = card
     }
 
     private func rebuild(_ snapshot: SidebarSnapshot) {
@@ -421,12 +408,8 @@ final class SidebarViewController: NSViewController {
         footer.frame = CGRect(x: 0, y: bounds.height - footerHeight, width: bounds.width, height: footerHeight)
         CircleButton.layOut([addButton, serversButton], trailingAt: bounds.width - ChromeButton.gap, y: y)
         filter.frame = CGRect(x: Metrics.gutter, y: y, width: max(addButton.frame.minX - ChromeButton.gap - Metrics.gutter, side), height: side)
-        let inset = Metrics.radiusMedium
-        let cardHeight = updateCard.isHidden ? 0 : updateCard.height(for: max(bounds.width - inset * 2, 0))
-        updateCard.frame = CGRect(x: inset, y: footer.frame.minY - cardHeight, width: max(bounds.width - inset * 2, 0), height: cardHeight)
         let scrollTop = Self.titleBarHeight
-        let listEnd = updateCard.isHidden ? footer.frame.minY : updateCard.frame.minY - inset
-        scroll.frame = CGRect(x: 0, y: scrollTop, width: bounds.width, height: max(listEnd - scrollTop, 0))
+        scroll.frame = CGRect(x: 0, y: scrollTop, width: bounds.width, height: max(footer.frame.minY - scrollTop, 0))
         resizeHandle.frame = CGRect(x: bounds.width - 3, y: 0, width: 6, height: bounds.height)
     }
 }

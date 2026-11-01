@@ -256,6 +256,10 @@ final class PaletteSource: PaletteDataSource {
         command(.installCommandLineTool, "Install Command Line Tool…", .window)
         commands.append(RootCommand(id: "check_for_updates", title: "Check for Updates…", category: .window,
                                     target: .run { [weak self] in self?.model.updater.checkForUpdates() }))
+        if Release.isDebugBuild {
+            commands.append(RootCommand(id: "preview_update_chips", title: "Preview Update Chips", category: .window,
+                                        target: .run { [weak self] in self?.model.updater.previewNextChip() }))
+        }
         commands.append(RootCommand(id: "remote_servers", title: "Remote Servers…", category: .remote,
                                     target: .run { [weak self] in self?.model.showServersPane() }))
         command(.openSettings, "Open Settings", .settings)

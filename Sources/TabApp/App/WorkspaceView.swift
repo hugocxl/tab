@@ -12,6 +12,7 @@ final class WorkspaceView: ThemedView {
     private let material = NSVisualEffectView()
     private let rightSidebar = RightSidebarView()
     private let banner = BannerView()
+    private let updateChip = UpdateChipView()
     private var shownPanel: RightPanelKind?
     private var shownPanelProject: ProjectId?
     private var liveSidebarWidth: CGFloat?
@@ -34,6 +35,13 @@ final class WorkspaceView: ThemedView {
         addSubview(splits)
         addSubview(rightSidebar)
         addSubview(banner)
+        updateChip.isHidden = true
+        addSubview(updateChip)
+        updateChip.onAction = { [weak model] action in
+            if action == .showChangelog { model?.showSettingsAction?(.changelog) }
+            model?.updater.handle(action)
+        }
+        updateChip.onDismiss = { [weak model] in model?.updater.dismissChip() }
         sidebar.onResize = { [weak self] width in
             self?.liveSidebarWidth = width
             self?.needsLayout = true
@@ -55,6 +63,7 @@ final class WorkspaceView: ThemedView {
         splits.reload()
         syncPanel()
         updateBanner()
+        updateUpdateChip()
         syncVibrancy()
     }
 
@@ -84,6 +93,7 @@ final class WorkspaceView: ThemedView {
         if changes.contains(.state) || changes.contains(.settings) {
             splits.reload()
         }
+        if changes.contains(.activity) { updateUpdateChip() }
         if changes.contains(.activity) || changes.contains(.state) {
             splits.refreshHeaders()
             updateBanner()
@@ -159,6 +169,23 @@ final class WorkspaceView: ThemedView {
         splits.frame = NSRect(x: sidebarWidth, y: 0, width: max(right - sidebarWidth, 0), height: bounds.height)
         let bannerWidth = min(splits.frame.width - 32, 520)
         banner.frame = NSRect(x: splits.frame.midX - bannerWidth / 2, y: 40, width: bannerWidth, height: 32)
+        // Floats over everything at the window's bottom right, twice the
+        // terminal cards' gap from its edges.
+        let inset = SplitGeometry.gutter * 2
+        let chipWidth = min(updateChip.fittingWidth, UpdateChipView.maximumWidth, max(bounds.width - inset * 2, 0))
+        updateChip.frame = NSRect(x: bounds.width - inset - chipWidth, y: bounds.height - inset - UpdateChipView.height,
+                                  width: chipWidth, height: UpdateChipView.height)
+    }
+
+    /// Shows the updater's chip, whether or not the sidebar is open.
+    private func updateUpdateChip() {
+        let chip = model.updater.chip
+        guard chip != updateChip.chip || updateChip.isHidden != (chip == nil) else { return }
+        let appearing = updateChip.isHidden && chip != nil
+        updateChip.chip = chip
+        updateChip.isHidden = chip == nil
+        needsLayout = true
+        if appearing { updateChip.animateIn() }
     }
 }
 

@@ -24,11 +24,22 @@ public final class GlassView: NSView {
 
         /// The selected sidebar card: a faint clear glass over the card fill.
         public static let card = Style(cornerRadius: 8, opacity: 0.4)
+        /// The floating update chip: a capsule of faint clear glass over its fill, as the sidebar cards.
+        public static let chip = Style(cornerRadius: UpdateChipView.height / 2, opacity: 0.4)
         /// The chrome's tooltip capsule.
         public static let tooltip = Style(cornerRadius: 10, fallbackMaterial: .toolTip)
     }
 
     private let material: NSView
+
+    /// A color the glass takes on, such as a status color; `nil` keeps it
+    /// clear. Before Liquid Glass the host's fill carries the tint instead.
+    public var tint: NSColor? {
+        didSet {
+            guard tint != oldValue, #available(macOS 26, *), let glass = material as? NSGlassEffectView else { return }
+            glass.tintColor = tint
+        }
+    }
 
     public init(style: Style) {
         if #available(macOS 26, *) {

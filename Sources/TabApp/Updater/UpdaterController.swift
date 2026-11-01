@@ -5,8 +5,6 @@ import TabProtocol
 /// What the updater needs from the app shell.
 @MainActor
 public protocol UpdaterHost: AnyObject {
-    /// The window the update sheet and messages attach to.
-    var updateWindow: NSWindow? { get }
     /// The connected local server's build (version and protocol versions);
     /// `nil` while disconnected.
     var localServerBuild: BuildInfo? { get }
@@ -16,18 +14,16 @@ public protocol UpdaterHost: AnyObject {
     func endAllSessions() async throws
     /// Stops the local server only when no terminal runs; returns whether it stops.
     func stopLocalServerIfIdle() async -> Bool
+    /// Restarts the local server on this app's build, ending every terminal on it.
+    func restartLocalServer() async throws
     /// Saves state and settles unsaved editors before quitting for an
     /// update; `false` cancels the install.
     func prepareToQuitForUpdate() -> Bool
     /// Quits the app. The new version is already in place and starts once
     /// this process exits.
     func quitForUpdate()
-    /// The updater's status or its card changed, such as for a menu item
-    /// or the sidebar's update card.
-    func updaterStatusDidChange(_ status: UpdaterStatus)
-    /// A background check downloaded a new version, for when the update
-    /// card isn't in view.
-    func announceUpdate(version: String)
+    /// The updater's status or chip changed.
+    func updaterDidChange()
 }
 
 /// Where the updater is.
@@ -36,55 +32,88 @@ public enum UpdaterStatus: Equatable, Sendable {
     /// This build can't update itself, and why.
     case unavailable(String)
     case checking
-    case downloading(version: String)
+    /// A newer release is out, waiting for the person to download it.
+    case available(version: String)
+    /// `progress` runs from 0 to 1 once the download's size is known.
+    case downloading(version: String, progress: Double?)
+    /// Checking the download's signature and contents.
+    case preparing(version: String)
     /// Downloaded and verified, waiting for the person.
     case ready(version: String)
-    /// Installs once every terminal has ended.
-    case waitingForSessions(version: String, sessions: Int)
     case installing(version: String)
-    case failed(String)
+    /// Restarting the outdated local server on this app's build.
+    case restartingServer
 }
 
-/// Checks GitHub Releases for a new Tab, downloads and verifies it, and
-/// installs it as the person chooses in the "Update available" sheet: now
-/// when the new version speaks the running server's protocol (terminals keep
-/// running, the server is replaced once idle), otherwise once every terminal
-/// has ended or right away after confirming that every terminal ends.
+/// Checks GitHub Releases for a new Tab and offers it on the window's
+/// update chip. Update downloads and verifies it in the background; Restart
+/// installs it: right away when the new
+/// version speaks the running server's protocol or no terminal runs (the
+/// old server keeps its terminals until it is idle or restarted), otherwise
+/// after the person agrees to end every terminal.
 @MainActor
 public final class UpdaterController {
     /// Background checks run at launch and then this often.
     public static let checkInterval: TimeInterval = 60 * 60
+    /// How long a server restart may take before it counts as failed.
+    static let serverRestartTimeout: TimeInterval = 30
 
     public private(set) var status: UpdaterStatus = .idle {
-        didSet { if status != oldValue { host?.updaterStatusDidChange(status) } }
+        didSet { if status != oldValue { host?.updaterDidChange() } }
     }
 
     /// The downloaded release waiting to install.
     public private(set) var prepared: PreparedUpdate?
-    /// Whether the install waits for every terminal to end.
-    public private(set) var scheduled = false
+    /// A release newer than `prepared`, not downloaded yet.
+    public private(set) var available: UpdateManifest?
 
-    /// The sidebar's update card: shown while a downloaded release is ready
-    /// or waiting, until the person dismisses it, and while it installs.
-    /// Hidden while the local server is disconnected, since what updating
-    /// does depends on it.
-    public var card: UpdateCard? {
-        if case .installing = status { return UpdateCard.make(status: status, compatible: false, sessions: 0) }
-        guard let prepared, prepared.version != dismissedVersion, let host, let server = host.localServerBuild else { return nil }
-        let compatible = UpdateDecision.isCompatible(prepared.manifest, with: server)
-        return UpdateCard.make(status: status, compatible: compatible, sessions: host.runningSessionCount)
+    /// The window's update chip, if it has something to say.
+    public var chip: UpdateChip? {
+        if let previewIndex { return UpdateChip.previews[previewIndex] }
+        guard let host else { return nil }
+        let server = host.localServerBuild
+        let sessions = host.runningSessionCount
+        let ready = prepared.flatMap { prepared -> UpdateChip.Ready? in
+            guard prepared.version != dismissedReady, let server else { return nil }
+            return UpdateChip.Ready(version: prepared.version, compatible: UpdateDecision.isCompatible(prepared.manifest, with: server))
+        }
+        var outdatedServer: String?
+        if let version = server?.version, sessions > 0, version != dismissedServer,
+           UpdateDecision.isOutdated(serverVersion: version, appVersion: Release.version) {
+            outdatedServer = version
+        }
+        let checking = manualCheck && (status == .checking || installation == nil)
+        let offered = available.map(\.version).flatMap { $0 == dismissedAvailable ? nil : $0 }
+        return UpdateChip.make(status: status, notice: notice, checking: checking, showsDownload: downloadingVersion != dismissedDownload,
+                               available: downloadingVersion == nil ? offered : nil, ready: ready, outdatedServer: outdatedServer, sessions: sessions)
     }
 
     private weak var host: UpdaterHost?
     private let record: URL
+    private let updatedMarker: URL
     private let serverStartupLock: URL
     private var downloader: UpdateDownloader
     private var installation: Installation?
     private var timer: Timer?
     private var task: Task<Void, Never>?
-    private var sheet: UpdateSheet?
     private var replacingServer = false
-    private var dismissedVersion: String?
+    /// A check the person asked for is running or waits for the updater to start.
+    private var manualCheck = false
+    private var notice: UpdateNotice? {
+        didSet {
+            guard notice != oldValue else { return }
+            scheduleNoticeExpiry()
+            host?.updaterDidChange()
+        }
+    }
+    private var noticeTimer: Timer?
+    private var serverRestartTimer: Timer?
+    private var dismissedAvailable: String?
+    private var dismissedReady: String?
+    private var dismissedDownload: String?
+    private var dismissedServer: String?
+    /// The sample chip on show in debug builds, which never update.
+    private var previewIndex: Int?
 
     /// - Parameters:
     ///   - dirs: the profile, which keeps the pending update record.
@@ -93,6 +122,7 @@ public final class UpdaterController {
     public init(host: UpdaterHost, dirs: TabDirs, configuration: URLSessionConfiguration = .ephemeral) {
         self.host = host
         record = dirs.root.appendingPathComponent("pending-update.json")
+        updatedMarker = dirs.root.appendingPathComponent("updated-to")
         serverStartupLock = dirs.root.appendingPathComponent("server.startup-lock")
         downloader = UpdateDownloader(configuration: configuration)
     }
@@ -108,13 +138,14 @@ public final class UpdaterController {
     public func start() {
         guard installation == nil, task == nil else { return }
         let record = record
+        let updatedMarker = updatedMarker
         task = Task { [weak self] in
-            let result = await Task.detached(priority: .utility) { () -> Result<(Installation, PreparedUpdate?, Bool), UpdateError> in
+            let result = await Task.detached(priority: .utility) { () -> Result<(Installation, PreparedUpdate?, String?), UpdateError> in
                 do {
                     let installation = try Installation.detect()
-                    let (pending, scheduled) = PendingUpdateRecord.restore(record, installation: installation)
+                    let pending = PendingUpdateRecord.restore(record, installation: installation)
                     installation.cleanUp(keeping: pending?.staging)
-                    return .success((installation, pending, scheduled))
+                    return .success((installation, pending, UpdatedMarker.take(updatedMarker)))
                 } catch let error as UpdateError {
                     return .failure(error)
                 } catch {
@@ -127,14 +158,18 @@ public final class UpdaterController {
             case .failure(let error):
                 self.status = .unavailable(error.description)
                 Log.updates.info("updates unavailable: \(error.description, privacy: .public)")
-            case .success(let (installation, pending, scheduled)):
+                if self.manualCheck {
+                    self.manualCheck = false
+                    self.notice = .unavailable(error.description)
+                }
+            case .success(let (installation, pending, updated)):
                 self.installation = installation
                 self.prepared = pending
-                self.scheduled = scheduled && pending != nil
+                if let updated { self.notice = .updated(version: updated) }
                 self.refreshStatus()
-                self.check(manual: false)
+                self.check()
                 self.timer = Timer.scheduledTimer(withTimeInterval: Self.checkInterval, repeats: true) { [weak self] _ in
-                    MainActor.assumeIsolated { self?.check(manual: false) }
+                    MainActor.assumeIsolated { self?.check() }
                 }
                 self.timer?.tolerance = 600
                 self.reconcile()
@@ -148,81 +183,102 @@ public final class UpdaterController {
         timer = nil
         task?.cancel()
         task = nil
+        noticeTimer?.invalidate()
+        serverRestartTimer?.invalidate()
     }
 
-    /// Check for Updates…: checks now and shows the result.
+    /// Check for Updates…: checks now and reports on the chip, bringing
+    /// back whatever it had hidden.
     public func checkForUpdates() {
-        check(manual: true)
+        dismissedAvailable = nil
+        dismissedReady = nil
+        dismissedDownload = nil
+        dismissedServer = nil
+        switch status {
+        case .installing, .restartingServer:
+            host?.updaterDidChange()
+            return
+        case .unavailable(let reason):
+            notice = .unavailable(reason)
+            host?.updaterDidChange()
+            return
+        default:
+            break
+        }
+        notice = nil
+        manualCheck = true
+        host?.updaterDidChange()
+        guard installation != nil else { return }
+        check()
     }
 
-    /// Hides the card until a newer version is downloaded or the app
-    /// restarts; a waiting install keeps waiting.
-    public func dismissCard() {
-        guard let prepared, card?.busy == false else { return }
-        dismissedVersion = prepared.version
-        host?.updaterStatusDidChange(status)
+    /// Closes the chip: a confirmation goes back to what it asked about, a
+    /// download carries on out of view, and an available or ready release or
+    /// an outdated server stays hidden until something newer or a check the person asks for.
+    public func dismissChip() {
+        if previewIndex != nil {
+            previewIndex = nil
+            host?.updaterDidChange()
+            return
+        }
+        guard let dismissal = chip?.dismissal else { return }
+        switch dismissal {
+        case .notice: notice = nil
+        case .download(let version): dismissedDownload = version
+        case .available(let version): dismissedAvailable = version
+        case .ready(let version): dismissedReady = version
+        case .server(let version): dismissedServer = version
+        }
+        host?.updaterDidChange()
     }
 
-    /// Runs a choice from the update card.
-    public func handle(_ action: UpdateCard.Action) {
-        guard let prepared, !isBusy, let host, let server = host.localServerBuild else { return }
+    /// Runs the chip's button.
+    public func handle(_ action: UpdateChip.Action) {
+        if previewIndex != nil {
+            previewNextChip()
+            return
+        }
         switch action {
-        case .restartAndUpdate:
-            let compatible = UpdateDecision.isCompatible(prepared.manifest, with: server)
-            perform(UpdateDecision.step(for: .install(restartServer: false), compatible: compatible, sessions: host.runningSessionCount))
-        case .waitForTerminals:
-            perform(UpdateDecision.step(for: .waitForSessions, compatible: false, sessions: host.runningSessionCount))
-        case .cancelWaiting:
-            perform(.cancelWait)
+        case .download:
+            download()
+        case .update:
+            update()
         case .endTerminalsAndUpdate:
-            ConfirmSheet.present(
-                on: host.updateWindow,
-                title: "Update and End All Terminals?",
-                message: "Every terminal on this Mac ends, including ones other apps show. Terminal panes close; other panes and settings stay.",
-                confirm: "Update and End Terminals",
-                destructive: true
-            ) { [weak self] confirmed in
-                guard confirmed, let self, self.prepared?.version == prepared.version else { return }
-                self.perform(.install(stopServer: true))
-            }
+            install(.endTerminals)
+        case .restartServer:
+            if host?.runningSessionCount ?? 0 > 0 { notice = .confirmServerRestart } else { restartServer() }
+        case .endTerminalsAndRestartServer:
+            restartServer()
+        case .checkAgain:
+            checkForUpdates()
+        case .showChangelog:
+            notice = nil
         }
     }
 
-    /// Shows the "Update available" sheet for the downloaded release.
-    public func showUpdateSheet() {
-        guard let prepared, !isBusy, sheet == nil, let host else { return }
-        let sessions = host.runningSessionCount
-        guard let server = host.localServerBuild else { return }
-        let compatible = UpdateDecision.isCompatible(prepared.manifest, with: server)
-        let offer = UpdateDecision.offer(compatible: compatible, scheduled: scheduled, sessions: sessions)
-        let sheet = UpdateSheet(version: prepared.version, offer: offer)
-        self.sheet = sheet
-        sheet.present(on: host.updateWindow) { [weak self] choice in
-            guard let self else { return }
-            self.sheet = nil
-            guard self.prepared?.version == prepared.version, self.host?.localServerBuild == server else { return }
-            if choice == .waitForSessions {
-                self.setScheduled(true)
-                return
-            }
-            let sessions = self.host?.runningSessionCount ?? sessions
-            self.perform(UpdateDecision.step(for: choice, compatible: compatible, sessions: sessions))
-        }
+    /// Shows the next sample of every chip state, for debug builds: a
+    /// chip's button steps on, and closing it ends the preview.
+    public func previewNextChip() {
+        previewIndex = ((previewIndex ?? -1) + 1) % UpdateChip.previews.count
+        host?.updaterDidChange()
     }
 
     /// Call when the local server connects, or its session count changes:
-    /// a waiting install proceeds once no terminal is left, and an older
+    /// a server restart finishes once the new build answers, and an older
     /// server left running by an earlier update is replaced once idle.
     public func reconcile() {
-        guard let host, !isBusy, host.localServerBuild != nil else { return }
-        let sessions = host.runningSessionCount
-        if scheduled, prepared != nil {
-            status = .waitingForSessions(version: prepared?.version ?? "", sessions: sessions)
-            if UpdateDecision.scheduledStep(sessions: sessions) != .wait { install(stopServer: false, whenIdle: true) }
+        guard let host else { return }
+        if status == .restartingServer {
+            guard let build = host.localServerBuild,
+                  !UpdateDecision.isOutdated(serverVersion: build.version, appVersion: Release.version) else { return }
+            serverRestartTimer?.invalidate()
+            refreshStatus()
+            notice = .serverRestarted(version: build.version)
             return
         }
-        guard !replacingServer,
-              UpdateDecision.shouldReplaceServer(serverVersion: host.localServerBuild?.version, appVersion: Release.version, sessions: sessions)
+        guard !isBusy, host.localServerBuild != nil, !replacingServer,
+              UpdateDecision.shouldReplaceServer(serverVersion: host.localServerBuild?.version, appVersion: Release.version,
+                                                 sessions: host.runningSessionCount)
         else { return }
         replacingServer = true
         Task { [weak self] in
@@ -235,139 +291,163 @@ public final class UpdaterController {
 
     private var isBusy: Bool {
         switch status {
-        case .checking, .downloading, .installing: return true
+        case .checking, .downloading, .preparing, .installing, .restartingServer: return true
         default: return false
         }
     }
 
-    private func check(manual: Bool) {
-        guard !isBusy else { return }
-        guard let installation else {
-            if manual { message(statusReason ?? "The updater is starting. Try again shortly.") }
-            return
+    private var downloadingVersion: String? {
+        switch status {
+        case .downloading(let version, _), .preparing(let version): return version
+        default: return nil
         }
+    }
+
+    /// Asks the feed for a newer release; downloading waits for the person.
+    private func check() {
+        guard !isBusy, installation != nil else { return }
         status = .checking
         let downloader = downloader
-        let known = prepared
         task = Task { [weak self] in
-            let result: Result<PreparedUpdate?, Error>
+            let result: Result<UpdateManifest?, Error>
             do {
-                let update = try await Self.checkedUpdate(known: known, latest: {
-                    try await downloader.latest()
-                }, prepare: { manifest in
-                    self?.status = .downloading(version: manifest.version)
-                    let folder = FileManager.default.temporaryDirectory.appendingPathComponent("tab-update-\(UUID().uuidString)")
-                    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-                    defer { try? FileManager.default.removeItem(at: folder) }
-                    let archive = try await downloader.download(manifest, into: folder)
-                    let prepared = try await Task.detached(priority: .utility) {
-                        try installation.prepare(archive: archive, manifest: manifest)
-                    }.value
-                    return prepared
-                })
-                result = .success(update)
+                result = .success(try await downloader.latest())
             } catch {
                 result = .failure(error)
             }
-            self?.finishCheck(result, manual: manual)
+            self?.finishCheck(result)
         }
     }
 
-    /// Always refreshes the feed, but only replaces a verified pending
-    /// download with a newer release. A stale feed must not move it back.
-    static func checkedUpdate(
-        known: PreparedUpdate?,
-        latest: () async throws -> UpdateManifest?,
-        prepare: (UpdateManifest) async throws -> PreparedUpdate
-    ) async throws -> PreparedUpdate? {
-        let manifest = try await latest()
-        if let known {
-            guard let manifest, ReleaseVersion.isNewer(manifest.version, than: known.version) else { return known }
-        }
-        guard let manifest else { return nil }
-        return try await prepare(manifest)
+    /// The feed's release when it replaces the downloaded one, if any. A
+    /// stale feed must not move a download back.
+    nonisolated static func newerRelease(_ latest: UpdateManifest?, than downloaded: String?) -> UpdateManifest? {
+        guard let latest else { return nil }
+        guard let downloaded else { return latest }
+        return ReleaseVersion.isNewer(latest.version, than: downloaded) ? latest : nil
     }
 
-    private func finishCheck(_ result: Result<PreparedUpdate?, Error>, manual: Bool) {
+    private func finishCheck(_ result: Result<UpdateManifest?, Error>) {
+        task = nil
+        let manual = manualCheck
+        manualCheck = false
+        switch result {
+        case .failure(let error):
+            Log.updates.error("update check failed: \(String(describing: error), privacy: .public)")
+            refreshStatus()
+            if manual { notice = .checkFailed(UpdateChip.reason(error)) }
+        case .success(let latest):
+            available = Self.newerRelease(latest, than: prepared?.version)
+            refreshStatus()
+            if manual, available == nil, prepared == nil { notice = .upToDate(version: Release.version) }
+        }
+        host?.updaterDidChange()
+    }
+
+    /// Update: downloads and verifies the available release in the background.
+    private func download() {
+        guard let manifest = available, let installation, !isBusy else { return }
+        let downloader = downloader
+        let version = manifest.version
+        notice = nil
+        status = .downloading(version: version, progress: manifest.size == nil ? nil : 0)
+        task = Task { [weak self] in
+            let result: Result<PreparedUpdate, Error>
+            do {
+                let folder = FileManager.default.temporaryDirectory.appendingPathComponent("tab-update-\(UUID().uuidString)")
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                defer { try? FileManager.default.removeItem(at: folder) }
+                let archive = try await downloader.download(manifest, into: folder) { fraction in
+                    Task { @MainActor in self?.downloadProgressed(version, fraction) }
+                }
+                self?.status = .preparing(version: version)
+                result = .success(try await Task.detached(priority: .utility) {
+                    try installation.prepare(archive: archive, manifest: manifest)
+                }.value)
+            } catch {
+                result = .failure(error)
+            }
+            self?.finishDownload(result, version: version)
+        }
+    }
+
+    private func downloadProgressed(_ version: String, _ fraction: Double) {
+        guard case .downloading(version, _) = status else { return }
+        status = .downloading(version: version, progress: fraction)
+    }
+
+    private func finishDownload(_ result: Result<PreparedUpdate, Error>, version: String) {
         task = nil
         switch result {
         case .failure(let error):
-            let text = "Could not check for or download the latest update: \((error as? UpdateError)?.description ?? error.localizedDescription)"
-            status = .failed(text)
-            Log.updates.error("\(text, privacy: .public)")
-            if manual { message(text) }
-        case .success(nil):
+            Log.updates.error("update download failed: \(String(describing: error), privacy: .public)")
             refreshStatus()
-            if manual { message("You’re running the latest version of \(Release.appName).") }
-        case .success(let update?):
-            let announced = prepared?.version == update.version
+            notice = .downloadFailed(version: version, reason: UpdateChip.reason(error))
+        case .success(let update):
             if let previous = prepared, previous.staging != update.staging {
                 Task.detached(priority: .utility) { previous.discard() }
-                scheduled = false
             }
             prepared = update
-            PendingUpdateRecord.save(update, scheduled: scheduled, to: record)
+            if available?.version == update.version { available = nil }
+            dismissedReady = nil
+            PendingUpdateRecord.save(update, to: record)
             refreshStatus()
-            if manual {
-                showUpdateSheet()
-            } else if !announced {
-                host?.announceUpdate(version: update.version)
-            }
         }
-    }
-
-    private var statusReason: String? {
-        if case .unavailable(let reason) = status { return reason }
-        return nil
+        host?.updaterDidChange()
     }
 
     private func refreshStatus() {
-        guard let prepared else {
-            status = .idle
-            return
+        if let available {
+            status = .available(version: available.version)
+        } else {
+            status = prepared.map { .ready(version: $0.version) } ?? .idle
         }
-        status = scheduled
-            ? .waitingForSessions(version: prepared.version, sessions: host?.runningSessionCount ?? 0)
-            : .ready(version: prepared.version)
+    }
+
+    private func scheduleNoticeExpiry() {
+        noticeTimer?.invalidate()
+        noticeTimer = nil
+        guard let notice, let lifetime = notice.lifetime else { return }
+        noticeTimer = Timer.scheduledTimer(withTimeInterval: lifetime, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.notice == notice else { return }
+                self.notice = nil
+            }
+        }
     }
 
     // MARK: Installing
 
-    private func perform(_ step: UpdateStep) {
-        switch step {
-        case .nothing:
-            return
-        case .wait:
-            setScheduled(true)
-        case .cancelWait:
-            setScheduled(false)
-        case .install(let stopServer):
-            install(stopServer: stopServer, whenIdle: false)
+    private enum InstallMode {
+        /// The running server keeps its terminals until it is idle.
+        case keepServer
+        /// Stops the server only if no terminal started meanwhile.
+        case stopIdleServer
+        /// Ends every terminal; the person agreed.
+        case endTerminals
+    }
+
+    private func update() {
+        guard let prepared, let host, let server = host.localServerBuild else { return }
+        let compatible = UpdateDecision.isCompatible(prepared.manifest, with: server)
+        switch UpdateDecision.step(compatible: compatible, sessions: host.runningSessionCount) {
+        case .install: install(.keepServer)
+        case .installStoppingIdleServer: install(.stopIdleServer)
+        case .confirmEndingTerminals: notice = .confirmUpdate
         }
     }
 
-    private func setScheduled(_ value: Bool) {
-        guard let prepared else { return }
-        scheduled = value
-        PendingUpdateRecord.save(prepared, scheduled: value, to: record)
-        refreshStatus()
-        if value { reconcile() }
-    }
-
-    /// Replaces the app and relaunches. `stopServer` ends every terminal
-    /// first; `whenIdle` stops the server only if nothing runs there.
-    private func install(stopServer: Bool, whenIdle: Bool) {
+    /// Replaces the app and relaunches.
+    private func install(_ mode: InstallMode) {
         guard let prepared, let host, !isBusy, host.localServerBuild != nil else { return }
-        guard stopServer || whenIdle || UpdateDecision.isCompatible(prepared.manifest, with: host.localServerBuild) else {
-            setScheduled(true)
-            return
-        }
         guard host.prepareToQuitForUpdate() else {
-            if !whenIdle { message("Save or close the editors with unsaved changes, then update again.") }
+            notice = .unsavedEditors
             return
         }
+        notice = nil
         status = .installing(version: prepared.version)
         let record = record
+        let updatedMarker = updatedMarker
         let serverStartupLock = serverStartupLock
         task = Task { [weak self] in
             do {
@@ -376,63 +456,95 @@ public final class UpdaterController {
                 }.value
                 defer { lease.unlock() }
                 try await Task.detached(priority: .userInitiated) { try prepared.validate() }.value
-                if whenIdle {
+                switch mode {
+                case .keepServer:
+                    // The server may have been replaced by an older one since the person chose.
+                    guard UpdateDecision.isCompatible(prepared.manifest, with: host.localServerBuild) else {
+                        self?.task = nil
+                        self?.refreshStatus()
+                        return
+                    }
+                case .stopIdleServer:
+                    // A terminal started meanwhile: the chip asks again.
                     guard await host.stopLocalServerIfIdle() else {
                         self?.task = nil
                         self?.refreshStatus()
                         return
                     }
-                } else if stopServer {
+                case .endTerminals:
                     try await host.endAllSessions()
-                } else {
-                    guard UpdateDecision.isCompatible(prepared.manifest, with: host.localServerBuild) else {
-                        self?.task = nil
-                        self?.scheduled = true
-                        PendingUpdateRecord.save(prepared, scheduled: true, to: record)
-                        self?.refreshStatus()
-                        return
-                    }
                 }
                 try await Task.detached(priority: .userInitiated) {
                     try prepared.install()
                     try? FileManager.default.removeItem(at: record)
+                    UpdatedMarker.save(prepared.version, to: updatedMarker)
                 }.value
                 host.quitForUpdate()
             } catch {
                 guard let self else { return }
                 self.task = nil
-                let text = "Could not install the update: \((error as? UpdateError)?.description ?? error.localizedDescription)"
-                self.status = .failed(text)
-                self.message(text)
+                Log.updates.error("could not install the update: \(String(describing: error), privacy: .public)")
+                self.refreshStatus()
+                self.notice = .installFailed(UpdateChip.reason(error))
             }
         }
     }
 
-    private func message(_ text: String) {
-        let alert = NSAlert()
-        alert.messageText = "\(Release.appName) Updates"
-        alert.informativeText = text
-        alert.addButton(withTitle: "OK")
-        alert.window.appearance = AppTheme.shared.nsAppearance
-        guard let window = host?.updateWindow else {
-            alert.runModal()
-            return
+    // MARK: Server
+
+    /// Restarts the outdated local server on this app's build. The chip
+    /// shows the restart until the new build answers.
+    private func restartServer() {
+        guard let host, !isBusy else { return }
+        notice = nil
+        status = .restartingServer
+        serverRestartTimer?.invalidate()
+        serverRestartTimer = Timer.scheduledTimer(withTimeInterval: Self.serverRestartTimeout, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.serverRestartFailed("The server didn’t come back in time.") }
         }
-        alert.beginSheetModal(for: window)
+        Task { [weak self] in
+            do {
+                try await host.restartLocalServer()
+            } catch {
+                self?.serverRestartFailed(UpdateChip.reason(error))
+            }
+        }
+    }
+
+    private func serverRestartFailed(_ reason: String) {
+        guard status == .restartingServer else { return }
+        serverRestartTimer?.invalidate()
+        refreshStatus()
+        notice = .serverRestartFailed(reason)
     }
 }
 
-/// `pending-update.json`: the downloaded release, so a restart keeps it and
-/// a waiting install keeps waiting.
+/// `updated-to`: the version just installed, so its first launch can say so.
+enum UpdatedMarker {
+    static func save(_ version: String, to url: URL) {
+        try? AtomicFile.write(Data(version.utf8), to: url)
+    }
+
+    /// The version just installed when it is this build, and forgets it.
+    static func take(_ url: URL, current: String = Release.version) -> String? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        try? FileManager.default.removeItem(at: url)
+        let version = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        return version == current ? version : nil
+    }
+}
+
+/// `pending-update.json`: the downloaded release, so a restart keeps it.
 enum PendingUpdateRecord {
     struct Stored: Codable {
         var manifest: UpdateManifest
         var staging: String
-        var scheduled: Bool
+        /// Written for older builds, which waited for terminals to end when set.
+        var scheduled: Bool?
     }
 
-    static func save(_ update: PreparedUpdate, scheduled: Bool, to url: URL) {
-        let stored = Stored(manifest: update.manifest, staging: update.staging.path, scheduled: scheduled)
+    static func save(_ update: PreparedUpdate, to url: URL) {
+        let stored = Stored(manifest: update.manifest, staging: update.staging.path, scheduled: false)
         do {
             try AtomicFile.write(JSONEncoder().encode(stored), to: url)
         } catch {
@@ -442,13 +554,13 @@ enum PendingUpdateRecord {
 
     /// The pending update when it is still newer than this build and its
     /// staged app is still intact; anything else is forgotten.
-    static func restore(_ url: URL, installation: Installation) -> (PreparedUpdate?, Bool) {
-        guard let data = try? Data(contentsOf: url) else { return (nil, false) }
+    static func restore(_ url: URL, installation: Installation) -> PreparedUpdate? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
         guard let stored = try? JSONDecoder().decode(Stored.self, from: data),
               ReleaseVersion.isNewer(stored.manifest.version, than: Release.version)
         else {
             try? FileManager.default.removeItem(at: url)
-            return (nil, false)
+            return nil
         }
         let update = PreparedUpdate(manifest: stored.manifest, installation: installation,
                                     staging: URL(fileURLWithPath: stored.staging, isDirectory: true))
@@ -456,8 +568,8 @@ enum PendingUpdateRecord {
             try update.validate()
         } catch {
             try? FileManager.default.removeItem(at: url)
-            return (nil, false)
+            return nil
         }
-        return (update, stored.scheduled)
+        return update
     }
 }

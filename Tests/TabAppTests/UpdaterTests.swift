@@ -24,56 +24,16 @@ final class UpdaterTests: XCTestCase {
 
     private let sonoma = OperatingSystemVersion(majorVersion: 14, minorVersion: 2, patchVersion: 0)
 
-    @MainActor
-    func testPendingUpdateStillChecksFeedAndSkipsToNewestRelease() async throws {
-        let pending = pendingUpdate("0.8.0")
-        let newest = pendingUpdate("0.10.0")
-        var checks = 0
-        var downloads: [String] = []
-        let result = try await UpdaterController.checkedUpdate(known: pending, latest: {
-            checks += 1
-            return newest.manifest
-        }, prepare: { manifest in
-            downloads.append(manifest.version)
-            return newest
-        })
-        XCTAssertEqual(checks, 1)
-        XCTAssertEqual(downloads, ["0.10.0"])
-        XCTAssertEqual(result, newest)
-    }
-
-    @MainActor
-    func testPendingUpdateIsReusedForSameOlderOrEmptyFeed() async throws {
-        let pending = pendingUpdate("0.9.0")
-        var differentHints = pending.manifest
-        differentHints.protocolVersions = []
-        for manifest in [differentHints, pendingUpdate("0.8.0").manifest, nil] {
-            var checks = 0
-            let result = try await UpdaterController.checkedUpdate(known: pending, latest: {
-                checks += 1
-                return manifest
-            }, prepare: { _ in
-                XCTFail("An equal or older release must not be downloaded")
-                return pending
-            })
-            XCTAssertEqual(checks, 1)
-            XCTAssertEqual(result, pending)
-        }
-    }
-
-    @MainActor
-    func testCheckWithoutPendingUpdateDownloadsLatestOrReturnsNil() async throws {
-        let newest = pendingUpdate("0.9.0")
-        let result = try await UpdaterController.checkedUpdate(known: nil, latest: {
-            newest.manifest
-        }, prepare: { _ in newest })
-        XCTAssertEqual(result, newest)
-
-        let empty = try await UpdaterController.checkedUpdate(known: nil, latest: { nil }, prepare: { _ in
-            XCTFail("An empty feed must not trigger a download")
-            return newest
-        })
-        XCTAssertNil(empty)
+    /// A check offers the feed's release unless it doesn't replace the
+    /// download waiting to install: a stale feed must not move it back.
+    func testChecksOfferOnlyReleasesNewerThanTheDownload() {
+        let newest = pendingUpdate("0.10.0").manifest
+        XCTAssertEqual(UpdaterController.newerRelease(newest, than: "0.8.0"), newest)
+        XCTAssertEqual(UpdaterController.newerRelease(newest, than: nil), newest)
+        XCTAssertNil(UpdaterController.newerRelease(nil, than: nil))
+        XCTAssertNil(UpdaterController.newerRelease(nil, than: "0.9.0"))
+        XCTAssertNil(UpdaterController.newerRelease(pendingUpdate("0.9.0").manifest, than: "0.9.0"))
+        XCTAssertNil(UpdaterController.newerRelease(pendingUpdate("0.8.0").manifest, than: "0.9.0"))
     }
 
     private func pendingUpdate(_ version: String) -> PreparedUpdate {
@@ -207,46 +167,110 @@ final class UpdaterTests: XCTestCase {
         unknown.protocolVersions = []
         XCTAssertFalse(UpdateDecision.isCompatible(unknown, with: BuildInfo(version: "1.0.0")))
 
-        XCTAssertEqual(UpdateDecision.offer(compatible: true, scheduled: false, sessions: 3), .installNow)
-        XCTAssertEqual(UpdateDecision.offer(compatible: false, scheduled: false, sessions: 3), .needsNewServer)
-        XCTAssertEqual(UpdateDecision.offer(compatible: true, scheduled: true, sessions: 3), .waitingForSessions(3))
+        XCTAssertEqual(UpdateDecision.step(compatible: true, sessions: 4), .install)
+        XCTAssertEqual(UpdateDecision.step(compatible: false, sessions: 0), .installStoppingIdleServer)
+        XCTAssertEqual(UpdateDecision.step(compatible: false, sessions: 4), .confirmEndingTerminals)
 
-        XCTAssertEqual(UpdateDecision.step(for: .install(restartServer: false), compatible: true, sessions: 4), .install(stopServer: false))
-        XCTAssertEqual(UpdateDecision.step(for: .install(restartServer: true), compatible: true, sessions: 4), .install(stopServer: true))
-        XCTAssertEqual(UpdateDecision.step(for: .install(restartServer: false), compatible: false, sessions: 4), .wait)
-        XCTAssertEqual(UpdateDecision.step(for: .endSessions, compatible: false, sessions: 4), .install(stopServer: true))
-        XCTAssertEqual(UpdateDecision.step(for: .waitForSessions, compatible: false, sessions: 4), .wait)
-        XCTAssertEqual(UpdateDecision.step(for: .waitForSessions, compatible: false, sessions: 0), .install(stopServer: true))
-        XCTAssertEqual(UpdateDecision.step(for: .cancelWaiting, compatible: false, sessions: 4), .cancelWait)
-        XCTAssertEqual(UpdateDecision.step(for: .later, compatible: true, sessions: 0), .nothing)
-        XCTAssertEqual(UpdateDecision.scheduledStep(sessions: 1), .wait)
-        XCTAssertEqual(UpdateDecision.scheduledStep(sessions: 0), .install(stopServer: true))
-
+        XCTAssertTrue(UpdateDecision.isOutdated(serverVersion: "1.0.0", appVersion: "1.1.0"))
+        XCTAssertFalse(UpdateDecision.isOutdated(serverVersion: "1.2.0", appVersion: "1.1.0"))
+        XCTAssertFalse(UpdateDecision.isOutdated(serverVersion: nil, appVersion: "1.1.0"))
         XCTAssertTrue(UpdateDecision.shouldReplaceServer(serverVersion: "1.0.0", appVersion: "1.1.0", sessions: 0))
         XCTAssertFalse(UpdateDecision.shouldReplaceServer(serverVersion: "1.0.0", appVersion: "1.1.0", sessions: 1))
         XCTAssertFalse(UpdateDecision.shouldReplaceServer(serverVersion: "1.1.0", appVersion: "1.1.0", sessions: 0))
         XCTAssertFalse(UpdateDecision.shouldReplaceServer(serverVersion: nil, appVersion: "1.1.0", sessions: 0))
     }
 
-    /// The card's one-click choices never end running terminals: only
-    /// "Update Now…", which confirms first, does.
-    func testUpdateCardNeverEndsTerminalsWithoutConfirming() throws {
-        func actions(_ status: UpdaterStatus, compatible: Bool, sessions: Int) -> [UpdateCard.Action]? {
-            UpdateCard.make(status: status, compatible: compatible, sessions: sessions)?.buttons.map(\.action)
-        }
-        let ready = UpdaterStatus.ready(version: "1.1.0")
-        XCTAssertEqual(actions(ready, compatible: true, sessions: 3), [.restartAndUpdate])
-        XCTAssertEqual(UpdateDecision.step(for: .install(restartServer: false), compatible: true, sessions: 3), .install(stopServer: false))
-        XCTAssertEqual(actions(ready, compatible: false, sessions: 0), [.restartAndUpdate])
-        XCTAssertEqual(actions(ready, compatible: false, sessions: 2), [.waitForTerminals, .endTerminalsAndUpdate])
-        XCTAssertEqual(actions(.waitingForSessions(version: "1.1.0", sessions: 2), compatible: false, sessions: 2),
-                       [.endTerminalsAndUpdate, .cancelWaiting])
+    private func chip(
+        _ status: UpdaterStatus = .idle, notice: UpdateNotice? = nil, checking: Bool = false, showsDownload: Bool = true,
+        available: String? = nil, ready: UpdateChip.Ready? = nil, outdatedServer: String? = nil, sessions: Int = 0
+    ) -> UpdateChip? {
+        UpdateChip.make(status: status, notice: notice, checking: checking, showsDownload: showsDownload,
+                        available: available, ready: ready, outdatedServer: outdatedServer, sessions: sessions)
+    }
 
-        let installing = try XCTUnwrap(UpdateCard.make(status: .installing(version: "1.1.0"), compatible: false, sessions: 0))
-        XCTAssertTrue(installing.busy)
-        for status: UpdaterStatus in [.idle, .checking, .downloading(version: "1.1.0"), .failed("offline"), .unavailable("debug")] {
-            XCTAssertNil(UpdateCard.make(status: status, compatible: true, sessions: 0))
-        }
+    /// Only a button the person pressed after a warning that names the
+    /// running terminals ends them.
+    func testUpdateChipNeverEndsTerminalsWithoutConfirming() throws {
+        let compatible = UpdateChip.Ready(version: "1.1.0", compatible: true)
+        let incompatible = UpdateChip.Ready(version: "1.1.0", compatible: false)
+        XCTAssertEqual(chip(ready: compatible, sessions: 3)?.button?.action, .update)
+        XCTAssertEqual(chip(ready: incompatible, sessions: 0)?.button?.action, .update)
+        XCTAssertEqual(chip(ready: incompatible, sessions: 2)?.button?.action, .update)
+
+        let confirm = try XCTUnwrap(chip(.ready(version: "1.1.0"), notice: .confirmUpdate, ready: incompatible, sessions: 2))
+        XCTAssertEqual(confirm.button?.action, .endTerminalsAndUpdate)
+        XCTAssertEqual(confirm.tone, .warning)
+        XCTAssertTrue(confirm.message.contains("2 running terminals"))
+        // Terminals ended meanwhile: nothing is left to warn about.
+        XCTAssertEqual(chip(.ready(version: "1.1.0"), notice: .confirmUpdate, ready: incompatible, sessions: 0)?.button?.title, "Restart")
+        XCTAssertEqual(chip(.ready(version: "1.1.0"), notice: .confirmUpdate, ready: compatible, sessions: 2)?.button?.title, "Restart")
+
+        let server = try XCTUnwrap(chip(outdatedServer: "1.0.0", sessions: 1))
+        XCTAssertEqual(server.tone, .warning)
+        XCTAssertEqual(server.button?.action, .restartServer)
+        XCTAssertEqual(chip(notice: .confirmServerRestart, outdatedServer: "1.0.0", sessions: 1)?.button?.action,
+                       .endTerminalsAndRestartServer)
+        XCTAssertNil(chip(notice: .confirmServerRestart, sessions: 1))
+
+        let installing = try XCTUnwrap(chip(.installing(version: "1.1.0"), notice: .confirmUpdate, ready: incompatible, sessions: 2))
+        XCTAssertNil(installing.button)
+        XCTAssertNil(installing.dismissal)
+    }
+
+    /// Background checks stay quiet; checks the person asks for always answer.
+    func testUpdateChipReportsChecksThePersonAskedFor() throws {
+        XCTAssertNil(chip(.checking))
+        XCTAssertNil(chip(.idle))
+        let checking = try XCTUnwrap(chip(.checking, checking: true))
+        XCTAssertEqual(checking.tone, .neutral)
+        XCTAssertEqual(checking.icon, .spinner)
+        XCTAssertNil(checking.dismissal)
+        XCTAssertEqual(chip(notice: .upToDate(version: "1.0.0"))?.tone, .success)
+        let available = try XCTUnwrap(chip(.available(version: "1.1.0"), available: "1.1.0"))
+        XCTAssertEqual(available.button?.action, .download)
+        XCTAssertEqual(available.dismissal, .available("1.1.0"))
+        XCTAssertEqual(chip(notice: .checkFailed("You’re offline."))?.button?.action, .checkAgain)
+        XCTAssertEqual(chip(notice: .downloadFailed(version: "1.1.0", reason: "x"))?.button?.action, .checkAgain)
+        XCTAssertEqual(chip(notice: .unavailable("Debug builds don't update themselves."))?.tone, .warning)
+
+        let downloading = try XCTUnwrap(chip(.downloading(version: "1.1.0", progress: 0.426)))
+        XCTAssertEqual(downloading.message, "Downloading \(Release.appName) 1.1.0… 42%")
+        XCTAssertEqual(downloading.icon, .progress(0.426))
+        XCTAssertEqual(downloading.dismissal, .download("1.1.0"))
+        XCTAssertEqual(chip(.downloading(version: "1.1.0", progress: nil))?.icon, .spinner)
+        XCTAssertNil(chip(.downloading(version: "1.1.0", progress: 0.5), showsDownload: false))
+        XCTAssertEqual(chip(.preparing(version: "1.1.0"))?.icon, .spinner)
+
+        XCTAssertEqual(chip(notice: .updated(version: "1.1.0"))?.button?.action, .showChangelog)
+        XCTAssertEqual(chip(notice: .updated(version: "1.1.0"))?.tone, .success)
+        XCTAssertEqual(UpdateChip.sentence("the server answered 404"), "The server answered 404.")
+        XCTAssertEqual(UpdateChip.sentence("You’re offline."), "You’re offline.")
+    }
+
+    /// Every sample in the debug preview still produces its chip.
+    func testUpdateChipPreviewCoversEveryState() {
+        XCTAssertEqual(UpdateChip.previews.count, 21)
+        XCTAssertEqual(Set(UpdateChip.previews.map(\.message)).count, 21)
+    }
+
+    func testUpdatedMarkerAnnouncesOnlyTheInstalledBuildOnce() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("updated-to-\(UUID().uuidString)")
+        UpdatedMarker.save("1.1.0", to: url)
+        XCTAssertNil(UpdatedMarker.take(url, current: "1.0.0"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+        UpdatedMarker.save("1.1.0", to: url)
+        XCTAssertEqual(UpdatedMarker.take(url, current: "1.1.0"), "1.1.0")
+        XCTAssertNil(UpdatedMarker.take(url, current: "1.1.0"))
+    }
+
+    /// Older builds require `scheduled`; this build writes it and reads records without it.
+    func testPendingUpdateRecordStaysReadableByOlderBuilds() throws {
+        let manifest = UpdateManifest(version: "1.1.0", url: URL(string: "https://example.com/Tab.zip")!, sha256: "")
+        let data = try JSONEncoder().encode(PendingUpdateRecord.Stored(manifest: manifest, staging: "/tmp/x", scheduled: false))
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(object["scheduled"] as? Bool, false)
+        let withoutScheduled = try JSONSerialization.data(withJSONObject: object.filter { $0.key != "scheduled" })
+        XCTAssertNoThrow(try JSONDecoder().decode(PendingUpdateRecord.Stored.self, from: withoutScheduled))
     }
 
     func testDownloadVerificationRejectsChecksumAndSizeMismatches() throws {

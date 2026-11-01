@@ -160,8 +160,6 @@ extension ServerAPI {
 // MARK: Updates
 
 extension AppModel: UpdaterHost {
-    public var updateWindow: NSWindow? { presenter?.window }
-
     public var localServerBuild: BuildInfo? { connections[.local]?.main?.server.build }
 
     public var runningSessionCount: Int { localSessionCount }
@@ -169,6 +167,11 @@ extension AppModel: UpdaterHost {
     public func endAllSessions() async throws {
         guard let main = connections[.local]?.main else { throw ModelError("This Mac's server is not running.") }
         _ = try await main.stopServer(force: true)
+    }
+
+    public func restartLocalServer() async throws {
+        guard let main = connections[.local]?.main else { throw ModelError("This Mac's server is not running.") }
+        try await main.restartServer()
     }
 
     public func stopLocalServerIfIdle() async -> Bool {
@@ -186,14 +189,7 @@ extension AppModel: UpdaterHost {
         NSApp.terminate(nil)
     }
 
-    public func updaterStatusDidChange(_ status: UpdaterStatus) {
-        notify(.settings)
-    }
-
-    /// The sidebar's update card announces new versions; a hidden sidebar
-    /// gets a toast instead.
-    public func announceUpdate(version: String) {
-        guard !appearance.sidebarExpanded else { return }
-        presenter?.showToast("\(Release.appName) \(version) is ready. Show the sidebar to update.", error: false)
+    public func updaterDidChange() {
+        notify(.activity)
     }
 }

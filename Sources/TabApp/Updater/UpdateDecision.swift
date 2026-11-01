@@ -2,45 +2,17 @@ import Foundation
 import TabCore
 import TabProtocol
 
-/// What the "Update available" sheet offers for a downloaded release.
-public enum UpdateOffer: Equatable, Sendable {
-    /// The new app speaks the running server's protocol: install now and keep
-    /// terminals running, optionally restarting the server too.
-    case installNow
-    /// The new app needs a new server: wait for every terminal to end, or
-    /// end them now.
-    case needsNewServer
-    /// The new app needs a new server and is already waiting for terminals
-    /// to end.
-    case waitingForSessions(Int)
-}
-
-/// What the person chose in the sheet.
-public enum UpdateChoice: Equatable, Sendable {
-    /// Install now; `restartServer` also replaces the server now, ending
-    /// every terminal.
-    case install(restartServer: Bool)
-    /// Install once every terminal has ended.
-    case waitForSessions
-    /// Install now, ending every terminal; already confirmed.
-    case endSessions
-    /// Stop waiting for terminals to end.
-    case cancelWaiting
-    case later
-}
-
-/// What the updater does next.
+/// How a downloaded release gets installed, given the running server.
 public enum UpdateStep: Equatable, Sendable {
-    /// Replace the bundle and relaunch. With `stopServer` the server is
-    /// stopped first (ending terminals) so the new app starts the new one;
-    /// without it the running server keeps going from the old bundle until
-    /// it is idle.
-    case install(stopServer: Bool)
-    /// Keep the download and install when the session count reaches zero.
-    case wait
-    /// Forget the scheduled install, keeping the download.
-    case cancelWait
-    case nothing
+    /// The new app speaks the server's protocol: install and relaunch, and
+    /// the running server keeps its terminals until it is idle.
+    case install
+    /// The new app needs a new server and no terminal runs: stop the idle
+    /// server, then install.
+    case installStoppingIdleServer
+    /// The new app needs a new server and terminals run: installing ends
+    /// them, so ask first.
+    case confirmEndingTerminals
 }
 
 /// The install decision table, kept free of side effects so it can be tested.
@@ -53,39 +25,22 @@ public enum UpdateDecision {
         return manifest.protocolVersions.contains(where: server.protocolVersions.contains)
     }
 
-    public static func offer(compatible: Bool, scheduled: Bool, sessions: Int) -> UpdateOffer {
-        if scheduled { return .waitingForSessions(sessions) }
-        return compatible ? .installNow : .needsNewServer
+    /// What installing does now. Nothing ends without asking.
+    public static func step(compatible: Bool, sessions: Int) -> UpdateStep {
+        if compatible { return .install }
+        return sessions == 0 ? .installStoppingIdleServer : .confirmEndingTerminals
     }
 
-    /// The step for a choice. Installing over an incompatible server always
-    /// stops it, and waiting with nothing left to wait for installs at once.
-    public static func step(for choice: UpdateChoice, compatible: Bool, sessions: Int) -> UpdateStep {
-        switch choice {
-        case .install(let restartServer):
-            if !compatible && !restartServer { return sessions == 0 ? .install(stopServer: true) : .wait }
-            return .install(stopServer: restartServer)
-        case .endSessions:
-            return .install(stopServer: true)
-        case .waitForSessions:
-            return sessions == 0 ? .install(stopServer: true) : .wait
-        case .cancelWaiting:
-            return .cancelWait
-        case .later:
-            return .nothing
-        }
-    }
-
-    /// While an install waits for terminals to end: install once none are left.
-    public static func scheduledStep(sessions: Int) -> UpdateStep {
-        sessions == 0 ? .install(stopServer: true) : .wait
+    /// Whether the running local server is from an older build than this app.
+    public static func isOutdated(serverVersion: String?, appVersion: String) -> Bool {
+        guard let serverVersion else { return false }
+        return ReleaseVersion.isNewer(appVersion, than: serverVersion)
     }
 
     /// Whether a running local server is older than this app and can be
     /// replaced: it is stopped once no terminals need it, and the app starts
     /// its own build's server.
     public static func shouldReplaceServer(serverVersion: String?, appVersion: String, sessions: Int) -> Bool {
-        guard let serverVersion, sessions == 0 else { return false }
-        return ReleaseVersion.isNewer(appVersion, than: serverVersion)
+        sessions == 0 && isOutdated(serverVersion: serverVersion, appVersion: appVersion)
     }
 }

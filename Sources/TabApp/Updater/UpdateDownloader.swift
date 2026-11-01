@@ -64,8 +64,11 @@ public struct UpdateDownloader: Sendable {
     }
 
     /// Streams a bounded release into `directory`, then verifies its size
-    /// and checksum. No partial or rejected download is kept.
-    public func download(_ manifest: UpdateManifest, into directory: URL) async throws -> URL {
+    /// and checksum. No partial or rejected download is kept. `progress`
+    /// hears the fraction downloaded, once per whole percent, when the size
+    /// is known.
+    public func download(_ manifest: UpdateManifest, into directory: URL,
+                         progress: (@Sendable (Double) -> Void)? = nil) async throws -> URL {
         let destination = directory.appendingPathComponent("update." + manifest.url.pathExtension.lowercased())
         var complete = false
         defer { if !complete { try? FileManager.default.removeItem(at: destination) } }
@@ -79,6 +82,8 @@ public struct UpdateDownloader: Sendable {
         defer { bytes.task.cancel() }
         try Self.checkStatus(response)
         let limit = min(manifest.size ?? UpdateFeed.maximumDownloadSize, UpdateFeed.maximumDownloadSize)
+        let expected = manifest.size ?? (response.expectedContentLength > 0 ? response.expectedContentLength : nil)
+        var reported = -1
         var count: Int64 = 0
         var buffer = Data()
         for try await byte in bytes {
@@ -88,6 +93,13 @@ public struct UpdateDownloader: Sendable {
             if buffer.count == 65_536 {
                 try output.write(contentsOf: buffer)
                 buffer.removeAll(keepingCapacity: true)
+                if let progress, let expected {
+                    let percent = Int(min(count * 100 / max(expected, 1), 100))
+                    if percent != reported {
+                        reported = percent
+                        progress(Double(percent) / 100)
+                    }
+                }
             }
         }
         try output.write(contentsOf: buffer)

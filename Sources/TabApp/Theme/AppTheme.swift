@@ -167,6 +167,10 @@ public final class AppTheme: ObservableObject {
     public var accentForeground: NSColor { palette.accentForeground.nsColor }
     public var warning: NSColor { palette.warning.nsColor }
     public var danger: NSColor { palette.danger.nsColor }
+    /// Information and progress: the system's blue, whatever the theme's accent.
+    public var info: NSColor { .systemBlue }
+    /// Something finished well: the theme's green.
+    public var success: NSColor { palette.diffAdd.nsColor }
     public var diffAdd: NSColor { palette.diffAdd.nsColor }
     public var diffRemove: NSColor { palette.diffRemove.nsColor }
     public var diffHunk: NSColor { palette.diffHunk.nsColor }

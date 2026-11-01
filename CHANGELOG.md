@@ -3,6 +3,24 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.26.0 - 2026-11-02
+
+### Changed
+
+- Updates now speak through one floating chip at the bottom right of the window,
+  instead of a sheet, alerts and a sidebar card.
+- A new version waits for you: Update downloads it in the background with its
+  progress, and Restart installs it.
+- Restarting for an update that would end running terminals asks first, right in
+  the chip.
+- Check for Updates shows that it is checking, then whether you're up to date or
+  why the check failed, with Try Again.
+
+### Added
+
+- After an update, a chip says which version you're on and opens What's New.
+- When this Mac's server still runs an older version, a chip offers to restart it.
+
 ## 0.25.1 - 2026-11-01
 
 ### Fixed
