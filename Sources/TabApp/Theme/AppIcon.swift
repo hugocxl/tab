@@ -5,7 +5,7 @@ import TabCore
 /// with the bundled Lucide SVG otherwise. Images are templates, so they tint
 /// with `contentTintColor` or the drawing color.
 public enum AppIcon: String, CaseIterable, Sendable {
-    case appWindow, arrowUpDown, chevronDown, chevronLeft, chevronRight, chevronUp, check, circleX
+    case appWindow, arrowUpDown, chevronDown, chevronLeft, chevronRight, chevronUp, check, circleX, command
     case code, circleUser, columns, ellipsis, folder, gitBranch, globe, eye, keyboard, lightbulb
     case maximize, network, palette, panelBottom, panelLeft, panelRight, pin, pinOff, plus, puzzle
     case restore, refresh, rows, search, settings, terminal, terminalStack, close, externalLink
@@ -24,6 +24,7 @@ public enum AppIcon: String, CaseIterable, Sendable {
         case .chevronUp: return "chevron.up"
         case .check: return "checkmark"
         case .circleX: return "xmark.circle"
+        case .command: return "command"
         case .code: return "chevron.left.forwardslash.chevron.right"
         case .circleUser: return "person.crop.circle"
         case .columns: return "square.split.2x1"
@@ -142,7 +143,7 @@ public enum AppIcon: String, CaseIterable, Sendable {
         case .quote: return "text-quote"
         case .stop: return "square"
         case .triangleAlert: return "triangle-alert"
-        case .phone, .trash, .minus, .qrcode, .arrowDown: return nil
+        case .command, .phone, .trash, .minus, .qrcode, .arrowDown: return nil
         }
     }
 

@@ -18,6 +18,7 @@ final class SidebarViewController: NSViewController {
     private let root = SidebarRootView()
     private let topRow = FlippedView()
     private let toggle = ChromeButton(.panelLeft, label: "Toggle Sidebar")
+    private let commandPalette = ChromeButton(.command, label: "Command Palette")
     private let newTerminal = ChromeButton(.plus, label: "New Terminal")
     private let scroll = ScrollView()
     private let list = NSStackView()
@@ -73,13 +74,14 @@ final class SidebarViewController: NSViewController {
         updateCard.isHidden = true
         root.addSubview(updateCard)
         root.addSubview(resizeHandle)
-        for button in [toggle, newTerminal] { topRow.addSubview(button) }
+        for button in [toggle, commandPalette, newTerminal] { topRow.addSubview(button) }
         for button in [hostButton, addButton, browserButton] { footer.addSubview(button) }
         filterField.translatesAutoresizingMaskIntoConstraints = true
         filterField.isHidden = true
         footer.addSubview(filterField)
 
         toggle.onPress = { [weak self] _ in self?.model.toggleSidebar() }
+        commandPalette.onPress = { [weak self] _ in self?.actions?.openPalette(.root) }
         newTerminal.onPress = { [weak self] button in
             guard let self else { return }
             self.model.newPaneMenu().popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.height), in: button)
@@ -422,6 +424,7 @@ final class SidebarViewController: NSViewController {
         let mid = (rowHeight - side) / 2
         toggle.frame = CGRect(x: max(trafficLightsEnd, Metrics.gutter), y: mid, width: side, height: side)
         newTerminal.frame = CGRect(x: bounds.width - step, y: mid, width: side, height: side)
+        commandPalette.frame = CGRect(x: newTerminal.frame.minX - step, y: mid, width: side, height: side)
         let footerHeight = Self.footerHeight
         footer.frame = CGRect(x: 0, y: bounds.height - footerHeight, width: bounds.width, height: footerHeight)
         let y = Metrics.gutter

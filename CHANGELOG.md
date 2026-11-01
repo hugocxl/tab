@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.20.0 - 2026-11-01
+
+### Added
+
+- A Command Palette button next to New Terminal at the top of the sidebar.
+
 ## 0.19.1 - 2026-11-01
 
 ### Fixed
