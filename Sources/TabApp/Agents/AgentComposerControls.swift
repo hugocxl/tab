@@ -165,7 +165,7 @@ class AgentTextPopUp: NSPopUpButton {
         setAccessibilityLabel(label)
         setAccessibilityHelp("Choose \(label.lowercased())")
         toolTip = label
-        focusRingType = .exterior
+        focusRingType = .none
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -182,8 +182,6 @@ class AgentTextPopUp: NSPopUpButton {
 
     override func mouseEntered(with event: NSEvent) { hovered = true; needsDisplay = true }
     override func mouseExited(with event: NSEvent) { hovered = false; needsDisplay = true }
-    override var focusRingMaskBounds: NSRect { bounds }
-    override func drawFocusRingMask() { NSBezierPath(roundedRect: bounds, xRadius: 5, yRadius: 5).fill() }
 
     override var intrinsicContentSize: NSSize {
         let width = (labelText as NSString).size(withAttributes: [.font: AppFont.small]).width
@@ -232,7 +230,7 @@ class AgentComposerButton: NSButton {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        focusRingType = .exterior
+        focusRingType = .none
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -247,10 +245,6 @@ class AgentComposerButton: NSButton {
 
     override func mouseEntered(with event: NSEvent) { hovered = true; needsDisplay = true }
     override func mouseExited(with event: NSEvent) { hovered = false; needsDisplay = true }
-    override var focusRingMaskBounds: NSRect { bounds.insetBy(dx: 1, dy: 1) }
-    override func drawFocusRingMask() {
-        NSBezierPath(roundedRect: focusRingMaskBounds, xRadius: bounds.height / 2, yRadius: bounds.height / 2).fill()
-    }
 }
 
 /// Shares one trailing position for send and interrupt; callers control visibility and enabled state.

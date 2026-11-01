@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.19.0 - 2026-11-01
+
+### Changed
+
+- Agent chat composer controls no longer show focus rings.
+
 ## 0.18.0 - 2026-11-01
 
 ### Added
