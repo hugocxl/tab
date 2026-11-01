@@ -148,7 +148,7 @@ final class PaletteItemView: NSView {
             label.maximumNumberOfLines = 1
             label.cell?.truncatesLastVisibleLine = true
         }
-        subtitle.font = AppFont.system(14)
+        subtitle.font = AppFont.body
         kind.font = AppFont.system(13)
         chevron.image = AppIcon.chevronRight.image(size: 12)
         check.image = AppIcon.check.image(size: 12)
@@ -164,7 +164,7 @@ final class PaletteItemView: NSView {
         tile.tile = item.tile
         title.attributedStringValue = highlighted(
             item.title, ranges: item.highlights,
-            font: AppFont.system(14, weight: item.current ? .semibold : .regular),
+            font: AppFont.system(13, weight: item.current ? .semibold : .medium),
             color: item.disabled ? theme.fgDim : theme.fg, accent: theme.accent
         )
         subtitle.stringValue = item.subtitle ?? ""

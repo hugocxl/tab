@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.25.0 - 2026-11-01
+
+### Changed
+
+- The command palette uses the standard font size, smaller icons and slightly
+  shorter rows, with bolder row titles.
+
 ## 0.24.4 - 2026-11-01
 
 ### Changed

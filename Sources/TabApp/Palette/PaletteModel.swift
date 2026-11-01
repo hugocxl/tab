@@ -10,11 +10,11 @@ public enum PaletteLayout {
     public static let radius: CGFloat = 20
     public static let header: CGFloat = 56
     public static let section: CGFloat = 28
-    public static let row: CGFloat = 40
+    public static let row: CGFloat = 36
     public static let rowInset: CGFloat = 8
     public static let rowRadius: CGFloat = 10
-    public static let tile: CGFloat = 24
-    public static let tileRadius: CGFloat = 6
+    public static let tile: CGFloat = 20
+    public static let tileRadius: CGFloat = 5
     /// The strip the floating footer capsule sits in; rows scroll under it.
     public static let footer: CGFloat = 52
     public static let capsule: CGFloat = 36

@@ -46,7 +46,7 @@ final class PaletteTests: XCTestCase {
     /// Heights come from row counts: header, sections, rows, list insets and
     /// footer, capped at 480pt plus the border.
     func testHeightsComeFromRowCounts() {
-        XCTAssertEqual(PaletteLayout.height(sections: 1, items: 2, list: true), 56 + 28 + 80 + 12 + 52 + 2)
+        XCTAssertEqual(PaletteLayout.height(sections: 1, items: 2, list: true), 56 + 28 + 72 + 12 + 52 + 2)
         XCTAssertEqual(PaletteLayout.height(sections: 0, items: 0, list: false), 56 + 96 + 52 + 2)
         XCTAssertEqual(PaletteLayout.height(sections: 3, items: 40, list: true), 480 + 2)
     }
