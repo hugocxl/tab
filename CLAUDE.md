@@ -39,7 +39,8 @@ Every commit is a version: it adds a new section on top of
 [CHANGELOG.md](CHANGELOG.md) in the same commit. The app bundles the file and
 shows it in Settings → Changelog, so write it for users.
 
-- Before every commit, run `git pull --rebase origin main`. Other branches
+- Before every commit, run `git pull --rebase --autostash origin main` (a
+  plain rebase refuses a dirty working tree). Other branches
   push to `main`, so the next version number must come from the latest
   `main`, not from where you started. If the rebase conflicts in the
   changelog, renumber your section above theirs.
