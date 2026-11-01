@@ -43,7 +43,6 @@ final class SidebarViewController: NSViewController {
 
     /// The window's title bar band the list starts below.
     static let titleBarHeight: CGFloat = 32
-    static let footerHeight: CGFloat = Metrics.gutter * 2 + ChromeButton.side
 
     init(model: AppModel) {
         self.model = model
@@ -142,7 +141,8 @@ final class SidebarViewController: NSViewController {
             list.removeArrangedSubview(view)
             view.removeFromSuperview()
         }
-        list.edgeInsets = NSEdgeInsets(top: 10, left: Metrics.gutter, bottom: 6, right: 0)
+        // The list starts and ends a gutter from the chrome rows' buttons.
+        list.edgeInsets = NSEdgeInsets(top: ChromeButton.rowHeight - Self.titleBarHeight, left: Metrics.gutter, bottom: 0, right: 0)
         guard isExpanded else { return }
         buildExpanded(snapshot)
     }
@@ -412,15 +412,13 @@ final class SidebarViewController: NSViewController {
 
     fileprivate func layoutRoot() {
         let bounds = root.bounds
-        let rowHeight = Metrics.headerHeight
         let side = ChromeButton.side
-        topRow.frame = CGRect(x: 0, y: Metrics.gutter, width: bounds.width, height: rowHeight)
-        let mid = (rowHeight - side) / 2
-        toggle.frame = CGRect(x: max(trafficLightsEnd, Metrics.gutter), y: mid, width: side, height: side)
-        CircleButton.layOut([commandPalette, newTerminal], trailingAt: bounds.width - ChromeButton.gap, y: mid)
-        let footerHeight = Self.footerHeight
-        footer.frame = CGRect(x: 0, y: bounds.height - footerHeight, width: bounds.width, height: footerHeight)
+        topRow.frame = CGRect(x: 0, y: 0, width: bounds.width, height: ChromeButton.rowHeight)
         let y = Metrics.gutter
+        toggle.frame = CGRect(x: max(trafficLightsEnd, Metrics.gutter), y: y, width: side, height: side)
+        CircleButton.layOut([commandPalette, newTerminal], trailingAt: bounds.width - ChromeButton.gap, y: y)
+        let footerHeight = ChromeButton.rowHeight
+        footer.frame = CGRect(x: 0, y: bounds.height - footerHeight, width: bounds.width, height: footerHeight)
         CircleButton.layOut([addButton, serversButton], trailingAt: bounds.width - ChromeButton.gap, y: y)
         filter.frame = CGRect(x: Metrics.gutter, y: y, width: max(addButton.frame.minX - ChromeButton.gap - Metrics.gutter, side), height: side)
         let inset = Metrics.radiusMedium

@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.25.1 - 2026-11-01
+
+### Fixed
+
+- Sidebar buttons keep the same gap above and below them as the space between
+  panes.
+
 ## 0.25.0 - 2026-11-01
 
 ### Changed

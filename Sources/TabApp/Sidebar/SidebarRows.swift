@@ -22,6 +22,9 @@ final class ChromeButton: CircleButton {
     static let glyph: CGFloat = 17
     /// The space between buttons side by side anywhere in the sidebars.
     static let gap: CGFloat = 4
+    /// A sidebar chrome row: the button with the gutter between cards above
+    /// and below it.
+    static let rowHeight: CGFloat = Metrics.gutter * 2 + side
 
     override var isFilled: Bool { isOn }
     override var mouseDownCanMoveWindow: Bool { false }

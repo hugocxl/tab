@@ -75,10 +75,9 @@ final class RightSidebarView: ThemedView {
         let gutter = Metrics.gutter
         let side = ChromeButton.side
         let cardWidth = max(bounds.width - gutter, 0)
-        let mid = gutter + ((Metrics.headerHeight - side) / 2).rounded()
-        CircleButton.layOut(tabs.map(\.1), leadingAt: 0, y: mid)
-        toggle.frame = CGRect(x: cardWidth - side, y: mid, width: side, height: side)
-        let top = gutter + Metrics.headerHeight
+        CircleButton.layOut(tabs.map(\.1), leadingAt: 0, y: gutter)
+        toggle.frame = CGRect(x: cardWidth - side, y: gutter, width: side, height: side)
+        let top = ChromeButton.rowHeight
         card.frame = CGRect(x: 0, y: top, width: cardWidth, height: max(bounds.height - top - gutter, 0))
         handle.frame = CGRect(x: 0, y: 0, width: 5, height: bounds.height)
     }

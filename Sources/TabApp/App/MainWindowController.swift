@@ -23,9 +23,8 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, A
     private(set) lazy var dictation = DictationController(host: self)
     private var subscriptions: Set<AnyCancellable> = []
 
-    /// The window buttons' top-left corner, centring them on the 36pt
-    /// header row 8pt from the top.
-    static let trafficLights = CGPoint(x: 2 * Metrics.gutter, y: Metrics.gutter + (Metrics.headerHeight - 14) / 2)
+    /// The window buttons' left edge.
+    static let trafficLightsX: CGFloat = 2 * Metrics.gutter
     /// The space between the window buttons' origins, as AppKit first
     /// lays them out.
     private var windowButtonStep: CGFloat?
@@ -125,6 +124,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, A
         if changes.contains(.state) { updateTitle() }
         if changes.contains(.settings) {
             palette.actionsChord = model.settings.keymap.chord(.commandPaletteActions)
+            placeWindowButtons()
         }
         if changes.contains(.state) || changes.contains(.activity) {
             dictation.targetDidChange()
@@ -142,7 +142,8 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, A
 
     // MARK: Window buttons
 
-    /// Puts the close, minimize and zoom buttons on the sidebar's top row.
+    /// Puts the close, minimize and zoom buttons on the sidebar's top row,
+    /// or on the top-left pane's header while the sidebar is collapsed.
     func placeWindowButtons() {
         guard let window, !window.styleMask.contains(.fullScreen),
               let close = window.standardWindowButton(.closeButton),
@@ -150,7 +151,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, A
             sidebar.trafficLightsEnd = Metrics.gutter
             return
         }
-        let height = Self.trafficLights.y * 2 + close.frame.height
+        let height = sidebar.isExpanded ? ChromeButton.rowHeight : Metrics.gutter * 2 + Metrics.headerHeight
         let frame = NSRect(x: 0, y: window.frame.height - height, width: window.frame.width, height: height)
         if container.frame != frame { container.frame = frame }
         // The workspace is added after the titlebar and would cover the buttons.
@@ -161,7 +162,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, A
             windowButtonStep = minimize.frame.minX - close.frame.minX
         }
         let step = windowButtonStep ?? close.frame.width + 6
-        var x = Self.trafficLights.x
+        var x = Self.trafficLightsX
         var end = x
         for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
             guard let button = window.standardWindowButton(kind) else { continue }
