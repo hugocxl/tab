@@ -91,7 +91,7 @@ final class AgentRenderingTests: XCTestCase {
         let rows = document.subviews.compactMap { $0 as? AgentTimelineRow }
         XCTAssertEqual(rows.count, 4, "Each tool call is a separately virtualized timeline row")
         for row in rows {
-            XCTAssertLessThanOrEqual(row.frame.width, 800)
+            XCTAssertLessThanOrEqual(row.frame.width, AgentPaneView.readableWidth)
             XCTAssertEqual(row.frame.midX, document.bounds.midX, accuracy: 1)
         }
         let user = try XCTUnwrap(rows.first)
@@ -107,7 +107,7 @@ final class AgentRenderingTests: XCTestCase {
         XCTAssertLessThanOrEqual(bubble.frame.width, user.bounds.width * 0.85 + 1)
         XCTAssertEqual(bubble.frame.maxX, user.bounds.maxX, accuracy: 1)
         let composerParent = try XCTUnwrap(surface.composerScroll.superview)
-        XCTAssertLessThanOrEqual(composerParent.frame.width, 800)
+        XCTAssertLessThanOrEqual(composerParent.frame.width, AgentPaneView.readableWidth)
         XCTAssertEqual(composerParent.frame.midX, surface.bounds.midX, accuracy: 1)
 
         surface.frame.size.width = 360

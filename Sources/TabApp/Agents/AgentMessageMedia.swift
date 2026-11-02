@@ -111,7 +111,7 @@ final class AgentMessageMediaView: NSView {
 
     override func layout() {
         super.layout()
-        AgentMessageShape.apply(to: self, bottomRight: joinsTextBubble ? 6 : 16)
+        AgentMessageShape.apply(to: self, bottomRight: joinsTextBubble ? AgentMessageShape.joinedRadius : AgentMessageShape.radius)
         let count = tiles.count, width = bounds.width
         for (index, tile) in tiles.enumerated() {
             if count == 1 { tile.frame = bounds }
@@ -310,14 +310,19 @@ private final class AgentAnimatedImageView: NSImageView {
 
 @MainActor
 enum AgentMessageShape {
-    static func apply(to view: NSView, topRight: CGFloat = 16, bottomRight: CGFloat = 16) {
+    /// A user message's corner radius, the same as a sidebar card's.
+    nonisolated static let radius = Metrics.radiusLarge
+    /// The tighter corner where a message's images meet its text bubble.
+    nonisolated static let joinedRadius: CGFloat = 3
+
+    static func apply(to view: NSView, topRight: CGFloat = radius, bottomRight: CGFloat = radius) {
         view.wantsLayer = true
         let name = "\(topRight)/\(bottomRight)"
         let mask = (view.layer?.mask as? CAShapeLayer) ?? CAShapeLayer()
         guard mask.frame != view.bounds || mask.name != name else { return }
         mask.frame = view.bounds; mask.name = name
         let width = view.bounds.width, height = view.bounds.height
-        let radius = min(16, min(width, height) / 2)
+        let radius = min(Self.radius, min(width, height) / 2)
         let tr = min(topRight, radius), br = min(bottomRight, radius)
         let path = CGMutablePath()
         path.move(to: CGPoint(x: radius, y: 0))

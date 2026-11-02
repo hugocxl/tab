@@ -19,7 +19,7 @@ final class AgentTableHitTestingTests: XCTestCase {
         let table = try XCTUnwrap(response.subviews.compactMap { $0 as? AgentResponseTable }.first)
         let local = NSPoint(x: table.copy.bounds.maxX - 1, y: table.copy.bounds.midY)
         let point = table.copy.convert(local, to: document)
-        XCTAssertGreaterThan(point.x, row.frame.maxX)
+        XCTAssertGreaterThan(point.x, response.convert(response.bounds, to: document).maxX, "The copy gutter lies outside the response")
         XCTAssertLessThan(point.x, document.bounds.maxX)
         XCTAssertTrue(table.hitTest(table.copy.convert(local, to: table.superview)) === table.copy)
         XCTAssertTrue(response.hitTest(table.copy.convert(local, to: response.superview)) === table.copy)

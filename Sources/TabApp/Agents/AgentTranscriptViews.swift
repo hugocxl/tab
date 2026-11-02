@@ -91,6 +91,10 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
     private var messageExpanded = false
     private let timestamp = makeLabel("", font: AppFont.footnote)
     private var timestampDate: Date?
+    /// How long the turn this message answers took, shown before its time.
+    var duration: TimeInterval? { didSet { if oldValue != duration { updateTimestampText() } } }
+    /// User and assistant messages fill at most this fraction of the conversation lane.
+    static let widthFraction: CGFloat = 0.8
     private var copyReset: Task<Void, Never>?
     private let detail = AgentRichTextView(frame: .zero)
     private let bubble = ThemedBackground(color: { $0.fg.withAlphaComponent(0.055) })
@@ -106,7 +110,8 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        bubble.cornerRadius = 16
+        bubble.cornerRadius = AgentMessageShape.radius
+        bubble.layer?.cornerCurve = .continuous
         addSubview(bubble)
         addSubview(body)
         body.delegate = self
@@ -259,22 +264,22 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
         guard let item else { return 0 }
         if item.kind == .user {
             let plain = item.text as NSString
-            let natural = plain.boundingRect(with: NSSize(width: max(1, width * 0.8 - 28), height: .greatestFiniteMagnitude),
+            let natural = plain.boundingRect(with: NSSize(width: max(1, width * Self.widthFraction - 28), height: .greatestFiniteMagnitude),
                 options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: [.font: AppFont.system(14)]).width
             let attachmentWidth = attachmentCards.map(\.naturalWidth).max() ?? 0
-            bubbleWidth = min(width * 0.8, max(48, ceil(max(natural, attachmentWidth)) + 28))
+            bubbleWidth = min(width * Self.widthFraction, max(48, ceil(max(natural, attachmentWidth)) + 28))
             let hasRichBlocks = AgentResponsePart.partition(AgentResponseParser.parse(item.text, parseRawHTML: false)).contains { $0.kind != 0 }
-            if hasRichBlocks { bubbleWidth = width * 0.8 }
+            if hasRichBlocks { bubbleWidth = width * Self.widthFraction }
             bodyHeight = item.text.isEmpty ? 0 : response.height(for: max(1, bubbleWidth - 28))
             if !expandMessage.isHidden && !messageExpanded { bodyHeight = min(Self.collapsedMessageHeight, bodyHeight) }
             attachmentsHeight = attachmentCards.reduce(0) { $0 + $1.preferredHeight } + CGFloat(max(0, attachmentCards.count - 1)) * 4
             if !attachmentCards.isEmpty && bodyHeight > 0 { attachmentsHeight += 8 }
-            if filesOnly { bubbleWidth = min(width * 0.8, 256); return attachmentsHeight + 28 }
-            mediaSize = media.measuredSize(maxWidth: max(1, width * 0.8))
+            if filesOnly { bubbleWidth = min(width * Self.widthFraction, 256); return attachmentsHeight + 28 }
+            mediaSize = media.measuredSize(maxWidth: max(1, width * Self.widthFraction))
             if bubble.isHidden { return mediaSize.height + 28 }
             return mediaSize.height + (mediaSize.height > 0 ? 4 : 0) + bodyHeight + attachmentsHeight + 22 + (expandMessage.isHidden ? 0 : 26) + 28
         }
-        bodyHeight = item.kind == .assistant ? response.height(for: width) : body.height(for: width)
+        bodyHeight = item.kind == .assistant ? response.height(for: Self.responseWidth(width)) : body.height(for: width)
         detailHeight = detail.isHidden ? 0 : detail.height(for: max(1, width - 24))
         if item.kind == .approval {
             return 24 + bodyHeight + (detail.isHidden ? 0 : detailHeight + 14) + (item.isComplete ? 0 : 42)
@@ -293,8 +298,8 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
             bubble.frame = NSRect(x: left, y: bubbleY, width: bubbleWidth, height: max(0, bounds.height - 28 - bubbleY))
             if !media.isHidden && !bubble.isHidden {
                 bubble.cornerRadius = 0
-                AgentMessageShape.apply(to: bubble, topRight: 6)
-            } else { bubble.cornerRadius = 16; bubble.layer?.mask = nil }
+                AgentMessageShape.apply(to: bubble, topRight: AgentMessageShape.joinedRadius)
+            } else { bubble.cornerRadius = AgentMessageShape.radius; bubble.layer?.mask = nil }
             response.frame = NSRect(x: left + 14, y: bubbleY + 11 + attachmentsHeight, width: max(1, bubbleWidth - 28), height: bodyHeight)
             expandMessage.frame = NSRect(x: max(left, width - 146), y: response.frame.maxY + 4, width: min(140, bubbleWidth), height: 24)
             response.layoutSubtreeIfNeeded()
@@ -326,14 +331,15 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
             deny.frame = NSRect(x: 0, y: actionsY, width: 62, height: 26)
             allow.frame = NSRect(x: 70, y: actionsY, width: 66, height: 26)
         } else if item.kind == .assistant {
-            response.frame = NSRect(x: 0, y: 0, width: width, height: bodyHeight)
+            response.frame = NSRect(x: 0, y: 0, width: Self.responseWidth(width), height: bodyHeight)
             response.layoutSubtreeIfNeeded()
             let footerY = bodyHeight + (changesHeight > 0 ? 16 + changesHeight : 0)
             changes.frame = NSRect(x: 0, y: bodyHeight + 16, width: width, height: changesHeight)
             changes.layoutRow(width: width)
-            copy.frame = NSRect(x: -4, y: footerY + 4, width: 28, height: 24)
-            timestamp.frame = NSRect(x: 30, y: copy.frame.minY + 4, width: max(0, width - 30), height: 18)
+            let timestampWidth = timestamp.isHidden ? 0 : min(max(0, width - 40), ceil(timestamp.attributedStringValue.size().width) + 4)
+            timestamp.frame = NSRect(x: 0, y: footerY + 8, width: timestampWidth, height: 18)
             timestamp.alignment = .left
+            copy.frame = NSRect(x: timestampWidth + (timestampWidth > 0 ? 4 : -4), y: footerY + 4, width: 28, height: 24)
         } else {
             body.frame = NSRect(x: 0, y: 0, width: width, height: bodyHeight)
         }
@@ -350,9 +356,13 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
     override func mouseEntered(with event: NSEvent) { hovered = true; updateActionVisibility() }
     override func mouseExited(with event: NSEvent) { hovered = false; updateActionVisibility() }
 
+    /// An assistant message's width: the lane narrowed to the shared message fraction.
+    static func responseWidth(_ width: CGFloat) -> CGFloat { max(1, floor(width * widthFraction)) }
+
     private func updateActionVisibility() {
+        // An answer's footer always shows when its turn ended; a user message's only on hover.
         // Keep controls in the accessibility tree while matching the quiet resting footer.
-        let opacity: CGFloat = hovered || actionsFocused ? 1 : 0
+        let opacity: CGFloat = hovered || actionsFocused || item?.kind == .assistant ? 1 : 0
         copy.alphaValue = opacity
         timestamp.alphaValue = opacity
     }
@@ -367,14 +377,20 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
         timestamp.isHidden = date == nil || (copy.isHidden && item?.kind != .user)
         guard timestampDate != date else { return }
         timestampDate = date
-        guard let date else { return }
+        updateTimestampText()
+    }
+
+    private func updateTimestampText() {
+        guard let date = timestampDate else { return }
+        let time = AgentTurnTime.moment(date)
+        let text = item?.kind == .assistant ? duration.map { AgentTurnTime.duration($0) + " · " + time } ?? time : time
+        guard timestamp.stringValue != text else { return }
+        timestamp.stringValue = text
         let formatter = DateFormatter()
-        formatter.dateStyle = Calendar.current.isDateInToday(date) ? .none : .short
-        formatter.timeStyle = .short
-        timestamp.stringValue = formatter.string(from: date)
         formatter.dateStyle = .full
         formatter.timeStyle = .medium
         timestamp.toolTip = formatter.string(from: date)
+        needsLayout = true
     }
 
     override func themeDidChange() {
@@ -482,14 +498,19 @@ final class AgentActivityRow: AgentTimelineRow {
     }
 }
 
+/// The bottom of a running turn: the sidebar's working glyph and the turn's live
+/// elapsed time, to a tenth of a second.
 @MainActor
 final class AgentWorkingRow: AgentTimelineRow {
-    var turn: AgentChatTurn?
-    private let label = makeLabel("", font: AppFont.small)
+    var turn: AgentChatTurn? { didSet { if oldValue != turn { refresh() } } }
+    private let glyph = ActivityGlyph()
+    private let label = makeLabel("", font: .monospacedDigitSystemFont(ofSize: 13, weight: .regular))
     private var ticker: Timer?
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         label.translatesAutoresizingMaskIntoConstraints = true
+        label.setAccessibilityLabel("Agent working time")
+        addSubview(glyph)
         addSubview(label)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -497,26 +518,69 @@ final class AgentWorkingRow: AgentTimelineRow {
         super.viewDidMoveToWindow()
         ticker?.invalidate()
         ticker = nil
-        if window != nil {
-            ticker = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-                MainActor.assumeIsolated { self?.refresh() }
-            }
+        guard window != nil else { return }
+        // Only this label changes on each tick: no layout or row measurement.
+        let ticker = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refresh() }
         }
+        ticker.tolerance = 0.02
+        RunLoop.main.add(ticker, forMode: .common)
+        self.ticker = ticker
+        refresh()
     }
     deinit { ticker?.invalidate() }
     private func refresh() {
-        let seconds = max(0, Int(Date().timeIntervalSince(turn?.startedAt ?? Date())))
-        let duration = seconds >= 60 ? "\(seconds / 60)m \(seconds % 60)s" : "\(seconds)s"
-        label.stringValue = "Working for " + duration
-        label.textColor = theme.fgDim
+        let text = AgentTurnTime.elapsed(Date().timeIntervalSince(turn?.startedAt ?? Date()))
+        if label.stringValue != text { label.stringValue = text }
     }
     override func update(_ items: [AgentChatItem]) { refresh() }
-    override func preferredHeight(for width: CGFloat) -> CGFloat { 37 }
-    override func layoutRow(width: CGFloat) { label.frame = NSRect(x: 4, y: 4, width: max(0, width - 8), height: 24) }
-    override func themeDidChange() { refresh(); needsDisplay = true }
-    override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
-        theme.fg.withAlphaComponent(0.1).setFill()
-        NSRect(x: 0, y: bounds.height - 1, width: bounds.width, height: 1).fill()
+    override func preferredHeight(for width: CGFloat) -> CGFloat { 28 }
+    override func layoutRow(width: CGFloat) {
+        glyph.frame = NSRect(x: 2, y: 8, width: 12, height: 12)
+        label.frame = NSRect(x: 24, y: 4, width: max(0, width - 24), height: 20)
+    }
+    override func themeDidChange() {
+        glyph.style = .dots(theme.accent)
+        label.textColor = theme.fgDim
+        refresh()
+    }
+}
+
+/// How the conversation writes a turn's times.
+enum AgentTurnTime {
+    /// A running turn, to a tenth of a second: `40.3s`, `3m 05.2s`, `1h 03m 05.2s`.
+    static func elapsed(_ seconds: TimeInterval) -> String {
+        let tenths = Int((max(0, seconds) * 10).rounded(.down))
+        let fraction = String(format: "%04.1f", Double(tenths % 600) / 10)
+        let minutes = tenths / 600
+        if minutes == 0 { return String(format: "%.1fs", Double(tenths) / 10) }
+        if minutes < 60 { return "\(minutes)m \(fraction)s" }
+        return String(format: "%dh %02dm ", minutes / 60, minutes % 60) + fraction + "s"
+    }
+
+    /// A finished turn: `2s`, `3m, 0s`, `1h, 3m`.
+    static func duration(_ seconds: TimeInterval) -> String {
+        let total = Int(max(0, seconds).rounded())
+        if total < 60 { return "\(total)s" }
+        if total < 3600 { return "\(total / 60)m, \(total % 60)s" }
+        return "\(total / 3600)h, \(total % 3600 / 60)m"
+    }
+
+    /// When a turn ended: the time today, the weekday and time this week, else the date.
+    static func moment(_ date: Date, now: Date = Date()) -> String {
+        let calendar = Calendar.current
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        let time = formatter.string(from: date)
+        if calendar.isDate(date, inSameDayAs: now) { return time }
+        if let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: date), to: calendar.startOfDay(for: now)).day,
+           days > 0, days < 7 {
+            formatter.timeStyle = .none
+            formatter.setLocalizedDateFormatFromTemplate("EEE")
+            return formatter.string(from: date) + " " + time
+        }
+        formatter.timeStyle = .none
+        formatter.dateStyle = .short
+        return formatter.string(from: date) + " " + time
     }
 }

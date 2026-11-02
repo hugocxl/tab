@@ -76,7 +76,7 @@ final class AgentToolImagesViewTests: XCTestCase {
         for _ in 0..<100 where tile.image == nil { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertNotNil(tile.image)
         row.frame.size = NSSize(width: 420, height: row.height(for: 420)); row.layoutSubtreeIfNeeded()
-        XCTAssertEqual(panel.frame.minY, 28)
+        XCTAssertEqual(panel.frame.minY, 48)
         XCTAssertTrue(tile.accessibilityPerformPress())
         XCTAssertEqual(previewed, "tool/image")
         let output = row.subviews.compactMap { $0 as? NSScrollView }.compactMap { $0.documentView as? NSTextView }

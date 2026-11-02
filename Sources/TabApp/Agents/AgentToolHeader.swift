@@ -1,41 +1,37 @@
 import AppKit
 
-/// source WorkLogLine geometry, drawn directly to avoid native bezel padding and inactive tinting.
+/// One tool call: its kind, the tool's name, then the operation in a code chip.
+/// Hovering shows a plate and a `+`; an open call shows `−`. Drawn directly to avoid
+/// native bezel padding and inactive tinting.
 @MainActor
 final class AgentToolHeader: NSButton {
     var onPress: (() -> Void)?
     var labelColor = NSColor.labelColor
     var iconColor = NSColor.secondaryLabelColor
     var focusColor = NSColor.controlAccentColor
+    var chipColor = NSColor.secondaryLabelColor
+    var plateColor = NSColor.quaternaryLabelColor
     var activityIcon: AgentConversationIcon = .wrench
-    /// A muted note after the title, such as why a tool did not run.
+    /// The operation, such as a command or a path; drawn in a code chip while closed.
+    var operation: String? { didSet { if oldValue != operation { needsDisplay = true } } }
+    /// A muted note after the operation, such as why a tool did not run.
     var suffix: String? { didSet { if oldValue != suffix { needsDisplay = true } } }
-    var expanded = false
-    var hovered = false { didSet { needsDisplay = true } }
-    var timestampColor = NSColor.secondaryLabelColor
+    var expanded = false { didSet { if oldValue != expanded { needsDisplay = true } } }
+    var hovered = false { didSet { if oldValue != hovered { needsDisplay = true } } }
     var timestamp: Date? { didSet { if oldValue != timestamp { updateTimestamp() } } }
-    private(set) var timestampText = ""
     private(set) var timestampTooltip: String?
+
+    static let chipFont = AppFont.mono(12)
+    static let maximumChipWidth: CGFloat = 560
+    private static let iconWidth: CGFloat = 30
+
     private func updateTimestamp() {
-        guard let timestamp else { timestampText = ""; timestampTooltip = nil; toolTip = nil; needsDisplay = true; return }
+        guard let timestamp else { timestampTooltip = nil; return }
         let formatter = DateFormatter()
-        formatter.timeStyle = .short
-        let time = formatter.string(from: timestamp)
-        if Calendar.current.isDateInToday(timestamp) || timestamp > Date() { timestampText = time }
-        else if Calendar.current.isDateInYesterday(timestamp) { timestampText = "yesterday at " + time }
-        else {
-            let sameYear = Calendar.current.component(.year, from: timestamp) == Calendar.current.component(.year, from: Date())
-            formatter.timeStyle = .none
-            formatter.setLocalizedDateFormatFromTemplate(sameYear ? "Md" : "yMd")
-            timestampText = formatter.string(from: timestamp) + " " + time
-        }
         formatter.dateStyle = .full
         formatter.timeStyle = .medium
         timestampTooltip = formatter.string(from: timestamp)
-        toolTip = timestampTooltip
-        needsDisplay = true
     }
-    var showsTimestamp: Bool { !timestampText.isEmpty && (hovered || window?.firstResponder === self) }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -50,42 +46,65 @@ final class AgentToolHeader: NSButton {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
     override var isFlipped: Bool { true }
 
-    override func draw(_ dirtyRect: NSRect) {
-        activityIcon.image(size: 16, color: iconColor)?.draw(
-            in: NSRect(x: 6, y: (bounds.height - 16) / 2, width: 16, height: 16), from: .zero,
-            operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.lineBreakMode = .byTruncatingTail
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: font ?? AppFont.system(14), .foregroundColor: labelColor, .paragraphStyle: paragraph,
-        ]
-        let lineHeight = ("Ag" as NSString).size(withAttributes: attributes).height
-        let timestampAttributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .regular), .foregroundColor: timestampColor,
-        ]
-        let timestampSize = (timestampText as NSString).size(withAttributes: timestampAttributes)
-        let trailingWidth: CGFloat = showsTimestamp ? ceil(timestampSize.width) + 10 : 0
-        let line = NSMutableAttributedString(string: title, attributes: attributes)
+    private var titleAttributes: [NSAttributedString.Key: Any] {
+        [.font: font ?? AppFont.system(14), .foregroundColor: labelColor]
+    }
+
+    private var chipText: String? { expanded ? nil : operation.flatMap { $0.isEmpty ? nil : $0 } }
+
+    /// The width the header needs, so its plate and click target hug the content.
+    func naturalWidth(maximum: CGFloat) -> CGFloat {
+        var width = Self.iconWidth + ceil((title as NSString).size(withAttributes: titleAttributes).width) + 10
+        if let chipText {
+            width += 8 + min(Self.maximumChipWidth, ceil((chipText as NSString).size(withAttributes: [.font: Self.chipFont]).width) + 14)
+        }
         if let suffix, !suffix.isEmpty {
-            var muted = attributes
-            muted[.foregroundColor] = timestampColor
-            line.append(NSAttributedString(string: " · " + suffix, attributes: muted))
+            width += 8 + ceil(((" · " + suffix) as NSString).size(withAttributes: titleAttributes).width)
         }
-        line.draw(with: NSRect(x: 32, y: (bounds.height - lineHeight) / 2,
-            width: max(0, bounds.width - 58 - trailingWidth), height: lineHeight),
-            options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
-        if showsTimestamp {
-            (timestampText as NSString).draw(at: NSPoint(x: max(32, bounds.width - 26 - timestampSize.width),
-                y: (bounds.height - timestampSize.height) / 2), withAttributes: timestampAttributes)
+        return min(maximum, width)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let focused = window?.firstResponder === self
+        if isEnabled && (hovered || expanded || focused) {
+            plateColor.setFill()
+            NSBezierPath(roundedRect: bounds, xRadius: 7, yRadius: 7).fill()
         }
-        if isEnabled {
-            (expanded ? AgentConversationIcon.chevronDown : .chevronRight).image(size: 12, color: iconColor)?.draw(
-                in: NSRect(x: bounds.width - 16, y: (bounds.height - 12) / 2, width: 12, height: 12), from: .zero,
-                operation: .sourceOver, fraction: 0.7, respectFlipped: true, hints: nil)
+        let icon: AgentConversationIcon = !isEnabled ? activityIcon : expanded ? .minus : hovered || focused ? .plus : activityIcon
+        icon.image(size: 15, color: iconColor)?.draw(
+            in: NSRect(x: 9, y: (bounds.height - 15) / 2, width: 15, height: 15), from: .zero,
+            operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+        let attributes = titleAttributes
+        let titleSize = (title as NSString).size(withAttributes: attributes)
+        var x = Self.iconWidth
+        let maxX = bounds.width - 8
+        (title as NSString).draw(with: NSRect(x: x, y: (bounds.height - titleSize.height) / 2,
+            width: max(0, min(ceil(titleSize.width), maxX - x)), height: titleSize.height),
+            options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], attributes: attributes)
+        x += ceil(titleSize.width) + 8
+        if let chipText, x < maxX - 24 {
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.lineBreakMode = .byTruncatingTail
+            let chipAttributes: [NSAttributedString.Key: Any] = [.font: Self.chipFont, .foregroundColor: chipColor, .paragraphStyle: paragraph]
+            let textSize = (chipText as NSString).size(withAttributes: chipAttributes)
+            let chipWidth = min(Self.maximumChipWidth, ceil(textSize.width) + 14, maxX - x)
+            let chip = NSRect(x: x, y: (bounds.height - 22) / 2, width: chipWidth, height: 22)
+            plateColor.setFill()
+            NSBezierPath(roundedRect: chip, xRadius: 5, yRadius: 5).fill()
+            (chipText as NSString).draw(with: NSRect(x: chip.minX + 7, y: (bounds.height - textSize.height) / 2,
+                width: max(0, chip.width - 14), height: textSize.height),
+                options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], attributes: chipAttributes)
+            x = chip.maxX + 8
         }
-        if window?.firstResponder === self {
+        if let suffix, !suffix.isEmpty, x < maxX {
+            let muted: [NSAttributedString.Key: Any] = [.font: font ?? AppFont.system(14), .foregroundColor: chipColor]
+            let size = (("· " + suffix) as NSString).size(withAttributes: muted)
+            (("· " + suffix) as NSString).draw(with: NSRect(x: x, y: (bounds.height - size.height) / 2, width: maxX - x, height: size.height),
+                options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], attributes: muted)
+        }
+        if focused {
             focusColor.withAlphaComponent(0.7).setStroke()
-            let ring = NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 1), xRadius: 6, yRadius: 6)
+            let ring = NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 1), xRadius: 7, yRadius: 7)
             ring.lineWidth = 2
             ring.stroke()
         }

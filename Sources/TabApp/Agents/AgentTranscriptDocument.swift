@@ -25,6 +25,8 @@ final class AgentTranscriptDocument: ThemedView {
         var items: [AgentChatItem]
         var turn: AgentChatTurn? = nil
         var timestamp: Date? = nil
+        /// How long the turn took, on its answer, or on its work summary when it has no answer.
+        var duration: TimeInterval? = nil
         var groupedWork = false
         var showsResponseActions = true
         /// Only compaction cards name the provider, so a provider change re-renders them alone.
@@ -193,9 +195,10 @@ final class AgentTranscriptDocument: ThemedView {
                        trailingSpaces: entries.enumerated().map { index, entry in
             if case .card = entry.kind { return entry.groupedWork ? 6 : 14 }
             if entry.groupedWork, entry.kind == .activity {
-                return index + 1 < entries.count && entries[index + 1].groupedWork && entries[index + 1].kind == .activity ? 0 : 4
+                return index + 1 < entries.count && entries[index + 1].groupedWork && entries[index + 1].kind == .activity ? 4 : 6
             }
-            if entry.kind == .working || entry.kind == .work || entry.kind == .activity { return 8 }
+            if entry.kind == .activity, index + 1 < entries.count, entries[index + 1].kind == .activity { return 4 }
+            if entry.kind == .working || entry.kind == .work || entry.kind == .activity { return 10 }
             if entry.items.first?.kind == .assistant, index + 1 < entries.count,
                entries[index + 1].kind == .activity { return 8 }
             return 26
@@ -482,11 +485,12 @@ final class AgentTranscriptDocument: ThemedView {
         }
         if cached.rendered != entry {
             if let activity = row as? AgentActivityRow { activity.grouped = entry.groupedWork }
-            if let work = row as? AgentCompletedWorkRow { work.turn = entry.turn }
+            if let work = row as? AgentCompletedWorkRow { work.turn = entry.turn; work.duration = entry.duration }
             if let working = row as? AgentWorkingRow { working.turn = entry.turn }
             if let message = row as? AgentMessageRow {
                 message.showsResponseActions = entry.showsResponseActions
                 message.checkpoint = entry.turn?.checkpoint
+                message.duration = entry.duration
             }
             if let changes = row as? AgentChangedFilesRow { changes.checkpoint = entry.turn?.checkpoint }
             if let compaction = row as? AgentCompactionRow { compaction.provider = entry.provider }
@@ -601,12 +605,19 @@ final class AgentTranscriptDocument: ThemedView {
             approvalCounts.append((approvalCounts.last ?? 0) + (item.kind == .approval && !item.isComplete ? 1 : 0))
         }
         var timestamps: [String: Date] = [:]
+        var durations: [String: TimeInterval] = [:]
         var groups: [Int: (AgentChatTurn, Int)] = [:]
+        // A running turn's timer sits below everything the turn has shown so far.
+        var working: [Int: AgentChatTurn] = [:]
         for turn in turns {
             timestamps[turn.userItemID] = turn.startedAt
+            if turn.completedAt == nil, let end = userEnds[turn.userItemID] { working[end] = turn }
             guard let endDate = turn.completedAt, let start = itemIndices[turn.userItemID],
                   let end = userEnds[turn.userItemID], let answer = answers[turn.userItemID] else { continue }
-            if answer < end { timestamps[items[answer].id] = endDate }
+            if answer < end {
+                timestamps[items[answer].id] = endDate
+                durations[items[answer].id] = endDate.timeIntervalSince(turn.startedAt)
+            }
             guard answer > start + 1, toolCounts[answer] > toolCounts[start + 1],
                   approvalCounts[answer] == approvalCounts[start + 1] else { continue }
             groups[start + 1] = (turn, answer)
@@ -615,30 +626,33 @@ final class AgentTranscriptDocument: ThemedView {
             let card = classifier.classify(item)
             return Entry(id: item.kind == .tool ? "activity:" + item.id : item.id,
                          kind: card.map { .card($0) } ?? (item.kind == .tool ? .activity : .message),
-                         items: [item], timestamp: timestamps[item.id],
+                         items: [item], timestamp: timestamps[item.id], duration: durations[item.id],
                          provider: card == .compaction ? provider : nil)
         }
         var result: [Entry] = []
-        let activeTurns = Dictionary(turns.filter { $0.completedAt == nil }.map { ($0.userItemID, $0) }, uniquingKeysWith: { _, last in last })
+        func appendWorking(before index: Int) {
+            guard let turn = working[index] else { return }
+            result.append(Entry(id: "working:" + turn.userItemID, kind: .working, items: [], turn: turn))
+        }
         var index = 0
         while index < items.endIndex {
+            appendWorking(before: index)
             let item = items[index]
             if let (turn, end) = groups[index] {
                 // Failures stay visible below the fold; every other card folds like a tool.
                 let work = items[index..<end]
                 let folded = work.filter { classifier.classify($0)?.folds != false }
-                result.append(Entry(id: "work:" + turn.userItemID, kind: .work, items: folded, turn: turn))
+                let unanswered = (userEnds[turn.userItemID] ?? end) <= end
+                result.append(Entry(id: "work:" + turn.userItemID, kind: .work, items: folded, turn: turn,
+                                    duration: unanswered ? turn.completedAt?.timeIntervalSince(turn.startedAt) : nil))
                 result.append(contentsOf: work.filter { classifier.classify($0)?.folds == false }.map(entry(for:)))
                 index = end
                 continue
-            } else {
-                result.append(entry(for: item))
             }
-            if let turn = activeTurns[item.id] {
-                result.append(Entry(id: "working:" + item.id, kind: .working, items: [], turn: turn))
-            }
+            result.append(entry(for: item))
             index += 1
         }
+        appendWorking(before: items.endIndex)
         var foundAnswer = false
         for position in result.indices.reversed() {
             if result[position].items.first?.kind == .user { foundAnswer = false }

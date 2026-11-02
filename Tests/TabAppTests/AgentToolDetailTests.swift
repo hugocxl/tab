@@ -41,38 +41,28 @@ final class AgentToolDetailTests: XCTestCase {
         XCTAssertTrue(row.captureState().toolExpandedIDs.contains("tool"))
     }
 
-    func testGroupedGeometryKeepsExpandedContentAndDisclosureState() throws {
+    func testHeaderNamesToolAndBoxesOpenResult() throws {
         let row = AgentActivityRow(frame: .zero)
         let item = AgentChatItem(id: "tool", kind: .tool, text: "Run command", tool: .init(
-            category: .command, input: "echo hello", output: "hello", startedAt: Date()))
+            name: "Bash", category: .command, input: #"{"command":"echo hello"}"#, output: "hello", startedAt: Date()))
         row.update([item])
-        XCTAssertEqual(row.preferredHeight(for: 400), 28)
-        row.restoreState(AgentTimelineRowState(toolExpandedIDs: [item.id]))
-        let standalone = row.preferredHeight(for: 400)
-        let state = row.captureState()
-        row.grouped = true
-        XCTAssertEqual(row.preferredHeight(for: 400), standalone - 4)
-        XCTAssertEqual(row.captureState().toolExpandedIDs, state.toolExpandedIDs)
-        row.restoreState(AgentTimelineRowState())
-        XCTAssertEqual(row.preferredHeight(for: 400), 24)
-        row.frame = NSRect(x: 0, y: 0, width: 400, height: 24)
+        XCTAssertEqual(row.preferredHeight(for: 400), 30)
+        row.frame = NSRect(x: 0, y: 0, width: 400, height: 30)
         row.layoutRow(width: 400)
         let header = try XCTUnwrap(descendants(row).compactMap { $0 as? AgentToolHeader }.first)
-        XCTAssertEqual(header.frame.height, 24)
-        XCTAssertFalse(header.showsTimestamp)
-        header.hovered = true
-        XCTAssertTrue(header.showsTimestamp)
-        XCTAssertFalse(header.timestampText.isEmpty)
-        header.hovered = false
-        XCTAssertFalse(header.showsTimestamp)
-        row.grouped = false
-        XCTAssertEqual(row.preferredHeight(for: 400), 28)
+        XCTAssertEqual(header.title, "Bash")
+        XCTAssertEqual(header.operation, "echo hello")
+        XCTAssertLessThan(header.frame.width, 400, "The header hugs the tool name and its operation")
+        XCTAssertNotNil(header.timestampTooltip)
+        row.restoreState(AgentTimelineRowState(toolExpandedIDs: [item.id]))
+        let state = row.captureState()
+        XCTAssertGreaterThan(row.preferredHeight(for: 400), 30 + 24, "The open result sits in a padded box")
         row.grouped = true
-        XCTAssertEqual(row.preferredHeight(for: 400), 24)
-        header.hovered = true
+        XCTAssertEqual(row.captureState().toolExpandedIDs, state.toolExpandedIDs)
+        row.restoreState(AgentTimelineRowState())
+        XCTAssertEqual(row.preferredHeight(for: 400), 30)
         row.update([.init(id: "undated", kind: .tool, text: "Read", detail: "Output")])
-        XCTAssertFalse(header.showsTimestamp, "Reused tool rows must clear a previous activity's timestamp")
-        XCTAssertEqual(header.timestampText, "")
+        XCTAssertNil(header.timestampTooltip, "Reused tool rows must clear a previous activity's timestamp")
     }
 
     func testImageOnlyToolResultCanExpand() throws {
@@ -106,8 +96,9 @@ final class AgentToolDetailTests: XCTestCase {
                     status: status, startedAt: Date(timeIntervalSince1970: 100), exitCode: code)
                 view.update(.init(id: "tool", kind: .tool, text: "Run check", tool: activity), expanded: false, theme: theme)
                 let header = try XCTUnwrap(descendants(view).compactMap { $0 as? AgentToolHeader }.first)
-                XCTAssertEqual(header.title, "check", "Command rows display the command input without an added lifecycle suffix")
-                XCTAssertEqual(header.labelColor, theme.fgMuted)
+                XCTAssertEqual(header.title, "Bash")
+                XCTAssertEqual(header.operation, "check", "Command rows display the command input without an added lifecycle suffix")
+                XCTAssertEqual(header.labelColor, theme.fg)
                 XCTAssertEqual(header.activityIcon, .terminal)
                 XCTAssertEqual(header.iconColor, failure ? AgentToolRowPresentation.failureIconColor(theme: theme) : theme.fgDim)
                 XCTAssertTrue(header.toolTip?.contains(status.rawValue.capitalized) == true)

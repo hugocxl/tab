@@ -43,13 +43,13 @@ final class AgentWebSearchPanelTests: XCTestCase {
             row.update(.init(id: "search", kind: .tool, text: "Search", tool: activity), expanded: true, theme: theme)
             row.wantsLayer = true; row.layer?.backgroundColor = theme.bg.cgColor
             row.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
-            for width: CGFloat in [420, 240] {
+            for width: CGFloat in [420, 180] {
                 row.frame.size = NSSize(width: width, height: row.height(for: width))
                 row.layoutSubtreeIfNeeded()
                 let panel = try XCTUnwrap(row.subviews.compactMap { $0 as? AgentWebSearchPanel }.first)
                 XCTAssertFalse(panel.isHidden)
-                XCTAssertEqual(panel.frame.minX, 2)
-                XCTAssertEqual(panel.frame.minY, 28)
+                XCTAssertEqual(panel.frame.minX, 12)
+                XCTAssertEqual(panel.frame.minY, 48)
                 let texts = panel.subviews.compactMap { $0 as? NSTextView }
                 XCTAssertEqual(texts.count, 3)
                 XCTAssertEqual(texts[1].frame.minY - texts[0].frame.maxY, 8)
@@ -63,7 +63,7 @@ final class AgentWebSearchPanelTests: XCTestCase {
                 }
             }
         }
-        XCTAssertGreaterThan(row.height(for: 240), row.height(for: 420))
+        XCTAssertGreaterThan(row.height(for: 180), row.height(for: 420))
     }
 
     func testHoverUnderlinesOnlyTheResultTitle() throws {

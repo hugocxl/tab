@@ -24,7 +24,7 @@ final class AgentFileSearchPanelTests: XCTestCase {
             for width: CGFloat in [420, 240] {
                 row.frame.size = NSSize(width: width, height: row.height(for: width)); row.layoutSubtreeIfNeeded()
                 let panel = try XCTUnwrap(row.subviews.compactMap { $0 as? AgentFileSearchPanel }.first)
-                XCTAssertEqual(panel.frame.minY, 28)
+                XCTAssertEqual(panel.frame.minY, 48, "The panel sits inside the padded result box")
                 let texts = panel.subviews.compactMap { $0 as? NSTextView }
                 XCTAssertEqual(texts[1].string, "project/src/a.ts:12:4")
                 XCTAssertEqual(texts[2].string, "first matching line\n  indented continuation")

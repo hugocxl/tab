@@ -29,7 +29,7 @@ final class AgentReplArgumentsTests: XCTestCase {
             row.frame.size = NSSize(width: 420, height: row.height(for: 420)); row.layoutSubtreeIfNeeded()
             let panel = try XCTUnwrap(row.subviews.compactMap { $0 as? AgentReplArguments }.first)
             XCTAssertFalse(panel.isHidden)
-            XCTAssertEqual(panel.frame.minY, 28)
+            XCTAssertEqual(panel.frame.minY, 48)
             let texts = panel.subviews.compactMap { $0 as? NSTextView }
             XCTAssertEqual(texts.map(\.string), ["title Inspect data", "code ", "timeout_ms 1000"])
             let scroll = try XCTUnwrap(panel.subviews.compactMap { $0 as? NSScrollView }.first)
@@ -37,7 +37,7 @@ final class AgentReplArgumentsTests: XCTestCase {
             XCTAssertEqual(scroll.frame.minY, 42.25)
             XCTAssertEqual(scroll.frame.height, count == 2 ? 42.25 : 320)
             XCTAssertEqual(texts.last?.frame.minY, scroll.frame.maxY)
-            XCTAssertEqual(row.frame.height, count == 2 ? 176.75 : 454.5)
+            XCTAssertEqual(row.frame.height, count == 2 ? 198.75 : 476.5)
             if count == 100 {
                 row.restoreArgumentScrollPosition(NSPoint(x: 0, y: 150))
                 panel.needsLayout = true; panel.layoutSubtreeIfNeeded()

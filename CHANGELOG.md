@@ -3,6 +3,21 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.28.0 - 2026-11-02
+
+### Changed
+
+- Agent tool calls now show the tool's name and what it ran in a code chip, and an
+  opened tool call shows its result in a bordered box.
+- A finished agent turn starts with a summary of its tool calls and messages, which
+  opens to show the work.
+- An agent's answer now shows how long its turn took and when it finished.
+- A running agent turn now shows a live timer to a tenth of a second at its bottom,
+  instead of a header under your message.
+- Agent conversations and the message box are wider, and messages fill at most 80% of
+  the width.
+- Your messages in an agent chat now have the same rounded corners as sidebar cards.
+
 ## 0.27.0 - 2026-11-02
 
 ### Changed

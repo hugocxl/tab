@@ -3,6 +3,42 @@ import TabProtocol
 
 @MainActor
 enum AgentToolPresentation {
+    /// The tool's name as a header shows it: `Bash`, `Read`, or a provider's own tool name.
+    static func displayName(_ activity: AgentToolActivity) -> String {
+        let name = activity.name.map { $0.components(separatedBy: "__").last ?? $0 } ?? ""
+        switch activity.category ?? .other {
+        case .command: return "Bash"
+        case .read: return "Read"
+        case .edit: return "Edit"
+        case .search: return isTitleCased(name) ? name : "Search"
+        case .web: return isTitleCased(name) ? name : "Web"
+        case .subagent: return "Agent"
+        case .other:
+            guard !name.isEmpty else { return "Tool" }
+            if isTitleCased(name) { return name }
+            let words = name.replacingOccurrences(of: "_", with: " ").replacingOccurrences(of: "-", with: " ")
+            return words.prefix(1).uppercased() + words.dropFirst()
+        }
+    }
+
+    /// What the tool operated on, for the header's code chip: a command, a path relative
+    /// to `root`, a pattern or a query. Nil when it would only repeat the tool's name.
+    static func operation(_ activity: AgentToolActivity, root: String?) -> String? {
+        var summary = activity.summary.trimmingCharacters(in: .whitespaces)
+        if let root, !root.isEmpty {
+            let prefix = root.hasSuffix("/") ? root : root + "/"
+            if summary.hasPrefix(prefix) { summary.removeFirst(prefix.count) }
+        }
+        guard !summary.isEmpty, summary != activity.name, summary != displayName(activity), summary != "Tool" else { return nil }
+        return summary
+    }
+
+    /// A provider name meant for people, such as `Grep` or `WebFetch`, not `web_search`.
+    private static func isTitleCased(_ name: String) -> Bool {
+        guard let first = name.first, first.isUppercase, name.count <= 24 else { return false }
+        return name.allSatisfy { $0.isLetter || $0.isNumber }
+    }
+
     static func argumentsNeedScroll(_ input: String?) -> Bool {
         guard let input else { return false }
         let value = AgentToolJSON.parse(input) ?? .string(input)

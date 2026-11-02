@@ -22,6 +22,8 @@ final class AgentToolDisclosure: NSView, NSTextViewDelegate {
     var onOpenToolDiff: ((String, AgentToolActivity) -> Void)?
     var onDisclosure: (() -> Void)?
     private let header = AgentToolHeader(frame: .zero)
+    /// The bordered box an open tool call shows its result in.
+    private let box = ThemedBackground(color: { $0.fg.withAlphaComponent(0.035) })
     private var hoverArea: NSTrackingArea?
     private let body = AgentRichTextView(frame: .zero)
     private let command = AgentRichTextView(frame: .zero)
@@ -40,7 +42,13 @@ final class AgentToolDisclosure: NSView, NSTextViewDelegate {
     private var item: AgentChatItem?
     private var expanded = false
     var grouped = false { didSet { needsLayout = true } }
-    private var headerHeight: CGFloat { grouped ? 24 : 28 }
+    private var headerHeight: CGFloat { 30 }
+    /// The gap between the header and the result box, and the box's inner padding.
+    private static let boxGap: CGFloat = 6
+    private static let boxPadding: CGFloat = 12
+    private var contentTop: CGFloat { headerHeight + Self.boxGap + Self.boxPadding }
+    /// The space below a result box, before the next row.
+    private static let boxTrailing: CGFloat = 6
     private var theme = AppTheme.shared
     private var restoredScrollPosition: NSPoint?
     private var bodyHeights: [CGFloat: CGFloat] = [:]
@@ -78,6 +86,10 @@ final class AgentToolDisclosure: NSView, NSTextViewDelegate {
         scroll.autohidesScrollers = true
         scroll.borderType = .noBorder
         scroll.documentView = body
+        box.cornerRadius = 8
+        box.layer?.borderWidth = 1
+        box.isHidden = true
+        addSubview(box)
         addSubview(images)
         images.isHidden = true
         images.onHeightChanged = { [weak self] in self?.onHeightChanged?() }
@@ -140,7 +152,8 @@ final class AgentToolDisclosure: NSView, NSTextViewDelegate {
         bodyHeights.removeAll(keepingCapacity: true)
         let activity = item.tool
         let status = activity?.status ?? (item.isComplete ? .completed : .running)
-        let title = activity?.summary ?? String(item.text.prefix(240))
+        let title = activity.map { AgentToolPresentation.displayName($0) } ?? String(item.text.prefix(240))
+        let operation = activity.flatMap { AgentToolPresentation.operation($0, root: workspaceRoot) }
         let statusText = status.rawValue.capitalized
         switch activity?.category {
         case .command: header.activityIcon = .terminal
@@ -157,16 +170,20 @@ final class AgentToolDisclosure: NSView, NSTextViewDelegate {
             || (usesArgumentPanel && (item.attachments ?? []).contains { $0.mimeType.hasPrefix("image/") })
         header.expanded = expanded
         header.timestamp = activity?.startedAt
-        header.timestampColor = theme.fgDim
+        header.chipColor = theme.fgDim
+        header.plateColor = theme.fg.withAlphaComponent(0.06)
+        box.theme = theme
+        box.layer?.borderColor = theme.fg.withAlphaComponent(0.1).cgColor
         let indicatesFailure = AgentToolRowPresentation.indicatesFailure(activity, status: status)
         header.iconColor = indicatesFailure ? AgentToolRowPresentation.failureIconColor(theme: theme) : theme.fgDim
         header.focusColor = theme.accent
         header.title = title
+        header.operation = operation
         let skipped = AgentToolNonExecution.label(item.workContext?.toolNonExecutionKind)
         header.suffix = skipped
-        header.labelColor = theme.fgMuted
+        header.labelColor = theme.fg
         header.needsDisplay = true
-        header.toolTip = ([([title, statusText, skipped].compactMap { $0 }).joined(separator: " · ")] + [header.timestampTooltip].compactMap { $0 }).joined(separator: "\n")
+        header.toolTip = ([([title, operation, statusText, skipped].compactMap { $0 }).joined(separator: " · ")] + [header.timestampTooltip].compactMap { $0 }).joined(separator: "\n")
         let isFileSearch = activity?.presentation == .fileSearch
         fileSearch.isHidden = !expanded || !isFileSearch
         if isFileSearch {
@@ -185,7 +202,8 @@ final class AgentToolDisclosure: NSView, NSTextViewDelegate {
             webSearch.update(activity, theme: theme)
             header.isEnabled = webSearch.hasContent
         }
-        header.setAccessibilityLabel((header.isEnabled ? (expanded ? "Collapse " : "Expand ") : "") + title + ", " + statusText
+        box.isHidden = !expanded || !header.isEnabled
+        header.setAccessibilityLabel((header.isEnabled ? (expanded ? "Collapse " : "Expand ") : "") + title + (operation.map { " " + $0 } ?? "") + ", " + statusText
             + (skipped.map { ", " + $0 } ?? "") + (indicatesFailure ? ", tool call failed" : ""))
         scroll.isHidden = !expanded || isWebSearch || isFileChange || isFileSearch
         images.isHidden = !expanded || !usesArgumentPanel
@@ -206,7 +224,9 @@ final class AgentToolDisclosure: NSView, NSTextViewDelegate {
         exitStatus.isHidden = !expanded || !isCommand || activity?.exitCode == nil || activity?.exitCode == 0
         if expanded, isCommand, var activity {
             activity.status = status
-            command.setContent(AgentCommandPresentation.source(activity, theme: theme))
+            let source = NSMutableAttributedString(attributedString: AgentCommandPresentation.text("> ", color: theme.fgDim))
+            source.append(AgentCommandPresentation.source(activity, theme: theme))
+            command.setContent(source)
             body.setContent(AgentCommandPresentation.output(activity, theme: theme))
             exitStatus.setContent(AgentCommandPresentation.text(exitStatus.isHidden ? "" : "exit \(activity.exitCode ?? 0)", color: .systemRed))
         } else if expanded, usesArgumentPanel {
@@ -254,50 +274,66 @@ final class AgentToolDisclosure: NSView, NSTextViewDelegate {
     }
 
     func height(for width: CGFloat) -> CGFloat {
-        guard expanded else { return headerHeight + (htmlCard.isHidden ? 0 : AgentHtmlDocumentCard.height + 8) }
-        if item?.tool?.presentation == .fileSearch { return headerHeight + 16 + fileSearch.arrange(width: max(1, width - 4), apply: false) }
+        guard expanded, header.isEnabled else { return headerHeight + (htmlCard.isHidden ? 0 : AgentHtmlDocumentCard.height + 8) }
+        let inner = innerWidth(width)
+        if item?.tool?.presentation == .fileSearch { return boxedHeight(fileSearch.arrange(width: inner, apply: false)) }
         if item?.tool?.presentation == .fileChange {
             fileChange.compactControls = (window?.contentView?.bounds.width ?? 640) >= 640
-            return headerHeight + 16 + fileChange.arrange(width: max(1, width - 4), apply: false)
+            return boxedHeight(fileChange.arrange(width: inner, apply: false))
         }
-        if item?.tool?.presentation == .webSearch { return headerHeight + 16 + webSearch.arrange(width: max(1, width - 4), apply: false) }
+        if item?.tool?.presentation == .webSearch { return boxedHeight(webSearch.arrange(width: inner, apply: false)) }
         if item?.tool?.presentsCommand == true || usesArgumentPanel {
             return commandLayout(width: width).height
         }
-        return headerHeight + 10 + min(256, bodyHeight(for: max(1, width - 46)))
+        return boxedHeight(min(256, bodyHeight(for: inner)))
+    }
+
+    private func innerWidth(_ width: CGFloat) -> CGFloat { max(1, width - 2 * Self.boxPadding) }
+
+    /// The row height when the box holds `content` points of result.
+    private func boxedHeight(_ content: CGFloat) -> CGFloat {
+        contentTop + content + Self.boxPadding + Self.boxTrailing
+    }
+
+    /// The result's area inside the box of a row `height` points tall.
+    private func contentFrame(height: CGFloat) -> NSRect {
+        NSRect(x: Self.boxPadding, y: contentTop, width: innerWidth(bounds.width),
+               height: max(0, height - contentTop - Self.boxPadding - Self.boxTrailing))
     }
 
     private func commandLayout(width: CGFloat) -> (card: NSRect, source: NSRect, images: NSRect, output: NSRect, exit: NSRect, height: CGFloat) {
-        let width = max(1, width - 4)
-        var y = headerHeight
-        var card = NSRect(x: 2, y: y, width: width, height: 0)
+        let x = Self.boxPadding
+        let width = innerWidth(width)
+        let top = contentTop
+        var y = top
+        var card = NSRect(x: x, y: y, width: width, height: 0)
         if !htmlCard.isHidden {
             card.size.height = AgentHtmlDocumentCard.height
             y = card.maxY
         }
         func frame(_ text: AgentRichTextView, limit: CGFloat = .greatestFiniteMagnitude) -> NSRect {
-            guard !text.string.isEmpty else { return NSRect(x: 2, y: y, width: width, height: 0) }
-            if y > headerHeight { y += 6 }
+            guard !text.string.isEmpty else { return NSRect(x: x, y: y, width: width, height: 0) }
+            if y > top { y += 6 }
             let rounded = text.height(for: width)
             let measured = text.textContainer.flatMap { text.layoutManager?.usedRect(for: $0).maxY } ?? rounded
-            let rect = NSRect(x: 2, y: y, width: width, height: min(limit, measured))
+            let rect = NSRect(x: x, y: y, width: width, height: min(limit, measured))
             y = rect.maxY
             return rect
         }
         let source: NSRect
         if usesReplArguments {
-            source = NSRect(x: 2, y: y, width: width, height: replArguments.arrange(width: width, apply: false))
+            source = NSRect(x: x, y: y, width: width, height: replArguments.arrange(width: width, apply: false))
             y = source.maxY
         } else { source = frame(command, limit: scrollsArguments ? 320 : .greatestFiniteMagnitude) }
-        var imageFrame = NSRect(x: 2, y: y, width: width, height: 0)
+        var imageFrame = NSRect(x: x, y: y, width: width, height: 0)
         if usesArgumentPanel && images.hasImages {
-            if y > headerHeight { y += 6 }
-            imageFrame = NSRect(x: 2, y: y, width: width, height: images.arrange(width: width, apply: false))
+            if y > top { y += 6 }
+            imageFrame = NSRect(x: x, y: y, width: width, height: images.arrange(width: width, apply: false))
             y = imageFrame.maxY
         }
         let output = frame(body, limit: 320)
         let exit = frame(exitStatus)
-        return (card, source, imageFrame, output, exit, y + 16)
+        return (card, source, imageFrame, output, exit, y + Self.boxPadding + Self.boxTrailing)
     }
 
     private func bodyHeight(for width: CGFloat) -> CGFloat {
@@ -310,24 +346,26 @@ final class AgentToolDisclosure: NSView, NSTextViewDelegate {
 
     override func layout() {
         super.layout()
-        header.frame = NSRect(x: 0, y: 0, width: bounds.width, height: headerHeight)
+        header.frame = NSRect(x: 0, y: 0, width: header.naturalWidth(maximum: bounds.width), height: headerHeight)
+        box.frame = NSRect(x: 0, y: headerHeight + Self.boxGap, width: bounds.width,
+                           height: max(0, bounds.height - headerHeight - Self.boxGap - Self.boxTrailing))
         if !expanded, !htmlCard.isHidden {
             htmlCard.frame = NSRect(x: 2, y: headerHeight, width: max(1, bounds.width - 4), height: AgentHtmlDocumentCard.height)
             htmlCard.layoutSubtreeIfNeeded()
             return
         }
         if expanded, item?.tool?.presentation == .fileSearch {
-            fileSearch.frame = NSRect(x: 2, y: headerHeight, width: max(1, bounds.width - 4), height: max(0, bounds.height - headerHeight - 16))
+            fileSearch.frame = contentFrame(height: bounds.height)
             fileSearch.layoutSubtreeIfNeeded()
             return
         }
         if expanded, item?.tool?.presentation == .fileChange {
-            fileChange.frame = NSRect(x: 2, y: headerHeight, width: max(1, bounds.width - 4), height: max(0, bounds.height - headerHeight - 16))
+            fileChange.frame = contentFrame(height: bounds.height)
             fileChange.layoutSubtreeIfNeeded()
             return
         }
         if expanded, item?.tool?.presentation == .webSearch {
-            webSearch.frame = NSRect(x: 2, y: headerHeight, width: max(1, bounds.width - 4), height: max(0, bounds.height - headerHeight - 16))
+            webSearch.frame = contentFrame(height: bounds.height)
             webSearch.layoutSubtreeIfNeeded()
             return
         }
@@ -354,7 +392,7 @@ final class AgentToolDisclosure: NSView, NSTextViewDelegate {
                 scroll.frame = frames.output
                 exitStatus.frame = frames.exit
             } else {
-                scroll.frame = NSRect(x: 26, y: headerHeight + 4, width: max(1, bounds.width - 32), height: max(1, bounds.height - headerHeight - 10))
+                scroll.frame = contentFrame(height: bounds.height)
             }
             let width = max(1, scroll.contentSize.width)
             body.frame = NSRect(x: 0, y: 0, width: width, height: bodyHeight(for: width))

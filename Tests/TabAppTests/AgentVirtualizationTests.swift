@@ -110,7 +110,7 @@ final class AgentVirtualizationTests: XCTestCase {
     func testCollapsedCompletedWorkDoesNotConstructItsHistory() {
         let row = AgentCompletedWorkRow(frame: .zero)
         row.update(messages(1_000))
-        XCTAssertEqual(row.preferredHeight(for: 700), 37)
+        XCTAssertEqual(row.preferredHeight(for: 700), 30)
         XCTAssertTrue(descendants(row).compactMap { $0 as? AgentMessageRow }.isEmpty)
     }
 

@@ -51,7 +51,7 @@ final class AgentTimelineTests: XCTestCase {
                      .init(id: "answer", kind: .assistant, text: "Done")]
         document.update(items, omittedCount: 0)
         document.reflow(viewportWidth: 700)
-        XCTAssertEqual(try XCTUnwrap(document.frameForEntry("activity:first")).height, 28)
+        XCTAssertEqual(try XCTUnwrap(document.frameForEntry("activity:first")).height, 30)
         let turn = AgentChatTurn(userItemID: "user", startedAt: .distantPast, completedAt: Date(), status: .idle)
         document.update(items, omittedCount: 0, turns: [turn])
         var states = document.rowStates
@@ -61,12 +61,12 @@ final class AgentTimelineTests: XCTestCase {
         document.reflow(viewportWidth: 700)
         let first = try XCTUnwrap(document.frameForEntry("activity:first"))
         let second = try XCTUnwrap(document.frameForEntry("activity:second"))
-        XCTAssertEqual(first.height, 24)
-        XCTAssertEqual(second.height, 24)
-        XCTAssertEqual(second.minY, first.maxY)
+        XCTAssertEqual(first.height, 30)
+        XCTAssertEqual(second.height, 30)
+        XCTAssertEqual(second.minY, first.maxY + 4)
         document.update(items, omittedCount: 0)
         document.reflow(viewportWidth: 700)
-        XCTAssertEqual(try XCTUnwrap(document.frameForEntry("activity:first")).height, 28)
+        XCTAssertEqual(try XCTUnwrap(document.frameForEntry("activity:first")).height, 30)
     }
 
     func testCompletedWorkDisclosureSnapshots() throws {
@@ -116,8 +116,11 @@ final class AgentTimelineTests: XCTestCase {
         document.reflow(viewportWidth: 700)
         let group = try XCTUnwrap(document.subviews.first { $0 is AgentCompletedWorkRow })
         let disclosure = try XCTUnwrap(group.subviews.compactMap { $0 as? PillButton }.first)
-        XCTAssertTrue(disclosure.title.contains("1m 5s"))
-        XCTAssertEqual(group.frame.height, 37)
+        XCTAssertTrue(disclosure.title.contains("1 tool call, 1 message"))
+        XCTAssertEqual(group.frame.height, 30)
+        let answer = try XCTUnwrap(document.subviews.compactMap { $0 as? AgentMessageRow }.first { $0.assistantItem?.id == "answer" })
+        XCTAssertTrue(answer.subviews.compactMap { $0 as? NSTextField }.contains { $0.stringValue.hasPrefix("1m, 5s · ") },
+                      "The answer's footer says how long the turn took")
         XCTAssertTrue(textViews(document).contains { $0.string == "The bug is fixed." && !$0.isHiddenOrHasHiddenAncestor })
         XCTAssertFalse(textViews(document).contains { $0.string == "Inspecting the source" && !$0.isHiddenOrHasHiddenAncestor })
         disclosure.onPress?()
@@ -177,7 +180,7 @@ final class AgentTimelineTests: XCTestCase {
         XCTAssertFalse(textViews(document).contains { $0.string == "Automatically approved" || $0.string == "Approved" })
     }
 
-    func testWorkingTimerPrecedesCommentaryAndDisappearsOnCompletion() throws {
+    func testWorkingTimerFollowsTheTurnAndDisappearsOnCompletion() throws {
         let document = AgentTranscriptDocument(frame: .zero)
         let items = [AgentChatItem(id: "user", kind: .user, text: "Help"),
                      AgentChatItem(id: "reply", kind: .assistant, text: "Checking", isComplete: false)]
@@ -186,7 +189,7 @@ final class AgentTimelineTests: XCTestCase {
         document.reflow(viewportWidth: 700)
         let working = try XCTUnwrap(document.frameForEntry("working:user"))
         let reply = try XCTUnwrap(document.frameForEntry("reply"))
-        XCTAssertLessThan(working.maxY, reply.minY)
+        XCTAssertGreaterThan(working.minY, reply.maxY)
         turn.completedAt = Date()
         turn.status = .idle
         document.update(items, omittedCount: 0, turns: [turn])
@@ -210,13 +213,17 @@ final class AgentTimelineTests: XCTestCase {
         XCTAssertGreaterThan(expandedHeight, row.frame.height)
     }
 
-    func testKeyboardFocusRevealsResponseActionsWithoutMouseHover() throws {
+    func testAnswerActionsShowAndKeyboardFocusRevealsMessageActions() throws {
         _ = NSApplication.shared
+        let answer = AgentMessageRow(frame: NSRect(x: 0, y: 0, width: 600, height: 150))
+        answer.update([AgentChatItem(id: "reply", kind: .assistant, text: "Finished.")])
+        let answerCopy = try XCTUnwrap(answer.subviews.compactMap { $0 as? PillButton }.first { $0.toolTip == "Copy response as Markdown" })
+        XCTAssertEqual(answerCopy.alphaValue, 1, "An answer's footer shows without hover")
         let row = AgentMessageRow(frame: NSRect(x: 0, y: 0, width: 600, height: 150))
-        row.update([AgentChatItem(id: "reply", kind: .assistant, text: "Finished.")])
+        row.update([AgentChatItem(id: "request", kind: .user, text: "Please finish.")])
         _ = row.preferredHeight(for: 600)
         row.layoutRow(width: 600)
-        let copy = try XCTUnwrap(row.subviews.compactMap { $0 as? PillButton }.first { $0.toolTip == "Copy response as Markdown" })
+        let copy = try XCTUnwrap(row.subviews.compactMap { $0 as? PillButton }.first { $0.toolTip == "Copy message" })
         let window = NSWindow(contentRect: row.frame, styleMask: [.titled], backing: .buffered, defer: false)
         window.contentView = row
         defer { window.contentView = nil; window.orderOut(nil) }

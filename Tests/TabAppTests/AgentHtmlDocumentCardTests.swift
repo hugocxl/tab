@@ -164,13 +164,13 @@ final class AgentHtmlDocumentCardTests: XCTestCase {
     func testCollapsedRowMeasuresAndPlacesTheCardBelowItsHeader() {
         let collapsed = row(renderItem(), expanded: false)
         let height = collapsed.height(for: 600)
-        XCTAssertEqual(height, 28 + AgentHtmlDocumentCard.height + 8)
+        XCTAssertEqual(height, 30 + AgentHtmlDocumentCard.height + 8)
         collapsed.frame = NSRect(x: 0, y: 0, width: 600, height: height)
         collapsed.layoutSubtreeIfNeeded()
-        XCTAssertEqual(collapsed.htmlDocumentCard.frame, NSRect(x: 2, y: 28, width: 596, height: AgentHtmlDocumentCard.height))
+        XCTAssertEqual(collapsed.htmlDocumentCard.frame, NSRect(x: 2, y: 30, width: 596, height: AgentHtmlDocumentCard.height))
         var plain = renderItem(id: "plain"); plain.tool?.output = #"{"result":"ok"}"#
         collapsed.update(plain, expanded: false, theme: AppTheme.shared)
-        XCTAssertEqual(collapsed.height(for: 600), 28, "A reused collapsed row without a document is only its header")
+        XCTAssertEqual(collapsed.height(for: 600), 30, "A reused collapsed row without a document is only its header")
         collapsed.update(renderItem(id: "back"), expanded: false, theme: AppTheme.shared)
         XCTAssertEqual(collapsed.height(for: 600), height)
         XCTAssertEqual(collapsed.htmlDocumentCard.reference?.itemID, "back")
@@ -183,20 +183,20 @@ final class AgentHtmlDocumentCardTests: XCTestCase {
         XCTAssertTrue(view.htmlDocumentCard === card)
         XCTAssertEqual(view.subviews.filter { $0 is AgentHtmlDocumentCard }.count, 1)
         let height = view.height(for: 600)
-        XCTAssertGreaterThan(height, 28 + AgentHtmlDocumentCard.height + 8)
+        XCTAssertGreaterThan(height, 30 + AgentHtmlDocumentCard.height + 8)
         view.frame = NSRect(x: 0, y: 0, width: 600, height: height)
         view.layoutSubtreeIfNeeded()
-        XCTAssertEqual(card.frame.minY, 28)
+        XCTAssertEqual(card.frame.minY, 48, "The open card leads the padded result box")
     }
 
     func testTranscriptActivityRowMeasuresTheCollapsedCard() {
         let row = AgentActivityRow(frame: NSRect(x: 0, y: 0, width: 600, height: 10))
         row.fetchAttachment = { _, _ in self.html }
         row.update([renderItem()])
-        XCTAssertEqual(row.preferredHeight(for: 600), 28 + AgentHtmlDocumentCard.height + 8)
+        XCTAssertEqual(row.preferredHeight(for: 600), 30 + AgentHtmlDocumentCard.height + 8)
         var plain = renderItem(id: "plain"); plain.tool?.output = #"{"result":"ok"}"#
         row.update([plain])
-        XCTAssertEqual(row.preferredHeight(for: 600), 28)
+        XCTAssertEqual(row.preferredHeight(for: 600), 30)
     }
 
     func testCollapsedCardButtonsReachTheirAction() {

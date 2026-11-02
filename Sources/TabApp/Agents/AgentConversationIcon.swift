@@ -7,10 +7,12 @@ enum AgentConversationIcon: CaseIterable {
     case copy, check, play, wrap, warning, chevronDown, chevronRight
     case terminal, eye, search, globe, bot, wrench, edit, externalLink
     case circle, info, download, circleCheck, loader, listTodo, fileText
-    case folderDown, foldVertical, maximize
+    case folderDown, foldVertical, maximize, plus, minus
 
     var symbolName: String {
         switch self {
+        case .plus: return "plus"
+        case .minus: return "minus"
         case .copy: return "doc.on.doc"
         case .check: return "checkmark"
         case .play: return "play"

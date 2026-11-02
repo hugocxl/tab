@@ -403,6 +403,7 @@ final class AgentCompactionRow: AgentCardRow {
         header.labelColor = theme.fgDim
         header.iconColor = item?.workContext?.sourceStatus == "failed" ? AgentToolRowPresentation.failureIconColor(theme: theme) : theme.fgDim
         header.focusColor = theme.accent
+        header.plateColor = theme.fg.withAlphaComponent(0.06)
         header.setAccessibilityLabel((hasSummary ? (expanded ? "Collapse " : "Expand ") : "") + title)
         header.needsDisplay = true
         summary.isHidden = !(expanded && hasSummary)
@@ -415,7 +416,7 @@ final class AgentCompactionRow: AgentCardRow {
     }
 
     override func layoutRow(width: CGFloat) {
-        header.frame = NSRect(x: 0, y: 0, width: width, height: 28)
+        header.frame = NSRect(x: 0, y: 0, width: header.naturalWidth(maximum: width), height: 28)
         summary.frame = NSRect(x: 32, y: 32, width: max(1, width - 40), height: summaryHeight)
         summary.layoutSubtreeIfNeeded()
     }

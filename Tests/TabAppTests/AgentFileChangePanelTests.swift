@@ -48,9 +48,9 @@ final class AgentFileChangePanelTests: XCTestCase {
             for width: CGFloat in [420, 240] {
                 row.frame.size = NSSize(width: width, height: row.height(for: width)); row.layoutSubtreeIfNeeded()
                 let panel = try XCTUnwrap(row.subviews.compactMap { $0 as? AgentFileChangePanel }.first)
-                XCTAssertEqual(panel.frame.minY, 28)
+                XCTAssertEqual(panel.frame.minY, 48, "The panel sits inside the padded result box")
                 XCTAssertFalse(panel.isHidden)
-                XCTAssertEqual(panel.frame.height, width == 240 ? 80 : 48)
+                XCTAssertEqual(panel.frame.height, width == 240 ? 104 : 64)
                 XCTAssertTrue(panel.subviews.compactMap { $0 as? NSScrollView }.allSatisfy(\.isHidden))
                 let button = try XCTUnwrap(panel.subviews.compactMap { $0 as? NSButton }.first)
                 XCTAssertEqual(button.title, "Open diff")
