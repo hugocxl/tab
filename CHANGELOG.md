@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.29.0 - 2026-11-02
+
+### Added
+
+- Closing an agent tab now asks for confirmation while the agent is working or
+  waiting for input, using the existing running-process confirmation setting.
+
 ## 0.28.0 - 2026-11-02
 
 ### Changed

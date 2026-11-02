@@ -567,6 +567,28 @@ final class AgentPaneTests: XCTestCase {
         XCTAssertEqual(backend.requests.count, 3)
     }
 
+    func testActiveAgentCloseCanBeCancelledWithoutStoppingWork() async throws {
+        for status: AgentChatStatus in [.working, .waiting, .idle, .failed, .closed] {
+            let backend = Backend()
+            backend.snapshot.status = status
+            let pane = backend.controller()
+            defer { pane.dispose() }
+            var confirmations = 0
+            pane.confirmClose = {
+                confirmations += 1
+                return false
+            }
+            pane.refresh()
+            try await wait { pane.snapshot != nil }
+            let approved = await pane.willClose()
+            let active = status == .working || status == .waiting
+            XCTAssertEqual(approved, !active)
+            XCTAssertEqual(confirmations, active ? 1 : 0)
+            XCTAssertFalse(backend.requests.contains(.close(session: backend.session)))
+            XCTAssertEqual(backend.snapshot.status, status)
+        }
+    }
+
     func testCloseApprovalDoesNotTerminateAgentBeforeOtherPanesCanVeto() async throws {
         let backend = Backend()
         backend.snapshot.status = .working

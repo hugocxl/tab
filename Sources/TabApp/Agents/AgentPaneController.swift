@@ -28,6 +28,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         savePreferences?(.init(provider: selection.provider, model: selection.model,
                                effort: reasoningEffort, access: access ?? snapshot?.accessMode))
     }
+    var confirmClose: (() async -> Bool)?
     var onNewConversation: (() -> Void)?
     var titleDidChange: (() -> Void)?
 
@@ -110,6 +111,15 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
             }
             route.project = project
             return result
+        }
+        confirmClose = { [weak model] in
+            guard let model, model.settings.window.confirmRunningProcess else { return true }
+            return await model.presenter?.confirm(
+                title: "Close this agent tab?",
+                message: "The agent is still running. Closing the tab stops its current work.",
+                confirm: "Close",
+                destructive: true
+            ) ?? true
         }
         restorePreferences(defaults: model.state.agentComposerDefaults, draft: model.state.agentComposerDrafts[pane]) { [weak model] preferences in
             model?.edit { $0.setAgentComposerDraft(preferences, for: pane) }
@@ -311,7 +321,10 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     func didShow() { refresh() }
     func didHide() {} // Keep the draft, transcript and scroll position when switching projects.
 
-    func willClose() async -> Bool { true }
+    func willClose() async -> Bool {
+        guard submitting || snapshot?.status == .working || snapshot?.status == .waiting else { return true }
+        return await confirmClose?() ?? true
+    }
 
     /// Called only after every pane in the closing group has approved its close.
     func commitClose() async -> Bool {
