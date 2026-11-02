@@ -328,7 +328,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
 
     /// Called only after every pane in the closing group has approved its close.
     func commitClose() async -> Bool {
-        // Don't strand an unused pane when the server is offline or predates Agent Tabs.
+        // Don't strand an unused pane when the server is offline or predates agent panes.
         // An in-flight create must finish before close, or it could create an orphan later.
         while !created, let pending = refreshTask { await pending.value }
         guard created else { return true }
@@ -460,7 +460,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         // A lone `/name` is meant as a command; `/tmp is full` or a path is an ordinary prompt.
         if selection.provider == .codex, let command, commandText == "/" + command, !command.hasPrefix("skill:"),
            !composerCoordinator.providerCommands.contains(command) {
-            showComposerError("This Codex command is not supported in Agent Tabs. Use / to choose an available command.")
+            showComposerError("This Codex command is not supported in agent panes. Use / to choose an available command.")
             return
         }
         if snapshot?.status == .working, let command, composerCoordinator.providerCommands.contains(command) {
@@ -813,7 +813,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         if submitting { return "" }
         switch snapshot?.status {
         case .working, .waiting: return ""
-        case .closed: return "This conversation has ended. Open a new Agent Tab to continue."
+        case .closed: return "This conversation has ended. Open a new agent pane to continue."
         case .failed: return "Turn failed · Change the model or try again"
         case .idle: return ""
         case nil: return "Connecting…"
@@ -993,7 +993,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
                 let reported = descriptor(for: choice) != nil
                 item.isEnabled = reported && (canChangeProvider || provider == snapshot?.provider)
                 item.toolTip = !reported ? "Current model is not listed in the provider catalog."
-                    : item.isEnabled ? choice.model : "Open a new Agent Tab to use another provider."
+                    : item.isEnabled ? choice.model : "Open a new agent pane to use another provider."
                 models.addItem(item)
             }
         }

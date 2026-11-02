@@ -265,11 +265,12 @@ final class DropPreviewView: ThemedView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
-/// A project with no panes, drawn in the pane card frame: the
-/// window glyph, "Nothing open in <project>", a hint and New Terminal; or
-/// that the folder is missing.
+/// A project whose tab has no panes yet, drawn in the pane card frame: the
+/// window glyph, "Nothing open in <project>", a hint and a button per pane
+/// kind; or that the folder is missing.
 final class EmptyProjectView: ThemedView {
-    var onNewTerminal: (() -> Void)?
+    /// Adds a pane of the kind chosen.
+    var onNewPane: ((PaneKind) -> Void)?
     /// The sidebar toggle at the header position while the sidebar is collapsed.
     var leadingView: NSView? {
         didSet {
@@ -292,8 +293,7 @@ final class EmptyProjectView: ThemedView {
     private let glyph = NSImageView()
     private let title = makeLabel("", font: AppFont.system(14, weight: .semibold))
     private let message = makeLabel("", font: AppFont.small)
-    private let button = PillButton("New Terminal", style: .primary)
-    private let agentButton = PillButton("New Agent Tab", style: .normal)
+    private let buttons = NSStackView()
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -306,8 +306,14 @@ final class EmptyProjectView: ThemedView {
         message.lineBreakMode = .byWordWrapping
         message.maximumNumberOfLines = 0
         message.preferredMaxLayoutWidth = 360
-        button.onPress = { [weak self] in self?.onNewTerminal?() }
-        let stack = NSStackView(views: [glyph, title, message, button, agentButton])
+        buttons.orientation = .horizontal
+        buttons.spacing = Metrics.controlGap
+        for kind in PaneKind.created {
+            let button = PillButton("\(kind.name) Pane", style: kind == .terminal ? .primary : .normal)
+            button.onPress = { [weak self] in self?.onNewPane?(kind) }
+            buttons.addArrangedSubview(button)
+        }
+        let stack = NSStackView(views: [glyph, title, message, buttons])
         stack.orientation = .vertical
         stack.spacing = 16
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -327,11 +333,9 @@ final class EmptyProjectView: ThemedView {
         title.stringValue = missing ? "Project folder is missing" : "Nothing open in \(project.name)"
         message.stringValue = missing
             ? "This project’s folder could not be found. Remove the project from the sidebar to clear its tabs."
-            : "Open a terminal or Agent Tab to start working in this project."
-        button.isHidden = missing
-        agentButton.isHidden = missing
-        agentButton.onPress = { [weak model] in model?.newAgent(in: project.id) }
-        onNewTerminal = { [weak model] in model?.newTerminal(in: project.id) }
+            : "Open a pane to start working in this project."
+        buttons.isHidden = missing
+        onNewPane = { [weak model] kind in model?.newPane(kind, in: project.id) }
     }
 
     override var wantsUpdateLayer: Bool { true }

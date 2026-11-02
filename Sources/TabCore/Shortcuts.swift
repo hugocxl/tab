@@ -108,9 +108,9 @@ public struct ShortcutDefinition: Sendable {
         switch id {
         case .newTab: label = "new terminal"
         case .newTabInProject: label = "new terminal in project"
-        case .newAgent: label = "new Agent Tab"
-        case .newClaudeAgent: label = "new Agent Tab — Claude Code"
-        case .newCodexAgent: label = "new Agent Tab — Codex"
+        case .newAgent: label = "new agent"
+        case .newClaudeAgent: label = "new agent — Claude Code"
+        case .newCodexAgent: label = "new agent — Codex"
         default:
             label = name.replacingOccurrences(of: "_", with: " ").replacingOccurrences(of: ".", with: " ")
         }
@@ -206,7 +206,7 @@ public enum ShortcutCatalog {
         .selectProject6, .selectProject7, .selectProject8, .selectProject9,
         .copy, .paste, .find, .findNext, .findPrevious, .scrollToBottom,
         .previousPrompt, .nextPrompt, .selectCommandOutput,
-        .increaseFontSize, .decreaseFontSize, .newBrowserTab,
+        .increaseFontSize, .decreaseFontSize, .newBrowserPane, .newDevicePane,
     ]
 
     /// Built-in defaults that give way to a key a user binding already has,
@@ -223,7 +223,7 @@ public enum ShortcutCatalog {
         .addProject, .closeTab, .splitRight, .splitDown,
         .focusPaneLeft, .focusPaneRight, .focusPaneUp, .focusPaneDown,
         .toggleZoomPane, .equalizeSplits, .closePane, .menuOpenSubmenu, .menuCloseSubmenu,
-        .newBrowserTab, .browserFocusAddress, .browserReload, .browserBack, .browserForward,
+        .newBrowserPane, .newDevicePane, .browserFocusAddress, .browserReload, .browserBack, .browserForward,
         .browserZoomIn, .browserZoomOut, .browserZoomReset, .browserCopyUrl, .browserInspect,
     ]
 
@@ -312,8 +312,9 @@ public enum ShortcutCatalog {
         ]
         let file: [ShortcutMenuItem] = [
             .shortcut(.newTab, title: "New Terminal"),
-            .shortcut(.newAgent, title: "New Agent Tab"),
-            .shortcut(.newBrowserTab, title: "New Browser Pane"),
+            .shortcut(.newAgent, title: "New Agent"),
+            .shortcut(.newBrowserPane, title: "New Browser Pane"),
+            .shortcut(.newDevicePane, title: "New Device Pane"),
             .shortcut(.newHomeTab, title: "New Home Terminal"),
             .shortcut(.newTabInProject, title: "New Terminal in Project…"),
             .shortcut(.newWorktree, title: "New Worktree…"),
@@ -647,7 +648,8 @@ public enum ShortcutId: String, CaseIterable, Codable, Sendable {
     case voiceFinish = "voice.finish"
     case voiceCancel = "voice.cancel"
     case voicePause = "voice.pause"
-    case newBrowserTab = "new_browser_tab"
+    case newBrowserPane = "new_browser_tab"
+    case newDevicePane = "new_device_pane"
     case browserFocusAddress = "browser.focus_address"
     case browserReload = "browser.reload"
     case browserBack = "browser.back"
@@ -799,7 +801,8 @@ extension ShortcutCatalog {
         ShortcutDefinition(.voiceFinish, keys: ["enter"], contexts: ["VoiceRecording"], keyContexts: [["VoiceRecording"]], group: .dictation),
         ShortcutDefinition(.voiceCancel, keys: ["escape"], contexts: ["VoiceRecording"], keyContexts: [["VoiceRecording"]], group: .dictation),
         ShortcutDefinition(.voicePause, keys: ["space"], contexts: ["VoiceRecording"], keyContexts: [["VoiceRecording"]], group: .dictation),
-        ShortcutDefinition(.newBrowserTab, keys: ["cmd-alt-b"], contexts: ["WorkspaceTabs"], keyContexts: [["WorkspaceTabs"]], group: .browser),
+        ShortcutDefinition(.newBrowserPane, keys: ["cmd-alt-b"], contexts: ["WorkspaceTabs"], keyContexts: [["WorkspaceTabs"]], group: .browser),
+        ShortcutDefinition(.newDevicePane, keys: ["cmd-alt-p"], contexts: ["WorkspaceTabs"], keyContexts: [["WorkspaceTabs"]], group: .panes),
         ShortcutDefinition(.browserFocusAddress, keys: ["cmd-l"], contexts: ["Browser"], keyContexts: [["Browser"]], group: .browser),
         ShortcutDefinition(.browserReload, keys: ["cmd-r"], contexts: ["Browser"], keyContexts: [["Browser"]], group: .browser),
         ShortcutDefinition(.browserBack, keys: ["cmd-["], contexts: ["Browser"], keyContexts: [["Browser"]], group: .browser),

@@ -13,6 +13,7 @@ public enum AppIcon: String, CaseIterable, Sendable {
     case circle, circleCheck, clock, file, gitMerge, gitPullRequest, octagonX, copy, pause, pencil
     case play, quote, stop, triangleAlert, phone, trash, minus, qrcode, arrowDown
     case plusCircle, filterCircleFill, addProject, layers, laptop, globeBadgePlus, clearField
+    case home, appearance, camera, rotate
 
     /// The SF Symbol drawn for the icon, or `nil` for the icons composed or
     /// bundled instead.
@@ -88,6 +89,10 @@ public enum AppIcon: String, CaseIterable, Sendable {
         case .laptop: return "laptopcomputer"
         case .globeBadgePlus: return nil
         case .clearField: return "xmark.circle.fill"
+        case .home: return "house"
+        case .appearance: return "circle.lefthalf.filled"
+        case .camera: return "camera"
+        case .rotate: return "rotate.left"
         }
     }
 

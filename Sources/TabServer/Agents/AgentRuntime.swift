@@ -109,7 +109,7 @@ internal final class AgentRuntime: @unchecked Sendable {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             queue.async {
                 guard !self.closed, !self.failed else {
-                    continuation.resume(throwing: AgentRuntimeError("Agent is closed or failed; open a new Agent Tab to resume."))
+                    continuation.resume(throwing: AgentRuntimeError("Agent is closed or failed; open a new agent pane to resume."))
                     return
                 }
                 guard !self.busy else {
@@ -158,7 +158,7 @@ internal final class AgentRuntime: @unchecked Sendable {
             queue.async {
                 do {
                     guard !self.closed, !self.failed else {
-                        throw AgentRuntimeError("Agent is closed or failed; open a new Agent Tab to resume.")
+                        throw AgentRuntimeError("Agent is closed or failed; open a new agent pane to resume.")
                     }
                     guard self.busy, self.ready else { throw AgentTurnFinishedError() }
                     if self.provider == .claude {

@@ -1,6 +1,6 @@
 import Foundation
 
-/// Headless coding agents supported by an Agent Tab.
+/// Headless coding agents an agent pane runs.
 public enum AgentChatProvider: String, Codable, Hashable, Sendable, CaseIterable {
     case claude, codex
 

@@ -334,7 +334,7 @@ final class AgentSessions: @unchecked Sendable {
             if provider != entry.snapshot.provider {
                 guard entry.snapshot.providerSession == nil, !entry.hasSuccessfulTurn,
                       entry.snapshot.status == .idle || entry.snapshot.status == .failed else {
-                    throw ServiceError(.badRequest, "An established conversation cannot switch providers. Open a new Agent Tab.")
+                    throw ServiceError(.badRequest, "An established conversation cannot switch providers. Open a new agent pane.")
                 }
             }
             if let effort, !effort.isAccepted(provider: provider, model: model) {

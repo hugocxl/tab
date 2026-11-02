@@ -234,6 +234,25 @@ final class AppStateTests: XCTestCase {
         XCTAssertEqual(state.project(project)?.tabs.count, 1)
     }
 
+    func testDevicePanesSaveTheirSimulatorAndTitleAcrossRestarts() throws {
+        var state = try AppState.bootstrap()
+        let project = try state.addProject(server: .local, directory: currentDirectory)
+        try state.selectProject(project)
+        try state.openTerminalTab(project)
+        let (_, picker) = try state.openDevice(project, DevicePane(), select: true)
+        XCTAssertEqual(try active(state), picker)
+        XCTAssertEqual(state.pane(picker)?.title, "Device")
+        let chosen = DevicePane(udid: "523622D8-52CD-4648-843C-A2CB04007365", name: "iPhone 18 Pro")
+        XCTAssertTrue(try state.setDevice(picker, chosen))
+        XCTAssertFalse(try state.setDevice(picker, chosen))
+        XCTAssertEqual(state.pane(picker)?.title, "iPhone 18 Pro")
+        let restored = try roundTrip(state)
+        XCTAssertEqual(restored.device(picker), chosen)
+        XCTAssertEqual(restored.pane(picker)?.title, "iPhone 18 Pro")
+        let terminal = try XCTUnwrap(state.project(project)?.tabs[0].panes.first { $0.content.isTerminal }?.id)
+        XCTAssertThrowsError(try state.setDevice(terminal, chosen))
+    }
+
     func testLoadMergesSubtreesPreservingSessionsOrderAndSelectedPane() throws {
         var state = try AppState.bootstrap()
         let project = try state.addProject(server: .local, directory: currentDirectory)

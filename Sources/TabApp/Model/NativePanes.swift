@@ -78,7 +78,8 @@ extension AppModel {
         return host
     }
 
-    /// Registers the editor, diff and browser pane kinds and the right panels.
+    /// Registers the editor, diff, browser and device pane kinds and the
+    /// right panels.
     func registerNativeContent() {
         panes.register(.editor) { context in
             guard case .editor(let path) = context.pane.content else { return PlaceholderPaneController(context: context) }
@@ -103,6 +104,10 @@ extension AppModel {
         panes.register(.browser) { context in
             guard case .browser(let state) = context.pane.content else { return PlaceholderPaneController(context: context) }
             return BrowserPaneContent(pane: context.pane.id, state: state, model: context.model)
+        }
+        panes.register(.device) { context in
+            guard case .device(let state) = context.pane.content else { return PlaceholderPaneController(context: context) }
+            return DevicePaneController(pane: context.pane.id, state: state, model: context.model)
         }
         rightPanelFactory = { kind, model in
             switch kind {

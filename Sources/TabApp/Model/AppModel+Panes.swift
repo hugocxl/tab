@@ -6,8 +6,8 @@ import TabProtocol
 extension AppModel {
     // MARK: Opening terminals
 
-    /// A new terminal (Cmd+T): a pane in the current project, or a new Home
-    /// terminal when Home shows. It starts in the project's folder or the
+    /// A new terminal (Cmd+T): a pane in the current project's tab, or a
+    /// new tab when Home shows. It starts in the project's folder or the
     /// focused terminal's, per Settings.
     public func newTerminal() {
         newTerminal(in: currentProject.id)
@@ -79,9 +79,77 @@ extension AppModel {
         focusActiveContent()
     }
 
+    // MARK: New tabs and panes
+
+    /// Opens a new tab (a new sidebar card) showing one `kind` pane. Only
+    /// Home holds several tabs, so the tab goes in the Home shown now, or
+    /// this Mac's.
+    @discardableResult
+    public func newTab(_ kind: PaneKind) -> PaneId? {
+        let home = currentProject.home ? currentProject.id : state.home.id
+        switch kind {
+        case .terminal:
+            newTerminal(in: home)
+            return activePane
+        case .agent: return newAgent(in: home)
+        case .browser: return openBrowser(project: home)
+        case .device: return openDevice(project: home)
+        case .editor, .diff, .servers: return nil
+        }
+    }
+
+    /// Adds a `kind` pane to an existing tab, beside the pane it shows: the
+    /// Home tab `tab`, or `project`'s tab. A project with no tab yet gets
+    /// one holding the pane.
+    @discardableResult
+    public func newPane(_ kind: PaneKind, in project: ProjectId, tab: TabId? = nil) -> PaneId? {
+        guard let target = state.project(project) else { return nil }
+        let shown = tab.flatMap { id in target.tabs.first { $0.id == id } } ?? (target.home ? nil : target.tabs.first)
+        let anchor = shown.flatMap { tab in
+            activePane.flatMap { tab.layout.contains($0) ? $0 : nil } ?? state.shownPane(tab) ?? tab.layout.leaves.last
+        }
+        guard let anchor else {
+            switch kind {
+            case .terminal:
+                newTerminal(in: project)
+                return activePane
+            case .agent: return newAgent(in: project)
+            case .browser: return openBrowser(project: project)
+            case .device: return openDevice(project: project)
+            case .editor, .diff, .servers: return nil
+            }
+        }
+        let content: PaneContent
+        switch kind {
+        case .terminal: content = .terminal(session: nil)
+        case .agent: content = .agent(session: SessionId(), provider: .claude)
+        case .device: content = .device(DevicePane())
+        case .browser:
+            do {
+                content = .browser(try newBrowserState(url: nil, profile: nil))
+            } catch {
+                report(error)
+                return nil
+            }
+        case .editor, .diff, .servers: return nil
+        }
+        let pane = Pane(title: kind == .browser ? "New Browser" : content.nativeTitle ?? kind.name, content: content)
+        let directory = newPaneDirectory(in: target)
+        guard edit({ state in
+            try state.insertSplitPane(after: anchor, pane, edge: .right)
+            if kind == .terminal { _ = state.prepareCreation(pane.id, directory: directory) }
+            try state.focusPane(pane.id)
+            state.revealCurrentProject()
+        }) else { return nil }
+        if kind == .terminal || kind == .agent { connectOnDemand(target.serverId) }
+        focusActiveContent()
+        return pane.id
+    }
+
     // MARK: Other pane kinds
 
-    /// Opens an Agent Tab; its initial provider is an internal seed for the composer.
+    /// Opens an agent pane in a project's tab, or a new tab in Home; its initial
+    /// provider is an internal seed for the composer.
     @discardableResult
     public func newAgent(in project: ProjectId? = nil, provider: TabCore.AgentChatProvider = .claude) -> PaneId? {
         let target = project ?? currentProject.id
@@ -141,6 +209,17 @@ extension AppModel {
         var opened: PaneId?
         guard edit({ opened = try $0.openBrowser(target, browser, select: select).1 })
         else { return nil }
+        if select { focusActiveContent() }
+        return opened
+    }
+
+    /// Opens a device pane in `project` (the current one by default),
+    /// showing the simulator picker.
+    @discardableResult
+    public func openDevice(project: ProjectId? = nil, select: Bool = true) -> PaneId? {
+        let target = project ?? currentProject.id
+        var opened: PaneId?
+        guard edit({ opened = try $0.openDevice(target, DevicePane(), select: select).1 }) else { return nil }
         if select { focusActiveContent() }
         return opened
     }

@@ -3,6 +3,24 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.32.0 - 2026-11-02
+
+### Added
+
+- Device panes show a live iOS simulator or Android emulator next to your
+  terminals, agents and browsers, where you can tap, scroll, type and paste,
+  press Home, rotate, switch dark appearance, take screenshots, and start or
+  shut down the device.
+- Right-clicking a sidebar card offers New Pane, which adds a terminal, agent,
+  browser or device pane to that card.
+
+### Changed
+
+- The sidebar's + button is now New Tab, offering Terminal Tab, Agent Tab,
+  Browser Tab and Device Tab, each of which always adds a new card.
+- A project with nothing open offers a terminal, agent, browser or device pane.
+- New Browser Pane and New Device Pane now add the pane to the current tab.
+
 ## 0.31.2 - 2026-11-02
 
 ### Fixed

@@ -19,7 +19,7 @@ final class SidebarViewController: NSViewController {
     private let topRow = FlippedView()
     private let toggle = ChromeButton(.panelLeft, label: "Toggle Sidebar")
     private let commandPalette = ChromeButton(.command, label: "Command Palette")
-    private let newTerminal = ChromeButton(.plusCircle, label: "New")
+    private let newTab = ChromeButton(.plusCircle, label: "New Tab")
     private let scroll = ScrollView()
     private let list = NSStackView()
     private let footer = FlippedView()
@@ -69,7 +69,7 @@ final class SidebarViewController: NSViewController {
         root.addSubview(topRow)
         root.addSubview(footer)
         root.addSubview(resizeHandle)
-        for button in [toggle, commandPalette, newTerminal] { topRow.addSubview(button) }
+        for button in [toggle, commandPalette, newTab] { topRow.addSubview(button) }
         for view in [filter, addButton, serversButton] as [NSView] { footer.addSubview(view) }
 
         toggle.shortcut = .toggleSidebar
@@ -77,9 +77,9 @@ final class SidebarViewController: NSViewController {
         addButton.shortcut = .addProject
         toggle.onPress = { [weak self] _ in self?.model.toggleSidebar() }
         commandPalette.onPress = { [weak self] _ in self?.actions?.openPalette(.root) }
-        newTerminal.onPress = { [weak self] button in
+        newTab.onPress = { [weak self] button in
             guard let self else { return }
-            self.model.newPaneMenu().popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.height), in: button)
+            self.model.newTabMenu().popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.height), in: button)
         }
         filter.hostMenu = { [weak self] in self?.hostMenu() }
         filter.contextMenu = { [weak self] in self?.filterMenu() }
@@ -311,11 +311,16 @@ final class SidebarViewController: NSViewController {
     private func cardMenu(_ card: SidebarSnapshot.CardEntry, anchor: NSView?) -> NSMenu? {
         switch card.target {
         case .tab(let tab):
-            return NSMenu.make([ClosureMenuItem("Close Terminal") { [weak self] in
-                guard let self else { return }
-                self.model.selectTab(tab)
-                self.model.closeTab()
-            }])
+            guard let project = model.state.projects.first(where: { $0.tabs.contains { $0.id == tab } })?.id else { return nil }
+            return NSMenu.make([
+                model.newPaneSubmenu(in: project, tab: tab),
+                .separator(),
+                ClosureMenuItem("Close Tab") { [weak self] in
+                    guard let self else { return }
+                    self.model.selectTab(tab)
+                    self.model.closeTab()
+                },
+            ])
         case .project(let id):
             guard let project = model.state.project(id) else { return nil }
             if project.parentId == nil && !card.data.primary { return projectMenu(id, anchor: anchor) }
@@ -325,8 +330,7 @@ final class SidebarViewController: NSViewController {
 
     private func terminalItems(_ id: ProjectId) -> [NSMenuItem] {
         [
-            ClosureMenuItem("New Terminal") { [weak self] in self?.model.newTerminal(in: id) },
-            ClosureMenuItem("New Agent Tab") { [weak self] in self?.model.newAgent(in: id) },
+            model.newPaneSubmenu(in: id),
             ClosureMenuItem("Existing Terminals…") { [weak self] in self?.actions?.openPalette(.terminals(id)) },
         ]
     }
@@ -412,7 +416,7 @@ final class SidebarViewController: NSViewController {
         topRow.frame = CGRect(x: 0, y: 0, width: bounds.width, height: ChromeButton.rowHeight)
         let y = Metrics.gutter
         toggle.frame = CGRect(x: max(trafficLightsEnd, Metrics.gutter), y: y, width: side, height: side)
-        CircleButton.layOut([commandPalette, newTerminal], trailingAt: bounds.width - ChromeButton.gap, y: y)
+        CircleButton.layOut([commandPalette, newTab], trailingAt: bounds.width - ChromeButton.gap, y: y)
         let footerHeight = ChromeButton.rowHeight
         footer.frame = CGRect(x: 0, y: bounds.height - footerHeight, width: bounds.width, height: footerHeight)
         CircleButton.layOut([addButton, serversButton], trailingAt: bounds.width - ChromeButton.gap, y: y)

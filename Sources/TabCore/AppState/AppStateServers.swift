@@ -458,8 +458,9 @@ extension AppState {
 // MARK: Browser panes
 
 extension AppState {
-    /// Opens a browser pane in `project`. With `select`, the window shows it;
-    /// otherwise it waits there without moving the user's view.
+    /// Opens a browser pane in `project`'s tab, or as a new tab in Home.
+    /// With `select`, the window shows it; otherwise it waits there without
+    /// moving the user's view.
     @discardableResult
     public mutating func openBrowser(_ project: ProjectId, _ browser: BrowserPane, select: Bool) throws -> (TabId, PaneId) {
         let pane = Pane(title: "New Browser", content: .browser(browser))
@@ -524,6 +525,51 @@ extension AppState {
         guard browser.profile != profile else { return false }
         browser.profile = profile
         try updatePane(pane) { $0.content = .browser(browser) }
+        return true
+    }
+}
+
+// MARK: Device panes
+
+extension AppState {
+    /// Opens a device pane in `project`'s tab, or as a new tab in Home, like
+    /// `openBrowser`.
+    @discardableResult
+    public mutating func openDevice(_ project: ProjectId, _ device: DevicePane, select: Bool) throws -> (TabId, PaneId) {
+        let pane = Pane(title: device.name ?? "Device", content: .device(device))
+        if isSingleTab(project) {
+            let (tab, id) = try openPaneInContainer(project, pane: pane, focusLeaf: window.activePane)
+            if select {
+                try selectProject(project)
+                try selectTab(project, tab)
+                try focusPane(id)
+            }
+            return (tab, id)
+        }
+        try projects[projectIndex(project)].requireAvailable()
+        let tab = Tab(pane: pane)
+        try addTab(project, tab)
+        if select {
+            try selectProject(project)
+            try selectTab(project, tab.id)
+        }
+        return (tab.id, pane.id)
+    }
+
+    public func device(_ pane: PaneId) -> DevicePane? {
+        if case .device(let device) = self.pane(pane)?.content { return device }
+        return nil
+    }
+
+    /// Records the simulator a device pane shows, reporting whether it changed.
+    @discardableResult
+    public mutating func setDevice(_ pane: PaneId, _ device: DevicePane) throws -> Bool {
+        guard let current = self.device(pane) else { throw AppError.invalidState("pane is not a device") }
+        guard current != device else { return false }
+        try updatePane(pane) {
+            $0.content = .device(device)
+            $0.title = device.name ?? "Device"
+        }
         return true
     }
 }

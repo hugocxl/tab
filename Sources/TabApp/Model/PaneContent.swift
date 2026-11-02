@@ -82,7 +82,7 @@ extension PaneContentController {
 
 /// The kinds of pane content, as `PaneContent` cases without their data.
 public enum PaneKind: Hashable, Sendable, CaseIterable {
-    case terminal, agent, editor, diff, browser, servers
+    case terminal, agent, editor, diff, browser, device, servers
 
     public init(_ content: PaneContent) {
         switch content {
@@ -91,9 +91,13 @@ public enum PaneKind: Hashable, Sendable, CaseIterable {
         case .editor: self = .editor
         case .diff: self = .diff
         case .browser: self = .browser
+        case .device: self = .device
         case .servers: self = .servers
         }
     }
+
+    /// The kinds people create from the New Tab and New Pane menus, in order.
+    public static let created: [PaneKind] = [.terminal, .agent, .browser, .device]
 
     /// The glyph a card header draws for the kind.
     public var glyph: AppIcon {
@@ -103,6 +107,7 @@ public enum PaneKind: Hashable, Sendable, CaseIterable {
         case .editor: return .file
         case .diff: return .gitBranch
         case .browser: return .globe
+        case .device: return .phone
         case .servers: return .network
         }
     }
@@ -114,6 +119,7 @@ public enum PaneKind: Hashable, Sendable, CaseIterable {
         case .editor: return "Editor"
         case .diff: return "Diff"
         case .browser: return "Browser"
+        case .device: return "Device"
         case .servers: return "Remote Servers"
         }
     }
@@ -192,6 +198,7 @@ public final class PaneRegistry {
         guard let old else { return false }
         if old.isTerminal && new.isTerminal { return true }
         if case .browser = old, case .browser = new { return true }
+        if case .device = old, case .device = new { return true }
         return old == new
     }
 }
@@ -209,6 +216,7 @@ final class PlaceholderPaneController: PaneContentController {
         switch context.pane.content {
         case .editor(let path), .diff(let path, _): detail = path
         case .browser(let browser): detail = browser.url ?? "New page"
+        case .device(let device): detail = device.name ?? "No device"
         case .terminal, .agent, .servers: detail = context.project.directory.rawValue
         }
         title = context.pane.title.isEmpty ? kind.name : context.pane.title

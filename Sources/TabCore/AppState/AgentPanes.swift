@@ -2,7 +2,7 @@ import Foundation
 import TabProtocol
 
 extension AppState {
-    /// Opens an Agent Tab beside the project's panes, or standalone in Home.
+    /// Opens an agent pane beside the project's panes, or as a new tab in Home.
     @discardableResult
     public mutating func openAgent(_ project: ProjectId, provider: AgentChatProvider = .claude) throws -> PaneId {
         try openAgent(project, session: SessionId(), provider: provider)

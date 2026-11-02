@@ -14,13 +14,35 @@ public struct BrowserPane: Codable, Hashable, Sendable {
     }
 }
 
-/// What a pane shows.
+/// What a device pane keeps across restarts: the iOS simulator or Android
+/// emulator it shows. With neither, it shows the device picker.
+public struct DevicePane: Codable, Hashable, Sendable {
+    /// An iOS simulator's UDID.
+    public var udid: String?
+    /// An Android virtual device's name.
+    public var avd: String?
+    /// The device's name when it was chosen, shown until it is found.
+    public var name: String?
+
+    public init(udid: String? = nil, avd: String? = nil, name: String? = nil) {
+        self.udid = udid
+        self.avd = avd
+        self.name = name
+    }
+
+    /// Whether a device was chosen.
+    public var isChosen: Bool { udid != nil || avd != nil }
+}
+
+/// What a pane shows: its kind and target.
 public enum PaneContent: Codable, Hashable, Sendable {
     /// A terminal; `session` is `nil` until its server creates it.
     case terminal(session: SessionId?)
     /// A conversation identity is assigned before contacting its server.
     case agent(session: SessionId, provider: AgentChatProvider)
     case browser(BrowserPane)
+    /// A simulated device's screen, on this Mac.
+    case device(DevicePane)
     /// The Remote Servers pane, which manages other computers' servers.
     case servers
     /// A file editor; `path` is project-relative with `/` separators.
@@ -51,7 +73,7 @@ public enum PaneContent: Codable, Hashable, Sendable {
         case .editor(let path): return Self.basename(path)
         case let .diff(path, staged): return staged ? "\(Self.basename(path)) (staged)" : Self.basename(path)
         case .agent: return "Agent"
-        case .terminal, .browser, .servers: return nil
+        case .terminal, .browser, .device, .servers: return nil
         }
     }
 
@@ -60,7 +82,7 @@ public enum PaneContent: Codable, Hashable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case type, session, provider, url, profile, path, staged
+        case type, session, provider, url, profile, path, staged, udid, avd, name
     }
 
     public init(from decoder: Decoder) throws {
@@ -75,6 +97,12 @@ public enum PaneContent: Codable, Hashable, Sendable {
             self = .browser(BrowserPane(
                 url: try container.decodeIfPresent(String.self, forKey: .url),
                 profile: try container.decodeIfPresent(String.self, forKey: .profile)
+            ))
+        case "device":
+            self = .device(DevicePane(
+                udid: try container.decodeIfPresent(String.self, forKey: .udid),
+                avd: try container.decodeIfPresent(String.self, forKey: .avd),
+                name: try container.decodeIfPresent(String.self, forKey: .name)
             ))
         case "servers":
             self = .servers
@@ -104,6 +132,11 @@ public enum PaneContent: Codable, Hashable, Sendable {
             try container.encode("browser", forKey: .type)
             try container.encodeIfPresent(browser.url, forKey: .url)
             try container.encodeIfPresent(browser.profile, forKey: .profile)
+        case .device(let device):
+            try container.encode("device", forKey: .type)
+            try container.encodeIfPresent(device.udid, forKey: .udid)
+            try container.encodeIfPresent(device.avd, forKey: .avd)
+            try container.encodeIfPresent(device.name, forKey: .name)
         case .servers:
             try container.encode("servers", forKey: .type)
         case .editor(let path):
@@ -129,6 +162,9 @@ public enum PaneContent: Codable, Hashable, Sendable {
     }
 }
 
+/// A pane: one terminal, agent, browser, device, editor or diff in a tab's
+/// split layout. New Pane adds one to an existing tab; it never adds a
+/// sidebar card.
 public struct Pane: Codable, Hashable, Sendable, Identifiable {
     public var id: PaneId
     public var title: String
@@ -168,8 +204,9 @@ public struct Pane: Codable, Hashable, Sendable, Identifiable {
     }
 }
 
-/// One split layout of panes. Projects have at most one; Home has one per
-/// standalone terminal.
+/// A tab: one card in the sidebar, holding a split layout of panes. A
+/// project or worktree is a single tab; Home holds one tab per card. New Tab
+/// adds a card, so it always adds a tab to Home.
 public struct Tab: Codable, Equatable, Sendable, Identifiable {
     public var id: TabId
     public var customTitle: String?

@@ -93,13 +93,35 @@ final class AgentEntryPointTests: XCTestCase {
         XCTAssertEqual(controller.commitCount, 2)
     }
 
+    func testNewTabAddsACardWhileNewPaneJoinsAnExistingTab() throws {
+        let model = AppModel(dirs: try ModelFixtures.profile(), connectorFactory: { _, _ in nil })
+        model.panes.register(.device) { EntryTestController(title: $0.pane.title) }
+        let before = model.state.home.tabs.count
+        let first = try XCTUnwrap(model.newTab(.device))
+        _ = try XCTUnwrap(model.newTab(.device))
+        XCTAssertEqual(model.state.home.tabs.count, before + 2, "each New Tab is its own card")
+        let card = try XCTUnwrap(model.state.home.tabs.first { $0.panes.contains { $0.id == first } })
+        let added = try XCTUnwrap(model.newPane(.device, in: model.state.home.id, tab: card.id))
+        XCTAssertEqual(model.state.home.tabs.count, before + 2, "New Pane adds no card")
+        XCTAssertEqual(model.state.home.tabs.first { $0.id == card.id }?.layout.leaves, [first, added])
+
+        var project: ProjectId?
+        XCTAssertTrue(model.edit { project = try $0.addProject(server: .local, directory: FileManager.default.currentDirectoryPath) })
+        let id = try XCTUnwrap(project)
+        let opened = try XCTUnwrap(model.newPane(.device, in: id))
+        let beside = try XCTUnwrap(model.newPane(.device, in: id))
+        XCTAssertEqual(model.state.project(id)?.tabs.count, 1, "a project is one card")
+        XCTAssertEqual(model.state.project(id)?.tabs.first?.layout.leaves, [opened, beside])
+        XCTAssertEqual(model.activePane, beside)
+    }
+
     func testGenericEntryPointOpensDirectlyAndPersistsStandaloneAgentIdentity() throws {
         let model = AppModel(dirs: try ModelFixtures.profile(), connectorFactory: { _, _ in nil })
         model.panes.register(.agent) { EntryTestController(title: $0.pane.title) }
-        let menu = model.newPaneMenu()
-        XCTAssertEqual(menu.items.map(\.title), ["New Terminal", "New Agent Tab", "New Browser"])
-        let item = try XCTUnwrap(menu.items.first { $0.title == "New Agent Tab" })
-        XCTAssertNil(item.submenu, "An Agent Tab opens directly, without choosing a provider")
+        let menu = model.newTabMenu()
+        XCTAssertEqual(menu.items.map(\.title), ["Terminal Tab", "Agent Tab", "Browser Tab", "Device Tab"])
+        let item = try XCTUnwrap(menu.items.first { $0.title == "Agent Tab" })
+        XCTAssertNil(item.submenu, "An agent opens directly, without choosing a provider")
         for _ in 0..<2 {
             _ = (item.target as? NSObject)?.perform(try XCTUnwrap(item.action), with: item)
         }
@@ -146,11 +168,11 @@ final class AgentEntryPointTests: XCTestCase {
 
     func testGenericActionIsTheOnlyAgentMenuAndPaletteEntryWithLegacyBindingsStillWorking() throws {
         let items = ShortcutCatalog.menus(appName: "Tab").flatMap(\.items)
-        XCTAssertTrue(items.contains(.shortcut(.newAgent, title: "New Agent Tab")))
+        XCTAssertTrue(items.contains(.shortcut(.newAgent, title: "New Agent")))
         let model = AppModel(dirs: try ModelFixtures.profile(), connectorFactory: { _, _ in nil })
         model.panes.register(.agent) { EntryTestController(title: $0.pane.title) }
         let commands = PaletteSource(model: model).rootCommands()
-        XCTAssertEqual(commands.filter { $0.id == ShortcutId.newAgent.rawValue }.map(\.title), ["New Agent Tab"])
+        XCTAssertEqual(commands.filter { $0.id == ShortcutId.newAgent.rawValue }.map(\.title), ["New Agent"])
         for id in [ShortcutId.newAgent, .newClaudeAgent, .newCodexAgent] {
             XCTAssertTrue(ShortcutCatalog.keymapActions.contains(id))
             XCTAssertTrue(id.definition.keys.isEmpty)

@@ -133,7 +133,7 @@ internal final class AgentProcess: @unchecked Sendable {
             var offset = 0
             while offset < bytes.count {
                 guard DispatchTime.now().uptimeNanoseconds < deadline else {
-                    throw AgentRuntimeError("Agent stopped reading input; submission timed out. Reopen the Agent Tab to resume.")
+                    throw AgentRuntimeError("Agent stopped reading input; submission timed out. Reopen the agent pane to resume.")
                 }
                 let count = Darwin.write(descriptor, base.advanced(by: offset), min(bytes.count - offset, 16_384))
                 if count > 0 { offset += count; continue }

@@ -193,7 +193,7 @@ final class PaletteSource: PaletteDataSource {
         let paneCount = model.activeTab?.panes.count ?? 0
         let missing = current.status == .missing
         command(.newTab, "New Terminal", .terminal)
-        command(.newAgent, "New Agent Tab", .panes, disabled: missing)
+        command(.newAgent, "New Agent", .panes, disabled: missing)
         command(.newHomeTab, "New Home Terminal", .terminal)
         page(ShortcutId.newTabInProject.rawValue, "New Terminal in Project…", .terminal, .newTerminal, shortcut: .newTabInProject)
         page(ShortcutId.existingTerminals.rawValue, "Existing Terminals…", .terminal, .terminals(project), shortcut: .existingTerminals)
@@ -216,7 +216,8 @@ final class PaletteSource: PaletteDataSource {
                             (.focusPaneRight, "Focus Pane Right"), (.focusPaneUp, "Focus Pane Up"), (.focusPaneDown, "Focus Pane Down")] {
             command(id, title, .panes, disabled: missing || paneCount < 2)
         }
-        command(.newBrowserTab, "New Browser Pane", .panes, disabled: missing || !model.settings.browser.enabled)
+        command(.newBrowserPane, "New Browser Pane", .panes, disabled: missing || !model.settings.browser.enabled)
+        command(.newDevicePane, "New Device Pane", .panes, keywords: "simulator emulator ios android iphone ipad", disabled: missing)
         page(ShortcutId.goToFile.rawValue, "Go to File…", .files, .files, shortcut: .goToFile, keywords: "quick open file")
         page(ShortcutId.findInFiles.rawValue, "Find in Files…", .files, .find, shortcut: .findInFiles, keywords: "search grep")
         command(.toggleFiles, "Toggle Files", .files, keywords: "explorer tree folder")

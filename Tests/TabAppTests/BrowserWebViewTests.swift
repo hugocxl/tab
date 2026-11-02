@@ -299,7 +299,7 @@ final class BrowserWebViewTests: XCTestCase {
         XCTAssertEqual(pane.zoom, 1.1, accuracy: 0.0001)
         XCTAssertTrue(pane.perform(.browserZoomReset))
         XCTAssertEqual(pane.zoom, 1)
-        XCTAssertFalse(pane.perform(.newBrowserTab))
+        XCTAssertFalse(pane.perform(.newBrowserPane))
         do {
             _ = try await command("eval", id)
             XCTFail("eval ran without a script")

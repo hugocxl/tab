@@ -99,6 +99,8 @@ final class SidebarCardView: HoverView {
             (text, weight, icon) = (file, .semibold, .gitBranch)
         case .browser(let page):
             (text, weight, icon) = (page, .semibold, .globe)
+        case .device(let name):
+            (text, weight, icon) = (name, .semibold, .phone)
         case let .agent(provider, task):
             (text, weight, icon) = (task ?? provider.displayName, task == nil ? .regular : .medium, .terminal)
             logo = provider

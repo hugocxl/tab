@@ -23,6 +23,9 @@ final class Actions {
            let browser = model.controller(for: pane) as? BrowserPaneContent,
            browser.controller.perform(id) { return true }
         if let pane = model.activePane,
+           let device = model.controller(for: pane) as? DevicePaneController,
+           device.perform(id) { return true }
+        if let pane = model.activePane,
            let agent = model.controller(for: pane) as? AgentPaneController,
            agent.performConversationShortcut(id) { return true }
         switch id {
@@ -89,7 +92,8 @@ final class Actions {
         case .openSettings: window?.showSettings()
         case .installCommandLineTool: CommandLineInstaller.installAndReport(on: window?.window)
         case .toggleVoiceRecording: window?.toggleDictation()
-        case .newBrowserTab: model.openBrowser()
+        case .newBrowserPane: model.newPane(.browser, in: model.currentProject.id, tab: model.activeTab?.id)
+        case .newDevicePane: model.newPane(.device, in: model.currentProject.id, tab: model.activeTab?.id)
         default: return false
         }
         return true

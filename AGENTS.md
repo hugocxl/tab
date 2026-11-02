@@ -43,6 +43,23 @@ runs the same script.
 - Each session allows one screen frame in flight per client. Newer output merges
   into the waiting frame, so a slow client never piles up frames.
 - The Ghostty engine isn't thread-safe. One serial queue owns each session's terminal.
+- Device panes live in the app (`Sources/TabApp/Devices`). iOS simulators use
+  Xcode's private CoreSimulator and SimulatorKit frameworks, loaded at runtime,
+  plus `simctl` and `devicectl`. Android emulators use the emulator's gRPC
+  control API and `adb`.
+- Tabs and panes are different things; keep the words exact in code, docs and UI:
+  - A **tab** is one card in the sidebar. It holds a split layout of panes. A
+    project or worktree is a single tab, and Home holds one tab per card.
+  - A **pane** is one terminal, agent, browser, device, editor or diff inside a
+    tab's layout.
+  - **New Tab** always adds a card, so it adds a tab to Home (`AppModel.newTab`).
+    The sidebar's + button offers Terminal Tab, Agent Tab, Browser Tab and
+    Device Tab.
+  - **New Pane** always adds a pane to an existing tab, beside the pane it shows
+    (`AppModel.newPane`). Only a project with no tab yet gets one. The empty-tab
+    placeholder and a card's New Pane submenu offer the same four kinds.
+  - Cmd-T and New Agent follow the current card: a pane in a project's tab, a
+    new tab in Home.
 - Use AppKit throughout. SwiftUI is allowed only for Settings forms and static
   dialogs, never on the terminal rendering path.
 - Shortcuts come only from `ShortcutCatalog`, and colors only from `AppTheme`.
