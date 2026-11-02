@@ -28,6 +28,7 @@ final class SidebarViewController: NSViewController {
     private let serversButton = ChromeButton(.globeBadgePlus, label: "Remote Servers")
     private let resizeHandle = SidebarResizeHandle()
     private var snapshot: SidebarSnapshot?
+    private var collapsedProjects: Set<ProjectId> = []
     private var subscription: AnyCancellable?
 
     /// Where the window buttons end, from the window's left edge.
@@ -167,16 +168,16 @@ final class SidebarViewController: NSViewController {
             stack.alignment = .leading
             let header = headerView(group)
             stack.addArrangedSubview(header)
-            stack.setCustomSpacing(0, after: header)
+            stack.setCustomSpacing(2, after: header)
             header.translatesAutoresizingMaskIntoConstraints = false
             header.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-            for card in group.cards {
+            for card in collapsedProjects.contains(group.project) ? [] : group.cards {
                 let view = cardView(card, hint: hint(.tabs, &cardNumber))
                 view.translatesAutoresizingMaskIntoConstraints = false
                 stack.addArrangedSubview(view)
                 view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
             }
-            for name in group.creating {
+            for name in collapsedProjects.contains(group.project) ? [] : group.creating {
                 let row = CreatingRow(name: name)
                 row.translatesAutoresizingMaskIntoConstraints = false
                 stack.addArrangedSubview(row)
@@ -231,14 +232,22 @@ final class SidebarViewController: NSViewController {
     // MARK: Reordering
 
     private func dragProject(_ project: ProjectId, from header: NSView, event: NSEvent) {
-        guard model.appearance.sidebarProjectOrder == .manual, let window = view.window,
-              model.state.project(project)?.status == .available else { return }
+        guard let window = view.window else { return }
+        let canReorder = model.appearance.sidebarProjectOrder == .manual
+            && model.state.project(project)?.status == .available
         let start = event.locationInWindow
         var moved = false
         while let next = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]) {
-            if next.type == .leftMouseUp { break }
+            if next.type == .leftMouseUp {
+                if !moved, header.bounds.contains(header.convert(next.locationInWindow, from: nil)) {
+                    if !collapsedProjects.insert(project).inserted { collapsedProjects.remove(project) }
+                    if let snapshot { rebuild(snapshot) }
+                }
+                break
+            }
             if !moved, hypot(next.locationInWindow.x - start.x, next.locationInWindow.y - start.y) < 4 { continue }
             moved = true
+            guard canReorder else { continue }
             let point = list.convert(next.locationInWindow, from: nil)
             guard let target = headerTarget(at: point), target != project else { continue }
             model.moveProject(project, before: target)

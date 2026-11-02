@@ -30,7 +30,10 @@ extension AppModel {
         }
         var added: ProjectId?
         guard edit({ added = try $0.addProject(server: server, directory: path) }) else { return nil }
-        if let added { noteRecent(added) }
+        if let added {
+            noteRecent(added)
+            refreshGit(added)
+        }
         return added
     }
 

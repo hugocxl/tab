@@ -111,7 +111,12 @@ extension AppModel {
         guard catalog.revision >= state.catalogRevision(server) || state.serverIdentity(server) != catalog.server else {
             return
         }
+        let previousProjects = Set(state.projects.filter { $0.serverId == server }.map(\.id))
         edit { try $0.applyCatalog(server, catalog) }
+        for project in state.projects where project.serverId == server
+            && !previousProjects.contains(project.id) && !project.home && project.status == .available {
+            refreshGit(project.id)
+        }
     }
 
     private func refreshCatalog(_ server: ServerId) async {

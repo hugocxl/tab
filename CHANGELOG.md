@@ -3,6 +3,20 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.31.0 - 2026-11-02
+
+### Changed
+
+- Sidebar host headings are smaller and dimmer, and project headings use larger
+  icons with compact action buttons that appear on hover.
+- Clicking a project heading now expands or collapses its cards.
+- Project headings no longer show a globe icon for remote projects.
+
+### Fixed
+
+- Newly added Git projects now show the button for creating a worktree without
+  requiring an app restart.
+
 ## 0.30.0 - 2026-11-02
 
 ### Changed

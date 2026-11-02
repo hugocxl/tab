@@ -343,10 +343,8 @@ final class HostHeaderRow: ThemedView {
 
     init(title: String, remote: Bool, match: String = "") {
         self.match = match
-        iconView = NSImageView(image: (remote ? AppIcon.globe.image(size: 18) : NSImage(
-            systemSymbolName: "laptopcomputer", accessibilityDescription: nil
-        )) ?? NSImage())
-        titleLabel = makeLabel(title, font: AppFont.system(13, weight: .semibold))
+        iconView = NSImageView(image: (remote ? AppIcon.globe.image(size: 14) : AppIcon.laptop.image(size: 14)) ?? NSImage())
+        titleLabel = makeLabel(title, font: AppFont.footnoteMedium)
         super.init(frame: .zero)
         addSubview(iconView)
         addSubview(titleLabel)
@@ -360,21 +358,20 @@ final class HostHeaderRow: ThemedView {
     override var intrinsicContentSize: NSSize { NSSize(width: NSView.noIntrinsicMetric, height: 30) }
 
     override func themeDidChange() {
-        iconView.contentTintColor = theme.fgMuted
-        titleLabel.showMatch(match, color: theme.fgMuted, accent: theme.accent)
+        iconView.contentTintColor = theme.fgDim
+        titleLabel.showMatch(match, color: theme.fgDim, accent: theme.accent)
     }
 
     override func layout() {
         super.layout()
-        iconView.frame = CGRect(x: 10, y: (bounds.height - 18) / 2, width: 20, height: 18)
+        iconView.frame = CGRect(x: 10, y: (bounds.height - 14) / 2, width: 16, height: 14)
         let height = titleLabel.intrinsicContentSize.height
-        titleLabel.frame = CGRect(x: 31, y: ((bounds.height - height) / 2).rounded(),
-                                 width: max(bounds.width - 41, 0), height: height)
+        titleLabel.frame = CGRect(x: 30, y: ((bounds.height - height) / 2).rounded(),
+                                 width: max(bounds.width - 40, 0), height: height)
     }
 }
 
-/// A project's header, a 28pt row: its icon when it has one, the
-/// name in 12pt semibold, and the settings and New Worktree buttons.
+/// A project's collapsible header with its icon, name and workspace actions.
 final class ProjectHeaderRow: HoverView {
     let project: ProjectId
     var onGear: ((NSView) -> Void)?
@@ -384,8 +381,7 @@ final class ProjectHeaderRow: HoverView {
 
     private let iconView = NSImageView()
     private let titleLabel: NSTextField
-    private let remote: NSImageView?
-    private let gear = ChromeButton(.settings, label: "Project Settings", side: 20, glyph: 12)
+    private let gear = ChromeButton(.settings, label: "Project Settings", side: 24, glyph: 14)
     private let plus: ChromeButton?
     private let missing: Bool
     private let match: String
@@ -396,15 +392,8 @@ final class ProjectHeaderRow: HoverView {
         self.project = project.id
         self.match = match
         missing = project.status == .missing
-        titleLabel = makeLabel(title, font: AppFont.system(12, weight: .semibold))
-        if !project.serverId.isLocal {
-            let view = NSImageView(image: AppIcon.globe.image(size: 10) ?? NSImage())
-            view.toolTip = "Remote project on \(remoteName ?? "Remote") · \(project.directory.rawValue)"
-            remote = view
-        } else {
-            remote = nil
-        }
-        plus = canCreateWorktree ? ChromeButton(.plus, label: "New Worktree", side: 20, glyph: 12) : nil
+        titleLabel = makeLabel(title, font: AppFont.header)
+        plus = canCreateWorktree ? ChromeButton(.plus, label: "New Worktree", side: 24, glyph: 14) : nil
         plus?.shortcut = .newWorktree
         super.init(frame: .zero)
         if let remoteName { toolTip = "\(remoteName) · \(project.directory.rawValue)" }
@@ -414,10 +403,11 @@ final class ProjectHeaderRow: HoverView {
         iconView.layer?.cornerRadius = Metrics.radiusSmall
         iconView.layer?.masksToBounds = true
         for view in [iconView, titleLabel, gear] as [NSView] { addSubview(view) }
-        if let remote { addSubview(remote) }
         if let plus { addSubview(plus) }
         gear.onPress = { [weak self] button in self?.onGear?(button) }
         plus?.onPress = { [weak self] _ in self?.onNewWorktree?() }
+        gear.isHidden = true
+        plus?.isHidden = true
         alphaValue = missing ? 0.5 : 1
     }
 
@@ -428,36 +418,42 @@ final class ProjectHeaderRow: HoverView {
 
     override func themeDidChange() {
         titleLabel.showMatch(match, color: theme.fgMuted, accent: theme.accent)
-        remote?.contentTintColor = theme.fgMuted
+        needsDisplay = true
+    }
+
+    override func hoverDidChange() {
+        gear.isHidden = !isHovered
+        plus?.isHidden = !isHovered
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard isHovered else { return }
+        theme.hover.setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: Metrics.radiusMedium, yRadius: Metrics.radiusMedium).fill()
     }
 
     override func layout() {
         super.layout()
-        let padding: CGFloat = 10
+        let padding: CGFloat = 6
         let gap: CGFloat = 4
         var x = padding
         let middle = bounds.height / 2
         if iconView.image != nil {
-            iconView.frame = CGRect(x: x, y: middle - 8, width: 16, height: 16)
-            x += 16 + gap
+            iconView.frame = CGRect(x: x, y: middle - 12, width: 24, height: 24)
+            x += 24 + gap
         } else {
             iconView.frame = .zero
         }
         var right = bounds.width - padding
         if let plus {
-            right -= 20
-            plus.frame = CGRect(x: right, y: middle - 10, width: 20, height: 20)
-            right -= ChromeButton.gap
+            right -= 24
+            plus.frame = CGRect(x: right, y: middle - 12, width: 24, height: 24)
+            right -= 2
         }
-        right -= 20
-        gear.frame = CGRect(x: right, y: middle - 10, width: 20, height: 20)
+        right -= 24
+        gear.frame = CGRect(x: right, y: middle - 12, width: 24, height: 24)
         right -= gap
-        if let remote {
-            right -= 18
-            remote.frame = CGRect(x: right, y: middle - 9, width: 18, height: 18)
-            remote.imageAlignment = .alignCenter
-            right -= gap
-        }
         let height = titleLabel.intrinsicContentSize.height
         titleLabel.frame = CGRect(x: x, y: (middle - height / 2).rounded(), width: max(right - x, 0), height: height)
     }
