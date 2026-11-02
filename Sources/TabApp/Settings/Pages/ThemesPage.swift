@@ -27,16 +27,6 @@ struct ThemesPage: View {
                 }
                 mode(dark: false)
                 mode(dark: true)
-                if let build = model.lastBuild {
-                    ForEach(build.rows.filter { $0.id == "sidebar" }) { row in
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Interface").font(.headline)
-                            SettingRowView(row: row, model: model)
-                                .padding(16)
-                                .background(theme?.card ?? .clear, in: RoundedRectangle(cornerRadius: 16))
-                        }
-                    }
-                }
                 ForEach(model.store.theme.catalog.errors, id: \.self) { problem in
                     Text(problem).font(.subheadline).foregroundStyle(theme?.danger ?? .red)
                 }
@@ -60,7 +50,7 @@ struct ThemesPage: View {
         return VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 6) {
                 Text(dark ? "Dark Mode" : "Light Mode").fontWeight(.semibold)
-                if appTheme.systemIsDark == dark {
+                if appTheme.interfaceIsDark == dark {
                     Text("— Active").foregroundStyle(.secondary)
                 }
             }

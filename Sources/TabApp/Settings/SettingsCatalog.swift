@@ -3,11 +3,12 @@ import TabCore
 
 /// A page of the Settings window, in sidebar order.
 public enum SettingsCategory: String, CaseIterable, Sendable {
-    case general, appearance, terminal, keyboard, browser, server, mobile, backup, changelog
+    case general, interface, appearance, terminal, keyboard, browser, server, mobile, backup, changelog
 
     public var title: String {
         switch self {
         case .general: return "General"
+        case .interface: return "Interface"
         case .appearance: return "Themes"
         case .terminal: return "Terminal"
         case .keyboard: return "Shortcuts"
@@ -24,6 +25,7 @@ public enum SettingsCategory: String, CaseIterable, Sendable {
     var icon: (symbol: String, top: UInt32, bottom: UInt32, glyph: UInt32) {
         switch self {
         case .general: return ("gearshape.fill", 0xA2A2A7, 0x76767B, 0xFFFFFF)
+        case .interface: return ("macwindow", 0x5BB2FF, 0x1F6FEB, 0xFFFFFF)
         case .appearance: return ("paintpalette.fill", 0x3FA2FF, 0xC04BF2, 0xFFFFFF)
         case .terminal: return ("apple.terminal", 0x3A3A3C, 0x151515, 0x5BE37A)
         case .keyboard: return ("command", 0xF7F7F8, 0xDCDCDF, 0x6E6E73)
@@ -101,7 +103,13 @@ public enum SettingsCatalog {
         // Appearance
         SettingItem("light-theme", "Light theme", "Colors for the interface and terminals when macOS uses light appearance.", .appearance, "Themes"),
         SettingItem("dark-theme", "Dark theme", "Colors for the interface and terminals when macOS uses dark appearance.", .appearance, "Themes"),
-        SettingItem("sidebar", "Expand sidebar", "Show project names alongside their icons in the workspace sidebar.", .appearance, "Interface"),
+        SettingItem("sidebar", "Expand sidebar", "Show project names alongside their icons in the workspace sidebar.", .interface, "Window"),
+        SettingItem("color-scheme", "Color scheme", "Choose an appearance or follow macOS.", .interface, "Appearance"),
+        SettingItem("interface-style", "Interface style", "Native macOS glass, always tinted with your theme.", .interface, "Appearance"),
+        SettingItem("glass-panes", "Use glass for panes", "Web pages and device screens keep their own backgrounds.", .interface, "Appearance"),
+        SettingItem("preserve-pane-width", "Preserve pane width when resizing sidebar", "", .interface, "Window"),
+        SettingItem("sidebar-gesture", "Use a gesture to toggle the sidebar", "Option-scroll always scrolls content sideways.", .interface, "Window"),
+        SettingItem("animation-style", "Animation style", "Pane transitions and sidebars follow this style. Reduce Motion turns animations off.", .interface, "Animation"),
         // Terminal
         SettingItem("typography-preview", "", "", .terminal, "Typography"),
         SettingItem("font-family", "Terminal font", "", .terminal, "Typography"),

@@ -191,6 +191,7 @@ public final class AppModel {
         connectorOverride = connectorFactory
         proxy = ProxyModel(file: dirs.proxy)
         askpass = AskpassServer(socket: dirs.root.appendingPathComponent("askpass.sock"))
+        theme.setInterface(settings.appearance)
         theme.setThemes(dark: settings.appearance.darkTheme, light: settings.appearance.lightTheme)
         self.notifier.model = self
         panes.register(.terminal) { TerminalPane(context: $0) }
@@ -200,7 +201,7 @@ public final class AppModel {
         browserProfiles.notify = { [weak self] message, isError in self?.presenter?.showToast(message, error: isError) }
         iconCache.onChange = { [weak self] _ in self?.notify(.activity) }
         recordNavigation()
-        theme.$palette.dropFirst().sink { [weak self] _ in
+        Publishers.Merge3(theme.$palette.dropFirst().map { _ in () }, theme.$interface.dropFirst().map { _ in () }, theme.$accessibility.dropFirst().map { _ in () }).sink { [weak self] _ in
             DispatchQueue.main.async { [weak self] in self?.refreshTerminalAppearance() }
         }.store(in: &themeObservations)
     }
@@ -378,6 +379,7 @@ public final class AppModel {
         } catch {
             report(error)
         }
+        theme.setInterface(settings.appearance)
         theme.setThemes(dark: settings.appearance.darkTheme, light: settings.appearance.lightTheme)
         notify(.settings)
         notify(.state)
@@ -390,6 +392,7 @@ public final class AppModel {
         browserProfiles.defaultProfileId = settings.browser.defaultProfile
         for controller in browserProfiles.panes.all { controller.apply(settings: settings.browser) }
         savedAppearance = settings.appearance
+        theme.setInterface(settings.appearance)
         theme.setThemes(dark: settings.appearance.darkTheme, light: settings.appearance.lightTheme)
         if servers != settings.servers {
             serversDidChange(old: servers)

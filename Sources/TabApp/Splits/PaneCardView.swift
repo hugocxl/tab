@@ -11,6 +11,7 @@ final class PaneCardView: HoverView {
     private(set) var controller: PaneContentController?
 
     private let header = PaneHeaderView()
+    private let glass = GlassView(style: .pane)
     private let glyph = NSImageView()
     private let titleLabel = makeLabel("", font: AppFont.header)
     private let suffixLabel = makeLabel("", font: AppFont.header)
@@ -73,6 +74,7 @@ final class PaneCardView: HoverView {
         header.card = self
         body.wantsLayer = true
         body.layer?.masksToBounds = true
+        addSubview(glass)
         addSubview(body)
         addSubview(header)
         for view in [glyph, titleLabel, suffixLabel, progressGlyph] as [NSView] { header.addSubview(view) }
@@ -193,9 +195,12 @@ final class PaneCardView: HoverView {
     override var wantsUpdateLayer: Bool { true }
 
     override func updateLayer() {
-        layer?.backgroundColor = theme.card.cgColor
+        glass.isHidden = !theme.glassPanes
+        glass.appearance = theme.nsAppearance
+        glass.tint = theme.card.withAlphaComponent(theme.isLight ? 0.25 : 0.5)
+        layer?.backgroundColor = theme.paneBackground.cgColor
         header.wantsLayer = true
-        header.layer?.backgroundColor = theme.card.cgColor
+        header.layer?.backgroundColor = theme.paneBackground.cgColor
         layer?.borderColor = theme.cardBorder.cgColor
     }
 
@@ -208,6 +213,7 @@ final class PaneCardView: HoverView {
 
     override func layout() {
         super.layout()
+        glass.frame = bounds
         let gutter = Metrics.gutter
         header.frame = CGRect(x: 0, y: 0, width: bounds.width, height: Metrics.headerHeight)
         body.frame = CGRect(x: 0, y: Metrics.headerHeight, width: bounds.width, height: max(bounds.height - Metrics.headerHeight, 0))

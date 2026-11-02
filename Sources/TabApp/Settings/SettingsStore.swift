@@ -160,6 +160,7 @@ public final class SettingsStore {
             var next = settings.appearance
             change(&next)
             settings.appearance = try next.saveChanges(since: settings.appearance, to: dirs.settings)
+            theme.setInterface(settings.appearance)
             theme.setThemes(dark: settings.appearance.darkTheme, light: settings.appearance.lightTheme)
             applySettings()
         }

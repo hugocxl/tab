@@ -114,6 +114,9 @@ final class SidebarViewController: NSViewController {
         let next = SidebarSnapshot(model: model)
         updateChrome(next)
         guard next != snapshot else { return }
+        if snapshot?.expanded == true, !next.expanded {
+            InterfaceMotion.dismiss(root, style: model.appearance.animationStyle, slide: -24)
+        }
         snapshot = next
         rebuild(next)
     }
@@ -435,7 +438,7 @@ final class SidebarRootView: ThemedView {
     override var mouseDownCanMoveWindow: Bool { true }
 
     override func updateLayer() {
-        layer?.backgroundColor = theme.chrome.cgColor
+        layer?.backgroundColor = (theme.glassEnabled ? NSColor.clear : theme.chrome).cgColor
     }
 
     override func layout() {

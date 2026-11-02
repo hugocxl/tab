@@ -38,8 +38,9 @@ final class SettingsModel: ObservableObject {
         store.changes
             .sink { [weak self] in self?.scheduleReload() }
             .store(in: &observations)
-        store.theme.$palette
-            .dropFirst()
+        Publishers.Merge3(store.theme.$palette.dropFirst().map { _ in () },
+                          store.theme.$interface.dropFirst().map { _ in () },
+                          store.theme.$accessibility.dropFirst().map { _ in () })
             .sink { [weak self] _ in self?.scheduleReload() }
             .store(in: &observations)
     }
@@ -135,6 +136,7 @@ final class SettingsModel: ObservableObject {
         switch page {
         case .general: buildGeneral(builder)
         case .appearance: buildAppearance(builder)
+        case .interface: buildInterface(builder)
         case .terminal: buildTerminal(builder)
         case .keyboard: buildKeyboard(builder)
         case .browser: buildBrowser(builder)

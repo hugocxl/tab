@@ -207,8 +207,10 @@ final class TerminalPane: PaneContentController {
 
     private func palette(_ settings: TerminalSettings? = nil) -> TerminalPalette {
         let theme = model?.theme ?? AppTheme.shared
-        return TerminalPalette(scheme: theme.scheme, settings: settings ?? model?.terminalSettings ?? TerminalSettings(),
+        var palette = TerminalPalette(scheme: theme.scheme, settings: settings ?? model?.terminalSettings ?? TerminalSettings(),
                                dark: !theme.palette.isLight, background: RGBColor(theme.card))
+        palette.transparentBackground = theme.glassPanes
+        return palette
     }
 
     /// The terminal's shortcuts as the keymap binds them.

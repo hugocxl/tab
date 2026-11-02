@@ -38,6 +38,16 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
         store.theme.$palette
             .sink { [weak window] palette in window?.appearance = AppTheme.nsAppearance(palette) }
             .store(in: &observations)
+        let updateMaterial = { [weak window, weak theme = store.theme] in
+            guard let window, let theme else { return }
+            window.isOpaque = !theme.glassEnabled
+            window.backgroundColor = theme.glassEnabled ? .clear : theme.bg
+        }
+        Publishers.Merge(store.theme.$interface.map { _ in () }, store.theme.$accessibility.map { _ in () })
+            .receive(on: DispatchQueue.main)
+            .sink { updateMaterial() }
+            .store(in: &observations)
+        updateMaterial()
         store.loadServerSettings()
         store.loadRemoteAccess()
         store.refreshBrowserProfiles()

@@ -261,8 +261,10 @@ public struct TerminalRenderState {
                                row: row, state: state)
         let rect = state.layout.rowRect(row)
         context.clear(rect)
-        context.setFillColor(color(state.palette.background))
-        context.fill(rect)
+        if !state.palette.transparentBackground {
+            context.setFillColor(color(state.palette.background))
+            context.fill(rect)
+        }
         context.textMatrix = CGAffineTransform(scaleX: 1, y: -1)
         drawImages(state, row: row, z: Int64.min..<(-1_073_741_824), in: context)
         drawBackgrounds(item, row: row, state: state, in: context)

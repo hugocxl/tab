@@ -25,7 +25,9 @@ final class SettingsSnapshotTests: XCTestCase {
         let theme = AppTheme.shared
         let wasDark = theme.systemIsDark
         let originalCatalog = theme.catalog
+        let originalInterface = theme.interface
         defer {
+            theme.setInterface(originalInterface)
             theme.setCatalog(originalCatalog)
             theme.setSystemDark(wasDark)
         }
@@ -44,6 +46,12 @@ final class SettingsSnapshotTests: XCTestCase {
                 try await Task.sleep(nanoseconds: 5_000_000)
                 controller.reload()
                 try render(window.contentView, output, "\(mode)-\(category.rawValue)")
+                if category == .interface {
+                    store.updateAppearance("interface-style") { $0.interfaceStyle = .glass }
+                    controller.reload()
+                    try render(window.contentView, output, "\(mode)-interface-glass")
+                    store.updateAppearance("interface-style") { $0.interfaceStyle = .classic }
+                }
             }
         }
         controller.select(.server)

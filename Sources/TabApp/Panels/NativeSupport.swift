@@ -139,6 +139,7 @@ public enum NativeStyle {
     /// The side panel card: 6% foreground over the background in dark
     /// themes, mostly white in light ones.
     public static func panel(_ theme: AppTheme) -> NSColor {
+        if theme.glassEnabled { return theme.bg }
         if theme.palette.isLight {
             return theme.bg.blended(withFraction: 0.7, of: .white) ?? theme.bg
         }

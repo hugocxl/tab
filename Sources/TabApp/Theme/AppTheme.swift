@@ -53,6 +53,20 @@ public final class AppTheme: ObservableObject {
     public private(set) var darkTheme: String
     public private(set) var lightTheme: String
 
+    @Published public private(set) var interface = Appearance()
+
+    public var glassEnabled: Bool { interface.interfaceStyle == .glass && !accessibility.reduceTransparency }
+    public var glassPanes: Bool { glassEnabled && interface.glassPanes }
+    public var paneBackground: NSColor { glassPanes ? .clear : card }
+    public var interfaceIsDark: Bool { interface.colorScheme == .auto ? systemIsDark : interface.colorScheme == .dark }
+
+    public func setInterface(_ appearance: Appearance) {
+        guard interface.colorScheme != appearance.colorScheme || interface.interfaceStyle != appearance.interfaceStyle ||
+              interface.glassPanes != appearance.glassPanes || interface.animationStyle != appearance.animationStyle else { return }
+        interface = appearance
+        apply()
+    }
+
     private var appearanceObservation: NSKeyValueObservation?
     private var accessibilityObserver: NSObjectProtocol?
 
@@ -140,13 +154,13 @@ public final class AppTheme: ObservableObject {
     }
 
     private func apply() {
-        let (scheme, palette) = Self.resolve(catalog: catalog, darkTheme: darkTheme, lightTheme: lightTheme, dark: systemIsDark)
+        let (scheme, palette) = Self.resolve(catalog: catalog, darkTheme: darkTheme, lightTheme: lightTheme, dark: interfaceIsDark)
         if scheme != self.scheme { self.scheme = scheme }
         if palette != self.palette { self.palette = palette }
     }
 
     /// The name of the theme in use.
-    public var currentThemeName: String { systemIsDark ? darkTheme : lightTheme }
+    public var currentThemeName: String { interfaceIsDark ? darkTheme : lightTheme }
 
     private static func currentSystemIsDark() -> Bool {
         let appearance = NSApp?.effectiveAppearance ?? NSAppearance.currentDrawing()
@@ -155,11 +169,11 @@ public final class AppTheme: ObservableObject {
 
     // MARK: Tokens
 
-    public var bg: NSColor { palette.bg.nsColor }
+    public var bg: NSColor { palette.bg.nsColor.withAlphaComponent(glassEnabled ? 0.12 : 1) }
     public var fg: NSColor { palette.fg.nsColor }
     public var fgMuted: NSColor { palette.fgMuted.nsColor }
     public var fgDim: NSColor { palette.fgDim.nsColor }
-    public var surface: NSColor { palette.surface.nsColor }
+    public var surface: NSColor { palette.surface.nsColor.withAlphaComponent(glassEnabled ? 0.28 : palette.surface.alpha) }
     public var border: NSColor { palette.border.nsColor }
     public var hover: NSColor { palette.hover.nsColor }
     public var accent: NSColor { palette.accent.nsColor }
@@ -180,19 +194,24 @@ public final class AppTheme: ObservableObject {
 
     /// Pane cards: lighter than the window in dark themes, and the theme's own
     /// background in light ones, where the window darkens instead.
-    public var card: NSColor { Self.card(palette).nsColor }
+    public var card: NSColor { Self.card(palette).nsColor.withAlphaComponent(glassPanes ? 0.12 : 1) }
     /// The window background behind the pane cards, shared by the sidebar.
-    public var chrome: NSColor { Self.chrome(palette).nsColor }
+    public var chrome: NSColor { Self.chrome(palette).nsColor.withAlphaComponent(glassEnabled ? 0.18 : 1) }
     /// Card borders: 95% border over the background (about `#282827`).
     public var cardBorder: NSColor { Self.cardBorder(palette).nsColor }
     /// Raised surfaces such as the Settings sidebar and popovers.
-    public var raised: NSColor { palette.raised.nsColor }
+    public var raised: NSColor { palette.raised.nsColor.withAlphaComponent(glassEnabled ? 0.25 : 1) }
     /// Surfaces floating over the window, such as the command palette: a
     /// faint tint of the background in light themes, raised in dark ones.
-    public var floating: NSColor { (Self.isLight(palette) ? Self.tint(palette) : palette.raised).nsColor }
+    public var floating: NSColor { (Self.isLight(palette) ? Self.tint(palette) : palette.raised).nsColor.withAlphaComponent(glassEnabled ? 0.3 : 1) }
+    /// A stable readability tint for the palette, independent of Interface style.
+    public var commandPaletteBackground: NSColor {
+        floating.withAlphaComponent(accessibility.reduceTransparency ? 1 : (isLight ? 0.78 : 0.72))
+    }
     /// Composer elevation brightens light themes while retaining the dark surface.
     var agentComposer: NSColor {
-        isLight ? ChromeColor(red: 1, green: 1, blue: 1).blended(over: palette.bg, amount: 0.65).nsColor : floating
+        let color = isLight ? ChromeColor(red: 1, green: 1, blue: 1).blended(over: palette.bg, amount: 0.65).nsColor : floating
+        return glassEnabled ? color.withAlphaComponent(0.3) : color
     }
     /// Whether the palette is a light one.
     public var isLight: Bool { Self.isLight(palette) }

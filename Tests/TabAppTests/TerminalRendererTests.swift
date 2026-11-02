@@ -18,6 +18,32 @@ import TabProtocol
 final class TerminalRendererTests: XCTestCase {
     private typealias F = TerminalFixtures
 
+    func testGlassClearsDefaultBackgroundButKeepsExplicitCellBackgrounds() throws {
+        let grid = F.grid([[F.run(" "), F.run(" ", bg: .rgb(200, 0, 0))]], cols: 2, cursor: Cursor(visible: false))
+        var renderState = state(grid)
+        let renderer = CoreTextRenderer()
+        let context = Self.context(renderState.layout)
+        func alpha(column: Int) throws -> UInt8 {
+            let rect = renderState.layout.cellRect(row: 0, column: column)
+            let x = Int(rect.midX * 2)
+            let y = context.height - 1 - Int(rect.midY * 2)
+            let data = try XCTUnwrap(context.data).assumingMemoryBound(to: UInt8.self)
+            return data[y * context.bytesPerRow + x * 4 + 3]
+        }
+        renderer.prepare(renderState)
+        renderer.draw(renderState, dirty: [renderState.layout.bounds], in: context)
+        XCTAssertEqual(try alpha(column: 0), 255)
+        renderState.palette.transparentBackground = true
+        renderer.prepare(renderState)
+        renderer.draw(renderState, dirty: [renderState.layout.bounds], in: context)
+        XCTAssertEqual(try alpha(column: 0), 0)
+        XCTAssertEqual(try alpha(column: 1), 255)
+        renderState.palette.transparentBackground = false
+        renderer.prepare(renderState)
+        renderer.draw(renderState, dirty: [renderState.layout.bounds], in: context)
+        XCTAssertEqual(try alpha(column: 0), 255)
+    }
+
     func testBackgroundRunsMergeByColorAndSkipTheDefault() {
         let palette = TerminalPalette()
         let red = Color.rgb(200, 0, 0)

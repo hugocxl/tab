@@ -234,7 +234,7 @@ final class AgentComposerSuggestionsView: NSView, NSTableViewDataSource, NSTable
         self.theme = theme
         glass.appearance = theme.nsAppearance
         // The sidebar's darker chrome keeps rows legible over the transcript.
-        fill.layer?.backgroundColor = theme.chrome.withAlphaComponent(0.92).cgColor
+        fill.layer?.backgroundColor = theme.chrome.withAlphaComponent(theme.glassEnabled ? 0.4 : 0.92).cgColor
         layer?.borderColor = theme.cardBorder.cgColor
         emptyLabel.textColor = theme.fgMuted
         emptyLabel.isHidden = !items.isEmpty

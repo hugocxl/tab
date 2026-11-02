@@ -182,7 +182,7 @@ public final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation
     required init?(coder: NSCoder) { nil }
 
     public override var isFlipped: Bool { true }
-    public override var isOpaque: Bool { true }
+    public override var isOpaque: Bool { !palette.transparentBackground }
     public override var acceptsFirstResponder: Bool { true }
     public override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 

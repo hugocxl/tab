@@ -32,8 +32,24 @@ struct SettingsRootView: View {
             placement: .sidebar,
             prompt: "Search Settings"
         )
+        .background { SettingsGlassBackground(theme: model.store.theme).ignoresSafeArea() }
         .environment(\.settingsTheme, theme)
         .foregroundStyle(theme.text)
         .tint(theme.accent)
+    }
+}
+
+/// Settings uses the same desktop-sampling native material as the workspace.
+private struct SettingsGlassBackground: NSViewRepresentable {
+    @ObservedObject var theme: AppTheme
+
+    func makeNSView(context: Context) -> GlassView {
+        GlassView(style: .workspace, behindWindow: true)
+    }
+
+    func updateNSView(_ view: GlassView, context: Context) {
+        view.isHidden = !theme.glassEnabled
+        view.appearance = theme.nsAppearance
+        view.tint = theme.chrome.withAlphaComponent(theme.isLight ? 0.35 : 0.65)
     }
 }

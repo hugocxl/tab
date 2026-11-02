@@ -16,6 +16,8 @@ final class SplitContainerView: ThemedView {
     private var resizing: (path: [Branch], ratio: Double)?
     private var trackingAreasByDivider: [NSTrackingArea] = []
     private var shownTab: TabId?
+    private var animateNextLayout = false
+    private var hasLaidOut = false
 
     /// The sidebar toggle, shown in the top-left card while the sidebar is
     /// collapsed.
@@ -47,8 +49,10 @@ final class SplitContainerView: ThemedView {
     /// Matches the cards to the model's current tab.
     func reload() {
         let tab = self.tab
+        animateNextLayout = hasLaidOut
         let visible = tab?.visiblePanes ?? []
         for (id, card) in cards where !visible.contains(id) {
+            InterfaceMotion.dismiss(card, style: model.appearance.animationStyle)
             card.removeFromSuperview()
             cards[id] = nil
         }
@@ -72,6 +76,12 @@ final class SplitContainerView: ThemedView {
         needsLayout = true
     }
 
+    /// The workspace animates this whole surface when a sidebar changes.
+    func layoutForWorkspaceTransition() {
+        animateNextLayout = false
+        layoutSubtreeIfNeeded()
+    }
+
     /// Redraws headers whose titles or activity changed.
     func refreshHeaders() {
         for card in cards.values { card.refreshHeader() }
@@ -79,6 +89,17 @@ final class SplitContainerView: ThemedView {
 
     override func layout() {
         super.layout()
+        let shouldAnimate = animateNextLayout && window != nil && InterfaceMotion.duration(model.appearance.animationStyle) > 0
+        let previous = shouldAnimate ? cards.mapValues { InterfaceMotion.frame($0) } : [:]
+        defer {
+            if shouldAnimate {
+                for (id, card) in cards {
+                    InterfaceMotion.animate(card, from: previous[id], style: model.appearance.animationStyle)
+                }
+            }
+            animateNextLayout = false
+            hasLaidOut = true
+        }
         emptyView.frame = content
         defer { placeSidebarToggles() }
         guard let tab else {
@@ -269,6 +290,7 @@ final class DropPreviewView: ThemedView {
 /// window glyph, "Nothing open in <project>", a hint and a button per pane
 /// kind; or that the folder is missing.
 final class EmptyProjectView: ThemedView {
+    private let glass = GlassView(style: .pane)
     /// Adds a pane of the kind chosen.
     var onNewPane: ((PaneKind) -> Void)?
     /// The sidebar toggle at the header position while the sidebar is collapsed.
@@ -297,6 +319,7 @@ final class EmptyProjectView: ThemedView {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
+        addSubview(glass)
         wantsLayer = true
         layer?.cornerRadius = Metrics.cardRadius
         layer?.borderWidth = Metrics.border
@@ -341,7 +364,10 @@ final class EmptyProjectView: ThemedView {
     override var wantsUpdateLayer: Bool { true }
 
     override func updateLayer() {
-        layer?.backgroundColor = theme.card.cgColor
+        glass.isHidden = !theme.glassPanes
+        glass.appearance = theme.nsAppearance
+        glass.tint = theme.card.withAlphaComponent(theme.isLight ? 0.25 : 0.5)
+        layer?.backgroundColor = theme.paneBackground.cgColor
         layer?.borderColor = theme.cardBorder.cgColor
     }
 
@@ -354,6 +380,7 @@ final class EmptyProjectView: ThemedView {
 
     override func layout() {
         super.layout()
+        glass.frame = bounds
         if let leadingView {
             let size = leadingView.intrinsicContentSize
             leadingView.frame = CGRect(x: Metrics.gutter, y: ((Metrics.headerHeight - size.height) / 2).rounded(), width: size.width, height: size.height)

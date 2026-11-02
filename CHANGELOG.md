@@ -3,6 +3,21 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.41.0 - 2026-11-02
+
+### Added
+
+- Interface settings offer automatic, light or dark appearance, native glass,
+  glass pane backgrounds, sidebar gestures and width preservation.
+- Snappy, Natural and Off animation styles control pane and sidebar transitions.
+
+### Changed
+
+- Glass brings theme-tinted translucent backgrounds to the workspace, panes,
+  side panels and Settings while respecting Reduce Transparency.
+- The command palette and its Actions menu always use denser native glass for
+  clearer text, independently of the interface style.
+
 ## 0.40.0 - 2026-11-02
 
 ### Removed

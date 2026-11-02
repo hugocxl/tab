@@ -35,7 +35,7 @@ open class ThemedView: NSView {
         }
         // @Published emits before storing the new palette. Renderers read the
         // theme's color properties, so deliver after that mutation has completed.
-        paletteObservation = theme.$palette.dropFirst().removeDuplicates()
+        paletteObservation = Publishers.Merge3(theme.$palette.dropFirst().map { _ in () }, theme.$interface.dropFirst().map { _ in () }, theme.$accessibility.dropFirst().map { _ in () })
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.themeDidChange() }
         themeDidChange()
@@ -59,7 +59,10 @@ final class PaletteObserver {
             observation = nil
             return
         }
-        observation = AppTheme.shared.$palette.dropFirst().removeDuplicates()
+        let theme = AppTheme.shared
+        observation = Publishers.Merge3(theme.$palette.dropFirst().map { _ in () },
+                                        theme.$interface.dropFirst().map { _ in () },
+                                        theme.$accessibility.dropFirst().map { _ in () })
             .receive(on: DispatchQueue.main)
             .sink { _ in update() }
         update()

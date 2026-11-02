@@ -11,8 +11,8 @@ final class PalettePanelView: ThemedView {
     private let fade = PaletteFadeView()
     private let messageLabel = makeLabel("", font: AppFont.system(12))
     /// A tight shadow at the card's edge, under the wide one on `self`.
-    private let edge = ThemedBackground(color: { $0.floating })
-    private let card = ThemedBackground(color: { $0.floating })
+    private let edge = ThemedBackground(color: { _ in .clear })
+    private let card = PaletteGlassBackground(style: .commandPalette)
 
     var message: (String, isError: Bool)? {
         didSet {
@@ -39,7 +39,7 @@ final class PalettePanelView: ThemedView {
         edge.layer?.cornerCurve = .continuous
         edge.shadow = Self.shadow(alpha: 0.14, blur: 4, y: 1)
         addSubview(edge)
-        card.cornerRadius = PaletteLayout.radius
+        card.layer?.cornerRadius = PaletteLayout.radius
         card.layer?.masksToBounds = true
         card.layer?.borderWidth = 1
         card.layer?.cornerCurve = .continuous
@@ -70,6 +70,7 @@ final class PalettePanelView: ThemedView {
     override func layout() {
         super.layout()
         edge.frame = bounds
+        edge.layer?.shadowPath = CGPath(roundedRect: bounds, cornerWidth: PaletteLayout.radius, cornerHeight: PaletteLayout.radius, transform: nil)
         card.frame = bounds
         let width = bounds.width
         header.frame = NSRect(x: 0, y: 0, width: width, height: PaletteLayout.header)
@@ -84,6 +85,37 @@ final class PalettePanelView: ThemedView {
             let capsule = footer.convert(footer.capsule.frame, to: self)
             actionsPanel.frame = NSRect(x: capsule.maxX - size.width, y: capsule.minY - size.height - 6, width: size.width, height: size.height)
         }
+    }
+}
+
+/// Readable native glass in both Classic and Glass interface modes.
+private final class PaletteGlassBackground: ThemedView {
+    private let glass: GlassView
+    private let fill = ThemedBackground(color: { $0.commandPaletteBackground })
+
+    init(style: GlassView.Style) {
+        glass = GlassView(style: style)
+        super.init(frame: .zero)
+        layer?.cornerRadius = style.cornerRadius
+        layer?.cornerCurve = .continuous
+        layer?.masksToBounds = true
+        addSubview(glass)
+        addSubview(fill)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func themeDidChange() {
+        glass.appearance = theme.nsAppearance
+        glass.tint = theme.chrome.withAlphaComponent(0.15)
+        glass.isHidden = theme.accessibility.reduceTransparency
+        fill.theme = theme
+    }
+
+    override func layout() {
+        super.layout()
+        glass.frame = bounds
+        fill.frame = bounds
     }
 }
 
@@ -444,6 +476,8 @@ final class HoverTable: NSTableView {
 
 /// The ⌘K panel: the selected row's actions.
 final class ActionsPanelView: ThemedView {
+    private let background = PaletteGlassBackground(style: .paletteActions)
+    private let selection = ThemedBackground(color: { $0.fg(alpha: 0.08) })
     private let state: ActionsState
     private var labels: [NSTextField] = []
     weak var controller: PaletteController?
@@ -456,6 +490,9 @@ final class ActionsPanelView: ThemedView {
         layer?.cornerCurve = .continuous
         layer?.borderWidth = 1
         shadow = PalettePanelView.shadow(alpha: 0.16, blur: 20, y: 6)
+        addSubview(background)
+        selection.cornerRadius = 8
+        addSubview(selection)
         for (index, action) in state.actions.enumerated() {
             let title = state.armed && index == state.selected ? "Press Return to \(action.title.lowercased())" : action.title
             let label = makeLabel(title, font: AppFont.system(13))
@@ -472,20 +509,11 @@ final class ActionsPanelView: ThemedView {
     override var wantsUpdateLayer: Bool { false }
 
     override func themeDidChange() {
-        layer?.backgroundColor = theme.floating.cgColor
         layer?.borderColor = theme.fg(alpha: 0.10).cgColor
         for (index, label) in labels.enumerated() {
             label.textColor = state.actions[index].destructive ? theme.danger : theme.fg
         }
         needsDisplay = true
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        layer?.backgroundColor = theme.floating.cgColor
-        layer?.borderColor = theme.fg(alpha: 0.10).cgColor
-        let row = rowFrame(state.selected)
-        theme.fg(alpha: 0.08).setFill()
-        NSBezierPath(roundedRect: row, xRadius: 8, yRadius: 8).fill()
     }
 
     private func rowFrame(_ index: Int) -> NSRect {
@@ -494,6 +522,8 @@ final class ActionsPanelView: ThemedView {
 
     override func layout() {
         super.layout()
+        background.frame = bounds
+        selection.frame = rowFrame(state.selected)
         for (index, label) in labels.enumerated() {
             let row = rowFrame(index)
             let height = label.intrinsicContentSize.height

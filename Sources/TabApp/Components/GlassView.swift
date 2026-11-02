@@ -13,14 +13,27 @@ public final class GlassView: NSView {
         public var cornerRadius: CGFloat
         /// The surface's opacity; below 1 lets the host's fill show through.
         public var opacity: CGFloat
+        /// Regular glass diffuses busy backgrounds more strongly than clear glass.
+        public var regular: Bool
         /// The `NSVisualEffectView` material on releases without Liquid Glass.
         public var fallbackMaterial: NSVisualEffectView.Material
 
-        public init(cornerRadius: CGFloat, opacity: CGFloat = 1, fallbackMaterial: NSVisualEffectView.Material = .sidebar) {
+        public init(cornerRadius: CGFloat, opacity: CGFloat = 1, fallbackMaterial: NSVisualEffectView.Material = .sidebar, regular: Bool = false) {
             self.cornerRadius = cornerRadius
             self.opacity = opacity
+            self.regular = regular
             self.fallbackMaterial = fallbackMaterial
         }
+
+        /// Full-window glass with a desktop-sampling backing material.
+        public static let workspace = Style(cornerRadius: 12)
+        /// A pane's continuous glass surface, underneath its header and content.
+        public static let pane = Style(cornerRadius: Metrics.cardRadius)
+
+        /// Always-on, diffused material for the command palette.
+        public static let commandPalette = Style(cornerRadius: PaletteLayout.radius, fallbackMaterial: .popover, regular: true)
+        /// The command palette's nested actions menu.
+        public static let paletteActions = Style(cornerRadius: 14, fallbackMaterial: .popover, regular: true)
 
         /// The selected sidebar card: a faint clear glass over the card fill.
         public static let card = Style(cornerRadius: 8, opacity: 0.4)
@@ -33,20 +46,26 @@ public final class GlassView: NSView {
     }
 
     private let material: NSView
+    private var backdrop: NSVisualEffectView?
+    private var fallbackTint: NSView?
 
     /// A color the glass takes on, such as a status color; `nil` keeps it
-    /// clear. Before Liquid Glass the host's fill carries the tint instead.
+    /// clear. On older macOS versions a translucent overlay carries the tint.
     public var tint: NSColor? {
         didSet {
-            guard tint != oldValue, #available(macOS 26, *), let glass = material as? NSGlassEffectView else { return }
-            glass.tintColor = tint
+            guard tint != oldValue else { return }
+            if #available(macOS 26, *), let glass = material as? NSGlassEffectView {
+                glass.tintColor = tint
+            } else {
+                fallbackTint?.layer?.backgroundColor = tint?.cgColor
+            }
         }
     }
 
-    public init(style: Style) {
+    public init(style: Style, behindWindow: Bool = false) {
         if #available(macOS 26, *) {
             let glass = NSGlassEffectView()
-            glass.style = .clear
+            glass.style = style.regular ? .regular : .clear
             glass.cornerRadius = style.cornerRadius
             material = glass
         } else {
@@ -62,7 +81,23 @@ public final class GlassView: NSView {
         }
         super.init(frame: .zero)
         alphaValue = style.opacity
+        if behindWindow {
+            let backing = NSVisualEffectView()
+            backing.material = .underWindowBackground
+            backing.blendingMode = .behindWindow
+            backing.state = .active
+            backdrop = backing
+            addSubview(backing)
+        }
         addSubview(material)
+        if #unavailable(macOS 26) {
+            let overlay = NSView()
+            overlay.wantsLayer = true
+            overlay.layer?.cornerRadius = style.cornerRadius
+            overlay.layer?.cornerCurve = .continuous
+            fallbackTint = overlay
+            addSubview(overlay)
+        }
         setAccessibilityElement(false)
     }
 
@@ -72,6 +107,8 @@ public final class GlassView: NSView {
 
     public override func layout() {
         super.layout()
+        fallbackTint?.frame = bounds
+        backdrop?.frame = bounds
         material.frame = bounds
     }
 }

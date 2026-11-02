@@ -616,7 +616,7 @@ final class LineNumberRuler: NSRulerView {
 
     override func drawHashMarksAndLabels(in rect: NSRect) {
         guard let textView, let layout = textView.layoutManager, let container = textView.textContainer else { return }
-        theme.card.setFill()
+        theme.paneBackground.setFill()
         bounds.fill()
         let visible = textView.visibleRect
         let glyphs = layout.glyphRange(forBoundingRect: visible, in: container)

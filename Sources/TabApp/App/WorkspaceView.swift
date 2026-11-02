@@ -11,6 +11,7 @@ final class WorkspaceView: ThemedView {
     let splits: SplitContainerView
     private let rightSidebar = RightSidebarView()
     private let banner = BannerView()
+    private let glass = GlassView(style: .workspace, behindWindow: true)
     private let updateChip = UpdateChipView()
     private var shownPanel: RightPanelKind?
     private var shownPanelProject: ProjectId?
@@ -18,6 +19,13 @@ final class WorkspaceView: ThemedView {
     private var livePanelWidth: CGFloat?
     private var subscription: AnyCancellable?
     private var lastPanelLayout: (RightPanelKind?, CGFloat)?
+    private var previousSidebarExpanded: Bool?
+    private var previousPanel: RightPanelKind?
+    private var resizeStartFrame: NSRect?
+    private var resizeStartSidebarWidth: CGFloat = 0
+    private var gestureMonitor: Any?
+    private var swipeDistance: CGFloat = 0
+    private var swipeHandled = false
     private let sidebarToggle = SidebarToggleSlot()
     private let rightSidebarToggle = HeaderButton(.panelRight, label: "Show Sidebar")
 
@@ -26,6 +34,7 @@ final class WorkspaceView: ThemedView {
         self.sidebar = sidebar
         splits = SplitContainerView(model: model)
         super.init(frame: .zero)
+        addSubview(glass)
         addSubview(sidebar.view)
         addSubview(splits)
         addSubview(rightSidebar)
@@ -38,8 +47,23 @@ final class WorkspaceView: ThemedView {
         }
         updateChip.onDismiss = { [weak model] in model?.updater.dismissChip() }
         sidebar.onResize = { [weak self] width in
-            self?.liveSidebarWidth = width
-            self?.needsLayout = true
+            guard let self else { return }
+            self.liveSidebarWidth = width
+            if let width, self.model.appearance.preservePaneWidth, let window = self.window,
+               !window.styleMask.contains(.fullScreen) {
+                if self.resizeStartFrame == nil {
+                    self.resizeStartFrame = window.frame
+                    self.resizeStartSidebarWidth = self.model.sidebarWidth
+                }
+                if let original = self.resizeStartFrame {
+                    var frame = original
+                    frame.size.width += width - self.resizeStartSidebarWidth
+                    if let screen = window.screen { frame.size.width = min(frame.width, screen.visibleFrame.maxX - frame.minX) }
+                    window.setFrame(frame, display: true)
+                }
+            }
+            if width == nil { self.resizeStartFrame = nil }
+            self.needsLayout = true
         }
         rightSidebar.onResize = { [weak self] width in
             guard let self else { return }
@@ -63,14 +87,43 @@ final class WorkspaceView: ThemedView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let gestureMonitor { NSEvent.removeMonitor(gestureMonitor); self.gestureMonitor = nil }
+        guard window != nil else { return }
+        gestureMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+            guard let self, event.window === self.window,
+                  self.model.appearance.sidebarGesture == .swipe,
+                  !event.modifierFlags.contains(.option), event.hasPreciseScrollingDeltas,
+                  event.momentumPhase.isEmpty else { return event }
+            if event.phase.contains(.began) { self.swipeDistance = 0; self.swipeHandled = false }
+            guard abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY) else { return event }
+            self.swipeDistance += event.scrollingDeltaX
+            if !self.swipeHandled, abs(self.swipeDistance) > 65 {
+                self.swipeHandled = true
+                let expanded = self.swipeDistance > 0
+                if self.model.appearance.sidebarExpanded != expanded { self.model.toggleSidebar() }
+            }
+            return nil
+        }
+    }
+
     override var wantsUpdateLayer: Bool { true }
     override var mouseDownCanMoveWindow: Bool { true }
 
     override func updateLayer() {
-        layer?.backgroundColor = theme.chrome.cgColor
+        glass.isHidden = !theme.glassEnabled
+        glass.appearance = theme.nsAppearance
+        glass.tint = theme.chrome.withAlphaComponent(theme.isLight ? 0.35 : 0.65)
+        layer?.backgroundColor = (theme.glassEnabled ? NSColor.clear : theme.chrome).cgColor
+        window?.isOpaque = !theme.glassEnabled
+        window?.backgroundColor = theme.glassEnabled ? .clear : theme.chrome
     }
 
     private func modelChanged(_ changes: Set<ModelChange>) {
+        if changes.contains(.settings), InterfaceMotion.duration(model.appearance.animationStyle) == 0 {
+            InterfaceMotion.cancel(in: self)
+        }
         if changes.contains(.state) || changes.contains(.settings) {
             splits.reload()
         }
@@ -87,7 +140,10 @@ final class WorkspaceView: ThemedView {
     private func syncPanel() {
         let kind = model.rightPanel
         if kind != shownPanel {
-            if let old = shownPanel { model.rightPanelContent(old)?.didHide() }
+            if let old = shownPanel {
+                if kind == nil { InterfaceMotion.dismiss(rightSidebar, style: model.appearance.animationStyle, slide: 24) }
+                model.rightPanelContent(old)?.didHide()
+            }
             // Sized before the content arrives: constraints solved at zero
             // width leave controls such as checkboxes collapsed.
             if let kind { rightSidebar.frame = rightSidebarFrame(kind) }
@@ -131,6 +187,25 @@ final class WorkspaceView: ThemedView {
 
     override func layout() {
         super.layout()
+        glass.frame = bounds
+        let oldSplitFrame = InterfaceMotion.frame(splits)
+        let oldSidebarFrame = InterfaceMotion.frame(sidebar.view)
+        let oldPanelFrame = InterfaceMotion.frame(rightSidebar)
+        let changed = previousSidebarExpanded != nil &&
+            (previousSidebarExpanded != model.appearance.sidebarExpanded || previousPanel != shownPanel)
+        let style = model.appearance.animationStyle
+        defer {
+            if changed {
+                splits.layoutForWorkspaceTransition()
+                InterfaceMotion.animate(splits, from: oldSplitFrame, style: style)
+                if model.appearance.sidebarExpanded {
+                    InterfaceMotion.animate(sidebar.view, from: previousSidebarExpanded == true ? oldSidebarFrame : nil, style: style)
+                }
+                if shownPanel != nil { InterfaceMotion.animate(rightSidebar, from: previousPanel == nil ? nil : oldPanelFrame, style: style) }
+            }
+            previousSidebarExpanded = model.appearance.sidebarExpanded
+            previousPanel = shownPanel
+        }
         let sidebarWidth = self.sidebarWidth
         let expanded = model.appearance.sidebarExpanded
         sidebar.view.isHidden = !expanded

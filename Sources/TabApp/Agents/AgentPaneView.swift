@@ -542,7 +542,7 @@ final class AgentPaneView: ThemedView {
     override var wantsUpdateLayer: Bool { true }
 
     override func updateLayer() {
-        layer?.backgroundColor = theme.card.cgColor
+        layer?.backgroundColor = theme.paneBackground.cgColor
     }
 
     override func themeDidChange() {

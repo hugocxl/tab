@@ -74,8 +74,32 @@ extension SettingsModel {
             b.row(id, b.popUp(id, items, selected: current) { [store] in store.setTheme(dark: dark, $0) })
         }
         for problem in store.theme.catalog.errors { b.note("dark-theme", problem, error: true) }
+    }
+
+    func buildInterface(_ b: SettingsPageBuilder) {
+        let appearance = store.settings.appearance
+        b.row("color-scheme", b.segmented("color-scheme", ["Auto", "Light", "Dark"], selected: InterfaceColorScheme.allCases.firstIndex(of: appearance.colorScheme) ?? 0) { [store] index in
+            store.updateAppearance("color-scheme") { $0.colorScheme = InterfaceColorScheme.allCases[index] }
+        })
+        b.row("interface-style", b.segmented("interface-style", ["Classic", "Glass"], selected: appearance.interfaceStyle == .glass ? 1 : 0) { [store] index in
+            store.updateAppearance("interface-style") { $0.interfaceStyle = index == 1 ? .glass : .classic }
+        })
+        do {
+            b.row("glass-panes", b.toggle("glass-panes", appearance.glassPanes, enabled: appearance.interfaceStyle == .glass) { [store] value in
+                store.updateAppearance("glass-panes") { $0.glassPanes = value }
+            })
+        }
         b.row("sidebar", b.toggle("sidebar", appearance.sidebarExpanded) { [store] value in
             store.updateAppearance("sidebar") { $0.sidebarExpanded = value }
+        })
+        b.row("preserve-pane-width", b.toggle("preserve-pane-width", appearance.preservePaneWidth) { [store] value in
+            store.updateAppearance("preserve-pane-width") { $0.preservePaneWidth = value }
+        })
+        b.row("sidebar-gesture", b.popUp("sidebar-gesture", [Choice(id: "off", title: "Off"), Choice(id: "swipe", title: "Swipe")], selected: appearance.sidebarGesture.rawValue) { [store] value in
+            store.updateAppearance("sidebar-gesture") { $0.sidebarGesture = SidebarGesture(rawValue: value) ?? .off }
+        })
+        b.row("animation-style", b.segmented("animation-style", ["Snappy", "Natural", "Off"], selected: InterfaceAnimation.allCases.firstIndex(of: appearance.animationStyle) ?? 1) { [store] index in
+            store.updateAppearance("animation-style") { $0.animationStyle = InterfaceAnimation.allCases[index] }
         })
     }
 }

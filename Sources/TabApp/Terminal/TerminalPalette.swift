@@ -6,6 +6,7 @@ import TabProtocol
 /// The colors a terminal draws with: the theme's scheme with the terminal
 /// settings' color and cursor choices, resolved to `0xRRGGBB` values.
 public struct TerminalPalette: Hashable, Sendable {
+    public var transparentBackground = false
     public var background: UInt32
     public var foreground: UInt32
     /// The cursor color when no cell-relative cursor color is set.
