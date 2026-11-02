@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import TabCore
 import TabProtocol
 import XCTest
@@ -45,6 +46,42 @@ final class SettingsSnapshotTests: XCTestCase {
                 try render(window.contentView, output, "\(mode)-\(category.rawValue)")
             }
         }
+        controller.select(.server)
+        for (name, state, version, restarting) in [
+            ("older-version", ServerConnectionState.running, Optional("0.1.0"), false),
+            ("unknown-version", .running, nil, false),
+            ("connecting", .connecting, nil, false),
+            ("stopped", .stopped, nil, false),
+            ("restarting", .connecting, nil, true),
+        ] {
+            host.serverState = state
+            host.serverVersion = version
+            host.serverRestarting = restarting
+            store.updateServerState(state)
+            controller.reload()
+            try render(window.contentView, output, "server-\(name)")
+        }
+        host.serverState = .running
+        host.serverVersion = "0.1.0"
+        host.serverRestarting = false
+        store.updateServerState(.running)
+        controller.reload()
+        let header = NSHostingView(rootView: ServerSettingsHeader(model: controller.model,
+            build: try XCTUnwrap(controller.model.lastBuild), appVersion: "1.0.0")
+            .padding(20)
+            .environment(\.colorScheme, .light)
+            .background(SwiftUI.Color.white))
+        let headerWindow = NSWindow(contentRect: NSRect(x: -20000, y: -20000, width: 650, height: 220),
+                                    styleMask: .borderless, backing: .buffered, defer: false)
+        headerWindow.isReleasedWhenClosed = false
+        headerWindow.contentView = header
+        headerWindow.displayIfNeeded()
+        try render(header, output, "server-outdated")
+        headerWindow.close()
+        host.serverState = .running
+        host.serverVersion = Release.version
+        host.serverRestarting = false
+        store.updateServerState(.running)
         theme.setSystemDark(true)
         controller.select(.terminal)
         controller.model.bindingDraft = BindingDraft(chord: try KeyChord("cmd-ctrl-f9"), action: "text", parameter: "\\e[A")

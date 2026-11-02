@@ -39,6 +39,11 @@ public enum UpdateNotice: Equatable, Sendable {
 /// The window's update chip: one line about where updating is, and at most
 /// one button. Kept free of side effects so it can be tested.
 public struct UpdateChip: Equatable, Sendable {
+    /// Shared by the update chip and Server settings.
+    static func serverUpdateMessage(version: String) -> String {
+        "The server is still running \(Release.appName) \(version). Restart it to finish updating."
+    }
+
     public enum Tone: Equatable, Sendable { case neutral, info, success, warning, danger }
 
     public enum Icon: Equatable, Sendable {
@@ -170,7 +175,7 @@ public struct UpdateChip: Equatable, Sendable {
 
         if let outdatedServer {
             return UpdateChip(tone: .warning, icon: .symbol("exclamationmark.circle.fill"),
-                              message: "The server is still running \(app) \(outdatedServer). Restart it to finish updating.",
+                              message: serverUpdateMessage(version: outdatedServer),
                               button: Button(title: "Restart", action: .restartServer), dismissal: .server(outdatedServer))
         }
 

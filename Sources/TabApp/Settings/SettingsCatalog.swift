@@ -81,6 +81,8 @@ public enum SettingsCatalog {
         SettingItem("dark-theme", "Dark theme", "Colors for the interface and terminals when macOS uses dark appearance.", .appearance, "Themes"),
         SettingItem("sidebar", "Expand sidebar", "Show project names alongside their icons in the workspace sidebar.", .appearance, "Interface"),
         // Terminal
+        SettingItem("default-shell", "Default shell (executable path)", "Shell for new sessions. Leave empty to use $SHELL, falling back to /bin/zsh.", .terminal, "Sessions"),
+        SettingItem("history-budget", "History budget per session (MiB)", "Retained terminal history, from 0 to 65536 MiB. Saved-history changes take effect at the next server start.", .terminal, "Sessions"),
         SettingItem("font-family", "Font family", "The typeface used to render text in every terminal pane.", .terminal, "Font"),
         SettingItem("font-fallbacks", "Fallback fonts", "Fonts used, in order, for characters the main font lacks.", .terminal, "Font"),
         SettingItem("font-size", "Font size (points)", "Default terminal text size. Individual panes can still be zoomed independently.", .terminal, "Font"),
@@ -126,7 +128,7 @@ public enum SettingsCatalog {
         SettingItem("terminal-keybindings", "Key bindings", "Keys the terminal handles while it is focused. They take precedence over app shortcuts.", .terminal, "Key bindings"),
         SettingItem("keybind-clear-defaults", "Disable built-in bindings", "Turn off Tab's built-in terminal keys, such as Command-K to clear the screen, and keep only yours.", .terminal, "Key bindings"),
         SettingItem("terminal-import-notes", "Imported settings", "Notes about terminal settings that could not be applied.", .terminal, "Migration"),
-        SettingItem("terminal-reset", "Reset terminal settings", "Return every setting on this page, including key bindings, to its default.", .terminal, "Reset"),
+        SettingItem("terminal-reset", "Reset terminal settings", "Return terminal appearance, input, and key bindings to their defaults.", .terminal, "Reset"),
         // Browser
         SettingItem("browser-enabled", "Enable built-in browser", "Open web pages in browser tabs and let tab browser commands drive them.", .browser, "General"),
         SettingItem("browser-terminal-links", "Open terminal links in the browser", "Command-click a web link in a terminal to open it in a browser tab instead of your system browser.", .browser, "General"),
@@ -135,10 +137,7 @@ public enum SettingsCatalog {
         SettingItem("browser-profiles", "Profiles", "Profiles keep cookies and logins apart. New browser panes use the default profile.", .browser, "Profiles"),
         SettingItem("browser-import", "Import from another browser", "Bring history, bookmarks, or sign-ins from Safari, Chrome or Firefox on this Mac.", .browser, "Profiles"),
         // Server
-        SettingItem("server", "Current device", "Manage the local server that keeps your terminal sessions running.", .server, "Connection"),
-        SettingItem("default-shell", "Default shell (executable path)", "Shell for new sessions. Leave empty to use $SHELL, falling back to /bin/zsh.", .server, "Sessions"),
-        SettingItem("history-budget", "History budget per session (MiB)", "Retained terminal history, from 0 to 65536 MiB. Saved-history changes take effect at the next server start.", .server, "Sessions"),
-        SettingItem("shell-integration", "Shell integration", "Enable working-directory tracking and prompt navigation in new sessions.", .server, "Sessions"),
+        SettingItem("server", "Local server", "View the version and connection status of the local server that keeps your terminal sessions running.", .server, "Connection"),
         SettingItem("stop-server", "Stop Server", "End all sessions on this device and stop the server. A confirmation is required.", .server, "Server control"),
         SettingItem("restart-server", "Restart Server", "End all sessions and start the server again. Saved terminal records are preserved.", .server, "Server control"),
         // Mobile

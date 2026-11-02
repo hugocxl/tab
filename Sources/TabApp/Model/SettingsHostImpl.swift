@@ -52,6 +52,12 @@ public final class SettingsHostImpl: SettingsHost {
         }
     }
 
+    public var serverVersion: String? { model.localServerBuild?.version }
+
+    public var canRestartServer: Bool { model.updater.canRestartServer }
+    public var serverRestarting: Bool { model.updater.status == .restartingServer }
+    public var serverRestartFailure: String? { model.updater.serverRestartFailure }
+
     public func connectServer() {
         model.connection(.local)?.retryNow()
     }
@@ -63,7 +69,11 @@ public final class SettingsHostImpl: SettingsHost {
         _ = try await local().stopServer(force: true)
     }
 
-    public func restartServer() async throws { try await local().restartServer() }
+    public func restartServer() async throws {
+        _ = try local()
+        guard canRestartServer else { throw ModelError("Wait for the current update to finish, then restart the server.") }
+        model.updater.handle(.endTerminalsAndRestartServer)
+    }
 
     // MARK: Mobile
 

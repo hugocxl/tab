@@ -63,6 +63,11 @@ public protocol SettingsHost: AnyObject {
     /// The local server's state; the host calls
     /// `SettingsStore.updateServerState` when it changes.
     var serverState: ServerConnectionState { get }
+    /// The connected server’s reported version, absent while disconnected.
+    var serverVersion: String? { get }
+    var serverRestarting: Bool { get }
+    var canRestartServer: Bool { get }
+    var serverRestartFailure: String? { get }
     /// Starts the local server or reconnects to it.
     func connectServer()
     func readServerSettings() async throws -> ServerSettingsDoc
@@ -102,11 +107,21 @@ public protocol SettingsHost: AnyObject {
     func backupState() throws -> Data
 }
 
+public extension SettingsHost {
+    var serverVersion: String? { nil }
+    var serverRestarting: Bool { false }
+    var canRestartServer: Bool { true }
+    var serverRestartFailure: String? { nil }
+}
+
 /// A host with no app behind it: a running server with default settings,
 /// nothing paired, one browser profile. For tests and previews.
 @MainActor
 public final class PreviewSettingsHost: SettingsHost {
     public var serverState: ServerConnectionState = .running
+    public var serverRestarting = false
+    public var serverRestartFailure: String?
+    public var serverVersion: String? = Release.version
     public var serverSettings = ServerSettingsDoc()
     public var remoteAccess = RemoteAccessState(revision: 0, settings: RemoteAccessSettings(), status: .disabled)
     public var profiles = [BrowserProfileSummary(id: "", name: "Default")]

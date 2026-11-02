@@ -3,6 +3,15 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.38.0 - 2026-11-02
+
+### Changed
+
+- Server settings show the running version and offer a restart to finish updating,
+  with status messages consistent with automatic updates.
+- Terminal session settings now live under Terminal, with shell integration
+  enabled by default and its troubleshooting override kept out of Settings.
+
 ## 0.37.0 - 2026-11-02
 
 ### Changed

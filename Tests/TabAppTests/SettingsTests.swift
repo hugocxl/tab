@@ -25,6 +25,39 @@ final class SettingsTests: XCTestCase {
         SettingsStore(dirs: dirs, host: host, theme: AppTheme(catalog: ThemeCatalog(entries: []), systemIsDark: true))
     }
 
+    func testSessionsMoveToTerminalAndKeepServerPersistence() async throws {
+        let store = makeStore()
+        let page = SettingsModel(store: store)
+        page.select(.terminal)
+        try await Task.sleep(nanoseconds: 50_000_000)
+        page.reload()
+        XCTAssertTrue(page.lastBuild?.rowIds.contains("default-shell") == true)
+        XCTAssertTrue(page.lastBuild?.rowIds.contains("history-budget") == true)
+        XCTAssertNil(SettingsCatalog.item("shell-integration"))
+        store.setServer("default-shell", "/bin/bash")
+        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertEqual(host.serverSettings.defaultShell?.rawValue, "/bin/bash")
+        page.select(.server)
+        XCTAssertFalse(page.lastBuild?.rowIds.contains("default-shell") == true)
+        XCTAssertFalse(page.lastBuild?.rowIds.contains("history-budget") == true)
+        page.search("history budget")
+        XCTAssertEqual(page.lastBuild?.groups.first?.category, .terminal)
+    }
+
+    func testServerHeaderUsesConnectedVersionAndRestartState() {
+        let store = makeStore()
+        host.serverVersion = "0.1.0"
+        XCTAssertEqual(store.serverVersion, "0.1.0")
+        host.serverRestarting = true
+        XCTAssertTrue(store.serverBusy)
+        host.serverRestarting = false
+        host.serverVersion = "0.2.0"
+        store.updateServerState(.running)
+        XCTAssertEqual(store.serverVersion, "0.2.0")
+        store.updateServerState(.stopped)
+        XCTAssertNil(store.serverVersion)
+    }
+
     // MARK: Search
 
     func testSearchFindsEverySettingByItsLabel() {

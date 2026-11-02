@@ -70,6 +70,17 @@ extension SettingsModel {
         let options = terminal.options
         let set: (String) -> (String) -> Void = { [store] id in { store.setTerminal(id, $0) } }
 
+        if let server = store.serverSettings {
+            b.row("default-shell", b.field("default-shell", server.defaultShell?.rawValue ?? "", placeholder: "$SHELL") { [store] in
+                store.setServer("default-shell", $0)
+            })
+            b.row("history-budget", b.field("history-budget", String(server.historyBudgetBytes / (1024 * 1024))) { [store] in
+                store.setServer("history-budget", $0)
+            })
+        } else {
+            b.note("default-shell", store.errors["server"] ?? (store.serverState == .running ? "Loading the server’s settings…" : "Connect to the local server to edit session settings."), error: store.errors["server"] != nil)
+        }
+
         // Font
         let family = terminal.fontFamilies.first ?? "Menlo"
         b.row("font-family", fontPopUp(b, "font-family", families: FontCatalog.monospaced, selected: family, allowDefault: false, set("font-family")))

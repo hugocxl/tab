@@ -129,7 +129,7 @@ final class SettingsControlsTests: XCTestCase {
                     guard found.indices.contains(index) else { break }
                     let before = snapshot()
                     guard actuate(found[index], rowId: rowId) else { continue }
-                    if category == .server || category == .mobile {
+                    if category == .server || category == .mobile || category == .terminal {
                         try await Task.sleep(nanoseconds: 2_000_000)
                     }
                     let paths = written(since: before)

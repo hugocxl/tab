@@ -75,7 +75,7 @@ final class SettingsModel: ObservableObject {
     private func open(_ category: SettingsCategory) {
         self.category = category
         query = ""
-        if category == .server { store.loadServerSettings() }
+        if category == .server || category == .terminal { store.loadServerSettings() }
         if category == .mobile { store.loadRemoteAccess() }
         if category == .browser { store.refreshBrowserProfiles() }
         reload()
@@ -84,6 +84,7 @@ final class SettingsModel: ObservableObject {
     /// Searches every page's settings, as typing in the search field does.
     func search(_ text: String) {
         guard text != query else { return }
+        if !text.isEmpty && store.serverSettings == nil { store.loadServerSettings() }
         query = text
         reload()
     }

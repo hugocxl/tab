@@ -41,7 +41,13 @@ struct SettingsPage: View {
                         Text("No settings match “\(model.query)”.").foregroundStyle(.secondary)
                     }
                 }
-                ForEach(build.groups) { group in
+                if model.category == .server && !model.isSearching {
+                    Section {
+                        ServerSettingsHeader(model: model, build: build)
+                            .listRowBackground(theme?.card)
+                    }
+                }
+                ForEach(build.groups.filter { model.isSearching || model.category != .server || $0.category != .server }) { group in
                     let parts = Self.parts(of: group)
                     ForEach(parts.indices, id: \.self) { index in
                         section(parts[index], title: index == 0 ? build.title(group) : nil)

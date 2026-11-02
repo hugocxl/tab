@@ -99,6 +99,14 @@ public final class UpdaterController {
     private var replacingServer = false
     /// A check the person asked for is running or waits for the updater to start.
     private var manualCheck = false
+    /// Server controls wait while an update is being installed or downloaded.
+    var canRestartServer: Bool { !isBusy }
+
+    var serverRestartFailure: String? {
+        guard case .serverRestartFailed(let reason) = notice else { return nil }
+        return "Couldn’t restart the server. \(UpdateChip.sentence(reason))"
+    }
+
     private var notice: UpdateNotice? {
         didSet {
             guard notice != oldValue else { return }

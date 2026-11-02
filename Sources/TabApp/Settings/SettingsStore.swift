@@ -19,9 +19,21 @@ public final class SettingsStore {
     /// Problems by row id; `application` and `configuration` are page-wide.
     public private(set) var errors: [String: String] = [:]
 
+    public var serverVersion: String? { serverState == .running ? host?.serverVersion : nil }
+
     public private(set) var serverState: ServerConnectionState
     public private(set) var serverSettings: ServerSettingsDoc?
-    public private(set) var serverBusy = false
+    public var serverRestarting: Bool { host?.serverRestarting ?? false }
+    public var serverBusy: Bool { serverControlBusy || serverRestarting }
+    private var serverControlBusy = false
+    private struct ServerDetails: Equatable {
+        var version: String?
+        var restarting: Bool
+        var canRestart: Bool
+        var failure: String?
+    }
+    private var lastServerDetails: ServerDetails?
+
     public private(set) var remoteAccess: RemoteAccessState?
     public private(set) var pairing: PairingOffer?
     public private(set) var pairingBusy = false
@@ -352,7 +364,14 @@ public final class SettingsStore {
 
     /// The host reports the server's state.
     public func updateServerState(_ state: ServerConnectionState) {
-        guard state != serverState else { return }
+        let details = ServerDetails(version: host?.serverVersion, restarting: serverRestarting,
+                                    canRestart: host?.canRestartServer ?? false, failure: host?.serverRestartFailure)
+        let detailsChanged = details != lastServerDetails
+        lastServerDetails = details
+        guard state != serverState else {
+            if detailsChanged { changed() }
+            return
+        }
         serverState = state
         if state != .running { serverSettings = nil }
         changed()
@@ -434,7 +453,8 @@ public final class SettingsStore {
     public func controlServer(restart: Bool) {
         guard let host else { return }
         let id = restart ? "restart-server" : "stop-server"
-        serverBusy = true
+        guard !serverBusy else { return }
+        serverControlBusy = true
         changed()
         Task { [weak self] in
             do {
@@ -444,7 +464,7 @@ public final class SettingsStore {
                 self?.errors[id] = Self.message(error)
             }
             guard let self else { return }
-            serverBusy = false
+            serverControlBusy = false
             updateServerState(host.serverState)
             changed()
         }

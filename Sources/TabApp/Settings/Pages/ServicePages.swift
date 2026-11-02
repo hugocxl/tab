@@ -105,32 +105,19 @@ extension SettingsModel {
 
     func buildServer(_ b: SettingsPageBuilder) {
         let running = store.serverState == .running
-        b.row("server", b.button(running ? "Reload Settings" : "Connect", enabled: !store.serverBusy) { [store] in
+        b.row("server", b.button(running ? "Reload Settings" : "Connect", enabled: !store.serverBusy && store.serverState != .connecting) { [store] in
             if running { store.loadServerSettings() } else { store.connectServer() }
         })
         guard running else {
             b.note("server", "Server disconnected. App preferences still work. Connect to edit server settings.")
             return
         }
-        if let server = store.serverSettings {
-            b.row("default-shell", b.field("default-shell", server.defaultShell?.rawValue ?? "", placeholder: "$SHELL") { [store] in
-                store.setServer("default-shell", $0)
-            })
-            b.row("history-budget", b.field("history-budget", String(server.historyBudgetBytes / (1024 * 1024))) { [store] in
-                store.setServer("history-budget", $0)
-            })
-            b.row("shell-integration", b.toggle("shell-integration", server.shellIntegration) { [store] in
-                store.setServer("shell-integration", String($0))
-            })
-        } else {
-            b.note("server", "Loading the server's settings…")
-        }
         b.row("stop-server", b.button("Stop Server", style: .destructive, enabled: !store.serverBusy) { [weak self] in
             self?.confirm("Stop the server?", "Every terminal session on this Mac ends. Saved terminal records are kept.", "Stop Server") {
                 self?.store.controlServer(restart: false)
             }
         })
-        b.row("restart-server", b.button("Restart Server", enabled: !store.serverBusy) { [weak self] in
+        b.row("restart-server", b.button("Restart Server", enabled: !store.serverBusy && (store.host?.canRestartServer ?? false), help: store.host?.canRestartServer == false ? "Wait for the current update to finish." : nil) { [weak self] in
             self?.confirm("Restart the server?", "Every terminal session on this Mac ends and the server starts again. Saved terminal records are kept.", "Restart Server") {
                 self?.store.controlServer(restart: true)
             }
