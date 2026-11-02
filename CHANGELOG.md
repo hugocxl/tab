@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.31.2 - 2026-11-02
+
+### Fixed
+
+- Updated checks for remote project location tooltips in the sidebar.
+
 ## 0.31.1 - 2026-11-02
 
 ### Fixed

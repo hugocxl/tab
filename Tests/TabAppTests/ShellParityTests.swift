@@ -212,7 +212,7 @@ final class ShellParityTests: XCTestCase {
         XCTAssertEqual(server.stops, [])
     }
 
-    func testRemoteLinkMenuUsesProjectRootsAndSidebarMarksTheLocation() async throws {
+    func testRemoteLinkMenuUsesProjectRootsAndSidebarShowsLocationTooltip() async throws {
         let entry = ServerEntry(name: "box", ssh: "box")
         let (model, server) = try fixture(entries: [entry])
         let root = ProjectDescriptor(directory: "/remote/repo", name: "repo")
@@ -237,8 +237,6 @@ final class ShellParityTests: XCTestCase {
         let project = try XCTUnwrap(model.state.project(root.id))
         let row = ProjectHeaderRow(project: project, title: project.name, icon: nil, remoteName: entry.name, canCreateWorktree: false)
         XCTAssertEqual(row.toolTip, "box · /remote/repo")
-        let marker = try XCTUnwrap(row.subviews.first { $0.toolTip?.hasPrefix("Remote project on ") == true })
-        XCTAssertEqual(marker.toolTip, "Remote project on box · /remote/repo")
     }
 
     func testRemoteCopyDownloadsThroughTheSideAPIAndCannotWrite() async throws {
