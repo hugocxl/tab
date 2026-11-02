@@ -91,7 +91,6 @@ final class Actions {
         case .endAllSessionsAndQuit: window?.endAllSessionsAndQuit()
         case .openSettings: window?.showSettings()
         case .installCommandLineTool: CommandLineInstaller.installAndReport(on: window?.window)
-        case .toggleVoiceRecording: window?.toggleDictation()
         case .newBrowserPane: model.newPane(.browser, in: model.currentProject.id, tab: model.activeTab?.id)
         case .newDevicePane: model.newPane(.device, in: model.currentProject.id, tab: model.activeTab?.id)
         default: return false

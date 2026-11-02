@@ -248,7 +248,6 @@ final class PaletteSource: PaletteDataSource {
         command(.toggleSidebar, "Toggle Sidebar", .view)
         page(ShortcutId.toggleThemePicker.rawValue, "Change Theme…", .view, .themes, shortcut: .toggleThemePicker,
              keywords: "appearance colors")
-        command(.toggleVoiceRecording, "Toggle Voice Recording", .view, keywords: "dictation speech")
         command(.toggleFullScreen, "Toggle Full Screen", .window)
         command(.minimize, "Minimize Window", .window)
         command(.zoom, "Zoom Window", .window, keywords: "Maximize Restore")

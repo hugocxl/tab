@@ -57,15 +57,6 @@ final class TerminalPane: PaneContentController {
 
     var hasFocus: Bool { session?.view.isFocused ?? false }
 
-    /// Dictation keeps its attachment while its overlay owns keyboard focus.
-    func dictationTarget(overlayActive: Bool) -> DictationTarget? {
-        guard let model, model.activePane == pane, let session, session.state == .live, let channel = session.channel,
-              let connection = model.connections[server], connection.state.isReady, let main = connection.main,
-              session.backend === main.terminalBackend, hasFocus || overlayActive else { return nil }
-        return DictationTarget(pane: pane, server: server, session: session.session, instance: main.server.instance,
-                               connection: ObjectIdentifier(main), channel: channel)
-    }
-
     func focusContent() {
         guard let session else {
             view.window?.makeFirstResponder(host)

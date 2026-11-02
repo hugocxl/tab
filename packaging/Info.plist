@@ -21,8 +21,6 @@
     <key>NSPrincipalClass</key><string>NSApplication</string>
     <key>NSSupportsAutomaticTermination</key><false/>
     <key>NSSupportsSuddenTermination</key><false/>
-    <key>NSMicrophoneUsageDescription</key><string>Tab records your voice to dictate into a terminal.</string>
-    <key>NSSpeechRecognitionUsageDescription</key><string>Tab transcribes dictation on this Mac.</string>
     <key>NSLocalNetworkUsageDescription</key><string>Commands in Tab can access devices on your local network, and paired phones can connect to this Mac's terminals.</string>
     <key>NSAppTransportSecurity</key>
     <dict><key>NSAllowsArbitraryLoadsInWebContent</key><true/></dict>

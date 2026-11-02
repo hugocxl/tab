@@ -27,7 +27,6 @@ public enum ShortcutContext {
 
 /// A feature whose backend a shortcut's command needs.
 public enum ShortcutFeature: String, CaseIterable, Sendable {
-    case voice
     case notifications
     case commandLineTool
     case updates
@@ -36,7 +35,6 @@ public enum ShortcutFeature: String, CaseIterable, Sendable {
     /// Why a build without a backend for the feature cannot offer it.
     public var unsupportedReason: String {
         switch self {
-        case .voice: return "Voice input is not available on this Mac."
         case .notifications: return "Notifications are not available on this Mac."
         case .commandLineTool: return "Installing the command line tool is not available in this build."
         case .updates: return "Automatic updates are not available in this build."
@@ -54,7 +52,6 @@ public enum ShortcutGroup: String, CaseIterable, Sendable {
     case projects
     case terminal
     case browser
-    case dictation
     case app
     case textEditing
     case lists
@@ -68,7 +65,6 @@ public enum ShortcutGroup: String, CaseIterable, Sendable {
         case .projects: return "Projects and Navigation"
         case .terminal: return "Terminal"
         case .browser: return "Browser"
-        case .dictation: return "Dictation"
         case .app: return "App"
         case .textEditing: return "Text Editing"
         case .lists: return "Lists and Menus"
@@ -122,7 +118,6 @@ public struct ShortcutDefinition: Sendable {
         switch id {
         case .installCommandLineTool: return .commandLineTool
         case .hideApp, .hideOthers, .showAll: return .appHiding
-        case .toggleVoiceRecording, .voiceFinish, .voiceCancel, .voicePause: return .voice
         default: return nil
         }
     }
@@ -324,11 +319,7 @@ public enum ShortcutCatalog {
             .shortcut(.closeTab, title: "Close Tab"),
         ]
         var view: [ShortcutMenuItem] = [.shortcut(.toggleCommandPalette, title: "Command Palette…"), .separator]
-        if available.contains(.voice) {
-            view.append(.shortcut(.toggleVoiceRecording, title: "Toggle Voice Recording"))
-        }
         view += [
-            .separator,
             .shortcut(.toggleSidebar, title: "Toggle Sidebar"),
             .shortcut(.toggleFiles, title: "Toggle Files"),
             .shortcut(.toggleSourceControl, title: "Toggle Source Control"),
@@ -644,10 +635,6 @@ public enum ShortcutId: String, CaseIterable, Codable, Sendable {
     case installCommandLineTool = "install_command_line_tool"
     case toggleCommandPalette = "toggle_command_palette"
     case commandPaletteActions = "command_palette.actions"
-    case toggleVoiceRecording = "toggle_voice_recording"
-    case voiceFinish = "voice.finish"
-    case voiceCancel = "voice.cancel"
-    case voicePause = "voice.pause"
     case newBrowserPane = "new_browser_tab"
     case newDevicePane = "new_device_pane"
     case browserFocusAddress = "browser.focus_address"
@@ -797,10 +784,6 @@ extension ShortcutCatalog {
         ShortcutDefinition(.installCommandLineTool, keys: [], contexts: [nil], keyContexts: [], group: .app),
         ShortcutDefinition(.toggleCommandPalette, keys: ["cmd-shift-p"], contexts: ["WorkspaceTabs"], keyContexts: [["WorkspaceTabs"]], group: .palette),
         ShortcutDefinition(.commandPaletteActions, keys: ["cmd-k"], contexts: ["CommandPalette"], keyContexts: [["CommandPalette"]], group: .palette),
-        ShortcutDefinition(.toggleVoiceRecording, keys: ["cmd-shift-i"], contexts: ["WorkspaceTabs"], keyContexts: [["WorkspaceTabs"]], group: .dictation),
-        ShortcutDefinition(.voiceFinish, keys: ["enter"], contexts: ["VoiceRecording"], keyContexts: [["VoiceRecording"]], group: .dictation),
-        ShortcutDefinition(.voiceCancel, keys: ["escape"], contexts: ["VoiceRecording"], keyContexts: [["VoiceRecording"]], group: .dictation),
-        ShortcutDefinition(.voicePause, keys: ["space"], contexts: ["VoiceRecording"], keyContexts: [["VoiceRecording"]], group: .dictation),
         ShortcutDefinition(.newBrowserPane, keys: ["cmd-alt-b"], contexts: ["WorkspaceTabs"], keyContexts: [["WorkspaceTabs"]], group: .browser),
         ShortcutDefinition(.newDevicePane, keys: ["cmd-alt-p"], contexts: ["WorkspaceTabs"], keyContexts: [["WorkspaceTabs"]], group: .panes),
         ShortcutDefinition(.browserFocusAddress, keys: ["cmd-l"], contexts: ["Browser"], keyContexts: [["Browser"]], group: .browser),

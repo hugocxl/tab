@@ -70,7 +70,7 @@ final class AppKeyDispatchTests: XCTestCase {
             "Switch Worktree…", "Open Project…", "-", "Close Tab",
         ])
         XCTAssertEqual(titles("View"), [
-            "Command Palette…", "-", "Toggle Voice Recording", "-", "Toggle Sidebar",
+            "Command Palette…", "-", "Toggle Sidebar",
             "Toggle Files", "Toggle Source Control", "Go to File…", "Find in Files…",
             "Toggle Full Screen", "-", "Theme Picker", "-", "Increase Font Size", "Decrease Font Size",
         ])
@@ -82,7 +82,7 @@ final class AppKeyDispatchTests: XCTestCase {
         XCTAssertEqual(titles("Help"), ["\(app) Help"])
         let limited = MenuBarBuilder.build(keymap: Keymap(), actions: Actions(model: model), available: [])
         let limitedTitles = limited.items.flatMap { $0.submenu?.items.map(\.title) ?? [] }
-        for unavailable in ["Check for Updates…", "Install Command Line Tool…", "Toggle Voice Recording"] {
+        for unavailable in ["Check for Updates…", "Install Command Line Tool…"] {
             XCTAssertFalse(limitedTitles.contains(unavailable))
         }
     }

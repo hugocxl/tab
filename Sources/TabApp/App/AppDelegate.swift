@@ -54,7 +54,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// What this build can offer in its menus.
     static var features: Set<ShortcutFeature> {
-        var features: Set<ShortcutFeature> = [.voice, .notifications, .appHiding, .updates]
+        var features: Set<ShortcutFeature> = [.notifications, .appHiding, .updates]
         if Executable.currentURL().flatMap(Executable.containingBundle(of:)) != nil { features.insert(.commandLineTool) }
         return features
     }

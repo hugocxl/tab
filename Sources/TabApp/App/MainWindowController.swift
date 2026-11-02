@@ -20,7 +20,6 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, A
     private var settingsWindow: SettingsWindowController?
     let settingsHost: SettingsHostImpl
     private lazy var settingsStore = SettingsStore(dirs: model.dirs, host: settingsHost, theme: model.theme)
-    private(set) lazy var dictation = DictationController(host: self)
     private var subscriptions: Set<AnyCancellable> = []
 
     /// The window buttons' left edge.
@@ -127,7 +126,6 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, A
             placeWindowButtons()
         }
         if changes.contains(.state) || changes.contains(.activity) {
-            dictation.targetDidChange()
             if palette.isOpen, palette.page == .root { palette.refresh() }
         }
     }
@@ -346,35 +344,6 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, A
                 model.report("Could not end all sessions: \(error.localizedDescription)")
             }
         }
-    }
-
-    func toggleDictation() {
-        dictation.toggle()
-    }
-}
-
-extension MainWindowController: DictationHost {
-    public var dictationTarget: DictationTarget? {
-        guard let pane = model.activePane, let terminal = model.panes.controller(for: pane) as? TerminalPane else { return nil }
-        return terminal.dictationTarget(overlayActive: dictation.isActive)
-    }
-
-    public var dictationOverlayContainer: NSView? { window?.contentView }
-
-    public func insertDictation(_ text: String, into target: DictationTarget) async throws {
-        guard target == dictationTarget, let pane = model.activePane,
-              let terminal = model.panes.controller(for: pane) as? TerminalPane, let session = terminal.session else {
-            throw ModelError("The terminal is no longer there.")
-        }
-        session.view.pasteText(text)
-    }
-
-    public func showDictationError(_ message: String) {
-        showToast(message, error: true)
-    }
-
-    public func dictationDidEnd() {
-        model.focusActiveContent()
     }
 }
 

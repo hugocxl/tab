@@ -116,40 +116,6 @@ final class ShellParityTests: XCTestCase {
         XCTAssertEqual(model.activePane, pane)
     }
 
-    func testDictationOverlayKeepsTheAttachmentAndReconnectsInvalidateIt() async throws {
-        let (model, _) = try fixture()
-        model.connection(.local)?.start()
-        let ready = await ModelFixtures.wait { model.connectionState(.local).isReady && model.state.serverIdentity(.local) != nil }
-        XCTAssertTrue(ready)
-        model.newHomeTerminal()
-        let pane = try XCTUnwrap(model.activePane)
-        let started = await ModelFixtures.wait { model.state.pane(pane)?.content.session != nil }
-        XCTAssertTrue(started)
-        let terminal = try XCTUnwrap(model.controller(for: pane) as? TerminalPane)
-        let session = try XCTUnwrap(terminal.session)
-        let stream = AsyncStream<ChannelEvent>.makeStream()
-        defer { stream.continuation.finish() }
-        let channel = ChannelId(1)
-        let snapshot = AttachSnapshot(channel: channel, size: Size(cols: 80, rows: 24), rows: [], cursor: Cursor(), directory: "/tmp")
-        session.attached(TerminalAttachment(channel: channel, snapshot: snapshot, process: nil, events: stream.stream))
-        XCTAssertFalse(terminal.hasFocus)
-        XCTAssertNil(terminal.dictationTarget(overlayActive: false))
-        let target = try XCTUnwrap(terminal.dictationTarget(overlayActive: true))
-        let main = try XCTUnwrap(model.connections[.local]?.main)
-        let changedSession = DictationTarget(pane: pane, server: .local, session: SessionId(), instance: main.server.instance,
-                                            connection: ObjectIdentifier(main), channel: channel)
-        XCTAssertNotEqual(target, changedSession)
-        let changedInstance = DictationTarget(pane: pane, server: .local, session: session.session, instance: main.server.instance + 1,
-                                             connection: ObjectIdentifier(main), channel: channel)
-        XCTAssertNotEqual(target, changedInstance)
-        let other = NSObject()
-        let changedConnection = DictationTarget(pane: pane, server: .local, session: session.session, instance: main.server.instance,
-                                               connection: ObjectIdentifier(other), channel: channel)
-        XCTAssertNotEqual(target, changedConnection)
-        model.connection(.local)?.disconnect()
-        XCTAssertNil(terminal.dictationTarget(overlayActive: true))
-    }
-
     func testRouteChangesPreserveCustomCommandsAndNeverConnectIdleServers() async throws {
         let direct = ServerEntry(name: "direct", ssh: "host")
         let custom = ServerEntry(name: "custom", ssh: "", sshCommand: "my-ssh host")

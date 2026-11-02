@@ -16,7 +16,6 @@ final class ShortcutTests: XCTestCase {
         }
         XCTAssertEqual(ShortcutId.newTab.label, "New terminal")
         XCTAssertEqual(ShortcutId.textInputSelectAll.label, "Text input select all")
-        XCTAssertEqual(ShortcutId.toggleVoiceRecording.definition.feature, .voice)
         XCTAssertEqual(ShortcutCatalog.find("split_right")?.defaultChord?.rawValue, "cmd-d")
     }
 
@@ -55,9 +54,8 @@ final class ShortcutTests: XCTestCase {
         let menus = ShortcutCatalog.menus(appName: "Tab")
         XCTAssertEqual(menus.map(\.title), ["Tab", "Edit", "File", "View", "Window"])
         XCTAssertTrue(menus[0].items.contains(.shortcut(.quit, title: "Quit Tab")))
-        let withoutVoice = ShortcutCatalog.menus(appName: "Tab", available: [.commandLineTool])
-        let items = withoutVoice.flatMap(\.items)
-        XCTAssertFalse(items.contains(.shortcut(.toggleVoiceRecording, title: "Toggle Voice Recording")))
+        let limited = ShortcutCatalog.menus(appName: "Tab", available: [.commandLineTool])
+        let items = limited.flatMap(\.items)
         XCTAssertFalse(items.contains(.command("check_for_updates", title: "Check for Updates…")))
         let windowItems = menus[4].items.compactMap { item -> ShortcutId? in
             if case .shortcut(let id, _) = item { return id }
@@ -120,6 +118,17 @@ final class ShortcutTests: XCTestCase {
         XCTAssertThrowsError(try Keymap.fromOverrides(["no_such_action": "cmd-j"]))
         XCTAssertThrowsError(try Keymap.fromOverrides(["split_right": "cmd-"]))
         XCTAssertThrowsError(try Keymap.fromOverrides(["split_right": "cmd-t"]), "two actions on one key")
+    }
+
+    func testRemovedVoiceBindingsDoNotPreventSettingsFromLoading() throws {
+        let directory = try TemporaryDirectory()
+        let path = try directory.write("settings.json", #"{"keymap":{"toggle_voice_recording":"cmd-shift-i","voice.finish":"enter","voice.cancel":"escape","voice.pause":"space","new_tab":"cmd-n"}}"#)
+        let settings = try Settings.load(path)
+        XCTAssertEqual(settings.keymap.chord(.newTab)?.rawValue, "cmd-n")
+        for action in ["toggle_voice_recording", "voice.finish", "voice.cancel", "voice.pause"] {
+            XCTAssertNil(settings.keymap.binding(action))
+            XCTAssertNil(settings.keymap.overrides[action])
+        }
     }
 
     func testRebindingResetAndPersistenceKeepContextsAndOtherSections() throws {

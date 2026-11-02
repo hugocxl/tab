@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.40.0 - 2026-11-02
+
+### Removed
+
+- Voice recording and terminal dictation, including their commands, shortcuts
+  and microphone permissions.
+
 ## 0.39.0 - 2026-11-02
 
 ### Added

@@ -29,6 +29,7 @@ public struct Keymap: Equatable, Sendable, Codable {
         "project_colors.previous_color", "project_colors.next_color",
         "project_colors.choose_color", "project_colors.dismiss_colors", "open_configuration",
         "toggle_agents_panel", "toggle_agent_sessions",
+        "toggle_voice_recording", "voice.finish", "voice.cancel", "voice.pause",
     ]
 
     public func chord(_ action: ShortcutId) -> KeyChord? { bindings[action.rawValue] }
