@@ -73,7 +73,7 @@ final class AgentPaneView: ThemedView {
     }
     var onOpenToolDiff: ((String, AgentToolActivity) -> Void)?
     var onOpenCheckpoint: ((String, String?) -> Void)?
-    static let readableWidth: CGFloat = 960
+    static let readableWidth: CGFloat = 896
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
