@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.43.0 - 2026-11-02
+
+### Changed
+
+- The project page now shows Tab's workspace, key capabilities and installation
+  steps.
+
 ## 0.42.2 - 2026-11-02
 
 ### Changed
