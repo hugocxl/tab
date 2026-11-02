@@ -10,7 +10,7 @@ public enum SettingsCategory: String, CaseIterable, Sendable {
         case .general: return "General"
         case .appearance: return "Appearance"
         case .terminal: return "Terminal"
-        case .keyboard: return "Keyboard"
+        case .keyboard: return "Shortcuts"
         case .browser: return "Browser"
         case .server: return "Server"
         case .mobile: return "Mobile"
@@ -157,12 +157,11 @@ public enum SettingsCatalog {
 
     public static func item(_ id: String) -> SettingItem? { byId[id] }
 
-    /// Every shortcut as Keyboard lists them: one card, ordered by the
-    /// keyboard shortcuts guide's groups, each searchable by its group.
+    /// Every shortcut, ordered and grouped by its catalog category.
     public static func shortcutItems() -> [SettingItem] {
         ShortcutGroup.allCases.flatMap { group in
             ShortcutCatalog.all.filter { $0.group == group }.map { shortcut in
-                SettingItem("shortcut.\(shortcut.name)", shortcut.label, group.title, .keyboard, "Shortcuts")
+                SettingItem("shortcut.\(shortcut.name)", shortcut.label, "", .keyboard, group.title)
             }
         }
     }

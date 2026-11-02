@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.36.0 - 2026-11-02
+
+### Changed
+
+- Keyboard settings are now called Shortcuts, with a filter for commands and
+  assigned keys and separate groups for each shortcut category.
+
 ## 0.33.0 - 2026-11-02
 
 ### Added
