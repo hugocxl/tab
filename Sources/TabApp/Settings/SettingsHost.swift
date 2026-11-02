@@ -53,10 +53,6 @@ public protocol SettingsHost: AnyObject {
     func settingsDidChange(_ settings: Settings)
     /// `terminal.json` changed; apply it to every terminal.
     func terminalSettingsDidChange(_ settings: TerminalSettings)
-    /// A slider is being dragged: show these terminal settings without
-    /// saving them. The final value arrives through
-    /// `terminalSettingsDidChange` on release.
-    func previewTerminalSettings(_ settings: TerminalSettings)
 
     // MARK: Server
 
@@ -127,7 +123,6 @@ public final class PreviewSettingsHost: SettingsHost {
     public var profiles = [BrowserProfileSummary(id: "", name: "Default")]
     public private(set) var appliedSettings: [Settings] = []
     public private(set) var appliedTerminal: [TerminalSettings] = []
-    public private(set) var previews: [TerminalSettings] = []
     public private(set) var serverActions: [String] = []
     public var state: Data?
     public var importSources: [BrowserImportSource] = []
@@ -136,7 +131,6 @@ public final class PreviewSettingsHost: SettingsHost {
 
     public func settingsDidChange(_ settings: Settings) { appliedSettings.append(settings) }
     public func terminalSettingsDidChange(_ settings: TerminalSettings) { appliedTerminal.append(settings) }
-    public func previewTerminalSettings(_ settings: TerminalSettings) { previews.append(settings) }
 
     public func connectServer() { serverState = .running }
     public func readServerSettings() async throws -> ServerSettingsDoc { serverSettings }

@@ -8,19 +8,15 @@ import TabProtocol
 final class TerminalMouseMappingTests: XCTestCase {
     func testReportingModesShiftOverrideAndAlternateScroll() {
         var modes = InputModes()
-        var options = TerminalOptions()
-        XCTAssertFalse(TerminalMouseMapping.reports(flags: [], modes: modes, options: options, live: true))
+        XCTAssertFalse(TerminalMouseMapping.reports(flags: [], modes: modes, live: true))
         modes.alternateScroll = true
-        XCTAssertFalse(TerminalMouseMapping.reports(flags: [], modes: modes, options: options, live: true))
-        XCTAssertTrue(TerminalMouseMapping.reports(flags: [], modes: modes, options: options, live: true, wheel: true))
+        XCTAssertFalse(TerminalMouseMapping.reports(flags: [], modes: modes, live: true))
+        XCTAssertTrue(TerminalMouseMapping.reports(flags: [], modes: modes, live: true, wheel: true))
         modes.mouseTracking = true
-        XCTAssertTrue(TerminalMouseMapping.reports(flags: [], modes: modes, options: options, live: true))
+        XCTAssertTrue(TerminalMouseMapping.reports(flags: [], modes: modes, live: true))
         for wheel in [false, true] {
-            XCTAssertFalse(TerminalMouseMapping.reports(flags: .shift, modes: modes, options: options, live: true, wheel: wheel))
-            XCTAssertFalse(TerminalMouseMapping.reports(flags: [], modes: modes, options: options, live: false, wheel: wheel))
-            options.mouseReporting = false
-            XCTAssertFalse(TerminalMouseMapping.reports(flags: [], modes: modes, options: options, live: true, wheel: wheel))
-            options.mouseReporting = true
+            XCTAssertFalse(TerminalMouseMapping.reports(flags: .shift, modes: modes, live: true, wheel: wheel))
+            XCTAssertFalse(TerminalMouseMapping.reports(flags: [], modes: modes, live: false, wheel: wheel))
         }
     }
 
@@ -38,12 +34,9 @@ final class TerminalMouseMappingTests: XCTestCase {
         XCTAssertEqual(outside.row, 1)
     }
 
-    func testTrackpadAndWheelSpeedsFractionalInputReversalAndFloodLimit() {
-        var options = TerminalOptions()
-        options.scrollPrecision = 2
-        options.scrollDiscrete = 3
-        XCTAssertEqual(TerminalMouseMapping.scrollRows(delta: 8, precise: true, cellHeight: 16, options: options), 1)
-        XCTAssertEqual(TerminalMouseMapping.scrollRows(delta: -2, precise: false, cellHeight: 16, options: options), -6)
+    func testTrackpadAndWheelRowsFractionalInputReversalAndFloodLimit() {
+        XCTAssertEqual(TerminalMouseMapping.scrollRows(delta: 8, precise: true, cellHeight: 16), 0.5)
+        XCTAssertEqual(TerminalMouseMapping.scrollRows(delta: -2, precise: false, cellHeight: 16), -2)
         var scroll = TerminalScrollAccumulator()
         XCTAssertEqual(scroll.consume(0.4, reporting: true), 0)
         XCTAssertEqual(scroll.consume(0.4, reporting: true), 0)
@@ -57,6 +50,13 @@ final class TerminalMouseMappingTests: XCTestCase {
         XCTAssertEqual(scroll.consume(0.75, reporting: false), 1)
         XCTAssertEqual(scroll.remainder, 0.5)
         XCTAssertEqual(scroll.consume(.infinity, reporting: false), 0)
+        scroll.reset()
+        let up = scroll.consumeFraction(1.25)
+        XCTAssertEqual(up.whole, 1)
+        XCTAssertEqual(up.fraction, 0.25, accuracy: 0.001)
+        let down = scroll.consumeFraction(-0.5)
+        XCTAssertEqual(down.whole, -1, "smooth scrolling keeps the fraction above the row")
+        XCTAssertEqual(down.fraction, 0.75, accuracy: 0.001)
     }
 
     func testClickDragDoubleWordTripleLineAndShiftOverride() throws {
@@ -95,11 +95,9 @@ final class TerminalMouseMappingTests: XCTestCase {
         XCTAssertEqual(host.inputs.count, 2)
     }
 
-    func testCopyOnSelectAndClearOnTypingOrCopy() throws {
+    func testCopyOnSelectKeepsTheSelectionThroughCopyAndTyping() throws {
         var settings = TerminalFixtures.settings()
-        settings.options.copyOnSelect = true
-        settings.options.selectionClearOnCopy = true
-        settings.options.selectionClearOnTyping = true
+        settings.copyOnSelect = true
         let view = TerminalView(settings: settings, palette: TerminalPalette())
         let host = RecordingHost()
         view.host = host
@@ -118,10 +116,9 @@ final class TerminalMouseMappingTests: XCTestCase {
         XCTAssertEqual(copies, ["hello"])
         XCTAssertNotNil(view.selection, "copy on select preserves the selection")
         XCTAssertTrue(view.copySelection(to: pasteboard))
-        XCTAssertNil(view.selection)
-        view.select(.line(at: TerminalPoint(row: 0, column: 0), in: view.grid!))
+        XCTAssertNotNil(view.selection)
         view.insertText("x", replacementRange: NSRange(location: NSNotFound, length: 0))
-        XCTAssertNil(view.selection)
+        XCTAssertNotNil(view.selection)
         XCTAssertEqual(host.inputs, [.text("x")])
     }
 }

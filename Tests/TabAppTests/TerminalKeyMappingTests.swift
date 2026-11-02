@@ -7,9 +7,9 @@ import TabTerminal
 
 final class TerminalKeyMappingTests: XCTestCase {
     private func key(_ code: UInt16, _ characters: String, unshifted: String? = nil, flags: NSEvent.ModifierFlags = [],
-                     option: OptionAsAlt = .both) -> KeyEvent {
+                     option: OptionKey = .alt, usLayout: Bool = true) -> KeyEvent {
         KeyMapping.keyEvent(keyCode: code, characters: characters, unshifted: unshifted ?? characters, flags: flags,
-                            optionAsAlt: option)
+                            optionKey: option, usLayout: usLayout)
     }
 
     func testLettersCarryTextAndUnshiftedCodepoint() {
@@ -52,22 +52,24 @@ final class TerminalKeyMappingTests: XCTestCase {
         let leftOption = NSEvent.ModifierFlags(rawValue: NSEvent.ModifierFlags.option.rawValue | KeyMapping.leftOption)
         let rightOption = NSEvent.ModifierFlags(rawValue: NSEvent.ModifierFlags.option.rawValue | KeyMapping.rightOption)
 
-        let alt = key(11, "∫", unshifted: "b", flags: leftOption, option: .both)
+        let alt = key(11, "∫", unshifted: "b", flags: leftOption, option: .alt)
         XCTAssertTrue(alt.optionAsAlt)
         XCTAssertEqual(alt.text, "b")
         XCTAssertEqual(alt.modifiers, .alt)
         XCTAssertEqual(alt.consumedModifiers, [])
 
-        let composed = key(11, "∫", unshifted: "b", flags: leftOption, option: .none)
+        let composed = key(11, "∫", unshifted: "b", flags: leftOption, option: .characters)
         XCTAssertFalse(composed.optionAsAlt)
         XCTAssertEqual(composed.text, "∫")
         XCTAssertEqual(composed.consumedModifiers, .alt)
 
-        XCTAssertTrue(key(11, "∫", unshifted: "b", flags: leftOption, option: .left).optionAsAlt)
-        XCTAssertFalse(key(11, "∫", unshifted: "b", flags: rightOption, option: .left).optionAsAlt)
-        XCTAssertTrue(key(11, "∫", unshifted: "b", flags: rightOption, option: .right).optionAsAlt)
+        XCTAssertTrue(key(11, "∫", unshifted: "b", flags: leftOption, option: .leftAlt).optionAsAlt)
+        XCTAssertFalse(key(11, "∫", unshifted: "b", flags: rightOption, option: .leftAlt).optionAsAlt)
+        XCTAssertTrue(key(11, "∫", unshifted: "b", flags: rightOption, option: .rightAlt).optionAsAlt)
+        XCTAssertTrue(key(11, "∫", unshifted: "b", flags: leftOption, option: .automatic, usLayout: true).optionAsAlt)
+        XCTAssertFalse(key(11, "∫", unshifted: "b", flags: leftOption, option: .automatic, usLayout: false).optionAsAlt)
 
-        let shiftedAlt = key(11, "ı", unshifted: "b", flags: [leftOption, .shift], option: .both)
+        let shiftedAlt = key(11, "ı", unshifted: "b", flags: [leftOption, .shift], option: .alt)
         XCTAssertEqual(shiftedAlt.text, "B")
     }
 
@@ -104,14 +106,9 @@ final class TerminalKeyMappingTests: XCTestCase {
         guard case .key(let arrow)? = host.inputs.first else { return XCTFail("arrow not sent") }
         XCTAssertEqual(arrow.key, "arrow_up")
 
-        var settings = TerminalFixtures.settings()
-        settings.keybindings = TerminalBindings(bindings: [try KeyChord("cmd-k"): .text([0x41])], clearDefaults: true)
-        view.configure(settings: settings, palette: TerminalPalette())
-        host.inputs = []
-        view.keyDown(with: try event(keyCode: 40, characters: "k", flags: .command))
-        XCTAssertEqual(host.inputs, [.bytes(Data([0x41]))])
+        view.builtInBindingsEnabled = false
         XCTAssertNil(view.handledShortcut(try event(keyCode: 36, characters: "\r", flags: .shift)),
-                     "Clearing the defaults drops Shift+Return")
+                     "Turning off the built-in keys drops Shift+Return")
         XCTAssertFalse(view.canHandle(try event(keyCode: 7, characters: "x", flags: .command)))
         XCTAssertTrue(view.canHandle(try event(keyCode: 7, characters: "x", flags: .control)))
     }
@@ -125,10 +122,10 @@ final class TerminalKeyMappingTests: XCTestCase {
         terminal.feed(Data("\u{1b}[>31u".utf8))
         XCTAssertEqual(try terminal.encodeKey(key(0, "a")), Data("\u{1b}[97;;97u".utf8))
         XCTAssertEqual(try terminal.encodeKey(key(0, "\u{01}", unshifted: "a", flags: .control)), Data("\u{1b}[97;5u".utf8))
-        let repeated = KeyMapping.keyEvent(keyCode: 0, characters: "a", unshifted: "a", flags: [], isRepeat: true, optionAsAlt: .both)
+        let repeated = KeyMapping.keyEvent(keyCode: 0, characters: "a", unshifted: "a", flags: [], isRepeat: true, optionKey: .alt)
         XCTAssertEqual(try terminal.encodeKey(repeated), Data("\u{1b}[97;1:2;97u".utf8))
         let release = KeyMapping.keyEvent(keyCode: 0, characters: "A", unshifted: "a", flags: .shift,
-                                          optionAsAlt: .both, release: true)
+                                          optionKey: .alt, release: true)
         XCTAssertEqual(release.consumedModifiers, [])
         XCTAssertEqual(release.text, "")
         XCTAssertEqual(try terminal.encodeKey(release), Data("\u{1b}[97;2:3u".utf8))
@@ -136,18 +133,21 @@ final class TerminalKeyMappingTests: XCTestCase {
 
     func testOptionSideMatrixAndShiftedPunctuationReachTheEngine() throws {
         let terminal = try TabTerminal.Terminal(size: Size(cols: 80, rows: 24), historyBudgetBytes: 1024)
-        for option in OptionAsAlt.allCases {
-            for side in [KeyMapping.leftOption, KeyMapping.rightOption] {
-                let flags = NSEvent.ModifierFlags(rawValue: NSEvent.ModifierFlags.option.rawValue | side)
-                let mapped = key(11, "∫", unshifted: "b", flags: flags, option: option)
-                let alt = option == .both || option == .left && side == KeyMapping.leftOption
-                    || option == .right && side == KeyMapping.rightOption
-                XCTAssertEqual(try terminal.encodeKey(mapped), Data((alt ? "\u{1b}b" : "∫").utf8))
+        for option in OptionKey.allCases {
+            for usLayout in [true, false] {
+                for side in [KeyMapping.leftOption, KeyMapping.rightOption] {
+                    let flags = NSEvent.ModifierFlags(rawValue: NSEvent.ModifierFlags.option.rawValue | side)
+                    let mapped = key(11, "∫", unshifted: "b", flags: flags, option: option, usLayout: usLayout)
+                    let alt = option == .alt || option == .automatic && usLayout
+                        || option == .leftAlt && side == KeyMapping.leftOption
+                        || option == .rightAlt && side == KeyMapping.rightOption
+                    XCTAssertEqual(try terminal.encodeKey(mapped), Data((alt ? "\u{1b}b" : "∫").utf8), "\(option) \(usLayout)")
+                }
             }
         }
         let flags: NSEvent.ModifierFlags = [.option, .shift]
         let punctuation = KeyMapping.keyEvent(keyCode: 18, characters: "⁄", unshifted: "1", shifted: "!",
-                                              flags: flags, optionAsAlt: .both)
+                                              flags: flags, optionKey: .alt)
         XCTAssertEqual(punctuation.text, "!")
         XCTAssertEqual(try terminal.encodeKey(punctuation), Data("\u{1b}!".utf8))
         XCTAssertEqual(key(49, " ", flags: .option).text, " ")

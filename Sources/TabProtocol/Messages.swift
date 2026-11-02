@@ -166,18 +166,27 @@ public struct TerminalColors: Hashable, Codable, Sendable {
 
 /// Server-owned settings, kept in `server.json`.
 public struct ServerSettingsDoc: Hashable, Codable, Sendable {
-    /// `nil` uses the user's login shell.
-    public var defaultShell: ServerPath?
+    /// What new terminals run: an executable and its arguments. Empty runs
+    /// the user's login shell.
+    public var startupCommand: [String]
     public var historyBudgetBytes: UInt64
     public var shellIntegration: Bool
 
     public static let defaultHistoryBudget: UInt64 = 16 * 1024 * 1024
 
-    public init(defaultShell: ServerPath? = nil, historyBudgetBytes: UInt64 = defaultHistoryBudget,
+    public init(startupCommand: [String] = [], historyBudgetBytes: UInt64 = defaultHistoryBudget,
                 shellIntegration: Bool = true) {
-        self.defaultShell = defaultShell
+        self.startupCommand = startupCommand
         self.historyBudgetBytes = historyBudgetBytes
         self.shellIntegration = shellIntegration
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        startupCommand = try container.decodeIfPresent([String].self, forKey: .startupCommand) ?? []
+        historyBudgetBytes = try container.decodeIfPresent(UInt64.self, forKey: .historyBudgetBytes)
+            ?? Self.defaultHistoryBudget
+        shellIntegration = try container.decodeIfPresent(Bool.self, forKey: .shellIntegration) ?? true
     }
 }
 

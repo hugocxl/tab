@@ -53,8 +53,6 @@ final class SettingsTests: XCTestCase {
         var settings = try Settings.load(path)
         settings.browser.openTerminalLinks = true
         try settings.saveBrowser(to: path)
-        settings.panes.newPaneDirectory = .current
-        try settings.savePanes(to: path)
         try settings.setProjectSearchRoot("/code", in: path)
         let loaded = try Settings.load(path)
         XCTAssertEqual(loaded, settings)
@@ -397,68 +395,53 @@ final class SettingsTests: XCTestCase {
         let path = directory.file("terminal.json")
         XCTAssertEqual(try TerminalSettings.load(path), TerminalSettings())
         var settings = TerminalSettings()
-        settings.fontFamilies = ["JetBrains Mono", "Symbols Nerd Font"]
-        settings.cellHeight = .percent(12.5)
-        settings.font.features = [FontFeature("calt", 0), FontFeature("ss01", 1)]
-        settings.font.codepoints = [FontMap(start: 0xE000, end: 0xF8FF, family: "Symbols Nerd Font")]
-        settings.optionAsAlt = .left
-        settings.options.palette[4] = RGBColor(0x112233)
-        settings.options.cursorColor = .cellForeground
-        settings.options.cursorStyle = .blockHollow
-        settings.options.backgroundOpacity = 0.8
-        settings.keybindings.clearDefaults = true
-        settings.keybindings.bindings[try KeyChord("cmd-shift-=")] = .increaseFontSize(2)
-        settings.keybindings.bindings[try KeyChord("shift-enter")] = .text([0x1B, 0x0D])
+        settings.fontFamily = "JetBrains Mono"
+        settings.fontStyle = "Medium"
+        settings.fallbackFonts = ["Symbols Nerd Font"]
+        settings.characterSpacing = .percent(12.5)
+        settings.lineHeight = 20
+        settings.ligatures = false
+        settings.cursorStyle = .outline
+        settings.cursorBlink = .fast
+        settings.optionKey = .leftAlt
+        settings.selectionBackground = .text
+        settings.appLinks = .never
         try settings.save(to: path)
         XCTAssertEqual(try TerminalSettings.load(path), settings)
         let text = try directory.read("terminal.json")
-        XCTAssertTrue(text.contains("cmd+shift+equal=increase_font_size:2"), text)
         XCTAssertTrue(text.contains("12.5%"), text)
+        XCTAssertEqual(settings.fontFamilies, ["JetBrains Mono", "Symbols Nerd Font"])
     }
 
     func testTerminalFilesTolerateUnknownKeysAndRejectInvalidValues() throws {
-        let loaded = try TerminalSettings.decode(Data(#"{"fontSize": 15, "future": 1, "options": {"cursorStyle": "bar", "newThing": true}}"#.utf8))
+        let loaded = try TerminalSettings.decode(Data(#"{"fontSize": 15, "future": 1, "options": {"cursorStyle": "bar"}}"#.utf8))
         XCTAssertEqual(loaded.fontSize, 15)
-        XCTAssertEqual(loaded.options.cursorStyle, .bar)
-        XCTAssertEqual(loaded.fontFamilies, ["Menlo"])
-        XCTAssertEqual(loaded.optionAsAlt, .both)
+        XCTAssertEqual(loaded.cursorStyle, .block)
+        XCTAssertEqual(loaded.fontFamily, TerminalSettings.defaultFontFamily)
+        XCTAssertEqual(loaded.optionKey, .automatic)
         for invalid in [
             #"{"fontSize": 0}"#,
-            #"{"fontFamilies": []}"#,
-            #"{"cellHeight": "5000"}"#,
-            #"{"options": {"background": "blurple"}}"#,
-            #"{"options": {"cursorOpacity": 2}}"#,
-            #"{"keybindings": ["cmd+k=unknown_action"]}"#,
-            #"{"font": {"features": [{"tag": "toolong", "value": 1}]}}"#,
+            #"{"fontFamily": ""}"#,
+            #"{"lineHeight": 500}"#,
+            #"{"characterSpacing": "40"}"#,
+            #"{"cursorStyle": "triangle"}"#,
+            #"{"optionKey": "both"}"#,
         ] {
             XCTAssertThrowsError(try TerminalSettings.decode(Data(invalid.utf8)), invalid)
         }
     }
 
-    func testInvalidEditsAndCorruptedFilesPreserveSavedPreferences() throws {
+    func testCorruptedFilesArePreservedAndInvalidSettingsNeverSave() throws {
         let directory = try TemporaryDirectory()
         let path = directory.file("terminal.json")
         var settings = try TerminalSettings.load(path)
         let saved = try directory.read("terminal.json")
-        for (id, value) in [("font-size", "0"), ("cursor-opacity", "150"), ("palette-300", "#ffffff"), ("cursor-style", "triangle"), ("unknown", "1")] {
-            XCTAssertThrowsError(try settings.setPreference(id, value), id)
-        }
-        XCTAssertEqual(settings, TerminalSettings())
-        try settings.setPreference("font-size", "16")
-        try settings.setPreference("background-transparency", "25")
-        try settings.setPreference("font-ligatures", "false")
-        try settings.setPreference("palette-1", "#ff0000")
-        try settings.setPreference("cursor-style", "underline")
-        try settings.setPreference("window-padding-x", "4,8")
-        try settings.setPreference("macos-option-as-alt", "right")
-        XCTAssertEqual(settings.fontSize, 16)
-        XCTAssertEqual(settings.options.backgroundOpacity, 0.75)
-        XCTAssertFalse(settings.ligaturesEnabled)
-        XCTAssertEqual(settings.options.palette[1], RGBColor(0xFF0000))
-        XCTAssertEqual(settings.options.cursorStyle, .underline)
-        XCTAssertEqual(settings.options.paddingX, [4, 8])
-        XCTAssertEqual(settings.optionAsAlt, .right)
+        var invalid = settings
+        invalid.fontSize = 100
+        XCTAssertThrowsError(try invalid.save(to: path))
+        XCTAssertEqual(try directory.read("terminal.json"), saved)
 
+        settings.fontSize = 16
         try directory.write("terminal.json", "{ hand edit gone wrong")
         XCTAssertThrowsError(try settings.save(to: path))
         XCTAssertEqual(try directory.read("terminal.json"), "{ hand edit gone wrong")
@@ -468,63 +451,31 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(try TerminalSettings.load(path), settings)
     }
 
-    func testInvalidOrConflictingTerminalEditsChangeNothing() throws {
-        var settings = TerminalSettings()
-        try settings.edit(.fallbacks(["Apple Color Emoji"]))
-        XCTAssertEqual(settings.fontFamilies, ["Menlo", "Apple Color Emoji"])
-        try settings.edit(.codepointMap(previous: nil, range: "U+E000-U+F8FF,U+F0000", family: "\"Nerd\""))
-        XCTAssertEqual(settings.font.codepoints, [
-            FontMap(start: 0xE000, end: 0xF8FF, family: "Nerd"),
-            FontMap(start: 0xF0000, end: 0xF0000, family: "Nerd"),
-        ])
-        let before = settings
-        XCTAssertThrowsError(try settings.edit(.codepointMap(previous: nil, range: "U+F8FF-U+E000", family: "Nerd")))
-        XCTAssertThrowsError(try settings.edit(.codepointMap(previous: FontMap(start: 1, end: 2, family: "x"), range: nil, family: nil)))
-        XCTAssertThrowsError(try settings.edit(.fallbacks(["Bad\"Name"])))
-        XCTAssertEqual(settings, before)
-        let chord = try KeyChord("cmd-shift-k")
-        try settings.edit(.binding(previous: nil, chord: chord, action: "csi:2J"))
-        XCTAssertEqual(settings.keybindings.action(for: chord), .text([0x1B, 0x5B, 0x32, 0x4A]))
-        let bound = settings
-        XCTAssertThrowsError(try settings.edit(.binding(previous: nil, chord: chord, action: "clear_screen")))
-        XCTAssertThrowsError(try settings.edit(.binding(previous: nil, chord: try KeyChord("cmd-j"), action: "goto_tab:1")))
-        XCTAssertEqual(settings, bound)
-        try settings.edit(.binding(previous: chord, chord: nil, action: nil))
-        XCTAssertNil(settings.keybindings.bindings[chord])
+    func testCellAdjustmentsApplyInWholePixels() throws {
+        XCTAssertEqual(try CellAdjustment("0"), .natural)
+        XCTAssertEqual(try CellAdjustment("-2"), .pixels(-2))
+        XCTAssertEqual(try CellAdjustment("10%"), .percent(10))
+        XCTAssertFalse(try CellAdjustment("-100%").isValid)
+        XCTAssertFalse(try CellAdjustment("50").isValid)
+        XCTAssertEqual(CellAdjustment.natural.apply(natural: 15.3, scale: 2), 15.5)
+        XCTAssertEqual(CellAdjustment.pixels(2).apply(natural: 15.3, scale: 2), 16.5)
+        XCTAssertEqual(CellAdjustment.percent(10).apply(natural: 10, scale: 2), 11)
+        XCTAssertEqual(CellAdjustment.pixels(-100).apply(natural: 10, scale: 2), 0.5)
     }
 
-    func testTerminalBindingsReadGhosttySyntaxAndKeepBuiltIns() throws {
-        var bindings = TerminalBindings()
-        XCTAssertNil(try bindings.read("super+arrow_left=text:\\x01"))
-        XCTAssertNil(try bindings.read("ctrl+shift+equal=increase_font_size"))
-        XCTAssertNotNil(try bindings.read("ctrl+a>c=new_tab"))
-        XCTAssertNotNil(try bindings.read("cmd+t=new_tab"))
-        XCTAssertThrowsError(try bindings.read("cmd+t"))
-        XCTAssertEqual(bindings.action(for: try KeyChord("cmd-left")), .text([0x01]))
-        XCTAssertEqual(bindings.action(for: try KeyChord("ctrl-shift-=")), .increaseFontSize(1))
-        XCTAssertEqual(bindings.action(for: try KeyChord("cmd-k")), .clearScreen)
-        XCTAssertEqual(bindings.chords(for: .text([0x0A])), [try KeyChord("shift-enter")])
-        XCTAssertNotNil(try bindings.read("clear"))
-        XCTAssertTrue(bindings.bindings.isEmpty)
-        XCTAssertNil(bindings.action(for: try KeyChord("cmd-k")))
-        XCTAssertEqual(try roundTrip(bindings), bindings)
-        XCTAssertEqual(try TerminalAction.unescape("a\\e\\x1b\\\\"), [0x61, 0x1B, 0x1B, 0x5C])
-        XCTAssertEqual(TerminalAction.escape([0x1B, 0x0A, 0x20, 0x7F]), "\\e\\n \\x7f")
-        XCTAssertThrowsError(try TerminalAction.unescape("\\q"))
+    func testOptionKeySendsAltByLayoutAndSide() {
+        XCTAssertTrue(OptionKey.automatic.sendsAlt(left: true, right: false, usLayout: true))
+        XCTAssertFalse(OptionKey.automatic.sendsAlt(left: true, right: false, usLayout: false))
+        XCTAssertTrue(OptionKey.alt.sendsAlt(left: false, right: true, usLayout: false))
+        XCTAssertFalse(OptionKey.characters.sendsAlt(left: true, right: true, usLayout: true))
+        XCTAssertTrue(OptionKey.leftAlt.sendsAlt(left: true, right: false, usLayout: false))
+        XCTAssertFalse(OptionKey.leftAlt.sendsAlt(left: false, right: true, usLayout: true))
     }
 
-    func testCellHeightsApplyInWholePixels() throws {
-        XCTAssertEqual(try CellHeight("0"), .natural)
-        XCTAssertEqual(try CellHeight("-2"), .pixels(-2))
-        XCTAssertEqual(try CellHeight("10%"), .percent(10))
-        XCTAssertThrowsError(try CellHeight("-100%"))
-        XCTAssertThrowsError(try CellHeight("5000"))
-        XCTAssertEqual(CellHeight.natural.apply(natural: 15.3, scale: 2), 15.5)
-        XCTAssertEqual(CellHeight.pixels(2).apply(natural: 15.3, scale: 2), 16.5)
-        XCTAssertEqual(CellHeight.percent(10).apply(natural: 10, scale: 2), 11)
-        XCTAssertEqual(CellHeight.pixels(-100).apply(natural: 10, scale: 2), 0.5)
-        var settings = TerminalSettings()
-        settings.zoom(300)
-        XCTAssertEqual(settings.fontSize, 256)
+    func testStartupCommandsSplitAndJoinWithQuotes() throws {
+        let arguments = ["/opt/homebrew/bin/fish", "--init-command", "set x 'a b'"]
+        XCTAssertEqual(try Executable.commandArguments(Executable.commandLine(arguments)), arguments)
+        XCTAssertEqual(try Executable.commandArguments(#"tmux new -A -s "my session""#), ["tmux", "new", "-A", "-s", "my session"])
+        XCTAssertThrowsError(try Executable.commandArguments(#"zsh "unclosed"#))
     }
 }

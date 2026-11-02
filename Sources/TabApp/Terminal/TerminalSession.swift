@@ -67,8 +67,6 @@ public enum TerminalSessionState: Equatable, Sendable {
     func terminalSession(_ session: TerminalSessionController, didChangeInputModes modes: InputModes)
     func terminalSession(_ session: TerminalSessionController, didChangeFontSize size: Double)
     func terminalSession(_ session: TerminalSessionController, didFail error: Error)
-    /// The user asked to reload `terminal.json` (a `reload_config` binding).
-    func terminalSessionRequestsReload(_ session: TerminalSessionController)
 }
 
 public extension TerminalSessionControllerDelegate {
@@ -81,7 +79,6 @@ public extension TerminalSessionControllerDelegate {
     func terminalSession(_ session: TerminalSessionController, didChangeInputModes modes: InputModes) {}
     func terminalSession(_ session: TerminalSessionController, didChangeFontSize size: Double) {}
     func terminalSession(_ session: TerminalSessionController, didFail error: Error) {}
-    func terminalSessionRequestsReload(_ session: TerminalSessionController) {}
 }
 
 /// One terminal pane's session: attaches with the view's grid size and cell
@@ -104,14 +101,22 @@ public extension TerminalSessionControllerDelegate {
     public private(set) var directory: ServerPath?
     public private(set) var process: ForegroundProcess?
     public private(set) var find: TerminalFind?
+    /// The program in front when the title was set, `nil` for the shell.
+    private var titleSetter: ForegroundProcess?
 
-    /// The pane title: what the program set, else the running program, else
-    /// the folder.
+    /// The pane title: the title set in the terminal, else the running
+    /// program and its folder. With generated titles preferred, only a
+    /// title the running program set for itself shows.
     public var displayTitle: String {
-        if !title.isEmpty { return title }
-        if let process, !process.isShell, !process.name.isEmpty { return process.name }
-        if let directory { return Self.abbreviate(directory.rawValue) }
-        return process?.name ?? ""
+        if !title.isEmpty, !view.settings.preferGeneratedTitles || titleSetter != nil && titleSetter == process {
+            return title
+        }
+        let folder = directory.map { Self.abbreviate($0.rawValue) }
+        if let process, !process.isShell, !process.name.isEmpty {
+            guard view.settings.preferGeneratedTitles, let folder else { return process.name }
+            return "\(process.name) — \(folder)"
+        }
+        return folder ?? process?.name ?? ""
     }
 
     static func abbreviate(_ path: String) -> String {
@@ -275,11 +280,7 @@ public extension TerminalSessionControllerDelegate {
         let totalBefore = view.grid?.historyTotal
         let invalidated = view.updateGrid { $0.apply(frame) }
         if let grid = view.grid, grid.scrollOffset > 0 {
-            if view.settings.options.scrollOnOutput {
-                scrollToBottom()
-            } else if totalBefore != grid.historyTotal {
-                requestHistory(newest: true)
-            }
+            if totalBefore != grid.historyTotal { requestHistory(newest: true) }
         }
         if find != nil, totalBefore != view.grid?.historyTotal || !frame.rows.isEmpty { scheduleFindRefresh() }
         if invalidated, view.window != nil, !view.isHiddenOrHasHiddenAncestor { view.displayIfNeeded() }
@@ -323,6 +324,7 @@ public extension TerminalSessionControllerDelegate {
     private func updateTitle(_ title: String) {
         guard title != self.title else { return }
         self.title = title
+        titleSetter = process.flatMap { $0.isShell ? nil : $0 }
         delegate?.terminalSession(self, didChangeTitle: title)
     }
 
@@ -419,7 +421,6 @@ public extension TerminalSessionControllerDelegate {
         case .find: showFind()
         case .findNext: stepFind(previous: false)
         case .findPrevious: stepFind(previous: true)
-        case .reloadConfiguration: delegate?.terminalSessionRequestsReload(self)
         default: view.perform(command, at: point)
         }
     }

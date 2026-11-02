@@ -41,7 +41,7 @@ enum TerminalFixtures {
 
     static func settings() -> TerminalSettings {
         var settings = TerminalSettings()
-        settings.fontFamilies = ["Menlo"]
+        settings.fontFamily = "Menlo"
         settings.fontSize = 13
         return settings
     }

@@ -23,7 +23,7 @@ final class BackupLaunchTests: XCTestCase {
         var terminal = TerminalSettings()
         terminal.fontSize = 23
         try terminal.save(to: source.terminalSettings)
-        let serverSettings = ServerSettingsDoc(defaultShell: "/bin/zsh", historyBudgetBytes: 1_048_576, shellIntegration: false)
+        let serverSettings = ServerSettingsDoc(startupCommand: ["/bin/zsh"], historyBudgetBytes: 1_048_576, shellIntegration: false)
         try AtomicFile.write(JSONEncoder().encode(serverSettings), to: source.serverSettings)
         try FileManager.default.createDirectory(at: source.themes, withIntermediateDirectories: true)
         try Data("background = 123456\nforeground = abcdef\n".utf8).write(to: source.themes.appendingPathComponent("Custom"))

@@ -7,8 +7,8 @@ extension AppModel {
     // MARK: Opening terminals
 
     /// A new terminal (Cmd+T): a pane in the current project's tab, or a
-    /// new tab when Home shows. It starts in the project's folder or the
-    /// focused terminal's, per Settings.
+    /// new tab when Home shows. It starts in the focused terminal's folder
+    /// when there is one.
     public func newTerminal() {
         newTerminal(in: currentProject.id)
     }
@@ -36,10 +36,10 @@ extension AppModel {
         newTerminal(in: state.home.id)
     }
 
-    /// Where a new terminal in `project` starts: its folder, or the focused
-    /// terminal's when Settings says so and it is on the same server.
+    /// Where a new terminal in `project` starts: the focused terminal's
+    /// folder when it is on the same server, else the project's.
     func newPaneDirectory(in project: Project) -> ServerPath {
-        guard settings.panes.newPaneDirectory == .current, let pane = activePane,
+        guard let pane = activePane,
               state.paneServer(pane) == project.serverId,
               let directory = (panes.controller(for: pane) as? TerminalPane)?.directory
         else { return project.directory }

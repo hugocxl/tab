@@ -39,6 +39,24 @@ public enum SettingsCategory: String, CaseIterable, Sendable {
     var startsGroup: Bool { [.terminal, .browser, .backup].contains(self) }
 }
 
+/// A page opened from a row of a category's page, such as Terminal's
+/// Advanced Font Settings.
+public enum SettingsSubpage: String, CaseIterable, Sendable {
+    case advancedFont
+
+    public var title: String {
+        switch self {
+        case .advancedFont: return "Advanced Font Settings"
+        }
+    }
+
+    public var category: SettingsCategory {
+        switch self {
+        case .advancedFont: return .terminal
+        }
+    }
+}
+
 /// One setting as Settings lists and searches it.
 public struct SettingItem: Equatable, Sendable {
     public let id: String
@@ -46,13 +64,17 @@ public struct SettingItem: Equatable, Sendable {
     public let description: String
     public let category: SettingsCategory
     public let section: String
+    /// The subpage the row is on, `nil` for the category's own page.
+    public let subpage: SettingsSubpage?
 
-    public init(_ id: String, _ label: String, _ description: String, _ category: SettingsCategory, _ section: String) {
+    public init(_ id: String, _ label: String, _ description: String, _ category: SettingsCategory, _ section: String,
+                subpage: SettingsSubpage? = nil) {
         self.id = id
         self.label = label
         self.description = description
         self.category = category
         self.section = section
+        self.subpage = subpage
     }
 
     /// Whether every word of `query` (lowercased) appears in the item's
@@ -81,54 +103,35 @@ public enum SettingsCatalog {
         SettingItem("dark-theme", "Dark theme", "Colors for the interface and terminals when macOS uses dark appearance.", .appearance, "Themes"),
         SettingItem("sidebar", "Expand sidebar", "Show project names alongside their icons in the workspace sidebar.", .appearance, "Interface"),
         // Terminal
-        SettingItem("default-shell", "Default shell (executable path)", "Shell for new sessions. Leave empty to use $SHELL, falling back to /bin/zsh.", .terminal, "Sessions"),
-        SettingItem("history-budget", "History budget per session (MiB)", "Retained terminal history, from 0 to 65536 MiB. Saved-history changes take effect at the next server start.", .terminal, "Sessions"),
-        SettingItem("font-family", "Font family", "The typeface used to render text in every terminal pane.", .terminal, "Font"),
-        SettingItem("font-fallbacks", "Fallback fonts", "Fonts used, in order, for characters the main font lacks.", .terminal, "Font"),
-        SettingItem("font-size", "Font size (points)", "Default terminal text size. Individual panes can still be zoomed independently.", .terminal, "Font"),
-        SettingItem("adjust-cell-height", "Line spacing", "Add space between terminal lines using pixels or a percentage, such as 10%.", .terminal, "Font"),
-        SettingItem("adjust-cell-width", "Character spacing", "Adjust character spacing by pixels or a percentage, such as 10%.", .terminal, "Font"),
-        SettingItem("font-family-bold", "Bold font", "Font for bold text. Default uses the main font's bold style.", .terminal, "Font"),
-        SettingItem("font-family-italic", "Italic font", "Font for italic text. Default uses the main font's italic style.", .terminal, "Font"),
-        SettingItem("font-family-bold-italic", "Bold italic font", "Font for bold italic text. Default uses the main font's bold italic style.", .terminal, "Font"),
-        SettingItem("font-feature", "Font features", "OpenType features separated by commas, such as ss01 or zero. Put a minus before one to turn it off, such as -calt.", .terminal, "Font"),
-        SettingItem("font-ligatures", "Font ligatures", "Combine programming symbols when the selected font supports ligatures.", .terminal, "Font"),
-        SettingItem("font-codepoint-map", "Codepoint fonts", "Use a specific font for a Unicode range, such as U+E000-U+F8FF for icons.", .terminal, "Font"),
-        SettingItem("font-thicken", "Thicken font", "Draw terminal text with a heavier stroke.", .terminal, "Font"),
-        SettingItem("font-thicken-strength", "Thicken strength", "How much heavier text is drawn when Thicken font is on.", .terminal, "Font"),
-        SettingItem("bold-is-bright", "Bright colors for bold text", "Use bright ANSI colors for bold text in the first eight palette colors.", .terminal, "Font"),
-        SettingItem("background-transparency", "Terminal transparency", "Let the desktop show through the terminal background. Off while Reduce Transparency or Increase Contrast is on.", .terminal, "Background"),
-        SettingItem("background-vibrancy", "Background vibrancy", "Reveal the native macOS material by reducing the solid background tint.", .terminal, "Background"),
-        SettingItem("background-opacity-cells", "Apply opacity to colored cells", "Also make backgrounds drawn by terminal programs translucent.", .terminal, "Background"),
-        SettingItem("window-padding-x", "Horizontal padding (points)", "Adjust the space to the left and right of terminal text.", .terminal, "Background"),
-        SettingItem("window-padding-y", "Vertical padding (points)", "Adjust the space above and below terminal text.", .terminal, "Background"),
-        SettingItem("window-padding-balance", "Balance padding", "Distribute unused cell space equally around the terminal grid.", .terminal, "Background"),
-        SettingItem("window-padding-color", "Padding color", "Fill padding with the background color, or extend the color of the nearest cells.", .terminal, "Background"),
-        SettingItem("background", "Background color", "Replaces the theme's terminal background, such as #1e1e2e. Leave empty to use the theme.", .terminal, "Colors"),
-        SettingItem("foreground", "Text color", "Replaces the theme's terminal text color. Leave empty to use the theme.", .terminal, "Colors"),
-        SettingItem("cursor-color", "Cursor color", "A color, cell-foreground, or cell-background. Leave empty to use the theme.", .terminal, "Colors"),
-        SettingItem("cursor-text", "Cursor text color", "Color of the character under a block cursor. Leave empty to use the theme.", .terminal, "Colors"),
-        SettingItem("selection-foreground", "Selection text color", "A color, cell-foreground, or cell-background. Leave empty to use the theme.", .terminal, "Colors"),
-        SettingItem("selection-background", "Selection color", "A color, cell-foreground, or cell-background. Leave empty to use the theme.", .terminal, "Colors"),
-        SettingItem("palette", "ANSI colors", "Replaces the 16 ANSI colors. Leave a color empty to use the theme.", .terminal, "Colors"),
-        SettingItem("cursor-style", "Cursor shape", "Choose the initial cursor shape. Terminal programs can change it.", .terminal, "Cursor"),
-        SettingItem("cursor-style-blink", "Cursor blinking", "Choose the initial blink behavior. Terminal programs can change it.", .terminal, "Cursor"),
-        SettingItem("adjust-cursor-thickness", "Cursor thickness", "Thicken bar, underline, and outlined cursors. Use 1 for one extra physical pixel, or 100% to double thickness.", .terminal, "Cursor"),
-        SettingItem("cursor-opacity", "Cursor opacity", "How opaque the cursor is.", .terminal, "Cursor"),
-        SettingItem("copy-on-select", "Copy on select", "Copy selected terminal text to the clipboard as soon as you finish selecting.", .terminal, "Selection"),
-        SettingItem("selection-clear-on-typing", "Clear selection when typing", "Remove the selected range when sending text to the terminal.", .terminal, "Selection"),
-        SettingItem("selection-clear-on-copy", "Clear selection after copying", "Remove the selected range after copying its text.", .terminal, "Selection"),
-        SettingItem("scroll-precision", "Trackpad scroll speed", "Adjust smooth scrolling speed.", .terminal, "Scrolling"),
-        SettingItem("scroll-discrete", "Mouse wheel scroll speed", "Adjust mouse wheel scrolling speed.", .terminal, "Scrolling"),
-        SettingItem("scroll-on-keystroke", "Scroll to bottom when typing", "Return to live output when sending a keystroke.", .terminal, "Scrolling"),
-        SettingItem("scroll-on-output", "Scroll to bottom on output", "Return to live output whenever the terminal receives new text.", .terminal, "Scrolling"),
-        SettingItem("mouse-reporting", "Allow programs to use the mouse", "Send mouse events to terminal programs that request them. Hold Shift to select text instead.", .terminal, "Input"),
-        SettingItem("macos-option-as-alt", "Option as Alt", "Use both Option keys, neither, or just one as the terminal Alt modifier.", .terminal, "Input"),
-        SettingItem("directory", "New pane directory", "Start new splits in the project folder or the current pane's working directory.", .terminal, "Input"),
-        SettingItem("terminal-keybindings", "Key bindings", "Keys the terminal handles while it is focused. They take precedence over app shortcuts.", .terminal, "Key bindings"),
-        SettingItem("keybind-clear-defaults", "Disable built-in bindings", "Turn off Tab's built-in terminal keys, such as Command-K to clear the screen, and keep only yours.", .terminal, "Key bindings"),
-        SettingItem("terminal-import-notes", "Imported settings", "Notes about terminal settings that could not be applied.", .terminal, "Migration"),
-        SettingItem("terminal-reset", "Reset terminal settings", "Return terminal appearance, input, and key bindings to their defaults.", .terminal, "Reset"),
+        SettingItem("typography-preview", "", "", .terminal, "Typography"),
+        SettingItem("font-family", "Terminal font", "", .terminal, "Typography"),
+        SettingItem("font-size", "Font size", "", .terminal, "Typography"),
+        SettingItem("font-style", "Style", "", .terminal, "Typography"),
+        SettingItem("font-advanced", "Advanced", "", .terminal, "Typography"),
+        SettingItem("advanced-preview", "", "", .terminal, "Advanced Font Settings", subpage: .advancedFont),
+        SettingItem("character-spacing", "Character spacing", "", .terminal, "Advanced Font Settings", subpage: .advancedFont),
+        SettingItem("line-height", "Line height", "", .terminal, "Advanced Font Settings", subpage: .advancedFont),
+        SettingItem("ligatures", "Ligatures", "", .terminal, "Advanced Font Settings", subpage: .advancedFont),
+        SettingItem("font-smoothing", "Font smoothing", "", .terminal, "Advanced Font Settings", subpage: .advancedFont),
+        SettingItem("fallback-fonts", "Fallback fonts", "Used in order for characters the terminal font doesn't have.", .terminal, "Advanced Font Settings", subpage: .advancedFont),
+        SettingItem("improve-contrast", "Improve text contrast", "Adjust unreadable text against its background.", .terminal, "Colors"),
+        SettingItem("force-theme-palette", "Force theme palette for text", "Map text colors to the nearest theme color.", .terminal, "Colors"),
+        SettingItem("display-p3", "Use Display P3 color space", "Read theme and program colors as wide-gamut Display P3.", .terminal, "Colors"),
+        SettingItem("cursor-preview", "", "", .terminal, "Cursor"),
+        SettingItem("cursor-style", "Cursor style", "", .terminal, "Cursor"),
+        SettingItem("cursor-blink", "Blink speed", "", .terminal, "Cursor"),
+        SettingItem("force-cursor-style", "Force style", "Ignore application requests to change cursor shape.", .terminal, "Cursor"),
+        SettingItem("option-key", "Option key", "", .terminal, "Keyboard"),
+        SettingItem("smooth-scrolling", "Smooth scrolling", "", .terminal, "Scrolling"),
+        SettingItem("selection-preview", "", "", .terminal, "Selection"),
+        SettingItem("copy-on-select", "Copy on selection", "", .terminal, "Selection"),
+        SettingItem("copy-animation", "Play animation on copy", "", .terminal, "Selection"),
+        SettingItem("selection-foreground", "Foreground", "", .terminal, "Selection"),
+        SettingItem("selection-background", "Background", "", .terminal, "Selection"),
+        SettingItem("rounded-selection", "Rounded corners", "", .terminal, "Selection"),
+        SettingItem("app-links", "Links that open apps", "", .terminal, "Links"),
+        SettingItem("generated-titles", "Prefer generated titles", "", .terminal, "Titles"),
+        SettingItem("startup-command", "Startup command", "", .terminal, "Shell"),
         // Browser
         SettingItem("browser-enabled", "Enable built-in browser", "Open web pages in browser tabs and let tab browser commands drive them.", .browser, "General"),
         SettingItem("browser-terminal-links", "Open terminal links in the browser", "Command-click a web link in a terminal to open it in a browser tab instead of your system browser.", .browser, "General"),

@@ -257,10 +257,6 @@ public struct AccessibilityOptions: Equatable, Sendable {
         self.reduceMotion = reduceMotion
     }
 
-    /// Vibrancy (the native window material) is off when the user asks for
-    /// less transparency or more contrast.
-    public var allowsVibrancy: Bool { !reduceTransparency && !increaseContrast }
-
     @MainActor
     public static func current() -> AccessibilityOptions {
         let workspace = NSWorkspace.shared

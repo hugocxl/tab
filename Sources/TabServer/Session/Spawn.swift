@@ -3,16 +3,30 @@ import TabCore
 import TabProtocol
 import TabTerminal
 
-/// Builds what a new session runs: the user's login shell with Tab's
-/// environment.
+/// Builds what a new session runs: the startup command, else the user's
+/// login shell, with Tab's environment.
 enum SessionSpawn {
     static let fallbackShell = "/bin/zsh"
+    static let shells: Set<String> = ["sh", "bash", "zsh", "fish", "ksh", "tcsh", "csh", "dash", "nu", "elvish", "xonsh"]
 
-    /// The configured shell, else `$SHELL`, else zsh.
-    static func shell(settings: ServerSettingsDoc, environment: [String: String]) -> String {
-        if let shell = settings.defaultShell?.rawValue, !shell.isEmpty { return shell }
+    /// `$SHELL`, else zsh.
+    static func loginShell(environment: [String: String]) -> String {
         if let shell = environment["SHELL"], shell.hasPrefix("/") { return shell }
         return fallbackShell
+    }
+
+    /// `program` as an absolute path: itself when absolute, else found on
+    /// `PATH`. `nil` when it isn't an executable file.
+    static func resolve(_ program: String, environment: [String: String]) -> String? {
+        if program.hasPrefix("/") { return Executable.isExecutableFile(URL(fileURLWithPath: program)) ? program : nil }
+        guard !program.contains("/") else { return nil }
+        let path = environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
+        return path.split(separator: ":").map { "\($0)/\(program)" }
+            .first { Executable.isExecutableFile(URL(fileURLWithPath: $0)) }
+    }
+
+    static func isShell(_ program: String) -> Bool {
+        shells.contains((program as NSString).lastPathComponent)
     }
 
     static func request(
@@ -20,13 +34,25 @@ enum SessionSpawn {
         command: String?, extra: [String: String], server: ServerId, session: SessionId,
         inherited: [String: String] = ProcessInfo.processInfo.environment
     ) -> SpawnRequest {
-        let shell = shell(settings: settings, environment: inherited)
-        var environment = Self.environment(inherited: inherited, extra: extra, server: server, session: session)
-        environment["SHELL"] = shell
-        integration?.configure(&environment, shell: shell, enabled: settings.shellIntegration)
+        var program = loginShell(environment: inherited)
         var arguments = ["-l"]
+        if let first = settings.startupCommand.first, let resolved = resolve(first, environment: inherited) {
+            let custom = Array(settings.startupCommand.dropFirst())
+            if isShell(resolved) {
+                program = resolved
+                if !custom.isEmpty, command == nil { arguments = custom }
+            } else if command == nil {
+                program = resolved
+                arguments = custom
+            }
+        }
+        var environment = Self.environment(inherited: inherited, extra: extra, server: server, session: session)
+        if isShell(program) {
+            environment["SHELL"] = program
+            integration?.configure(&environment, shell: program, enabled: settings.shellIntegration)
+        }
         if let command { arguments += ["-c", command] }
-        return SpawnRequest(program: shell, arguments: arguments, environment: environment,
+        return SpawnRequest(program: program, arguments: arguments, environment: environment,
                             workingDirectory: directory, size: size)
     }
 

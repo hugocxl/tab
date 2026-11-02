@@ -18,8 +18,7 @@ final class TerminalGraphicsTests: XCTestCase {
         var state = TerminalRendererTests().state(grid)
         state.metrics = TerminalMetrics(cellWidth: 8, cellHeight: 16, ascent: 10, descent: 3, baseline: 12,
                                         scale: 2, lineThickness: 0.5)
-        state.layout = TerminalLayout(bounds: CGRect(x: 0, y: 0, width: 68, height: 68), metrics: state.metrics,
-                                       options: TerminalOptions())
+        state.layout = TerminalLayout(bounds: CGRect(x: 0, y: 0, width: 68, height: 68), metrics: state.metrics)
         state.palette.background = 0
         let renderer = CoreTextRenderer()
         let context = TerminalRendererTests.context(state.layout)

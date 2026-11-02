@@ -22,11 +22,10 @@ public enum TerminalCommand: Hashable, Sendable {
     case increaseFontSize(Double)
     case decreaseFontSize(Double)
     case resetFontSize
-    case reloadConfiguration
 }
 
-/// How a terminal handles a key: a key binding from `terminal.json` (or a
-/// built-in one), or one of the terminal's own shortcuts.
+/// How a terminal handles a key: a built-in terminal key, or one of the
+/// terminal's own shortcuts.
 public enum TerminalKeyHandling: Equatable, Sendable {
     case binding(TerminalAction)
     case command(TerminalCommand)
@@ -99,11 +98,14 @@ public final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation
     public internal(set) var inputModes = InputModes()
     /// Set from the session: whether the program asked the cursor to blink.
     public var cursorBlinks = true { didSet { if cursorBlinks != oldValue { syncBlink() } } }
+    /// How far the rows sit below their places while smooth scrolling
+    /// reveals part of the row above.
+    public private(set) var smoothOffset: CGFloat = 0
     /// Terminal shortcuts that are app shortcuts in the menu bar; the view
     /// handles them while focused so they work in any host. The shell can
     /// replace them with the user's keymap.
     public var shortcuts: [KeyChord: TerminalCommand] = TerminalView.defaultShortcuts
-    /// Turns off the built-in key bindings (Cmd+K, Shift+Return…), keeping the user's.
+    /// Turns off the built-in terminal keys (Cmd+K, Shift+Return…).
     public var builtInBindingsEnabled = true
     /// The find state whose matches are highlighted.
     public var find: TerminalFind? { didSet { if find != oldValue { needsDisplay = true } } }
@@ -156,10 +158,8 @@ public final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation
         self.renderer = renderer ?? CoreTextRenderer()
         fontSize = settings.fontSize
         fonts = TerminalFontSet(settings: settings)
-        metrics = TerminalMetrics(fonts: fonts, cellWidth: settings.font.cellWidth, cellHeight: settings.cellHeight,
-                                  scale: NSScreen.main?.backingScaleFactor ?? 2)
-        layout = TerminalLayout(bounds: .zero, metrics: metrics, options: settings.options)
-        cursorBlinks = palette.cursorBlink ?? true
+        metrics = TerminalMetrics(fonts: fonts, settings: settings, scale: NSScreen.main?.backingScaleFactor ?? 2)
+        layout = TerminalLayout(bounds: .zero, metrics: metrics)
         super.init(frame: .zero)
         dirty.reserveCapacity(128)
         wantsLayer = true
@@ -182,7 +182,7 @@ public final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation
     required init?(coder: NSCoder) { nil }
 
     public override var isFlipped: Bool { true }
-    public override var isOpaque: Bool { palette.isOpaque }
+    public override var isOpaque: Bool { true }
     public override var acceptsFirstResponder: Bool { true }
     public override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
@@ -191,13 +191,22 @@ public final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation
     /// Applies new terminal settings and colors, re-measuring the font when
     /// it changed.
     public func configure(settings: TerminalSettings, palette: TerminalPalette) {
-        let fontChanged = settings.fontFamilies != self.settings.fontFamilies || settings.font != self.settings.font
-            || settings.cellHeight != self.settings.cellHeight || settings.fontSize != self.settings.fontSize
+        let fontChanged = settings.fontFamily != self.settings.fontFamily || settings.fontStyle != self.settings.fontStyle
+            || settings.fallbackFonts != self.settings.fallbackFonts || settings.fontSize != self.settings.fontSize
+            || settings.characterSpacing != self.settings.characterSpacing || settings.lineHeight != self.settings.lineHeight
+            || settings.ligatures != self.settings.ligatures || settings.fontSmoothing != self.settings.fontSmoothing
+        let blinkChanged = settings.cursorBlink != self.settings.cursorBlink
         if settings.fontSize != self.settings.fontSize { fontSize = settings.fontSize }
+        let redraw = settings.roundedSelection != self.settings.roundedSelection
+            || settings.forceCursorStyle != self.settings.forceCursorStyle
         self.settings = settings
         let paletteChanged = palette != self.palette
-        if palette.cursorBlink != self.palette.cursorBlink { cursorBlinks = palette.cursorBlink ?? true }
         self.palette = palette
+        if blinkChanged {
+            blinkTimer?.invalidate()
+            blinkTimer = nil
+        }
+        if !settings.smoothScrolling { resetSmoothScroll() }
         if fontChanged {
             remeasure()
         } else {
@@ -205,9 +214,9 @@ public final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation
         }
         if paletteChanged {
             renderer.invalidateAll()
-            scrollbar.thumbColor = NSColor(cgColor: CGColor.terminal(palette.foreground, alpha: 0.3)) ?? .gray
-            needsDisplay = true
+            scrollbar.thumbColor = NSColor(cgColor: palette.cgColor(palette.foreground, alpha: 0.3)) ?? .gray
         }
+        if paletteChanged || redraw { needsDisplay = true }
         syncBlink()
     }
 
@@ -221,14 +230,13 @@ public final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation
 
     private func remeasure() {
         fonts = TerminalFontSet(settings: settings, size: fontSize)
-        metrics = TerminalMetrics(fonts: fonts, cellWidth: settings.font.cellWidth, cellHeight: settings.cellHeight,
-                                  scale: window?.backingScaleFactor ?? metrics.scale)
+        metrics = TerminalMetrics(fonts: fonts, settings: settings, scale: window?.backingScaleFactor ?? metrics.scale)
         renderer.invalidateAll()
         relayout(force: true)
     }
 
     private func relayout(force: Bool = false) {
-        let next = TerminalLayout(bounds: bounds, metrics: metrics, options: settings.options, basePadding: basePadding)
+        let next = TerminalLayout(bounds: bounds, metrics: metrics, basePadding: basePadding)
         guard force || next != layout else { return }
         let viewportChanged = next.viewport != layout.viewport
         layout = next
@@ -274,6 +282,7 @@ public final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation
     /// Replaces the grid, such as with a session's first or cached screen.
     public func setGrid(_ grid: RunGrid?) {
         self.grid = grid
+        resetSmoothScroll()
         _ = self.grid?.takeChanges()
         lastCursorRow = grid.map { Int($0.cursor.row) }
         validateSelection()
@@ -335,7 +344,8 @@ public final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation
         guard let grid = grid ?? emptyGrid else { return }
         let state = TerminalRenderState(
             grid: grid, layout: layout, metrics: metrics, fonts: fonts, palette: palette, cursor: cursorState(grid),
-            selection: selection, find: find, link: link, markedText: markedText.isEmpty ? nil : markedText)
+            selection: selection, find: find, link: link, markedText: markedText.isEmpty ? nil : markedText,
+            roundedSelection: settings.roundedSelection, smoothOffset: smoothOffset)
         renderer.prepare(state)
         preparedState = state
     }
@@ -359,15 +369,16 @@ public final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation
         let live = host?.isLive ?? true
         let visible = live && focused && blinkVisible && grid.scrollOffset == 0 && grid.cursor.visible
             && grid.cursor.col < grid.size.cols && Int(grid.cursor.row) < Int(layout.viewport.rows)
-        return TerminalCursorState(visible: visible || !markedText.isEmpty && focused, shape: grid.cursor.shape,
-                                   row: Int(grid.cursor.row), column: Int(grid.cursor.col),
-                                   thickness: settings.options.cursorThickness)
+        return TerminalCursorState(visible: visible || !markedText.isEmpty && focused,
+                                   shape: settings.forceCursorStyle ? palette.cursorStyle : grid.cursor.shape,
+                                   row: Int(grid.cursor.row), column: Int(grid.cursor.col))
     }
 
     // MARK: Cursor blink
 
     private var shouldBlink: Bool {
-        guard let grid, cursorBlinks, focused, host?.isLive ?? true, grid.scrollOffset == 0,
+        guard settings.cursorBlink != .off, cursorBlinks || settings.forceCursorStyle else { return false }
+        guard let grid, focused, host?.isLive ?? true, grid.scrollOffset == 0,
               grid.cursor.visible, markedText.isEmpty else { return false }
         return true
     }
@@ -383,7 +394,7 @@ public final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation
             return
         }
         guard blinkTimer == nil else { return }
-        let timer = Timer(timeInterval: 0.53, repeats: true) { [weak self] timer in
+        let timer = Timer(timeInterval: settings.cursorBlink.interval ?? 0.53, repeats: true) { [weak self] timer in
             guard let self else { return timer.invalidate() }
             MainActor.assumeIsolated {
                 guard self.shouldBlink else { return self.syncBlink() }
@@ -457,21 +468,14 @@ public final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation
     /// shortcuts. The shell asks before running app shortcuts.
     public func handledShortcut(_ event: NSEvent) -> TerminalKeyHandling? {
         guard let chord = KeyMapping.chord(event) else { return nil }
-        let bindings = settings.keybindings
-        if let action = bindings.bindings[chord] {
-            return action == .unbind ? nil : .binding(action)
-        }
-        if builtInBindingsEnabled, !bindings.clearDefaults, let action = TerminalBindings.defaults[chord] {
-            return .binding(action)
-        }
+        if builtInBindingsEnabled, let action = TerminalAction.defaults[chord] { return .binding(action) }
         return shortcuts[chord].map(TerminalKeyHandling.command)
     }
 
-    /// Whether the terminal takes `event` while focused: its bindings and
+    /// Whether the terminal takes `event` while focused: its keys and
     /// shortcuts, and every key without Command (those go to the program).
     public func canHandle(_ event: NSEvent) -> Bool {
-        if let chord = KeyMapping.chord(event), settings.keybindings.bindings[chord] == .unbind { return true }
-        return handledShortcut(event) != nil || !event.modifierFlags.contains(.command)
+        handledShortcut(event) != nil || !event.modifierFlags.contains(.command)
     }
 
     public override func performKeyEquivalent(with event: NSEvent) -> Bool {
@@ -490,17 +494,17 @@ public final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation
             perform(handling, event: event)
             return
         }
-        let unbound = KeyMapping.chord(event).map { settings.keybindings.bindings[$0] == .unbind } ?? false
-        if !unbound, event.modifierFlags.contains(.command) { return }
-        if KeyMapping.usesTextInput(event, optionAsAlt: settings.optionAsAlt) {
-            pendingKey = KeyMapping.keyEvent(event, optionAsAlt: settings.optionAsAlt)
+        if event.modifierFlags.contains(.command) { return }
+        let usLayout = KeyboardLayout.isUS
+        if KeyMapping.usesTextInput(event, optionKey: settings.optionKey, usLayout: usLayout) {
+            pendingKey = KeyMapping.keyEvent(event, optionKey: settings.optionKey, usLayout: usLayout)
             pendingKeyCode = event.keyCode
             interpretKeyEvents([event])
             pendingKey = nil
             pendingKeyCode = nil
             return
         }
-        sendKey(KeyMapping.keyEvent(event, optionAsAlt: settings.optionAsAlt), code: event.keyCode)
+        sendKey(KeyMapping.keyEvent(event, optionKey: settings.optionKey, usLayout: usLayout), code: event.keyCode)
     }
 
     public override func keyUp(with event: NSEvent) {
@@ -532,21 +536,13 @@ public final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation
         case .text(let bytes):
             guard prepareInput() else { return }
             host?.terminalView(self, send: .bytes(Data(bytes)))
-        case .ignore:
-            break
-        case .unbind:
-            sendKey(KeyMapping.keyEvent(event, optionAsAlt: settings.optionAsAlt), code: event.keyCode)
-        case .copy: perform(.copy)
         case .paste: perform(.paste)
         case .selectAll: perform(.selectAll)
-        case .reload: perform(.reloadConfiguration)
         case .clearScreen: perform(.clearScreen)
         case .scrollTop: perform(.scrollToTop)
         case .scrollBottom: perform(.scrollToBottom)
         case .scrollPageUp: perform(.scrollPageUp)
         case .scrollPageDown: perform(.scrollPageDown)
-        case .increaseFontSize(let amount): perform(.increaseFontSize(amount))
-        case .decreaseFontSize(let amount): perform(.decreaseFontSize(amount))
         case .resetFontSize: perform(.resetFontSize)
         }
     }
@@ -575,8 +571,7 @@ public final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation
             setFontSize(fontSize - amount)
         case .resetFontSize:
             setFontSize(nil)
-        case .selectCommandOutput, .clearScreen, .previousPrompt, .nextPrompt, .find, .findNext, .findPrevious,
-             .reloadConfiguration:
+        case .selectCommandOutput, .clearScreen, .previousPrompt, .nextPrompt, .find, .findNext, .findPrevious:
             host?.terminalView(self, perform: command, at: point)
         }
     }
@@ -599,15 +594,13 @@ public final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation
         }
     }
 
-    /// Before input: back to live output, clear the selection when asked,
-    /// show the cursor. Returns whether the terminal takes input.
+    /// Before input: back to live output and show the cursor. Returns
+    /// whether the terminal takes input.
     private func prepareInput() -> Bool {
         guard host?.isLive ?? false else { return false }
-        if settings.options.scrollOnKeystroke, let grid, grid.scrollOffset > 0 {
+        resetSmoothScroll()
+        if let grid, grid.scrollOffset > 0 {
             host?.terminalView(self, scrollTo: 0)
-        }
-        if settings.options.selectionClearOnTyping, selection != nil {
-            clearSelection()
         }
         restartBlinkPhase()
         return true
@@ -715,7 +708,8 @@ public final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation
         let x = (location.x - layout.grid.minX) / layout.cellWidth
         let column = nearest ? x.rounded() : x.rounded(.down)
         let rows = max(1, Int(layout.viewport.rows))
-        let row = min(max(Int(((location.y - layout.grid.minY) / layout.cellHeight).rounded(.down)), 0), rows - 1)
+        let y = (location.y - smoothOffset - layout.grid.minY) / layout.cellHeight
+        let row = min(max(Int(y.rounded(.down)), 0), rows - 1)
         let clamped = UInt16(min(max(column, 0), CGFloat(grid.size.cols)))
         return TerminalPoint(row: row - grid.scrollOffset, column: clamped)
     }
@@ -749,11 +743,11 @@ public final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation
     public func copySelection(to pasteboard: NSPasteboard = .general) -> Bool {
         guard let text = selectedText else { return false }
         writeSelection(text, to: pasteboard)
-        if settings.options.selectionClearOnCopy { clearSelection() }
         return true
     }
 
     private func writeSelection(_ text: String, to pasteboard: NSPasteboard) {
+        if settings.copyAnimation { flashSelection() }
         if let selectionCopyHandler {
             selectionCopyHandler(text)
             return
@@ -874,12 +868,11 @@ public final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation
     }
 
     private func reportsMouse(_ flags: NSEvent.ModifierFlags) -> Bool {
-        TerminalMouseMapping.reports(flags: flags, modes: inputModes, options: settings.options, live: host?.isLive ?? false)
+        TerminalMouseMapping.reports(flags: flags, modes: inputModes, live: host?.isLive ?? false)
     }
 
     private var reportsWheel: Bool {
-        TerminalMouseMapping.reports(flags: [], modes: inputModes, options: settings.options,
-                                     live: host?.isLive ?? false, wheel: true)
+        TerminalMouseMapping.reports(flags: [], modes: inputModes, live: host?.isLive ?? false, wheel: true)
     }
 
     private func location(_ event: NSEvent) -> CGPoint {
@@ -956,7 +949,7 @@ public final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation
         dragOrigin = nil
         guard dragUnit != nil else { return }
         dragUnit = nil
-        if settings.options.copyOnSelect ?? false, let text = selectedText {
+        if settings.copyOnSelect, let text = selectedText {
             writeSelection(text, to: .general)
         }
     }
@@ -1071,10 +1064,11 @@ public final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation
 
     public override func scrollWheel(with event: NSEvent) {
         let rows = TerminalMouseMapping.scrollRows(delta: event.scrollingDeltaY, precise: event.hasPreciseScrollingDeltas,
-                                                   cellHeight: layout.cellHeight, options: settings.options)
-        if TerminalMouseMapping.reports(flags: event.modifierFlags, modes: inputModes, options: settings.options,
-                                       live: host?.isLive ?? false, wheel: true) {
+                                                   cellHeight: layout.cellHeight)
+        if TerminalMouseMapping.reports(flags: event.modifierFlags, modes: inputModes, live: host?.isLive ?? false,
+                                       wheel: true) {
             historyScroll.reset()
+            resetSmoothScroll()
             let whole = wheelScroll.consume(rows, reporting: true)
             if whole != 0, let grid, grid.scrollOffset > 0 { host?.terminalView(self, scrollTo: 0) }
             for _ in 0..<abs(whole) {
@@ -1085,9 +1079,82 @@ public final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation
         }
         wheelScroll.reset()
         if event.phase == .began || event.phase == .mayBegin { historyScroll.reset() }
+        if settings.smoothScrolling, event.hasPreciseScrollingDeltas, find == nil {
+            smoothScroll(rows)
+            return
+        }
+        resetSmoothScroll()
         let whole = historyScroll.consume(rows, reporting: false)
         guard whole != 0 else { return }
         host?.terminalView(self, scrollBy: whole)
+    }
+
+    /// Scrolls history by a fraction of a row: whole rows page the history,
+    /// and the rest shifts the rows down to reveal part of the row above.
+    private func smoothScroll(_ rows: CGFloat) {
+        guard let grid else { return }
+        var (whole, fraction) = historyScroll.consumeFraction(rows)
+        let offset = grid.scrollOffset
+        let total = Int(clamping: grid.historyTotal)
+        if offset + whole >= total {
+            whole = total - offset
+            fraction = 0
+            historyScroll.reset()
+        } else if offset + whole < 0 {
+            whole = -offset
+            fraction = 0
+            historyScroll.reset()
+        }
+        if whole != 0 { host?.terminalView(self, scrollBy: whole) }
+        setSmoothOffset(fraction * layout.cellHeight)
+    }
+
+    private func setSmoothOffset(_ offset: CGFloat) {
+        let snapped = (offset * metrics.scale).rounded() / metrics.scale
+        guard snapped != smoothOffset else { return }
+        smoothOffset = snapped
+        needsDisplay = true
+    }
+
+    private func resetSmoothScroll() {
+        guard smoothOffset != 0 else { return }
+        historyScroll.reset()
+        smoothOffset = 0
+        needsDisplay = true
+    }
+
+    /// Flashes the selection once as it is copied.
+    private func flashSelection() {
+        guard let selection, let grid, let layer else { return }
+        let path = CGMutablePath()
+        let radius = settings.roundedSelection ? min(layout.cellHeight / 4, 4) : 0
+        for row in 0..<Int(layout.viewport.rows) {
+            let screenRow = row - grid.scrollOffset
+            let columns = selection.columns(row: screenRow, in: grid)
+            guard !columns.isEmpty else { continue }
+            let rect = layout.cellRect(row: row, column: Int(columns.lowerBound), width: columns.count)
+                .offsetBy(dx: 0, dy: smoothOffset)
+            let corners = SelectionCorners(columns, above: selection.columns(row: screenRow - 1, in: grid),
+                                           below: selection.columns(row: screenRow + 1, in: grid))
+            path.addPath(corners.path(rect, radius: radius))
+        }
+        guard !path.isEmpty else { return }
+        let flash = CAShapeLayer()
+        flash.frame = bounds
+        var flip = CGAffineTransform(translationX: 0, y: bounds.height).scaledBy(x: 1, y: -1)
+        flash.path = layer.isGeometryFlipped ? path : path.copy(using: &flip)
+        flash.fillColor = palette.cgColor(palette.foreground, alpha: 0.35)
+        flash.opacity = 0
+        layer.addSublayer(flash)
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = 1
+        fade.toValue = 0
+        fade.duration = 0.35
+        fade.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        CATransaction.begin()
+        CATransaction.setCompletionBlock { flash.removeFromSuperlayer() }
+        flash.add(fade, forKey: "flash")
+        CATransaction.commit()
     }
 
     private func updateScrollbar() {

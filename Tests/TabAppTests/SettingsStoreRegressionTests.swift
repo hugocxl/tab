@@ -39,17 +39,18 @@ final class SettingsStoreRegressionTests: XCTestCase {
         store.loadServerSettings()
         try await settle { store.serverSettings != nil }
         host.rejectNextServerWrite = true
-        store.setServer("default-shell", "/bin/bash")
-        store.setServer("history-budget", "32")
-        store.setServer("shell-integration", "false")
-        try await settle { host.writes.count == 3 && store.serverSettings?.shellIntegration == false }
-        XCTAssertNotNil(store.errors["default-shell"])
-        XCTAssertNil(store.serverSettings?.defaultShell)
-        XCTAssertNil(host.base.serverSettings.defaultShell)
-        XCTAssertEqual(host.base.serverSettings.historyBudgetBytes, 32 * 1024 * 1024)
-        XCTAssertFalse(host.base.serverSettings.shellIntegration)
+        store.setServer("startup-command", "/bin/bash")
+        try await settle { host.writes.count == 1 && store.errors["startup-command"] != nil }
+        XCTAssertNotNil(store.errors["startup-command"])
+        XCTAssertEqual(store.serverSettings?.startupCommand, [])
+        store.setServer("startup-command", #"tmux new -A -s "my work""#)
+        try await settle { host.writes.count == 2 && store.serverSettings?.startupCommand.isEmpty == false }
+        XCTAssertNil(store.errors["startup-command"])
+        XCTAssertEqual(host.base.serverSettings.startupCommand, ["tmux", "new", "-A", "-s", "my work"])
         XCTAssertEqual(store.serverSettings, host.base.serverSettings)
-        XCTAssertEqual(host.writes.dropFirst().map(\.defaultShell), [nil, nil])
+        store.setServer("startup-command", #"zsh "unclosed"#)
+        XCTAssertNotNil(store.errors["startup-command"])
+        XCTAssertEqual(host.writes.count, 2, "a command that doesn't parse is never written")
     }
 
     func testMobileWriteFailureClearsBusyAndCanBeRetried() async throws {
@@ -109,33 +110,21 @@ final class SettingsStoreRegressionTests: XCTestCase {
         let controller = SettingsWindowController(store: store)
         defer { controller.window?.close() }
         try await settle { store.serverSettings != nil && store.remoteAccess != nil }
-        controller.search("Default shell")
-        XCTAssertEqual(controller.model.lastBuild?.rowIds, ["default-shell"])
+        controller.search("Startup command")
+        XCTAssertEqual(controller.model.lastBuild?.rowIds, ["startup-command"])
         controller.search("Allow mobile devices")
         XCTAssertEqual(controller.model.lastBuild?.rowIds, ["mobile-access"])
     }
 
     func testClosingSettingsSavesFieldsBeingTyped() throws {
         let controller = SettingsWindowController(store: store())
-        for (category, id, text) in [(SettingsCategory.general, "worktree-template", "../{branch}"), (.terminal, "palette-0", "#123456")] {
+        for (category, id, text) in [(SettingsCategory.general, "worktree-template", "../{branch}")] {
             controller.select(category)
             let field = try XCTUnwrap(controller.model.fields[id])
             controller.model.editing(id) { field.commit(text) }
         }
         controller.window?.close()
         XCTAssertEqual(try Settings.load(dirs.settings).worktrees.defaultLocation.pathTemplate, "../{branch}")
-        XCTAssertEqual(try TerminalSettings.load(dirs.terminalSettings).options.palette[0]?.hex.lowercased(), "#123456")
-    }
-
-    func testTerminalBindingEditorPersists() throws {
-        let store = store()
-        let page = SettingsModel(store: store)
-        page.select(.terminal)
-        let free = try KeyChord("cmd-ctrl-alt-f10")
-        page.bindingDraft = BindingDraft(chord: free, action: "text", parameter: "hello")
-        page.saveBinding()
-        XCTAssertNil(page.bindingDraft)
-        XCTAssertEqual(try TerminalSettings.load(dirs.terminalSettings).keybindings.bindings[free], try TerminalAction("text:hello"))
     }
 
     private func buttons(in control: SettingControl?) -> [ButtonSpec] {
@@ -184,33 +173,22 @@ final class SettingsStoreRegressionTests: XCTestCase {
         XCTAssertFalse(store.settings.keymap.isDefault("split_right"))
     }
 
-    func testResetDoesNotPartiallyResetTerminalWhenAppSettingsAreBroken() throws {
+    func testRefusedTerminalChangesKeepTheSavedFileAndShowOnTheRow() throws {
         let store = store()
-        store.setTerminal("font-size", "20")
-        store.setNewPaneDirectory(.current)
-        let original = try Data(contentsOf: dirs.terminalSettings)
-        try Data("{ broken".utf8).write(to: dirs.settings)
-        store.resetTerminal()
-        XCTAssertNotNil(store.errors["terminal-reset"])
-        XCTAssertEqual(try Data(contentsOf: dirs.terminalSettings), original)
+        store.updateTerminal("font-size") { $0.fontSize = 20 }
+        let saved = try Data(contentsOf: dirs.terminalSettings)
+        store.updateTerminal("font-size") { $0.fontSize = 500 }
+        XCTAssertNotNil(store.errors["font-size"])
         XCTAssertEqual(store.terminal.fontSize, 20)
-        XCTAssertEqual(store.settings.panes.newPaneDirectory, .current)
-    }
-
-    func testResetClearsTheLegacyCopyOnSelectFallback() throws {
-        try Data(#"{"clipboard":{"copyOnSelect":true}}"#.utf8).write(to: dirs.settings)
-        let store = store()
-        XCTAssertTrue(store.terminalIsCustomized)
-        XCTAssertTrue(store.terminal.options.copyOnSelect ?? store.settings.clipboard.copyOnSelect)
-        store.resetTerminal()
-        XCTAssertNil(store.errors["terminal-reset"])
-        XCTAssertFalse(store.terminal.options.copyOnSelect ?? store.settings.clipboard.copyOnSelect)
-        XCTAssertFalse(try Settings.load(dirs.settings).clipboard.copyOnSelect)
-        XCTAssertFalse(store.terminalIsCustomized)
+        XCTAssertEqual(try Data(contentsOf: dirs.terminalSettings), saved)
+        XCTAssertEqual(host.base.appliedTerminal.last?.fontSize, 20)
+        store.updateTerminal("font-size") { $0.fontSize = 14 }
+        XCTAssertNil(store.errors["font-size"])
+        XCTAssertEqual(try TerminalSettings.load(dirs.terminalSettings).fontSize, 14)
     }
 
     func testBackupRejectsInvalidServerSettingsBeforeStaging() throws {
-        for server in [#"{"defaultShell":"relative"}"#, #"{"historyBudgetBytes":68719476737}"#, #"{"shellIntegration":"yes"}"#] {
+        for server in [#"{"startupCommand":[""]}"#, #"{"historyBudgetBytes":68719476737}"#, #"{"shellIntegration":"yes"}"#] {
             let archive = BackupArchive(files: ["settings.json": Data("{}".utf8), "server.json": Data(server.utf8)])
             XCTAssertThrowsError(try archive.stage(in: dirs))
             XCTAssertFalse(BackupArchive.hasPending(dirs))
@@ -253,7 +231,6 @@ private final class SettingsWriteHost: SettingsHost {
     var serverState: ServerConnectionState { base.serverState }
     func settingsDidChange(_ settings: Settings) { base.settingsDidChange(settings) }
     func terminalSettingsDidChange(_ settings: TerminalSettings) { base.terminalSettingsDidChange(settings) }
-    func previewTerminalSettings(_ settings: TerminalSettings) { base.previewTerminalSettings(settings) }
     func connectServer() { base.connectServer() }
     func readServerSettings() async throws -> ServerSettingsDoc { try await base.readServerSettings() }
     func writeServerSettings(_ settings: ServerSettingsDoc) async throws {

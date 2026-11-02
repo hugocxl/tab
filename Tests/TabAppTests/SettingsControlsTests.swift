@@ -69,7 +69,7 @@ final class SettingsControlsTests: XCTestCase {
     private func controls(in control: SettingControl) -> [SettingControl] {
         control.leaves.filter {
             switch $0 {
-            case .toggle, .segmented, .choice, .slider, .text: return true
+            case .toggle, .segmented, .choice, .stepper, .text: return true
             default: return false
             }
         }
@@ -86,9 +86,9 @@ final class SettingsControlsTests: XCTestCase {
         case .choice(let popUp):
             guard let other = popUp.items.first(where: { $0.id != popUp.selected && !$0.id.hasPrefix("__") }) else { return false }
             popUp.change(other.id)
-        case .slider(let slider):
-            let next = slider.value + slider.step <= slider.range.upperBound ? slider.value + slider.step : slider.value - slider.step
-            slider.commit(next)
+        case .stepper(let stepper):
+            let next = stepper.value + stepper.step <= stepper.range.upperBound ? stepper.value + stepper.step : stepper.value - stepper.step
+            stepper.commit(next)
         case .text(let field):
             guard field.enabled else { return false }
             if rowId == "browser-profiles" { return false }
@@ -96,13 +96,9 @@ final class SettingsControlsTests: XCTestCase {
             var text = numeric ? "1000" : (field.value.isEmpty ? "qa-value" : field.value + "-qa")
             if rowId.contains("folder") || rowId.contains("template") { text = "~/qa-worktrees" }
             if rowId == "worktree-template" { text = "../{base-dir}.{branch}" }
-            if rowId == "default-shell" { text = "/bin/bash" }
+            if rowId == "startup-command" { text = "/bin/bash -l" }
             if rowId == "mobile-port" { text = "7420" }
             if rowId == "browser-home-page" { text = "https://example.com" }
-            if rowId == "font-feature" { text = "ss01" }
-            if ["palette", "background", "foreground", "cursor-color", "cursor-text", "selection-foreground", "selection-background"].contains(rowId) {
-                text = "#123456"
-            }
             field.commit(text)
         default:
             return false
@@ -118,8 +114,10 @@ final class SettingsControlsTests: XCTestCase {
         let page = SettingsModel(store: store)
         var report: [String: [String]] = [:]
         var silent: [String] = []
-        for category in SettingsCategory.allCases {
-            page.select(category)
+        let pages = SettingsCategory.allCases.map { ($0, SettingsSubpage?.none) }
+            + SettingsSubpage.allCases.map { ($0.category, Optional($0)) }
+        for (category, subpage) in pages {
+            if let subpage { page.open(subpage) } else { page.select(category) }
             let rowIds = try XCTUnwrap(page.lastBuild).rows.map(\.id)
             for rowId in rowIds {
                 for index in 0 ..< 16 {
@@ -152,10 +150,13 @@ final class SettingsControlsTests: XCTestCase {
         let expected: [String: String] = [
             "close-behavior": "settings.json:window.closeBehavior",
             "confirm-process": "settings.json:window.confirmRunningProcess",
-            "font-ligatures": "terminal.json:font.features",
+            "ligatures": "terminal.json:ligatures",
+            "character-spacing#1": "terminal.json:characterSpacing",
+            "cursor-blink": "terminal.json:cursorBlink",
+            "fallback-fonts": "terminal.json:fallbackFonts",
             "browser-enabled": "settings.json:browser.enabled",
             "mobile-access": "remote",
-            "default-shell": "server",
+            "startup-command": "server",
         ]
         for (row, path) in expected {
             XCTAssertTrue(report[row]?.contains(path) ?? false, "\(row) wrote \(report[row] ?? []) instead of \(path)")

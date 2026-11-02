@@ -42,6 +42,6 @@ enum AgentCommandPresentation {
             value.addAttribute(.font, value: NSFontManager.shared.convert(AppFont.mono(13), toHaveTrait: .italicFontMask), range: NSRange(location: 0, length: value.length))
             return value
         }
-        return AgentTerminalOutput(dark: !theme.palette.isLight, baseColor: theme.fgMuted, palette: TerminalPalette(scheme: theme.scheme, options: TerminalOptions(), dark: !theme.palette.isLight)).render(output)
+        return AgentTerminalOutput(dark: !theme.palette.isLight, baseColor: theme.fgMuted, palette: TerminalPalette(scheme: theme.scheme, dark: !theme.palette.isLight)).render(output)
     }
 }

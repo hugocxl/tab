@@ -35,16 +35,18 @@ final class SettingsPageBuilder {
     let store: SettingsStore
     let query: String
     let category: SettingsCategory
+    let subpage: SettingsSubpage?
     private let items: [String: SettingItem]
     private(set) var groups: [Group] = []
     private(set) var fields: [String: TextSpec] = [:]
     private(set) var rowIds: [String] = []
     private(set) var unknownIds: [String] = []
 
-    init(store: SettingsStore, query: String, category: SettingsCategory) {
+    init(store: SettingsStore, query: String, category: SettingsCategory, subpage: SettingsSubpage? = nil) {
         self.store = store
         self.query = query.trimmingCharacters(in: .whitespaces).lowercased()
         self.category = category
+        self.subpage = subpage
         let index = SettingsCatalog.searchIndex()
         items = Dictionary(index.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
     }
@@ -54,14 +56,14 @@ final class SettingsPageBuilder {
     func item(_ id: String) -> SettingItem? { items[id] }
 
     /// Whether the row `id` is on screen: on the open page, or matching the
-    /// search.
+    /// search. Rows without a label, such as previews, never match a search.
     func shows(_ id: String) -> Bool {
         guard let item = items[id] else {
             unknownIds.append(id)
             return false
         }
-        if isSearching { return item.matches(query) }
-        return item.category == category
+        if isSearching { return !item.label.isEmpty && item.matches(query) }
+        return item.category == category && item.subpage == subpage
     }
 
     /// Adds a row for `id` with its catalog label; `label` replaces it, such
@@ -109,8 +111,10 @@ final class SettingsPageBuilder {
     }
 
     /// A section's title: its name, or "Page › Section" in search results.
+    /// A subpage's own section has no title; the toolbar names it.
     func title(_ group: Group) -> String? {
         if isSearching { return "\(group.category.title) › \(group.section)" }
+        if group.section == subpage?.title { return nil }
         return group.section
     }
 
@@ -145,25 +149,22 @@ final class SettingsPageBuilder {
         .choice(ChoiceSpec(items: choices, selected: selected, label: label ?? items[id]?.label ?? id, placeholder: placeholder, change: change))
     }
 
+    /// A button titled `title` that offers `choices` in a menu.
+    func menu(_ id: String, _ title: String, _ choices: [Choice], _ choose: @escaping (String) -> Void) -> SettingControl {
+        .choice(ChoiceSpec(items: choices, selected: "", label: items[id]?.label ?? id, placeholder: title, isMenu: true,
+                           change: choose))
+    }
+
+    func stepper(_ id: String, _ value: Double, range: ClosedRange<Double>, step: Double = 1, unit: String? = nil,
+                 _ commit: @escaping (Double) -> Void) -> SettingControl {
+        .stepper(StepperSpec(value: value, range: range, step: step, unit: unit, label: items[id]?.label ?? id, commit: commit))
+    }
+
     func segmented(_ id: String, _ titles: [String], selected: Int, _ change: @escaping (Int) -> Void) -> SettingControl {
         .segmented(SegmentedSpec(titles: titles, selected: selected, label: items[id]?.label ?? id, change: change))
     }
 
     func button(_ title: String, style: ButtonSpec.Style = .normal, enabled: Bool = true, symbol: String? = nil, help: String? = nil, _ action: @escaping () -> Void) -> SettingControl {
         .button(ButtonSpec(title: title, style: style, enabled: enabled, symbol: symbol, help: help, action: action))
-    }
-
-    /// A slider that previews while dragging and commits on release.
-    func slider(
-        _ id: String,
-        value: Double,
-        range: ClosedRange<Double>,
-        step: Double,
-        suffix: String = "",
-        label: String? = nil,
-        preview: ((Double) -> Void)? = nil,
-        commit: @escaping (Double) -> Void
-    ) -> SettingControl {
-        .slider(SliderSpec(value: value, range: range, step: step, suffix: suffix, label: label ?? items[id]?.label ?? id, preview: preview, commit: commit))
     }
 }

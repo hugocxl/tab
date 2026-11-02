@@ -13,16 +13,12 @@ public struct TerminalCursorState: Equatable, Sendable {
     /// Visible row and column.
     public var row: Int
     public var column: Int
-    /// The configured bar, underline and outline thickness.
-    public var thickness: CellHeight
 
-    public init(visible: Bool = false, shape: CursorShape = .block, row: Int = 0, column: Int = 0,
-                thickness: CellHeight = .natural) {
+    public init(visible: Bool = false, shape: CursorShape = .block, row: Int = 0, column: Int = 0) {
         self.visible = visible
         self.shape = shape
         self.row = row
         self.column = column
-        self.thickness = thickness
     }
 }
 
@@ -40,11 +36,16 @@ public struct TerminalRenderState {
     public var link: TerminalLinkCandidate?
     /// Input method text being composed, drawn at the cursor.
     public var markedText: String?
+    /// Selections draw with rounded corners.
+    public var roundedSelection: Bool
+    /// How far the rows sit below their places while smooth scrolling,
+    /// revealing part of the row above, from 0 to under a cell's height.
+    public var smoothOffset: CGFloat
 
     public init(grid: RunGrid, layout: TerminalLayout, metrics: TerminalMetrics, fonts: TerminalFontSet,
                 palette: TerminalPalette, cursor: TerminalCursorState = TerminalCursorState(),
                 selection: TerminalSelection? = nil, find: TerminalFind? = nil, link: TerminalLinkCandidate? = nil,
-                markedText: String? = nil) {
+                markedText: String? = nil, roundedSelection: Bool = false, smoothOffset: CGFloat = 0) {
         self.grid = grid
         self.layout = layout
         self.metrics = metrics
@@ -55,6 +56,8 @@ public struct TerminalRenderState {
         self.find = find
         self.link = link
         self.markedText = markedText
+        self.roundedSelection = roundedSelection
+        self.smoothOffset = smoothOffset
     }
 
     /// The content row (history then screen) shown at the top.
@@ -64,8 +67,6 @@ public struct TerminalRenderState {
 /// Draws a terminal grid into a Core Graphics context. Kept behind a protocol
 /// so a Metal renderer can replace Core Text without touching the model.
 @MainActor public protocol TerminalRenderer: AnyObject {
-    /// Whether the terminal background covers what is behind it.
-    var isBackgroundOpaque: Bool { get }
     /// Prepares changed row surfaces before AppKit enters draw(_:).
     func prepare(_ state: TerminalRenderState)
     /// Blits the prepared rows touching `dirty` (view coordinates, y down).
@@ -111,7 +112,9 @@ public struct TerminalRenderState {
     private var graphics: Graphics?
     private var preparedImages: [ImagePlacement] = []
     private var surfaceKeys: [PaintKey?] = []
-    public private(set) var isBackgroundOpaque = true
+    /// The row above the first, partly shown while smooth scrolling.
+    private var aboveSurface: RowSurface?
+    private var aboveKey: PaintKey?
 
     private var slots: [PreparedRow?] = []
     private var cache: [RowKey: PreparedRow] = [:]
@@ -133,6 +136,8 @@ public struct TerminalRenderState {
         colors.removeAll(keepingCapacity: true)
         surfaces.removeAll(keepingCapacity: true)
         surfaceKeys.removeAll(keepingCapacity: true)
+        aboveSurface = nil
+        aboveKey = nil
         preparedImages.removeAll(keepingCapacity: true)
         graphics = nil
         renderLayout = nil
@@ -164,32 +169,60 @@ public struct TerminalRenderState {
             graphics = state.grid.graphics
             prepareImages(state)
         }
-        isBackgroundOpaque = state.palette.isOpaque
         stamp &+= 1
         for row in 0..<rowCount {
-            let content = state.firstRow + row
-            let runs = state.grid.contentRow(content) ?? []
-            let selected = selectedColumns(state, row: content - state.grid.history.count)
-            let item = preparedRow(runs, selected: selected, row: row, state: state)
-            let selection = state.selection?.columns(row: content - state.grid.history.count, in: state.grid)
-            let link = state.link.flatMap { $0.row == content - state.grid.history.count ? $0 : nil }
-            let cursor = state.cursor.visible && state.cursor.row == row ? state.cursor : nil
-            let marked = state.cursor.row == row ? state.markedText : nil
-            let key = PaintKey(row: item.key, selection: selection, find: state.find, link: link,
-                               cursor: cursor, marked: marked, scroll: preparedImages.isEmpty ? 0 : state.grid.scrollOffset)
-            guard graphicsChanged || surfaceKeys[row] != key || surfaces[row] == nil else { continue }
+            guard let key = paintKey(row: row, state: state),
+                  graphicsChanged || surfaceKeys[row] != key || surfaces[row] == nil else { continue }
             let rect = state.layout.rowRect(row)
             if surfaces[row]?.rect != rect {
-                surfaces[row] = RowSurface(rect: rect, scale: state.metrics.scale)
+                surfaces[row] = RowSurface(rect: rect, scale: state.metrics.scale, displayP3: state.palette.displayP3)
                 surfaceAllocationCount += 1
             }
             guard let surface = surfaces[row] else { continue }
-            paint(item, row: row, state: state, in: surface.context)
+            paint(row: row, state: state, in: surface.context)
             surfaceKeys[row] = key
             rasterCount += 1
             onRasterRow?(row)
         }
+        prepareAbove(state, graphicsChanged: graphicsChanged)
         trimLayouts()
+    }
+
+    /// What a visible row's surface shows; `nil` when there is no such content row.
+    private func paintKey(row: Int, state: TerminalRenderState) -> PaintKey? {
+        let content = state.firstRow + row
+        guard content >= 0 else { return nil }
+        let screenRow = content - state.grid.history.count
+        let runs = state.grid.contentRow(content) ?? []
+        let item = preparedRow(runs, selected: selectedColumns(state, row: screenRow), row: row, state: state)
+        let selection = state.selection?.columns(row: screenRow, in: state.grid)
+        var neighbors: [Range<UInt16>] = []
+        if state.roundedSelection, let range = selection, !range.isEmpty, let all = state.selection {
+            neighbors = [all.columns(row: screenRow - 1, in: state.grid), all.columns(row: screenRow + 1, in: state.grid)]
+        }
+        let link = state.link.flatMap { $0.row == screenRow ? $0 : nil }
+        let cursor = state.cursor.visible && state.cursor.row == row ? state.cursor : nil
+        let marked = state.cursor.row == row ? state.markedText : nil
+        return PaintKey(row: item.key, selection: selection, neighbors: neighbors, find: state.find, link: link,
+                        cursor: cursor, marked: marked, scroll: preparedImages.isEmpty ? 0 : state.grid.scrollOffset)
+    }
+
+    /// Paints the row above the first while smooth scrolling reveals it.
+    private func prepareAbove(_ state: TerminalRenderState, graphicsChanged: Bool) {
+        guard state.smoothOffset > 0, let key = paintKey(row: -1, state: state) else {
+            aboveKey = nil
+            return
+        }
+        guard graphicsChanged || aboveKey != key || aboveSurface == nil else { return }
+        let rect = state.layout.rowRect(-1)
+        if aboveSurface?.rect != rect {
+            aboveSurface = RowSurface(rect: rect, scale: state.metrics.scale, displayP3: state.palette.displayP3)
+            surfaceAllocationCount += 1
+        }
+        guard let surface = aboveSurface else { return }
+        paint(row: -1, state: state, in: surface.context)
+        aboveKey = key
+        rasterCount += 1
     }
 
     public func draw(_ state: TerminalRenderState, dirty: [CGRect], in context: CGContext) {
@@ -198,33 +231,47 @@ public struct TerminalRenderState {
         defer { context.restoreGState() }
         context.setBlendMode(.copy)
         context.interpolationQuality = .none
+        let offset = state.smoothOffset
+        if offset > 0 {
+            context.clip(to: layout.bounds)
+            context.translateBy(x: 0, y: offset)
+            if aboveKey != nil, let surface = aboveSurface { blit(surface, in: context) }
+        }
         for row in surfaces.indices {
             guard let surface = surfaces[row],
-                  dirty.contains(where: { $0.intersects(layout.rowRect(row)) }) else { continue }
-            context.saveGState()
-            context.translateBy(x: surface.rect.minX, y: surface.rect.maxY)
-            context.scaleBy(x: 1, y: -1)
-            context.draw(surface.layer, in: CGRect(origin: .zero, size: surface.rect.size))
-            context.restoreGState()
+                  offset > 0 || dirty.contains(where: { $0.intersects(layout.rowRect(row)) }) else { continue }
+            blit(surface, in: context)
             drawCount += 1
             onDrawRow?(row)
         }
     }
 
-    private func paint(_ item: PreparedRow, row: Int, state: TerminalRenderState, in context: CGContext) {
+    private func blit(_ surface: RowSurface, in context: CGContext) {
+        context.saveGState()
+        context.translateBy(x: surface.rect.minX, y: surface.rect.maxY)
+        context.scaleBy(x: 1, y: -1)
+        context.draw(surface.layer, in: CGRect(origin: .zero, size: surface.rect.size))
+        context.restoreGState()
+    }
+
+    private func paint(row: Int, state: TerminalRenderState, in context: CGContext) {
+        let content = state.firstRow + row
+        let screenRow = content - state.grid.history.count
+        let item = preparedRow(state.grid.contentRow(content) ?? [], selected: selectedColumns(state, row: screenRow),
+                               row: row, state: state)
         let rect = state.layout.rowRect(row)
         context.clear(rect)
-        context.setFillColor(color(state.palette.background, alpha: CGFloat(state.palette.backgroundOpacity)))
+        context.setFillColor(color(state.palette.background))
         context.fill(rect)
         context.textMatrix = CGAffineTransform(scaleX: 1, y: -1)
         drawImages(state, row: row, z: Int64.min..<(-1_073_741_824), in: context)
-        drawBackgrounds(item, row: row, state: state, backgroundAlpha: CGFloat(state.palette.backgroundOpacity), in: context)
+        drawBackgrounds(item, row: row, state: state, in: context)
         drawImages(state, row: row, z: -1_073_741_824..<0, in: context)
-        drawHighlights(state, row: row, content: state.firstRow + row, in: context)
+        drawHighlights(state, row: row, content: content, in: context)
         let top = state.layout.grid.minY + CGFloat(row) * state.layout.cellHeight
         drawDecorations(item, top: top, state: state, in: context)
         context.saveGState()
-        context.clip(to: state.layout.grid)
+        context.clip(to: state.layout.grid.union(state.layout.rowRect(-1)))
         drawGlyphs(item, origin: CGPoint(x: state.layout.grid.minX, y: top + state.metrics.baseline),
                    fonts: state.fonts, override: nil, in: context)
         context.restoreGState()
@@ -253,7 +300,7 @@ public struct TerminalRenderState {
     /// The cached layout of a row, laid out again only for new content.
     private func preparedRow(_ runs: [Run], selected: Range<UInt16>?, row: Int, state: TerminalRenderState)
         -> PreparedRow {
-        if row < slots.count, let slot = slots[row], slot.key.selected == selected, slot.key.runs == runs {
+        if row >= 0, row < slots.count, let slot = slots[row], slot.key.selected == selected, slot.key.runs == runs {
             slot.stamp = stamp
             return slot
         }
@@ -269,7 +316,7 @@ public struct TerminalRenderState {
             onLayoutRow?(row)
         }
         item.stamp = stamp
-        if row < slots.count { slots[row] = item }
+        if row >= 0, row < slots.count { slots[row] = item }
         return item
     }
 
@@ -307,7 +354,7 @@ public struct TerminalRenderState {
                 if part.selected, let selection = palette.selectionForeground {
                     color = palette.resolveCell(selection, foreground: colors.foreground, background: colors.background)
                 }
-                if simple, let ascii = face.ascii, !fonts.mapsASCII {
+                if simple, let ascii = face.ascii {
                     if !pending.matches(face, color, alpha) {
                         pending.flush(into: item)
                         pending.start(face, color, alpha)
@@ -350,9 +397,6 @@ public struct TerminalRenderState {
             let face = fonts.face(bold: segment.bold, italic: segment.italic)
             let attributes = [kCTFontAttributeName: face.font, Self.segmentKey: index as CFNumber] as CFDictionary
             CFAttributedStringSetAttributes(string, segment.range, attributes, true)
-        }
-        if fonts.hasMappedRanges {
-            applyMappedFonts(string, text: text, segments: segments, fonts: fonts)
         }
         CFAttributedStringEndEditing(string)
         let line = CTLineCreateWithAttributedString(string)
@@ -400,9 +444,6 @@ public struct TerminalRenderState {
         let string = CFAttributedStringCreateMutable(nil, 0)!
         CFAttributedStringReplaceString(string, CFRange(location: 0, length: 0), text as CFString)
         CFAttributedStringSetAttribute(string, CFRange(location: 0, length: text.utf16.count), kCTFontAttributeName, face.font)
-        let segments = [Segment(range: CFRange(location: 0, length: text.utf16.count), color: 0, alpha: 1,
-                                bold: bold, italic: italic)]
-        if state.fonts.hasMappedRanges { applyMappedFonts(string, text: text, segments: segments, fonts: state.fonts) }
         let line = CTLineCreateWithAttributedString(string)
         var result: [GlyphRun] = []
         for run in CTLineGetGlyphRuns(line) as? [CTRun] ?? [] {
@@ -430,24 +471,6 @@ public struct TerminalRenderState {
         }
         glyphLayoutCount += 1
         return result
-    }
-
-    private func applyMappedFonts(_ string: CFMutableAttributedString, text: String, segments: [Segment],
-                                  fonts: TerminalFontSet) {
-        var offset = 0
-        var segment = 0
-        for scalar in text.unicodeScalars {
-            let length = scalar.utf16.count
-            while segment + 1 < segments.count, segments[segment].range.location + segments[segment].range.length <= offset {
-                segment += 1
-            }
-            let face = fonts.face(bold: segments[segment].bold, italic: segments[segment].italic)
-            if let font = fonts.mappedFont(for: scalar, base: face.font) {
-                CFAttributedStringSetAttribute(string, CFRange(location: offset, length: length), kCTFontAttributeName,
-                                               font)
-            }
-            offset += length
-        }
     }
 
     private struct Part {
@@ -526,31 +549,26 @@ public struct TerminalRenderState {
         return false
     }
 
-    private func drawBackgrounds(_ item: PreparedRow, row: Int, state: TerminalRenderState, backgroundAlpha: CGFloat,
-                                 in context: CGContext) {
+    /// Cell backgrounds, extended into the padding beside the grid, and
+    /// above and below it for rows colored edge to edge.
+    private func drawBackgrounds(_ item: PreparedRow, row: Int, state: TerminalRenderState, in context: CGContext) {
         let layout = state.layout
         context.saveGState()
         defer { context.restoreGState() }
         context.setBlendMode(.copy)
-        let alpha = state.palette.backgroundOpacityCells ? backgroundAlpha : 1
         let top = layout.grid.minY + CGFloat(row) * layout.cellHeight
-        let height = layout.cellHeight
         let lastRow = Int(layout.viewport.rows) - 1
         for span in item.backgrounds {
             var left = layout.grid.minX + CGFloat(span.columns.lowerBound) * layout.cellWidth
             var right = layout.grid.minX + CGFloat(span.columns.upperBound) * layout.cellWidth
             var minY = top
-            var maxY = top + height
-            if layout.paddingColor != .background {
-                let vertical = layout.paddingColor == .extendAlways || item.fullWidth
-                if span.columns.lowerBound == 0 { left = layout.bounds.minX }
-                if span.columns.upperBound >= layout.viewport.cols { right = layout.bounds.maxX }
-                if vertical, row == 0 { minY = layout.bounds.minY }
-                if vertical, row == lastRow { maxY = layout.bounds.maxY }
-            }
-            let rect = CGRect(x: left, y: minY, width: right - left, height: maxY - minY)
-            context.setFillColor(color(span.color, alpha: alpha))
-            context.fill(rect)
+            var maxY = top + layout.cellHeight
+            if span.columns.lowerBound == 0 { left = layout.bounds.minX }
+            if span.columns.upperBound >= layout.viewport.cols { right = layout.bounds.maxX }
+            if item.fullWidth, row == 0 { minY = layout.bounds.minY }
+            if item.fullWidth, row == lastRow { maxY = layout.bounds.maxY }
+            context.setFillColor(color(span.color))
+            context.fill(CGRect(x: left, y: minY, width: right - left, height: maxY - minY))
         }
     }
 
@@ -569,6 +587,14 @@ public struct TerminalRenderState {
         let columns = selection.columns(row: screenRow, in: state.grid)
         guard !columns.isEmpty else { return }
         let rect = layout.cellRect(row: row, column: Int(columns.lowerBound), width: columns.count)
+        context.saveGState()
+        defer { context.restoreGState() }
+        if state.roundedSelection {
+            let corners = SelectionCorners(columns, above: selection.columns(row: screenRow - 1, in: state.grid),
+                                           below: selection.columns(row: screenRow + 1, in: state.grid))
+            context.addPath(corners.path(rect, radius: min(layout.cellHeight / 4, 4)))
+            context.clip()
+        }
         guard let background = palette.selectionBackground else {
             context.setFillColor(color(palette.indexed(4), alpha: 0.35))
             context.fill(rect)
@@ -656,9 +682,10 @@ public struct TerminalRenderState {
         guard !item.glyphs.isEmpty else { return }
         context.saveGState()
         context.translateBy(x: origin.x, y: origin.y)
-        let thicken = fonts.thicken && fonts.thickenStrength > 0
+        context.setAllowsFontSmoothing(fonts.smoothing)
+        context.setShouldSmoothFonts(fonts.smoothing)
         for run in item.glyphs {
-            let stroke = !run.isColor && (run.syntheticBold || thicken)
+            let stroke = !run.isColor && run.syntheticBold
             let grouped = stroke && override == nil && run.alpha < 1
             if grouped {
                 context.saveGState()
@@ -674,7 +701,7 @@ public struct TerminalRenderState {
                     CTFontDrawGlyphs(run.font, glyphs, positions, run.glyphs.count, context)
                     guard stroke else { return }
                     context.setStrokeColor(fill)
-                    context.setLineWidth(run.syntheticBold ? max(fonts.size / 24, 0.5) : 0.35 * fonts.thickenStrength)
+                    context.setLineWidth(max(fonts.size / 24, 0.5))
                     context.setTextDrawingMode(.stroke)
                     CTFontDrawGlyphs(run.font, glyphs, positions, run.glyphs.count, context)
                 }
@@ -777,11 +804,8 @@ public struct TerminalRenderState {
             palette.resolveCell($0, foreground: colors.foreground, background: colors.background)
         } ?? palette.background
         let rect = layout.cellRect(row: cursor.row, column: cursor.column, width: width)
-        let scale = state.metrics.scale
-        let natural = cursor.shape == .hollow ? 1 : 1 / scale
-        let thickness = min(CGFloat(cursor.thickness.apply(natural: Double(natural), scale: Double(scale))),
-                            rect.width, rect.height)
-        let fill = color(cursorColor, alpha: CGFloat(palette.cursorOpacity))
+        let thickness = min(cursor.shape == .hollow ? 1 : 1 / state.metrics.scale, rect.width, rect.height)
+        let fill = color(cursorColor)
         context.setFillColor(fill)
         switch cursor.shape {
         case .bar:
@@ -823,7 +847,7 @@ public struct TerminalRenderState {
         let alphaByte = UInt64(min(max(alpha, 0), 1) * 255)
         let key = UInt64(value) | alphaByte << 32
         if let cached = colors[key] { return cached }
-        let created = CGColor.terminal(value, alpha: CGFloat(alphaByte) / 255)
+        let created = (palette ?? TerminalPalette()).cgColor(value, alpha: CGFloat(alphaByte) / 255)
         if colors.count >= 512 { colors.removeAll(keepingCapacity: true) }
         colors[key] = created
         return created
@@ -957,12 +981,13 @@ private final class RowSurface {
     /// Backing pixel payload; Core Graphics owns the layer's allocation metadata.
     let bytes: Int
 
-    init?(rect: CGRect, scale: CGFloat) {
+    init?(rect: CGRect, scale: CGFloat, displayP3: Bool) {
         let width = Int(ceil(rect.width * scale))
         let height = Int(ceil(rect.height * scale))
         guard width > 0, height > 0,
+              let space = CGColorSpace(name: displayP3 ? CGColorSpace.displayP3 : CGColorSpace.sRGB),
               let reference = CGContext(data: nil, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 0,
-                                        space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                        space: space,
                                         bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue
                                             | CGBitmapInfo.byteOrder32Little.rawValue),
               let layer = CGLayer(reference, size: CGSize(width: width, height: height), auxiliaryInfo: nil),
@@ -986,11 +1011,48 @@ private struct ImagePlacement {
 private struct PaintKey: Equatable {
     var row: RowKey
     var selection: Range<UInt16>?
+    /// The selection on the rows above and below, which round its corners.
+    var neighbors: [Range<UInt16>]
     var find: TerminalFind?
     var link: TerminalLinkCandidate?
     var cursor: TerminalCursorState?
     var marked: String?
     var scroll: Int
+}
+
+/// Which corners of a row's selection are rounded: those the rows above
+/// and below don't continue.
+struct SelectionCorners: Equatable {
+    var topLeft: Bool
+    var topRight: Bool
+    var bottomLeft: Bool
+    var bottomRight: Bool
+
+    init(_ columns: Range<UInt16>, above: Range<UInt16>, below: Range<UInt16>) {
+        func covers(_ range: Range<UInt16>, _ column: UInt16) -> Bool { range.contains(column) }
+        let last = columns.upperBound - 1
+        topLeft = !covers(above, columns.lowerBound)
+        topRight = !covers(above, last)
+        bottomLeft = !covers(below, columns.lowerBound)
+        bottomRight = !covers(below, last)
+    }
+
+    /// `rect` with these corners rounded by `radius`.
+    func path(_ rect: CGRect, radius: CGFloat) -> CGPath {
+        let r = min(radius, rect.width / 2, rect.height / 2)
+        let path = CGMutablePath()
+        path.move(to: CGPoint(x: rect.minX + (topLeft ? r : 0), y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX - (topRight ? r : 0), y: rect.minY))
+        if topRight { path.addArc(tangent1End: CGPoint(x: rect.maxX, y: rect.minY), tangent2End: CGPoint(x: rect.maxX, y: rect.minY + r), radius: r) }
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - (bottomRight ? r : 0)))
+        if bottomRight { path.addArc(tangent1End: CGPoint(x: rect.maxX, y: rect.maxY), tangent2End: CGPoint(x: rect.maxX - r, y: rect.maxY), radius: r) }
+        path.addLine(to: CGPoint(x: rect.minX + (bottomLeft ? r : 0), y: rect.maxY))
+        if bottomLeft { path.addArc(tangent1End: CGPoint(x: rect.minX, y: rect.maxY), tangent2End: CGPoint(x: rect.minX, y: rect.maxY - r), radius: r) }
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + (topLeft ? r : 0)))
+        if topLeft { path.addArc(tangent1End: CGPoint(x: rect.minX, y: rect.minY), tangent2End: CGPoint(x: rect.minX + r, y: rect.minY), radius: r) }
+        path.closeSubpath()
+        return path
+    }
 }
 
 private struct GlyphKey: Hashable {

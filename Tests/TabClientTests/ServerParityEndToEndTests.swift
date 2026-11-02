@@ -433,7 +433,7 @@ final class ServerParityEndToEndTests: XCTestCase {
 
 
     private func shell(_ client: ServerClient, zsh: Bool = false) async throws -> (SessionInfo, Attachment, Capture) {
-        try await client.writeServerSettings(ServerSettingsDoc(defaultShell: ServerPath(zsh ? "/bin/zsh" : "/bin/bash"),
+        try await client.writeServerSettings(ServerSettingsDoc(startupCommand: [zsh ? "/bin/zsh" : "/bin/bash"],
                                                                 shellIntegration: zsh))
         let home = try await client.catalogPage().home
         let session = try await client.createSession(CreateSession(project: home, directory: ServerPath(root.path),

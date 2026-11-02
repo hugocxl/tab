@@ -110,7 +110,7 @@ public enum CLIHelp {
     public static let settings = """
     Usage: tab settings get [--json]
            tab settings set <key> <value> [--json]
-    Keys: default-shell (absolute path or 'default'), history-budget-bytes (integer),
+    Keys: startup-command (command line or 'default'), history-budget-bytes (integer),
           shell-integration (true/false). Get returns JSON.
     """
 

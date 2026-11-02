@@ -7,18 +7,23 @@ import TabCore
 /// built from the store.
 @MainActor
 final class SettingsModel: ObservableObject {
+    /// A page: a category's, or one of its subpages.
+    struct Location: Equatable {
+        var category: SettingsCategory
+        var subpage: SettingsSubpage?
+    }
+
     let store: SettingsStore
     private(set) var category: SettingsCategory = .general
+    private(set) var subpage: SettingsSubpage?
     private(set) var query = ""
-    private(set) var backStack: [SettingsCategory] = []
-    private(set) var forwardStack: [SettingsCategory] = []
+    private(set) var backStack: [Location] = []
+    private(set) var forwardStack: [Location] = []
     @Published private(set) var lastBuild: SettingsPageBuilder?
     /// The window sheets and panels attach to.
     weak var window: NSWindow?
 
     /// Transient editors on the page.
-    var bindingDraft: BindingDraft?
-    var codepointDraft: CodepointDraft?
     var profileName = ""
     /// The bundled changelog, read when its page first opens.
     private(set) lazy var changelog: Changelog? = Changelog.bundled()
@@ -43,7 +48,8 @@ final class SettingsModel: ObservableObject {
     var canGoBack: Bool { !backStack.isEmpty }
     var canGoForward: Bool { !forwardStack.isEmpty }
     var isSearching: Bool { !query.trimmingCharacters(in: .whitespaces).isEmpty }
-    var title: String { isSearching ? "Search" : category.title }
+    var title: String { isSearching ? "Search" : subpage?.title ?? category.title }
+    private var location: Location { Location(category: category, subpage: subpage) }
 
     /// The page selected in the sidebar: none while searching.
     var selection: SettingsCategory? { isSearching ? nil : category }
@@ -53,27 +59,37 @@ final class SettingsModel: ObservableObject {
     /// Opens `category`'s page, ending a search, and remembers the page it
     /// leaves for Back.
     func select(_ category: SettingsCategory) {
-        if category != self.category {
-            backStack.append(self.category)
+        go(to: Location(category: category))
+    }
+
+    /// Opens a subpage of the current page, such as Advanced Font Settings.
+    func open(_ subpage: SettingsSubpage) {
+        go(to: Location(category: subpage.category, subpage: subpage))
+    }
+
+    private func go(to next: Location) {
+        if next != location {
+            backStack.append(location)
             forwardStack = []
         }
-        open(category)
+        open(next)
     }
 
     func goBack() {
         guard let previous = backStack.popLast() else { return }
-        forwardStack.append(category)
+        forwardStack.append(location)
         open(previous)
     }
 
     func goForward() {
         guard let next = forwardStack.popLast() else { return }
-        backStack.append(category)
+        backStack.append(location)
         open(next)
     }
 
-    private func open(_ category: SettingsCategory) {
-        self.category = category
+    private func open(_ location: Location) {
+        category = location.category
+        subpage = location.subpage
         query = ""
         if category == .server || category == .terminal { store.loadServerSettings() }
         if category == .mobile { store.loadRemoteAccess() }
@@ -103,7 +119,7 @@ final class SettingsModel: ObservableObject {
 
     /// Rebuilds the page from the store.
     func reload() {
-        let builder = SettingsPageBuilder(store: store, query: query, category: category)
+        let builder = SettingsPageBuilder(store: store, query: query, category: category, subpage: subpage)
         if builder.isSearching {
             for page in SettingsCategory.allCases { build(page, into: builder) }
         } else {

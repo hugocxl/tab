@@ -235,10 +235,10 @@ final class TerminalRendererTests: XCTestCase {
     func state(_ grid: RunGrid) -> TerminalRenderState {
         let settings = F.settings()
         let fonts = TerminalFontSet(settings: settings)
-        let metrics = TerminalMetrics(fonts: fonts, cellWidth: .natural, cellHeight: .natural, scale: 2)
+        let metrics = TerminalMetrics(fonts: fonts, settings: settings, scale: 2)
         let bounds = CGRect(x: 0, y: 0, width: CGFloat(grid.size.cols) * metrics.cellWidth + 4,
                             height: CGFloat(grid.size.rows) * metrics.cellHeight + 4)
-        let layout = TerminalLayout(bounds: bounds, metrics: metrics, options: settings.options)
+        let layout = TerminalLayout(bounds: bounds, metrics: metrics)
         return TerminalRenderState(grid: grid, layout: layout, metrics: metrics, fonts: Self.fonts(settings),
                                    palette: TerminalPalette(),
                                    cursor: TerminalCursorState(visible: grid.cursor.visible, row: Int(grid.cursor.row),

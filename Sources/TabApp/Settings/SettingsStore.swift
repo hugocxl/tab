@@ -205,90 +205,16 @@ public final class SettingsStore {
 
     // MARK: Terminal
 
-    /// Changes one terminal preference by its Settings id and saves it.
-    public func setTerminal(_ id: String, _ value: String) {
-        let saved = attempt(Self.terminalRow(id)) {
-            var next = terminal
-            try next.setPreference(id, value)
-            try saveTerminal(next)
-        }
-        if !saved { host?.previewTerminalSettings(terminal) }
-    }
-
-    /// The row a terminal preference's problems show on.
-    static func terminalRow(_ id: String) -> String {
-        switch id {
-        case "padding-left", "padding-right": return "window-padding-x"
-        case "padding-top", "padding-bottom": return "window-padding-y"
-        case "dismiss-import-notes": return "terminal-import-notes"
-        default: return id
-        }
-    }
-
-    /// Shows a terminal preference without saving it, while a slider moves.
-    public func previewTerminal(_ id: String, _ value: String) {
-        var next = terminal
-        guard (try? next.setPreference(id, value)) != nil else { return }
-        host?.previewTerminalSettings(next)
-    }
-
-    public func editTerminal(_ id: String, _ edit: TerminalEdit) {
+    /// Changes terminal preferences and saves them, recording a refusal
+    /// under the row `id`.
+    public func updateTerminal(_ id: String, _ change: (inout TerminalSettings) -> Void) {
         attempt(id) {
             var next = terminal
-            try next.edit(edit)
-            try saveTerminal(next)
-        }
-    }
-
-    private func saveTerminal(_ next: TerminalSettings) throws {
-        try next.save(to: dirs.terminalSettings)
-        terminal = next
-        host?.terminalSettingsDidChange(next)
-    }
-
-    public func setNewPaneDirectory(_ directory: NewPaneDirectory) {
-        attempt("directory") {
-            var next = settings
-            next.panes.newPaneDirectory = directory
-            try next.savePanes(to: dirs.settings)
-            settings = next
-            applySettings()
-        }
-    }
-
-    /// Whether anything on the Terminal page differs from the defaults.
-    public var terminalIsCustomized: Bool {
-        var defaults = TerminalSettings()
-        defaults.diagnostics = terminal.diagnostics
-        return terminal != defaults || settings.panes.newPaneDirectory != .project
-            || settings.clipboard != ClipboardSettings()
-    }
-
-    /// Returns every Terminal page setting, key bindings included, to its
-    /// default.
-    public func resetTerminal() {
-        attempt("terminal-reset") {
-            let previous = try Data(contentsOf: dirs.terminalSettings)
-            let previousApp = try Data(contentsOf: dirs.settings)
-            let defaults = TerminalSettings()
-            let current = try Settings.load(dirs.settings)
-            var next = current
-            next.panes.newPaneDirectory = .project
-            next.clipboard = ClipboardSettings()
-            do {
-                try defaults.save(to: dirs.terminalSettings)
-                if next.panes != current.panes { try next.savePanes(to: dirs.settings) }
-                if next.clipboard != current.clipboard { try next.saveClipboard(to: dirs.settings) }
-            } catch {
-                try AtomicFile.write(previous, to: dirs.terminalSettings)
-                try AtomicFile.write(previousApp, to: dirs.settings)
-                throw error
-            }
-            terminal = defaults
-            settings = next
-            host?.terminalSettingsDidChange(defaults)
-            applySettings()
-            errors = errors.filter { SettingsCatalog.item($0.key)?.category != .terminal }
+            change(&next)
+            guard next != terminal else { return }
+            try next.save(to: dirs.terminalSettings)
+            terminal = next
+            host?.terminalSettingsDidChange(next)
         }
     }
 
@@ -422,26 +348,22 @@ public final class SettingsStore {
         }
     }
 
+    private static func commandArguments(_ text: String) throws -> [String] {
+        do {
+            return try Executable.commandArguments(text)
+        } catch {
+            throw SettingsError("startup-command", "\(error)")
+        }
+    }
+
     /// Applies one field to the last settings accepted by the server, so
     /// queued edits cannot overwrite each other or retain a failed edit.
     private static func serverSetting(_ current: ServerSettingsDoc, id: String, value: String) throws -> ServerSettingsDoc {
         var next = current
         let text = value.trimmingCharacters(in: .whitespaces)
         switch id {
-        case "default-shell":
-            if text.isEmpty {
-                next.defaultShell = nil
-            } else {
-                guard text.hasPrefix("/") else { throw SettingsError(id, "Enter the absolute path of a shell, such as /bin/zsh.") }
-                next.defaultShell = ServerPath(text)
-            }
-        case "history-budget":
-            guard let mebibytes = UInt64(text), mebibytes <= 65536 else {
-                throw SettingsError(id, "Enter a whole number of MiB from 0 to 65536.")
-            }
-            next.historyBudgetBytes = mebibytes * 1024 * 1024
-        case "shell-integration":
-            next.shellIntegration = text == "true"
+        case "startup-command":
+            next.startupCommand = text.isEmpty ? [] : try Self.commandArguments(text)
         default:
             throw SettingsError(id, "Unknown server setting.")
         }

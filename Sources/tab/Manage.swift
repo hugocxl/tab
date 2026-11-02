@@ -85,19 +85,22 @@ enum Manage {
         case .settingsGet:
             let settings = try await client.serverSettings()
             Output.json(.object([
-                "defaultShell": settings.defaultShell.map { .string($0.rawValue) } ?? .null,
+                "startupCommand": .array(settings.startupCommand.map { .string($0) }),
                 "historyBudgetBytes": .int(Int64(clamping: settings.historyBudgetBytes)),
                 "shellIntegration": .bool(settings.shellIntegration),
             ]))
         case .settingsSet(let key, let value):
             var settings = try await client.serverSettings()
             switch key {
-            case "default-shell":
-                if value == "default" {
-                    settings.defaultShell = nil
+            case "startup-command":
+                if value == "default" || value.isEmpty {
+                    settings.startupCommand = []
                 } else {
-                    guard value.hasPrefix("/") else { throw CLIError("default-shell must be an absolute path or 'default'") }
-                    settings.defaultShell = ServerPath(value)
+                    do {
+                        settings.startupCommand = try Executable.commandArguments(value)
+                    } catch {
+                        throw CLIError("startup-command: \(error)")
+                    }
                 }
             case "history-budget-bytes":
                 guard let bytes = UInt64(value) else { throw CLIError("history-budget-bytes must be an integer") }

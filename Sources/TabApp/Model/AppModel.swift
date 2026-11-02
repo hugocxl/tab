@@ -200,9 +200,6 @@ public final class AppModel {
         browserProfiles.notify = { [weak self] message, isError in self?.presenter?.showToast(message, error: isError) }
         iconCache.onChange = { [weak self] _ in self?.notify(.activity) }
         recordNavigation()
-        theme.$accessibility.dropFirst().sink { [weak self] _ in
-            DispatchQueue.main.async { [weak self] in self?.refreshTerminalAppearance() }
-        }.store(in: &themeObservations)
         theme.$palette.dropFirst().sink { [weak self] _ in
             DispatchQueue.main.async { [weak self] in self?.refreshTerminalAppearance() }
         }.store(in: &themeObservations)
@@ -406,31 +403,24 @@ public final class AppModel {
     }
 
     /// Applies new terminal settings to every terminal.
-    public func apply(terminalSettings: TerminalSettings, preview: Bool = false) {
-        if !preview {
-            if self.terminalSettings.fontSize != terminalSettings.fontSize {
-                terminalFontSizes.removeAll()
-                scheduleSave()
-            }
-            self.terminalSettings = terminalSettings
+    public func apply(terminalSettings: TerminalSettings) {
+        if self.terminalSettings.fontSize != terminalSettings.fontSize {
+            terminalFontSizes.removeAll()
+            scheduleSave()
         }
+        self.terminalSettings = terminalSettings
         notify(.settings)
         for (_, controller) in panes.all {
             (controller as? TerminalPane)?.apply(settings: terminalSettings)
         }
     }
 
-    /// Refreshes translucent terminal colors after appearance or accessibility changes.
+    /// Refreshes terminal colors after the theme changes.
     private func refreshTerminalAppearance() {
         for (_, controller) in panes.all {
             (controller as? TerminalPane)?.apply(settings: terminalSettings)
         }
         notify(.settings)
-    }
-
-    /// The native material is available only when accessibility permits it.
-    var terminalVibrancy: Double {
-        theme.accessibility.allowsVibrancy ? Double(min(max(terminalSettings.options.backgroundVibrancy, 0), 100)) / 100 : 0
     }
 
     // MARK: Visibility

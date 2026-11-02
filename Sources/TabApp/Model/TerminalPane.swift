@@ -146,7 +146,7 @@ final class TerminalPane: PaneContentController {
             old.detach()
         }
         let controller = TerminalSessionController(
-            session: sessionId, backend: client.terminalBackend, settings: effectiveSettings(model.terminalSettings),
+            session: sessionId, backend: client.terminalBackend, settings: model.terminalSettings,
             palette: palette(), remote: !server.isLocal, directory: nil, cachedGrid: lastGrid
         )
         controller.view.basePadding = 2
@@ -197,19 +197,11 @@ final class TerminalPane: PaneContentController {
     func progressChanged() { titleDidChange?() }
 
     func apply(settings: TerminalSettings) {
-        session?.apply(settings: effectiveSettings(settings), palette: palette(options: settings.options))
-        if let session {
-            fontSize = session.view.fontSize
-            if let model { session.view.shortcuts = Self.shortcuts(model.settings.keymap) }
-        }
-    }
-
-    private func effectiveSettings(_ settings: TerminalSettings) -> TerminalSettings {
-        var effective = settings
-        if effective.options.copyOnSelect == nil {
-            effective.options.copyOnSelect = model?.settings.clipboard.copyOnSelect ?? false
-        }
-        return effective
+        guard let session else { return }
+        session.apply(settings: settings, palette: palette(settings))
+        fontSize = session.view.fontSize
+        if let model { session.view.shortcuts = Self.shortcuts(model.settings.keymap) }
+        updateTitle()
     }
 
     private func statusText() -> String {
@@ -222,16 +214,10 @@ final class TerminalPane: PaneContentController {
         }
     }
 
-    private func palette(options: TerminalOptions? = nil) -> TerminalPalette {
+    private func palette(_ settings: TerminalSettings? = nil) -> TerminalPalette {
         let theme = model?.theme ?? AppTheme.shared
-        let options = options ?? model?.terminalSettings.options ?? TerminalOptions()
-        var palette = TerminalPalette(
-            scheme: theme.scheme, options: options,
-            dark: !theme.palette.isLight, background: RGBColor(theme.card)
-        )
-        let vibrancy = theme.accessibility.allowsVibrancy ? Double(min(max(options.backgroundVibrancy, 0), 100)) / 100 : 0
-        palette.backgroundOpacity *= 1 - vibrancy
-        return palette
+        return TerminalPalette(scheme: theme.scheme, settings: settings ?? model?.terminalSettings ?? TerminalSettings(),
+                               dark: !theme.palette.isLight, background: RGBColor(theme.card))
     }
 
     /// The terminal's shortcuts as the keymap binds them.
@@ -291,13 +277,6 @@ extension TerminalPane: TerminalSessionControllerDelegate {
         model?.scheduleSave()
     }
 
-    func terminalSessionRequestsReload(_ session: TerminalSessionController) {
-        guard let model else { return }
-        if let settings = try? TerminalSettings.load(model.dirs.terminalSettings) {
-            model.apply(terminalSettings: settings)
-        }
-    }
-
     private func updateTitle() {
         guard let model, let session else { return }
         let title = session.displayTitle
@@ -311,12 +290,39 @@ extension TerminalPane: TerminalSessionControllerDelegate {
 extension TerminalPane: TerminalViewDelegate {
     func terminalView(_ view: TerminalView, openURL url: URL) {
         guard let model else { return }
-        if model.settings.browser.enabled, model.settings.browser.openTerminalLinks, ["http", "https"].contains(url.scheme ?? "") {
+        let scheme = url.scheme?.lowercased() ?? ""
+        if model.settings.browser.enabled, model.settings.browser.openTerminalLinks, ["http", "https"].contains(scheme) {
             model.openBrowser(url: url.absoluteString, project: project)
             return
         }
-        NSWorkspace.shared.open(url)
+        guard !Self.directLinkSchemes.contains(scheme) else {
+            NSWorkspace.shared.open(url)
+            return
+        }
+        switch model.terminalSettings.appLinks {
+        case .always:
+            NSWorkspace.shared.open(url)
+        case .never:
+            model.presenter?.showToast("Links that open apps are off in Terminal settings", error: true)
+        case .ask:
+            guard let app = NSWorkspace.shared.urlForApplication(toOpen: url) else {
+                model.presenter?.showToast("No app opens \(scheme): links", error: true)
+                return
+            }
+            let name = FileManager.default.displayName(atPath: app.path)
+            Task { @MainActor in
+                let open = await model.presenter?.confirm(
+                    title: "Open this link in \(name)?",
+                    message: "A program in the terminal printed “\(url.absoluteString)”.",
+                    confirm: "Open", destructive: false
+                ) ?? false
+                if open { NSWorkspace.shared.open(url) }
+            }
+        }
     }
+
+    /// Links that open without asking: web, mail and files.
+    static let directLinkSchemes: Set<String> = ["http", "https", "mailto", "file"]
 
     func terminalView(_ view: TerminalView, openFile path: String, line: Int?, column: Int?) {
         guard let model else { return }

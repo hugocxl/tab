@@ -74,11 +74,11 @@ final class CoreServerTests: XCTestCase {
     func testSettingsRoundTripThroughTheFile() throws {
         let server = try CoreTestServer()
         let client = try server.connect()
-        let settings = ServerSettingsDoc(defaultShell: "/bin/zsh", historyBudgetBytes: 4 * 1024 * 1024,
+        let settings = ServerSettingsDoc(startupCommand: ["/bin/zsh"], historyBudgetBytes: 4 * 1024 * 1024,
                                          shellIntegration: false)
         XCTAssertEqual(try client.request(.writeServerSettings(settings)), .serverSettingsWritten)
         XCTAssertEqual(try client.request(.readServerSettings), .serverSettings(settings))
-        XCTAssertEqual(try client.request(.writeServerSettings(ServerSettingsDoc(defaultShell: "/no/such/shell")))
+        XCTAssertEqual(try client.request(.writeServerSettings(ServerSettingsDoc(startupCommand: ["/no/such/shell"])))
             .errorCode, .badPath)
 
         let url = server.configuration.settings

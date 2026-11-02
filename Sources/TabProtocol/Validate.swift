@@ -244,7 +244,10 @@ extension TerminalColors {
 extension ServerSettingsDoc {
     public func validate() throws(ErrorCode) {
         if historyBudgetBytes > Limits.maxHistoryBudgetBytes { throw .badRequest }
-        try defaultShell?.validateAbsolute()
+        if startupCommand.count > 256 || startupCommand.first?.isEmpty == true
+            || startupCommand.contains(where: { $0.utf8.count > Limits.maxPathBytes || $0.utf8.contains(0) }) {
+            throw .badRequest
+        }
     }
 }
 

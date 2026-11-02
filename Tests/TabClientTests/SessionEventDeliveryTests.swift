@@ -13,7 +13,7 @@ final class SessionEventDeliveryTests: XCTestCase {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let dirs = TabDirs(root: root)
-        try WireJSON.encode(ServerSettingsDoc(defaultShell: "/bin/bash", shellIntegration: false))
+        try WireJSON.encode(ServerSettingsDoc(startupCommand: ["/bin/bash"], shellIntegration: false))
             .write(to: dirs.serverSettings)
         let server = try Server(configuration: ServerConfiguration(dirs: dirs, uploads: root.appendingPathComponent("uploads")))
         defer {

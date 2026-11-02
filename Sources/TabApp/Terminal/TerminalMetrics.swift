@@ -4,9 +4,8 @@ import TabCore
 import TabProtocol
 
 /// The fonts a terminal draws with, resolved once per font configuration:
-/// the primary family with the other configured families as its fallback
-/// cascade, bold and italic faces (configured, from the family, or
-/// synthesized), OpenType features, and Unicode-range fonts.
+/// the family in the chosen style with the fallback fonts as its cascade,
+/// bold and italic faces (from the family, or synthesized), and ligatures.
 public final class TerminalFontSet {
     public struct Face {
         public let font: CTFont
@@ -31,8 +30,8 @@ public final class TerminalFontSet {
             CTFontGetGlyphsForCharacters(font, &characters, &glyphs, 128)
             guard (0x21...0x7E).allSatisfy({ glyphs[$0] != 0 }) else { return nil }
             let sample = "fi fl ffi -> => == != === <= >= <> :: ::: www <!-- /* */ && || ++ -- ... |> <| ## ;; .= $( ~~"
-            let string = CFAttributedStringCreate(nil, sample as CFString,
-                                                  [kCTFontAttributeName: font] as CFDictionary)!
+            guard let string = CFAttributedStringCreate(nil, sample as CFString,
+                                                        [kCTFontAttributeName: font] as CFDictionary) else { return nil }
             let line = CTLineCreateWithAttributedString(string)
             let scalars = Array(sample.utf16)
             for run in CTLineGetGlyphRuns(line) as? [CTRun] ?? [] {
@@ -55,59 +54,55 @@ public final class TerminalFontSet {
     public let bold: Face
     public let italic: Face
     public let boldItalic: Face
-    public let thicken: Bool
-    /// 0...1, from `font-thicken-strength`.
-    public let thickenStrength: CGFloat
+    /// Draws glyphs with macOS font smoothing, which renders them heavier.
+    public let smoothing: Bool
     /// Changes whenever a different font set is built, for cache keys.
     public let generation: UInt64
-    private let maps: [FontMap]
-    private var mapped: [String: CTFont] = [:]
-    private let features: [[CFString: Any]]
 
     private static var nextGeneration: UInt64 = 0
+    /// Turn off ligatures and contextual alternates.
+    private static let noLigatures: [[CFString: Any]] = ["calt", "liga", "dlig"].map {
+        [kCTFontOpenTypeFeatureTag: $0, kCTFontOpenTypeFeatureValue: 0]
+    }
 
-    public init(families: [String], size: CGFloat, options: FontOptions) {
+    public init(family: String, style: String, fallbacks: [String], size: CGFloat, ligatures: Bool = true,
+                smoothing: Bool = false) {
         Self.nextGeneration &+= 1
         generation = Self.nextGeneration
         self.size = size
-        maps = options.codepoints
-        thicken = options.thicken
-        thickenStrength = CGFloat(options.thickenStrength) / 255
-        let features = options.features.map { feature -> [CFString: Any] in
-            [kCTFontOpenTypeFeatureTag: feature.tag, kCTFontOpenTypeFeatureValue: feature.value]
-        }
-        self.features = features
-        let fallbacks = families.dropFirst().map { family in
+        self.smoothing = smoothing
+        let features = ligatures ? [] : Self.noLigatures
+        let cascade = fallbacks.map { family in
             CTFontDescriptorCreateWithAttributes([kCTFontFamilyNameAttribute: family] as CFDictionary)
         }
-        func make(_ family: String?) -> CTFont? {
-            guard let family else { return nil }
+        func make(_ family: String, style: String?) -> CTFont? {
             var attributes: [CFString: Any] = [kCTFontFamilyNameAttribute: family]
+            if let style { attributes[kCTFontStyleNameAttribute] = style }
             if !features.isEmpty { attributes[kCTFontFeatureSettingsAttribute] = features }
-            if !fallbacks.isEmpty { attributes[kCTFontCascadeListAttribute] = fallbacks }
+            if !cascade.isEmpty { attributes[kCTFontCascadeListAttribute] = cascade }
             let font = CTFontCreateWithFontDescriptor(
                 CTFontDescriptorCreateWithAttributes(attributes as CFDictionary), size, nil)
-            let name = CTFontCopyFamilyName(font) as String
-            return name.caseInsensitiveCompare(family) == .orderedSame ? font : nil
+            guard (CTFontCopyFamilyName(font) as String).caseInsensitiveCompare(family) == .orderedSame else { return nil }
+            if let style, (CTFontCopyName(font, kCTFontStyleNameKey) as String?)?.caseInsensitiveCompare(style) != .orderedSame {
+                return nil
+            }
+            return font
         }
-        let base = families.lazy.compactMap { make($0) }.first
-            ?? make("Menlo")
+        let base = make(family, style: style) ?? make(family, style: nil) ?? make("Menlo", style: nil)
             ?? CTFontCreateUIFontForLanguage(.userFixedPitch, size, nil)
             ?? CTFontCreateWithName("Menlo" as CFString, size, nil)
         regular = Face(font: base, syntheticBold: false)
-        func variant(_ configured: [String], _ traits: CTFontSymbolicTraits) -> Face {
-            if let font = configured.lazy.compactMap({ make($0) }).first { return Face(font: font, syntheticBold: false) }
+        func variant(_ traits: CTFontSymbolicTraits) -> Face {
             if let font = CTFontCreateCopyWithSymbolicTraits(base, size, nil, traits, traits) {
                 return Face(font: font, syntheticBold: false)
             }
             let wantsBold = traits.contains(.traitBold)
-            let wantsItalic = traits.contains(.traitItalic)
             var font = base
             if wantsBold, let bold = CTFontCreateCopyWithSymbolicTraits(base, size, nil, .traitBold, .traitBold) {
                 font = bold
             }
             var syntheticBold = wantsBold && font === base
-            if wantsItalic {
+            if traits.contains(.traitItalic) {
                 if let italic = CTFontCreateCopyWithSymbolicTraits(font, size, nil, .traitItalic, .traitItalic) {
                     font = italic
                 } else {
@@ -120,13 +115,15 @@ public final class TerminalFontSet {
             }
             return Face(font: font, syntheticBold: syntheticBold)
         }
-        bold = variant(options.bold, .traitBold)
-        italic = variant(options.italic, .traitItalic)
-        boldItalic = variant(options.boldItalic.isEmpty ? options.bold : options.boldItalic, [.traitBold, .traitItalic])
+        bold = variant(.traitBold)
+        italic = variant(.traitItalic)
+        boldItalic = variant([.traitBold, .traitItalic])
     }
 
     public convenience init(settings: TerminalSettings, size: Double? = nil) {
-        self.init(families: settings.fontFamilies, size: CGFloat(size ?? settings.fontSize), options: settings.font)
+        self.init(family: settings.fontFamily, style: settings.fontStyle, fallbacks: settings.fallbackFonts,
+                  size: CGFloat(size ?? settings.fontSize), ligatures: settings.ligatures,
+                  smoothing: settings.fontSmoothing)
     }
 
     public func face(bold isBold: Bool, italic isItalic: Bool) -> Face {
@@ -137,28 +134,6 @@ public final class TerminalFontSet {
         case (true, true): return boldItalic
         }
     }
-
-    /// The font a Unicode range is mapped to, if any.
-    func mappedFont(for scalar: Unicode.Scalar, base: CTFont) -> CTFont? {
-        guard !maps.isEmpty,
-              let map = maps.last(where: { $0.start <= scalar.value && scalar.value <= $0.end }) else { return nil }
-        let traits = CTFontGetSymbolicTraits(base).intersection([.traitBold, .traitItalic])
-        let key = "\(map.family):\(traits.rawValue)"
-        if let font = mapped[key] { return font }
-        var attributes: [CFString: Any] = [kCTFontFamilyNameAttribute: map.family]
-        if !features.isEmpty { attributes[kCTFontFeatureSettingsAttribute] = features }
-        let descriptor = CTFontDescriptorCreateWithAttributes(attributes as CFDictionary)
-        let regular = CTFontCreateWithFontDescriptor(descriptor, size, nil)
-        guard (CTFontCopyFamilyName(regular) as String).caseInsensitiveCompare(map.family) == .orderedSame else { return nil }
-        let font = CTFontCreateCopyWithSymbolicTraits(regular, size, nil, traits, traits) ?? regular
-        mapped[key] = font
-        return font
-    }
-
-    var hasMappedRanges: Bool { !maps.isEmpty }
-
-    /// Whether a Unicode-range font covers printable ASCII.
-    var mapsASCII: Bool { maps.contains { $0.start <= 0x7E && $0.end >= 0x20 } }
 }
 
 /// The size of a cell and where text sits in it, in points, snapped to the
@@ -189,9 +164,9 @@ public struct TerminalMetrics: Equatable, Sendable {
     }
 
     /// Measures the regular face: the advance of `M` for the width and
-    /// ascent + descent + leading for the height, with the configured cell
-    /// width and height adjustments.
-    public init(fonts: TerminalFontSet, cellWidth widthAdjustment: CellHeight, cellHeight heightAdjustment: CellHeight,
+    /// ascent + descent + leading for the height, with the configured
+    /// character spacing and line height.
+    public init(fonts: TerminalFontSet, cellWidth widthAdjustment: CellAdjustment, cellHeight heightAdjustment: CellAdjustment,
                 scale: CGFloat) {
         let font = fonts.regular.font
         let scale = max(scale, 1)
@@ -217,6 +192,12 @@ public struct TerminalMetrics: Equatable, Sendable {
         lineThickness = max(1 / scale, (CTFontGetUnderlineThickness(font) * scale).rounded() / scale)
     }
 
+    /// Measures `fonts` with the settings' character spacing and line height.
+    public init(fonts: TerminalFontSet, settings: TerminalSettings, scale: CGFloat) {
+        self.init(fonts: fonts, cellWidth: settings.characterSpacing,
+                  cellHeight: settings.lineHeight == 0 ? .natural : .percent(settings.lineHeight), scale: scale)
+    }
+
     /// A cell in physical pixels, for kitty graphics placement on the server.
     public var physicalCellSize: CellSize {
         CellSize(width: UInt16(clamping: Int((cellWidth * scale).rounded())),
@@ -224,9 +205,12 @@ public struct TerminalMetrics: Equatable, Sendable {
     }
 }
 
-/// Where the cell grid sits in a terminal view: padding per edge, the
-/// leftover space balanced when asked, and the grid size that fits.
+/// Where the cell grid sits in a terminal view: inside a small padding, and
+/// the grid size that fits.
 public struct TerminalLayout: Equatable, Sendable {
+    /// Space around the cell grid, in points, before the host's own inset.
+    public static let padding: CGFloat = 2
+
     /// The whole view.
     public var bounds: CGRect
     /// The cell grid, `viewport.cols × viewport.rows` cells.
@@ -234,37 +218,22 @@ public struct TerminalLayout: Equatable, Sendable {
     public var viewport: Size
     public var cellWidth: CGFloat
     public var cellHeight: CGFloat
-    public var paddingColor: PaddingColor
 
     /// `basePadding` is the inset the host already gives the view (the pane
-    /// card's), subtracted from the configured padding.
-    public init(bounds: CGRect, metrics: TerminalMetrics, options: TerminalOptions, basePadding: CGFloat = 0) {
-        func inset(_ values: [Double], _ index: Int) -> CGFloat {
-            max(0, CGFloat(values.indices.contains(index) ? values[index] : 0) - basePadding)
-        }
-        let left = inset(options.paddingX, 0)
-        let right = inset(options.paddingX, 1)
-        let top = inset(options.paddingY, 0)
-        let bottom = inset(options.paddingY, 1)
-        var content = CGRect(x: bounds.minX + left, y: bounds.minY + top,
-                             width: max(0, bounds.width - left - right), height: max(0, bounds.height - top - bottom))
+    /// card's), subtracted from the padding.
+    public init(bounds: CGRect, metrics: TerminalMetrics, basePadding: CGFloat = 0) {
+        let inset = max(0, Self.padding - basePadding)
+        let content = bounds.insetBy(dx: min(inset, bounds.width / 2), dy: min(inset, bounds.height / 2))
         let cols = max(1, Int(content.width / metrics.cellWidth))
         let rows = max(1, Int(content.height / metrics.cellHeight))
         let viewport = Size(cols: UInt16(clamping: min(cols, Int(Limits.maxCols))),
                             rows: UInt16(clamping: min(rows, Int(Limits.maxRows))))
-        let gridWidth = CGFloat(viewport.cols) * metrics.cellWidth
-        let gridHeight = CGFloat(viewport.rows) * metrics.cellHeight
-        if options.paddingBalance {
-            let scale = metrics.scale
-            content.origin.x += (max(0, content.width - gridWidth) / 2 * scale).rounded(.down) / scale
-            content.origin.y += (max(0, content.height - gridHeight) / 2 * scale).rounded(.down) / scale
-        }
         self.bounds = bounds
-        grid = CGRect(x: content.minX, y: content.minY, width: gridWidth, height: gridHeight)
+        grid = CGRect(x: content.minX, y: content.minY, width: CGFloat(viewport.cols) * metrics.cellWidth,
+                      height: CGFloat(viewport.rows) * metrics.cellHeight)
         self.viewport = viewport
         cellWidth = metrics.cellWidth
         cellHeight = metrics.cellHeight
-        paddingColor = options.paddingColor
     }
 
     /// The view rectangle of a visible row, across the whole width so that

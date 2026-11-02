@@ -40,7 +40,6 @@ public final class SettingsHostImpl: SettingsHost {
 
     public func settingsDidChange(_ settings: Settings) { model.apply(settings: settings) }
     public func terminalSettingsDidChange(_ settings: TerminalSettings) { model.apply(terminalSettings: settings) }
-    public func previewTerminalSettings(_ settings: TerminalSettings) { model.apply(terminalSettings: settings, preview: true) }
 
     // MARK: Server
 

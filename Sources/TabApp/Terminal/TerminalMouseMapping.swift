@@ -4,9 +4,8 @@ import TabProtocol
 
 /// Mouse decisions shared by AppKit event handling and offscreen tests.
 public enum TerminalMouseMapping {
-    public static func reports(flags: NSEvent.ModifierFlags, modes: InputModes, options: TerminalOptions,
-                               live: Bool, wheel: Bool = false) -> Bool {
-        guard live, options.mouseReporting, !flags.contains(.shift) else { return false }
+    public static func reports(flags: NSEvent.ModifierFlags, modes: InputModes, live: Bool, wheel: Bool = false) -> Bool {
+        guard live, !flags.contains(.shift) else { return false }
         return modes.mouseTracking || wheel && modes.alternateScroll
     }
 
@@ -20,8 +19,8 @@ public enum TerminalMouseMapping {
                           modifiers: modifiers)
     }
 
-    public static func scrollRows(delta: CGFloat, precise: Bool, cellHeight: CGFloat, options: TerminalOptions) -> CGFloat {
-        precise ? delta / max(cellHeight, 1) * CGFloat(options.scrollPrecision) : delta * CGFloat(options.scrollDiscrete)
+    public static func scrollRows(delta: CGFloat, precise: Bool, cellHeight: CGFloat) -> CGFloat {
+        precise ? delta / max(cellHeight, 1) : delta
     }
 }
 
@@ -39,5 +38,15 @@ struct TerminalScrollAccumulator {
         let whole = Int(remainder.rounded(.towardZero))
         remainder -= CGFloat(whole)
         return whole
+    }
+
+    /// Whole rows to scroll and the fraction of a row left, from 0 up to 1,
+    /// for smooth scrolling.
+    mutating func consumeFraction(_ rows: CGFloat) -> (whole: Int, fraction: CGFloat) {
+        guard rows.isFinite else { return (0, remainder) }
+        remainder += rows
+        let whole = Int(remainder.rounded(.down))
+        remainder -= CGFloat(whole)
+        return (whole, remainder)
     }
 }

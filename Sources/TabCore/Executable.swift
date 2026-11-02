@@ -103,6 +103,15 @@ public enum Executable {
         }
         return arguments
     }
+
+    /// Arguments as one command line that `commandArguments` reads back,
+    /// single-quoting the ones a shell would split or expand.
+    public static func commandLine(_ arguments: [String]) -> String {
+        arguments.map { argument in
+            let plain = !argument.isEmpty && argument.allSatisfy { $0.isLetter || $0.isNumber || "-_./=:@%+,".contains($0) }
+            return plain ? argument : "'" + argument.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        }.joined(separator: " ")
+    }
 }
 
 public enum ExecutableError: Error, Equatable, CustomStringConvertible {

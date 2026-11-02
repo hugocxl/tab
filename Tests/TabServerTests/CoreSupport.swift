@@ -25,7 +25,7 @@ final class CoreTestServer {
         self.root = root
         let dirs = TabDirs(root: root)
         if !FileManager.default.fileExists(atPath: dirs.serverSettings.path) {
-            let settings = #"{"defaultShell":"\#(shell)","historyBudgetBytes":1048576,"shellIntegration":false}"#
+            let settings = #"{"startupCommand":["\#(shell)"],"historyBudgetBytes":1048576,"shellIntegration":false}"#
             try Data(settings.utf8).write(to: dirs.serverSettings)
         }
         configuration = ServerConfiguration(dirs: dirs, uploads: root.appendingPathComponent("uploads"),

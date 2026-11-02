@@ -6,10 +6,10 @@ import XCTest
 
 @MainActor
 final class ComponentsTests: XCTestCase {
-    func testSliderValuesFormatWithTheirStep() {
-        XCTAssertEqual(SliderSpec.format(75, step: 1), "75")
-        XCTAssertEqual(SliderSpec.format(0.5, step: 0.01), "0.5")
-        XCTAssertEqual(SliderSpec.format(1.25, step: 0.01), "1.25")
+    func testStepperValuesFormatWithTheirStep() {
+        XCTAssertEqual(StepperSpec.format(75, step: 1), "75")
+        XCTAssertEqual(StepperSpec.format(0.5, step: 0.01), "0.5")
+        XCTAssertEqual(StepperSpec.format(1.25, step: 0.01), "1.25")
     }
 
     func testShortcutRecorderKeepsChordWhenRefused() throws {

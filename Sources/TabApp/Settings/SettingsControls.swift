@@ -8,7 +8,7 @@ indirect enum SettingControl {
     case toggle(ToggleSpec)
     case choice(ChoiceSpec)
     case segmented(SegmentedSpec)
-    case slider(SliderSpec)
+    case stepper(StepperSpec)
     case text(TextSpec)
     case button(ButtonSpec)
     case color(ColorSpec)
@@ -16,6 +16,12 @@ indirect enum SettingControl {
     case label(String, LabelStyle = .body)
     case keys(KeyChord)
     case qrCode(QRCode)
+    /// A font family's name, drawn in that font.
+    case fontName(family: String, style: String)
+    /// A terminal sample drawn with the page's settings.
+    case preview(PreviewSpec)
+    /// A chevron: the row opens another page.
+    case disclosure(() -> Void)
     /// Controls side by side.
     case row([SettingControl])
     /// Controls stacked, leading or trailing aligned.
@@ -54,6 +60,9 @@ struct ChoiceSpec {
     var label: String
     /// Shown, and selected, when nothing is chosen yet, such as "Add Font…".
     var placeholder: String?
+    /// A button titled `placeholder` that shows the items as a menu,
+    /// rather than a pop-up showing the selected item.
+    var isMenu = false
     var change: (String) -> Void
 
     var selectedTitle: String {
@@ -68,18 +77,17 @@ struct SegmentedSpec {
     var change: (Int) -> Void
 }
 
-/// A slider that previews while dragging and commits on release.
-struct SliderSpec {
+/// A number field with stepper arrows and its unit, saved on Return,
+/// leaving it, or a step.
+struct StepperSpec {
     var value: Double
     var range: ClosedRange<Double>
     var step: Double
-    var suffix = ""
+    var unit: String?
     var label: String
-    var preview: ((Double) -> Void)?
     var commit: (Double) -> Void
 
-    /// `value` as the slider's value label shows it.
-    var displayText: String { Self.format(value, step: step) + suffix }
+    var text: String { Self.format(value, step: step) }
 
     /// A whole number for whole steps, else up to two decimals without
     /// trailing zeros.
@@ -90,6 +98,20 @@ struct SliderSpec {
         if text.hasSuffix(".") { text.removeLast() }
         return text
     }
+
+    /// The value typed, clamped to the range; `nil` when it isn't a number.
+    func parse(_ text: String) -> Double? {
+        guard let number = Double(text.trimmingCharacters(in: .whitespaces)), number.isFinite else { return nil }
+        return min(max((number / step).rounded() * step, range.lowerBound), range.upperBound)
+    }
+}
+
+/// A terminal sample: what it shows, and the settings and colors it is
+/// drawn with.
+struct PreviewSpec {
+    var preview: TerminalPreview
+    var settings: TerminalSettings
+    var palette: TerminalPalette
 }
 
 /// A text field saved on Return, on leaving it, or when Settings closes.

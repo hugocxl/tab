@@ -138,7 +138,7 @@ final class EndToEndTests: XCTestCase {
         }
         let client = try await startServer()
         let home = try await home(client)
-        try await client.writeServerSettings(ServerSettingsDoc(defaultShell: "/bin/zsh"))
+        try await client.writeServerSettings(ServerSettingsDoc(startupCommand: ["/bin/zsh"]))
         let info = try await client.createSession(CreateSession(project: home, directory: ServerPath(root.path),
                                                                 size: Size(cols: 80, rows: 24)))
         let attachment = try await client.attach(session: info.id, size: Size(cols: 80, rows: 24))

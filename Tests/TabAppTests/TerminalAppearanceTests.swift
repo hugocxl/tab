@@ -11,8 +11,7 @@ final class TerminalAppearanceTests: XCTestCase {
 
     func testStyleColorsDecorationsFaintAndInvisible() {
         let renderer = CoreTextRenderer()
-        var state = TerminalRendererTests().state(F.grid([[]], cols: 12, cursor: Cursor(visible: false)))
-        state.palette.boldIsBright = true
+        let state = TerminalRendererTests().state(F.grid([[]], cols: 12, cursor: Cursor(visible: false)))
         var style = Style()
         style.fg = .indexed(1)
         style.bg = .indexed(2)
@@ -25,7 +24,7 @@ final class TerminalAppearanceTests: XCTestCase {
         style.underline = .double
         style.underlineColor = .rgb(1, 2, 3)
         let row = renderer.layoutRow(RowKey(runs: [Run(text: "X", width: 1, style: style)], selected: nil), state: state)
-        XCTAssertEqual(row.backgrounds.first?.color, state.palette.indexed(9))
+        XCTAssertEqual(row.backgrounds.first?.color, state.palette.indexed(1))
         XCTAssertEqual(row.glyphs.first?.color, state.palette.indexed(2))
         XCTAssertEqual(row.glyphs.first?.alpha, 0.5)
         XCTAssertEqual(row.decorations.count, 3)
@@ -61,30 +60,47 @@ final class TerminalAppearanceTests: XCTestCase {
         XCTAssertNotEqual(Data(bytes: context.data!, count: context.bytesPerRow * context.height), plain)
     }
 
-    func testExplicitDefaultColoredCellsStayOpaqueOverVibrancy() {
-        var state = TerminalRendererTests().state(F.grid([[F.run(" ", bg: .rgb(0, 0, 0))]], cols: 4,
-                                                        cursor: Cursor(visible: false)))
-        state.palette.background = 0
-        state.palette.backgroundOpacity = 0.4
-        let renderer = CoreTextRenderer()
-        let context = TerminalRendererTests.context(state.layout)
-        renderer.prepare(state)
-        renderer.draw(state, dirty: [state.layout.bounds], in: context)
-        XCTAssertEqual(pixel(context, state.layout.cellRect(row: 0, column: 0).midpoint).alpha, 255)
-        XCTAssertEqual(pixel(context, state.layout.cellRect(row: 0, column: 2).midpoint).alpha, 102, accuracy: 1)
-        state.palette.backgroundOpacityCells = true
-        renderer.prepare(state)
-        renderer.draw(state, dirty: [state.layout.bounds], in: context)
-        XCTAssertEqual(pixel(context, state.layout.cellRect(row: 0, column: 0).midpoint).alpha, 102, accuracy: 1)
-        XCTAssertFalse(renderer.isBackgroundOpaque)
+    func testImprovedContrastAndThemePaletteAdjustOnlyText() {
+        var palette = TerminalPalette()
+        palette.background = 0x10_10_10
+        var style = Style()
+        style.fg = .rgb(0x18, 0x18, 0x18)
+        XCTAssertEqual(palette.style(style).foreground, 0x18_18_18)
+        palette.minimumContrast = TerminalPalette.improvedContrast
+        let adjusted = palette.style(style)
+        XCTAssertEqual(adjusted.background, 0x10_10_10)
+        XCTAssertGreaterThanOrEqual(TerminalPalette.contrast(TerminalPalette.luminance(adjusted.foreground),
+                                                             TerminalPalette.luminance(adjusted.background)), 3)
+        style.fg = .default
+        XCTAssertEqual(palette.style(style).foreground, palette.foreground, "readable theme text is left alone")
+
+        palette.minimumContrast = 1
+        palette.forceThemePalette = true
+        style.fg = .rgb(0xEE, 0x40, 0x90)
+        XCTAssertEqual(palette.style(style).foreground, palette.indexed(1))
+        style.fg = .indexed(5)
+        XCTAssertEqual(palette.style(style).foreground, palette.indexed(5), "theme colors stay")
+        style.bg = .rgb(1, 2, 3)
+        XCTAssertEqual(palette.style(style).background, 0x01_02_03, "backgrounds stay")
     }
 
-    func testCursorShapesOpacityThicknessAndBlinkPhase() {
+    func testDisplayP3ColorsAndSurfaces() {
+        var palette = TerminalPalette()
+        XCTAssertEqual(palette.cgColor(0xFF_00_00).colorSpace?.name, CGColorSpace.sRGB)
+        palette.displayP3 = true
+        XCTAssertEqual(palette.cgColor(0xFF_00_00).colorSpace?.name, CGColorSpace.displayP3)
+        var state = TerminalRendererTests().state(F.grid([[F.run("ab")]], cols: 4, cursor: Cursor(visible: false)))
+        state.palette = palette
+        let renderer = CoreTextRenderer()
+        renderer.prepare(state)
+        XCTAssertGreaterThan(renderer.rasterCount, 0)
+    }
+
+    func testCursorShapesAndBlinkPhase() {
         var state = TerminalRendererTests().state(F.grid([[F.run("    ")]], cols: 4, cursor: Cursor(visible: false)))
         state.palette.background = 0
         state.palette.cursor = 0xFF_00_00
-        state.palette.cursorOpacity = 0.5
-        state.cursor = TerminalCursorState(visible: true, row: 0, column: 1, thickness: .pixels(3))
+        state.cursor = TerminalCursorState(visible: true, row: 0, column: 1)
         let renderer = CoreTextRenderer()
         let context = TerminalRendererTests.context(state.layout)
         let rect = state.layout.cellRect(row: 0, column: 1)
@@ -93,15 +109,15 @@ final class TerminalAppearanceTests: XCTestCase {
             renderer.prepare(state)
             renderer.draw(state, dirty: [state.layout.bounds], in: context)
             let center = pixel(context, rect.midpoint)
-            XCTAssertEqual(center.red, shape == .block ? 127 : 0, accuracy: 2)
-            let edge = shape == .underline ? CGPoint(x: rect.midX, y: rect.maxY - 0.5)
-                : CGPoint(x: rect.minX + 0.5, y: rect.midY)
-            XCTAssertEqual(pixel(context, edge).red, 127, accuracy: 2, "shape \(shape)")
+            XCTAssertEqual(center.red, shape == .block ? 255 : 0, accuracy: 2)
+            let edge = shape == .underline ? CGPoint(x: rect.midX, y: rect.maxY - 0.25)
+                : CGPoint(x: rect.minX + 0.25, y: rect.midY)
+            XCTAssertEqual(pixel(context, edge).red, 255, accuracy: 2, "shape \(shape)")
         }
         state.cursor.visible = false
         renderer.prepare(state)
         renderer.draw(state, dirty: [rect], in: context)
-        XCTAssertEqual(pixel(context, CGPoint(x: rect.minX + 0.5, y: rect.midY)).red, 0)
+        XCTAssertEqual(pixel(context, CGPoint(x: rect.minX + 0.25, y: rect.midY)).red, 0)
     }
 
     func testSelectionResolvesCellColorsAndWideCellForeground() {
@@ -120,22 +136,44 @@ final class TerminalAppearanceTests: XCTestCase {
         XCTAssertEqual(row.glyphs.first?.color, 0x00_FF_00)
     }
 
-    func testPaddingBalanceAndExtension() {
+    func testRoundedSelectionKeepsCornersThatNeighborsContinue() {
+        let corners = SelectionCorners(4..<10, above: 0..<20, below: 0..<6)
+        XCTAssertFalse(corners.topLeft)
+        XCTAssertFalse(corners.topRight)
+        XCTAssertFalse(corners.bottomLeft)
+        XCTAssertTrue(corners.bottomRight)
+        let alone = SelectionCorners(4..<10, above: 0..<0, below: 0..<0)
+        XCTAssertTrue(alone.topLeft && alone.topRight && alone.bottomLeft && alone.bottomRight)
+
+        var state = TerminalRendererTests().state(F.grid([[F.run("abcdef")]], cols: 8, cursor: Cursor(visible: false)))
+        state.palette.background = 0
+        state.palette.selectionBackground = .rgb(RGBColor(0xFF_00_00))
+        state.selection = TerminalSelection(anchor: TerminalPoint(row: 0, column: 1), head: TerminalPoint(row: 0, column: 5))
+        let renderer = CoreTextRenderer()
+        let context = TerminalRendererTests.context(state.layout)
+        let rect = state.layout.cellRect(row: 0, column: 1, width: 4)
+        let corner = CGPoint(x: rect.minX + 0.25, y: rect.minY + 0.25)
+        renderer.prepare(state)
+        renderer.draw(state, dirty: [state.layout.bounds], in: context)
+        XCTAssertEqual(pixel(context, corner).red, 255)
+        state.roundedSelection = true
+        renderer.prepare(state)
+        renderer.draw(state, dirty: [state.layout.bounds], in: context)
+        XCTAssertEqual(pixel(context, corner).red, 0)
+        XCTAssertEqual(pixel(context, CGPoint(x: rect.midX, y: rect.minY + 0.25)).red, 255)
+    }
+
+    func testPaddingAndRowsColoredEdgeToEdgeExtendIntoIt() {
         let metrics = TerminalMetrics(cellWidth: 8, cellHeight: 16, ascent: 10, descent: 3, baseline: 12,
                                       scale: 2, lineThickness: 0.5)
-        var options = TerminalOptions()
-        options.paddingX = [3, 5]
-        options.paddingY = [7, 9]
-        options.paddingBalance = true
         let bounds = CGRect(x: 0, y: 0, width: 93, height: 73)
-        let layout = TerminalLayout(bounds: bounds, metrics: metrics, options: options)
-        XCTAssertEqual(layout.viewport, Size(cols: 10, rows: 3))
-        XCTAssertEqual(layout.grid.minX, 5.5)
-        XCTAssertEqual(layout.grid.minY, 11.5)
+        let layout = TerminalLayout(bounds: bounds, metrics: metrics)
+        XCTAssertEqual(layout.viewport, Size(cols: 11, rows: 4))
+        XCTAssertEqual(layout.grid.minX, TerminalLayout.padding)
         XCTAssertEqual(layout.rowRect(0).minY, 0)
-        XCTAssertEqual(layout.rowRect(2).maxY, 73)
-        XCTAssertEqual(layout.rows(in: CGRect(x: 0, y: 11.5, width: 93, height: 16)), 0..<1)
-        var state = TerminalRendererTests().state(F.grid([[F.run(" ", width: 10, bg: .rgb(255, 0, 0))], [], []], cols: 10,
+        XCTAssertEqual(layout.rowRect(3).maxY, 73)
+        XCTAssertEqual(TerminalLayout(bounds: bounds, metrics: metrics, basePadding: 2).grid.minX, 0)
+        var state = TerminalRendererTests().state(F.grid([[F.run(" ", width: 11, bg: .rgb(255, 0, 0))], [], [], []], cols: 11,
                                                         cursor: Cursor(visible: false)))
         state.metrics = metrics
         state.layout = layout
@@ -143,36 +181,39 @@ final class TerminalAppearanceTests: XCTestCase {
         let context = TerminalRendererTests.context(layout)
         renderer.prepare(state)
         renderer.draw(state, dirty: [bounds], in: context)
-        XCTAssertEqual(pixel(context, CGPoint(x: 1, y: 1)).red, 255)
-        options.paddingColor = .background
-        state.layout = TerminalLayout(bounds: bounds, metrics: metrics, options: options)
-        renderer.prepare(state)
-        renderer.draw(state, dirty: [bounds], in: context)
-        XCTAssertNotEqual(pixel(context, CGPoint(x: 1, y: 1)).red, 255)
+        XCTAssertEqual(pixel(context, CGPoint(x: 0.5, y: 0.5)).red, 255)
+        XCTAssertNotEqual(pixel(context, CGPoint(x: 0.5, y: 72.5)).red, 255)
     }
 
-    func testFontFamiliesTraitsFeaturesAndUnicodeMaps() {
-        var settings = F.settings()
-        settings.fontFamilies = ["Tab missing font", "Courier", "Menlo"]
-        settings.font.bold = ["Tab missing bold", "Menlo"]
-        settings.font.features = [FontFeature("liga", 0), FontFeature("calt", 0)]
-        settings.font.codepoints = [FontMap(start: 0x41, end: 0x41, family: "Menlo")]
-        settings.font.thicken = true
-        settings.font.thickenStrength = 128
-        let fonts = TerminalFontSet(settings: settings)
-        XCTAssertEqual(CTFontCopyFamilyName(fonts.regular.font) as String, "Courier")
-        XCTAssertEqual(CTFontCopyFamilyName(fonts.bold.font) as String, "Menlo")
+    func testSmoothScrollingShiftsRowsAndRevealsTheRowAbove() {
+        var state = TerminalRendererTests().state(F.grid([[F.run("    ")], [F.run("    ")]], cols: 4,
+                                                        history: [[F.run(" ", width: 4, bg: .rgb(255, 0, 0))]],
+                                                        cursor: Cursor(visible: false)))
+        state.palette.background = 0
+        let renderer = CoreTextRenderer()
+        let context = TerminalRendererTests.context(state.layout)
+        let top = CGPoint(x: state.layout.grid.midX, y: state.layout.grid.minY + 1)
+        renderer.prepare(state)
+        renderer.draw(state, dirty: [state.layout.bounds], in: context)
+        XCTAssertEqual(pixel(context, top).red, 0)
+        state.smoothOffset = state.layout.cellHeight / 2
+        renderer.prepare(state)
+        renderer.draw(state, dirty: [state.layout.bounds], in: context)
+        XCTAssertEqual(pixel(context, top).red, 255, "the history row above shows")
+    }
+
+    func testFontFamilyStyleFallbacksAndLigatures() {
+        let fonts = TerminalFontSet(family: "Menlo", style: "Bold", fallbacks: ["Apple Color Emoji"], size: 13)
+        XCTAssertEqual(CTFontCopyFamilyName(fonts.regular.font) as String, "Menlo")
+        XCTAssertEqual(CTFontCopyName(fonts.regular.font, kCTFontStyleNameKey) as String?, "Bold")
         XCTAssertTrue(CTFontGetSymbolicTraits(fonts.italic.font).contains(.traitItalic))
-        XCTAssertTrue(fonts.thicken)
-        XCTAssertEqual(fonts.thickenStrength, 128.0 / 255.0, accuracy: 0.001)
-        let mapped = fonts.mappedFont(for: "A", base: fonts.italic.font)
-        XCTAssertEqual(mapped.map { CTFontCopyFamilyName($0) as String }, "Menlo")
-        XCTAssertTrue(mapped.map { CTFontGetSymbolicTraits($0).contains(.traitItalic) } ?? false)
-        XCTAssertNil(fonts.mappedFont(for: "B", base: fonts.regular.font))
-        let descriptor = CTFontCopyFontDescriptor(fonts.regular.font)
-        XCTAssertNotNil(CTFontDescriptorCopyAttribute(descriptor, kCTFontCascadeListAttribute))
-        let featureFonts = TerminalFontSet(families: ["Times New Roman"], size: 13, options: settings.font)
-        XCTAssertNotNil(CTFontDescriptorCopyAttribute(CTFontCopyFontDescriptor(featureFonts.regular.font), kCTFontFeatureSettingsAttribute))
+        XCTAssertNotNil(CTFontDescriptorCopyAttribute(CTFontCopyFontDescriptor(fonts.regular.font), kCTFontCascadeListAttribute))
+        let missing = TerminalFontSet(family: "Tab missing font", style: "Regular", fallbacks: [], size: 13)
+        XCTAssertEqual(CTFontCopyFamilyName(missing.regular.font) as String, "Menlo")
+        let unknownStyle = TerminalFontSet(family: "Menlo", style: "Tab missing style", fallbacks: [], size: 13)
+        XCTAssertEqual(CTFontCopyName(unknownStyle.regular.font, kCTFontStyleNameKey) as String?, "Regular")
+        let plain = TerminalFontSet(family: "Menlo", style: "Regular", fallbacks: [], size: 13, ligatures: false)
+        XCTAssertNotNil(plain.regular.ascii, "without ligatures ASCII never substitutes")
     }
 
     func testUnicodeGlyphGeometryIsReusedAndCachesInvalidateForMetrics() {
@@ -189,7 +230,7 @@ final class TerminalAppearanceTests: XCTestCase {
         XCTAssertEqual(renderer.glyphLayoutCount, 2)
     }
 
-    func testThickeningAddsInkAndGlyphCacheIsBounded() {
+    func testFontSmoothingAddsInkAndGlyphCacheIsBounded() {
         var state = TerminalRendererTests().state(F.grid([[F.run("MMMM")]], cols: 6, cursor: Cursor(visible: false)))
         state.palette.background = 0
         state.palette.foreground = 0xFF_FF_FF
@@ -199,7 +240,7 @@ final class TerminalAppearanceTests: XCTestCase {
         renderer.draw(state, dirty: [state.layout.bounds], in: context)
         let plain = Data(bytes: context.data!, count: context.bytesPerRow * context.height).reduce(0) { $0 + Int($1) }
         var settings = F.settings()
-        settings.font.thicken = true
+        settings.fontSmoothing = true
         state.fonts = TerminalFontSet(settings: settings)
         renderer.prepare(state)
         renderer.draw(state, dirty: [state.layout.bounds], in: context)
@@ -214,7 +255,7 @@ final class TerminalAppearanceTests: XCTestCase {
         let brightest = stride(from: 2, to: context.bytesPerRow * context.height, by: 4).reduce(0) {
             max($0, Int(pixels[$1]))
         }
-        XCTAssertEqual(brightest, 127, accuracy: 2, "faint applies once to fill and stroke together")
+        XCTAssertEqual(brightest, 127, accuracy: 2, "faint text draws at half strength")
         for index in 0..<1400 {
             let text = String(Unicode.Scalar(0x4E00 + index)!)
             state.grid.rows[0] = [F.run(text, width: 2)]

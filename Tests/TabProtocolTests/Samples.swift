@@ -199,7 +199,7 @@ enum Samples {
         .mutateProject(ProjectIntent(operation: operation, mutation: .pruneWorktree(project))),
         .listProjectSessions(project: project, after: session, revision: 2), .listFolders("/Users"),
         .readServerSettings,
-        .writeServerSettings(ServerSettingsDoc(defaultShell: "/bin/zsh", historyBudgetBytes: 1024,
+        .writeServerSettings(ServerSettingsDoc(startupCommand: ["/bin/zsh"], historyBudgetBytes: 1024,
                                                shellIntegration: false)),
         .stopServer(force: true), .stopServerIfIdle, .restartServer,
         .git(GitRequest(project: project, action: .summary)),

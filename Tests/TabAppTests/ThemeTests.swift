@@ -57,12 +57,6 @@ final class ThemeTests: XCTestCase {
         XCTAssertLessThan(AppTheme.chrome(palette).lightness, AppTheme.card(palette).lightness)
     }
 
-    func testVibrancyOffUnderAccessibilityOptions() {
-        XCTAssertTrue(AccessibilityOptions().allowsVibrancy)
-        XCTAssertFalse(AccessibilityOptions(reduceTransparency: true).allowsVibrancy)
-        XCTAssertFalse(AccessibilityOptions(increaseContrast: true).allowsVibrancy)
-    }
-
     func testEveryIconHasAnImage() {
         for icon in AppIcon.allCases {
             XCTAssertNotNil(icon.image(), "\(icon) has neither a symbol nor a bundled image")
@@ -72,7 +66,7 @@ final class ThemeTests: XCTestCase {
 
 @MainActor
 final class ThemeTerminalIntegrationTests: XCTestCase {
-    func testVibrancyAndAppPreferencesReachExistingTerminalPanes() async throws {
+    func testTerminalAndAppPreferencesReachExistingTerminalPanes() async throws {
         let dirs = try ModelFixtures.profile()
         let identity = ServerId()
         let home = ProjectDescriptor.home(directory: ServerPath(NSHomeDirectory()))
@@ -87,21 +81,16 @@ final class ThemeTerminalIntegrationTests: XCTestCase {
         let created = await ModelFixtures.wait { pane.session != nil }
         XCTAssertTrue(created)
         var terminal = TerminalSettings()
-        terminal.options.backgroundOpacity = 0.5
-        terminal.options.backgroundVibrancy = 60
+        terminal.cursorStyle = .underline
+        terminal.improveContrast = false
         model.apply(terminalSettings: terminal)
         let view = try XCTUnwrap(pane.session?.view)
-        let expected = model.theme.accessibility.allowsVibrancy ? 0.2 : 0.5
-        XCTAssertEqual(view.palette.backgroundOpacity, expected, accuracy: 0.0001)
+        XCTAssertEqual(view.palette.cursorStyle, .underline)
+        XCTAssertEqual(view.palette.minimumContrast, 1)
         var settings = model.settings
-        settings.clipboard.copyOnSelect = true
         settings.keymap = try Keymap.fromOverrides([ShortcutId.copy.rawValue: "cmd-shift-c"])
         model.apply(settings: settings)
-        XCTAssertEqual(view.settings.options.copyOnSelect, true)
         XCTAssertEqual(view.shortcuts[try KeyChord("cmd-shift-c")], .copy)
         XCTAssertNil(view.shortcuts[try KeyChord("cmd-c")])
-        terminal.options.copyOnSelect = false
-        model.apply(terminalSettings: terminal)
-        XCTAssertEqual(view.settings.options.copyOnSelect, false, "the terminal override wins over the app preference")
     }
 }

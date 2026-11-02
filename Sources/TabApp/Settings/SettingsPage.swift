@@ -139,13 +139,26 @@ private struct SettingLabel: View {
     }
 }
 
-/// One row: the label beside its control, or above it when stacked.
+/// One row: the label beside its control, or above it when stacked. A row
+/// without a label is its control alone, and a disclosure row opens a page.
 struct SettingRowView: View {
     let row: SettingRow
     @ObservedObject var model: SettingsModel
 
     var body: some View {
-        if let control = row.control, !row.stacked {
+        if row.label.isEmpty, let control = row.control {
+            SettingControlView(control: control, model: model)
+        } else if case .disclosure(let open)? = row.control {
+            Button(action: open) {
+                LabeledContent {
+                    Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                } label: {
+                    SettingLabel(row: row)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        } else if let control = row.control, !row.stacked {
             LabeledContent {
                 SettingControlView(control: control, model: model)
             } label: {
@@ -186,8 +199,16 @@ struct SettingControlView: View {
             .pickerStyle(.segmented)
             .labelsHidden()
             .fixedSize()
-        case .slider(let spec):
-            SliderView(spec: spec)
+        case .stepper(let spec):
+            StepperView(spec: spec)
+        case .fontName(let family, let style):
+            Text(family)
+                .font(Font(NSFont(descriptor: NSFontDescriptor(fontAttributes: [.family: family, .face: style]),
+                                  size: NSFont.systemFontSize) ?? .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)))
+        case .preview(let spec):
+            TerminalPreviewView(spec: spec)
+        case .disclosure:
+            Image(systemName: "chevron.right").foregroundStyle(.tertiary)
         case .text(let spec):
             TextFieldView(spec: spec, model: model)
         case .button(let spec):
@@ -253,6 +274,22 @@ private struct ChoiceView: View {
     let spec: ChoiceSpec
 
     var body: some View {
+        if spec.isMenu {
+            Menu(spec.placeholder ?? spec.label) {
+                ForEach(spec.items.indices, id: \.self) { index in
+                    Button(spec.items[index].title) { spec.change(spec.items[index].id) }
+                }
+            }
+            .menuStyle(.button)
+            .buttonStyle(.bordered)
+            .menuIndicator(.hidden)
+            .fixedSize()
+        } else {
+            picker
+        }
+    }
+
+    private var picker: some View {
         Picker(spec.label, selection: Binding(get: { spec.selected }, set: { spec.change($0) })) {
             if let placeholder = spec.placeholder, !spec.items.contains(where: { $0.id == spec.selected }) {
                 Text(placeholder).tag(spec.selected)
@@ -270,45 +307,91 @@ private struct ChoiceView: View {
     }
 }
 
-/// A slider with its value, previewing while dragged and saving on release.
-private struct SliderView: View {
-    let spec: SliderSpec
-    @State private var value: Double
-    @State private var dragging = false
+/// A number field with stepper arrows, saved on Return, leaving it, or a step.
+private struct StepperView: View {
+    let spec: StepperSpec
+    @State private var text: String
+    @FocusState private var focused: Bool
 
-    init(spec: SliderSpec) {
+    init(spec: StepperSpec) {
         self.spec = spec
-        _value = State(initialValue: spec.value)
+        _text = State(initialValue: spec.text)
     }
 
     var body: some View {
-        HStack(spacing: 8) {
-            // Rounded by hand: a stepped slider would draw a tick per step.
-            SwiftUI.Slider(
-                value: Binding(get: { value }, set: { value = ($0 / spec.step).rounded() * spec.step }),
-                in: spec.range
-            ) { editing in
-                dragging = editing
-                if !editing { spec.commit(value) }
+        HStack(spacing: 4) {
+            TextField(spec.label, text: $text)
+                .textFieldStyle(.roundedBorder)
+                .multilineTextAlignment(.trailing)
+                .labelsHidden()
+                .monospacedDigit()
+                .frame(width: 56)
+                .focused($focused)
+                .onSubmit(commit)
+                .onChange(of: focused) { _, isFocused in
+                    if !isFocused { commit() }
+                }
+                .onChange(of: spec.value) { _, _ in
+                    if !focused { text = spec.text }
+                }
+            Stepper(spec.label) {
+                spec.commit(min(spec.value + spec.step, spec.range.upperBound))
+            } onDecrement: {
+                spec.commit(max(spec.value - spec.step, spec.range.lowerBound))
             }
             .labelsHidden()
-            .accessibilityLabel(spec.label)
-            .accessibilityValue(displayText)
-            .frame(width: 150)
-            Text(displayText)
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
-                .frame(minWidth: 40, alignment: .trailing)
+            if let unit = spec.unit {
+                Text(unit).foregroundStyle(.secondary)
+            }
         }
-        .onChange(of: value) { old, new in
-            if dragging && old != new { spec.preview?(new) }
+        .fixedSize()
+    }
+
+    private func commit() {
+        guard let value = spec.parse(text) else {
+            text = spec.text
+            return
         }
-        .onChange(of: spec.value) { _, new in
-            if !dragging { value = new }
+        text = StepperSpec.format(value, step: spec.step)
+        if value != spec.value { spec.commit(value) }
+    }
+}
+
+/// A terminal sample on its terminal background; the cursor sample blinks
+/// at the chosen speed.
+private struct TerminalPreviewView: View {
+    let spec: PreviewSpec
+    @Environment(\.displayScale) private var scale
+
+    var body: some View {
+        if spec.preview == .cursor, let interval = spec.settings.cursorBlink.interval {
+            TimelineView(.periodic(from: .now, by: interval)) { context in
+                sample(cursor: Int(context.date.timeIntervalSinceReferenceDate / interval) % 2 == 0)
+            }
+        } else {
+            sample(cursor: true)
         }
     }
 
-    private var displayText: String { SliderSpec.format(value, step: spec.step) + spec.suffix }
+    private func sample(cursor: Bool) -> some View {
+        HStack(spacing: 0) {
+            if let image = spec.preview.image(settings: spec.settings, palette: spec.palette, cursor: cursor, scale: scale) {
+                Image(nsImage: image).accessibilityHidden(true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .clipped()
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(SwiftUI.Color(cgColor: spec.palette.cgColor(spec.palette.background)))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(.separator, lineWidth: 0.5)
+        )
+    }
 }
 
 /// A text field saved on Return, on leaving it, or when Settings closes.

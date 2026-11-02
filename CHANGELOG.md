@@ -3,6 +3,32 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.39.0 - 2026-11-02
+
+### Added
+
+- Terminal settings show live previews of the font, cursor and selection, and an
+  Advanced Font Settings page sets character spacing, line height, ligatures, font
+  smoothing and fallback fonts.
+- Terminals can raise text contrast, keep program colors to the theme palette, and
+  use the Display P3 color space.
+- Cursor blink speed, smooth trackpad scrolling, a flash when copying, rounded
+  selection corners and theme-based selection colors are now settings.
+- The Option key can send Alt automatically on U.S. keyboard layouts, or on only
+  the left or right Option key.
+- Links that open other apps ask first by default, and terminals can show generated
+  titles with the running program and its folder.
+- The startup command sets the program, with arguments, that new terminals run.
+
+### Changed
+
+- New tabs and splits always start in the source terminal's folder.
+
+### Removed
+
+- Custom key bindings, font overrides, transparency, padding, scroll speed, mouse
+  reporting and other terminal settings that the new Terminal page doesn't show.
+
 ## 0.38.0 - 2026-11-02
 
 ### Changed

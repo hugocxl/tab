@@ -5,12 +5,12 @@ import TabProtocol
 /// `server.json`: the server's own settings. Unknown keys are ignored and
 /// missing ones take their defaults, so the file only grows.
 struct ServerSettingsFile: Codable, Equatable {
-    var defaultShell: String?
+    var startupCommand: [String]
     var historyBudgetBytes: UInt64
     var shellIntegration: Bool
 
     init(_ document: ServerSettingsDoc = ServerSettingsDoc()) {
-        defaultShell = document.defaultShell?.rawValue
+        startupCommand = document.startupCommand
         historyBudgetBytes = document.historyBudgetBytes
         shellIntegration = document.shellIntegration
     }
@@ -18,7 +18,7 @@ struct ServerSettingsFile: Codable, Equatable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let defaults = ServerSettingsDoc()
-        defaultShell = try container.decodeIfPresent(String.self, forKey: .defaultShell)
+        startupCommand = try container.decodeIfPresent([String].self, forKey: .startupCommand) ?? []
         historyBudgetBytes = try container.decodeIfPresent(UInt64.self, forKey: .historyBudgetBytes)
             ?? defaults.historyBudgetBytes
         shellIntegration = try container.decodeIfPresent(Bool.self, forKey: .shellIntegration)
@@ -26,7 +26,7 @@ struct ServerSettingsFile: Codable, Equatable {
     }
 
     var document: ServerSettingsDoc {
-        ServerSettingsDoc(defaultShell: defaultShell.map { ServerPath($0) }, historyBudgetBytes: historyBudgetBytes,
+        ServerSettingsDoc(startupCommand: startupCommand, historyBudgetBytes: historyBudgetBytes,
                           shellIntegration: shellIntegration)
     }
 }
@@ -51,7 +51,7 @@ final class ServerSettingsStore: @unchecked Sendable {
             do {
                 try document.validate()
             } catch {
-                throw ServiceError(.badRequest, "\(url.path): the shell must be an absolute path and the history budget at most 64 GiB")
+                throw ServiceError(.badRequest, "\(url.path): the startup command is invalid or the history budget is over 64 GiB")
             }
             current = document
         } else {
@@ -69,12 +69,11 @@ final class ServerSettingsStore: @unchecked Sendable {
         do {
             try settings.validate()
         } catch {
-            throw ServiceError(.badRequest, "The shell must be an absolute path and the history budget at most 64 GiB")
+            throw ServiceError(.badRequest, "The startup command is invalid or the history budget is over 64 GiB")
         }
-        if let shell = settings.defaultShell {
-            guard Executable.isExecutableFile(shell.url) else {
-                throw ServiceError(.badPath, "\(shell.rawValue) is not an executable file")
-            }
+        if let program = settings.startupCommand.first,
+           SessionSpawn.resolve(program, environment: ProcessInfo.processInfo.environment) == nil {
+            throw ServiceError(.badPath, "\(program) is not an executable file")
         }
         try lock.withLock {
             do {

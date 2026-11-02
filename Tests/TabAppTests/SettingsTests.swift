@@ -25,23 +25,30 @@ final class SettingsTests: XCTestCase {
         SettingsStore(dirs: dirs, host: host, theme: AppTheme(catalog: ThemeCatalog(entries: []), systemIsDark: true))
     }
 
-    func testSessionsMoveToTerminalAndKeepServerPersistence() async throws {
+    func testTerminalPageShowsExactlyItsSectionsAndTheStartupCommandSavesOnTheServer() async throws {
         let store = makeStore()
         let page = SettingsModel(store: store)
         page.select(.terminal)
         try await Task.sleep(nanoseconds: 50_000_000)
         page.reload()
-        XCTAssertTrue(page.lastBuild?.rowIds.contains("default-shell") == true)
-        XCTAssertTrue(page.lastBuild?.rowIds.contains("history-budget") == true)
-        XCTAssertNil(SettingsCatalog.item("shell-integration"))
-        store.setServer("default-shell", "/bin/bash")
+        XCTAssertEqual(page.lastBuild?.groups.map(\.section),
+                       ["Typography", "Colors", "Cursor", "Keyboard", "Scrolling", "Selection", "Links", "Titles", "Shell"])
+        XCTAssertFalse(page.lastBuild?.rowIds.contains("character-spacing") == true)
+        XCTAssertNil(SettingsCatalog.item("history-budget"))
+        store.setServer("startup-command", "/bin/bash -l")
         try await Task.sleep(nanoseconds: 50_000_000)
-        XCTAssertEqual(host.serverSettings.defaultShell?.rawValue, "/bin/bash")
-        page.select(.server)
-        XCTAssertFalse(page.lastBuild?.rowIds.contains("default-shell") == true)
-        XCTAssertFalse(page.lastBuild?.rowIds.contains("history-budget") == true)
-        page.search("history budget")
-        XCTAssertEqual(page.lastBuild?.groups.first?.category, .terminal)
+        XCTAssertEqual(host.serverSettings.startupCommand, ["/bin/bash", "-l"])
+
+        let advanced = try XCTUnwrap(page.lastBuild?.rows.first { $0.id == "font-advanced" })
+        guard case .disclosure(let open)? = advanced.control else { return XCTFail("Advanced opens a page") }
+        open()
+        XCTAssertEqual(page.title, "Advanced Font Settings")
+        XCTAssertEqual(page.lastBuild?.rowIds,
+                       ["advanced-preview", "character-spacing", "line-height", "ligatures", "font-smoothing", "fallback-fonts"])
+        page.goBack()
+        XCTAssertEqual(page.title, "Terminal")
+        page.search("ligatures")
+        XCTAssertEqual(page.lastBuild?.rowIds, ["ligatures"])
     }
 
     func testServerHeaderUsesConnectedVersionAndRestartState() {
@@ -63,11 +70,11 @@ final class SettingsTests: XCTestCase {
     func testSearchFindsEverySettingByItsLabel() {
         let index = SettingsCatalog.searchIndex()
         XCTAssertEqual(Set(index.map(\.id)).count, index.count, "row ids must be unique")
-        for item in index {
+        for item in index where !item.label.isEmpty {
             let results = SettingsCatalog.search(item.label)
             XCTAssertTrue(results.contains(item), "searching “\(item.label)” misses \(item.id)")
         }
-        XCTAssertTrue(SettingsCatalog.search("ligatures").contains { $0.id == "font-ligatures" })
+        XCTAssertTrue(SettingsCatalog.search("ligatures").contains { $0.id == "ligatures" })
         XCTAssertTrue(SettingsCatalog.search("zzz-no-such-setting").isEmpty)
     }
 
@@ -85,8 +92,13 @@ final class SettingsTests: XCTestCase {
             XCTAssertTrue(category == .changelog || !build.groups.isEmpty, "\(category) shows nothing")
             shown.formUnion(build.rowIds)
         }
-        let conditional: Set<String> = ["terminal-import-notes"]
-        for item in SettingsCatalog.items where !conditional.contains(item.id) {
+        for subpage in SettingsSubpage.allCases {
+            page.open(subpage)
+            let build = try XCTUnwrap(page.lastBuild)
+            XCTAssertEqual(build.unknownIds, [], "\(subpage) shows rows missing from the catalog")
+            shown.formUnion(build.rowIds)
+        }
+        for item in SettingsCatalog.items {
             XCTAssertTrue(shown.contains(item.id), "\(item.id) is in the catalog but no page shows it")
         }
 
@@ -151,17 +163,14 @@ final class SettingsTests: XCTestCase {
         XCTAssertNotNil(raw?["futureSection"])
     }
 
-    func testTerminalPreviewDoesNotSaveUntilCommitted() throws {
+    func testTerminalChangesSaveAndReachTheApp() throws {
         let store = makeStore()
-        store.previewTerminal("font-size", "20")
-        XCTAssertEqual(host.previews.last?.fontSize, 20)
-        XCTAssertEqual(try TerminalSettings.load(dirs.terminalSettings).fontSize, TerminalSettings.defaultFontSize)
-        store.setTerminal("font-size", "20")
-        XCTAssertEqual(try TerminalSettings.load(dirs.terminalSettings).fontSize, 20)
-        XCTAssertEqual(host.appliedTerminal.last?.fontSize, 20)
-        XCTAssertTrue(store.terminalIsCustomized)
-        store.resetTerminal()
-        XCTAssertFalse(store.terminalIsCustomized)
+        store.updateTerminal("cursor-style") { $0.cursorStyle = .bar }
+        XCTAssertEqual(try TerminalSettings.load(dirs.terminalSettings).cursorStyle, .bar)
+        XCTAssertEqual(host.appliedTerminal.last?.cursorStyle, .bar)
+        let applied = host.appliedTerminal.count
+        store.updateTerminal("cursor-style") { $0.cursorStyle = .bar }
+        XCTAssertEqual(host.appliedTerminal.count, applied, "an unchanged value isn't saved again")
     }
 
     func testBrokenTerminalFileIsReportedAndNeverOverwritten() throws {
@@ -169,7 +178,7 @@ final class SettingsTests: XCTestCase {
         try broken.write(to: dirs.terminalSettings)
         let store = makeStore()
         XCTAssertNotNil(store.errors["configuration"])
-        store.setTerminal("font-size", "15")
+        store.updateTerminal("font-size") { $0.fontSize = 15 }
         XCTAssertEqual(try Data(contentsOf: dirs.terminalSettings), broken)
     }
 
@@ -178,7 +187,7 @@ final class SettingsTests: XCTestCase {
     func testBackupRoundTripAndRestore() throws {
         let store = makeStore()
         store.setCloseBehavior(.detach)
-        store.setTerminal("font-size", "18")
+        store.updateTerminal("font-size") { $0.fontSize = 18 }
         try FileManager.default.createDirectory(at: dirs.themes, withIntermediateDirectories: true)
         try Data("background = #000000\nforeground = #ffffff\n".utf8).write(to: dirs.themes.appendingPathComponent("Mine"))
         try Data(#"{"shell":"/bin/zsh"}"#.utf8).write(to: dirs.serverSettings)

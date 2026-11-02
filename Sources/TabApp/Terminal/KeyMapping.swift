@@ -11,21 +11,22 @@ public enum KeyMapping {
     static let rightOption: UInt = 0x40
 
     /// The key event for `event`, as a press, repeat or release.
-    public static func keyEvent(_ event: NSEvent, optionAsAlt: OptionAsAlt, release: Bool = false) -> KeyEvent {
+    public static func keyEvent(_ event: NSEvent, optionKey: OptionKey, usLayout: Bool, release: Bool = false) -> KeyEvent {
         keyEvent(keyCode: event.keyCode, characters: event.characters ?? "",
                  unshifted: event.characters(byApplyingModifiers: []) ?? event.charactersIgnoringModifiers ?? "",
                  shifted: event.characters(byApplyingModifiers: .shift), flags: event.modifierFlags,
                  isRepeat: event.type == .keyDown && event.isARepeat,
-                 optionAsAlt: optionAsAlt, release: release)
+                 optionKey: optionKey, usLayout: usLayout, release: release)
     }
 
     /// The key event for a key code, the text it typed, the text it types with
     /// no modifiers, and the modifier flags.
     public static func keyEvent(keyCode: UInt16, characters: String, unshifted: String, shifted: String? = nil,
                                 flags: NSEvent.ModifierFlags,
-                                isRepeat: Bool = false, optionAsAlt: OptionAsAlt, release: Bool = false) -> KeyEvent {
+                                isRepeat: Bool = false, optionKey: OptionKey, usLayout: Bool = true,
+                                release: Bool = false) -> KeyEvent {
         let modifiers = keyModifiers(flags)
-        let alt = treatsOptionAsAlt(flags, optionAsAlt)
+        let alt = treatsOptionAsAlt(flags, optionKey, usLayout: usLayout)
         let logical = keyCode == 49 ? " " : named[keyCode] == nil && unshifted.count == 1 ? unshifted : nil
         var text: String
         if modifiers.contains(.control) || (modifiers.contains(.alt) && alt) {
@@ -64,24 +65,23 @@ public enum KeyMapping {
         return modifiers
     }
 
-    /// Whether Option acts as Alt for this event, per the setting and which
-    /// Option key is down.
-    public static func treatsOptionAsAlt(_ flags: NSEvent.ModifierFlags, _ setting: OptionAsAlt) -> Bool {
-        guard flags.contains(.option) else { return setting != .none }
+    /// Whether Option acts as Alt for this event, per the setting, the
+    /// keyboard layout and which Option key is down.
+    public static func treatsOptionAsAlt(_ flags: NSEvent.ModifierFlags, _ setting: OptionKey, usLayout: Bool) -> Bool {
         let raw = flags.rawValue
-        let left = raw & leftOption != 0
-        let right = raw & rightOption != 0
-        if !left && !right { return setting.enabled(left: true, right: true) }
-        return setting.enabled(left: left, right: right)
+        var left = raw & leftOption != 0
+        var right = raw & rightOption != 0
+        if !flags.contains(.option) || !left && !right { (left, right) = (true, true) }
+        return setting.sendsAlt(left: left, right: right, usLayout: usLayout)
     }
 
     /// Whether the key types text through the input method rather than going
     /// to the engine as a key: no Command or Control, Option not acting as
     /// Alt, and printable text.
-    public static func usesTextInput(_ event: NSEvent, optionAsAlt: OptionAsAlt) -> Bool {
+    public static func usesTextInput(_ event: NSEvent, optionKey: OptionKey, usLayout: Bool) -> Bool {
         let flags = event.modifierFlags
         if flags.contains(.command) || flags.contains(.control) { return false }
-        if flags.contains(.option) && treatsOptionAsAlt(flags, optionAsAlt) { return false }
+        if flags.contains(.option) && treatsOptionAsAlt(flags, optionKey, usLayout: usLayout) { return false }
         if named[event.keyCode] != nil && event.keyCode != 49 { return false }
         guard let text = event.characters, !text.isEmpty else { return false }
         return printable(text)

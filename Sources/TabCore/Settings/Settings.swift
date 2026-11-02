@@ -8,8 +8,6 @@ public struct Settings: Codable, Equatable, Sendable {
     public var keymap: Keymap
     public var projects: ProjectSettings
     public var worktrees: WorktreeSettings
-    public var panes: PaneSettings
-    public var clipboard: ClipboardSettings
     public var openers: OpenerSettings
     public var browser: BrowserSettings
     /// Other computers' servers, reached over SSH.
@@ -21,8 +19,6 @@ public struct Settings: Codable, Equatable, Sendable {
         keymap = Keymap()
         projects = ProjectSettings()
         worktrees = WorktreeSettings()
-        panes = PaneSettings()
-        clipboard = ClipboardSettings()
         openers = OpenerSettings()
         browser = BrowserSettings()
         servers = []
@@ -36,8 +32,6 @@ public struct Settings: Codable, Equatable, Sendable {
         keymap = try container.value(.keymap, defaults.keymap)
         projects = try container.value(.projects, defaults.projects)
         worktrees = try container.value(.worktrees, defaults.worktrees)
-        panes = try container.value(.panes, defaults.panes)
-        clipboard = try container.value(.clipboard, defaults.clipboard)
         openers = try container.value(.openers, defaults.openers)
         browser = try container.value(.browser, defaults.browser)
         servers = try container.value(.servers, defaults.servers)
@@ -93,14 +87,6 @@ public struct Settings: Codable, Equatable, Sendable {
         try saveSection("browser", browser, to: url)
     }
 
-    public func savePanes(to url: URL) throws {
-        try saveSection("panes", panes, to: url)
-    }
-
-    public func saveClipboard(to url: URL) throws {
-        try saveSection("clipboard", clipboard, to: url)
-    }
-
     public func saveWorktrees(to url: URL) throws {
         try worktrees.defaultLocation.validate()
         for location in worktrees.projects.values { try location.validate() }
@@ -150,45 +136,12 @@ public struct WindowSettings: Codable, Equatable, Sendable {
     }
 }
 
-public enum NewPaneDirectory: String, Codable, Sendable, CaseIterable {
-    /// New terminals start in the project's folder.
-    case project
-    /// New terminals start in the focused terminal's folder.
-    case current
-}
-
-public struct PaneSettings: Codable, Equatable, Sendable {
-    public var newPaneDirectory: NewPaneDirectory
-
-    public init(newPaneDirectory: NewPaneDirectory = .project) {
-        self.newPaneDirectory = newPaneDirectory
-    }
-
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        newPaneDirectory = try container.value(.newPaneDirectory, .project)
-    }
-}
-
 public struct ProjectSettings: Codable, Equatable, Sendable {
     /// Where the Open Project page searches for folders.
     public var searchRoot: String?
 
     public init(searchRoot: String? = nil) {
         self.searchRoot = searchRoot
-    }
-}
-
-public struct ClipboardSettings: Codable, Equatable, Sendable {
-    public var copyOnSelect: Bool
-
-    public init(copyOnSelect: Bool = false) {
-        self.copyOnSelect = copyOnSelect
-    }
-
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        copyOnSelect = try container.value(.copyOnSelect, false)
     }
 }
 
