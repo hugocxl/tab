@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.42.1 - 2026-11-02
+
+### Fixed
+
+- Glass mode uses a flat, translucent workspace background that preserves your
+  palette colours without a full-window Liquid Glass layer.
+
 ## 0.42.0 - 2026-11-02
 
 ### Changed
