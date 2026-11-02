@@ -58,6 +58,28 @@ public struct AppState: Codable, Equatable, Sendable {
         self.window = window
     }
 
+    /// Only repairs focus on a removed management pane; unknown references remain errors.
+    private static func isRetiredPane(_ id: PaneId, in container: KeyedDecodingContainer<CodingKeys>) throws -> Bool {
+        enum ContentKeys: String, CodingKey { case type }
+        var projects = try container.nestedUnkeyedContainer(forKey: .projects)
+        while !projects.isAtEnd {
+            let project = try projects.nestedContainer(keyedBy: Project.CodingKeys.self)
+            guard project.contains(.tabs) else { continue }
+            var tabs = try project.nestedUnkeyedContainer(forKey: .tabs)
+            while !tabs.isAtEnd {
+                let tab = try tabs.nestedContainer(keyedBy: Tab.CodingKeys.self)
+                var panes = try tab.nestedUnkeyedContainer(forKey: .panes)
+                while !panes.isAtEnd {
+                    let pane = try panes.nestedContainer(keyedBy: Pane.CodingKeys.self)
+                    guard try pane.decode(PaneId.self, forKey: .id) == id else { continue }
+                    let content = try pane.nestedContainer(keyedBy: ContentKeys.self, forKey: .content)
+                    return try content.decode(String.self, forKey: .type) == "servers"
+                }
+            }
+        }
+        return false
+    }
+
     /// Loads saved state, repairing what can be repaired (Home, selection,
     /// focus, single-tab projects) and refusing what cannot.
     public init(from decoder: Decoder) throws {
@@ -79,6 +101,10 @@ public struct AppState: Codable, Equatable, Sendable {
             workspaces: try container.value(.workspaces, []),
             window: try container.decode(WindowState.self, forKey: .window)
         )
+        if let active = window.activePane, pane(active) == nil,
+           try Self.isRetiredPane(active, in: container) {
+            window.activePane = nil
+        }
         agentComposerDefaults = try container.decodeIfPresent(AgentComposerPreferences.self, forKey: .agentComposerDefaults)
         agentComposerDrafts = try container.value(.agentComposerDrafts, [:])
         do {

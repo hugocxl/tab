@@ -108,7 +108,7 @@ public final class AppModel {
     let askpass: AskpassServer
     /// Remote Servers: entries, statuses, passwords, installs.
     public private(set) lazy var remoteServers = RemoteServersModel(entries: settings.servers, askpass: askpass, host: self)
-    /// The host menu, the Remote Servers pane and its dialogs.
+    /// The host menu, the Remote Servers settings page and its dialogs.
     public private(set) lazy var remoteController = RemoteServersController(model: remoteServers)
     public private(set) lazy var proxyController = ProxyController(model: proxy, host: self)
     /// AI commit and pull request actions.

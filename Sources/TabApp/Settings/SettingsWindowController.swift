@@ -14,7 +14,7 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
     let model: SettingsModel
     private var observations: Set<AnyCancellable> = []
 
-    public init(store: SettingsStore) {
+    public init(store: SettingsStore, remoteController: RemoteServersController? = nil) {
         self.store = store
         model = SettingsModel(store: store)
         let window = NSWindow(
@@ -30,7 +30,7 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
         window.collectionBehavior.insert(.fullScreenNone)
         super.init(window: window)
         window.delegate = self
-        let hosting = NSHostingController(rootView: SettingsRootView(model: model))
+        let hosting = NSHostingController(rootView: SettingsRootView(remoteController: remoteController, model: model))
         hosting.sceneBridgingOptions = [.toolbars, .title]
         window.contentViewController = hosting
         window.setContentSize(Self.defaultSize)

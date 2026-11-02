@@ -3,6 +3,17 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.42.0 - 2026-11-02
+
+### Changed
+
+- Remote server management now lives in Settings instead of a workspace pane.
+
+### Removed
+
+- The Remote Servers pane is removed from saved layouts while preserving other
+  panes and their sessions.
+
 ## 0.41.0 - 2026-11-02
 
 ### Added

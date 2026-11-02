@@ -261,7 +261,7 @@ final class PaletteSource: PaletteDataSource {
                                         target: .run { [weak self] in self?.model.updater.previewNextChip() }))
         }
         commands.append(RootCommand(id: "remote_servers", title: "Remote Servers…", category: .remote,
-                                    target: .run { [weak self] in self?.model.showServersPane() }))
+                                    target: .run { [weak self] in self?.model.showRemoteServersSettings() }))
         command(.openSettings, "Open Settings", .settings)
         return commands
     }

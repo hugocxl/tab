@@ -31,7 +31,7 @@ public func shownServers(_ servers: [RemoteServerStatus], query: String) -> [(gr
     }
 }
 
-/// The servers ticked in the Remote Servers pane, in the order ticked, and
+/// The servers ticked in the Remote Servers settings page, in the order ticked, and
 /// the box Shift-click ranges from.
 public struct ServerSelection: Equatable, Sendable {
     public private(set) var ids: [ServerId] = []

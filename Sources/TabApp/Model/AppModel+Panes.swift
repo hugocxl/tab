@@ -94,7 +94,7 @@ extension AppModel {
         case .agent: return newAgent(in: home)
         case .browser: return openBrowser(project: home)
         case .device: return openDevice(project: home)
-        case .editor, .diff, .servers: return nil
+        case .editor, .diff: return nil
         }
     }
 
@@ -116,7 +116,7 @@ extension AppModel {
             case .agent: return newAgent(in: project)
             case .browser: return openBrowser(project: project)
             case .device: return openDevice(project: project)
-            case .editor, .diff, .servers: return nil
+            case .editor, .diff: return nil
             }
         }
         let content: PaneContent
@@ -131,7 +131,7 @@ extension AppModel {
                 report(error)
                 return nil
             }
-        case .editor, .diff, .servers: return nil
+        case .editor, .diff: return nil
         }
         let pane = Pane(title: kind == .browser ? "New Browser" : content.nativeTitle ?? kind.name, content: content)
         let directory = newPaneDirectory(in: target)
@@ -222,11 +222,6 @@ extension AppModel {
         guard edit({ opened = try $0.openDevice(target, DevicePane(), select: select).1 }) else { return nil }
         if select { focusActiveContent() }
         return opened
-    }
-
-    /// Shows the Remote Servers pane.
-    public func showServersPane() {
-        edit { _ = try $0.showServersTab($0.currentProject.id, title: "Remote Servers") }
     }
 
     /// The line and column an editor pane was opened at, taken once.

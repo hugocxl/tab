@@ -43,8 +43,6 @@ public enum PaneContent: Codable, Hashable, Sendable {
     case browser(BrowserPane)
     /// A simulated device's screen, on this Mac.
     case device(DevicePane)
-    /// The Remote Servers pane, which manages other computers' servers.
-    case servers
     /// A file editor; `path` is project-relative with `/` separators.
     case editor(path: String)
     /// One file's working tree (or, when `staged`, index) diff.
@@ -73,7 +71,7 @@ public enum PaneContent: Codable, Hashable, Sendable {
         case .editor(let path): return Self.basename(path)
         case let .diff(path, staged): return staged ? "\(Self.basename(path)) (staged)" : Self.basename(path)
         case .agent: return "Agent"
-        case .terminal, .browser, .device, .servers: return nil
+        case .terminal, .browser, .device: return nil
         }
     }
 
@@ -104,8 +102,6 @@ public enum PaneContent: Codable, Hashable, Sendable {
                 avd: try container.decodeIfPresent(String.self, forKey: .avd),
                 name: try container.decodeIfPresent(String.self, forKey: .name)
             ))
-        case "servers":
-            self = .servers
         case "editor":
             self = .editor(path: try container.decode(String.self, forKey: .path))
         case "diff":
@@ -137,8 +133,6 @@ public enum PaneContent: Codable, Hashable, Sendable {
             try container.encodeIfPresent(device.udid, forKey: .udid)
             try container.encodeIfPresent(device.avd, forKey: .avd)
             try container.encodeIfPresent(device.name, forKey: .name)
-        case .servers:
-            try container.encode("servers", forKey: .type)
         case .editor(let path):
             try container.encode("editor", forKey: .type)
             try container.encode(path, forKey: .path)
@@ -242,9 +236,14 @@ public struct Tab: Codable, Equatable, Sendable, Identifiable {
         customTitle = try container.decodeIfPresent(String.self, forKey: .customTitle)
         color = try container.decodeIfPresent(TabColor.self, forKey: .color)
         pinned = try container.value(.pinned, false)
-        panes = try container.decode([Pane].self, forKey: .panes)
+        let savedPanes = try container.decode([SavedPane].self, forKey: .panes)
+        panes = savedPanes.compactMap(\.pane)
         layout = try container.decode(Layout<PaneId>.self, forKey: .layout)
         zoomed = try container.decodeIfPresent(PaneId.self, forKey: .zoomed)
+        for saved in savedPanes where saved.pane == nil {
+            layout.remove(saved.id)
+            if zoomed == saved.id { zoomed = nil }
+        }
         sanitizeTitles()
         do {
             try validate()
@@ -313,4 +312,34 @@ public struct Tab: Codable, Equatable, Sendable, Identifiable {
     }
 
     public func pane(_ id: PaneId) -> Pane? { panes.first { $0.id == id } }
+}
+
+/// Discards the retired management pane while retaining every other saved pane.
+private struct SavedPane: Decodable {
+    let id: PaneId
+    let pane: Pane?
+
+    private enum ContentKeys: String, CodingKey { case type }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: Pane.CodingKeys.self)
+        id = try container.decode(PaneId.self, forKey: .id)
+        let content = try container.nestedContainer(keyedBy: ContentKeys.self, forKey: .content)
+        if try content.decode(String.self, forKey: .type) == "servers" {
+            pane = nil
+        } else {
+            pane = try Pane(from: decoder)
+        }
+    }
+}
+
+/// Drops tabs containing only the retired management pane.
+struct SavedTab: Decodable {
+    let tab: Tab?
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: Tab.CodingKeys.self)
+        let panes = try container.decode([SavedPane].self, forKey: .panes)
+        tab = !panes.isEmpty && panes.allSatisfy { $0.pane == nil } ? nil : try Tab(from: decoder)
+    }
 }

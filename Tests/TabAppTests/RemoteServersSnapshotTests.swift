@@ -19,9 +19,12 @@ final class RemoteServersSnapshotTests: XCTestCase {
         let model = RemoteServersModel(entries: [], askpass: askpass, host: host)
         let controller = RemoteServersController(model: model)
         let empty = HostMenuView(controller: controller)
-        try render(empty, size: NSSize(width: 300, height: empty.fittingSize.height), root: root, name: "hosts-empty")
+        try await render(empty, size: NSSize(width: 300, height: empty.fittingSize.height), root: root, name: "hosts-empty")
         XCTAssertTrue(labels(empty).contains("No remote servers yet."))
         XCTAssertTrue(labels(empty).contains("Add Server…"))
+
+        try await render(RemoteServersSettingsView(controller: controller), size: NSSize(width: 525, height: 500),
+                   root: root, name: "servers-empty")
 
         let build = ServerEntry(name: "Build Mac", ssh: "builder@build.example", port: 2222, group: "Work")
         let dev = ServerEntry(name: "Development", ssh: "me@dev.example", passwordLogin: true, group: "Work")
@@ -31,14 +34,14 @@ final class RemoteServersSnapshotTests: XCTestCase {
         host.snapshots[build.id] = RemoteConnectionSnapshot(state: .connected)
         host.snapshots[home.id] = RemoteConnectionSnapshot(.reconnecting(attempt: 2), failure: .disconnected)
         let hosts = HostMenuView(controller: controller)
-        try render(hosts, size: NSSize(width: 300, height: hosts.fittingSize.height), root: root, name: "hosts-grouped")
+        try await render(hosts, size: NSSize(width: 300, height: hosts.fittingSize.height), root: root, name: "hosts-grouped")
         model.selection.tick(build.id, range: false, shown: model.listedIDs)
         model.selection.tick(home.id, range: true, shown: model.listedIDs)
-        let pane = controller.makePane()
-        try render(pane.view, size: NSSize(width: 1100, height: 720), root: root, name: "servers-selected")
-        try render(pane.view, size: NSSize(width: 740, height: 640), root: root, name: "servers-narrow")
-        XCTAssertEqual(pane.view.bounds.width, 740)
-        let search = try XCTUnwrap(descendant(SearchField.self, in: pane.view))
+        let page = RemoteServersSettingsView(controller: controller)
+        try await render(page, size: NSSize(width: 1100, height: 720), root: root, name: "servers-selected")
+        try await render(page, size: NSSize(width: 525, height: 500), root: root, name: "servers-narrow")
+        XCTAssertEqual(page.bounds.width, 525)
+        let search = try XCTUnwrap(descendant(SearchField.self, in: page))
         let header = try XCTUnwrap(search.superview)
         search.stringValue = "build"
         search.onChange?(search.stringValue)
@@ -46,6 +49,17 @@ final class RemoteServersSnapshotTests: XCTestCase {
         XCTAssertEqual(model.selection.ids, [build.id])
         search.stringValue = ""
         search.onChange?(search.stringValue)
+
+        let store = SettingsStore(dirs: TabDirs(root: root), host: nil)
+        let settings = SettingsWindowController(store: store, remoteController: controller)
+        let settingsWindow = try XCTUnwrap(settings.window)
+        settingsWindow.setFrameOrigin(NSPoint(x: -20000, y: -20000))
+        settings.select(.remoteServers)
+        settingsWindow.orderFront(nil)
+        try await Task.sleep(nanoseconds: 50_000_000)
+        try capture(try XCTUnwrap(settingsWindow.contentView), root: root, name: "settings-remote-servers")
+        XCTAssertEqual(settings.category, .remoteServers)
+        settingsWindow.close()
 
         let add = ServerFormSheet(controller: controller, editing: nil)
         try renderSheet(add, root: root, name: "server-add")
@@ -60,7 +74,7 @@ final class RemoteServersSnapshotTests: XCTestCase {
             ["/Users/me/Applications", "/Users/me/code", "/Users/me/Documents"]
         }, choose: { _ in })
         try await Task.sleep(nanoseconds: 30_000_000)
-        try render(folders, size: NSSize(width: 480, height: 420), root: root, name: "remote-folders")
+        try await render(folders, size: NSSize(width: 480, height: 420), root: root, name: "remote-folders")
 
         let proxy = ProxySheet(model: ProxyModel(file: root.appendingPathComponent("unused-proxy.json")), oldServer: false) { _ in }
         proxy.window.isReleasedWhenClosed = false
@@ -96,7 +110,7 @@ final class RemoteServersSnapshotTests: XCTestCase {
         sheet.close()
     }
 
-    private func render(_ view: NSView, size: NSSize, root: URL, name: String) throws {
+    private func render(_ view: NSView, size: NSSize, root: URL, name: String) async throws {
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: true)
         window.isReleasedWhenClosed = false
         window.setFrameOrigin(NSPoint(x: -20000, y: -20000))
@@ -105,6 +119,8 @@ final class RemoteServersSnapshotTests: XCTestCase {
         view.pinEdges(to: background)
         window.contentView = background
         window.setContentSize(size)
+        window.orderFront(nil)
+        try await Task.sleep(nanoseconds: 50_000_000)
         try capture(background, root: root, name: name)
         window.close()
     }

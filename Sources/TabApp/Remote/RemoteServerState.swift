@@ -58,7 +58,7 @@ public enum RemoteStatusGlyph: Equatable, Sendable {
     }
 }
 
-/// One remote server as the host menu, the Remote Servers pane and the
+/// One remote server as the host menu, the Remote Servers settings page and the
 /// sidebar list it.
 public struct RemoteServerStatus: Equatable, Sendable {
     public var entry: ServerEntry

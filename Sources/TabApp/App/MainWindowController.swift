@@ -310,7 +310,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, A
             return group.map { [NSMenuItem.submenu($0, items)] } ?? items
         }
         remote.append(.separator())
-        remote.append(ClosureMenuItem("Manage Remote Servers…") { [weak self] in self?.model.showServersPane() })
+        remote.append(ClosureMenuItem("Manage Remote Servers…") { [weak self] in self?.model.showRemoteServersSettings() })
         let menu = NSMenu.make([
             ClosureMenuItem("Local") { [weak self] in self?.openPalette(.addProject(.local)) },
             .submenu("Remote", remote),
@@ -323,7 +323,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, A
     }
 
     func showSettings(_ category: SettingsCategory?) {
-        let controller = settingsWindow ?? SettingsWindowController(store: settingsStore)
+        let controller = settingsWindow ?? SettingsWindowController(store: settingsStore, remoteController: model.remoteController)
         settingsWindow = controller
         controller.show(category)
     }

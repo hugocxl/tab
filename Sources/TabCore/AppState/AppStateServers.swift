@@ -255,65 +255,6 @@ extension AppState {
         servers[server] = state
     }
 
-    // MARK: Remote Servers pane
-
-    /// The Remote Servers pane's project and tab, if one is open where it
-    /// can be shown.
-    public var serversTab: (ProjectId, TabId)? {
-        findServersTab { $0.status == .available }
-    }
-
-    private func findServersTab(_ within: (Project) -> Bool) -> (ProjectId, TabId)? {
-        for project in projects where within(project) {
-            if let tab = project.tabs.first(where: { $0.panes.contains { $0.content == .servers } }) {
-                return (project.id, tab.id)
-            }
-        }
-        return nil
-    }
-
-    public func isServersPane(_ pane: PaneId) -> Bool { self.pane(pane)?.content == .servers }
-
-    /// Shows the Remote Servers pane. There is only one: without one that can
-    /// be shown, any left in a missing project closes and it opens in
-    /// `project` when that is on this computer and available, else in Home.
-    @discardableResult
-    public mutating func showServersTab(_ project: ProjectId, title: String) throws -> TabId {
-        var target: (ProjectId, TabId)
-        if let open = serversTab {
-            target = open
-        } else {
-            if let (stale, tab) = findServersTab({ $0.status != .available }) {
-                if isSingleTab(stale) {
-                    guard let pane = self.project(stale)?.tabs.first(where: { $0.id == tab })?
-                        .panes.first(where: { $0.content == .servers })?.id
-                    else { throw AppError.invalidState("missing servers pane") }
-                    try removePane(pane)
-                } else {
-                    try closeTab(stale, tab)
-                }
-            }
-            let here = self.project(project).map { $0.serverId.isLocal && $0.status == .available } ?? false
-            let destination = here ? project : home.id
-            let pane = Pane(title: title, content: .servers)
-            if isSingleTab(destination) {
-                target = (destination, try openPaneInContainer(destination, pane: pane, focusLeaf: window.activePane).0)
-            } else {
-                let tab = Tab(pane: pane)
-                try addTab(destination, tab)
-                target = (destination, tab.id)
-            }
-        }
-        try selectProject(target.0)
-        try selectTab(target.0, target.1)
-        if let pane = self.project(target.0)?.tabs.first(where: { $0.id == target.1 })?
-            .panes.first(where: { $0.content == .servers })
-        {
-            try focusPane(pane.id)
-        }
-        return target.1
-    }
-
     /// Removes `server`'s projects with their tabs and workspace memberships,
     /// and what the app kept for it. Nothing changes on the server.
     public mutating func forgetServer(_ server: ServerId) throws {

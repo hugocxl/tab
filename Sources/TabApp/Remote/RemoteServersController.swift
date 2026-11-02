@@ -4,10 +4,14 @@ import TabCore
 
 /// The remote servers UI: the host menu popover, the server menus, the
 /// Add/Edit Server dialog, the password prompt, the group name prompt, the
-/// confirmations, and factories for the Remote Servers pane and the remote
-/// folder browser. The shell makes one beside its `RemoteServersModel`.
+/// confirmations, and the remote folder browser. The shell makes one beside its `RemoteServersModel`.
 @MainActor
 public final class RemoteServersController {
+    weak var presentationWindow: NSWindow?
+    private var dialogWindow: NSWindow? {
+        presentationWindow?.isVisible == true ? presentationWindow : host?.remoteServersWindow
+    }
+
     public let model: RemoteServersModel
     public var host: RemoteServersHost? { model.host }
     private weak var popover: NSPopover?
@@ -56,7 +60,7 @@ public final class RemoteServersController {
 
     // MARK: Menus
 
-    /// The menu of one server; in the pane, a server among several ticked
+    /// The menu of one server; in the settings page, a server among several ticked
     /// opens the menu of the ticked servers.
     public func serverMenu(_ id: ServerId, selection: Bool = false) -> NSMenu? {
         if selection && model.selection.count > 1 && model.selection.contains(id) {
@@ -86,7 +90,7 @@ public final class RemoteServersController {
         return builder.menu
     }
 
-    /// The menu of the servers ticked in the pane.
+    /// The menu of the servers ticked in the settings page.
     public func selectionMenu() -> NSMenu? {
         let ids = model.listedIDs.filter(model.selection.contains)
         let members = ids.compactMap(model.status(of:))
@@ -189,7 +193,7 @@ public final class RemoteServersController {
 
     /// Asks, then deletes a group; its servers stay, ungrouped.
     public func confirmDeleteGroup(_ group: String) {
-        ConfirmSheet.present(on: host?.remoteServersWindow, title: "Delete Group?",
+        ConfirmSheet.present(on: dialogWindow, title: "Delete Group?",
                              message: "Delete “\(group)”? Its servers will not be removed.",
                              confirm: "Delete", destructive: true) { [weak self] confirmed in
             guard confirmed, let self else { return }
@@ -203,7 +207,7 @@ public final class RemoteServersController {
         guard !names.isEmpty else { return }
         let single = names.count == 1
         ConfirmSheet.present(
-            on: host?.remoteServersWindow,
+            on: dialogWindow,
             title: single ? "Forget \(names[0])?" : "Forget \(names.count) Servers?",
             message: single
                 ? "Its projects and layouts leave this app; nothing on the server changes."
@@ -219,7 +223,7 @@ public final class RemoteServersController {
     public func confirmControl(_ id: ServerId, restart: Bool) {
         guard let name = model.entry(id)?.name else { return }
         ConfirmSheet.present(
-            on: host?.remoteServersWindow,
+            on: dialogWindow,
             title: restart ? "Restart the Server on \(name)?" : "Stop the Server on \(name)?",
             message: "All running terminal sessions on \(name) will end. Saved terminal output and settings will remain.",
             confirm: restart ? "Restart" : "Stop", destructive: true
@@ -231,7 +235,7 @@ public final class RemoteServersController {
     /// Asks, then installs this release there.
     public func confirmInstall(_ id: ServerId) {
         guard let name = model.entry(id)?.name, let version = RemoteRelease.installableVersion else { return }
-        ConfirmSheet.present(on: host?.remoteServersWindow, title: "Install Tab \(version) on \(name)?",
+        ConfirmSheet.present(on: dialogWindow, title: "Install Tab \(version) on \(name)?",
                              message: RemoteInstall.description(version: version, destination: name),
                              confirm: "Install") { [weak self] confirmed in
             if confirmed { self?.model.install(id) }
@@ -252,7 +256,7 @@ public final class RemoteServersController {
             self?.model.clearTest()
         }
         formSheet = sheet
-        sheet.present(on: host?.remoteServersWindow)
+        sheet.present(on: dialogWindow)
     }
 
     /// Asks for the password of a server that logs in with one. It is kept
@@ -266,7 +270,7 @@ public final class RemoteServersController {
             self?.model.setPassword(password, for: id)
         }
         passwordSheet = sheet
-        sheet.present(on: host?.remoteServersWindow)
+        sheet.present(on: dialogWindow)
     }
 
     private func askName(title: String, label: String, value: String, confirm: String,
@@ -277,15 +281,10 @@ public final class RemoteServersController {
             if let name { done(name) }
         }
         nameSheet = sheet
-        sheet.present(on: host?.remoteServersWindow)
+        sheet.present(on: dialogWindow)
     }
 
     // MARK: Factories
-
-    /// The Remote Servers pane's controller.
-    public func makePane() -> RemoteServersPaneController {
-        RemoteServersPaneController(controller: self)
-    }
 
     /// A browser of `server`'s folders from `start` (its Home), for Add
     /// Project → Remote. `choose` gets the folder to add.

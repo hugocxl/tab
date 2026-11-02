@@ -6,11 +6,14 @@ import TabCore
 /// The open page, or the search results, as a grouped form like System
 /// Settings: a section per group of rows, notes under them.
 struct SettingsPage: View {
+    let remoteController: RemoteServersController?
     @ObservedObject var model: SettingsModel
     @Environment(\.settingsTheme) private var theme
 
     var body: some View {
-        if model.category == .changelog && !model.isSearching {
+        if model.category == .remoteServers && !model.isSearching, let remoteController {
+            RemoteServersPage(controller: remoteController)
+        } else if model.category == .changelog && !model.isSearching {
             ChangelogPage(changelog: model.changelog, installed: Release.version)
         } else if model.category == .interface && !model.isSearching {
             InterfacePage(model: model)

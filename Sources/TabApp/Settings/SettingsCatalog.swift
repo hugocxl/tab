@@ -3,7 +3,7 @@ import TabCore
 
 /// A page of the Settings window, in sidebar order.
 public enum SettingsCategory: String, CaseIterable, Sendable {
-    case general, interface, appearance, terminal, keyboard, browser, server, mobile, backup, changelog
+    case general, interface, appearance, terminal, keyboard, browser, server, remoteServers, mobile, backup, changelog
 
     public var title: String {
         switch self {
@@ -13,6 +13,7 @@ public enum SettingsCategory: String, CaseIterable, Sendable {
         case .terminal: return "Terminal"
         case .keyboard: return "Shortcuts"
         case .browser: return "Browser"
+        case .remoteServers: return "Remote Servers"
         case .server: return "Server"
         case .mobile: return "Mobile"
         case .backup: return "Backup & Restore"
@@ -30,6 +31,7 @@ public enum SettingsCategory: String, CaseIterable, Sendable {
         case .terminal: return ("apple.terminal", 0x3A3A3C, 0x151515, 0x5BE37A)
         case .keyboard: return ("command", 0xF7F7F8, 0xDCDCDF, 0x6E6E73)
         case .browser: return ("globe", 0x5BB2FF, 0x1F6FEB, 0xFFFFFF)
+        case .remoteServers: return ("network", 0x4FD1D5, 0x1E9AA0, 0xFFFFFF)
         case .server: return ("server.rack", 0x4FD1D5, 0x1E9AA0, 0xFFFFFF)
         case .mobile: return ("iphone", 0x6BDB7E, 0x2FA84A, 0xFFFFFF)
         case .backup: return ("clock.arrow.circlepath", 0x9B9BA0, 0x5F5F64, 0xFFFFFF)
@@ -94,6 +96,7 @@ public struct SettingItem: Equatable, Sendable {
 /// the user's commands.
 public enum SettingsCatalog {
     public static let items: [SettingItem] = [
+        SettingItem("remote-servers", "Remote Servers", "Manage SSH connections, passwords and server groups.", .remoteServers, "Remote Servers"),
         // General
         SettingItem("close-behavior", "When closing tabs or panes", "Close sessions unused by other panes, or detach to keep them running and reopen them from Existing Terminals.", .general, "Closing terminals"),
         SettingItem("confirm-process", "Confirm before closing a running process", "Ask before ending a running command. Detaching never requires confirmation.", .general, "Closing terminals"),

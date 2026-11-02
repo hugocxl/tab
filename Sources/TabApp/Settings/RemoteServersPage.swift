@@ -1,35 +1,19 @@
 import AppKit
 import Combine
+import SwiftUI
 import TabCore
 
-/// The Remote Servers pane: every server by group with checkboxes, Shift-
-/// click ranges and Select all, a bar acting on the ticked servers, and
-/// group headings that connect, rename or delete their group.
-@MainActor
-public final class RemoteServersPaneController: PaneContentController {
-    public let view: NSView
-    public let title = "Remote Servers"
-    public var titleDidChange: (() -> Void)?
-    private let content: RemoteServersPaneView
+struct RemoteServersPage: NSViewRepresentable {
+    let controller: RemoteServersController
 
-    init(controller: RemoteServersController) {
-        content = RemoteServersPaneView(controller: controller)
-        view = content
+    func makeNSView(context: Context) -> RemoteServersSettingsView {
+        RemoteServersSettingsView(controller: controller)
     }
 
-    public func focusContent() { content.focusSearch() }
-    public func willClose() async -> Bool { true }
-    public func didShow() { content.reload(force: true) }
-    public func didHide() {}
-
-    public var headerActions: [PaneAction] {
-        [PaneAction(id: "remote-add-server", icon: .plus, label: "Add Server…") { [weak content] in
-            content?.controller.editServer(nil)
-        }]
-    }
+    func updateNSView(_ view: RemoteServersSettingsView, context: Context) {}
 }
 
-final class RemoteServersPaneView: ThemedView {
+final class RemoteServersSettingsView: ThemedView {
     static let contentWidth: CGFloat = 960
     let controller: RemoteServersController
     private var model: RemoteServersModel { controller.model }
@@ -61,12 +45,10 @@ final class RemoteServersPaneView: ThemedView {
         addSubview(scroll)
         scroll.pinEdges(to: self)
         let header = DialogParts.row([
-            makeLabel("Remote Servers", font: AppFont.title),
-            DialogParts.spacer(),
             search,
             PillButton("Add Server…") { [weak self] in self?.controller.editServer(nil) },
         ], spacing: 12)
-        search.widthAnchor.constraint(equalToConstant: 220).isActive = true
+        search.setContentHuggingPriority(.defaultLow, for: .horizontal)
         add(header)
         search.onChange = { [weak self] _ in
             guard let self else { return }
@@ -79,7 +61,10 @@ final class RemoteServersPaneView: ThemedView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    func focusSearch() { window?.makeFirstResponder(search.field) }
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        controller.presentationWindow = window
+    }
 
     private var shown: [(group: String?, members: [RemoteServerStatus])] {
         shownServers(model.servers, query: search.stringValue)
@@ -87,7 +72,7 @@ final class RemoteServersPaneView: ThemedView {
 
     private var shownIDs: [ServerId] { shown.flatMap { $0.members.map(\.id) } }
 
-    /// Rebuilds when what the pane shows changed.
+    /// Rebuilds when what the page shows changed.
     func reload(force: Bool) {
         let servers = model.servers
         var key = servers.map { "\($0.id)|\($0.entry.name)|\($0.entry.group ?? "")|\($0.label)|\($0.detail ?? "")" }
@@ -116,7 +101,7 @@ final class RemoteServersPaneView: ThemedView {
             add(GroupHeading(controller: controller, group: group, members: whole))
             let card = Card()
             for server in members {
-                card.addRow(PaneServerRow(controller: controller, server: server, shown: ids))
+                card.addRow(SettingsServerRow(controller: controller, server: server, shown: ids))
             }
             add(card)
         }
@@ -178,7 +163,9 @@ private final class SelectionBar: ThemedView {
         } else {
             label.textColor = AppTheme.shared.fgMuted
         }
-        let row = DialogParts.row(views)
+        var rows: [NSView] = [DialogParts.row(Array(views.prefix(3)))]
+        if any { rows.append(DialogParts.row(Array(views.dropFirst(3)))) }
+        let row = DialogParts.column(rows, spacing: 8)
         addSubview(row)
         row.pinEdges(to: self, insets: NSEdgeInsets(top: 8, left: 14, bottom: 8, right: 10))
         heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
@@ -234,7 +221,7 @@ private final class GroupHeading: ThemedView {
 
 /// One server: its box and state, name, destination and why it failed, and
 /// New Terminal, Edit and More shown while hovered.
-private final class PaneServerRow: HoverView {
+private final class SettingsServerRow: HoverView {
     private let controller: RemoteServersController
     private let id: ServerId
     private let actions: NSStackView
@@ -331,22 +318,5 @@ private final class PaneServerRow: HoverView {
 
     override func rightMouseDown(with event: NSEvent) {
         controller.showServerMenu(id, in: self, at: convert(event.locationInWindow, from: nil), selection: true)
-    }
-}
-
-/// Runs a closure as a control's action; kept alive by the control.
-final class BlockTarget: NSObject {
-    private let block: () -> Void
-    private static var key = 0
-
-    private init(_ block: @escaping () -> Void) { self.block = block }
-
-    @objc func run() { block() }
-
-    /// Makes a target for `control` and ties its life to the control's.
-    static func attach(to control: NSControl, _ block: @escaping () -> Void) -> BlockTarget {
-        let target = BlockTarget(block)
-        objc_setAssociatedObject(control, &key, target, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-        return target
     }
 }

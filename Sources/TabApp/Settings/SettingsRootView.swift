@@ -4,6 +4,7 @@ import SwiftUI
 /// with search, the server tile and the categories, and the page as a grouped
 /// form under a toolbar with back, forward and the page's title.
 struct SettingsRootView: View {
+    let remoteController: RemoteServersController?
     @ObservedObject var model: SettingsModel
 
     var body: some View {
@@ -13,7 +14,7 @@ struct SettingsRootView: View {
                 .toolbar(removing: .sidebarToggle)
                 .navigationSplitViewColumnWidth(SettingsWindowController.sidebarWidth)
         } detail: {
-            SettingsPage(model: model)
+            SettingsPage(remoteController: remoteController, model: model)
                 .navigationTitle(model.title)
                 .toolbar {
                     ToolbarItem(placement: .navigation) {

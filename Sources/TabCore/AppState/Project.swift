@@ -71,7 +71,7 @@ public struct Project: Codable, Equatable, Sendable, Identifiable {
         directory = try container.decode(ServerPath.self, forKey: .directory)
         kind = try container.decodeIfPresent(ProjectKind.self, forKey: .kind)
         parentId = try container.decodeIfPresent(ProjectId.self, forKey: .parentId)
-        tabs = try container.value(.tabs, [])
+        tabs = try container.value(.tabs, [SavedTab]()).compactMap(\.tab)
     }
 
     public func encode(to encoder: Encoder) throws {

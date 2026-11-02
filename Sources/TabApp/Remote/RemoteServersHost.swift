@@ -2,7 +2,7 @@ import AppKit
 import TabClient
 import TabCore
 
-/// What the remote servers model, its popover, dialogs and pane need from
+/// What the remote servers model, its popover, dialogs and settings page need from
 /// the app shell. The shell owns the connections (`ServerConnection`); the
 /// model asks it to connect and hang up, and reads where each one stands.
 @MainActor
@@ -34,8 +34,8 @@ public protocol RemoteServersHost: AnyObject {
     func openRemoteHome(on server: ServerId)
     /// Add Project… on `server`: the shell shows a `RemoteFolderBrowser`.
     func addRemoteProject(on server: ServerId)
-    /// Shows the Remote Servers pane in the current project.
-    func showRemoteServersPane()
+    /// Shows the Remote Servers settings page in Settings.
+    func showRemoteServersSettings()
     /// A failure the user should see, such as a settings write that failed.
     func showRemoteError(_ message: String)
 }

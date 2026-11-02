@@ -314,19 +314,42 @@ final class AppStateTests: XCTestCase {
         XCTAssertEqual(state.project(project)?.tabs.first?.panes.count, 1)
     }
 
-    func testServersPaneIsReusedAndFocusedWithoutReplacingTheTerminal() throws {
-        var state = try AppState.bootstrap()
-        let project = try state.addProject(server: .local, directory: currentDirectory)
-        try state.selectProject(project)
-        let tab = try state.openTerminalTab(project)
-        let terminal = try active(state)
-        XCTAssertEqual(try state.showServersTab(project, title: "Servers"), tab)
-        let servers = try active(state)
-        XCTAssertTrue(state.isServersPane(servers))
-        try state.focusPane(terminal)
-        XCTAssertEqual(try state.showServersTab(project, title: "Servers"), tab)
-        XCTAssertEqual(try active(state), servers)
-        XCTAssertEqual(state.project(project)?.tabs.first?.panes.count, 2)
+    func testLoadingRetiredServersPanePreservesOtherPanesAndRepairsFocus() throws {
+        for mixed in [false, true] {
+            var state = try AppState.bootstrap()
+            let project = state.home.id
+            _ = try state.openTerminalTab(project)
+            let retired = try active(state)
+            let survivor = mixed ? try state.splitPane(retired, edge: .right) : nil
+            try state.focusPane(retired)
+            var json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(state)) as? [String: Any])
+            var projects = try XCTUnwrap(json["projects"] as? [[String: Any]])
+            for p in projects.indices {
+                var tabs = try XCTUnwrap(projects[p]["tabs"] as? [[String: Any]])
+                for t in tabs.indices {
+                    var panes = try XCTUnwrap(tabs[t]["panes"] as? [[String: Any]])
+                    for i in panes.indices where panes[i]["id"] as? String == retired.description {
+                        panes[i]["content"] = ["type": "servers"]
+                    }
+                    tabs[t]["panes"] = panes
+                    tabs[t]["zoomed"] = retired.description
+                }
+                projects[p]["tabs"] = tabs
+            }
+            json["projects"] = projects
+            let restored = try JSONDecoder().decode(AppState.self, from: JSONSerialization.data(withJSONObject: json))
+            XCTAssertNil(restored.pane(retired))
+            if let survivor {
+                XCTAssertNotNil(restored.pane(survivor))
+                XCTAssertEqual(restored.window.activePane, survivor)
+                XCTAssertEqual(restored.home.tabs.first?.layout.leaves, [survivor])
+                XCTAssertNil(restored.home.tabs.first?.zoomed)
+            } else {
+                XCTAssertTrue(restored.home.tabs.isEmpty)
+                XCTAssertNil(restored.window.activePane)
+            }
+            XCTAssertEqual(try JSONDecoder().decode(AppState.self, from: JSONEncoder().encode(restored)), restored)
+        }
     }
 
     func testEditorAndDiffPanesReuseAnExistingPane() throws {

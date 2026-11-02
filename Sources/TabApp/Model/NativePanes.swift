@@ -98,9 +98,6 @@ extension AppModel {
             let host = context.model.projectHost(context.project.id)
             return DiffPaneContent(host: host, path: path, staged: staged)
         }
-        panes.register(.servers) { context in
-            context.model.remoteController.makePane()
-        }
         panes.register(.browser) { context in
             guard case .browser(let state) = context.pane.content else { return PlaceholderPaneController(context: context) }
             return BrowserPaneContent(pane: context.pane.id, state: state, model: context.model)

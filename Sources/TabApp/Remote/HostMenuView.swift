@@ -247,7 +247,7 @@ final class HostMenuView: ThemedView {
         })
         add(action(.settings, "Manage Remote Servers…") { [weak self] in
             self?.dismiss?()
-            self?.controller.host?.showRemoteServersPane()
+            self?.controller.host?.showRemoteServersSettings()
         })
         fitHeight()
     }

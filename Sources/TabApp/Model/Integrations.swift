@@ -90,8 +90,8 @@ extension AppModel: RemoteServersHost {
         presenter?.showRemoteFolderBrowser(server)
     }
 
-    public func showRemoteServersPane() {
-        showServersPane()
+    public func showRemoteServersSettings() {
+        showSettingsAction?(.remoteServers)
     }
 
     public func showRemoteError(_ message: String) {

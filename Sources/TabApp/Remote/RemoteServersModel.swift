@@ -4,7 +4,7 @@ import TabClient
 import TabCore
 
 /// The remote servers listed in `settings.json` as the app manages them:
-/// their states for the host menu and the pane, editing the list, passwords
+/// their states for the host menu and the settings page, editing the list, passwords
 /// kept in memory, Test Connection, installing Tab there, and restarting or
 /// stopping the server there. The shell creates one at launch, builds its
 /// remote connections with `connector(for:)`, and calls
@@ -16,7 +16,7 @@ public final class RemoteServersModel {
     public let askpass: AskpassServer
     /// Sent after any change to the list, a state, the selection or a test.
     public let changes = PassthroughSubject<Void, Never>()
-    /// The servers ticked in the Remote Servers pane.
+    /// The servers ticked in the Remote Servers settings page.
     public var selection = ServerSelection() { didSet { changes.send() } }
     /// The last Test Connection: what it tried, and how it went.
     public private(set) var test: (key: String, result: ConnectionTest)?
@@ -69,7 +69,7 @@ public final class RemoteServersModel {
         return groups
     }
 
-    /// Every server in the order the popover and the pane list them.
+    /// Every server in the order the popover and the settings page list them.
     public var listedIDs: [ServerId] {
         serversByGroup(entries) { $0 }.flatMap { $0.members.map(\.id) }
     }

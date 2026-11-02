@@ -194,7 +194,7 @@ final class FakeRemoteHost: RemoteServersHost {
     func forgetProjects(on servers: [ServerId]) { forgotten += servers }
     func openRemoteHome(on server: ServerId) {}
     func addRemoteProject(on server: ServerId) {}
-    func showRemoteServersPane() {}
+    func showRemoteServersSettings() {}
     func showRemoteError(_ message: String) {}
 }
 

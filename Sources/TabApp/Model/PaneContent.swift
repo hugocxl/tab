@@ -21,7 +21,7 @@ public struct PaneAction {
 }
 
 /// What a pane card shows below its header: a terminal, an editor, a diff,
-/// a browser or the Remote Servers pane. The shell owns the card, its header
+/// an agent, a browser or a device. The shell owns the card, its header
 /// and focus; the controller owns its content view.
 @MainActor
 public protocol PaneContentController: AnyObject {
@@ -82,7 +82,7 @@ extension PaneContentController {
 
 /// The kinds of pane content, as `PaneContent` cases without their data.
 public enum PaneKind: Hashable, Sendable, CaseIterable {
-    case terminal, agent, editor, diff, browser, device, servers
+    case terminal, agent, editor, diff, browser, device
 
     public init(_ content: PaneContent) {
         switch content {
@@ -92,7 +92,6 @@ public enum PaneKind: Hashable, Sendable, CaseIterable {
         case .diff: self = .diff
         case .browser: self = .browser
         case .device: self = .device
-        case .servers: self = .servers
         }
     }
 
@@ -108,7 +107,6 @@ public enum PaneKind: Hashable, Sendable, CaseIterable {
         case .diff: return .gitBranch
         case .browser: return .globe
         case .device: return .phone
-        case .servers: return .network
         }
     }
 
@@ -120,7 +118,6 @@ public enum PaneKind: Hashable, Sendable, CaseIterable {
         case .diff: return "Diff"
         case .browser: return "Browser"
         case .device: return "Device"
-        case .servers: return "Remote Servers"
         }
     }
 }
@@ -217,7 +214,7 @@ final class PlaceholderPaneController: PaneContentController {
         case .editor(let path), .diff(let path, _): detail = path
         case .browser(let browser): detail = browser.url ?? "New page"
         case .device(let device): detail = device.name ?? "No device"
-        case .terminal, .agent, .servers: detail = context.project.directory.rawValue
+        case .terminal, .agent: detail = context.project.directory.rawValue
         }
         title = context.pane.title.isEmpty ? kind.name : context.pane.title
         view = PlaceholderView(title: kind.name, detail: detail)

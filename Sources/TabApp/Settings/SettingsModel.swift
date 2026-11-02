@@ -143,6 +143,8 @@ final class SettingsModel: ObservableObject {
         case .server: buildServer(builder)
         case .mobile: buildMobile(builder)
         case .backup: buildBackup(builder)
+        case .remoteServers:
+            builder.row("remote-servers", .disclosure { [weak self] in self?.select(.remoteServers) })
         case .changelog: break
         }
     }
