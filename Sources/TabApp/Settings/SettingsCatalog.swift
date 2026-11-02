@@ -8,7 +8,7 @@ public enum SettingsCategory: String, CaseIterable, Sendable {
     public var title: String {
         switch self {
         case .general: return "General"
-        case .appearance: return "Appearance"
+        case .appearance: return "Themes"
         case .terminal: return "Terminal"
         case .keyboard: return "Shortcuts"
         case .browser: return "Browser"

@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.37.0 - 2026-11-02
+
+### Changed
+
+- Settings now has a Themes page with visual theme cards, color previews, and
+  separate selections for light and dark mode.
+
 ## 0.36.0 - 2026-11-02
 
 ### Changed

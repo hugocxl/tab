@@ -12,6 +12,8 @@ struct SettingsPage: View {
     var body: some View {
         if model.category == .changelog && !model.isSearching {
             ChangelogPage(changelog: model.changelog, installed: Release.version)
+        } else if model.category == .appearance && !model.isSearching {
+            ThemesPage(model: model)
         } else if model.category == .keyboard && !model.isSearching {
             ShortcutsPage(model: model)
         } else {
