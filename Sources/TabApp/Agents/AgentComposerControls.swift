@@ -120,8 +120,8 @@ final class AgentComposerTextView: NSTextView {
             outline.stroke()
         }
         guard string.isEmpty, !hasMarkedText() else { return }
-        ("Message the agent…" as NSString).draw(at: textContainerOrigin, withAttributes: [
-            .font: font ?? AppFont.system(14), .foregroundColor: placeholderColor,
+        ("Ask to make changes, @mention files, run /commands" as NSString).draw(at: textContainerOrigin, withAttributes: [
+            .font: font ?? AppFont.system(14, weight: .light), .foregroundColor: placeholderColor,
         ])
     }
 }

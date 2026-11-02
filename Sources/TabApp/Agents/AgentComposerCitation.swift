@@ -75,11 +75,11 @@ extension AgentPaneView {
         guard composer.shouldChangeText(in: range, replacementString: label + (addsSpace ? " " : "")) else { return false }
         let content = NSMutableAttributedString(string: label, attributes: [
             .agentThreadMention: link.href, .agentAssistantCitationIdentity: UUID().uuidString,
-            .font: AppFont.system(14), .foregroundColor: theme.accent,
+            .font: AppFont.system(14, weight: .light), .foregroundColor: theme.accent,
             .backgroundColor: theme.accent.withAlphaComponent(0.10),
         ])
         if addsSpace {
-            content.append(NSAttributedString(string: " ", attributes: [.font: AppFont.system(14), .foregroundColor: composer.textColor ?? theme.fg]))
+            content.append(NSAttributedString(string: " ", attributes: [.font: AppFont.system(14, weight: .light), .foregroundColor: composer.textColor ?? theme.fg]))
         }
         storage.replaceCharacters(in: range, with: content)
         composer.setSelectedRange(NSRange(location: range.location + content.length + (addsSpace ? 0 : 1), length: 0))
@@ -99,7 +99,7 @@ extension AgentPaneView {
         let label = AgentComposerCitation.label(for: citation)
         let content = NSAttributedString(string: label, attributes: [
             .agentAssistantCitation: citation.href, .agentAssistantCitationIdentity: UUID().uuidString,
-            .font: AppFont.system(14), .foregroundColor: theme.accent,
+            .font: AppFont.system(14, weight: .light), .foregroundColor: theme.accent,
             .backgroundColor: theme.accent.withAlphaComponent(0.10),
         ])
         storage.replaceCharacters(in: range, with: content)

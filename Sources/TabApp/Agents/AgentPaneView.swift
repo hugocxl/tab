@@ -112,7 +112,7 @@ final class AgentPaneView: ThemedView {
         composer.isRichText = false
         composer.importsGraphics = false
         composer.allowsUndo = true
-        composer.font = AppFont.system(14)
+        composer.font = AppFont.system(14, weight: .light)
         composer.drawsBackground = false
         composer.isAutomaticQuoteSubstitutionEnabled = false
         composer.isAutomaticDashSubstitutionEnabled = false

@@ -53,7 +53,7 @@ final class AgentResponseTable: AgentResponseSection {
         cellContents = ([headers] + rows).enumerated().flatMap { row, values in
             headers.indices.map { column in
                 AgentMarkdown.inline(values.indices.contains(column) ? values[column] : "", theme: theme,
-                    font: AppFont.system(14, weight: row == 0 ? .semibold : .regular), fileLinks: true, references: references, lineBreaks: lineBreaks, rawHTML: rawHTML)
+                    font: AppFont.system(14, weight: row == 0 ? .semibold : .light), fileLinks: true, references: references, lineBreaks: lineBreaks, rawHTML: rawHTML)
             }
         }
         text.delegate = delegate
@@ -135,7 +135,7 @@ final class AgentResponseTable: AgentResponseSection {
             let alignment = alignments.indices.contains(column) ? alignments[column] : .left
             switch alignment { case .left: paragraph.alignment = .left; case .center: paragraph.alignment = .center; case .right: paragraph.alignment = .right }
             let cell = NSMutableAttributedString(attributedString: cellContents[index])
-            cell.append(NSAttributedString(string: "\n", attributes: [.font: AppFont.system(14)]))
+            cell.append(NSAttributedString(string: "\n", attributes: [.font: AppFont.system(14, weight: .light)]))
             cell.addAttribute(.paragraphStyle, value: paragraph, range: NSRange(location: 0, length: cell.length))
             content.append(cell)
         }

@@ -3,6 +3,20 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.30.0 - 2026-11-02
+
+### Changed
+
+- Agent conversations and the chat input now use lighter text, and your messages
+  have a translucent primary-color background with tighter, consistent line spacing.
+- The agent chat input now suggests making changes, mentioning files and running
+  commands.
+
+### Fixed
+
+- The answer's copy button now stays hidden while the agent is still working,
+  including between tool calls.
+
 ## 0.29.0 - 2026-11-02
 
 ### Added

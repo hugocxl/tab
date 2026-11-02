@@ -46,11 +46,11 @@ enum AgentMarkdown {
     static func render(_ blocks: [Block], theme: AppTheme, fileLinks: Bool = false, references: [String: String] = [:], compact: Bool = false, lineBreaks: Bool = false, listIndents suppliedListIndents: [Int: CGFloat] = [:], rawHTML: Bool = false) -> NSAttributedString {
         let colors = AgentMarkdownPalette(theme: theme)
         let output = NSMutableAttributedString(string: "")
-        let listIndents = AgentListLayout.indents(blocks, font: AppFont.system(compact ? 12 : 14)).merging(suppliedListIndents) { _, supplied in supplied }
+        let listIndents = AgentListLayout.indents(blocks, font: AppFont.system(compact ? 12 : 14, weight: .light)).merging(suppliedListIndents) { _, supplied in supplied }
         for (blockIndex, block) in blocks.enumerated() {
             let paragraph = NSMutableParagraphStyle()
-            paragraph.minimumLineHeight = compact ? 19.5 : 22.75
-            paragraph.maximumLineHeight = compact ? 19.5 : 22.75
+            paragraph.minimumLineHeight = lineBreaks ? 19 : (compact ? 19.5 : 22.75)
+            paragraph.maximumLineHeight = paragraph.minimumLineHeight
             paragraph.paragraphSpacingBefore = blockIndex == 0 ? 0 : (compact ? 8 : AgentMarkdownLayout.blockGap)
             paragraph.paragraphSpacing = 0
             paragraph.lineBreakMode = .byWordWrapping
@@ -66,7 +66,7 @@ enum AgentMarkdown {
                 }
                 text = content
             case .paragraph(let content):
-                text = inline(content, theme: theme, font: AppFont.system(compact ? 12 : 14), color: compact ? colors.muted : nil, fileLinks: fileLinks, references: references, lineBreaks: lineBreaks, rawHTML: rawHTML)
+                text = inline(content, theme: theme, font: AppFont.system(compact ? 12 : 14, weight: .light), color: compact ? colors.muted : nil, fileLinks: fileLinks, references: references, lineBreaks: lineBreaks, rawHTML: rawHTML)
             case .heading(let level, let content):
                 let size: CGFloat = level == 1 ? 20 : level == 2 ? 18 : level == 3 ? 16 : 14
                 paragraph.paragraphSpacingBefore = blockIndex == 0 ? 0 : 20
@@ -75,7 +75,7 @@ enum AgentMarkdown {
                 text = inline(content, theme: theme, font: AppFont.system(size, weight: .semibold), color: level == 6 ? colors.muted : colors.heading, fileLinks: fileLinks, references: references, lineBreaks: lineBreaks, rawHTML: rawHTML)
             case .list(let marker, let content, let depth, let structure):
                 paragraph.headIndent = listIndents[blockIndex] ?? CGFloat(depth + 1) * 20
-                let markerFont = marker.hasSuffix(".") ? NSFont.monospacedDigitSystemFont(ofSize: compact ? 12 : 14, weight: .regular) : AppFont.system(compact ? 12 : 14)
+                let markerFont = marker.hasSuffix(".") ? NSFont.monospacedDigitSystemFont(ofSize: compact ? 12 : 14, weight: .light) : AppFont.system(compact ? 12 : 14, weight: .light)
                 let markerWidth = ((marker + " ") as NSString).size(withAttributes: [.font: markerFont]).width
                 paragraph.firstLineHeadIndent = paragraph.headIndent - markerWidth
                 paragraph.tabStops = [NSTextTab(textAlignment: .left, location: paragraph.headIndent)]
@@ -96,13 +96,13 @@ enum AgentMarkdown {
                     // must not enlarge the line through a fallback symbol font.
                     item.addAttributes([.agentTaskCheckbox: state, .foregroundColor: NSColor.clear, .font: AppFont.system(1), .agentMarkdownLineFont: markerFont], range: NSRange(location: 0, length: 1))
                 }
-                item.append(inline(content, theme: theme, font: AppFont.system(compact ? 12 : 14), color: compact ? colors.muted : nil, fileLinks: fileLinks, references: references, lineBreaks: lineBreaks, rawHTML: rawHTML))
+                item.append(inline(content, theme: theme, font: AppFont.system(compact ? 12 : 14, weight: .light), color: compact ? colors.muted : nil, fileLinks: fileLinks, references: references, lineBreaks: lineBreaks, rawHTML: rawHTML))
                 text = item
             case .math(let latex):
                 paragraph.alignment = .center
                 paragraph.minimumLineHeight = 0
                 paragraph.maximumLineHeight = 0
-                let math = NSMutableAttributedString(string: "\u{E000}", attributes: [.font: AppFont.system(compact ? 12 : 14), .foregroundColor: colors.body])
+                let math = NSMutableAttributedString(string: "\u{E000}", attributes: [.font: AppFont.system(compact ? 12 : 14, weight: .light), .foregroundColor: colors.body])
                 AgentMarkdownMath.substitute(["\u{E000}": AgentMarkdownMath.Span(latex: latex, display: true)], in: math, theme: theme)
                 text = math
             case .code, .diagram:
@@ -135,7 +135,7 @@ enum AgentMarkdown {
             case .listBlock(let marker, let source, let depth, _):
                 paragraph.firstLineHeadIndent = CGFloat(depth) * 18
                 paragraph.headIndent = CGFloat(depth) * 18 + 20
-                let nested = NSMutableAttributedString(string: marker + "  ", attributes: [.font: AppFont.system(14), .foregroundColor: colors.muted])
+                let nested = NSMutableAttributedString(string: marker + "  ", attributes: [.font: AppFont.system(14, weight: .light), .foregroundColor: colors.muted])
                 nested.append(render(AgentResponseParser.parse(source, parseRawHTML: rawHTML), theme: theme, fileLinks: fileLinks, references: references, lineBreaks: lineBreaks, rawHTML: rawHTML))
                 text = nested
             case .details(let summary, let source, _):
@@ -151,6 +151,7 @@ enum AgentMarkdown {
                 let table = ([headers] + rows).map { $0.joined(separator: "\t") }.joined(separator: "\n")
                 text = inline(table, theme: theme, fileLinks: fileLinks, references: references, lineBreaks: lineBreaks, rawHTML: rawHTML)
             }
+            if lineBreaks { paragraph.paragraphSpacingBefore = 0 }
             let part = NSMutableAttributedString(attributedString: text)
             if case .heading = block, part.length > 0 {
                 part.addAttribute(.agentMarkdownHeading, value: text.string, range: NSRange(location: 0, length: part.length))
@@ -188,12 +189,12 @@ enum AgentMarkdown {
         paragraph.lineSpacing = monospaced ? 3 : 5
         paragraph.lineBreakMode = .byWordWrapping
         return NSAttributedString(string: source, attributes: [
-            .font: monospaced ? AppFont.mono(12) : AppFont.system(14),
+            .font: monospaced ? AppFont.mono(12) : AppFont.system(14, weight: .light),
             .foregroundColor: muted ? theme.fgMuted : theme.fg, .paragraphStyle: paragraph,
         ])
     }
 
-    static func inline(_ text: String, theme: AppTheme, font: NSFont = AppFont.system(14), color: NSColor? = nil,
+    static func inline(_ text: String, theme: AppTheme, font: NSFont = AppFont.system(14, weight: .light), color: NSColor? = nil,
                        fileLinks: Bool = false, references: [String: String] = [:], lineBreaks: Bool = false, normalizeWhitespace: Bool = true,
                        rawHTML: Bool = false) -> NSAttributedString {
         let colors = AgentMarkdownPalette(theme: theme)

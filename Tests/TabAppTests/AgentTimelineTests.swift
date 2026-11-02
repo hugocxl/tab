@@ -196,6 +196,30 @@ final class AgentTimelineTests: XCTestCase {
         XCTAssertNil(document.frameForEntry("working:user"))
     }
 
+    func testCopyActionWaitsForTurnCompletionAfterProgressMessageEnds() throws {
+        let document = AgentTranscriptDocument(frame: .zero)
+        let items = [AgentChatItem(id: "user", kind: .user, text: "Review this"),
+                     AgentChatItem(id: "progress", kind: .assistant, text: "Checking the files.", isComplete: true),
+                     AgentChatItem(id: "tool", kind: .tool, text: "Read file")]
+        var turn = AgentChatTurn(userItemID: "user", startedAt: Date())
+        document.update(items, omittedCount: 0, turns: [turn])
+        document.reflow(viewportWidth: 700)
+        document.updateViewport(NSRect(x: 0, y: 0, width: 700, height: 700), followingEnd: false)
+        let progress = try XCTUnwrap(document.subviews.compactMap { $0 as? AgentMessageRow }.first {
+            $0.subviews.compactMap { $0 as? PillButton }.contains { $0.toolTip == "Copy response as Markdown" }
+        })
+        let copy = try XCTUnwrap(progress.subviews.compactMap { $0 as? PillButton }.first {
+            $0.toolTip == "Copy response as Markdown"
+        })
+        XCTAssertTrue(copy.isHidden)
+        turn.completedAt = Date()
+        turn.status = .idle
+        document.update(items, omittedCount: 0, turns: [turn])
+        document.reflow(viewportWidth: 700)
+        document.updateViewport(NSRect(x: 0, y: 0, width: 700, height: 700), followingEnd: false)
+        XCTAssertFalse(copy.isHidden)
+    }
+
     func testCollapsedUserMessageRetainsFullMarkdownAndCopySource() throws {
         let row = AgentMessageRow(frame: .zero)
         let text = String(repeating: "A paragraph with **emphasis**. ", count: 40)

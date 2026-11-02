@@ -23,7 +23,7 @@ final class AgentListStructureTests: XCTestCase {
         let paragraph = try XCTUnwrap(rendered.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle)
         XCTAssertEqual(paragraph.firstLineHeadIndent, 0, accuracy: 0.001)
         XCTAssertEqual(paragraph.headIndent, 35.265625, accuracy: 0.001)
-        XCTAssertEqual(try XCTUnwrap(paragraph.tabStops.first).location, AgentTaskCheckbox.textInset(font: AppFont.system(14)), accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(paragraph.tabStops.first).location, AgentTaskCheckbox.textInset(font: AppFont.system(14, weight: .light)), accuracy: 0.001)
     }
 
     func testAdjacentMarkerFamiliesRemainDistinctLists() throws {

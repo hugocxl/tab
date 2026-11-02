@@ -435,7 +435,7 @@ enum AgentResponsePart: Equatable {
     @MainActor
     static func partition(_ blocks: [AgentMarkdown.Block], compact: Bool = false, parseRawHTML: Bool = true,
                           pullRequestHosts: Set<String> = [], templates: Bool = false, media: Bool = false) -> [Self] {
-        let indents = AgentListLayout.indents(blocks, font: AppFont.system(compact ? 12 : 14))
+        let indents = AgentListLayout.indents(blocks, font: AppFont.system(compact ? 12 : 14, weight: .light))
         var proseIndents: [Int: CGFloat] = [:]
         var result: [Self] = []
         var prose: [AgentMarkdown.Block] = []

@@ -622,11 +622,14 @@ final class AgentTranscriptDocument: ThemedView {
                   approvalCounts[answer] == approvalCounts[start + 1] else { continue }
             groups[start + 1] = (turn, answer)
         }
+        let runningUserIDs = Set(turns.filter { $0.completedAt == nil }.map(\.userItemID))
+        var currentTurnIsRunning = false
         func entry(for item: AgentChatItem) -> Entry {
             let card = classifier.classify(item)
             return Entry(id: item.kind == .tool ? "activity:" + item.id : item.id,
                          kind: card.map { .card($0) } ?? (item.kind == .tool ? .activity : .message),
                          items: [item], timestamp: timestamps[item.id], duration: durations[item.id],
+                         showsResponseActions: !currentTurnIsRunning,
                          provider: card == .compaction ? provider : nil)
         }
         var result: [Entry] = []
@@ -638,6 +641,7 @@ final class AgentTranscriptDocument: ThemedView {
         while index < items.endIndex {
             appendWorking(before: index)
             let item = items[index]
+            if item.kind == .user { currentTurnIsRunning = runningUserIDs.contains(item.id) }
             if let (turn, end) = groups[index] {
                 // Failures stay visible below the fold; every other card folds like a tool.
                 let work = items[index..<end]
@@ -657,7 +661,7 @@ final class AgentTranscriptDocument: ThemedView {
         for position in result.indices.reversed() {
             if result[position].items.first?.kind == .user { foundAnswer = false }
             if result[position].kind == .message, result[position].items.first?.kind == .assistant {
-                result[position].showsResponseActions = !foundAnswer && !isNested
+                result[position].showsResponseActions = result[position].showsResponseActions && !foundAnswer && !isNested
                 foundAnswer = true
             }
         }
