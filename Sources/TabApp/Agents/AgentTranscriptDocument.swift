@@ -274,7 +274,7 @@ final class AgentTranscriptDocument: ThemedView {
             let needsLayout = cached.needsLayout || cached.row.frame.size != target.size
             cached.row.frame = target
             if needsLayout {
-                cached.row.layoutRow(width: rowWidth)
+                cached.row.layoutRow(width: target.width)
                 cached.row.invalidateFindText()
                 cached.needsLayout = false
             }
@@ -418,9 +418,16 @@ final class AgentTranscriptDocument: ThemedView {
         if frame.size != size { frame.size = size }
     }
 
+    /// User bubbles align to the right of the lane; every other row shares the
+    /// assistant width, including cards and rows revealed by disclosures.
+    private func entryWidth(at index: Int) -> CGFloat {
+        if entries[index].kind == .message, entries[index].items.first?.kind == .user { return rowWidth }
+        return isNested ? rowWidth : AgentMessageRow.responseWidth(rowWidth)
+    }
+
     private func entryFrame(at index: Int) -> NSRect {
         NSRect(x: floor((viewportWidth - rowWidth) / 2), y: geometry.top(at: index),
-               width: rowWidth, height: geometry.heights[index])
+               width: entryWidth(at: index), height: geometry.heights[index])
     }
 
     private func clampedOrigin(_ y: CGFloat, height: CGFloat) -> CGFloat {
@@ -513,11 +520,12 @@ final class AgentTranscriptDocument: ThemedView {
         useSequence &+= 1
         cached.lastUse = useSequence
         let old = heights[entry.id]
-        guard cached.needsMeasurement || old?.valid != true || old?.width != rowWidth || old?.epoch != themeEpoch else { return false }
-        let height = max(1, row.preferredHeight(for: rowWidth))
+        let width = entryWidth(at: index)
+        guard cached.needsMeasurement || old?.valid != true || old?.width != width || old?.epoch != themeEpoch else { return false }
+        let height = max(1, row.preferredHeight(for: width))
         row.invalidateFindText()
         measurementCount += 1
-        heights[entry.id] = Height(value: height, width: rowWidth, epoch: themeEpoch, valid: true)
+        heights[entry.id] = Height(value: height, width: width, epoch: themeEpoch, valid: true)
         geometry.setHeight(height, at: index)
         cached.needsMeasurement = false
         cached.needsLayout = true

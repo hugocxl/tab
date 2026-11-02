@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.31.1 - 2026-11-02
+
+### Fixed
+
+- Agent messages, changed-file cards and expanded tool results now stay within
+  the same maximum message width.
+
 ## 0.31.0 - 2026-11-02
 
 ### Changed

@@ -6,6 +6,33 @@ import XCTest
 
 @MainActor
 final class AgentTimelineTests: XCTestCase {
+    func testAllRevealedRowsShareAssistantWidthWhenResizing() throws {
+        let document = AgentTranscriptDocument(frame: .zero)
+        let items = [AgentChatItem(id: "user", kind: .user, text: "Inspect"),
+                     .init(id: "progress", kind: .assistant, text: "Checking"),
+                     .init(id: "tool", kind: .tool, text: "Read file", detail: String(repeating: "output ", count: 200)),
+                     .init(id: "answer", kind: .assistant, text: "Done"),
+                     .init(id: "approval", kind: .approval, text: "Allow command?", isComplete: false)]
+        let turn = AgentChatTurn(userItemID: "user", startedAt: .distantPast, completedAt: Date(), status: .idle)
+        document.update(items, omittedCount: 0, turns: [turn])
+        var states = document.rowStates
+        states["work:user"] = AgentTimelineRowState(expanded: true)
+        states["activity:tool"] = AgentTimelineRowState(expanded: true)
+        document.rowStates = states
+        document.update(items, omittedCount: 0, turns: [turn])
+        for viewport in [CGFloat(900), 360, 700] {
+            document.reflow(viewportWidth: viewport)
+            document.updateViewport(NSRect(x: 0, y: 0, width: viewport, height: 10_000), followingEnd: false)
+            let user = try XCTUnwrap(document.frameForEntry("user"))
+            let expected = AgentMessageRow.responseWidth(user.width)
+            for id in ["progress", "activity:tool", "approval", "answer", "work:user"] {
+                let frame = try XCTUnwrap(document.frameForEntry(id), id)
+                XCTAssertEqual(frame.width, expected, id)
+                XCTAssertEqual(frame.minX, user.minX, id)
+            }
+        }
+    }
+
     func testExpandedHistoryUsesMainTimelineAndRetainsStateAcrossFolding() throws {
         let document = AgentTranscriptDocument(frame: .zero)
         var items = [AgentChatItem(id: "user", kind: .user, text: "Review the project")]

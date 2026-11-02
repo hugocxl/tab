@@ -92,8 +92,12 @@ final class AgentRenderingTests: XCTestCase {
         XCTAssertEqual(rows.count, 4, "Each tool call is a separately virtualized timeline row")
         for row in rows {
             XCTAssertLessThanOrEqual(row.frame.width, AgentPaneView.readableWidth)
-            XCTAssertEqual(row.frame.midX, document.bounds.midX, accuracy: 1)
+            XCTAssertEqual(row.frame.minX, rows[0].frame.minX, accuracy: 1)
+            if row !== rows[0] {
+                XCTAssertEqual(row.frame.width, AgentMessageRow.responseWidth(rows[0].frame.width))
+            }
         }
+        XCTAssertEqual(rows[0].frame.midX, document.bounds.midX, accuracy: 1)
         let user = try XCTUnwrap(rows.first)
         let userResponse = try XCTUnwrap(user.subviews.compactMap { $0 as? AgentResponseView }.first)
         let userText = try XCTUnwrap(descendants(userResponse).compactMap { $0 as? AgentRichTextView }.first)

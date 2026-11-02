@@ -50,6 +50,8 @@ final class AgentChangedFilesRowTests: XCTestCase {
         })
         let card = try XCTUnwrap(answer.subviews.compactMap { $0 as? AgentChangedFilesRow }.first)
         let response = try XCTUnwrap(answer.subviews.compactMap { $0 as? AgentResponseView }.first)
+        XCTAssertEqual(card.frame.width, response.frame.width)
+        XCTAssertEqual(card.frame.maxX, response.frame.maxX)
         XCTAssertEqual(card.frame.minY - response.frame.maxY, 16)
         XCTAssertTrue(document.subviews.compactMap { $0 as? AgentChangedFilesRow }.isEmpty,
                       "The card belongs inside the answer before its footer")

@@ -279,7 +279,7 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
             if bubble.isHidden { return mediaSize.height + 28 }
             return mediaSize.height + (mediaSize.height > 0 ? 4 : 0) + bodyHeight + attachmentsHeight + 14 + (expandMessage.isHidden ? 0 : 26) + 28
         }
-        bodyHeight = item.kind == .assistant ? response.height(for: Self.responseWidth(width)) : body.height(for: width)
+        bodyHeight = item.kind == .assistant ? response.height(for: width) : body.height(for: width)
         detailHeight = detail.isHidden ? 0 : detail.height(for: max(1, width - 24))
         if item.kind == .approval {
             return 24 + bodyHeight + (detail.isHidden ? 0 : detailHeight + 14) + (item.isComplete ? 0 : 42)
@@ -331,7 +331,7 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
             deny.frame = NSRect(x: 0, y: actionsY, width: 62, height: 26)
             allow.frame = NSRect(x: 70, y: actionsY, width: 66, height: 26)
         } else if item.kind == .assistant {
-            response.frame = NSRect(x: 0, y: 0, width: Self.responseWidth(width), height: bodyHeight)
+            response.frame = NSRect(x: 0, y: 0, width: width, height: bodyHeight)
             response.layoutSubtreeIfNeeded()
             let footerY = bodyHeight + (changesHeight > 0 ? 16 + changesHeight : 0)
             changes.frame = NSRect(x: 0, y: bodyHeight + 16, width: width, height: changesHeight)
