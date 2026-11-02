@@ -320,7 +320,7 @@ enum AgentMarkdown {
         }
         result.addAttribute(.agentMarkdownLineFont, value: font, range: NSRange(location: 0, length: result.length))
         if normalizeWhitespace {
-            AgentExternalLinkLayout.mark(result, fontSize: font.pointSize, color: colors.link)
+            AgentExternalLinkLayout.mark(result, fontSize: font.pointSize, color: colors.link, theme: theme)
             AgentInlineCodeLayout.mark(result)
         }
         return result
@@ -450,12 +450,13 @@ private final class AgentTextLayoutManager: NSLayoutManager, NSLayoutManagerDele
                     let color = textStorage.attribute(.agentExternalLinkColor, at: range.location, effectiveRange: nil) as? NSColor ?? .linkColor
                     // Native text drawing runs on the UI actor; Foundation's enumeration
                     // callback does not carry that isolation in its signature.
-                    let icon = MainActor.assumeIsolated { AgentLinkFavicon.shared.image(for: url, color: color, manager: self) }
+                    let fileIcon = textStorage.attribute(.agentFileLinkImage, at: range.location, effectiveRange: nil) as? NSImage
+                    let icon = fileIcon ?? MainActor.assumeIsolated { AgentLinkFavicon.shared.image(for: url, color: color, manager: self) }
                     if let image = icon {
                         let rect = NSRect(x: origin.x + fragment.minX + location.x + size * 0.25,
                             y: origin.y + fragment.minY + location.y - 14 + size * 0.125, width: 14, height: 14)
                         NSGraphicsContext.saveGraphicsState()
-                        if AgentLinkFavicon.host(for: url).flatMap(AgentLinkFavicon.brand(for:)) == nil {
+                        if fileIcon == nil && AgentLinkFavicon.host(for: url).flatMap(AgentLinkFavicon.brand(for:)) == nil {
                             NSBezierPath(roundedRect: rect, xRadius: 2, yRadius: 2).addClip()
                         }
                         image.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
@@ -716,7 +717,7 @@ final class AgentRichTextView: NSTextView {
     }
 
     /// Enables file-link metadata tooltips backed by `services`, or removes them.
-    func setFileLinkServices(_ services: AgentConversationLinkServices?, missingColor: NSColor) {
+    func setFileLinkServices(_ services: AgentConversationLinkServices?, missingColor: NSColor, theme: AppTheme) {
         guard let services else {
             fileLinkHover?.cancelRequests()
             fileLinkHover?.uninstall()
@@ -726,6 +727,7 @@ final class AgentRichTextView: NSTextView {
         let hover = fileLinkHover ?? AgentFileLinkHover(text: self)
         hover.services = services
         hover.missingColor = missingColor
+        hover.theme = theme
         fileLinkHover = hover
     }
 

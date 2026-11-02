@@ -119,7 +119,12 @@ final class SidebarCardView: HoverView {
             view.imageScaling = .scaleProportionallyUpOrDown
             lead = view
         } else {
-            lead = HeadlineChip(icon: icon, tone: Self.tone(data.headline))
+            let fileName: String?
+            switch data.headline {
+            case .editor(let file), .diff(let file): fileName = file
+            default: fileName = nil
+            }
+            lead = HeadlineChip(icon: icon, tone: Self.tone(data.headline), fileName: fileName)
         }
         super.init(frame: .zero)
         wantsLayer = true
@@ -290,16 +295,30 @@ final class HeadlineChip: ThemedView {
     enum Tone { case normal, shell, dim }
     let icon: AppIcon
     let tone: Tone
+    private let fileName: String?
+    private var fileIcon: NSImage?
 
-    init(icon: AppIcon, tone: Tone) {
+    init(icon: AppIcon, tone: Tone, fileName: String? = nil) {
         self.icon = icon
         self.tone = tone
+        self.fileName = fileName
         super.init(frame: .zero)
+        themeDidChange()
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    override func themeDidChange() {
+        fileIcon = fileName.flatMap { FileIcon.image(for: $0, theme: theme) }
+        needsDisplay = true
+    }
+
     override func draw(_ dirtyRect: NSRect) {
+        if let fileIcon {
+            fileIcon.draw(in: NSRect(x: bounds.midX - 7, y: bounds.midY - 7, width: 14, height: 14),
+                          from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+            return
+        }
         let rect = bounds.insetBy(dx: 0.5, dy: 0.5)
         let path = NSBezierPath(roundedRect: rect, xRadius: 5, yRadius: 5)
         theme.surface.setFill()

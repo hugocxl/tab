@@ -7,6 +7,8 @@ final class AgentFileChangePanel: NSView, @preconcurrency NSLayoutManagerDelegat
     override var isFlipped: Bool { true }
     var onOpenDiff: (() -> Void)?
     private let path = AgentRichTextView(frame: .zero)
+    private let fileIcon = NSImageView()
+    private var operationIcons: [NSImageView] = []
     private let counts = AgentRichTextView(frame: .zero)
     private let button = AgentDiffButton(frame: .zero)
     private let error = AgentRichTextView(frame: .zero)
@@ -20,7 +22,7 @@ final class AgentFileChangePanel: NSView, @preconcurrency NSLayoutManagerDelegat
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         path.layoutManager?.delegate = self
-        for view in [path, counts, button, errorScroll] { addSubview(view) }
+        for view in [path, fileIcon, counts, button, errorScroll] { addSubview(view) }
         errorScroll.drawsBackground = false
         errorScroll.borderType = .noBorder
         errorScroll.hasVerticalScroller = true
@@ -71,6 +73,8 @@ final class AgentFileChangePanel: NSView, @preconcurrency NSLayoutManagerDelegat
             paragraph.minimumLineHeight = 16; paragraph.maximumLineHeight = 16
             return NSAttributedString(string: value, attributes: [.font: AppFont.mono(12), .foregroundColor: color, .paragraphStyle: paragraph])
         }
+        fileIcon.image = FileIcon.image(for: details.fileName, theme: theme)
+        fileIcon.setAccessibilityElement(false)
         path.setContent(text(Self.displayPath(details.fileName, root: root), color: theme.fgMuted))
         counts.isHidden = details.additions == nil && details.deletions == nil
         let formatter = NumberFormatter(); formatter.numberStyle = .decimal
@@ -91,9 +95,20 @@ final class AgentFileChangePanel: NSView, @preconcurrency NSLayoutManagerDelegat
         errorScroll.isHidden = !failed
         error.setContent(AgentCommandPresentation.text(failed ? details.diff ?? "" : "", color: theme.fgMuted))
         let changes = details.operations ?? []
-        while operations.count > changes.count { operations.removeLast().removeFromSuperview() }
-        while operations.count < changes.count { let view = AgentRichTextView(frame: .zero); view.layoutManager?.delegate = self; operations.append(view); addSubview(view) }
-        for (view, operation) in zip(operations, changes) {
+        while operations.count > changes.count {
+            operations.removeLast().removeFromSuperview()
+            operationIcons.removeLast().removeFromSuperview()
+        }
+        while operations.count < changes.count {
+            let view = AgentRichTextView(frame: .zero)
+            view.layoutManager?.delegate = self
+            operations.append(view); addSubview(view)
+            let icon = NSImageView(); icon.setAccessibilityElement(false)
+            operationIcons.append(icon); addSubview(icon)
+        }
+        for (index, operation) in changes.enumerated() {
+            let view = operations[index]
+            operationIcons[index].image = FileIcon.image(for: operation.path, mimeType: operation.mimeType, theme: theme)
             let types = [operation.fileType, operation.mimeType].compactMap { $0 }.filter { !$0.isEmpty }
             let value = operation.operation + " " + (operation.oldPath.map { $0 + " → " } ?? "") + Self.displayPath(operation.path, root: root)
                 + (types.isEmpty ? "" : " (" + types.joined(separator: ", ") + ")")
@@ -117,13 +132,16 @@ final class AgentFileChangePanel: NSView, @preconcurrency NSLayoutManagerDelegat
             let size: NSSize
             if let text = view as? AgentRichTextView {
                 let natural = text.attributedString().size().width
-                let w = min(width, ceil(natural))
+                let w = min(max(1, width - (view === path ? 20 : 0)), ceil(natural))
                 _ = text.height(for: max(1, w))
                 let h = text.textContainer.flatMap { text.layoutManager?.usedRect(for: $0).maxY } ?? 16
-                size = NSSize(width: w, height: h)
+                size = NSSize(width: w + (view === path ? 20 : 0), height: h)
             } else { size = button.intrinsicContentSize }
             if x > 0 && x + size.width > width { finishLine(); y += lineHeight + 8; x = 0; lineHeight = 0 }
-            frames.append((view, NSRect(origin: NSPoint(x: x, y: y), size: size)))
+            if view === path {
+                frames.append((fileIcon, NSRect(x: x, y: y, width: 14, height: 14)))
+                frames.append((view, NSRect(x: x + 20, y: y, width: size.width - 20, height: size.height)))
+            } else { frames.append((view, NSRect(origin: NSPoint(x: x, y: y), size: size))) }
             lineHeight = max(lineHeight, size.height); x += size.width + 8
         }
         finishLine(); y += lineHeight
@@ -140,9 +158,12 @@ final class AgentFileChangePanel: NSView, @preconcurrency NSLayoutManagerDelegat
         }
         for (index, view) in operations.enumerated() {
             y += index == 0 ? 8 : 4
-            _ = view.height(for: width)
+            _ = view.height(for: max(1, width - 20))
             let height = view.textContainer.flatMap { view.layoutManager?.usedRect(for: $0).maxY } ?? 16
-            if apply { view.frame = NSRect(x: 0, y: y, width: width, height: height) }
+            if apply {
+                operationIcons[index].frame = NSRect(x: 0, y: y + 1, width: 14, height: 14)
+                view.frame = NSRect(x: 20, y: y, width: max(1, width - 20), height: height)
+            }
             y += height
         }
         return y

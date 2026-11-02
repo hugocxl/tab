@@ -32,6 +32,18 @@ enum AgentFileLinkTooltip {
         sizeFormatter.string(fromByteCount: Int64(clamping: bytes))
     }
 
+    /// Refines explicit file-link artwork using metadata already in the conversation cache.
+    static func markIcons(_ text: NSMutableAttributedString, theme: AppTheme,
+                          metadata: (String) -> AgentConversationLinkServices.FileMetadata) {
+        for link in AgentFileLinkHover.fileLinks(in: text) {
+            guard text.attribute(.agentFileLinkImage, at: link.range.location, effectiveRange: nil) != nil,
+                  let info = metadata(link.path),
+                  let image = FileIcon.image(for: link.path, isDirectory: info.isDirectory, mimeType: info.mimeType, theme: theme) else { continue }
+            let first = (text.string as NSString).rangeOfComposedCharacterSequence(at: link.range.location)
+            text.addAttribute(.agentFileLinkImage, value: image, range: first)
+        }
+    }
+
     /// Mutes and strikes through links to paths already known not to exist.
     static func markMissing(_ text: NSMutableAttributedString, color: NSColor, isMissing: (String) -> Bool) {
         for link in AgentFileLinkHover.fileLinks(in: text) where isMissing(link.path) {
@@ -70,6 +82,7 @@ final class AgentFileLinkHover: NSResponder, NSViewToolTipOwner {
 
     weak var services: AgentConversationLinkServices?
     var missingColor: NSColor = .secondaryLabelColor
+    var theme: AppTheme = .shared
     private weak var text: NSTextView?
     private(set) var links: [Link] = []
     private(set) var trackingAreas: [NSTrackingArea] = []
@@ -155,9 +168,18 @@ final class AgentFileLinkHover: NSResponder, NSViewToolTipOwner {
     func request(_ path: String) {
         guard observations[path] == nil, let services else { return }
         observations[path] = services.fileMetadata.observe(path) { [weak self] state in
-            guard case .loaded(nil) = state else { return }
-            self?.markMissing(path)
+            switch state {
+            case .loaded(nil): self?.markMissing(path)
+            case .loaded(let metadata?): self?.updateIcon(path, metadata: metadata)
+            default: break
+            }
         }
+    }
+
+    private func updateIcon(_ path: String, metadata: AgentConversationFileActions.Metadata) {
+        guard let storage = text?.textStorage else { return }
+        AgentFileLinkTooltip.markIcons(storage, theme: theme) { $0 == path ? metadata : nil }
+        text?.needsDisplay = true
     }
 
     private func markMissing(_ path: String) {

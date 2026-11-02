@@ -34,7 +34,7 @@ SOFTWARE.
 
 ## T3 Code
 
-Agent Tabs bundle artwork and rules adapted from T3 Code:
+Tab bundles artwork and rules adapted from T3 Code:
 
 - Git host icons (`agent-host-*.svg`), with their view boxes, paths and gradients
   preserved.

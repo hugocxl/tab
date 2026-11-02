@@ -364,7 +364,7 @@ final class PaletteSource: PaletteDataSource {
             }
             item.subtitle = directory.isEmpty ? nil : directory + "/"
             item.kind = PaletteKind.file.rawValue
-            item.tile = PaletteKind.file.tile
+            item.tile = PaletteTile(.file(path: path, isDirectory: false), .none)
             item.actions = fileActions(project)
             return item
         }
@@ -408,7 +408,7 @@ final class PaletteSource: PaletteDataSource {
                         self?.model.openEditor(project: project, path: file.path, line: Int(match.line), column: Int(match.column))
                     })
                     item.subtitle = "line \(match.line)"
-                    item.tile = PaletteKind.file.tile
+                    item.tile = PaletteTile(.file(path: file.path, isDirectory: false), .none)
                     item.kind = PaletteKind.file.rawValue
                     return item
                 }
@@ -564,7 +564,7 @@ final class PaletteSource: PaletteDataSource {
                         return range.lowerBound >= offset ? (range.lowerBound - offset)..<(range.upperBound - offset) : nil
                     }
                     item.kind = PaletteKind.change.rawValue
-                    item.tile = PaletteKind.change.tile
+                    item.tile = PaletteTile(.file(path: path, isDirectory: false), .none)
                     item.actions = [PaletteItemAction("diff", "Open Diff"),
                                     staged ? PaletteItemAction("unstage", "Unstage", keepOpen: true)
                                         : PaletteItemAction("stage", "Stage", keepOpen: true),
@@ -859,7 +859,7 @@ final class PaletteSource: PaletteDataSource {
         item.highlights = ranges
         item.subtitle = TabDirs.abbreviateHome((path as NSString).deletingLastPathComponent, home: NSHomeDirectory())
         item.kind = PaletteKind.folder.rawValue
-        item.tile = PaletteKind.folder.tile
+        item.tile = PaletteTile(.file(path: path, isDirectory: true), .none)
         item.actions = [
             PaletteItemAction("open", "Open Project"),
             PaletteItemAction("add", "Add Project"),
@@ -888,7 +888,7 @@ final class PaletteSource: PaletteDataSource {
                 var up = PaletteItem(id: "..", title: "..", target: .apply { [weak self] in
                     self?.loadRemoteFolders(server, path: (entry.path as NSString).deletingLastPathComponent)
                 })
-                up.tile = .icon(.folder, .gray)
+                up.tile = PaletteTile(.file(path: "..", isDirectory: true), .none)
                 items.append(up)
             }
             for folder in list {
@@ -901,7 +901,7 @@ final class PaletteSource: PaletteDataSource {
                 })
                 item.highlights = match.ranges
                 item.kind = PaletteKind.folder.rawValue
-                item.tile = PaletteKind.folder.tile
+                item.tile = PaletteTile(.file(path: path, isDirectory: true), .none)
                 item.actions = [PaletteItemAction("browse", "Open Folder"), PaletteItemAction("add", "Add Project")]
                 items.append(item)
             }

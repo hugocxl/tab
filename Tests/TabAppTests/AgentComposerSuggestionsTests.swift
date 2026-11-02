@@ -74,6 +74,24 @@ final class AgentComposerTriggerTests: XCTestCase {
 
 @MainActor
 final class AgentComposerSuggestionsViewTests: XCTestCase {
+    func testFileIconsKeepTheirColorWhenCellsAreReconfigured() throws {
+        let view = AgentComposerSuggestionsView()
+        let file = AgentComposerSuggestion(id: "Sources/main.swift", title: "main.swift", kind: .file)
+        let thread = AgentComposerSuggestion(id: "thread", title: "Thread", symbol: "bubble.left", kind: .thread)
+        for dark in [false, true] {
+            let theme = AppTheme(systemIsDark: dark)
+            view.update([file], theme: theme)
+            let cell = try XCTUnwrap(view.tableView(view.tableView, viewFor: view.tableView.tableColumns.first, row: 0))
+            let icon = try XCTUnwrap(cell.subviews.compactMap { $0 as? NSImageView }.first)
+            XCTAssertTrue(icon.image === FileIcon.image(for: file.id, theme: theme, size: 16))
+            XCTAssertNil(icon.contentTintColor)
+            view.update([thread], theme: theme)
+            let next = try XCTUnwrap(view.tableView(view.tableView, viewFor: view.tableView.tableColumns.first, row: 0))
+            let nextIcon = try XCTUnwrap(next.subviews.compactMap { $0 as? NSImageView }.first)
+            XCTAssertNotNil(nextIcon.contentTintColor)
+        }
+    }
+
     func testDefaultInitializer() {
         let view = AgentComposerSuggestionsView()
         XCTAssertEqual(view.frame, .zero)

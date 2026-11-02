@@ -125,8 +125,10 @@ public final class RemoteFolderBrowser: ThemedView {
     private func show(_ folders: [ServerPath]) {
         rows.arrangedSubviews.forEach { $0.removeFromSuperview() }
         for folder in folders.sorted(by: { Self.name(of: $0).localizedStandardCompare(Self.name(of: $1)) == .orderedAscending }) {
-            let row = ListRow(title: Self.name(of: folder), icon: AppIcon.folder.image(),
+            let row = ListRow(title: Self.name(of: folder), icon: FileIcon.image(for: folder.rawValue, isDirectory: true, theme: theme, size: Metrics.glyph),
                               accessory: AppIcon.chevronRight.image().map(NSImageView.init(image:)))
+            row.fileIconPath = folder.rawValue
+            row.fileIconIsDirectory = true
             row.onClick = { [weak self] in self?.open(folder) }
             rows.addArrangedSubview(row)
             row.widthAnchor.constraint(equalTo: rows.widthAnchor).isActive = true

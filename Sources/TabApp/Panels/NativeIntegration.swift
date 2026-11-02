@@ -120,7 +120,7 @@ public final class EditorPaneContent: PaneContentController, EditorLocationRecei
 
     public var view: NSView { controller.view }
     public var title: String { controller.paneTitle }
-    public var icon: NSImage? { nil }
+    public var icon: NSImage? { FileIcon.image(for: controller.path, theme: .shared, size: Metrics.glyph) }
     public func focusContent() { controller.focus() }
     public func didShow() { controller.didShow() }
 
@@ -152,7 +152,7 @@ public final class DiffPaneContent: PaneContentController {
 
     public var view: NSView { controller.view }
     public var title: String { PaneContent.diff(path: controller.path, staged: controller.staged).nativeTitle ?? controller.path }
-    public var icon: NSImage? { nil }
+    public var icon: NSImage? { FileIcon.image(for: controller.path, theme: .shared, size: Metrics.glyph) }
     public func focusContent() { controller.view.window?.makeFirstResponder(controller.rowsView) }
     public func didShow() { controller.didShow() }
     public func didHide() {}

@@ -72,8 +72,6 @@ final class AgentHtmlDocumentCard: ThemedView {
         super.init(frame: frameRect)
         wantsLayer = true
         layer?.cornerRadius = 12
-        icon.image = NSImage(systemSymbolName: "doc.richtext", accessibilityDescription: nil)?
-            .withSymbolConfiguration(.init(pointSize: 18, weight: .regular))
         icon.setAccessibilityElement(false)
         title.lineBreakMode = .byTruncatingTail
         detail.lineBreakMode = .byTruncatingTail
@@ -102,7 +100,8 @@ final class AgentHtmlDocumentCard: ThemedView {
 
     override func themeDidChange() {
         layer?.backgroundColor = theme.fg.withAlphaComponent(isAvailable ? 0.055 : 0.03).cgColor
-        icon.contentTintColor = isAvailable ? theme.fgMuted : theme.fgDim
+        icon.image = FileIcon.image(for: "document.html", theme: theme, size: 18)
+        icon.alphaValue = isAvailable ? 1 : 0.5
         title.textColor = isAvailable ? theme.fg : theme.fgMuted
         detail.textColor = isAvailable ? theme.fgMuted : theme.fgDim
     }

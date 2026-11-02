@@ -581,9 +581,10 @@ final class AgentResponseProse: AgentResponseSection {
     let text = AgentRichTextView(frame: .zero)
     /// File-link tooltips request metadata through these services.
     weak var services: AgentConversationLinkServices? {
-        didSet { if oldValue !== services { text.setFileLinkServices(services, missingColor: missingColor) } }
+        didSet { if oldValue !== services { text.setFileLinkServices(services, missingColor: missingColor, theme: fileIconTheme) } }
     }
     private var missingColor: NSColor = .secondaryLabelColor
+    private var fileIconTheme = AppTheme.shared
     /// Inline image thumbnails, in reading order.
     private(set) var inlineCells: [AgentInlineMediaCell] = []
     private var inlineAttachments: [String: NSTextAttachment] = [:]
@@ -628,10 +629,15 @@ final class AgentResponseProse: AgentResponseSection {
         guard case .prose(let blocks, let listIndents) = part else { return }
         text.delegate = delegate
         let rendered = AgentMarkdown.render(blocks, theme: theme, fileLinks: true, references: references, compact: compactProse, lineBreaks: lineBreaks, listIndents: listIndents, rawHTML: rawHTML)
+        fileIconTheme = theme
         missingColor = AgentMarkdownPalette(theme: theme).muted
         if let services {
             let content = NSMutableAttributedString(attributedString: rendered)
             let metadata = services.fileMetadata
+            AgentFileLinkTooltip.markIcons(content, theme: theme) {
+                guard case .loaded(let info)? = metadata.state(for: $0) else { return nil }
+                return info
+            }
             AgentFileLinkTooltip.markMissing(content, color: missingColor) { metadata.state(for: $0) == .loaded(nil) }
             AgentThreadLink.applyKnownTitles(content, titles: services.threadTitles)
             inlineCells = services.mediaLoader == nil ? [] : AgentInlineMedia.substitute(content, theme: theme, cells: &inlineAttachments)
@@ -641,7 +647,7 @@ final class AgentResponseProse: AgentResponseSection {
             text.setContent(rendered)
         }
         observeInlineMedia()
-        text.setFileLinkServices(services, missingColor: missingColor)
+        text.setFileLinkServices(services, missingColor: missingColor, theme: fileIconTheme)
         text.selectedTextAttributes = [.backgroundColor: theme.accent.withAlphaComponent(0.22)]
         text.linkTextAttributes = [:] // Inline spans already carry their own link or code color.
     }
@@ -755,9 +761,9 @@ final class AgentResponseCode: AgentResponseSection {
         let metadata = AgentCodeFenceInfo(info)
         fenceLanguage = metadata.language
         fenceClosed = closed
-        let iconPath = metadata.title ?? AgentFileIcon.syntheticFileName(language: metadata.language)
-        fileIcon.isHidden = metadata.title == nil && !AgentFileIcon.hasSpecificIcon(for: iconPath)
-        fileIcon.image = fileIcon.isHidden ? nil : AgentFileIcon.image(for: iconPath, dark: !theme.palette.isLight)
+        let iconPath = metadata.title ?? FileIcon.syntheticFileName(language: metadata.language)
+        fileIcon.isHidden = metadata.title == nil && !FileIcon.hasSpecificIcon(for: iconPath)
+        fileIcon.image = fileIcon.isHidden ? nil : FileIcon.image(for: iconPath, dark: !theme.palette.isLight)
         fileIcon.toolTip = metadata.title == nil ? metadata.language : nil
         fileIcon.setAccessibilityElement(metadata.title == nil && !fileIcon.isHidden)
         fileIcon.setAccessibilityLabel(metadata.title == nil ? "Language: \(metadata.language)" : metadata.title)

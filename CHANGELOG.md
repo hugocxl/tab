@@ -3,6 +3,14 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.33.0 - 2026-11-02
+
+### Added
+
+- Files show consistent type-specific icons across the explorer, agent file
+  picker, search results, Git views, pane headers, sidebar cards, links and
+  previews, with matching folder icons and light and dark appearances.
+
 ## 0.32.0 - 2026-11-02
 
 ### Added

@@ -605,6 +605,8 @@ extension TextGlyphButton {
 /// A changed file: colored status letter, name, folder, line counts, and
 /// stage, unstage and discard buttons on hover.
 final class ChangeFileCell: HoverView {
+    private let fileIcon = NSImageView()
+    private var filePath = ""
     private let letter = makeLabel("", font: AppFont.system(13, weight: .semibold))
     private let name = makeLabel("", font: AppFont.body)
     private let folder = makeLabel("", font: AppFont.body)
@@ -637,7 +639,7 @@ final class ChangeFileCell: HoverView {
         name.setContentCompressionResistancePriority(.defaultHigh - 1, for: .horizontal)
         folder.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         folder.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let row = NSStackView(views: [letter, name, folder, added, removed, actions])
+        let row = NSStackView(views: [fileIcon, letter, name, folder, added, removed, actions])
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = 6
@@ -645,12 +647,17 @@ final class ChangeFileCell: HoverView {
         addSubview(row)
         row.pinEdges(to: self, insets: NSEdgeInsets(top: 0, left: 4, bottom: 0, right: 2))
         letter.widthAnchor.constraint(equalToConstant: 14).isActive = true
+        fileIcon.imageScaling = .scaleProportionallyDown
+        fileIcon.setAccessibilityElement(false)
+        fileIcon.widthAnchor.constraint(equalToConstant: 14).isActive = true
+        fileIcon.heightAnchor.constraint(equalToConstant: 14).isActive = true
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     func configure(entry: GitFileStatus, group: SourceControlModel.Group, busy: Bool) {
         let path = entry.file.path.rawValue
+        filePath = path
         let code = SourceControlModel.letter(entry.file, in: group)
         tone = SourceControlModel.tone(code, in: group)
         letter.stringValue = String(code)
@@ -678,6 +685,7 @@ final class ChangeFileCell: HoverView {
     }
 
     override func themeDidChange() {
+        fileIcon.image = FileIcon.image(for: filePath, theme: theme)
         switch tone {
         case .conflict: letter.textColor = theme.danger
         case .added: letter.textColor = theme.diffAdd

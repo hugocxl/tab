@@ -12,6 +12,10 @@ final class PaletteTileView: ThemedView {
         switch tile.glyph {
         case .none:
             return
+        case let .file(path, isDirectory):
+            FileIcon.image(for: path, isDirectory: isDirectory, theme: theme, size: PaletteLayout.tile)?
+                .draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+            return
         case .image(let image):
             image.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
             return

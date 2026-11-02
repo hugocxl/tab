@@ -555,6 +555,7 @@ final class FilesCellView: HoverView {
     private var expanded = false
     private var selected = false
     private weak var editor: InlineNameField?
+    private var fileIcon: NSImage?
 
     static let indent: CGFloat = 12
 
@@ -563,9 +564,15 @@ final class FilesCellView: HoverView {
         self.depth = depth
         self.expanded = expanded
         self.selected = selected
+        themeDidChange()
         setAccessibilityElement(true)
         setAccessibilityRole(node.isDirectory ? .group : .row)
         setAccessibilityLabel(node.name)
+        needsDisplay = true
+    }
+
+    override func themeDidChange() {
+        fileIcon = FileIcon.image(for: node.path, isDirectory: node.isDirectory, theme: theme)
         needsDisplay = true
     }
 
@@ -609,9 +616,9 @@ final class FilesCellView: HoverView {
         }
         x += 16
         let color = node.dimmed ? theme.fgMuted : theme.fg
-        if let glyph = (node.isDirectory ? AppIcon.folder : AppIcon.file).image(size: 14) {
-            glyph.tinted(color).draw(in: NSRect(x: x, y: midY - 7, width: 14, height: 14),
-                                     from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+        if let glyph = fileIcon {
+            glyph.draw(in: NSRect(x: x, y: midY - 7, width: 14, height: 14),
+                                     from: .zero, operation: .sourceOver, fraction: node.dimmed ? 0.5 : 1, respectFlipped: true, hints: nil)
         }
         guard editor == nil else { return }
         let style = NSMutableParagraphStyle()

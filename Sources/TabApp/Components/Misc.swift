@@ -7,6 +7,8 @@ public final class ListRow: HoverView {
     public let titleLabel: NSTextField
     public let subtitleLabel: NSTextField
     private let iconView = NSImageView()
+    var fileIconPath: String?
+    var fileIconIsDirectory = false
     public var isSelected = false { didSet { needsDisplay = true } }
     public var onClick: (() -> Void)?
 
@@ -48,7 +50,10 @@ public final class ListRow: HoverView {
     public override func themeDidChange() {
         titleLabel.textColor = theme.fg
         subtitleLabel.textColor = theme.fgMuted
-        iconView.contentTintColor = theme.fgMuted
+        if let fileIconPath {
+            iconView.image = FileIcon.image(for: fileIconPath, isDirectory: fileIconIsDirectory, theme: theme, size: Metrics.glyph)
+            iconView.contentTintColor = nil
+        } else { iconView.contentTintColor = theme.fgMuted }
         needsDisplay = true
     }
 

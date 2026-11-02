@@ -2,7 +2,7 @@ import AppKit
 
 /// Static bundled file icon data, resolved natively in the same rule order as the source.
 @MainActor
-enum AgentFileIcon {
+enum FileIcon {
     private struct Catalog: Decodable {
         var fileNames: [String: String]
         var extensions: [String: String]
@@ -19,6 +19,17 @@ enum AgentFileIcon {
         return try? JSONDecoder().decode(Catalog.self, from: data)
     }()
     private static var images: [String: NSImage] = [:]
+
+    /// Resolves workspace paths without touching the local filesystem, including remote paths.
+    static func image(for path: String, isDirectory: Bool = false, mimeType: String? = nil,
+                      theme: AppTheme, size: CGFloat = 14) -> NSImage? {
+        if isDirectory {
+            let key = "folder-\(size)"
+            if images[key] == nil { images[key] = AppIcon.folder.image(size: size) }
+            return images[key]?.tinted(theme.fgMuted)
+        }
+        return image(for: path, mimeType: mimeType, dark: !theme.palette.isLight, size: size)
+    }
 
     static func syntheticFileName(language: String) -> String {
         let language = language.lowercased()
@@ -69,5 +80,32 @@ enum AgentFileIcon {
         image.isTemplate = false
         images[key] = image
         return image
+    }
+}
+
+/// A file glyph that updates with the app theme, independent of the file's location.
+final class FileIconView: ThemedView {
+    private let path: String
+    private let size: CGFloat
+    private var image: NSImage?
+
+    init(path: String, size: CGFloat = 16) {
+        self.path = path
+        self.size = size
+        super.init(frame: NSRect(x: 0, y: 0, width: size + 8, height: 24))
+        setAccessibilityElement(false)
+        themeDidChange()
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func themeDidChange() {
+        image = FileIcon.image(for: path, theme: theme, size: size)
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        image?.draw(in: NSRect(x: bounds.midX - size / 2, y: bounds.midY - size / 2, width: size, height: size),
+                    from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
     }
 }

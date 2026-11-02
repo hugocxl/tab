@@ -69,7 +69,7 @@ final class AgentChangedFilesRow: AgentTimelineRow {
                 button.font = AppFont.mono(12)
                 button.alignment = .left
                 button.lineBreakMode = .byTruncatingMiddle
-                button.image = node.isDirectory ? symbol("folder") : AgentFileIcon.image(for: node.path, dark: !theme.palette.isLight)
+                button.image = FileIcon.image(for: node.path, isDirectory: node.isDirectory, theme: theme)
                 button.imagePosition = .imageLeading
                 button.title = node.isDirectory ? (expandedDirectories.contains(node.path) ? "⌄  " : "›  ") + node.name : node.name
                 button.setTitleColor(theme.fgMuted)

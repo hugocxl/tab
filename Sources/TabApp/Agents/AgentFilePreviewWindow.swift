@@ -37,6 +37,11 @@ final class AgentFilePreviewWindow: NSWindowController, NSWindowDelegate {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 600), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
         window.title = attachment.name; window.isReleasedWhenClosed = false
         super.init(window: window)
+        let accessory = NSTitlebarAccessoryViewController()
+        let icon = FileIconView(path: attachment.name)
+        icon.theme = theme; icon.themeDidChange()
+        accessory.view = icon; accessory.layoutAttribute = .left
+        window.addTitlebarAccessoryViewController(accessory)
         content.theme = theme; content.themeDidChange()
         window.contentView = content; window.delegate = self
         window.minSize = NSSize(width: 360, height: 240); window.center()

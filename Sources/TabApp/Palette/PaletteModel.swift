@@ -79,6 +79,7 @@ public enum TileGlyph: Equatable {
     /// Up to four colors in a 2×2 grid, such as a theme preview.
     case swatches([NSColor])
     case image(NSImage)
+    case file(path: String, isDirectory: Bool)
     case none
 }
 

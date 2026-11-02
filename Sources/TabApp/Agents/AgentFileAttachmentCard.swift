@@ -61,7 +61,7 @@ final class AgentFileAttachmentCard: ThemedView {
         layer?.cornerRadius = standalone ? 16 : 0
         iconBackground.theme = theme
         // source user-message cards resolve the filename only (without the optional MIME fallback).
-        icon.image = attachment.flatMap { AgentFileIcon.image(for: $0.name, dark: !theme.palette.isLight, size: 16) }
+        icon.image = attachment.flatMap { FileIcon.image(for: $0.name, dark: !theme.palette.isLight, size: 16) }
         icon.setAccessibilityElement(false)
         name.textColor = theme.fg; detail.textColor = theme.fgMuted
         download.contentTintColor = theme.fgMuted

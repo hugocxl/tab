@@ -5,16 +5,25 @@ import AppKit
 enum AgentExternalLinkLayout {
     nonisolated static func inset(fontSize: CGFloat) -> CGFloat { 14 + fontSize * 0.45 }
 
-    static func mark(_ text: NSMutableAttributedString, fontSize: CGFloat, color: NSColor) {
+    static func mark(_ text: NSMutableAttributedString, fontSize: CGFloat, color: NSColor, theme: AppTheme) {
         let full = NSRange(location: 0, length: text.length)
         var links: [NSRange] = []
         text.enumerateAttribute(.agentExternalLinkIdentity, in: full) { value, range, _ in
-            guard value != nil, let url = text.attribute(.link, at: range.location, effectiveRange: nil) as? URL, let scheme = url.scheme?.lowercased(),
-                  scheme == "http" || scheme == "https", url.host != nil, range.length > 0 else { return }
-            links.append(range)
+            guard value != nil, range.length > 0,
+                  let url = text.attribute(.link, at: range.location, effectiveRange: nil) as? URL else { return }
+            if url.scheme == "tab-agent-file" {
+                links.append(range)
+            } else if let scheme = url.scheme?.lowercased(), (scheme == "http" || scheme == "https"), url.host != nil {
+                links.append(range)
+            }
         }
         for link in links {
             let range = (text.string as NSString).rangeOfComposedCharacterSequence(at: link.location)
+            if let url = text.attribute(.link, at: link.location, effectiveRange: nil) as? URL,
+               case .file(let path, _)? = AgentResponseLink.parse(url.absoluteString),
+               let image = FileIcon.image(for: path, isDirectory: path.hasSuffix("/"), theme: theme) {
+                text.addAttribute(.agentFileLinkImage, value: image, range: range)
+            }
             var prefix = range
             if text.attribute(.agentExternalLinkProtocol, at: link.location, effectiveRange: nil) as? Bool == true {
                 let label = (text.string as NSString).substring(with: link).lowercased()
@@ -46,6 +55,7 @@ enum AgentExternalLinkLayout {
 }
 
 extension NSAttributedString.Key {
+    static let agentFileLinkImage = NSAttributedString.Key("TabAgentFileLinkImage")
     static let agentExternalLinkIdentity = NSAttributedString.Key("TabAgentExternalLinkIdentity")
     static let agentExternalLinkNoBreak = NSAttributedString.Key("TabAgentExternalLinkNoBreak")
     static let agentExternalLinkProtocol = NSAttributedString.Key("TabAgentExternalLinkProtocol")

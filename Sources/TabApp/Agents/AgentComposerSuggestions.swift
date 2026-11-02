@@ -362,8 +362,13 @@ private final class AgentComposerSuggestionCell: NSTableCellView {
         subtitleLabel.stringValue = item.subtitle
         subtitleLabel.textColor = theme.fgMuted
         subtitleLabel.isHidden = item.subtitle.isEmpty
-        icon.image = NSImage(systemSymbolName: item.symbol, accessibilityDescription: nil)
-        icon.contentTintColor = theme.fgMuted
+        if item.kind == .file {
+            icon.image = FileIcon.image(for: item.id, theme: theme, size: 16)
+            icon.contentTintColor = nil
+        } else {
+            icon.image = NSImage(systemSymbolName: item.symbol, accessibilityDescription: nil)
+            icon.contentTintColor = theme.fgMuted
+        }
         toolTip = [item.title, item.subtitle].filter { !$0.isEmpty }.joined(separator: " — ")
         setAccessibilityLabel("\(item.title), \(item.kind.rawValue)\(item.subtitle.isEmpty ? "" : ", \(item.subtitle)")")
         needsLayout = true
