@@ -1,4 +1,5 @@
 import AppKit
+import TabClient
 import TabCore
 import TabProtocol
 import XCTest
@@ -269,5 +270,9 @@ private final class SettingsWriteHost: SettingsHost {
     func clearBrowserProfileData(_ id: String) async throws { try await base.clearBrowserProfileData(id) }
     func browserImportSources() -> [BrowserImportSource] { [] }
     func importBrowserData(from source: BrowserImportSource, cookies: Bool) async throws {}
+    func agentIntegrations() async throws -> [AgentIntegrationStatus] { try await base.agentIntegrations() }
+    func setAgentIntegration(_ enabled: Bool) async throws -> [AgentIntegrationStatus] { try await base.setAgentIntegration(enabled) }
+    func migrationSources() -> [TerminalMigration.Source] { base.migrationSources() }
+    func openAgent(prompt: String) throws { try base.openAgent(prompt: prompt) }
     func backupState() throws -> Data { try base.backupState() }
 }

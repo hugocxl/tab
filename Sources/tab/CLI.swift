@@ -24,6 +24,13 @@ enum CLI {
             for file in try AgentSkill.install(home: home, directories: directories) {
                 Output.line(file.path)
             }
+        case .integrations(let action, let json):
+            try Integrations.run(action, json: json)
+        case .agentContext:
+            let cli = Executable.currentURL()
+            if let context = AgentIntegrations.context(environment: ProcessInfo.processInfo.environment, cli: cli) {
+                Output.line(context)
+            }
         case .stdio(let start):
             try StdioBridge.serve(try LocalServer.profile(), start: start)
         case .mobile(let command):

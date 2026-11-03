@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import TabClient
 import TabCore
 import TabProtocol
 
@@ -41,6 +42,9 @@ public final class SettingsStore {
     public private(set) var backupBusy = false
     public private(set) var backupStatus = ""
     public private(set) var browserProfiles: [BrowserProfileSummary] = []
+    /// What Tab installed for each coding agent; `nil` until read.
+    public private(set) var agentIntegrations: [AgentIntegrationStatus]?
+    public private(set) var agentIntegrationBusy = false
 
     /// Fires after anything the window shows changed.
     public let changes = PassthroughSubject<Void, Never>()
@@ -148,6 +152,39 @@ public final class SettingsStore {
             try next.saveWorktrees(to: dirs.settings)
             settings = next
             applySettings()
+        }
+    }
+
+    // MARK: Integrations
+
+    /// Reads what Tab installed for each coding agent.
+    public func loadAgentIntegrations() {
+        changeAgentIntegrations(nil)
+    }
+
+    /// Installs or removes the skill and hooks of every agent found.
+    public func setAgentIntegration(_ enabled: Bool) {
+        changeAgentIntegrations(enabled)
+    }
+
+    private func changeAgentIntegrations(_ enable: Bool?) {
+        guard !agentIntegrationBusy, let host else { return }
+        agentIntegrationBusy = true
+        changed()
+        Task { [weak self] in
+            do {
+                let statuses = if let enable {
+                    try await host.setAgentIntegration(enable)
+                } else {
+                    try await host.agentIntegrations()
+                }
+                self?.agentIntegrations = statuses
+                self?.errors["agent-integration"] = nil
+            } catch {
+                self?.errors["agent-integration"] = Self.message(error)
+            }
+            self?.agentIntegrationBusy = false
+            self?.changed()
         }
     }
 

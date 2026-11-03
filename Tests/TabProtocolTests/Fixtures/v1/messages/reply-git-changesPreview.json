@@ -1,0 +1,1 @@
+{"body":{"reply":{"preview":{"branch":"b","destination":{"branch":"b","remote":"origin"},"diff":{"diff":"diff --git a b\n","truncated":true},"files":[{"added":1,"path":"a","removed":2,"untracked":true}],"head":"abc","tree":"def"},"type":"changesPreview"},"type":"git"},"id":1,"type":"reply"}

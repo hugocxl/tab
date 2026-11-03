@@ -1,0 +1,1 @@
+{"body":{"hello":{"features":["terminalInput","sessionEnvironment","fileSearch","fileByteRanges","pullRequestPreview","fileWriteParents"],"server":{"build":{"compatibility":21,"protocol":[1],"version":"1.0.0"},"instance":77,"server":"05000000-0000-4000-8000-000000000005"},"version":1},"type":"hello"},"id":1,"type":"reply"}

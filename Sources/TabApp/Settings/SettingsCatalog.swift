@@ -3,7 +3,7 @@ import TabCore
 
 /// A page of the Settings window, in sidebar order.
 public enum SettingsCategory: String, CaseIterable, Sendable {
-    case general, interface, appearance, terminal, keyboard, browser, server, remoteServers, mobile, backup, changelog
+    case general, interface, appearance, terminal, keyboard, integrations, browser, server, remoteServers, mobile, backup, changelog
 
     public var title: String {
         switch self {
@@ -12,6 +12,7 @@ public enum SettingsCategory: String, CaseIterable, Sendable {
         case .appearance: return "Themes"
         case .terminal: return "Terminal"
         case .keyboard: return "Shortcuts"
+        case .integrations: return "Integrations"
         case .browser: return "Browser"
         case .remoteServers: return "Remote Servers"
         case .server: return "Server"
@@ -30,6 +31,7 @@ public enum SettingsCategory: String, CaseIterable, Sendable {
         case .appearance: return ("paintpalette.fill", 0x3FA2FF, 0xC04BF2, 0xFFFFFF)
         case .terminal: return ("apple.terminal", 0x3A3A3C, 0x151515, 0x5BE37A)
         case .keyboard: return ("command", 0xF7F7F8, 0xDCDCDF, 0x6E6E73)
+        case .integrations: return ("puzzlepiece.extension.fill", 0xFF6FB5, 0x8E4BF2, 0xFFFFFF)
         case .browser: return ("globe", 0x5BB2FF, 0x1F6FEB, 0xFFFFFF)
         case .remoteServers: return ("network", 0x4FD1D5, 0x1E9AA0, 0xFFFFFF)
         case .server: return ("server.rack", 0x4FD1D5, 0x1E9AA0, 0xFFFFFF)
@@ -143,6 +145,10 @@ public enum SettingsCatalog {
         SettingItem("app-links", "Links that open apps", "", .terminal, "Links"),
         SettingItem("generated-titles", "Prefer generated titles", "", .terminal, "Titles"),
         SettingItem("startup-command", "Startup command", "", .terminal, "Shell"),
+        // Integrations
+        SettingItem("agent-integration", "Integrate with available agents", "Installs a Tab skill and session hooks for supported agents.", .integrations, "Coding Agents"),
+        SettingItem("agent-integration-agents", "Agents", "", .integrations, "Coding Agents"),
+        SettingItem("terminal-migration", "Migrate from another terminal", "An agent reads that terminal's configuration and brings its shortcuts, font, cursor and colors into Tab.", .integrations, "Migration"),
         // Browser
         SettingItem("browser-enabled", "Enable built-in browser", "Open web pages in browser tabs and let tab browser commands drive them.", .browser, "General"),
         SettingItem("browser-terminal-links", "Open terminal links in the browser", "Command-click a web link in a terminal to open it in a browser tab instead of your system browser.", .browser, "General"),

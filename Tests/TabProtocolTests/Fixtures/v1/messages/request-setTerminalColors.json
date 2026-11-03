@@ -1,0 +1,1 @@
+{"body":{"colors":{"ansi":["#000000","#010203","#020406","#030609","#04080c","#050a0f","#060c12","#070e15","#081018","#09121b","#0a141e","#0b1621","#0c1824","#0d1a27","#0e1c2a","#0f1e2d"],"background":"#111111","cursor":"#ffffff","cursorBlink":true,"cursorStyle":2,"foreground":"#d5cec7","palette":{"17":"#010203"}},"type":"setTerminalColors"},"id":1,"type":"request"}

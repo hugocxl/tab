@@ -95,6 +95,7 @@ final class SettingsModel: ObservableObject {
         if category == .server || category == .terminal { store.loadServerSettings() }
         if category == .mobile { store.loadRemoteAccess() }
         if category == .browser { store.refreshBrowserProfiles() }
+        if category == .integrations { store.loadAgentIntegrations() }
         reload()
     }
 
@@ -139,6 +140,7 @@ final class SettingsModel: ObservableObject {
         case .interface: buildInterface(builder)
         case .terminal: buildTerminal(builder)
         case .keyboard: buildKeyboard(builder)
+        case .integrations: buildIntegrations(builder)
         case .browser: buildBrowser(builder)
         case .server: buildServer(builder)
         case .mobile: buildMobile(builder)

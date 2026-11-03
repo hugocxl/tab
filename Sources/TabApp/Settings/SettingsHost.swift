@@ -1,4 +1,5 @@
 import Foundation
+import TabClient
 import TabCore
 import TabProtocol
 
@@ -96,6 +97,17 @@ public protocol SettingsHost: AnyObject {
     /// Imports history and bookmarks, or cookies, into the default profile.
     func importBrowserData(from source: BrowserImportSource, cookies: Bool) async throws
 
+    // MARK: Agents
+
+    /// What Tab installed for each coding agent on this computer.
+    func agentIntegrations() async throws -> [AgentIntegrationStatus]
+    /// Installs or removes the skill and hooks of every agent found.
+    func setAgentIntegration(_ enabled: Bool) async throws -> [AgentIntegrationStatus]
+    /// The terminals whose settings an agent can bring into Tab.
+    func migrationSources() -> [TerminalMigration.Source]
+    /// Opens an agent tab in Home with `prompt` in its composer, not yet sent.
+    func openAgent(prompt: String) throws
+
     // MARK: Backup
 
     /// The local projects with their layouts and workspaces, as the backup
@@ -126,6 +138,11 @@ public final class PreviewSettingsHost: SettingsHost {
     public private(set) var serverActions: [String] = []
     public var state: Data?
     public var importSources: [BrowserImportSource] = []
+    public private(set) var agentPrompts: [String] = []
+    public var integrations = CodingAgent.allCases.map {
+        AgentIntegrationStatus(agent: $0, found: $0 != .pi, skill: .missing, hook: $0.supportsSessionHook ? .missing : .unsupported)
+    }
+    public var migrations = Array(TerminalMigration.sources.prefix(2))
 
     public init() {}
 
@@ -170,6 +187,17 @@ public final class PreviewSettingsHost: SettingsHost {
     public func clearBrowserProfileData(_ id: String) async throws {}
     public func browserImportSources() -> [BrowserImportSource] { importSources }
     public func importBrowserData(from source: BrowserImportSource, cookies: Bool) async throws {}
+
+    public func agentIntegrations() async throws -> [AgentIntegrationStatus] { integrations }
+    public func setAgentIntegration(_ enabled: Bool) async throws -> [AgentIntegrationStatus] {
+        for index in integrations.indices where integrations[index].found {
+            integrations[index].skill = enabled ? .installed : .missing
+            if integrations[index].agent.supportsSessionHook { integrations[index].hook = enabled ? .installed : .missing }
+        }
+        return integrations
+    }
+    public func migrationSources() -> [TerminalMigration.Source] { migrations }
+    public func openAgent(prompt: String) throws { agentPrompts.append(prompt) }
 
     public func backupState() throws -> Data {
         if let state { return state }

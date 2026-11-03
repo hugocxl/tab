@@ -32,10 +32,20 @@ public enum CLICommand: Hashable, Sendable {
     case browser(BrowserInvocation)
     /// Installs the agent skill into agent folders and these folders.
     case installSkills([String])
+    /// Shows or changes the skill and hooks of the coding agents on this computer.
+    case integrations(CLIIntegrations, json: Bool)
+    /// Prints what Tab tells an agent starting in one of its terminals.
+    case agentContext
     /// Joins stdin and stdout to the server, for clients on other computers.
     case stdio(BridgeStart)
     /// Answers an ssh prompt for the running app.
     case askpass(String)
+}
+
+public enum CLIIntegrations: Hashable, Sendable {
+    case status
+    case install
+    case remove
 }
 
 public enum CLIMobile: Hashable, Sendable {
@@ -128,7 +138,7 @@ public enum CLIParser {
         }
         let command = try command(rest)
         switch command {
-        case .help, .version, .buildInfo, .stdio, .open, .browser, .installSkills, .askpass:
+        case .help, .version, .buildInfo, .stdio, .open, .browser, .installSkills, .integrations, .agentContext, .askpass:
             throw CLIError("--host can't be combined with \(rest.first ?? "no command")")
         case .manage, .mobile:
             return CLIInvocation(host: host, command: command)
@@ -170,6 +180,12 @@ public enum CLIParser {
             }
         case "install-skills":
             return wantsHelp ? .help(CLIHelp.installSkills) : .installSkills(try installSkills(rest))
+        case "integrations":
+            return wantsHelp ? .help(CLIHelp.integrations) : try integrations(rest)
+        case "agent-context":
+            if wantsHelp { return .help(CLIHelp.agentContext) }
+            guard rest.isEmpty else { throw CLIError("usage: tab agent-context") }
+            return .agentContext
         case "browser":
             return try BrowserParser.parse(rest)
         default:
@@ -217,6 +233,19 @@ public enum CLIParser {
             throw CLIError("a pairing code holds at most \(Limits.maxPairingHosts) addresses")
         }
         return .pair(addresses: addresses)
+    }
+
+    static func integrations(_ arguments: [String]) throws -> CLICommand {
+        let json = arguments.contains("--json")
+        let words = arguments.filter { $0 != "--json" }
+        let action: CLIIntegrations
+        switch words {
+        case [], ["status"]: action = .status
+        case ["install"]: action = .install
+        case ["remove"]: action = .remove
+        default: throw CLIError("usage: tab integrations [status|install|remove] [--json]")
+        }
+        return .integrations(action, json: json)
     }
 
     static func installSkills(_ arguments: [String]) throws -> [String] {

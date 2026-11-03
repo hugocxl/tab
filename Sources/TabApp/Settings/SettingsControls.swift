@@ -16,6 +16,8 @@ indirect enum SettingControl {
     case label(String, LabelStyle = .body)
     case keys(KeyChord)
     case qrCode(QRCode)
+    /// A picture, such as an agent's logo, `side` points square.
+    case image(NSImage, side: CGFloat)
     /// A font family's name, drawn in that font.
     case fontName(family: String, style: String)
     /// A terminal sample drawn with the page's settings.

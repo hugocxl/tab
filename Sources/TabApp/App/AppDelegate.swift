@@ -33,6 +33,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         let model = AppModel(dirs: dirs, theme: theme)
         self.model = model
         Task { await theme.loadCatalog(customDirectory: dirs.themes) }
+        Task.detached(priority: .utility) {
+            do {
+                try AgentIntegrations.current().refresh()
+            } catch {
+                Log.app.error("agent integrations: \(String(describing: error), privacy: .public)")
+            }
+        }
         let controller = MainWindowController(model: model)
         windowController = controller
         NSApp.mainMenu = MenuBarBuilder.build(keymap: model.settings.keymap, actions: controller.actions, available: Self.features)

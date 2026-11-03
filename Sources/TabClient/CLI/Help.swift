@@ -21,6 +21,8 @@ public enum CLIHelp {
       browser       Drive browser tabs in the desktop app on this computer
       install-skills
                     Install the tab-cli skill for AI coding agents
+      integrations  Show, install or remove the skill and hooks of coding agents
+      agent-context Print what an agent starting in a Tab terminal is told
       stdio         Connect stdin/stdout to the server; used over SSH
       --help | --version | --build-info
 
@@ -214,6 +216,23 @@ public enum CLIHelp {
     An installed copy is replaced.
     """
 
+    public static let integrations = """
+    Usage: tab integrations [status|install|remove] [--json]
+    Teaches the coding agents on this computer (Claude Code, Codex, OpenCode and
+    Pi) to use Tab. install writes the tab-cli skill into each agent found, and a
+    session-start hook into Claude Code and Codex that runs tab agent-context.
+    remove takes them out again; other skills, hooks and settings are kept.
+    Codex runs a new or changed hook only after you approve it with /hooks.
+    Text status columns: agent, found, skill, hook (tab-separated).
+    """
+
+    public static let agentContext = """
+    Usage: tab agent-context
+    Prints what Tab tells a coding agent whose session starts in a Tab terminal:
+    which terminal it is and how to use tab. Prints nothing outside a Tab terminal.
+    Agent hooks installed by tab integrations run it.
+    """
+
     public static let stdio = """
     Usage: tab stdio [--no-start]
     Joins stdin and stdout to this computer's server, for Tab on another computer,
@@ -235,6 +254,8 @@ public enum CLIHelp {
         case "mobile": mobile
         case "browser": browser
         case "install-skills": installSkills
+        case "integrations": integrations
+        case "agent-context": agentContext
         case "stdio": stdio
         default: nil
         }

@@ -236,6 +236,11 @@ struct SettingControlView: View {
         case .qrCode(let code):
             QRCodeImage(code: code)
                 .frame(width: 200, height: 200)
+        case .image(let image, let side):
+            Image(nsImage: image)
+                .resizable()
+                .frame(width: side, height: side)
+                .accessibilityHidden(true)
         case .row(let children):
             HStack(spacing: 8) {
                 ForEach(children.indices, id: \.self) { index in

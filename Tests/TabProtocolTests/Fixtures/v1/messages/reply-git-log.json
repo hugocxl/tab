@@ -1,0 +1,1 @@
+{"body":{"reply":{"commits":[{"authorDate":"2026","authorName":"A","hash":"abcdef","parentHashes":["123"],"refs":[{"kind":"localBranch","name":"main"},{"kind":"tag","name":"v1"}],"shortHash":"abc","subject":"S"}],"type":"log"},"type":"git"},"id":1,"type":"reply"}

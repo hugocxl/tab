@@ -1,0 +1,1 @@
+{"body":{"reply":{"diff":{"additions":1,"binary":false,"deletions":1,"rows":[{"kind":"hunk","text":"@@ -1 +1 @@"},{"kind":"deletion","oldLineNumber":1,"oldText":"a","text":"-a"},{"kind":"addition","newLineNumber":1,"newText":"b","text":"+b"}],"truncated":false},"type":"diff"},"type":"git"},"id":1,"type":"reply"}

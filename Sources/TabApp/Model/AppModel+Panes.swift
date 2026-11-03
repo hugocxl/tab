@@ -161,6 +161,19 @@ extension AppModel {
         return opened
     }
 
+    /// Puts `prompt` in the composer of the agent pane `pane`, once the pane
+    /// shows and its composer takes text, for the user to review and send.
+    func draftAgentPrompt(_ prompt: String, in pane: PaneId, attempts: Int = 40) {
+        if let agent = controller(for: pane) as? AgentPaneController,
+           (try? AgentConversationTemplateAction.append(prompt, expectedPrompt: "", surface: agent.surface)) != nil {
+            return
+        }
+        guard attempts > 1 else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            self?.draftAgentPrompt(prompt, in: pane, attempts: attempts - 1)
+        }
+    }
+
     /// Opens the existing server-owned conversation targeted by a body citation/link.
     @discardableResult
     func openExistingAgent(_ snapshot: AgentChatSnapshot) -> PaneId? {

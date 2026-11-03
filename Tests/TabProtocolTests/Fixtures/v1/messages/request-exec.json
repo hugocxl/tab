@@ -1,0 +1,1 @@
+{"body":{"request":{"argv":["git","status"],"cwd":"/Users/me/src/tab","env":{"A":"b"},"job":1,"project":"01000000-0000-4000-8000-000000000001","stdin":"AQ==","timeoutMs":1000},"type":"exec"},"id":1,"type":"request"}

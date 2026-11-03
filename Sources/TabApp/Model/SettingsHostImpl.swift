@@ -106,6 +106,28 @@ public final class SettingsHostImpl: SettingsHost {
         try await model.browserProfiles.importBrowserData(from: source, cookies: cookies)
     }
 
+    // MARK: Agents
+
+    public func agentIntegrations() async throws -> [AgentIntegrationStatus] {
+        try await Task.detached(priority: .userInitiated) { try AgentIntegrations.current().status() }.value
+    }
+
+    public func setAgentIntegration(_ enabled: Bool) async throws -> [AgentIntegrationStatus] {
+        try await Task.detached(priority: .userInitiated) {
+            let integrations = try AgentIntegrations.current()
+            return enabled ? try integrations.install() : try integrations.remove()
+        }.value
+    }
+
+    public func migrationSources() -> [TerminalMigration.Source] {
+        TerminalMigration.available(home: URL(fileURLWithPath: ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory()))
+    }
+
+    public func openAgent(prompt: String) throws {
+        guard let pane = model.newTab(.agent) else { throw ModelError("Tab couldn't open an agent tab.") }
+        model.draftAgentPrompt(prompt, in: pane)
+    }
+
     // MARK: Backup
 
     public func backupState() throws -> Data {

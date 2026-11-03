@@ -3,6 +3,25 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.46.0 - 2026-11-03
+
+### Added
+
+- Settings has an Integrations page that teaches Claude Code, Codex, OpenCode
+  and Pi to use Tab, with a skill and a hook that tells an agent which Tab
+  terminal it runs in.
+- `tab integrations` shows, installs or removes the same agent integrations
+  from a shell.
+- Settings → Integrations opens an agent tab, ready to send, that brings your
+  shortcuts, font, cursor and colors over from Ghostty, iTerm2, kitty, WezTerm,
+  Alacritty, Warp, tmux or Terminal.
+
+### Fixed
+
+- Programs in Tab terminals can now ask for the camera, microphone, contacts,
+  calendars, photos, location, Bluetooth or control of other apps, instead of
+  being denied without a prompt.
+
 ## 0.45.0 - 2026-11-03
 
 ### Added
