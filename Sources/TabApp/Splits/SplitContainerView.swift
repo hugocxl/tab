@@ -315,7 +315,9 @@ final class EmptyProjectView: ThemedView {
     private let glyph = NSImageView()
     private let title = makeLabel("", font: AppFont.system(14, weight: .semibold))
     private let message = makeLabel("", font: AppFont.small)
+    private let tips = makeLabel("", font: AppFont.small)
     private let buttons = NSStackView()
+    private var actionButtons: [PaneKind: PillButton] = [:]
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -328,15 +330,20 @@ final class EmptyProjectView: ThemedView {
         message.alignment = .center
         message.lineBreakMode = .byWordWrapping
         message.maximumNumberOfLines = 0
-        message.preferredMaxLayoutWidth = 360
+        message.preferredMaxLayoutWidth = 420
+        tips.alignment = .center
+        tips.lineBreakMode = .byWordWrapping
+        tips.maximumNumberOfLines = 0
+        tips.preferredMaxLayoutWidth = 420
         buttons.orientation = .horizontal
         buttons.spacing = Metrics.controlGap
         for kind in PaneKind.created {
             let button = PillButton("\(kind.name) Pane", style: kind == .terminal ? .primary : .normal)
             button.onPress = { [weak self] in self?.onNewPane?(kind) }
             buttons.addArrangedSubview(button)
+            actionButtons[kind] = button
         }
-        let stack = NSStackView(views: [glyph, title, message, buttons])
+        let stack = NSStackView(views: [glyph, title, message, buttons, tips])
         stack.orientation = .vertical
         stack.spacing = 16
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -345,7 +352,8 @@ final class EmptyProjectView: ThemedView {
             stack.centerXAnchor.constraint(equalTo: centerXAnchor),
             stack.centerYAnchor.constraint(equalTo: centerYAnchor),
             stack.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor, constant: -32),
-            message.widthAnchor.constraint(lessThanOrEqualToConstant: 360),
+            message.widthAnchor.constraint(lessThanOrEqualToConstant: 420),
+            tips.widthAnchor.constraint(lessThanOrEqualToConstant: 420),
         ])
     }
 
@@ -353,10 +361,20 @@ final class EmptyProjectView: ThemedView {
 
     func update(project: Project, model: AppModel) {
         let missing = project.status == .missing
-        title.stringValue = missing ? "Project folder is missing" : "Nothing open in \(project.name)"
+        let onboarding = project.home && !missing
+        for (kind, button) in actionButtons {
+            button.title = "\(kind.name) \(onboarding ? "Tab" : "Pane")"
+        }
+        title.stringValue = missing ? "Project folder is missing" : onboarding ? "Welcome to Tab" : "Nothing open in \(project.name)"
         message.stringValue = missing
             ? "This project’s folder could not be found. Remove the project from the sidebar to clear its tabs."
-            : "Open a pane to start working in this project."
+            : onboarding
+                ? "Your workspace for terminals, AI agents, browsers, and devices. Pick a place to begin."
+                : "Open a pane to start working in this project."
+        tips.stringValue = onboarding
+            ? "A tab is a card in the sidebar. Panes live inside a tab and can be split side by side.\n\nAdd a code folder with Add Project, or press ⌘T for a terminal."
+            : ""
+        tips.isHidden = !onboarding
         buttons.isHidden = missing
         onNewPane = { [weak model] kind in model?.newPane(kind, in: project.id) }
     }
@@ -375,6 +393,7 @@ final class EmptyProjectView: ThemedView {
         glyph.contentTintColor = theme.fgMuted
         title.textColor = theme.fg
         message.textColor = theme.fgMuted
+        tips.textColor = theme.fgMuted
         needsDisplay = true
     }
 

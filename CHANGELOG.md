@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.45.0 - 2026-11-03
+
+### Added
+
+- An empty Home now welcomes you with actions for terminal, agent, browser and
+  device tabs, plus a short guide to tabs and panes.
+
 ## 0.44.0 - 2026-11-03
 
 ### Fixed
