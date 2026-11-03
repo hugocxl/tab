@@ -3,6 +3,18 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.44.0 - 2026-11-03
+
+### Fixed
+
+- Typing on your Mac's keyboard now reaches iOS simulators in device panes
+  instead of requiring clicks on the on-screen keyboard.
+
+### Added
+
+- Device panes for iOS simulators have a Simulate Hardware Keyboard switch in
+  the header and More menu to bring back the on-screen keyboard.
+
 ## 0.43.0 - 2026-11-02
 
 ### Changed

@@ -249,6 +249,10 @@ final class AppStateTests: XCTestCase {
         let restored = try roundTrip(state)
         XCTAssertEqual(restored.device(picker), chosen)
         XCTAssertEqual(restored.pane(picker)?.title, "iPhone 18 Pro")
+        var typingOnScreen = chosen
+        typingOnScreen.hardwareKeyboard = false
+        XCTAssertTrue(try state.setDevice(picker, typingOnScreen))
+        XCTAssertEqual(try roundTrip(state).device(picker)?.simulatesHardwareKeyboard, false)
         let terminal = try XCTUnwrap(state.project(project)?.tabs[0].panes.first { $0.content.isTerminal }?.id)
         XCTAssertThrowsError(try state.setDevice(terminal, chosen))
     }

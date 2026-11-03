@@ -235,6 +235,10 @@ final class AndroidSession: DeviceSession {
     func isDark() async throws -> Bool { try await AndroidEmulators.isDark(try running()) }
     func setDark(_ dark: Bool) async throws { try await AndroidEmulators.setDark(try running(), dark) }
 
+    /// Keys always reach the emulator, so it has no keyboard switch.
+    var hasHardwareKeyboardSwitch: Bool { false }
+    func setHardwareKeyboard(_ connected: Bool) async throws {}
+
     /// Frames arrive upright, so the view never turns them.
     func orientation() async throws -> DeviceOrientation { .portrait }
 

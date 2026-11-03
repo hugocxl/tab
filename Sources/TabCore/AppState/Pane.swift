@@ -23,15 +23,23 @@ public struct DevicePane: Codable, Hashable, Sendable {
     public var avd: String?
     /// The device's name when it was chosen, shown until it is found.
     public var name: String?
+    /// Whether the simulator has a hardware keyboard connected, so the Mac's
+    /// keys type on it; `nil` means connected.
+    public var hardwareKeyboard: Bool?
 
-    public init(udid: String? = nil, avd: String? = nil, name: String? = nil) {
+    public init(udid: String? = nil, avd: String? = nil, name: String? = nil, hardwareKeyboard: Bool? = nil) {
         self.udid = udid
         self.avd = avd
         self.name = name
+        self.hardwareKeyboard = hardwareKeyboard
     }
 
     /// Whether a device was chosen.
     public var isChosen: Bool { udid != nil || avd != nil }
+
+    /// Whether the Mac's keys type on the device instead of its on-screen
+    /// keyboard.
+    public var simulatesHardwareKeyboard: Bool { hardwareKeyboard ?? true }
 }
 
 /// What a pane shows: its kind and target.
@@ -80,7 +88,7 @@ public enum PaneContent: Codable, Hashable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case type, session, provider, url, profile, path, staged, udid, avd, name
+        case type, session, provider, url, profile, path, staged, udid, avd, name, hardwareKeyboard
     }
 
     public init(from decoder: Decoder) throws {
@@ -100,7 +108,8 @@ public enum PaneContent: Codable, Hashable, Sendable {
             self = .device(DevicePane(
                 udid: try container.decodeIfPresent(String.self, forKey: .udid),
                 avd: try container.decodeIfPresent(String.self, forKey: .avd),
-                name: try container.decodeIfPresent(String.self, forKey: .name)
+                name: try container.decodeIfPresent(String.self, forKey: .name),
+                hardwareKeyboard: try container.decodeIfPresent(Bool.self, forKey: .hardwareKeyboard)
             ))
         case "editor":
             self = .editor(path: try container.decode(String.self, forKey: .path))
@@ -133,6 +142,7 @@ public enum PaneContent: Codable, Hashable, Sendable {
             try container.encodeIfPresent(device.udid, forKey: .udid)
             try container.encodeIfPresent(device.avd, forKey: .avd)
             try container.encodeIfPresent(device.name, forKey: .name)
+            try container.encodeIfPresent(device.hardwareKeyboard, forKey: .hardwareKeyboard)
         case .editor(let path):
             try container.encode("editor", forKey: .type)
             try container.encode(path, forKey: .path)

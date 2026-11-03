@@ -29,6 +29,8 @@ protocol DeviceSession: AnyObject {
 
     /// The buttons the header and menu offer.
     var buttons: [DeviceButton] { get }
+    /// Whether the device can connect and disconnect a hardware keyboard.
+    var hasHardwareKeyboardSwitch: Bool { get }
 
     /// Finds the device and starts following its state.
     func connect() async throws
@@ -40,6 +42,8 @@ protocol DeviceSession: AnyObject {
     func shutDown() async throws
     func isDark() async throws -> Bool
     func setDark(_ dark: Bool) async throws
+    /// Connects or disconnects the hardware keyboard, if it has the switch.
+    func setHardwareKeyboard(_ connected: Bool) async throws
     /// How the screen view turns the surface to show it upright.
     func orientation() async throws -> DeviceOrientation
     /// Turns the device a quarter counterclockwise per turn; returns how
@@ -51,6 +55,7 @@ protocol DeviceSession: AnyObject {
 
 extension SimulatorSession: DeviceSession {
     var buttons: [DeviceButton] { [.home, .lock] }
+    var hasHardwareKeyboardSwitch: Bool { true }
 
     func press(_ button: DeviceButton) {
         let hardware: SimulatorBridge.HardwareButton

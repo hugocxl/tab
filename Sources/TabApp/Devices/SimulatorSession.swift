@@ -170,6 +170,17 @@ final class SimulatorSession {
         }
     }
 
+    /// Connects or disconnects the device's hardware keyboard.
+    func setHardwareKeyboard(_ connected: Bool) async throws {
+        guard isBooted, let device, !closed else { return }
+        let bridge = bridge
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            bridge.queue.async {
+                continuation.resume(with: Result { try bridge.setHardwareKeyboard(device, connected: connected) })
+            }
+        }
+    }
+
     var onInputError: ((Error) -> Void)?
 
     private func inputFailed(_ error: Error) {

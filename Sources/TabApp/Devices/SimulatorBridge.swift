@@ -176,6 +176,23 @@ final class SimulatorBridge: @unchecked Sendable {
         return client
     }
 
+    /// Connects or disconnects `device`'s hardware keyboard. While it is
+    /// disconnected the device ignores keyboard input and shows its
+    /// on-screen keyboard instead.
+    func setHardwareKeyboard(_ device: AnyObject, connected: Bool) throws {
+        dispatchPrecondition(condition: .onQueue(queue))
+        let selector = NSSelectorFromString("setHardwareKeyboardEnabled:keyboardType:error:")
+        guard device.responds(to: selector), let method = class_getMethodImplementation(type(of: device), selector) else {
+            throw SimulatorError.unavailable("CoreSimulator can't connect a hardware keyboard")
+        }
+        typealias Function = @convention(c) (AnyObject, Selector, Bool, UInt8, UnsafeMutablePointer<NSError?>?) -> Bool
+        var error: NSError?
+        // Keyboard type 0 is the device's default layout.
+        guard unsafeBitCast(method, to: Function.self)(device, selector, connected, 0, &error) else {
+            throw SimulatorError.unavailable(error?.localizedDescription ?? "the hardware keyboard didn't change")
+        }
+    }
+
     /// Sends `messages` in order. Each message is freed once sent.
     func send(_ messages: [HIDMessage], to client: AnyObject) {
         dispatchPrecondition(condition: .onQueue(queue))

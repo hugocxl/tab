@@ -87,6 +87,10 @@ final class DevicePaneController: PaneContentController {
             }
             actions.append(PaneAction(id: "device.home", icon: .home, label: "Home") { [weak self] in self?.press(.home) })
             actions.append(PaneAction(id: "device.rotate", icon: .rotate, label: "Rotate Left") { [weak self] in self?.rotate(by: 1) })
+            if session.hasHardwareKeyboardSwitch {
+                actions.append(PaneAction(id: "device.keyboard", icon: .keyboard, label: "Simulate Hardware Keyboard",
+                                          isActive: state.simulatesHardwareKeyboard) { [weak self] in self?.toggleHardwareKeyboard() })
+            }
             actions.append(PaneAction(id: "device.appearance", icon: .appearance, label: "Toggle Dark Appearance",
                                       isActive: dark ?? false) { [weak self] in self?.toggleAppearance() })
             actions.append(PaneAction(id: "device.screenshot", icon: .camera, label: "Screenshot") { [weak self] in self?.screenshot() })
@@ -108,6 +112,11 @@ final class DevicePaneController: PaneContentController {
             }
             builder.add("Rotate Left") { [weak self] in self?.rotate(by: 1) }
             builder.add("Rotate Right") { [weak self] in self?.rotate(by: -1) }
+            if session.hasHardwareKeyboardSwitch {
+                builder.add("Simulate Hardware Keyboard", checked: state.simulatesHardwareKeyboard) { [weak self] in
+                    self?.toggleHardwareKeyboard()
+                }
+            }
             builder.add("Paste Text") { [weak self] in self?.pasteText() }
             builder.add("Screenshot") { [weak self] in self?.screenshot() }
             builder.section()
@@ -204,6 +213,7 @@ final class DevicePaneController: PaneContentController {
             if shown { session?.startScreen() }
             loadAppearance()
             loadOrientation()
+            applyHardwareKeyboard()
         } else if phase != .starting {
             phase = .off
             screen.show(nil)
@@ -256,6 +266,22 @@ final class DevicePaneController: PaneContentController {
     private func pasteText() {
         guard let text = NSPasteboard.general.string(forType: .string), !text.isEmpty else { return }
         screen.type(text)
+    }
+
+    /// A device starts each boot with its own keyboard setting, so the
+    /// pane's is applied whenever it boots.
+    private func applyHardwareKeyboard() {
+        guard session?.hasHardwareKeyboardSwitch == true else { return }
+        let connected = state.simulatesHardwareKeyboard
+        run { try await $0.setHardwareKeyboard(connected) }
+    }
+
+    private func toggleHardwareKeyboard() {
+        state.hardwareKeyboard = !state.simulatesHardwareKeyboard
+        let saved = state
+        _ = model?.edit { try $0.setDevice(self.pane, saved) }
+        titleDidChange?()
+        applyHardwareKeyboard()
     }
 
     private func loadOrientation() {
