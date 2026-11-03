@@ -1,6 +1,7 @@
 import XCTest
 @testable import TabClient
 import TabCore
+import TabProtocol
 
 final class AgentIntegrationTests: XCTestCase {
     private var home: URL!
@@ -45,7 +46,9 @@ final class AgentIntegrationTests: XCTestCase {
         XCTAssertEqual(installed.first { $0.agent == .claude }?.hook, .installed)
         XCTAssertEqual(installed.first { $0.agent == .codex }?.skill, .installed)
         XCTAssertEqual(installed.first { $0.agent == .opencode }?.found, false)
-        XCTAssertEqual(try HookDocument.read(file).tabCommands, [integrations().hookCommand])
+        let installedHooks = try HookDocument.read(file).tabHooks
+        XCTAssertEqual(Set(installedHooks.map(\.hook)), Set(TabHook.all(for: .claude)))
+        XCTAssertEqual(installedHooks.count, TabHook.all(for: .claude).count, "installing twice adds nothing")
         XCTAssertEqual(try json(".claude/settings.json")["model"] as? String, "opus")
         XCTAssertFalse(FileManager.default.fileExists(atPath: home.appendingPathComponent(".config/opencode").path))
 
@@ -77,8 +80,8 @@ final class AgentIntegrationTests: XCTestCase {
         XCTAssertEqual(integrations().status(.claude).hook, .installed)
         XCTAssertEqual(integrations().status(.codex).hook, .installed)
         XCTAssertEqual(integrations().status(.opencode).skill, .missing)
-        XCTAssertEqual(try HookDocument.read(home.appendingPathComponent(".claude/settings.json")).tabCommands,
-                       [integrations().hookCommand])
+        XCTAssertEqual(Set(try HookDocument.read(home.appendingPathComponent(".claude/settings.json")).tabHooks.map(\.program)),
+                       [integrations().cli])
     }
 
     func testRefreshLeavesTheHookOfAnotherInstalledTab() throws {
@@ -90,8 +93,8 @@ final class AgentIntegrationTests: XCTestCase {
         try integrations().refresh()
 
         XCTAssertEqual(integrations().status(.claude).hook, .installed)
-        XCTAssertEqual(try HookDocument.read(home.appendingPathComponent(".claude/settings.json")).tabCommands,
-                       [integrations(cli: development.path).hookCommand])
+        XCTAssertEqual(Set(try HookDocument.read(home.appendingPathComponent(".claude/settings.json")).tabHooks.map(\.program)),
+                       [development])
     }
 
     func testAHookFileBehindALinkIsEditedWhereItLives() throws {
@@ -104,7 +107,7 @@ final class AgentIntegrationTests: XCTestCase {
 
         let link = try FileManager.default.destinationOfSymbolicLink(atPath: home.appendingPathComponent(".claude/settings.json").path)
         XCTAssertEqual(link, dotfiles.path)
-        XCTAssertEqual(try HookDocument.read(dotfiles).tabCommands.count, 1)
+        XCTAssertEqual(try HookDocument.read(dotfiles).tabHooks.count, TabHook.all(for: .claude).count)
     }
 
     func testContextOnlyInsideATabTerminal() {
@@ -114,9 +117,31 @@ final class AgentIntegrationTests: XCTestCase {
     }
 
     func testOnlyTabsOwnHooksCount() {
-        XCTAssertTrue(HookDocument.isTab("'/Applications/Tab Dev.app/Contents/MacOS/tab' agent-context"))
-        XCTAssertFalse(HookDocument.isTab("/usr/local/bin/other agent-context"))
-        XCTAssertFalse(HookDocument.isTab("tab agent-context --verbose"))
+        XCTAssertNotNil(HookDocument.parse("'/Applications/Tab Dev.app/Contents/MacOS/tab' agent-context"))
+        XCTAssertEqual(HookDocument.parse("/x/tab agent-event codex idle")?.arguments, ["agent-event", "codex", "idle"])
+        XCTAssertNil(HookDocument.parse("/usr/local/bin/other agent-context"))
+        XCTAssertNil(HookDocument.parse("tab session list"))
+    }
+
+    func testAnOlderSingleHookInstallIsUpgradedByRefresh() throws {
+        let file = home.appendingPathComponent(".claude/settings.json")
+        let old = Executable.commandLine([integrations().cli.path, "agent-context"])
+        try JSONSerialization.data(withJSONObject: ["hooks": ["SessionStart": [["hooks": [["type": "command", "command": old]]]]]])
+            .write(to: file)
+        XCTAssertEqual(integrations().status(.claude).hook, .outdated)
+
+        try integrations().refresh()
+
+        XCTAssertEqual(integrations().status(.claude).hook, .installed)
+        XCTAssertEqual(try HookDocument.read(file).tabHooks.count, TabHook.all(for: .claude).count)
+    }
+
+    func testAgentEventArguments() throws {
+        XCTAssertEqual(try CLIParser.parse(["agent-event", "claude", "blocked"]).command,
+                       .agentEvent(provider: .claude, state: .blocked))
+        XCTAssertEqual(try CLIParser.parse(["agent-event", "codex", "ended"]).command,
+                       .agentEvent(provider: .codex, state: nil))
+        XCTAssertThrowsError(try CLIParser.parse(["agent-event", "claude", "sleeping"]))
     }
 
     func testIntegrationsArguments() throws {

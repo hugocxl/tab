@@ -44,8 +44,12 @@ public struct Feature: RawRepresentable, Hashable, Codable, Sendable {
     /// Existing file writes may safely create missing workspace parent directories.
     public static let fileWriteParents = Feature(rawValue: "fileWriteParents")
 
+    /// Agents' hooks report their state with `reportAgentState`.
+    public static let agentStateReports = Feature(rawValue: "agentStateReports")
+
     /// Features this build's server supports.
-    public static let all: [Feature] = [.terminalInput, .sessionEnvironment, .fileSearch, .fileByteRanges, .pullRequestPreview, .fileWriteParents]
+    public static let all: [Feature] = [.terminalInput, .sessionEnvironment, .fileSearch, .fileByteRanges, .pullRequestPreview,
+                                        .fileWriteParents, .agentStateReports]
 }
 
 /// What kind of program a client is.
@@ -100,6 +104,8 @@ public enum Limits {
     public static let maxSearchScannedRows: UInt64 = 2000
     public static let maxSessionReferences = 16_384
     public static let activityHistoryLimit = 200
+    /// The most a terminal notification's title or text keeps, in bytes.
+    public static let maxNotificationText = 1024
     public static let maxFileBytes = 5 * 1024 * 1024
     public static let maxFileEntries = 16_384
     public static let maxFilePathBytes = 2 * 1024 * 1024
@@ -165,10 +171,14 @@ public struct ServerInfo: Hashable, Codable, Sendable {
     /// Differs for every start of the server.
     public var instance: UInt64
     public var server: ServerId
+    /// The previous server of this profile stopped without ending its
+    /// sessions, such as in a crash; older servers leave it out.
+    public var previousStopUnclean: Bool?
 
-    public init(build: BuildInfo, instance: UInt64, server: ServerId) {
+    public init(build: BuildInfo, instance: UInt64, server: ServerId, previousStopUnclean: Bool? = nil) {
         self.build = build
         self.instance = instance
         self.server = server
+        self.previousStopUnclean = previousStopUnclean
     }
 }

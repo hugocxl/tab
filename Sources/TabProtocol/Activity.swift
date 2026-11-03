@@ -99,14 +99,18 @@ public enum EventKind: OpenEnum {
     case attention
     /// The agent finished working.
     case completed
+    /// A program asked for a desktop notification (OSC 9 or OSC 777);
+    /// the event's `title` and `body` hold it.
+    case notification
     case unknown(String)
 
-    public static let knownCases: [EventKind] = [.attention, .completed]
+    public static let knownCases: [EventKind] = [.attention, .completed, .notification]
 
     public var rawValue: String {
         switch self {
         case .attention: "attention"
         case .completed: "completed"
+        case .notification: "notification"
         case .unknown(let value): value
         }
     }
@@ -115,6 +119,7 @@ public enum EventKind: OpenEnum {
         switch self {
         case .attention: "Needs your attention"
         case .completed: "Finished working"
+        case .notification: "Sent a notification"
         case .unknown: "Has an update"
         }
     }
@@ -131,9 +136,12 @@ public struct AgentEvent: Hashable, Codable, Sendable {
     public var timestamp: UInt64
     public var kind: EventKind
     public var read: Bool
+    /// A notification's title and text, as the program sent them.
+    public var title: String?
+    public var body: String?
 
     public init(id: UInt64, session: SessionId, project: ProjectId, provider: AgentProvider, timestamp: UInt64,
-                kind: EventKind, read: Bool = false) {
+                kind: EventKind, read: Bool = false, title: String? = nil, body: String? = nil) {
         self.id = id
         self.session = session
         self.project = project
@@ -141,6 +149,22 @@ public struct AgentEvent: Hashable, Codable, Sendable {
         self.timestamp = timestamp
         self.kind = kind
         self.read = read
+        self.title = title
+        self.body = body
+    }
+}
+
+/// What an agent's hook reports about the agent in a session: its state, or
+/// `nil` once its session ended.
+public struct AgentStateReport: Hashable, Codable, Sendable {
+    public var session: SessionId
+    public var provider: AgentProvider
+    public var state: AgentState?
+
+    public init(session: SessionId, provider: AgentProvider, state: AgentState?) {
+        self.session = session
+        self.provider = provider
+        self.state = state
     }
 }
 

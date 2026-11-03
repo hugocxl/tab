@@ -249,6 +249,8 @@ public enum RequestBody: Hashable, Codable, Sendable {
     case cancelCreation(OperationId)
     /// Writes bytes to a session's terminal (CLI `send`).
     case writeInput(session: SessionId, bytes: Data)
+    /// An agent's own hook says what it is doing; see `Feature.agentStateReports`.
+    case reportAgentState(AgentStateReport)
 
     // Catalog
     case readCatalog(after: ProjectId?, revision: UInt64?)
@@ -325,6 +327,7 @@ public enum RequestBody: Hashable, Codable, Sendable {
         case "identifyClient": self = .identifyClient(try c("kind"))
         case "cancelCreation": self = .cancelCreation(try c("operation"))
         case "writeInput": self = .writeInput(session: try c("session"), bytes: try c("bytes"))
+        case "reportAgentState": self = .reportAgentState(try c("report"))
         case "readCatalog": self = .readCatalog(after: try c("after"), revision: try c("revision"))
         case "mutateProject": self = .mutateProject(try c("intent"))
         case "listProjectSessions":
@@ -440,6 +443,9 @@ public enum RequestBody: Hashable, Codable, Sendable {
             var c = try TaggedEncoding(encoder, "writeInput")
             try c(session, "session")
             try c(bytes, "bytes")
+        case .reportAgentState(let report):
+            var c = try TaggedEncoding(encoder, "reportAgentState")
+            try c(report, "report")
         case .readCatalog(let after, let revision):
             var c = try TaggedEncoding(encoder, "readCatalog")
             try c(after, "after")
@@ -539,6 +545,7 @@ public enum ReplyBody: Hashable, Codable, Sendable {
     case sessionReferencesSynced
     case clientIdentified(SessionClient)
     case inputWritten
+    case agentStateReported
 
     // Catalog
     case catalog(CatalogPage)
@@ -606,6 +613,7 @@ public enum ReplyBody: Hashable, Codable, Sendable {
         case "sessionReferencesSynced": self = .sessionReferencesSynced
         case "clientIdentified": self = .clientIdentified(try c("client"))
         case "inputWritten": self = .inputWritten
+        case "agentStateReported": self = .agentStateReported
         case "catalog": self = .catalog(try c("page"))
         case "projectMutated": self = .projectMutated(revision: try c("revision"))
         case "projectSessions": self = .projectSessions(try c("page"))
@@ -689,6 +697,7 @@ public enum ReplyBody: Hashable, Codable, Sendable {
             var c = try TaggedEncoding(encoder, "clientIdentified")
             try c(client, "client")
         case .inputWritten: try TaggedEncoding(encoder, "inputWritten")
+        case .agentStateReported: try TaggedEncoding(encoder, "agentStateReported")
         case .catalog(let page):
             var c = try TaggedEncoding(encoder, "catalog")
             try c(page, "page")

@@ -97,6 +97,11 @@ public protocol SettingsHost: AnyObject {
     /// Imports history and bookmarks, or cookies, into the default profile.
     func importBrowserData(from source: BrowserImportSource, cookies: Bool) async throws
 
+    // MARK: Privacy
+
+    /// What macOS answered Tab, and so programs in its terminals, for `permission`.
+    func privacyAccess(_ permission: PrivacyPermission) -> PrivacyAccess
+
     // MARK: Agents
 
     /// What Tab installed for each coding agent on this computer.
@@ -188,6 +193,8 @@ public final class PreviewSettingsHost: SettingsHost {
     public func browserImportSources() -> [BrowserImportSource] { importSources }
     public func importBrowserData(from source: BrowserImportSource, cookies: Bool) async throws {}
 
+    public var privacy: [PrivacyPermission: PrivacyAccess] = [.camera: .allowed, .microphone: .denied]
+    public func privacyAccess(_ permission: PrivacyPermission) -> PrivacyAccess { privacy[permission] ?? .notAsked }
     public func agentIntegrations() async throws -> [AgentIntegrationStatus] { integrations }
     public func setAgentIntegration(_ enabled: Bool) async throws -> [AgentIntegrationStatus] {
         for index in integrations.indices where integrations[index].found {

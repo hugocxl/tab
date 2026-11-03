@@ -81,6 +81,9 @@ public enum AgentSkill {
 
     Outside a Tab terminal, name the project: an ID, a unique name, or its folder.
 
+    Every session also has a name, such as `wispy-cedar`, shown by `session list`.
+    It works wherever an ID does while no other session has it.
+
     The words after `--` are joined with spaces, so quote the whole command to keep
     its own quotes, pipes, or `;`:
 
@@ -103,6 +106,16 @@ public enum AgentSkill {
     `--exit` waits for the terminal's shell to end. Use `exec` for a one-shot command,
     as in the test example, so the program replaces the shell and its exit ends the
     session. Without `exec`, the shell stays open after the program finishes.
+
+    ## Follow what happens
+
+    `tab session events` prints one JSON object per line until stopped: sessions
+    starting and ending, agents changing state (`working`, `blocked`, `idle`),
+    and notifications programs send. Give a session to follow only that one.
+
+    ```bash
+    tab session events "$TESTS" --json          # one JSON object per line
+    ```
 
     ## Read output
 

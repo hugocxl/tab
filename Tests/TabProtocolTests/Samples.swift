@@ -192,6 +192,7 @@ enum Samples {
         .clearScreen(channel), .setTerminalColors(colors),
         .syncSessionReferences(owner: operation, revision: 3, sessions: [session]),
         .identifyClient(.cli), .cancelCreation(operation), .writeInput(session: session, bytes: Data("ls\r".utf8)),
+        .reportAgentState(AgentStateReport(session: session, provider: .claude, state: .blocked)),
         .readCatalog(after: project, revision: 4), .readCatalog(after: nil, revision: nil),
         .mutateProject(ProjectIntent(operation: operation, mutation: .create(descriptor))),
         .mutateProject(ProjectIntent(operation: operation, mutation: .rename(project: project, name: "New"))),
@@ -224,7 +225,9 @@ enum Samples {
         revision: 9,
         agents: [AgentActivity(session: session, project: project, provider: .claude, state: .blocked)],
         events: [AgentEvent(id: 1, session: session, project: project, provider: .ohMyPi, timestamp: 1000,
-                            kind: .attention, read: false)]
+                            kind: .attention, read: false),
+                 AgentEvent(id: 2, session: session, project: project, provider: .unknown("terminal"), timestamp: 1001,
+                            kind: .notification, title: "Build", body: "Tests passed")]
     )
 
     static let replies: [ReplyBody] = [
@@ -244,7 +247,7 @@ enum Samples {
         .searchPage(SearchPage(matches: [SearchMatch(row: 9, start: 1, end: 4), SearchMatch(row: 2, start: 0, end: 1)],
                                next: HistoryCursor(3), totalRows: 10, scannedRows: 7)),
         .screenCleared, .terminalColorsSet, .sessionReferencesSynced,
-        .clientIdentified(SessionClient(id: client, kind: .mobile)), .inputWritten,
+        .clientIdentified(SessionClient(id: client, kind: .mobile)), .inputWritten, .agentStateReported,
         .catalog(CatalogPage(server: server, home: project,
                              revision: 1, projects: [ProjectDescriptor(id: project, home: true, directory: "/Users/me",
                                                                        name: "Home")], next: nil)),

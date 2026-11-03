@@ -126,6 +126,11 @@ public final class ServerRunner: @unchecked Sendable {
         timer.resume()
         retention = timer
         server.services.remote?.start(acceptor: server)
+        do {
+            try AtomicFile.write(Data("\(getpid())\n".utf8), to: server.configuration.dirs.serverRunning)
+        } catch {
+            ServerLog.error("could not mark the server running: \(error)")
+        }
         ServerLog.info("server started: socket=\(server.configuration.socket.path) pid=\(getpid())")
         let thread = Thread { [self] in acceptLoop() }
         thread.name = "tab.server.accept"
@@ -162,6 +167,7 @@ public final class ServerRunner: @unchecked Sendable {
         retention?.cancel()
         server.services.remote?.stop()
         server.endAllSessions()
+        try? FileManager.default.removeItem(at: server.configuration.dirs.serverRunning)
         server.closeConnections()
         signalSources.forEach { $0.cancel() }
         var held = stat()

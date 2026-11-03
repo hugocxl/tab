@@ -44,10 +44,10 @@ extension SettingsModel {
         guard status.isIntegrated else { return "Not set up" }
         if status.skill == .outdated || status.hook == .outdated { return "Updates when Tab next opens" }
         switch (status.skill, status.hook) {
-        case (.installed, .installed): return "Skill and session hook installed"
+        case (.installed, .installed): return "Skill and hooks installed"
         case (.installed, .unsupported): return "Skill installed"
-        case (.installed, .missing): return "Skill installed; turn integration off and on to add the session hook"
-        default: return "Session hook installed; turn integration off and on to add the skill"
+        case (.installed, .missing): return "Skill installed; turn integration off and on to add the hooks"
+        default: return "Hooks installed; turn integration off and on to add the skill"
         }
     }
 

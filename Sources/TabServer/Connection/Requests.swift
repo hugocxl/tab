@@ -157,6 +157,10 @@ extension ClientConnection {
         case .syncSessionReferences(let owner, let revision, let sessions):
             server.syncReferences(requester: self, owner: owner, revision: revision, sessions: sessions)
             return .sessionReferencesSynced
+        case .reportAgentState(let report):
+            guard let owner = server.owner(report.session) else { throw ServiceError.unknownSession(report.session) }
+            owner.reportAgent(report.provider, state: report.state)
+            return .agentStateReported
         case .identifyClient(let kind):
             guard kind.isKnown else { throw ServiceError(.unsupported, "This server doesn't know the client kind") }
             return .clientIdentified(setKind(kind))

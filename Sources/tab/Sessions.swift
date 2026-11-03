@@ -19,7 +19,7 @@ enum Sessions {
                     records.append(record(session))
                 }
             }
-            Output.list(records, columns: ["id", "projectId", "status", "attached", "directory"], json: json)
+            Output.list(records, columns: ["id", "projectId", "status", "attached", "directory", "name"], json: json)
         case .create(let selector, let directory, let size, let command):
             try await create(selector, directory: directory, size: size, command: command, client: client,
                              target: target, json: json)
@@ -89,6 +89,9 @@ enum Sessions {
                 "totalRows": .string(String(page.totalRows)),
                 "scannedRows": .string(String(page.scannedRows)),
             ]))
+        case .events(let selector):
+            let only: SessionId? = if let selector { try await calling(selector, client: client) } else { nil }
+            try await SessionEvents.follow(only, client: client, json: json)
         case .wait(let selector, let until, let timeoutMs):
             let session = try await calling(selector, client: client)
             let waited = try await wait(session, until: until, timeout: TimeInterval(timeoutMs) / 1000, client: client)
@@ -103,6 +106,7 @@ enum Sessions {
     static func record(_ session: ProjectSession) -> JSONValue {
         .object([
             "id": .string(session.info.id.description),
+            "name": .string(SessionName.of(session.info.id)),
             "projectId": .string(session.info.project.description),
             "directory": .string(session.info.directory.rawValue),
             "status": .string(session.status.rawValue),
@@ -181,6 +185,7 @@ enum Sessions {
         }
         Output.record(.object([
             "id": .string(session.id.description),
+            "name": .string(SessionName.of(session.id)),
             "projectId": .string(session.project.description),
             "directory": .string(session.directory.rawValue),
         ]), columns: ["id"], json: json)

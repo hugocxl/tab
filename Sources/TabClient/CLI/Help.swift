@@ -71,6 +71,7 @@ public enum CLIHelp {
       search [id] <text> [--ignore-case] [--before CURSOR] [--limit N] [--saved]
       wait [id] --text TEXT [--ignore-case] | --exit
            [--timeout SECONDS | --timeout-ms N]
+      events [id]                      Follow sessions, agents and notifications
       end [id] --yes                   End the process, keeping saved output
       discard [id] --yes               End the process and delete saved output
 
@@ -78,7 +79,8 @@ public enum CLIHelp {
     COMMAND words are joined with spaces without shell quoting; quote the whole
     command to preserve its quotes and shell syntax.
     Sessions outlive this command; the app lists them under Existing Terminals.
-    Session IDs are UUIDs; a unique start of one, of at least 4 characters, works.
+    Session IDs are UUIDs; a unique start of one, of at least 4 characters, works,
+    and so does a session's name, such as wispy-cedar, when no other has it.
     Inside a Tab terminal, the ID defaults to that terminal and the project to its
     project. Wait prints the first visible line containing TEXT, or how the session
     ended; it fails after the timeout (default 30 seconds, maximum 3600).
@@ -88,7 +90,11 @@ public enum CLIHelp {
     Ended sessions and their saved output are automatically removed after 7 days.
     Read-screen returns the last N visible rows (default 50), not scrollback.
     History/search return one page as JSON, with next for --before; 0 starts paging.
-    Text list columns: id, project-id, status, attached, directory.
+    Events prints one JSON object per line until interrupted: started, ended,
+    agent (its state: working, blocked or idle), attention, completed and
+    notification (a program's title and body). Without an id it follows every
+    session.
+    Text list columns: id, project-id, status, attached, directory, name.
     """
 
     public static let worktree = """
@@ -233,6 +239,13 @@ public enum CLIHelp {
     Agent hooks installed by tab integrations run it.
     """
 
+    public static let agentEvent = """
+    Usage: tab agent-event <agent> working|blocked|idle|ended
+    Tells Tab what the agent in this terminal is doing; agent is claude, codex,
+    opencode or pi. Agent hooks installed by tab integrations run it. It prints
+    nothing and never fails, so a missing server doesn't disturb the agent.
+    """
+
     public static let stdio = """
     Usage: tab stdio [--no-start]
     Joins stdin and stdout to this computer's server, for Tab on another computer,
@@ -256,6 +269,7 @@ public enum CLIHelp {
         case "install-skills": installSkills
         case "integrations": integrations
         case "agent-context": agentContext
+        case "agent-event": agentEvent
         case "stdio": stdio
         default: nil
         }

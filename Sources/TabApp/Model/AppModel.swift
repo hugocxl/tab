@@ -85,6 +85,8 @@ public final class AppModel {
     var replaying: Set<ServerId> = []
     var shownPanes: Set<PaneId> = []
     var deliveredNotifications: [ServerId: Set<UInt64>] = [:]
+    /// Server starts whose unclean predecessor was already reported, by instance.
+    var reportedUncleanStops: Set<UInt64> = []
     var gitRefreshing: Set<ProjectId> = []
     /// The project whose working tree the shell watches, and on which side
     /// connection.

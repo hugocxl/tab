@@ -204,6 +204,10 @@ public final class Terminal {
             callbacks.bell = false
             events.append(.bell)
         }
+        for notification in callbacks.notifications {
+            events.append(.notification(title: notification.title, body: notification.body))
+        }
+        callbacks.notifications.removeAll()
         return events
     }
 

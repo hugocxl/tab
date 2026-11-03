@@ -36,6 +36,8 @@ public enum CLICommand: Hashable, Sendable {
     case integrations(CLIIntegrations, json: Bool)
     /// Prints what Tab tells an agent starting in one of its terminals.
     case agentContext
+    /// An agent's hook reports its state for the terminal it runs in.
+    case agentEvent(provider: AgentProvider, state: AgentState?)
     /// Joins stdin and stdout to the server, for clients on other computers.
     case stdio(BridgeStart)
     /// Answers an ssh prompt for the running app.
@@ -105,6 +107,9 @@ public enum CLISession: Hashable, Sendable {
     case history(session: String?, before: UInt64, limit: UInt16, saved: Bool)
     case search(session: String?, query: String, before: UInt64, limit: UInt16, ignoreCase: Bool, saved: Bool)
     case wait(session: String?, until: CLIWaitUntil, timeoutMs: UInt32)
+    /// Follows sessions starting and ending, agent states and notifications;
+    /// `nil` follows every session.
+    case events(session: String?)
 }
 
 public enum CLIWaitUntil: Hashable, Sendable {
@@ -138,7 +143,8 @@ public enum CLIParser {
         }
         let command = try command(rest)
         switch command {
-        case .help, .version, .buildInfo, .stdio, .open, .browser, .installSkills, .integrations, .agentContext, .askpass:
+        case .help, .version, .buildInfo, .stdio, .open, .browser, .installSkills, .integrations, .agentContext, .agentEvent,
+             .askpass:
             throw CLIError("--host can't be combined with \(rest.first ?? "no command")")
         case .manage, .mobile:
             return CLIInvocation(host: host, command: command)
@@ -186,6 +192,9 @@ public enum CLIParser {
             if wantsHelp { return .help(CLIHelp.agentContext) }
             guard rest.isEmpty else { throw CLIError("usage: tab agent-context") }
             return .agentContext
+        case "agent-event":
+            if wantsHelp { return .help(CLIHelp.agentEvent) }
+            return try agentEvent(rest)
         case "browser":
             return try BrowserParser.parse(rest)
         default:
@@ -246,6 +255,26 @@ public enum CLIParser {
         default: throw CLIError("usage: tab integrations [status|install|remove] [--json]")
         }
         return .integrations(action, json: json)
+    }
+
+    static func agentEvent(_ arguments: [String]) throws -> CLICommand {
+        let usage = CLIError("usage: tab agent-event <agent> working|blocked|idle|ended")
+        guard arguments.count == 2, let agent = CodingAgent(rawValue: arguments[0]) else { throw usage }
+        let state: AgentState?
+        switch arguments[1] {
+        case "working": state = .working
+        case "blocked": state = .blocked
+        case "idle": state = .idle
+        case "ended": state = nil
+        default: throw usage
+        }
+        let provider: AgentProvider = switch agent {
+        case .claude: .claude
+        case .codex: .codex
+        case .opencode: .openCode
+        case .pi: .pi
+        }
+        return .agentEvent(provider: provider, state: state)
     }
 
     static func installSkills(_ arguments: [String]) throws -> [String] {
@@ -370,6 +399,12 @@ enum ManageParser {
             return .list(project: options.values["--project"], all: options.flag("--all"))
         }
         if verb == "create" { return try createSession(options) }
+        if verb == "events" {
+            guard options.words.count <= 1 else { throw CLIError("usage: tab session events [id]") }
+            let session = options.words.first
+            if let session, !SessionSelector.isValid(session) { throw CLIError(SessionSelector.invalid) }
+            return .events(session: session)
+        }
         let arguments: Int
         switch verb {
         case "send", "send-keys", "search": arguments = 1
@@ -383,7 +418,7 @@ enum ManageParser {
         }
         let session = given == 1 ? options.words[0] : nil
         if let session, !SessionSelector.isValid(session) {
-            throw CLIError("session ID must be a UUID or a start of one with at least 4 characters")
+            throw CLIError(SessionSelector.invalid)
         }
         let argument = { options.words[given] }
         let saved = options.flag("--saved")
@@ -566,15 +601,23 @@ struct Options {
 
 /// Session IDs on the command line: a whole UUID, or a unique start of one.
 public enum SessionSelector {
+    static let invalid = "a session is a UUID, a start of one with at least 4 characters, or a name such as wispy-cedar"
+
     public static func isValid(_ text: String) -> Bool {
-        if UUID(uuidString: text) != nil { return true }
+        if UUID(uuidString: text) != nil || SessionName.isName(text) { return true }
         return text.count >= 4 && text.count < 36
             && text.unicodeScalars.allSatisfy { CharacterSet(charactersIn: "0123456789abcdefABCDEF-").contains($0) }
     }
 
-    /// The one session whose ID is or starts with `text`.
+    /// The one session whose ID is or starts with `text`, or whose name it is.
     public static func resolve(_ text: String, among sessions: [SessionId]) throws -> SessionId {
         if let id = SessionId(string: text) { return id }
+        if SessionName.isName(text) {
+            let named = Set(sessions.filter { SessionName.of($0) == text })
+            guard let first = named.first else { throw CLIError("no session is named \(text)") }
+            guard named.count == 1 else { throw CLIError("more than one session is named \(text); use its ID") }
+            return first
+        }
         let prefix = text.lowercased()
         let matches = Set(sessions.filter { $0.description.hasPrefix(prefix) })
         guard let first = matches.first else { throw CLIError("no session starts with \(text)") }

@@ -3,6 +3,24 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.47.0 - 2026-11-03
+
+### Added
+
+- Claude Code and Codex now tell Tab through their own hooks when they start
+  working, need you or finish, so badges and notifications no longer rely on
+  reading the screen; reopening Tab adds the new hooks to agents already set up.
+- Programs in Tab terminals can show macOS notifications with OSC 9 or OSC 777,
+  such as when a build or test run finishes.
+- Every terminal has a readable name, such as `wispy-cedar`, that `tab session`
+  commands accept in place of its ID.
+- `tab session events` follows terminals starting and ending, agent states and
+  notifications as they happen.
+- Settings has a Privacy page that shows which permissions programs in Tab
+  terminals have, with shortcuts to change them.
+- Tab tells you when its server stopped unexpectedly, so terminals that closed
+  with it aren't a mystery.
+
 ## 0.46.0 - 2026-11-03
 
 ### Added

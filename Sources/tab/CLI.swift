@@ -31,6 +31,8 @@ enum CLI {
             if let context = AgentIntegrations.context(environment: ProcessInfo.processInfo.environment, cli: cli) {
                 Output.line(context)
             }
+        case .agentEvent(let provider, let state):
+            await AgentEventReport.send(provider: provider, state: state)
         case .stdio(let start):
             try StdioBridge.serve(try LocalServer.profile(), start: start)
         case .mobile(let command):

@@ -25,14 +25,14 @@ final class MessageTests: XCTestCase {
         for (index, body) in Samples.requests.enumerated() {
             roundTrip(Message.request(RequestId(UInt32(index)), body))
         }
-        XCTAssertEqual(try types(Samples.requests).count, 45, "add a sample for every RequestBody case")
+        XCTAssertEqual(try types(Samples.requests).count, 46, "add a sample for every RequestBody case")
     }
 
     func testEveryReplyRoundTrips() throws {
         for (index, body) in Samples.replies.enumerated() {
             roundTrip(Message.reply(RequestId(UInt32(index)), body))
         }
-        XCTAssertEqual(try types(Samples.replies).count, 42, "add a sample for every ReplyBody case")
+        XCTAssertEqual(try types(Samples.replies).count, 43, "add a sample for every ReplyBody case")
     }
 
     func testEveryEventRoundTrips() throws {

@@ -1,6 +1,7 @@
 import Darwin
 import Foundation
 import TabCore
+import TabProtocol
 
 /// A coding agent Tab can teach to use `tab`.
 public enum CodingAgent: String, CaseIterable, Hashable, Codable, Sendable {
@@ -104,7 +105,7 @@ public struct AgentIntegrations: Sendable {
         root(agent).appendingPathComponent("skills/\(AgentSkill.folderName)/SKILL.md")
     }
 
-    /// The JSON file whose `hooks.SessionStart` runs the hook.
+    /// The JSON file whose `hooks` run Tab's hooks.
     public func hookFile(_ agent: CodingAgent) -> URL? {
         switch agent {
         case .claude: root(agent).appendingPathComponent("settings.json")
@@ -112,9 +113,6 @@ public struct AgentIntegrations: Sendable {
         case .opencode, .pi: nil
         }
     }
-
-    /// What the hook runs: this `tab`, quoted for a shell.
-    public var hookCommand: String { Executable.commandLine([cli.path, Self.contextCommand]) }
 
     // MARK: Status
 
@@ -131,12 +129,14 @@ public struct AgentIntegrations: Sendable {
         }
         var hook = AgentIntegrationStatus.Part.unsupported
         if let file = hookFile(agent) {
-            let commands = (try? HookDocument.read(file).tabCommands) ?? []
-            if commands.isEmpty {
+            let found = (try? HookDocument.read(file).tabHooks) ?? []
+            if found.isEmpty {
                 hook = .missing
+            } else if Set(found.map(\.hook)) != Set(TabHook.all(for: agent)) {
+                hook = .outdated
             } else {
-                // Another Tab, such as a development build, may own the hook; it stays while its `tab` exists.
-                hook = commands.contains { HookDocument.program($0).map(Executable.isExecutableFile) ?? false } ? .installed : .outdated
+                // Another Tab, such as a development build, may own the hooks; they stay while its `tab` exists.
+                hook = found.allSatisfy { Executable.isExecutableFile($0.program) } ? .installed : .outdated
             }
         }
         return AgentIntegrationStatus(agent: agent, found: isDirectory(root(agent)), skill: skill, hook: hook)
@@ -159,7 +159,7 @@ public struct AgentIntegrations: Sendable {
         }
         for agent in found {
             try writeSkill(agent)
-            if let file = hookFile(agent) { try HookDocument.update(file) { $0.setTabCommand(hookCommand) } }
+            if let file = hookFile(agent) { try HookDocument.update(file) { $0.setTabHooks(TabHook.all(for: agent), cli: cli) } }
         }
         return status()
     }
@@ -174,20 +174,20 @@ public struct AgentIntegrations: Sendable {
                 rmdir(skill.deletingLastPathComponent().path) // only when nothing else is in it
             }
             if let file = hookFile(agent), FileManager.default.fileExists(atPath: file.path) {
-                try HookDocument.update(file) { $0.setTabCommand(nil) }
+                try HookDocument.update(file) { $0.setTabHooks([], cli: cli) }
             }
         }
         return status()
     }
 
     /// Brings what is installed up to date, such as the skill after an update
-    /// or a hook whose `tab` is gone. Installs nothing new.
+    /// or hooks from an older Tab or whose `tab` is gone. Installs nothing new.
     public func refresh() throws {
         for agent in CodingAgent.allCases where isDirectory(root(agent)) {
             let current = status(agent)
             if current.skill == .outdated { try writeSkill(agent) }
             if current.hook == .outdated, let file = hookFile(agent) {
-                try HookDocument.update(file) { $0.setTabCommand(hookCommand) }
+                try HookDocument.update(file) { $0.setTabHooks(TabHook.all(for: agent), cli: cli) }
             }
         }
     }
@@ -207,8 +207,9 @@ public struct AgentIntegrations: Sendable {
     public static func context(environment: [String: String], cli: URL?) -> String? {
         guard let session = environment["TAB_SESSION_ID"], !session.isEmpty else { return nil }
         let command = cli.map { "`tab` (\($0.path))" } ?? "`tab`"
+        let name = SessionId(string: session).map { " (\(SessionName.of($0)))" } ?? ""
         return """
-        You are running in a Tab terminal, session \(session). Tab keeps terminals running in a \
+        You are running in a Tab terminal, session \(session)\(name). Tab keeps terminals running in a \
         background server, and \(command) drives them from a shell: start long-running work such as a \
         dev server or test watcher in its own terminal, wait for its output instead of polling, read \
         its screen, and manage projects and Git worktrees. Inside this terminal, session commands \
@@ -217,12 +218,58 @@ public struct AgentIntegrations: Sendable {
     }
 }
 
-/// An agent's JSON file holding `hooks.SessionStart`, such as Claude Code's
-/// `settings.json` or Codex's `hooks.json`.
+/// A hook Tab installs: when it runs, which of the event's sources it
+/// matches, and the `tab` arguments it runs.
+struct TabHook: Hashable {
+    var event: String
+    var matcher: String?
+    var arguments: [String]
+
+    /// What Tab installs into `agent`: context when a session starts, and the
+    /// agent's state as it changes.
+    static func all(for agent: CodingAgent) -> [TabHook] {
+        let name = agent.rawValue
+        let state = { (event: String, matcher: String?, state: String) in
+            TabHook(event: event, matcher: matcher, arguments: ["agent-event", name, state])
+        }
+        let context = TabHook(event: "SessionStart", matcher: nil, arguments: [AgentIntegrations.contextCommand])
+        switch agent {
+        case .claude:
+            return [context, state("UserPromptSubmit", nil, "working"), state("PreToolUse", nil, "working"),
+                    state("Notification", "permission_prompt|elicitation_dialog", "blocked"),
+                    state("Stop", nil, "idle"), state("SessionEnd", nil, "ended")]
+        case .codex:
+            return [context, state("UserPromptSubmit", nil, "working"), state("PreToolUse", nil, "working"),
+                    state("PermissionRequest", nil, "blocked"), state("Stop", nil, "idle"),
+                    state("SessionEnd", nil, "ended")]
+        case .opencode, .pi:
+            return []
+        }
+    }
+
+    /// The hook as an agent's JSON lists it, running `cli`.
+    func group(cli: URL) -> [String: Any] {
+        var group: [String: Any] = ["hooks": [[
+            "type": "command",
+            "command": Executable.commandLine([cli.path] + arguments),
+            "timeout": 3,
+        ]]]
+        if let matcher { group["matcher"] = matcher }
+        return group
+    }
+}
+
+/// An agent's JSON file holding `hooks`, such as Claude Code's
+/// `settings.json` or Codex's `hooks.json`: an object of event names, each a
+/// list of matcher groups whose `hooks` list commands.
 struct HookDocument {
     private(set) var root: [String: Any]
 
-    static let event = "SessionStart"
+    /// A hook Tab wrote, as found in the file.
+    struct Found: Hashable {
+        var hook: TabHook
+        var program: URL
+    }
 
     /// The file's object; empty when missing. Anything else refuses, so a
     /// file Tab can't read is never replaced.
@@ -237,11 +284,10 @@ struct HookDocument {
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw CLIError("\(url.path) is not a JSON object; fix it before Tab changes it")
         }
-        let document = HookDocument(root: root)
-        guard document.groups != nil else {
-            throw CLIError("\(url.path) has a \"hooks.\(event)\" that is not a list; fix it before Tab changes it")
+        if let hooks = root["hooks"], !(hooks is [String: Any]) {
+            throw CLIError("\(url.path) has a \"hooks\" that is not an object; fix it before Tab changes it")
         }
-        return document
+        return HookDocument(root: root)
     }
 
     /// Reads `url`, changes it and writes it back when something changed,
@@ -261,35 +307,39 @@ struct HookDocument {
         try AtomicFile.write(data, to: target, permissions: permissions)
     }
 
-    /// The `SessionStart` matcher groups; `nil` when present but not a list.
-    private var groups: [Any]? {
-        guard let hooks = root["hooks"] else { return [] }
-        guard let hooks = hooks as? [String: Any] else { return nil }
-        guard let groups = hooks[Self.event] else { return [] }
-        return groups as? [Any]
+    private var hooks: [String: Any] { root["hooks"] as? [String: Any] ?? [:] }
+
+    /// Tab's hooks in the file.
+    var tabHooks: [Found] {
+        hooks.flatMap { event, groups -> [Found] in
+            ((groups as? [Any]) ?? []).flatMap { group -> [Found] in
+                let matcher = (group as? [String: Any])?["matcher"] as? String
+                return Self.handlers(group).compactMap(Self.command).compactMap { command in
+                    Self.parse(command).map { Found(hook: TabHook(event: event, matcher: matcher, arguments: $0.arguments),
+                                                    program: $0.program) }
+                }
+            }
+        }
     }
 
-    /// The commands of Tab's hooks, in file order.
-    var tabCommands: [String] {
-        (groups ?? []).flatMap(Self.handlers).compactMap(Self.command).filter(Self.isTab)
-    }
-
-    /// Replaces Tab's hooks with one running `command`, or removes them.
-    mutating func setTabCommand(_ command: String?) {
-        guard var groups else { return }
-        groups = groups.compactMap { group in
-            guard var object = group as? [String: Any], let handlers = object["hooks"] as? [Any] else { return group }
-            let kept = handlers.filter { !Self.isTab(Self.command($0) ?? "") }
-            guard kept.count != handlers.count else { return group }
-            if kept.isEmpty { return nil }
-            object["hooks"] = kept
-            return object
+    /// Replaces Tab's hooks, in every event, with `hooks` running `cli`.
+    mutating func setTabHooks(_ wanted: [TabHook], cli: URL) {
+        var hooks = self.hooks
+        for (event, value) in hooks {
+            guard let groups = value as? [Any] else { continue }
+            let kept = groups.compactMap { group -> Any? in
+                guard var object = group as? [String: Any], let handlers = object["hooks"] as? [Any] else { return group }
+                let others = handlers.filter { Self.parse(Self.command($0) ?? "") == nil }
+                guard others.count != handlers.count else { return group }
+                if others.isEmpty { return nil }
+                object["hooks"] = others
+                return object
+            }
+            hooks[event] = kept.isEmpty ? nil : kept
         }
-        if let command {
-            groups.append(["hooks": [["type": "command", "command": command]]])
+        for hook in wanted {
+            hooks[hook.event] = ((hooks[hook.event] as? [Any]) ?? []) + [hook.group(cli: cli)]
         }
-        var hooks = root["hooks"] as? [String: Any] ?? [:]
-        hooks[Self.event] = groups.isEmpty ? nil : groups
         root["hooks"] = hooks.isEmpty ? nil : hooks
     }
 
@@ -301,16 +351,11 @@ struct HookDocument {
         (handler as? [String: Any])?["command"] as? String
     }
 
-    /// A hook Tab wrote: some `tab` running `agent-context`.
-    static func isTab(_ command: String) -> Bool {
-        program(command) != nil
-    }
-
-    /// The `tab` a hook Tab wrote runs; `nil` for other hooks.
-    static func program(_ command: String) -> URL? {
-        guard let arguments = try? Executable.commandArguments(command), arguments.count == 2,
-              arguments[1] == AgentIntegrations.contextCommand,
-              (arguments[0] as NSString).lastPathComponent == Executable.cli else { return nil }
-        return URL(fileURLWithPath: arguments[0])
+    /// The `tab` and its arguments, for a command Tab wrote; `nil` for others.
+    static func parse(_ command: String) -> (program: URL, arguments: [String])? {
+        guard let words = try? Executable.commandArguments(command), words.count >= 2,
+              (words[0] as NSString).lastPathComponent == Executable.cli,
+              [AgentIntegrations.contextCommand, "agent-event"].contains(words[1]) else { return nil }
+        return (URL(fileURLWithPath: words[0]), Array(words.dropFirst()))
     }
 }

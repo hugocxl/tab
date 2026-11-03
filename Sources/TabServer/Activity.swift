@@ -74,6 +74,24 @@ final class Activity: @unchecked Sendable {
         notify(changed)
     }
 
+    /// A program in the session asked for a desktop notification; it
+    /// replaces the session's unread event.
+    func notification(session: SessionId, project: ProjectId, title: String, body: String) {
+        let changed: UInt64 = lock.withLock {
+            removeEvents { $0.session == session }
+            nextId += 1
+            events.insert(AgentEvent(id: nextId, session: session, project: project, provider: .unknown("terminal"),
+                                     timestamp: Clock.nowMilliseconds(), kind: .notification,
+                                     title: title.isEmpty ? nil : title, body: body.isEmpty ? nil : body), at: 0)
+            if events.count > Limits.activityHistoryLimit, let expired = events.popLast() {
+                claimed.remove(expired.id)
+            }
+            revision += 1
+            return revision
+        }
+        notify(changed)
+    }
+
     /// A turn starts when the agent starts working and lasts while it works
     /// or waits for you.
     private static func workingSince(_ state: AgentState, previous: AgentActivity?) -> UInt64? {

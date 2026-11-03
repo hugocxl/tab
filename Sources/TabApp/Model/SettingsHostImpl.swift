@@ -106,6 +106,10 @@ public final class SettingsHostImpl: SettingsHost {
         try await model.browserProfiles.importBrowserData(from: source, cookies: cookies)
     }
 
+    // MARK: Privacy
+
+    public func privacyAccess(_ permission: PrivacyPermission) -> PrivacyAccess { PrivacyAccess.current(permission) }
+
     // MARK: Agents
 
     public func agentIntegrations() async throws -> [AgentIntegrationStatus] {

@@ -98,8 +98,10 @@ public final class Server: @unchecked Sendable {
             ServerLog.error("shell integration unavailable: \(error)")
             shellIntegration = nil
         }
+        let unclean = FileManager.default.fileExists(atPath: dirs.serverRunning.path)
+        if unclean { ServerLog.error("the previous server stopped without ending its sessions") }
         info = ServerInfo(build: BuildInfo(version: Release.version), instance: UInt64.random(in: 1...UInt64.max),
-                          server: catalog.serverId)
+                          server: catalog.serverId, previousStopUnclean: unclean)
         catalog.onChange = { [weak self] revision in self?.catalogChanged(revision) }
         activity.onChange = { [weak self] revision in self?.activityChanged(revision) }
         agents.activityChanged = { [weak self] snapshot in self?.activity.updateChat(snapshot) }

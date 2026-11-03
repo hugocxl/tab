@@ -17,6 +17,10 @@ final class SessionOwner: @unchecked Sendable {
     static let compressionQuiet: TimeInterval = 2
     static let endGrace: TimeInterval = 2
     static let drainGrace: TimeInterval = 1
+    /// How long a hook's report outranks the screen when the two disagree,
+    /// since agents run no hook when you interrupt them.
+    static let reportedAgentTrust: TimeInterval = 30
+    static let notificationInterval: TimeInterval = 1
 
     let info: SessionInfo
     let queue: DispatchQueue
@@ -69,6 +73,9 @@ final class SessionOwner: @unchecked Sendable {
     private var detectionNeeded = true
     private var detectionScheduled = false
     private var detectionProgress = ""
+    /// What the agent's own hooks last reported, and when.
+    private var reportedAgent: (provider: AgentProvider, state: AgentState, at: TimeInterval)?
+    private var lastNotification: TimeInterval = -.infinity
     private var compressionScheduled = false
     private var checkpointScheduled = false
     private var checkpointDelay = SessionOwner.checkpointInterval
@@ -322,6 +329,8 @@ final class SessionOwner: @unchecked Sendable {
                 broadcast(.bell)
             case .progress(let update):
                 updateProgress(update)
+            case .notification(let title, let body):
+                notify(title: title, body: body)
             }
         }
         if now >= nextProcessProbe {
@@ -350,6 +359,10 @@ final class SessionOwner: @unchecked Sendable {
                 observation.process.name.trimmingCharacters(in: CharacterSet(charactersIn: "-")))
                 ? nil : ForegroundProbe.agentProvider(group: observation.group)
             if provider != agent {
+                if let reported = reportedAgent, reported.provider != provider {
+                    reportedAgent = nil
+                    activity.clearAgent(info.id)
+                }
                 agent = provider
                 detectionNeeded = true
                 detectionProgress = ""
@@ -424,9 +437,42 @@ final class SessionOwner: @unchecked Sendable {
         }
         let completed = tracker.update(detector: detector, provider: agent, screen: detectionScreen, title: title,
                                        progress: detectionProgress, now: .now)
+        if let reported = reportedAgent, reported.provider == agent {
+            let interrupted = tracker.state == .idle && reported.state != .idle && now - reported.at > Self.reportedAgentTrust
+            guard interrupted else { return }
+            reportedAgent = nil
+        }
         guard let provider = tracker.provider else { return }
         activity.update(AgentActivity(session: info.id, project: info.project, provider: provider,
                                       state: tracker.state), completed: completed)
+    }
+
+    /// An agent's hook reports its state, which the screen can only guess;
+    /// `nil` means its session ended.
+    func reportAgent(_ provider: AgentProvider, state: AgentState?) {
+        queue.async { [self] in
+            guard !finishing else { return }
+            guard let state else {
+                guard reportedAgent?.provider == provider else { return }
+                reportedAgent = nil
+                tracker = AgentStateTracker()
+                activity.clearAgent(info.id)
+                return
+            }
+            let previous = reportedAgent?.provider == provider ? reportedAgent?.state
+                : tracker.provider == provider ? tracker.state : nil
+            reportedAgent = (provider, state, now)
+            activity.update(AgentActivity(session: info.id, project: info.project, provider: provider, state: state),
+                            completed: previous == .working && state == .idle)
+        }
+    }
+
+    /// A program asked for a desktop notification. Agents already notify
+    /// through their state, so only other programs' requests count.
+    private func notify(title: String, body: String) {
+        guard agent == nil, reportedAgent == nil, now - lastNotification >= Self.notificationInterval else { return }
+        lastNotification = now
+        activity.notification(session: info.id, project: info.project, title: title, body: body)
     }
 
     // MARK: Memory and saving

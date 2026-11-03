@@ -51,7 +51,8 @@ public final class Notifier: NSObject {
         guard let center else { return }
         let content = UNMutableNotificationContent()
         content.title = title
-        content.body = event.kind.displayDescription
+        content.body = event.kind == .notification ? event.body ?? event.title ?? event.kind.displayDescription
+            : event.kind.displayDescription
         content.sound = .default
         content.userInfo = ["server": server.description, "session": event.session.description]
         let request = UNNotificationRequest(identifier: Self.identifier(server, event.id), content: content, trigger: nil)

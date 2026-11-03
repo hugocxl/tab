@@ -74,6 +74,7 @@ extension AppModel {
         let server = connection.id
         Task {
             do {
+                reportUncleanStop(server, main.server)
                 let sessions = try await main.sessions()
                 if server.isLocal {
                     localSessionCount = sessions.count
@@ -100,6 +101,15 @@ extension AppModel {
                 report("Could not load \(serverLabel(server)): \(error.message)")
             }
         }
+    }
+
+    /// Says once per server start that the previous one stopped without
+    /// ending its terminals, so missing terminals aren't a mystery.
+    private func reportUncleanStop(_ server: ServerId, _ info: ServerInfo) {
+        guard info.previousStopUnclean == true, reportedUncleanStops.insert(info.instance).inserted else { return }
+        let subject = server.isLocal ? "This Mac's server" : "The server on \(serverName(server) ?? "another computer")"
+        presenter?.showToast("\(subject) stopped unexpectedly. Terminals that were running show their last saved output.",
+                             error: true)
     }
 
     func serverLabel(_ server: ServerId) -> String {
@@ -449,7 +459,8 @@ extension AppModel {
         let project = pane.flatMap { state.paneProject($0) }.flatMap { state.project($0) }
         let name = project?.name ?? "Tab"
         let remote = server.isLocal ? nil : serverName(server)
-        return [event.provider.displayName, name, remote].compactMap { $0 }.joined(separator: " · ")
+        let source = event.kind == .notification ? (event.body == nil ? nil : event.title) ?? "Terminal" : event.provider.displayName
+        return [source, name, remote].compactMap { $0 }.joined(separator: " · ")
     }
 
     /// The server and session the user is looking at, if any.

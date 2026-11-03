@@ -49,6 +49,8 @@ public struct TabDirs: Sendable, Equatable {
     public var serverSocket: URL { file("server.sock") }
     /// The server's single-instance lock, holding its pid.
     public var serverPid: URL { file("server.pid") }
+    /// Exists while a server runs; one left behind means it didn't stop cleanly.
+    public var serverRunning: URL { file("server.running") }
     /// Projects, sessions, saved screens and history.
     public var sessions: URL { folder("sessions") }
     /// Mobile access settings and paired phones.

@@ -220,7 +220,7 @@ extension RequestBody {
         case .ping, .listSessions, .attachWithoutResize, .endSession, .closeSession, .discardSession,
              .readSavedScreen, .identifyClient, .cancelCreation, .readCatalog, .listProjectSessions,
              .readServerSettings, .stopServer, .stopServerIfIdle, .restartServer, .cancelExec, .readActivity,
-             .readRemoteAccess, .cancelPairing, .revokeDevice, .unknown:
+             .readRemoteAccess, .cancelPairing, .revokeDevice, .reportAgentState, .unknown:
             break
         }
     }
@@ -270,6 +270,10 @@ extension ReplyBody {
             if snapshot.events.count > Limits.activityHistoryLimit || snapshot.agents.count > 16_384 {
                 throw .badRequest
             }
+            for event in snapshot.events
+                where (event.title?.utf8.count ?? 0) > Limits.maxNotificationText || (event.body?.utf8.count ?? 0) > Limits.maxNotificationText {
+                throw .badRequest
+            }
         case .files(let reply):
             try reply.validate()
         case .folders(let names):
@@ -306,7 +310,7 @@ extension ReplyBody {
             try Validation.versions([hello.version])
         case .versionUnsupported, .pong, .error, .detached, .sessionEnded, .sessionClosed, .sessionDiscarded,
              .creationCancelled, .screenCleared, .terminalColorsSet, .sessionReferencesSynced, .clientIdentified,
-             .inputWritten, .projectMutated, .serverSettingsWritten, .serverStopping, .serverBusy,
+             .inputWritten, .agentStateReported, .projectMutated, .serverSettingsWritten, .serverStopping, .serverBusy,
              .serverRestarting, .git, .execCancelled, .activityAcknowledged, .authenticated, .unknown:
             break
         }

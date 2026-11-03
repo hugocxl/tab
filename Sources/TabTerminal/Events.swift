@@ -9,6 +9,9 @@ public enum TerminalEvent: Hashable, Sendable {
     case clipboardWrite(String)
     case bell
     case progress(ProgressUpdate)
+    /// A desktop notification the program asked for with OSC 9 or OSC 777;
+    /// `title` is empty when the program gave none.
+    case notification(title: String, body: String)
 }
 
 /// Largest OSC 52 clipboard text accepted from a program.
@@ -21,6 +24,10 @@ final class EngineCallbacks {
     var directoryChanged = false
     var bell = false
     var clipboardWrite: String?
+    /// Notifications since the last `takeEvents`, oldest first, at most `maxNotifications`.
+    var notifications: [(title: String, body: String)] = []
+    static let maxNotifications = 4
+    static let maxNotificationText = 1024
 
     func install(on terminal: GhosttyTerminal) throws {
         let userdata = Unmanaged.passUnretained(self).toOpaque()
@@ -31,6 +38,8 @@ final class EngineCallbacks {
         try set(terminal, GHOSTTY_TERMINAL_OPT_BELL, unsafeBitCast(Self.bellRang, to: UnsafeRawPointer.self))
         try set(terminal, GHOSTTY_TERMINAL_OPT_CLIPBOARD_WRITE, unsafeBitCast(Self.clipboard, to: UnsafeRawPointer.self))
         try set(terminal, GHOSTTY_TERMINAL_OPT_COLOR_SCHEME, unsafeBitCast(Self.colorScheme, to: UnsafeRawPointer.self))
+        try set(terminal, GHOSTTY_TERMINAL_OPT_DESKTOP_NOTIFICATION,
+                unsafeBitCast(Self.desktopNotification, to: UnsafeRawPointer.self))
     }
 
     private func set(_ terminal: GhosttyTerminal, _ option: GhosttyTerminalOption, _ callback: UnsafeRawPointer) throws {
@@ -57,6 +66,29 @@ final class EngineCallbacks {
 
     private static let bellRang: GhosttyTerminalBellFn = { _, userdata in
         callbacks(userdata)?.bell = true
+    }
+
+    private static let desktopNotification: GhosttyTerminalDesktopNotificationFn = { _, userdata, notification in
+        guard let callbacks = callbacks(userdata), let notification,
+              notification.pointee.size >= MemoryLayout<GhosttyTerminalDesktopNotification>.size,
+              callbacks.notifications.count < maxNotifications else { return }
+        let title = truncated(Ghostty.string(notification.pointee.title))
+        let body = truncated(Ghostty.string(notification.pointee.body))
+        guard !title.isEmpty || !body.isEmpty else { return }
+        callbacks.notifications.append((title, body))
+    }
+
+    /// `text` without control characters, cut at a character boundary to
+    /// at most `maxNotificationText` bytes.
+    static func truncated(_ text: String) -> String {
+        var result = ""
+        var bytes = 0
+        for character in text where !character.unicodeScalars.contains(where: { $0.properties.generalCategory == .control }) {
+            bytes += character.utf8.count
+            guard bytes <= maxNotificationText else { break }
+            result.append(character)
+        }
+        return result.trimmingCharacters(in: .whitespaces)
     }
 
     private static let clipboard: GhosttyTerminalClipboardWriteFn = { _, userdata, write in
