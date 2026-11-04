@@ -30,6 +30,13 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     }
     var confirmClose: (() async -> Bool)?
     var onNewConversation: (() -> Void)?
+    /// Conversations Claude Code and Codex saved for this folder outside Tab.
+    var loadHistory: (() async throws -> [AgentHistoryEntry])?
+    /// Continues one of them as the conversation with the given ID.
+    var importHistory: ((AgentHistoryEntry, SessionId) async throws -> AgentChatSnapshot)?
+    /// Shows a conversation this pane doesn't hold, beside it.
+    var showConversation: ((AgentChatSnapshot) -> Void)?
+    private var historyTask: Task<Void, Never>?
     var titleDidChange: (() -> Void)?
 
     private let request: (AgentChatRequest) async throws -> AgentChatSnapshot
@@ -134,6 +141,23 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         onNewConversation = { [weak model] in
             guard let model, let project = owningProject() else { return }
             model.newAgent(in: project)
+        }
+        loadHistory = { [weak model] in
+            guard let model, let project = owningProject(), let client = model.sideClient(for: project) else {
+                throw AgentPaneError.offline
+            }
+            return try await client.agentHistory(.init(project: project)).entries
+        }
+        importHistory = { [weak model] entry, target in
+            guard let model, let project = owningProject(), let client = model.sideClient(for: project) else {
+                throw AgentPaneError.offline
+            }
+            return try await client.importAgentHistory(.init(session: target, project: project, provider: entry.provider,
+                                                             providerSession: entry.providerSession))
+        }
+        showConversation = { [weak model] snapshot in
+            model?.show(AppPane(kind: .agent, session: snapshot.session, project: snapshot.project,
+                                provider: snapshot.provider, beside: session, placement: .pane))
         }
         surface.workspaceRoot = context.project.directory.rawValue
         AgentConversationProjectActions.install(surface: surface, model: model, pane: pane, session: session)
@@ -359,9 +383,11 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         refreshTask?.cancel()
         commandTask?.cancel()
         stopTask?.cancel()
+        historyTask?.cancel()
         refreshTask = nil
         commandTask = nil
         stopTask = nil
+        historyTask = nil
         submitting = false
         stopRequested = false
         attachmentTask?.cancel()
@@ -652,6 +678,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
             showComposerError("\(selection.provider.name) · \(effectiveModel ?? "Provider default") · \(reasoningEffort?.title ?? "Auto") · \((snapshot?.accessMode ?? .standard).title)")
             return
         case "new", "clear-conversation": onNewConversation?(); return
+        case "resume": showHistory(); return
         case "model": control = surface.model
         case "effort": control = surface.effort
         case "access": control = surface.access
@@ -670,6 +697,95 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
             return
         }
         control.performClick(nil)
+    }
+
+    private func showHistory() {
+        guard !disposed, historyTask == nil, let loadHistory else { return }
+        errorMessage = nil
+        historyTask = Task { [weak self] in
+            defer {
+                self?.historyTask = nil
+                self?.updateControls()
+            }
+            do {
+                let entries = try await loadHistory()
+                guard let self, !Task.isCancelled, !self.disposed else { return }
+                self.presentHistory(entries)
+            } catch is CancellationError {
+            } catch {
+                guard let self, !Task.isCancelled, !self.disposed else { return }
+                self.showHistoryError(error, doing: "list past conversations")
+            }
+        }
+        updateControls()
+    }
+
+    private func presentHistory(_ entries: [AgentHistoryEntry]) {
+        guard !entries.isEmpty else {
+            showComposerError("Claude Code and Codex have no other conversations saved for this folder.")
+            return
+        }
+        let menu = NSMenu()
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        for provider in TabCore.AgentChatProvider.allCases {
+            let group = entries.filter { $0.provider == provider }
+            guard !group.isEmpty else { continue }
+            menu.addItem(NSMenuItem.sectionHeader(title: provider.name))
+            for entry in group.prefix(40) {
+                let title = entry.title.count > 80 ? entry.title.prefix(79) + "…" : entry.title
+                let item = NSMenuItem(title: String(title), action: #selector(historySelected(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = entry
+                let when = formatter.localizedString(for: entry.updatedAt, relativeTo: Date())
+                if #available(macOS 14.4, *) { item.subtitle = when }
+                item.toolTip = entry.title + "\n" + when
+                menu.addItem(item)
+            }
+        }
+        let anchor = surface.composerScroll
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: anchor.isFlipped ? 0 : anchor.bounds.height), in: anchor)
+    }
+
+    @objc private func historySelected(_ sender: NSMenuItem) {
+        guard !disposed, historyTask == nil, let entry = sender.representedObject as? AgentHistoryEntry,
+              let importHistory else { return }
+        // An unused pane takes the conversation over; otherwise it opens beside this one.
+        let unused = created && !submitting && commandTask == nil && snapshot.map {
+            $0.items.isEmpty && $0.providerSession == nil && $0.status == .idle
+        } == true
+        let target = unused ? session : SessionId()
+        let generation = connectionGeneration
+        errorMessage = nil
+        historyTask = Task { [weak self] in
+            defer {
+                self?.historyTask = nil
+                self?.updateControls()
+            }
+            do {
+                let result = try await importHistory(entry, target)
+                guard let self, !Task.isCancelled, !self.disposed else { return }
+                if result.session == self.session {
+                    self.selectionEdited = false
+                    self.accept(result, generation: generation, authoritative: true)
+                } else {
+                    self.showConversation?(result)
+                }
+            } catch is CancellationError {
+            } catch {
+                guard let self, !Task.isCancelled, !self.disposed else { return }
+                self.showHistoryError(error, doing: "continue that conversation")
+            }
+        }
+        updateControls()
+    }
+
+    private func showHistoryError(_ error: Error, doing action: String) {
+        if (error as? ClientError)?.serverCode == .unsupported {
+            showComposerError("This server can't \(action). Update Tab on it first.")
+        } else {
+            showComposerError("Couldn't \(action): \(error.localizedDescription)")
+        }
     }
 
     func stop() {
@@ -809,6 +925,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
 
     private var statusText: String {
         if preparingAttachments > 0 { return "Preparing attachments…" }
+        if historyTask != nil { return "Looking through past conversations…" }
         if needsAuthoritativeSnapshot { return "Reconnecting… Your transcript and draft are kept here." }
         if submitting { return "" }
         switch snapshot?.status {

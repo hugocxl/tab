@@ -16,6 +16,18 @@ extension ServerClient {
         return context
     }
 
+    public func agentHistory(_ request: AgentHistoryRequest) async throws -> AgentHistoryReply {
+        let reply = try await self.request(.agentHistory(request), timeout: max(defaultTimeout, 60))
+        guard case .agentHistory(let history) = reply else { throw unexpected(reply) }
+        return history
+    }
+
+    public func importAgentHistory(_ request: AgentHistoryImport) async throws -> AgentChatSnapshot {
+        let reply = try await self.request(.importAgentHistory(request), timeout: max(defaultTimeout, 60))
+        guard case .agentChat(let snapshot) = reply else { throw unexpected(reply) }
+        return snapshot
+    }
+
     public func agentAttachment(_ request: AgentAttachmentRequest) async throws -> AgentAttachmentReply {
         let reply = try await self.request(.agentAttachment(request))
         guard case .agentAttachment(let attachment) = reply else { throw unexpected(reply) }

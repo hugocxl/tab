@@ -32,6 +32,8 @@ final class AgentComposerCoordinator {
             .init(id: "skills", title: "/skills", subtitle: "Browse installed skills", symbol: "sparkles", kind: .action),
             .init(id: "status", title: "/status", subtitle: "Show current conversation settings", symbol: "info.circle", kind: .action),
             .init(id: "new", title: "/new", subtitle: "Start a new conversation", symbol: "plus.bubble", kind: .action),
+            .init(id: "resume", title: "/resume", subtitle: "Continue a Claude Code or Codex conversation from this folder",
+                  symbol: "clock.arrow.circlepath", kind: .action),
             .init(id: "clear-conversation", title: "/clear", subtitle: "Start a new conversation with a fresh context",
                   symbol: "plus.bubble", kind: .action),
             .init(id: "access", title: "/permissions", subtitle: "Change tool access", symbol: "lock.shield", kind: .action),

@@ -696,6 +696,71 @@ final class AgentSessions: @unchecked Sendable {
         return entry.snapshot
     }
 
+    /// Provider conversations that open Tab conversations continue.
+    func openProviderSessions() -> Set<String> {
+        queue.sync {
+            Set(entries.values.filter { $0.snapshot.status != .closed }.compactMap(\.snapshot.providerSession))
+        }
+    }
+
+    /// Continues a conversation a provider CLI saved outside Tab; see `AgentHistoryImport`.
+    /// `transcript` reads the saved conversation for the project's folder.
+    func importHistory(_ request: AgentHistoryImport,
+                       transcript: @escaping @Sendable (String) throws -> AgentHistoryTranscript) async throws -> AgentChatSnapshot {
+        try request.validate()
+        if let existing = try queue.sync(execute: { try importTarget(request) }) { return existing }
+        let directory = try queue.sync { () throws -> String in
+            let directory = try projectDirectory(request.project)
+            try checkDirectory(directory)
+            return directory
+        }
+        let saved = try await runBlocking { try transcript(directory) }
+        return try queue.sync {
+            if let existing = try importTarget(request) { return existing }
+            var snapshot = entries[request.session]?.snapshot
+                ?? AgentChatSnapshot(session: request.session, project: request.project, provider: request.provider)
+            snapshot.provider = request.provider
+            snapshot.providerSession = request.providerSession
+            snapshot.model = nil
+            snapshot.reasoningEffort = nil
+            snapshot.resolvedModel = saved.resolvedModel
+            snapshot.contextUsage = nil
+            snapshot.turns = nil
+            snapshot.status = .idle
+            snapshot.items = saved.items.map { item in
+                var item = item
+                item.isComplete = true
+                return item
+            }
+            snapshot.items.append(AgentChatItem(kind: .notice,
+                text: "Continued from \(request.provider.name). New messages carry on this conversation."))
+            let entry = Entry(snapshot, directory: directory)
+            entry.hasSuccessfulTurn = true
+            entries[request.session] = entry
+            touch(entry)
+            persist(entry)
+            return entry.snapshot
+        }
+    }
+
+    /// The conversation that already continues `request`'s, or `nil` when
+    /// `request.session` is free to take it.
+    private func importTarget(_ request: AgentHistoryImport) throws -> AgentChatSnapshot? {
+        guard !stopping else { throw ServiceError(.badRequest, "The server is stopping") }
+        if let existing = entries.values.first(where: {
+            $0.snapshot.status != .closed && $0.snapshot.provider == request.provider
+                && $0.snapshot.providerSession == request.providerSession
+        }) {
+            return existing.snapshot
+        }
+        guard let entry = entries[request.session] else { return nil }
+        guard entry.snapshot.project == request.project, entry.snapshot.items.isEmpty, entry.snapshot.providerSession == nil,
+              entry.snapshot.status == .idle, entry.runtime == nil, !entry.submitting, !entry.hasSuccessfulTurn else {
+            throw ServiceError(.badRequest, "This agent session ID is already in use")
+        }
+        return nil
+    }
+
     private func interrupted(_ entry: Entry, message: String) {
 
         entry.snapshot.status = .failed

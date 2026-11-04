@@ -54,6 +54,24 @@ extension ClientConnection {
             Task { [self] in
                 reply(id, await asyncResult { .agentComposerContext(try await server.agentComposerContext.handle(request)) })
             }
+        case .agentHistory(let request):
+            Task { [self] in
+                reply(id, await asyncResult {
+                    let directory = try server.agentDirectory(request.project)
+                    let open = server.agents.openProviderSessions()
+                    let history = server.agentHistory
+                    return .agentHistory(try await runBlocking { history.list(directory: directory, excluding: open) })
+                })
+            }
+        case .importAgentHistory(let request):
+            Task { [self] in
+                let history = server.agentHistory
+                reply(id, await asyncResult {
+                    .agentChat(try await server.agents.importHistory(request) { directory in
+                        try history.transcript(provider: request.provider, session: request.providerSession, directory: directory)
+                    })
+                })
+            }
         case .exec(let request):
             do {
                 let root = try server.projectPath(request.project)
@@ -274,7 +292,7 @@ extension ClientConnection {
             return .remoteAccess(remote.state())
 
         case .hello, .ping, .unknown, .authenticate, .pair, .git, .files, .exec, .cancelExec, .agentChat, .agentCheckpoint, .agentAttachment,
-             .agentComposerContext, .agentModelCatalog, .openTunnel, .closeTunnel, .listDevices, .deviceAction, .attachDevice,
+             .agentComposerContext, .agentModelCatalog, .agentHistory, .importAgentHistory, .openTunnel, .closeTunnel, .listDevices, .deviceAction, .attachDevice,
              .detachDevice, .deviceScreenshot:
             throw ServiceError(.badRequest, "Unexpected request")
         }

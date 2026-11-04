@@ -60,6 +60,13 @@ private final class AgentRuntimeBox: @unchecked Sendable {
     func install(_ runtime: FakeAgentRuntime) { lock.withLock { value = runtime } }
 }
 
+private final class AgentRuntimeResumes: @unchecked Sendable {
+    let lock = NSLock()
+    private var recorded: [String?] = []
+    var values: [String?] { lock.withLock { recorded } }
+    func append(_ value: String?) { lock.withLock { recorded.append(value) } }
+}
+
 private final class AgentEventCount: @unchecked Sendable {
     let lock = NSLock()
     private var value = 0
@@ -372,6 +379,70 @@ final class AgentSessionsTests: XCTestCase {
         sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: factory)
         _ = try await sessions.handle(.send(session: fork, text: "Later", model: "claude-opus-5-5"))
         XCTAssertNil(box.runtime?.launches.first?.forkSource, "A fork with its own conversation resumes it")
+    }
+
+    func testImportedConversationResumesItsProviderSessionAndIsImportedOnce() async throws {
+        let root = try root(), box = AgentRuntimeBox()
+        let resumed = AgentRuntimeResumes()
+        let factory: AgentSessions.Factory = { _, _, resume, callback in
+            resumed.append(resume)
+            let runtime = FakeAgentRuntime(callback)
+            runtime.providerSession = resume
+            runtime.onSend = { callback(.status(.idle)) }
+            box.install(runtime)
+            return runtime
+        }
+        var sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: factory)
+        let pane = SessionId(), other = SessionId(), project = ProjectId()
+        let saved = AgentHistoryTranscript(items: [
+            AgentChatItem(id: "u1", kind: .user, text: "Fix the login bug", isComplete: false),
+            AgentChatItem(id: "a1", kind: .assistant, text: "Fixed it."),
+        ], resolvedModel: "claude-opus-5-5")
+        let directories = AgentRuntimeResumes()
+        let transcript: @Sendable (String) throws -> AgentHistoryTranscript = { directory in
+            directories.append(directory)
+            return saved
+        }
+        let request = AgentHistoryImport(session: pane, project: project, provider: .codex, providerSession: "thread-1")
+
+        // An unused pane takes the conversation over, whatever provider it started with.
+        _ = try await sessions.handle(.create(session: pane, project: project, provider: .claude))
+        _ = try await sessions.handle(.setAccess(session: pane, mode: .ask))
+        let imported = try await sessions.importHistory(request, transcript: transcript)
+        XCTAssertEqual(imported.session, pane)
+        XCTAssertEqual(imported.provider, .codex)
+        XCTAssertEqual(imported.providerSession, "thread-1")
+        XCTAssertEqual(imported.accessMode, .ask)
+        XCTAssertEqual(imported.status, .idle)
+        XCTAssertEqual(imported.items.prefix(2).map(\.text), ["Fix the login bug", "Fixed it."])
+        XCTAssertTrue(imported.items.allSatisfy(\.isComplete))
+        XCTAssertEqual(imported.items.last?.kind, .notice)
+        XCTAssertEqual(directories.values, [root.path])
+        XCTAssertNoThrow(try imported.validate())
+        XCTAssertEqual(sessions.openProviderSessions(), ["thread-1"])
+
+        // Importing it again shows the conversation that already continues it.
+        let again = try await sessions.importHistory(
+            AgentHistoryImport(session: other, project: project, provider: .codex, providerSession: "thread-1"),
+            transcript: transcript)
+        XCTAssertEqual(again.session, pane)
+        // A conversation in use can't be replaced.
+        do {
+            _ = try await sessions.importHistory(
+                AgentHistoryImport(session: pane, project: project, provider: .claude, providerSession: "other"),
+                transcript: transcript)
+            XCTFail("An established conversation was replaced")
+        } catch {}
+
+        // It survives a restart, and the next message resumes the provider's conversation.
+        sessions.shutdown()
+        sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: factory)
+        defer { sessions.shutdown() }
+        let continued = try await sessions.handle(.send(session: pane, text: "Thanks", model: nil))
+        XCTAssertEqual(resumed.values, ["thread-1"])
+        XCTAssertNil(box.runtime?.launches.first?.forkSource)
+        XCTAssertEqual(continued.providerSession, "thread-1")
+        XCTAssertEqual(continued.items.filter { $0.kind == .user }.map(\.text), ["Fix the login bug", "Thanks"])
     }
 
     private func root() throws -> URL {

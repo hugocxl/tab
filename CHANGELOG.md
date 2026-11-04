@@ -3,6 +3,14 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.56.0 - 2026-11-04
+
+### Added
+
+- Type /resume in an agent pane to continue a Claude Code or Codex
+  conversation you started outside Tab in the same folder, with its
+  transcript so far.
+
 ## 0.55.1 - 2026-11-04
 
 ### Changed

@@ -21,6 +21,8 @@ public protocol ServerAPI: AnyObject, Sendable {
     func agentChat(_ request: AgentChatRequest) async throws -> AgentChatSnapshot
     func agentComposerContext(_ request: AgentComposerContextRequest) async throws -> AgentComposerContextReply
     func agentModelCatalog(_ request: AgentModelCatalogRequest) async throws -> AgentModelCatalogReply
+    func agentHistory(_ request: AgentHistoryRequest) async throws -> AgentHistoryReply
+    func importAgentHistory(_ request: AgentHistoryImport) async throws -> AgentChatSnapshot
     func createSession(_ session: CreateSession) async throws -> SessionInfo
     func closeSession(_ session: SessionId, operation: OperationId) async throws
     func endSession(_ session: SessionId) async throws
@@ -89,6 +91,14 @@ extension ServerAPI {
 
     public func agentChat(_ request: AgentChatRequest) async throws -> AgentChatSnapshot {
         throw ModelError("Agent chat is unsupported by this server.")
+    }
+
+    public func agentHistory(_ request: AgentHistoryRequest) async throws -> AgentHistoryReply {
+        throw ModelError("Past conversations are unsupported by this server.")
+    }
+
+    public func importAgentHistory(_ request: AgentHistoryImport) async throws -> AgentChatSnapshot {
+        throw ModelError("Past conversations are unsupported by this server.")
     }
 
     public func openTunnel(host: String, port: UInt16) async throws -> Tunnel {

@@ -222,6 +222,10 @@ public enum RequestBody: Hashable, Codable, Sendable {
     case agentCheckpoint(AgentCheckpointRequest)
     case agentChat(AgentChatRequest)
     case agentComposerContext(AgentComposerContextRequest)
+    /// Conversations the provider CLIs saved for a project outside Tab.
+    case agentHistory(AgentHistoryRequest)
+    /// Continues one of them in Tab; replies `agentChat`.
+    case importAgentHistory(AgentHistoryImport)
     case hello(Hello)
     case ping
 
@@ -319,6 +323,8 @@ public enum RequestBody: Hashable, Codable, Sendable {
         case "agentCheckpoint": self = .agentCheckpoint(try c("request"))
         case "agentChat": self = .agentChat(try c("request"))
         case "agentComposerContext": self = .agentComposerContext(try c("request"))
+        case "agentHistory": self = .agentHistory(try c("request"))
+        case "importAgentHistory": self = .importAgentHistory(try c("request"))
         case "ping": self = .ping
         case "listSessions": self = .listSessions
         case "createSession": self = .createSession(try c("session"))
@@ -400,6 +406,12 @@ public enum RequestBody: Hashable, Codable, Sendable {
             try c(request, "request")
         case .agentComposerContext(let request):
             var c = try TaggedEncoding(encoder, "agentComposerContext")
+            try c(request, "request")
+        case .agentHistory(let request):
+            var c = try TaggedEncoding(encoder, "agentHistory")
+            try c(request, "request")
+        case .importAgentHistory(let request):
+            var c = try TaggedEncoding(encoder, "importAgentHistory")
             try c(request, "request")
         case .ping: try TaggedEncoding(encoder, "ping")
         case .listSessions: try TaggedEncoding(encoder, "listSessions")
@@ -567,6 +579,7 @@ public enum ReplyBody: Hashable, Codable, Sendable {
     case agentCheckpoint(AgentCheckpointReply)
     case agentChat(AgentChatSnapshot)
     case agentComposerContext(AgentComposerContextReply)
+    case agentHistory(AgentHistoryReply)
     case hello(HelloReply)
     /// The peer shares no protocol version with this server.
     case versionUnsupported(supported: [ProtocolVersion])
@@ -652,6 +665,7 @@ public enum ReplyBody: Hashable, Codable, Sendable {
         case "agentCheckpoint": self = .agentCheckpoint(try c("checkpoint"))
         case "agentChat": self = .agentChat(try c("snapshot"))
         case "agentComposerContext": self = .agentComposerContext(try c("context"))
+        case "agentHistory": self = .agentHistory(try c("history"))
         case "pong": self = .pong
         case "error": self = .error(try c("error"))
         case "sessions": self = .sessions(try c("sessions"))
@@ -727,6 +741,9 @@ public enum ReplyBody: Hashable, Codable, Sendable {
         case .agentComposerContext(let context):
             var c = try TaggedEncoding(encoder, "agentComposerContext")
             try c(context, "context")
+        case .agentHistory(let history):
+            var c = try TaggedEncoding(encoder, "agentHistory")
+            try c(history, "history")
         case .pong: try TaggedEncoding(encoder, "pong")
         case .error(let error):
             var c = try TaggedEncoding(encoder, "error")

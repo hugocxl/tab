@@ -42,6 +42,7 @@ public final class Server: @unchecked Sendable {
     let agents: AgentSessions
     let agentComposerContext: AgentComposerContextService
     let agentModelCatalog: AgentModelCatalogService
+    let agentHistory: AgentHistory
     let shellIntegration: ShellIntegration?
     let lifecycle = DispatchQueue(label: "tab.server.lifecycle", qos: .utility)
 
@@ -88,6 +89,7 @@ public final class Server: @unchecked Sendable {
                 guard directory.isDirectory else { throw ServiceError(.badPath, "The agent's project folder is unavailable") }
                 return directory.url
             })
+        agentHistory = AgentHistory(home: URL(fileURLWithPath: configuration.homeDirectory))
         agents = try AgentSessions(root: dirs.root.appendingPathComponent("agents"), projectDirectory: { project in
             let directory = try catalog.project(project).directory
             guard directory.isDirectory else { throw ServiceError(.badPath, "The agent's project folder is unavailable") }
@@ -530,6 +532,13 @@ public final class Server: @unchecked Sendable {
 extension Server: WorktreeCatalog {
     public func projectPath(_ id: ProjectId) throws -> String {
         try catalog.project(id).directory.rawValue
+    }
+
+    /// The folder an agent in `project` works in, which must exist.
+    func agentDirectory(_ project: ProjectId) throws -> String {
+        let directory = try catalog.project(project).directory
+        guard directory.isDirectory else { throw ServiceError(.badPath, "The agent's project folder is unavailable") }
+        return directory.rawValue
     }
 
     public var homeProject: ProjectId { catalog.homeId }
