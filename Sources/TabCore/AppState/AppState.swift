@@ -175,7 +175,13 @@ public struct AppState: Codable, Equatable, Sendable {
         projects.first { $0.tabs.contains { $0.pane(pane) != nil } }?.id
     }
 
+    /// The pane showing the terminal or agent conversation `session`.
+    public func paneShowing(_ session: SessionId) -> PaneId? {
+        projects.lazy.flatMap(\.tabs).flatMap(\.panes).first { $0.content.activitySession == session }?.id
+    }
+
     public func pane(_ id: PaneId) -> Pane? {
+
         for project in projects {
             for tab in project.tabs {
                 if let pane = tab.pane(id) { return pane }

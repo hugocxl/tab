@@ -60,6 +60,7 @@ internal final class AgentRuntime: @unchecked Sendable {
     private var hasSubmittedTurn = false
     private var processGeneration = UUID()
     private var accessMode: AgentAccessMode = .standard
+    private var launch = AgentLaunch()
     private lazy var claude = ClaudeAgentRuntime(onEvent: onEvent)
     private lazy var codex = CodexAgentRuntime(onEvent: onEvent)
 
@@ -203,12 +204,19 @@ internal final class AgentRuntime: @unchecked Sendable {
         var environment = AgentProcess.environment()
         // A nested SDK process is intentional, not an interactive Claude session.
         environment.removeValue(forKey: "CLAUDECODE")
+        // Only terminals are Tab sessions; an inherited one isn't this agent's.
+        environment.removeValue(forKey: "TAB_SESSION_ID")
+        environment.merge(launch.environment) { _, tab in tab }
+
+        if let path = launch.path { environment["PATH"] = [path, environment["PATH"]].compactMap { $0 }.joined(separator: ":") }
+        let forking = launch.forkSource != nil && resumeSession == launch.forkSource
         var arguments = provider == .claude
             ? ["--print", "--verbose", "--input-format", "stream-json", "--output-format", "stream-json",
                "--include-partial-messages", "--replay-user-messages", "--permission-prompt-tool", "stdio", "--permission-mode", "default"]
             : ["app-server"]
         if provider == .claude {
             if let resumeSession { arguments += ["--resume", resumeSession] }
+            if forking { arguments.append("--fork-session") }
             if let model { arguments += ["--model", model] }
             if let reasoningEffort { arguments += ["--effort", claudeWireEffort(reasoningEffort, model: model)] }
             self.model = model
@@ -244,13 +252,15 @@ internal final class AgentRuntime: @unchecked Sendable {
                         "sandbox": self.accessMode == .fullAccess ? "danger-full-access" : self.accessMode == .ask ? "read-only" : "workspace-write"]
                     if let model { params["model"] = model }
                     if let resumeSession = self.resumeSession { params["threadId"] = resumeSession }
-                    try self.request(self.resumeSession == nil ? "thread/start" : "thread/resume", params: params) { result in
+                    let method = self.resumeSession == nil ? "thread/start" : forking ? "thread/fork" : "thread/resume"
+                    try self.request(method, params: params) { result in
                         do {
                             let response = try result.get()
                             guard let thread = response["thread"] as? [String: Any], let id = thread["id"] as? String else {
                                 throw AgentRuntimeError("Codex did not return a thread ID.")
                             }
                             self.threadID = id
+                            if forking { self.resumeSession = id }
                             self.ready = true
                             self.onEvent(.providerSession(id))
                             if let model = response["model"] as? String { self.onEvent(.resolvedModel(model)) }
@@ -489,7 +499,12 @@ internal final class AgentRuntime: @unchecked Sendable {
         onEvent(.status(.closed))
     }
 
+    func prepare(_ launch: AgentLaunch) {
+        queue.sync { self.launch = launch }
+    }
+
     private func perform(_ action: @escaping () throws -> Void) async throws {
+
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             queue.async {
                 do {

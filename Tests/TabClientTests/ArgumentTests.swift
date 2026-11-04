@@ -172,7 +172,28 @@ final class ArgumentTests: XCTestCase {
         }
     }
 
+    func testPanesOpenFromSessionAndAgentCommands() throws {
+        let id = SessionId().description
+        XCTAssertEqual(try action(["session", "create", "--open", "--", "npm", "run", "dev"]),
+                       .session(.create(project: nil, directory: nil, size: Size(cols: 80, rows: 24),
+                                        command: "npm run dev", open: true)))
+        XCTAssertEqual(try action(["session", "open"]), .session(.open(nil)))
+        XCTAssertEqual(try action(["session", "open", "wispy-cedar"]), .session(.open("wispy-cedar")))
+        XCTAssertEqual(try action(["agent", "new"]), .agent(.new(project: nil, provider: .claude)))
+        XCTAssertEqual(try action(["agent", "new", "App", "--provider", "codex"]),
+                       .agent(.new(project: "App", provider: .codex)))
+        XCTAssertEqual(try action(["agent", "fork"]), .agent(.fork(nil)))
+        XCTAssertEqual(try action(["agent", "fork", id, "--json"]), .agent(.fork(id)))
+        for words in [
+            ["agent"], ["agent", "new", "--provider", "gemini"], ["agent", "new", "A", "B"],
+            ["agent", "fork", "wispy-cedar"], ["session", "open", "a", "b"],
+        ] {
+            assertRefused(words)
+        }
+    }
+
     func testInvalidSessionArgumentsAreRefused() {
+
         for words in [
             ["session", "send", "0", "text"], ["session", "send", "1", "two", "three"], ["session", "send"],
             ["session", "read-screen", "abcd", "--lines", "no"], ["session", "read-screen", "--lines", "0"],

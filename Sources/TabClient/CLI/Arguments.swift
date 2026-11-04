@@ -69,6 +69,7 @@ public enum ManageAction: Hashable, Sendable {
     case server(CLIServer)
     case project(CLIProject)
     case session(CLISession)
+    case agent(CLIAgent)
     case worktree(CLIWorktree)
     case settingsGet
     case settingsSet(key: String, value: String)
@@ -96,8 +97,11 @@ public enum CLIProject: Hashable, Sendable {
 /// command runs in.
 public enum CLISession: Hashable, Sendable {
     case list(project: String?, all: Bool)
-    /// `command` is typed into the new terminal, followed by Return.
-    case create(project: String?, directory: String?, size: Size, command: String?)
+    /// `command` is typed into the new terminal, followed by Return; `open`
+    /// shows it in a pane of the desktop app.
+    case create(project: String?, directory: String?, size: Size, command: String?, open: Bool = false)
+    /// Shows the terminal in a pane of the desktop app.
+    case open(String?)
     case end(String?)
     case discard(String?)
     case send(session: String?, text: String)
@@ -110,6 +114,13 @@ public enum CLISession: Hashable, Sendable {
     /// Follows sessions starting and ending, agent states and notifications;
     /// `nil` follows every session.
     case events(session: String?)
+}
+
+/// Agent conversations, shown in agent panes of the desktop app. A missing
+/// agent means the one this command runs in.
+public enum CLIAgent: Hashable, Sendable {
+    case new(project: String?, provider: AgentChatProvider)
+    case fork(String?)
 }
 
 public enum CLIWaitUntil: Hashable, Sendable {
@@ -306,6 +317,7 @@ enum ManageParser {
         case "server": action = .server(try server(verb, options))
         case "project": action = .project(try project(verb, options))
         case "session": action = .session(try session(verb, options))
+        case "agent": action = .agent(try agent(verb, options))
         case "worktree": action = .worktree(try worktree(verb, options))
         case "settings":
             switch verb {
@@ -350,7 +362,8 @@ enum ManageParser {
         case ("worktree", "remove"): ([], ["--yes", "--force", "--hooks"])
         case ("server", "stop"): ([], ["--force"])
         case ("session", "list"): (["--project"], ["--all"])
-        case ("session", "create"): (["--directory", "--cols", "--rows"], [])
+        case ("session", "create"): (["--directory", "--cols", "--rows"], ["--open"])
+        case ("agent", "new"): (["--provider"], [])
         case ("session", "read-screen"): (["--lines"], ["--saved"])
         case ("session", "history"): (["--before", "--limit"], ["--saved"])
         case ("session", "search"): (["--before", "--limit"], ["--saved", "--ignore-case"])
@@ -408,7 +421,7 @@ enum ManageParser {
         let arguments: Int
         switch verb {
         case "send", "send-keys", "search": arguments = 1
-        case "end", "discard", "read-screen", "history", "wait": arguments = 0
+        case "end", "discard", "open", "read-screen", "history", "wait": arguments = 0
         default: throw CLIError(CLIHelp.session)
         }
         // The session ID comes first and may be left out inside a Tab terminal.
@@ -429,6 +442,8 @@ enum ManageParser {
         case "discard":
             try options.confirm()
             return .discard(session)
+        case "open":
+            return .open(session)
         case "send":
             return .send(session: session, text: argument())
         case "send-keys":
@@ -468,8 +483,27 @@ enum ManageParser {
         let size = Size(cols: try options.number("--cols", default: 80, 1 ... Limits.maxCols),
                         rows: try options.number("--rows", default: 24, 1 ... Limits.maxRows))
         return .create(project: project.first, directory: options.values["--directory"], size: size,
-                       command: options.literal == nil ? nil : command)
+                       command: options.literal == nil ? nil : command, open: options.flag("--open"))
     }
+
+    static func agent(_ verb: String, _ options: Options) throws -> CLIAgent {
+        switch verb {
+        case "new":
+            guard options.words.count <= 1 else { throw CLIError(CLIHelp.agent) }
+            let name = options.values["--provider"] ?? AgentChatProvider.claude.rawValue
+            guard let provider = AgentChatProvider(rawValue: name) else {
+                throw CLIError("--provider must be claude or codex")
+            }
+            return .new(project: options.words.first, provider: provider)
+        case "fork":
+            guard options.words.count <= 1 else { throw CLIError(CLIHelp.agent) }
+            if let agent = options.words.first, SessionId(string: agent) == nil { throw CLIError("agent IDs are UUIDs") }
+            return .fork(options.words.first)
+        default:
+            throw CLIError(CLIHelp.agent)
+        }
+    }
+
 
     /// `--timeout SECONDS` or `--timeout-ms N`, 30 seconds by default and at most an hour.
     static func waitTimeout(_ options: Options) throws -> UInt32 {

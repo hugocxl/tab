@@ -71,6 +71,7 @@ public enum JSONValue: Hashable, Sendable, Codable, CustomStringConvertible {
 /// closes the connection.
 ///
 ///     {"type":"open","path":"/Users/me/code/app"}
+///     {"type":"show","pane":{"kind":"agent","session":"…","project":"…","beside":"…"}}
 ///     {"verb":"browser.click","args":{"tabId":"…","selector":"#go"}}
 public enum AppRequest: Hashable, Sendable, Codable {
     /// Opens a folder as a project, selecting it if it is one already.
@@ -78,10 +79,12 @@ public enum AppRequest: Hashable, Sendable, Codable {
     /// A browser automation command; see `BrowserCommand` for the names and
     /// their arguments.
     case browser(command: String, args: [String: JSONValue])
+    /// Shows a running terminal or agent conversation in a pane, focusing it.
+    case show(AppPane)
     /// A request from a newer `tab`; answer with an error.
     case unknown(String)
 
-    private enum Keys: String, CodingKey { case verb, args, type, path }
+    private enum Keys: String, CodingKey { case verb, args, type, path, pane }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: Keys.self)
@@ -99,6 +102,7 @@ public enum AppRequest: Hashable, Sendable, Codable {
         let type = try container.decode(String.self, forKey: .type)
         switch type {
         case "open": self = .open(path: try container.decode(String.self, forKey: .path))
+        case "show": self = .show(try container.decode(AppPane.self, forKey: .pane))
         default: self = .unknown(type)
         }
     }
@@ -113,13 +117,42 @@ public enum AppRequest: Hashable, Sendable, Codable {
             let verb = command == "evaluate" ? "eval" : command
             try container.encode("browser.\(verb)", forKey: .verb)
             try container.encode(args, forKey: .args)
+        case .show(let pane):
+            try container.encode("show", forKey: .type)
+            try container.encode(pane, forKey: .pane)
         case .unknown(let type):
             try container.encode(type, forKey: .verb)
         }
     }
 }
 
+/// A terminal or agent conversation for the app to show. A pane already
+/// showing it is focused; otherwise a new pane opens beside the pane showing
+/// `beside`, such as the agent or terminal that asked, else in `project`.
+public struct AppPane: Hashable, Sendable, Codable {
+    public enum Kind: String, Hashable, Sendable, Codable {
+        case terminal, agent
+    }
+
+    public var kind: Kind
+    public var session: SessionId
+    public var project: ProjectId
+    /// An agent's provider; Claude Code when missing.
+    public var provider: AgentChatProvider?
+    public var beside: SessionId?
+
+    public init(kind: Kind, session: SessionId, project: ProjectId, provider: AgentChatProvider? = nil,
+                beside: SessionId? = nil) {
+        self.kind = kind
+        self.session = session
+        self.project = project
+        self.provider = provider
+        self.beside = beside
+    }
+}
+
 /// The app's answer:
+
 ///
 ///     {"ok":true,"value":…}
 ///     {"ok":false,"error":"No tab with that ID"}

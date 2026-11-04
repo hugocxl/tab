@@ -50,7 +50,7 @@ final class AgentPaneTests: XCTestCase {
         func request(_ request: AgentChatRequest) async throws -> AgentChatSnapshot {
             requests.append(request)
             switch request {
-            case .create:
+            case .create, .fork:
                 if failCreate { throw NSError(domain: "Offline", code: 1) }
             case .send(_, let text, let model, let effort, let provider, _):
                 if gateNextSend {

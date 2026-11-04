@@ -11,6 +11,7 @@ public enum CLIHelp {
       server        Start, inspect or stop the server
       project       List, add, edit or delete server projects
       session       Create terminals, send input, read output and end sessions
+      agent         Open a new agent, or fork one, in a pane of the desktop app
       worktree      List, create, register or remove Git worktree projects
       settings      Read or update server settings
       activity      Read or acknowledge agent activity
@@ -36,7 +37,8 @@ public enum CLIHelp {
     browser commands, which start it for open.
     Tabs, panes and workspaces belong to UI clients.
     Project selectors accept an exact ID, unique name or directory path.
-    Inside a Tab terminal, session commands default to that terminal.
+    Inside a Tab terminal, session commands default to that terminal. Inside a
+    Tab agent, agent commands default to that agent, and panes open beside it.
     Use ./NAME to open a folder named like a command.
     Use -- before literal arguments that start with a dash, or before the command
     of session create.
@@ -63,7 +65,9 @@ public enum CLIHelp {
     public static let session = """
     Usage: tab session <action> [--json]
       list [--project PROJECT] [--all]  Live sessions; --all includes saved/ended ones
-      create [project] [--directory PATH] [--cols N] [--rows N] [-- COMMAND...]
+      create [project] [--directory PATH] [--cols N] [--rows N] [--open]
+             [-- COMMAND...]
+      open [id]                        Show the terminal in a pane of the desktop app
       send [id] <text>                 Send literal text without pressing Return
       send-keys [id] <key>             Enter, Tab, Escape, Backspace, Ctrl+C/D/Z
       read-screen [id] [--lines N] [--saved]
@@ -79,6 +83,8 @@ public enum CLIHelp {
     COMMAND words are joined with spaces without shell quoting; quote the whole
     command to preserve its quotes and shell syntax.
     Sessions outlive this command; the app lists them under Existing Terminals.
+    --open and open show the terminal in a pane beside the Tab terminal or agent
+    this command runs in, else in its project, starting the app if needed.
     Session IDs are UUIDs; a unique start of one, of at least 4 characters, works,
     and so does a session's name, such as wispy-cedar, when no other has it.
     Inside a Tab terminal, the ID defaults to that terminal and the project to its
@@ -95,6 +101,20 @@ public enum CLIHelp {
     notification (a program's title and body). Without an id it follows every
     session.
     Text list columns: id, project-id, status, attached, directory, name.
+    """
+
+    public static let agent = """
+    Usage: tab agent <action> [--json]
+      new [project] [--provider claude|codex]  A new conversation in an agent pane
+      fork [id]                        A copy of the conversation in a new agent pane
+
+    Both print the new agent's ID and open its pane beside the Tab terminal or
+    agent this command runs in, else in the project, starting the app if needed.
+    Fork keeps the transcript, provider, model, effort and access of the agent
+    (by default, the one this command runs in); from its next message the copy
+    continues on its own, and the original never sees what it says.
+    Inside a Tab agent, the project defaults to that agent's project. Agents
+    run on this computer's server only.
     """
 
     public static let worktree = """
@@ -258,6 +278,8 @@ public enum CLIHelp {
         case "server": server
         case "project": project
         case "session": session
+        case "agent": agent
+
         case "worktree": worktree
         case "settings": settings
         case "activity": activity

@@ -17,6 +17,8 @@ private final class FakeAgentRuntime: AgentSessionRuntime, @unchecked Sendable {
     private var submittedEfforts: [AgentReasoningEffort?] = []
     private var currentAccess: AgentAccessMode = .standard
     var providerSession: String? = "provider-resume-id"
+    private var prepared: [AgentLaunch] = []
+    var launches: [AgentLaunch] { lock.withLock { prepared } }
     var stops: Int { lock.withLock { stopCount } }
     var models: [String?] { lock.withLock { submittedModels } }
     var efforts: [AgentReasoningEffort?] { lock.withLock { submittedEfforts } }
@@ -45,6 +47,9 @@ private final class FakeAgentRuntime: AgentSessionRuntime, @unchecked Sendable {
     func stop() {
         lock.withLock { stopCount += 1 }
         onStop?()
+    }
+    func prepare(_ launch: AgentLaunch) {
+        lock.withLock { prepared.append(launch) }
     }
 }
 
@@ -323,7 +328,54 @@ final class AgentSessionsTests: XCTestCase {
         XCTAssertNoThrow(try repo.run("rev-parse", "--verify", "HEAD"))
     }
 
+    func testForkCopiesTheConversationAndForksItsProviderSessionUntilItHasItsOwn() async throws {
+        let root = try root(), box = AgentRuntimeBox()
+        let factory: AgentSessions.Factory = { _, _, resume, callback in
+            let runtime = FakeAgentRuntime(callback)
+            runtime.providerSession = resume == nil ? "source-conversation" : "forked-conversation"
+            runtime.onSend = { callback(.status(.idle)) }
+            box.install(runtime)
+            return runtime
+        }
+        var sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: factory)
+        sessions.launchEnvironment = ["TAB_SERVER_ID": "server"]
+        let source = SessionId(), fork = SessionId(), project = ProjectId()
+        _ = try await sessions.handle(.create(session: source, project: project, provider: .claude))
+        _ = try await sessions.handle(.setAccess(session: source, mode: .fullAccess))
+        _ = try await sessions.handle(.send(session: source, text: "Start", model: "claude-opus-5-5"))
+        let original = try await sessions.handle(.read(session: source))
+        XCTAssertEqual(original.providerSession, "source-conversation")
+
+        let copied = try await sessions.handle(.fork(session: fork, from: source))
+        XCTAssertEqual(copied.session, fork)
+        XCTAssertEqual(copied.project, project)
+        XCTAssertEqual(copied.items.map(\.text), original.items.map(\.text))
+        XCTAssertEqual(copied.accessMode, .fullAccess)
+        XCTAssertEqual(copied.model, "claude-opus-5-5")
+        XCTAssertEqual(copied.status, .idle)
+        let again = try await sessions.handle(.fork(session: fork, from: source))
+        XCTAssertEqual(again, copied)
+
+        // The fork survives a server restart before its first message.
+        sessions.shutdown()
+        sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: factory)
+        defer { sessions.shutdown() }
+        let continued = try await sessions.handle(.send(session: fork, text: "Next", model: "claude-opus-5-5"))
+        XCTAssertEqual(box.runtime?.launches.first?.forkSource, "source-conversation")
+        XCTAssertEqual(box.runtime?.launches.first?.environment["TAB_AGENT_ID"], fork.description)
+        XCTAssertEqual(continued.providerSession, "forked-conversation")
+        XCTAssertEqual(continued.items.filter { $0.kind == .user }.map(\.text), ["Start", "Next"])
+        let unchanged = try await sessions.handle(.read(session: source))
+        XCTAssertEqual(unchanged.items.filter { $0.kind == .user }.map(\.text), ["Start"])
+
+        sessions.shutdown()
+        sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: factory)
+        _ = try await sessions.handle(.send(session: fork, text: "Later", model: "claude-opus-5-5"))
+        XCTAssertNil(box.runtime?.launches.first?.forkSource, "A fork with its own conversation resumes it")
+    }
+
     private func root() throws -> URL {
+
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("agent-tests-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: root) }

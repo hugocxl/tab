@@ -161,7 +161,42 @@ extension AppModel {
         return opened
     }
 
+    /// Shows a running terminal or agent conversation for `tab session open`
+    /// and `tab agent`: focuses the pane already showing it, else opens one
+    /// beside the pane showing `beside` on the same server, else in its project.
+    @discardableResult
+    public func show(_ request: AppPane) -> PaneId? {
+        if let shown = state.paneShowing(request.session) {
+            focusPane(shown)
+            return shown
+        }
+        guard let project = state.project(request.project) else { return nil }
+        let provider = request.provider ?? .claude
+        let content: PaneContent = request.kind == .agent
+            ? .agent(session: request.session, provider: provider) : .terminal(session: request.session)
+        let anchor = request.beside.flatMap(state.paneShowing).flatMap { state.paneServer($0) == project.serverId ? $0 : nil }
+        var opened: PaneId?
+        if let anchor {
+            let pane = Pane(title: request.kind == .agent ? "Agent" : "Terminal", content: content)
+            guard edit({ state in
+                try state.insertSplitPane(after: anchor, pane, edge: .right)
+                try state.focusPane(pane.id)
+                state.revealCurrentProject()
+            }) else { return nil }
+            opened = pane.id
+        } else if request.kind == .agent {
+            guard edit({ opened = try $0.openAgent(project.id, session: request.session, provider: provider) }) else { return nil }
+        } else {
+            openExistingSession(request.session, in: project.id)
+            opened = state.paneShowing(request.session)
+        }
+        connectOnDemand(project.serverId)
+        focusActiveContent()
+        return opened
+    }
+
     /// Puts `prompt` in the composer of the agent pane `pane`, once the pane
+
     /// shows and its composer takes text, for the user to review and send.
     func draftAgentPrompt(_ prompt: String, in pane: PaneId, attempts: Int = 40) {
         if let agent = controller(for: pane) as? AgentPaneController,

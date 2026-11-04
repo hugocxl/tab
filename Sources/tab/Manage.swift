@@ -82,6 +82,9 @@ enum Manage {
             try await Projects.worktree(command, client: client, target: target, json: json)
         case .session(let command):
             try await Sessions.run(command, client: client, target: target, json: json)
+        case .agent(let command):
+            try await Agents.run(command, client: client, target: target, json: json)
+
         case .settingsGet:
             let settings = try await client.serverSettings()
             Output.json(.object([

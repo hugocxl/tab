@@ -462,7 +462,68 @@ final class AgentRuntimeTests: XCTestCase {
         XCTAssertTrue(recorder.failures.isEmpty, "Retired process exit must not fail the replacement process")
     }
 
+    func testClaudeForkForksOnlyUntilItsNewSessionIsKnown() async throws {
+        let fixture = try AgentRuntimeFixture(#"""
+        take
+        id=$(printf '%s' "$line" | /usr/bin/sed -E 's/.*"request_id":"([^"]+)".*/\1/')
+        emit "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"$id\",\"response\":{}}}"
+        take
+        emit '{"type":"system","subtype":"init","session_id":"forked-session"}'
+        emit '{"type":"result","subtype":"success","is_error":false,"result":"Done"}'
+        hold
+        """#)
+        defer { fixture.remove() }
+        let recorder = AgentRuntimeRecorder()
+        let runtime = fixture.runtime(.claude, recorder: recorder, resume: "original-session")
+        runtime.prepare(AgentLaunch(forkSource: "original-session"))
+        defer { runtime.stop() }
+        for model in ["claude-opus-5-5", "claude-sonnet-5-5"] {
+            let idle = expectation(description: "turn completed")
+            recorder.observe = { event in if case .status(.idle) = event { idle.fulfill() } }
+            try await runtime.send(text: "continue", model: model, reasoningEffort: nil)
+            await fulfillment(of: [idle], timeout: 5)
+        }
+        let launches = try fixture.launches()
+        XCTAssertEqual(launches.count, 2)
+        guard launches.count == 2 else { return }
+        XCTAssertTrue(launches[0].contains("--resume\noriginal-session\n--fork-session\n"))
+        XCTAssertTrue(launches[1].contains("--resume\nforked-session\n"))
+        XCTAssertFalse(launches[1].contains("--fork-session"))
+    }
+
+    func testCodexForkStartsAThreadForkAndResumesTheNewThreadAfterwards() async throws {
+        let recorder = AgentRuntimeRecorder()
+        let idle = expectation(description: "turn completed")
+        recorder.observe = { event in if case .status(.idle) = event { idle.fulfill() } }
+        let fixture = try AgentRuntimeFixture("""
+        take
+        emit '{"id":1,"result":{}}'
+        take
+        take
+        emit '{"id":2,"result":{"thread":{"id":"forked-thread"}}}'
+        take
+        emit '{"id":3,"result":{"config":{}}}'
+        take
+        emit '{"id":4,"result":{"data":[{"id":"test-model","model":"test-model","isDefault":true,"defaultReasoningEffort":"medium"}]}}'
+        take
+        emit '{"id":5,"result":{"turn":{"id":"turn"}}}'
+        emit '{"method":"turn/completed","params":{"turn":{"id":"turn","status":"completed"}}}'
+        hold
+        """)
+        defer { fixture.remove() }
+        let runtime = fixture.runtime(.codex, recorder: recorder, resume: "old-thread")
+        runtime.prepare(AgentLaunch(forkSource: "old-thread"))
+        defer { runtime.stop() }
+        try await runtime.send(text: "Hello", model: "test-model")
+        await fulfillment(of: [idle], timeout: 5)
+        let sent = try fixture.messages()
+        XCTAssertEqual(sent[2]["method"] as? String, "thread/fork")
+        XCTAssertEqual((sent[2]["params"] as? [String: Any])?["threadId"] as? String, "old-thread")
+        XCTAssertEqual(recorder.sessions, ["forked-thread"])
+    }
+
     func testCodexEffortReachesTurnStartAndNilResetsReadRealDefaultsWithoutLosingThread() async throws {
+
         let fixture = try AgentRuntimeFixture(#"""
         take
         emit '{"id":1,"result":{}}'

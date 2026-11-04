@@ -91,7 +91,11 @@ public final class Server: @unchecked Sendable {
             guard directory.isDirectory else { throw ServiceError(.badPath, "The agent's project folder is unavailable") }
             return directory.rawValue
         })
+        agents.launchEnvironment = ["TAB_SERVER_ID": catalog.serverId.description]
+        agents.cliDirectory = Executable.currentURL().map { $0.deletingLastPathComponent() }
+            .flatMap { Executable.isExecutableFile($0.appendingPathComponent("tab")) ? $0.path : nil }
         uploads = Uploads(directory: configuration.uploads)
+
         do {
             shellIntegration = try ShellIntegration.install(into: dirs.root.appendingPathComponent("shell-integration"))
         } catch {

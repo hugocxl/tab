@@ -41,7 +41,7 @@ public enum AgentSkill {
     public static let text = #"""
     ---
     name: tab-cli
-    description: How to drive Tab from a shell with the `tab` command — start terminals that keep running, type into them, read and wait on their output, and manage projects and Git worktrees. Use this when you are an agent running inside a Tab terminal (or any script on the same computer) and want work to run in its own terminal instead of blocking yours, or to drive the Tab app's built-in browser.
+    description: How to drive Tab from a shell with the `tab` command — start terminals that keep running, type into them, read and wait on their output, open terminal and agent panes in the app, fork your own conversation into a new agent pane, and manage projects and Git worktrees. Use this when you are an agent running inside a Tab terminal or Tab agent pane (or any script on the same computer) and want work to run in its own terminal instead of blocking yours, the user asks for a new terminal or agent pane, or to drive the Tab app's built-in browser.
     ---
 
     # Tab CLI
@@ -68,6 +68,31 @@ public enum AgentSkill {
     Tab sets `TAB_SESSION_ID` and `TAB_SERVER_ID` in every terminal. Session
     commands then default to your own terminal, and `session create` to your
     project, so most commands need no IDs.
+
+    ## Inside a Tab agent pane
+
+    Agents in Tab's own agent panes get `TAB_AGENT_ID` and `TAB_SERVER_ID`, and
+    `tab` on `PATH`. `session create` and `agent new` default to your project,
+    `agent fork` to your own conversation, and panes open beside yours.
+
+    ## Open panes in the app
+
+    When the user asks for a terminal or agent "pane", show it in the app;
+    a terminal started without `--open` runs unseen.
+
+    ```bash
+    tab session create --open                 # a new terminal pane beside yours
+    tab session create --open -- npm run dev  # the same, running a command
+    tab session open "$WEB"                   # show a terminal you started earlier
+    tab agent new                             # a new agent pane, a fresh conversation
+    tab agent fork                            # a new agent pane continuing this conversation
+    ```
+
+    `agent fork` copies your transcript, model, effort and access mode, so the
+    user can carry on in parallel. Never start `claude` or `codex` in a terminal
+    for that: it is a separate program that asks its own questions, such as
+    whether to trust the folder, regardless of the access mode chosen in Tab.
+
 
     ## Start a terminal and capture its ID
 

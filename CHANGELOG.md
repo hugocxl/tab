@@ -3,6 +3,23 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.48.0 - 2026-11-04
+
+### Added
+
+- `tab agent fork` opens a copy of an agent conversation in a new agent pane,
+  with its transcript, model, effort and access, so you can carry on two ways
+  at once.
+- `tab agent new` opens a new agent pane, and `tab session create --open` and
+  `tab session open` show a terminal in a pane, beside the agent or terminal
+  that asked.
+
+### Fixed
+
+- Agents in agent panes can now use the `tab` command and know which agent and
+  project they are, so asking one for a new terminal or agent pane opens it
+  beside the conversation instead of starting it out of sight.
+
 ## 0.47.0 - 2026-11-03
 
 ### Added

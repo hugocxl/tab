@@ -18,7 +18,13 @@ final class AppSocketTests: XCTestCase {
         XCTAssertEqual(try json(AppReply.failed("No tab with that ID")), #"{"error":"No tab with that ID","ok":false}"#)
         let evaluate = AppRequest.browser(command: "evaluate", args: ["tabId": .string("T"), "script": .string("1")])
         XCTAssertEqual(try json(evaluate), #"{"args":{"script":"1","tabId":"T"},"verb":"browser.eval"}"#)
+        let session = SessionId(), project = ProjectId()
+        let show = AppRequest.show(AppPane(kind: .agent, session: session, project: project, provider: .codex))
+        XCTAssertEqual(try json(show), #"{"pane":{"kind":"agent","project":"\#(project)","provider":"codex","#
+                       + #""session":"\#(session)"},"type":"show"}"#)
+        XCTAssertEqual(try JSONDecoder().decode(AppRequest.self, from: AppSocket.encode(show)), show)
         XCTAssertEqual(BrowserCommand.storageGet.rawValue, "storage.get")
+
         XCTAssertEqual(BrowserCommand.waitForNavigation.rawValue, "waitForNavigation")
     }
 
@@ -61,7 +67,9 @@ final class AppSocketTests: XCTestCase {
                     try? await Task.sleep(nanoseconds: 2_000_000_000)
                     return .ok(.null)
                 case .browser(let command, let args): return .failed("\(command) \(args["tabId"]?.string ?? "")")
+                case .show(let pane): return .ok(.string(pane.session.description))
                 case .unknown(let type): return .failed(type)
+
                 }
             }
         } catch let error as TransportError {

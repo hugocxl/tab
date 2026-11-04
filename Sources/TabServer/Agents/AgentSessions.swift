@@ -11,6 +11,19 @@ protocol AgentSessionRuntime: Sendable {
     func setAccess(_ mode: AgentAccessMode) async throws
     func interrupt() async throws
     func stop()
+    /// Called once, before the first message: what the provider process starts with.
+    func prepare(_ launch: AgentLaunch)
+}
+
+/// What a conversation's provider process starts with beyond its arguments.
+struct AgentLaunch: Sendable, Equatable {
+    /// Added to the provider's environment, such as `TAB_AGENT_ID`.
+    var environment: [String: String] = [:]
+    /// Searched first on `PATH`, so the agent finds this Tab's `tab`.
+    var path: String?
+    /// The provider conversation to fork rather than resume, until the provider
+    /// names the new one.
+    var forkSource: String?
 }
 
 extension AgentSessionRuntime {
@@ -23,6 +36,8 @@ extension AgentSessionRuntime {
         guard attachments.isEmpty else { throw AgentRuntimeError("This agent runtime does not support attachments.") }
         try await send(text: text, model: model, reasoningEffort: reasoningEffort)
     }
+
+    func prepare(_ launch: AgentLaunch) {}
 }
 
 extension AgentRuntime: AgentSessionRuntime {}
@@ -51,6 +66,8 @@ final class AgentSessions: @unchecked Sendable {
         var deferredEvents: [AgentRuntimeEvent] = []
         var deferredEventBytes = 0
         var deferredEventOverflow = false
+        /// The provider conversation this one forks, until the provider names its own.
+        var forkSource: String?
 
         init(_ snapshot: AgentChatSnapshot, directory: String) {
             self.snapshot = snapshot
@@ -64,6 +81,7 @@ final class AgentSessions: @unchecked Sendable {
         var snapshot: AgentChatSnapshot
         var directory: String
         var hasSuccessfulTurn: Bool?
+        var forkSource: String?
     }
 
     private final class PendingReply: @unchecked Sendable {
@@ -87,6 +105,10 @@ final class AgentSessions: @unchecked Sendable {
     var activityChanged: @Sendable (AgentChatSnapshot) -> Void = { _ in }
     var changed: @Sendable (SessionId, UInt64) -> Void
     var checkDirectory: @Sendable (String) throws -> Void = { _ in }
+    /// Tab's variables for every agent; each also gets `TAB_AGENT_ID`.
+    var launchEnvironment: [String: String] = [:]
+    /// The folder holding this Tab's `tab`, put first on agents' `PATH`.
+    var cliDirectory: String?
     var stageToolImages: @Sendable ([AgentChatAttachment], URL) throws -> Void = { images, directory in
         let staged = try AgentAttachments.stageToolImages(images, root: directory)
         try AgentAttachments.record(staged, root: directory)
@@ -120,6 +142,7 @@ final class AgentSessions: @unchecked Sendable {
                 }
                 let entry = Entry(saved.snapshot, directory: saved.directory)
                 entry.hasSuccessfulTurn = saved.hasSuccessfulTurn ?? entry.hasSuccessfulTurn
+                entry.forkSource = saved.forkSource
                 bound(entry)
                 let checkpointDirectory = root.appendingPathComponent("checkpoints", isDirectory: true)
                     .appendingPathComponent(entry.snapshot.session.description, isDirectory: true)
@@ -235,11 +258,15 @@ final class AgentSessions: @unchecked Sendable {
             continuation.resume(returning: entry.snapshot)
             return
         }
+        if case .fork(let id, let from) = request {
+            continuation.resume(returning: try fork(id, from: from))
+            return
+        }
         let id: SessionId
         switch request {
         case .read(let session), .send(let session, _, _, _, _, _), .approve(let session, _, _),
              .interrupt(let session), .close(let session), .setAccess(let session, _): id = session
-        case .create: throw ServiceError(.badRequest, "Unexpected create")
+        case .create, .fork: throw ServiceError(.badRequest, "Unexpected create")
         }
         guard let entry = entries[id] else { throw ServiceError.unknownSession(id) }
         if case .read = request {
@@ -415,6 +442,9 @@ final class AgentSessions: @unchecked Sendable {
                 self?.queue.async { [weak self] in self?.receive(event, session: id, generation: generation) }
             }
             if let runtime = entry.runtime {
+                var environment = launchEnvironment
+                environment["TAB_AGENT_ID"] = id.description
+                runtime.prepare(AgentLaunch(environment: environment, path: cliDirectory, forkSource: entry.forkSource))
                 configureAccess(entry, runtime: runtime, mode: entry.snapshot.accessMode ?? .standard)
             }
         }
@@ -606,6 +636,7 @@ final class AgentSessions: @unchecked Sendable {
             }
             guard entry.snapshot.providerSession != id else { return }
             entry.snapshot.providerSession = id
+            entry.forkSource = nil
         case .contextUsage(let usage):
             guard usage.usedTokens >= 0, usage.contextWindow.map({ $0 > 0 }) ?? true,
                   entry.snapshot.contextUsage != usage else { return }
@@ -635,7 +666,38 @@ final class AgentSessions: @unchecked Sendable {
         if case .providerSession = event { persist(entry) }
     }
 
+    /// A new conversation `id` holding `from`'s transcript and choices. Its
+    /// provider forks `from`'s conversation on the first message, so neither
+    /// sees what the other says next.
+    private func fork(_ id: SessionId, from: SessionId) throws -> AgentChatSnapshot {
+        guard let source = entries[from] else { throw ServiceError.unknownSession(from) }
+        if let entry = entries[id] {
+            guard entry.snapshot.project == source.snapshot.project else {
+                throw ServiceError(.badRequest, "This agent session ID is already in use")
+            }
+            return entry.snapshot
+        }
+        guard !stopping else { throw ServiceError(.badRequest, "The server is stopping") }
+        _ = try projectDirectory(source.snapshot.project)
+        try checkDirectory(source.directory)
+        var snapshot = source.snapshot
+        snapshot.session = id
+        snapshot.revision = 0
+        snapshot.status = .idle
+        snapshot.turns = nil
+        snapshot.items = snapshot.items.filter { $0.kind != .approval || $0.isComplete }
+        for index in snapshot.items.indices { snapshot.items[index].isComplete = true }
+        let entry = Entry(snapshot, directory: source.directory)
+        entry.hasSuccessfulTurn = source.hasSuccessfulTurn
+        entry.forkSource = source.forkSource ?? source.snapshot.providerSession
+        entries[id] = entry
+        touch(entry)
+        persist(entry)
+        return entry.snapshot
+    }
+
     private func interrupted(_ entry: Entry, message: String) {
+
         entry.snapshot.status = .failed
         updateTurn(entry, status: .failed, outcome: .interrupted)
         entry.snapshot.revision &+= 1
@@ -1136,7 +1198,8 @@ final class AgentSessions: @unchecked Sendable {
     }
 
     private func persist(_ entry: Entry) {
-        let saved = Saved(snapshot: entry.snapshot, directory: entry.directory, hasSuccessfulTurn: entry.hasSuccessfulTurn)
+        let saved = Saved(snapshot: entry.snapshot, directory: entry.directory, hasSuccessfulTurn: entry.hasSuccessfulTurn,
+                          forkSource: entry.forkSource)
         let file = root.appendingPathComponent(entry.snapshot.session.description + ".json")
         writer.async {
             do {
