@@ -23,7 +23,11 @@ final class PaneCardView: HoverView {
     private let body = FlippedView()
 
     var isActive = false {
-        didSet { if isActive != oldValue { updateControls() } }
+        didSet {
+            guard isActive != oldValue else { return }
+            updateControls()
+            needsDisplay = true
+        }
     }
 
     var isZoomed = false {
@@ -193,14 +197,17 @@ final class PaneCardView: HoverView {
     }
 
     override var wantsUpdateLayer: Bool { true }
+    override var redrawsOnKeyChange: Bool { true }
 
     override func updateLayer() {
         glass.isHidden = !theme.glassPanes
         glass.appearance = theme.nsAppearance
-        glass.tint = theme.card.withAlphaComponent(theme.isLight ? 0.25 : 0.5)
+        glass.apply(theme.paneGlass(isKey: window?.isKeyWindow ?? true, isActive: isActive))
         layer?.backgroundColor = theme.paneBackground.cgColor
         header.wantsLayer = true
         header.layer?.backgroundColor = theme.paneBackground.cgColor
+        // Glass panes draw no border, so the glass's own edge catches the light.
+        layer?.borderWidth = theme.glassPanes ? 0 : Metrics.border
         layer?.borderColor = theme.cardBorder.cgColor
     }
 

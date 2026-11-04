@@ -213,6 +213,43 @@ public final class AppTheme: ObservableObject {
         let color = isLight ? ChromeColor(red: 1, green: 1, blue: 1).blended(over: palette.bg, amount: 0.65).nsColor : floating
         return glassEnabled ? color.withAlphaComponent(0.3) : color
     }
+    /// The window's glass in the Glass interface style, as native glass apps
+    /// draw it: a canvas-tinted glass, a plate under it and a blend over it.
+    public func windowGlass(isKey: Bool) -> GlassRecipe {
+        let canvas = palette.bg.nsColor
+        if isLight {
+            return GlassRecipe(
+                tint: isKey ? NSColor(white: 0.118, alpha: 0.5) : NSColor(white: 1, alpha: 0.5),
+                backdrop: GlassPlane(canvas.withAlphaComponent(isKey ? 0.55 : 0.6))
+            )
+        }
+        return GlassRecipe(
+            tint: canvas.withAlphaComponent(0.5),
+            backdrop: isKey ? GlassPlane(palette.raised.nsColor.withAlphaComponent(0.5), blend: "colorBlendMode") : nil,
+            fill: isKey ? GlassPlane(NSColor.black.withAlphaComponent(0.3), blend: "overlayBlendMode") : GlassPlane(NSColor.black.withAlphaComponent(0.2))
+        )
+    }
+
+    /// A pane's glass when glass panes are on: clear glass with a faint
+    /// canvas tint and no border, so its edges catch the desktop's light.
+    /// Other panes than the active one sit under a darker or lighter veil.
+    public func paneGlass(isKey: Bool, isActive: Bool) -> GlassRecipe {
+        let canvas = palette.bg.nsColor
+        if isLight {
+            let fill: GlassPlane? = switch (isKey, isActive) {
+            case (true, true): GlassPlane(palette.raised.nsColor.withAlphaComponent(0.5))
+            case (true, false): GlassPlane(NSColor(srgbRed: 0.122, green: 0.137, blue: 0.157, alpha: 0.05), blend: "plusD")
+            case (false, _): GlassPlane(palette.raised.nsColor.withAlphaComponent(0.4))
+            }
+            return GlassRecipe(tint: canvas.withAlphaComponent(0.1), fill: fill)
+        }
+        return GlassRecipe(
+            tint: canvas.withAlphaComponent(0.35),
+            backdrop: GlassPlane(NSColor.black.withAlphaComponent(isKey ? 0.2 : 0.6)),
+            fill: isKey && !isActive ? GlassPlane(NSColor.black.withAlphaComponent(0.2)) : nil
+        )
+    }
+
     /// Whether the palette is a light one.
     public var isLight: Bool { Self.isLight(palette) }
     /// Pills and chips at rest.
@@ -284,5 +321,28 @@ public struct AccessibilityOptions: Equatable, Sendable {
             increaseContrast: workspace.accessibilityDisplayShouldIncreaseContrast,
             reduceMotion: workspace.accessibilityDisplayShouldReduceMotion
         )
+    }
+}
+
+/// How one glass surface is layered: the glass's tint, a plate under the
+/// glass and a blend over it.
+public struct GlassRecipe: Equatable {
+    public var tint: NSColor
+    public var backdrop: GlassPlane?
+    public var fill: GlassPlane?
+
+    public init(tint: NSColor, backdrop: GlassPlane? = nil, fill: GlassPlane? = nil) {
+        self.tint = tint
+        self.backdrop = backdrop
+        self.fill = fill
+    }
+}
+
+extension GlassView {
+    /// Applies `recipe`'s tint and planes.
+    func apply(_ recipe: GlassRecipe) {
+        tint = recipe.tint
+        backdrop = recipe.backdrop
+        fill = recipe.fill
     }
 }

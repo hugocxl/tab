@@ -20,17 +20,22 @@ public final class GlassView: NSView {
         public var usesLiquidGlass: Bool
         /// The `NSVisualEffectView` material on releases without Liquid Glass.
         public var fallbackMaterial: NSVisualEffectView.Material
+        /// The desktop-sampling material under Liquid Glass behind the window.
+        public var backdropMaterial: NSVisualEffectView.Material
 
-        public init(cornerRadius: CGFloat, opacity: CGFloat = 1, fallbackMaterial: NSVisualEffectView.Material = .sidebar, regular: Bool = false, usesLiquidGlass: Bool = true) {
+        public init(cornerRadius: CGFloat, opacity: CGFloat = 1, fallbackMaterial: NSVisualEffectView.Material = .sidebar, backdropMaterial: NSVisualEffectView.Material = .underWindowBackground, regular: Bool = false, usesLiquidGlass: Bool = true) {
             self.cornerRadius = cornerRadius
             self.opacity = opacity
             self.regular = regular
             self.usesLiquidGlass = usesLiquidGlass
             self.fallbackMaterial = fallbackMaterial
+            self.backdropMaterial = backdropMaterial
         }
 
         /// Flat, desktop-sampling vibrancy with a translucent palette overlay.
         public static let workspace = Style(cornerRadius: 0, fallbackMaterial: .underWindowBackground, usesLiquidGlass: false)
+        /// The main window's background: clear Liquid Glass over HUD vibrancy.
+        public static let window = Style(cornerRadius: 0, fallbackMaterial: .underWindowBackground, backdropMaterial: .hudWindow)
         /// A pane's continuous glass surface, underneath its header and content.
         public static let pane = Style(cornerRadius: Metrics.cardRadius)
 
@@ -50,8 +55,20 @@ public final class GlassView: NSView {
     }
 
     private let material: NSView
-    private var backdrop: NSVisualEffectView?
+    private var backing: NSVisualEffectView?
     private var fallbackTint: NSView?
+    private let backdropPlane = NSView()
+    private let fillPlane = NSView()
+
+    /// A color layer under the glass, such as a darkening plate.
+    public var backdrop: GlassPlane? {
+        didSet { if backdrop != oldValue { backdropPlane.apply(backdrop) } }
+    }
+
+    /// A color layer over the glass, blended with what the glass shows.
+    public var fill: GlassPlane? {
+        didSet { if fill != oldValue { fillPlane.apply(fill) } }
+    }
 
     /// A color the glass takes on, such as a status color; `nil` keeps it
     /// clear. Vibrancy surfaces use a translucent overlay to carry the tint.
@@ -87,13 +104,21 @@ public final class GlassView: NSView {
         alphaValue = style.opacity
         if behindWindow, !(material is NSVisualEffectView) {
             let backing = NSVisualEffectView()
-            backing.material = .underWindowBackground
+            backing.material = style.backdropMaterial
             backing.blendingMode = .behindWindow
             backing.state = .active
-            backdrop = backing
+            self.backing = backing
             addSubview(backing)
         }
+        for plane in [backdropPlane, fillPlane] {
+            plane.wantsLayer = true
+            plane.layer?.cornerRadius = style.cornerRadius
+            plane.layer?.cornerCurve = .continuous
+            plane.isHidden = true
+        }
+        addSubview(backdropPlane)
         addSubview(material)
+        addSubview(fillPlane)
         if material is NSVisualEffectView {
             let overlay = NSView()
             overlay.wantsLayer = true
@@ -112,7 +137,29 @@ public final class GlassView: NSView {
     public override func layout() {
         super.layout()
         fallbackTint?.frame = bounds
-        backdrop?.frame = bounds
+        backing?.frame = bounds
+        backdropPlane.frame = bounds
         material.frame = bounds
+        fillPlane.frame = bounds
+    }
+}
+
+/// A flat color layer in a `GlassView`, with an optional Core Animation
+/// compositing filter such as `"overlayBlendMode"` or `"plusD"`.
+public struct GlassPlane: Equatable {
+    public var color: NSColor
+    public var blend: String?
+
+    public init(_ color: NSColor, blend: String? = nil) {
+        self.color = color
+        self.blend = blend
+    }
+}
+
+private extension NSView {
+    func apply(_ plane: GlassPlane?) {
+        isHidden = plane == nil
+        layer?.backgroundColor = plane?.color.cgColor
+        layer?.compositingFilter = plane?.blend
     }
 }

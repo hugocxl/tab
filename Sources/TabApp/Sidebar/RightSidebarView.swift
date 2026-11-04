@@ -106,6 +106,7 @@ private final class RightSidebarCard: ThemedView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     override var wantsUpdateLayer: Bool { true }
+    override var redrawsOnKeyChange: Bool { true }
 
     override func layout() {
         super.layout()
@@ -115,8 +116,9 @@ private final class RightSidebarCard: ThemedView {
     override func updateLayer() {
         glass.isHidden = !theme.glassEnabled
         glass.appearance = theme.nsAppearance
-        glass.tint = theme.chrome.withAlphaComponent(theme.isLight ? 0.25 : 0.5)
+        glass.apply(theme.paneGlass(isKey: window?.isKeyWindow ?? true, isActive: false))
         layer?.backgroundColor = (theme.glassEnabled ? NSColor.clear : NativeStyle.panel(theme)).cgColor
+        layer?.borderWidth = theme.glassEnabled ? 0 : Metrics.border
         layer?.borderColor = theme.cardBorder.cgColor
     }
 }

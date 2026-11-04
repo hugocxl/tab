@@ -10,6 +10,11 @@ open class ThemedView: NSView {
     }
 
     private var paletteObservation: AnyCancellable?
+    private var keyObservation: AnyCancellable?
+
+    /// Whether the view redraws when its window becomes or stops being key,
+    /// for surfaces that look different in an inactive window.
+    open var redrawsOnKeyChange: Bool { false }
 
     public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -29,9 +34,16 @@ open class ThemedView: NSView {
     }
 
     private func subscribe() {
-        guard window != nil else {
+        guard let window else {
             paletteObservation = nil
+            keyObservation = nil
             return
+        }
+        if redrawsOnKeyChange {
+            let center = NotificationCenter.default
+            keyObservation = center.publisher(for: NSWindow.didBecomeKeyNotification, object: window)
+                .merge(with: center.publisher(for: NSWindow.didResignKeyNotification, object: window))
+                .sink { [weak self] _ in self?.needsDisplay = true }
         }
         // @Published emits before storing the new palette. Renderers read the
         // theme's color properties, so deliver after that mutation has completed.

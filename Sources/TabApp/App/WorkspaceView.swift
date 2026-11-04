@@ -11,7 +11,8 @@ final class WorkspaceView: ThemedView {
     let splits: SplitContainerView
     private let rightSidebar = RightSidebarView()
     private let banner = BannerView()
-    private let glass = GlassView(style: .workspace, behindWindow: true)
+    private let glass = GlassView(style: .window, behindWindow: true)
+    private let rim = WindowRimView()
     private let updateChip = UpdateChipView()
     private var shownPanel: RightPanelKind?
     private var shownPanelProject: ProjectId?
@@ -35,6 +36,7 @@ final class WorkspaceView: ThemedView {
         splits = SplitContainerView(model: model)
         super.init(frame: .zero)
         addSubview(glass)
+        addSubview(rim)
         addSubview(sidebar.view)
         addSubview(splits)
         addSubview(rightSidebar)
@@ -111,10 +113,13 @@ final class WorkspaceView: ThemedView {
     override var wantsUpdateLayer: Bool { true }
     override var mouseDownCanMoveWindow: Bool { true }
 
+    override var redrawsOnKeyChange: Bool { true }
+
     override func updateLayer() {
         glass.isHidden = !theme.glassEnabled
         glass.appearance = theme.nsAppearance
-        glass.tint = theme.chrome.withAlphaComponent(theme.isLight ? 0.35 : 0.65)
+        glass.apply(theme.windowGlass(isKey: window?.isKeyWindow ?? true))
+        rim.isHidden = !theme.glassEnabled
         layer?.backgroundColor = (theme.glassEnabled ? NSColor.clear : theme.chrome).cgColor
         window?.isOpaque = !theme.glassEnabled
         window?.backgroundColor = theme.glassEnabled ? .clear : theme.chrome
@@ -189,6 +194,7 @@ final class WorkspaceView: ThemedView {
     override func layout() {
         super.layout()
         glass.frame = bounds
+        rim.frame = bounds
         let oldSplitFrame = InterfaceMotion.frame(splits)
         let oldSidebarFrame = InterfaceMotion.frame(sidebar.view)
         let oldPanelFrame = InterfaceMotion.frame(rightSidebar)
@@ -347,5 +353,46 @@ final class BannerView: ThemedView {
         button.frame = NSRect(x: bounds.width - size.width - 4, y: (bounds.height - size.height) / 2, width: size.width, height: size.height)
         let height = label.intrinsicContentSize.height
         label.frame = NSRect(x: 12, y: (bounds.height - height) / 2, width: max(button.frame.minX - 20, 0), height: height)
+    }
+}
+
+/// The light along the inside of a glass window's edge, strongest at the
+/// top: a shadow cast inward by a ring around the window, clipped to it.
+private final class WindowRimView: ThemedView {
+    private let ring = CALayer()
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        layer?.masksToBounds = true
+        ring.shadowColor = NSColor.white.cgColor
+        layer?.addSublayer(ring)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override var wantsUpdateLayer: Bool { true }
+
+    override func updateLayer() {
+        layer?.compositingFilter = theme.isLight ? "plusL" : "overlayBlendMode"
+        ring.shadowOpacity = theme.isLight ? 0.15 : 0.6
+        ring.shadowRadius = theme.isLight ? 1 : 2.5
+        ring.shadowOffset = CGSize(width: 0, height: theme.isLight ? 0.5 : 1.5)
+    }
+
+    override func layout() {
+        super.layout()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        ring.frame = bounds
+        let path = CGMutablePath()
+        path.addRect(bounds.insetBy(dx: -20, dy: -20))
+        // Wound the other way, so the window's own area stays a hole.
+        path.addLines(between: [CGPoint(x: bounds.minX, y: bounds.minY), CGPoint(x: bounds.minX, y: bounds.maxY),
+                                CGPoint(x: bounds.maxX, y: bounds.maxY), CGPoint(x: bounds.maxX, y: bounds.minY)])
+        path.closeSubpath()
+        ring.shadowPath = path
+        CATransaction.commit()
     }
 }

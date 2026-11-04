@@ -3,6 +3,14 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.52.0 - 2026-11-04
+
+### Changed
+
+- In the Glass interface style, the window and glass panes let more of the
+  desktop's color through, and pane edges catch its light instead of drawing a
+  border.
+
 ## 0.51.0 - 2026-11-04
 
 ### Added

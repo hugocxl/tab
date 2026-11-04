@@ -380,12 +380,14 @@ final class EmptyProjectView: ThemedView {
     }
 
     override var wantsUpdateLayer: Bool { true }
+    override var redrawsOnKeyChange: Bool { true }
 
     override func updateLayer() {
         glass.isHidden = !theme.glassPanes
         glass.appearance = theme.nsAppearance
-        glass.tint = theme.card.withAlphaComponent(theme.isLight ? 0.25 : 0.5)
+        glass.apply(theme.paneGlass(isKey: window?.isKeyWindow ?? true, isActive: true))
         layer?.backgroundColor = theme.paneBackground.cgColor
+        layer?.borderWidth = theme.glassPanes ? 0 : Metrics.border
         layer?.borderColor = theme.cardBorder.cgColor
     }
 
