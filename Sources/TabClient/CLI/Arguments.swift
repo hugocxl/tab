@@ -59,6 +59,24 @@ public enum ManageAction: Hashable, Sendable {
     case git(project: String, action: String)
     case files(project: String, action: String)
     case exec(project: String, argv: [String], timeoutMs: UInt32)
+    case device(CLIDevice)
+    /// Exposes the server's `localhost:remote` on this computer until interrupted.
+    case forward(remote: UInt16, local: UInt16?)
+}
+
+/// The server's simulators and emulators. A missing device means the only
+/// running one.
+public enum CLIDevice: Hashable, Sendable {
+    case list
+    case boot(device: String)
+    case shutDown(device: String?)
+    /// Saves a PNG to `output`, or writes it to stdout.
+    case screenshot(device: String?, output: String?)
+    /// A tap at a point of the screenshot, in its pixels.
+    case tap(device: String?, x: Double, y: Double)
+    case type(device: String?, text: String)
+    case press(device: String?, button: DeviceButton)
+    case open(device: String?, url: String)
 }
 
 public enum CLIServer: Hashable, Sendable {

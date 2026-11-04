@@ -46,6 +46,8 @@ extension AppModel {
         let current = Set(settings.servers.map(\.id))
         for entry in old where !current.contains(entry.id) {
             connections.removeValue(forKey: entry.id)?.disconnect()
+            browserProxies.removeValue(forKey: entry.id)?.stop()
+            portForwards.removeValue(forKey: entry.id)?.values.forEach { $0.stop() }
         }
         for entry in settings.servers {
             guard let previous = old.first(where: { $0.id == entry.id }), !previous.hasSameConnection(as: entry) else { continue }
@@ -312,6 +314,8 @@ extension AppModel {
                 }
             case .remoteAccess:
                 if server.isLocal { notify(.remoteAccess) }
+            case .devices:
+                devicesChanged(server)
             case .unknown: break
             }
         case .sessionMetadata(let session, let metadata):

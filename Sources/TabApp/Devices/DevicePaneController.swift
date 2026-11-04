@@ -1,11 +1,14 @@
 import AppKit
 import CoreImage
 import TabCore
+import TabDevices
+import TabProtocol
 
 /// A device pane: an iOS simulator's or Android emulator's live screen you
-/// can touch and type into, or the picker when it has none. The device
-/// keeps running when the pane closes; its screen streams only while the
-/// pane is on screen.
+/// can touch and type into, or the picker when it has none. Its devices
+/// belong to the tab's server: this Mac's show their surfaces directly,
+/// another computer's stream as video. The device keeps running when the
+/// pane closes; its screen streams only while the pane is on screen.
 @MainActor
 final class DevicePaneController: PaneContentController {
     let pane: PaneId
@@ -33,10 +36,14 @@ final class DevicePaneController: PaneContentController {
     private let picker = DevicePickerView()
     private let message = DeviceMessageView()
 
-    init(pane: PaneId, state: DevicePane, model: AppModel) {
+    /// The tab's server, which owns the pane's devices.
+    private let server: ServerId
+
+    init(pane: PaneId, state: DevicePane, model: AppModel, server: ServerId) {
         self.pane = pane
         self.state = state
         self.model = model
+        self.server = server
         for child in [screen, picker, message] {
             child.theme = model.theme
             root.addSubview(child)
@@ -44,6 +51,7 @@ final class DevicePaneController: PaneContentController {
         }
         root.theme = model.theme
         screen.onInput = { [weak self] input in self?.session?.send(input) }
+        screen.onResize = { [weak self] pixels in (self?.session as? ServerDeviceSession)?.maxPixels = pixels }
         picker.onChoose = { [weak self] device in self?.choose(device) }
         if state.isChosen {
             attach(state)
@@ -153,17 +161,53 @@ final class DevicePaneController: PaneContentController {
 
     // MARK: Choosing
 
+    /// The tab's server, while connected.
+    private var api: ServerAPI? { model?.connections[server]?.side }
+
+    /// The server's name when it is another computer.
+    private var host: String? { server.isLocal ? nil : model?.serverName(server) ?? "the server" }
+
     private func showPicker() {
         session?.close()
         session = nil
         screen.show(nil)
         phase = .picking
         render()
+        loadPicker()
+    }
+
+    private func loadPicker() {
         pickerLoad?.cancel()
+        guard let api else {
+            phase = .failed("Reconnect to \(host ?? "this Mac's server") to choose a device.")
+            render()
+            return
+        }
         pickerLoad = Task { [weak self] in
-            let devices = await DeviceChoice.all()
+            let devices = (try? await api.listDevices()) ?? []
             guard let self, !Task.isCancelled, phase == .picking else { return }
-            picker.show(devices)
+            picker.show(devices.map(DeviceChoice.init), host: host)
+        }
+    }
+
+    /// The server's devices changed, or it reconnected.
+    func devicesChanged() {
+        switch phase {
+        case .picking:
+            loadPicker()
+        case .failed where session == nil:
+            showPicker()
+        default:
+            guard let session = session as? ServerDeviceSession else { return }
+            Task { [weak self] in
+                do {
+                    try await session.refresh()
+                } catch {
+                    guard let self, self.session === session else { return }
+                    phase = .failed("\(error)")
+                    render()
+                }
+            }
         }
     }
 
@@ -177,14 +221,22 @@ final class DevicePaneController: PaneContentController {
 
     private func attach(_ device: DevicePane) {
         session?.close()
-        let session: DeviceSession
+        let ref: DeviceRef
         if let udid = device.udid {
-            session = SimulatorSession(udid: udid)
+            ref = .simulator(udid)
         } else if let avd = device.avd {
-            session = AndroidSession(avd: avd)
+            ref = .emulator(avd)
         } else {
             showPicker()
             return
+        }
+        let session: DeviceSession
+        if server.isLocal {
+            session = LocalDevices.session(for: ref)
+        } else {
+            let remote = ServerDeviceSession(device: ref) { [weak self] in self?.api }
+            remote.maxPixels = screen.maxPixels
+            session = remote
         }
         self.session = session
         screen.orientation = .portrait
@@ -361,6 +413,9 @@ final class DevicePaneController: PaneContentController {
         case .failed(let reason):
             message.show(title: "Can't show the device", detail: reason, button: "Choose Another…") { [weak self] in
                 self?.showPicker()
+            }
+            if api == nil, let host {
+                message.show(title: "Reconnect to \(host)", detail: "Its devices show here once it is connected.")
             }
         case .live, .picking:
             break

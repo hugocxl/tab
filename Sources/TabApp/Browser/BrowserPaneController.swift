@@ -1,11 +1,14 @@
 import AppKit
 import TabClient
 import TabCore
+import TabProtocol
 import UniformTypeIdentifiers
 import WebKit
 
 /// A browser pane: a toolbar over a `WKWebView` browsing with one profile's
-/// website data store. The page keeps running while the pane is hidden.
+/// website data store. The page keeps running while the pane is hidden. In
+/// a remote tab, pages load through the tab's server, so its network and its
+/// `localhost` are the ones the page sees.
 /// The pane reports its address, profile, title and icon to its host, which
 /// saves them; `tabId` is the ID `tab browser` names it by.
 @MainActor
@@ -48,6 +51,8 @@ public final class BrowserPaneController: NSViewController {
     private var settings: BrowserSettings
     private var initialURL: String?
     private var pickerGeneration = 0
+    /// Whose network the pane loads from, fixed by its tab.
+    private lazy var network: BrowserNetwork = host?.browserNetwork(forTab: tabId) ?? .local
     private var findQuery = ""
 
     /// A pane showing `state`'s address with its profile (the default
@@ -170,7 +175,7 @@ public final class BrowserPaneController: NSViewController {
 
     private func makeWebView(loading url: String?) {
         let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = profiles.dataStore(for: profile)
+        configuration.websiteDataStore = profiles.dataStore(for: profile, server: network.server)
         configuration.preferences.isElementFullscreenEnabled = true
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = true
         let webView = BrowserWebView(frame: content.bounds, configuration: configuration)
@@ -187,6 +192,7 @@ public final class BrowserPaneController: NSViewController {
         self.webView = webView
         observe(webView)
         toolbar.profile.name = profile.name
+        if case .remote(_, let name) = network { toolbar.via = name }
         if let url, !BrowserAddress.isBlank(url) {
             load(url)
         } else {
@@ -245,7 +251,7 @@ public final class BrowserPaneController: NSViewController {
     }
 
     private func urlChanged(_ url: String?) {
-        let url = url ?? ""
+        let url = RemoteLoopback.unproxied(url ?? "")
         guard url != page.url else { return }
         page.url = url
         if !toolbar.address.editing { toolbar.address.text = Self.displayAddress(url) }
@@ -326,7 +332,11 @@ public final class BrowserPaneController: NSViewController {
             openExternally(address)
             return
         }
-        webView.load(URLRequest(url: address))
+        if network.server != nil, let proxied = URL(string: RemoteLoopback.proxied(url)) {
+            webView.load(URLRequest(url: proxied))
+        } else {
+            webView.load(URLRequest(url: address))
+        }
         page.loading = true
         toolbar.address.text = Self.displayAddress(url)
         refreshChrome()
@@ -713,7 +723,7 @@ public final class BrowserPaneController: NSViewController {
     }
 
     /// The cookies of the pane's profile.
-    public var cookieStore: WKHTTPCookieStore { profiles.dataStore(for: profile).httpCookieStore }
+    public var cookieStore: WKHTTPCookieStore { profiles.dataStore(for: profile, server: network.server).httpCookieStore }
 }
 
 // MARK: - Delegates
@@ -725,6 +735,11 @@ extension BrowserPaneController: WKNavigationDelegate, WKUIDelegate, WKDownloadD
         if !BrowserAddress.engineLoads(url.absoluteString) {
             let byUser = navigationAction.navigationType == .linkActivated || navigationAction.navigationType == .formSubmitted
             if byUser { openExternally(url) }
+            return (.cancel, preferences)
+        }
+        if network.server != nil, RemoteLoopback.isLoopback(url), navigationAction.targetFrame?.isMainFrame == true {
+            // A loopback address would bypass the server's proxy; load its reserved name instead.
+            load(url.absoluteString)
             return (.cancel, preferences)
         }
         if navigationAction.shouldPerformDownload { return (.download, preferences) }
@@ -752,7 +767,7 @@ extension BrowserPaneController: WKNavigationDelegate, WKUIDelegate, WKDownloadD
     public func webView(_ webView: WKWebView, didFinish navigation: WKNavigation?) {
         page.loading = false
         page.progress = 1
-        let url = webView.url?.absoluteString ?? page.url
+        let url = webView.url.map { RemoteLoopback.unproxied($0.absoluteString) } ?? page.url
         profiles.history(for: profile).recordVisit(url: url, title: webView.title)
         refreshChrome()
         loadFavicon()
@@ -774,8 +789,26 @@ extension BrowserPaneController: WKNavigationDelegate, WKUIDelegate, WKDownloadD
             refreshChrome()
             return
         }
-        page.error = LoadError(url: url ?? page.url, message: error.localizedDescription)
+        page.error = LoadError(url: url.map(RemoteLoopback.unproxied) ?? page.url, message: failureMessage(error))
         refreshChrome()
+    }
+
+    /// A remote tab names its server, which loaded the page, and says when it is offline.
+    private func failureMessage(_ error: NSError) -> String {
+        guard case .remote(let server, let name) = network else { return error.localizedDescription }
+        guard host?.browserServerConnected(server) ?? false else {
+            return "Reconnect to \(name) to load pages from its network."
+        }
+        switch error.code {
+        case NSURLErrorCannotConnectToHost:
+            return "Nothing on \(name) accepted the connection. Check that the server is running there."
+        case NSURLErrorCannotFindHost, NSURLErrorDNSLookupFailed:
+            return "\(name) couldn't find that address."
+        case NSURLErrorTimedOut:
+            return "\(name) took too long to connect."
+        default:
+            return "\(error.localizedDescription) (loaded through \(name))"
+        }
     }
 
     public func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {

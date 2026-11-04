@@ -1,22 +1,23 @@
-import AppKit
+import Foundation
 import IOSurface
+import TabProtocol
 
 /// One pane's live link to a simulator: whether it is booted, its screen's
 /// surface while the pane is on screen, and its input. Screen callbacks
 /// arrive only while `streaming`, so a hidden pane costs nothing.
 @MainActor
-final class SimulatorSession {
-    let udid: String
+public final class SimulatorSession {
+    public let udid: String
     /// The device booted or shut down.
-    var onStateChange: ((Bool) -> Void)?
+    public var onStateChange: ((Bool) -> Void)?
     /// The screen's surface was replaced, such as on first connect or a
     /// rotation.
-    var onSurface: ((IOSurface) -> Void)?
+    public var onSurface: ((IOSurface) -> Void)?
     /// The screen drew into its current surface.
-    var onFrame: (() -> Void)?
+    public var onFrame: (() -> Void)?
 
-    private(set) var isBooted = false
-    private(set) var surface: IOSurface?
+    public private(set) var isBooted = false
+    public private(set) var surface: IOSurface?
 
     private let bridge = SimulatorBridge.shared
     private var device: AnyObject?
@@ -28,12 +29,12 @@ final class SimulatorSession {
     private var shownScreen: ObjectIdentifier?
     private var closed = false
 
-    init(udid: String) {
+    public init(udid: String) {
         self.udid = udid
     }
 
     /// Finds the device and starts following its state.
-    func connect() async throws {
+    public func connect() async throws {
         let bridge = bridge
         let udid = udid
         let (device, booted, size) = try await withCheckedThrowingContinuation { continuation in
@@ -50,7 +51,7 @@ final class SimulatorSession {
         self.device = device
         expectedSize = size
         isBooted = booted
-        notifications = bridge.registerNotifications(device) { [weak self] in
+        notifications = bridge.registerNotifications(device, queue: .main) { [weak self] in
             MainActor.assumeIsolated { self?.stateMayHaveChanged() }
         }
     }
@@ -75,7 +76,7 @@ final class SimulatorSession {
     // MARK: Screen
 
     /// Starts receiving the screen, if booted.
-    func startScreen() {
+    public func startScreen() {
         guard registration == nil, isBooted, let device, !closed else { return }
         let id = UUID()
         registration = id
@@ -83,7 +84,7 @@ final class SimulatorSession {
         bridge.queue.async { [weak self] in
             let screens = bridge.screens(device)
             for screen in screens {
-                bridge.registerScreen(screen, id: id, surfaces: { [weak self] in
+                bridge.registerScreen(screen, id: id, queue: .main, surfaces: { [weak self] in
                     MainActor.assumeIsolated { self?.surfacesChanged(screen) }
                 }, frame: { [weak self] in
                     MainActor.assumeIsolated { self?.screenDrew(screen) }
@@ -100,7 +101,7 @@ final class SimulatorSession {
     }
 
     /// Stops receiving the screen.
-    func stopScreen() {
+    public func stopScreen() {
         guard let id = registration else { return }
         registration = nil
         let screens = screens
@@ -135,17 +136,28 @@ final class SimulatorSession {
     // MARK: Input
 
     /// Sends input in order. Touches land on the panel's surface.
-    func send(_ input: [DeviceInput]) {
+    public func send(_ input: [DeviceInput]) {
         let size = surface.map { CGSize(width: $0.width, height: $0.height) } ?? .zero
-        send(input.compactMap { item -> SimulatorBridge.HIDMessage? in
+        var messages: [SimulatorBridge.HIDMessage] = []
+        for item in input {
             switch item {
-            case let .touch(point, down):
-                guard size.width > 0 else { return nil }
-                return .touch(point: CGPoint(x: point.x * size.width, y: point.y * size.height), size: size, down: down)
+            case let .touch(x, y, down):
+                guard size.width > 0 else { continue }
+                messages.append(.touch(point: CGPoint(x: x * size.width, y: y * size.height), size: size, down: down))
             case let .key(usage, down):
-                return .key(usage, down: down)
+                messages.append(.key(usage, down: down))
+            case .button(let button):
+                messages += Self.buttonMessages(button)
+            case .unknown:
+                continue
             }
-        })
+        }
+        send(messages)
+    }
+
+    static func buttonMessages(_ button: DeviceButton) -> [SimulatorBridge.HIDMessage] {
+        let hardware: SimulatorBridge.HardwareButton = button == .lock ? .lock : .home
+        return [.button(hardware, down: true), .button(hardware, down: false)]
     }
 
     /// Sends HID messages in order, connecting the HID client on first use.
@@ -171,7 +183,7 @@ final class SimulatorSession {
     }
 
     /// Connects or disconnects the device's hardware keyboard.
-    func setHardwareKeyboard(_ connected: Bool) async throws {
+    public func setHardwareKeyboard(_ connected: Bool) async throws {
         guard isBooted, let device, !closed else { return }
         let bridge = bridge
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
@@ -181,14 +193,14 @@ final class SimulatorSession {
         }
     }
 
-    var onInputError: ((Error) -> Void)?
+    public var onInputError: ((Error) -> Void)?
 
     private func inputFailed(_ error: Error) {
         onInputError?(error)
     }
 
     /// Stops everything; the simulator keeps running.
-    func close() {
+    public func close() {
         closed = true
         stopScreen()
         if let device, let notifications {

@@ -41,6 +41,36 @@ final class BrowserPaneContent: PaneContentController {
 extension AppModel: BrowserHost {
     public var browserSettings: BrowserSettings { settings.browser }
 
+    public func browserNetwork(forTab tabId: String) -> BrowserNetwork {
+        guard let pane = PaneId(tabId), let server = state.paneServer(pane), !server.isLocal else { return .local }
+        return .remote(server: server, name: serverName(server) ?? "the server")
+    }
+
+    public func browserServerConnected(_ server: ServerId) -> Bool {
+        connections[server]?.state.isReady ?? false
+    }
+
+    /// The side connection to `server`, while connected.
+    func sideAPI(_ server: ServerId) -> ServerAPI? {
+        connections[server]?.side
+    }
+
+    /// The proxy for `server`'s pages, started on first use. Its tunnels go
+    /// through the side connection, so pages never wait behind terminals.
+    func browserProxy(_ server: ServerId) -> ServerProxy? {
+        if let proxy = browserProxies[server] { return proxy }
+        do {
+            let proxy = try ServerProxy(name: server.description) { [weak self] in
+                await self?.sideAPI(server)
+            }
+            browserProxies[server] = proxy
+            return proxy
+        } catch {
+            report(error)
+            return nil
+        }
+    }
+
     public func openBrowserPane(url: String, profile: String, from source: BrowserPaneController) {
         guard let pane = PaneId(source.tabId), let project = state.paneProject(pane) else {
             openBrowser(url: url, profile: profile.isEmpty ? BrowserProfiles.defaultName : profile)

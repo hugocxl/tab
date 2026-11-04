@@ -1,22 +1,13 @@
-import AppKit
+import CoreGraphics
+import Foundation
 import IOSurface
-
-/// The device platforms a device pane shows.
-enum DevicePlatform: String, Sendable {
-    case iOS
-    case android
-}
-
-/// A hardware or navigation button a device has.
-enum DeviceButton: Sendable {
-    case home, back, recents, lock
-}
+import TabProtocol
 
 /// One device pane's live link to a simulator or emulator: whether it runs,
 /// its screen's surface while the pane is on screen, its input and its
 /// controls. Screens stream only between `startScreen` and `stopScreen`.
 @MainActor
-protocol DeviceSession: AnyObject {
+public protocol DeviceSession: AnyObject {
     var isBooted: Bool { get }
     var surface: IOSurface? { get }
     /// The device started or stopped.
@@ -53,26 +44,36 @@ protocol DeviceSession: AnyObject {
     func close()
 }
 
-extension SimulatorSession: DeviceSession {
-    var buttons: [DeviceButton] { [.home, .lock] }
-    var hasHardwareKeyboardSwitch: Bool { true }
+extension DeviceOrientation {
+    /// `panelPoint(x:y:)` for a point.
+    public func panelPoint(_ upright: CGPoint) -> CGPoint {
+        let point = panelPoint(x: upright.x, y: upright.y)
+        return CGPoint(x: point.x, y: point.y)
+    }
+}
 
-    func press(_ button: DeviceButton) {
-        let hardware: SimulatorBridge.HardwareButton
-        switch button {
-        case .home, .back, .recents: hardware = .home
-        case .lock: hardware = .lock
-        }
-        send([SimulatorBridge.HIDMessage.button(hardware, down: true), .button(hardware, down: false)])
+extension DeviceInput {
+    /// A touch at a point on the panel's portrait screen.
+    public static func touch(_ point: CGPoint, down: Bool) -> DeviceInput {
+        .touch(x: point.x, y: point.y, down: down)
+    }
+}
+
+extension SimulatorSession: DeviceSession {
+    public var buttons: [DeviceButton] { [.home, .lock] }
+    public var hasHardwareKeyboardSwitch: Bool { true }
+
+    public func press(_ button: DeviceButton) {
+        send(Self.buttonMessages(button))
     }
 
-    func boot() async throws { try await SimulatorControl.boot(udid) }
-    func shutDown() async throws { try await SimulatorControl.shutdown(udid) }
-    func isDark() async throws -> Bool { try await SimulatorControl.isDark(udid) }
-    func setDark(_ dark: Bool) async throws { try await SimulatorControl.setDark(udid, dark) }
-    func orientation() async throws -> DeviceOrientation { try await SimulatorControl.orientation(udid) }
+    public func boot() async throws { try await SimulatorControl.boot(udid) }
+    public func shutDown() async throws { try await SimulatorControl.shutdown(udid) }
+    public func isDark() async throws -> Bool { try await SimulatorControl.isDark(udid) }
+    public func setDark(_ dark: Bool) async throws { try await SimulatorControl.setDark(udid, dark) }
+    public func orientation() async throws -> DeviceOrientation { try await SimulatorControl.orientation(udid) }
 
-    func rotate(by turns: Int) async throws -> DeviceOrientation {
+    public func rotate(by turns: Int) async throws -> DeviceOrientation {
         let current = try await SimulatorControl.orientation(udid)
         return try await SimulatorControl.setOrientation(udid, DeviceOrientation(quarterTurns: current.quarterTurns + turns))
     }

@@ -12,15 +12,17 @@ public struct ServerServices: Sendable {
     public var files: FilesServiceProtocol?
     public var detector: AgentDetector?
     public var remote: RemoteAccessProtocol?
+    public var devices: DeviceService?
 
     public init(git: GitServiceProtocol? = nil, worktreeGuard: WorktreeOperationGuard? = nil,
                 files: FilesServiceProtocol? = nil, detector: AgentDetector? = nil,
-                remote: RemoteAccessProtocol? = nil) {
+                remote: RemoteAccessProtocol? = nil, devices: DeviceService? = nil) {
         self.git = git
         self.worktreeGuard = worktreeGuard
         self.files = files
         self.detector = detector
         self.remote = remote
+        self.devices = devices
     }
 }
 
@@ -126,6 +128,7 @@ public final class Server: @unchecked Sendable {
     }
 
     var services: ServerServices { serviceLock.withLock { installedServices } }
+    var devices: DeviceService? { services.devices }
 
     // MARK: Counters
 

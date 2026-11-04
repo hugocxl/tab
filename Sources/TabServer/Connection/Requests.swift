@@ -67,6 +67,16 @@ extension ClientConnection {
         case .cancelExec(let job):
             jobs.cancel(job)
             reply(id, .execCancelled)
+        case .openTunnel(let host, let port):
+            tunnels.open(host: host, port: port, channel: { [weak self] in self?.reserveChannel() ?? ChannelId(0) }) {
+                [weak self] body in self?.reply(id, body)
+            }
+        case .closeTunnel(let channel):
+            tunnels.close(channel)
+            reply(id, .tunnelClosed)
+        case .listDevices, .deviceAction, .attachDevice, .detachDevice, .deviceScreenshot:
+            guard let devices = server.devices else { return unavailable(id, "Devices") }
+            device(id, body, devices)
         default:
             worker.async { [self] in
                 guard !isClosed else { return }
@@ -76,6 +86,38 @@ extension ClientConnection {
                     reply(id, .error(errorReply(error)))
                 }
             }
+        }
+    }
+
+    private func device(_ id: RequestId, _ body: RequestBody, _ devices: DeviceService) {
+        if case .attachDevice(let request) = body {
+            Task { [self] in
+                do {
+                    let stream = try await devices.attach(request, channel: reserveChannel(), connection: self)
+                    reply(id, .deviceAttached(stream))
+                    devices.begin(stream.channel, connection: self)
+                } catch {
+                    reply(id, .error(errorReply(error)))
+                }
+            }
+            return
+        }
+        Task { [self] in
+            reply(id, await asyncResult {
+                switch body {
+                case .listDevices:
+                    return .devices(await devices.list())
+                case .deviceAction(let device, let action):
+                    return .deviceSettings(try await devices.perform(action, on: device))
+                case .deviceScreenshot(let device):
+                    return .deviceScreenshot(png: try await devices.screenshot(device))
+                case .detachDevice(let channel):
+                    devices.detach(channel, connection: self)
+                    return .deviceDetached
+                default:
+                    throw ServiceError(.badRequest, "Unexpected request")
+                }
+            })
         }
     }
 
@@ -232,7 +274,8 @@ extension ClientConnection {
             return .remoteAccess(remote.state())
 
         case .hello, .ping, .unknown, .authenticate, .pair, .git, .files, .exec, .cancelExec, .agentChat, .agentCheckpoint, .agentAttachment,
-             .agentComposerContext, .agentModelCatalog:
+             .agentComposerContext, .agentModelCatalog, .openTunnel, .closeTunnel, .listDevices, .deviceAction, .attachDevice,
+             .detachDevice, .deviceScreenshot:
             throw ServiceError(.badRequest, "Unexpected request")
         }
     }

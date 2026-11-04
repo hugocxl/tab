@@ -49,7 +49,7 @@ public enum PaneContent: Codable, Hashable, Sendable {
     /// A conversation identity is assigned before contacting its server.
     case agent(session: SessionId, provider: AgentChatProvider)
     case browser(BrowserPane)
-    /// A simulated device's screen, on this Mac.
+    /// A simulator's or emulator's screen, on the tab's server.
     case device(DevicePane)
     /// A file editor; `path` is project-relative with `/` separators.
     case editor(path: String)

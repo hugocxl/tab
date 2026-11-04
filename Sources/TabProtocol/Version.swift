@@ -47,9 +47,15 @@ public struct Feature: RawRepresentable, Hashable, Codable, Sendable {
     /// Agents' hooks report their state with `reportAgentState`.
     public static let agentStateReports = Feature(rawValue: "agentStateReports")
 
+    /// TCP tunnels to the server's network, for remote browser panes.
+    public static let tunnels = Feature(rawValue: "tunnels")
+
+    /// The server lists, controls and streams its simulators and emulators.
+    public static let devices = Feature(rawValue: "devices")
+
     /// Features this build's server supports.
     public static let all: [Feature] = [.terminalInput, .sessionEnvironment, .fileSearch, .fileByteRanges, .pullRequestPreview,
-                                        .fileWriteParents, .agentStateReports]
+                                        .fileWriteParents, .agentStateReports, .tunnels, .devices]
 }
 
 /// What kind of program a client is.
@@ -121,6 +127,17 @@ public enum Limits {
     public static let maxEnvironmentVariables = 128
     public static let maxEnvironmentBytes = 64 * 1024
     public static let maxDevices = 64
+    /// The most tunnels one connection keeps open.
+    public static let maxTunnelsPerConnection = 256
+    /// The most one `stream` frame carries.
+    public static let maxStreamChunk = 64 * 1024
+    /// The bytes each direction of a tunnel may send before the reader grants credit.
+    public static let tunnelWindow: UInt32 = 512 * 1024
+    public static let maxTunnelHost = 255
+    /// The most input one device message carries.
+    public static let maxDeviceInput = 1024
+    /// The most devices a listing returns.
+    public static let maxDeviceList = 1024
     public static let maxDeviceName = 64
     public static let maxPairingHosts = 8
     public static let defaultRemotePort: UInt16 = 7419

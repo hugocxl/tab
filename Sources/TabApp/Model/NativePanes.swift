@@ -104,7 +104,8 @@ extension AppModel {
         }
         panes.register(.device) { context in
             guard case .device(let state) = context.pane.content else { return PlaceholderPaneController(context: context) }
-            return DevicePaneController(pane: context.pane.id, state: state, model: context.model)
+            return DevicePaneController(pane: context.pane.id, state: state, model: context.model,
+                                        server: context.project.serverId)
         }
         rightPanelFactory = { kind, model in
             switch kind {
@@ -145,6 +146,14 @@ extension AppModel {
         for project in projects {
             for editor in editors(in: project) { editor.controller.reconnected() }
             for diff in diffs(in: project) { diff.controller.reconnected() }
+        }
+        devicesChanged(server)
+    }
+
+    /// A server's devices booted, stopped, came or went: its device panes follow.
+    func devicesChanged(_ server: ServerId) {
+        for (id, controller) in panes.all where state.paneServer(id) == server {
+            (controller as? DevicePaneController)?.devicesChanged()
         }
     }
 

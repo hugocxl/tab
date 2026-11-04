@@ -31,11 +31,15 @@ let package = Package(
             swiftSettings: swift5
         ),
 
+        // iOS simulators and Android emulators: listing, controlling, their
+        // screens and input, and the video codec that streams screens. No AppKit.
+        .target(name: "TabDevices", dependencies: ["TabCore", "TabProtocol"], swiftSettings: swift5),
+
         // The server: projects, sessions, history, Git, files, search, agent
-        // detection, shell integration, mobile access.
+        // detection, shell integration, mobile access, tunnels and devices.
         .target(
             name: "TabServer",
-            dependencies: ["TabCore", "TabProtocol", "TabTerminal"],
+            dependencies: ["TabCore", "TabDevices", "TabProtocol", "TabTerminal"],
             resources: [.copy("Resources/Detection"), .copy("Resources/Shell")],
             swiftSettings: swift5
         ),
@@ -54,7 +58,7 @@ let package = Package(
         // The desktop app (AppKit, with SwiftUI for Settings forms).
         .target(
             name: "TabApp",
-            dependencies: ["TabClient", "TabCore", "TabProtocol"],
+            dependencies: ["TabClient", "TabCore", "TabDevices", "TabProtocol"],
             resources: [.copy("Resources/Icons")],
             swiftSettings: swift5
         ),
@@ -62,6 +66,7 @@ let package = Package(
 
         .testTarget(name: "TabCoreTests", dependencies: ["TabCore"], swiftSettings: swift5),
         .testTarget(name: "TabProtocolTests", dependencies: ["TabProtocol"], exclude: ["Fixtures"], swiftSettings: swift5),
+        .testTarget(name: "TabDevicesTests", dependencies: ["TabDevices", "TabProtocol"], swiftSettings: swift5),
         .testTarget(name: "TabTerminalTests", dependencies: ["TabTerminal"], swiftSettings: swift5),
         .testTarget(name: "TabServerTests", dependencies: ["TabServer"], swiftSettings: swift5),
         .testTarget(name: "TabClientTests", dependencies: ["TabClient", "TabServer"], swiftSettings: swift5),

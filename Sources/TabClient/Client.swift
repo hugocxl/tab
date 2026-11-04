@@ -207,6 +207,10 @@ public final class ServerClient: @unchecked Sendable {
         try send(.clear, channel: channel)
     }
 
+    func sendChannelMessage(_ message: SessionMessage, channel: ChannelId) throws {
+        try send(message, channel: channel)
+    }
+
     private func send(_ message: SessionMessage, channel: ChannelId) throws {
         guard !channel.isControl else { throw ClientError.invalid(.unknownChannel) }
         do {
@@ -229,6 +233,18 @@ public final class ServerClient: @unchecked Sendable {
     func finishChannel(_ channel: ChannelId) {
         state.finishChannel(channel)
     }
+
+    func claimTunnel(_ channel: ChannelId) -> Tunnel? {
+        state.claimTunnel(channel)
+    }
+
+    func claimDeviceChannel(_ channel: ChannelId) -> AsyncStream<DeviceChannelEvent>? {
+        state.claimDeviceChannel(channel)
+    }
+
+    func finishDeviceChannel(_ channel: ChannelId) {
+        state.finishDeviceChannel(channel)
+    }
 }
 
 // MARK: - Connection state
@@ -246,6 +262,11 @@ private final class State: @unchecked Sendable {
     /// read so no frame after it is missed.
     private var channels: [ChannelId: AsyncStream<ChannelEvent>.Continuation] = [:]
     private var unclaimed: [ChannelId: AsyncStream<ChannelEvent>] = [:]
+    /// Tunnels by channel, made when the `tunnelOpened` reply is read.
+    private var tunnels: [ChannelId: Tunnel] = [:]
+    private var unclaimedTunnels: Set<ChannelId> = []
+    private var devices: [ChannelId: AsyncStream<DeviceChannelEvent>.Continuation] = [:]
+    private var unclaimedDevices: [ChannelId: AsyncStream<DeviceChannelEvent>] = [:]
     private var closeHandlers: [@Sendable (ClientError) -> Void] = []
     private var closedWith: ClientError?
     private var connection: FrameConnection?
@@ -269,7 +290,7 @@ private final class State: @unchecked Sendable {
     }
 
     func write(_ data: Data) {
-        guard let connection, let writer else { return }
+        guard !data.isEmpty, let connection, let writer else { return }
         writer.async { [weak self] in
             do {
                 try connection.send(encoded: data)
@@ -333,6 +354,15 @@ private final class State: @unchecked Sendable {
         if waiting != nil, case .attached(let snapshot, _) = body {
             openChannel(snapshot.channel)
         }
+        if case .tunnelOpened(let channel) = body {
+            openTunnel(channel, claimed: waiting != nil)
+        }
+        if waiting != nil, case .deviceAttached(let stream) = body {
+            devices.removeValue(forKey: stream.channel)?.finish()
+            let (events, continuation) = AsyncStream<DeviceChannelEvent>.makeStream()
+            devices[stream.channel] = continuation
+            unclaimedDevices[stream.channel] = events
+        }
         lock.unlock()
         waiting?.continuation.resume(returning: body)
     }
@@ -343,6 +373,41 @@ private final class State: @unchecked Sendable {
         let (stream, continuation) = AsyncStream<ChannelEvent>.makeStream()
         channels[channel] = continuation
         unclaimed[channel] = stream
+    }
+
+    /// Call with the lock held. A tunnel nobody waits for any more closes at once.
+    private func openTunnel(_ channel: ChannelId, claimed: Bool) {
+        let tunnel = Tunnel(channel: channel, send: { [weak self] data in
+            guard let self, isOpen else { return false }
+            write(data)
+            return true
+        }, close: { [weak self] in
+            guard let self else { return }
+            lock.withLock { _ = self.tunnels.removeValue(forKey: channel) }
+            Task { _ = try? await self.request(.closeTunnel(channel), timeout: 10) }
+        })
+        tunnels[channel] = tunnel
+        if claimed {
+            unclaimedTunnels.insert(channel)
+        } else {
+            DispatchQueue.global().async { tunnel.close() }
+        }
+    }
+
+    func claimTunnel(_ channel: ChannelId) -> Tunnel? {
+        lock.withLock { unclaimedTunnels.remove(channel) != nil ? tunnels[channel] : nil }
+    }
+
+    func claimDeviceChannel(_ channel: ChannelId) -> AsyncStream<DeviceChannelEvent>? {
+        lock.withLock { unclaimedDevices.removeValue(forKey: channel) }
+    }
+
+    func finishDeviceChannel(_ channel: ChannelId) {
+        let continuation = lock.withLock { () -> AsyncStream<DeviceChannelEvent>.Continuation? in
+            unclaimedDevices[channel] = nil
+            return devices.removeValue(forKey: channel)
+        }
+        continuation?.finish()
     }
 
     func channelStream(_ channel: ChannelId) -> AsyncStream<ChannelEvent>? {
@@ -392,6 +457,10 @@ private final class State: @unchecked Sendable {
                 return violation("invalid screen frame on channel \(channel)")
             }
             yield(.frame(screen), on: channel)
+        case .stream(let channel, let data):
+            lock.withLock { tunnels[channel] }?.received(data)
+        case .video(let channel, let frame):
+            lock.withLock { devices[channel] }?.yield(.frame(frame))
         case .input, .other:
             break
         }
@@ -455,7 +524,19 @@ private final class State: @unchecked Sendable {
         case .ended(let reason):
             yield(.ended(reason), on: channel)
             finishChannel(channel)
-        case .input, .resize, .ack, .scroll, .cellSize, .requestHistory, .clear, .unknown:
+        case .credit(let bytes):
+            lock.withLock { tunnels[channel] }?.credited(bytes)
+        case .streamEnd:
+            lock.withLock { tunnels[channel] }?.serverEnded()
+        case .streamClosed(let failure):
+            lock.withLock { () -> Tunnel? in
+                unclaimedTunnels.remove(channel)
+                return tunnels.removeValue(forKey: channel)
+            }?.ended(failure)
+        case .deviceStopped:
+            lock.withLock { devices[channel] }?.yield(.stopped)
+            finishDeviceChannel(channel)
+        case .input, .resize, .ack, .scroll, .cellSize, .requestHistory, .clear, .deviceInput, .requestKeyframe, .unknown:
             break
         }
     }
@@ -479,6 +560,12 @@ private final class State: @unchecked Sendable {
         let channels = channels
         self.channels = [:]
         unclaimed = [:]
+        let tunnels = Array(self.tunnels.values)
+        self.tunnels = [:]
+        unclaimedTunnels = []
+        let devices = Array(self.devices.values)
+        self.devices = [:]
+        unclaimedDevices = [:]
         let handlers = closeHandlers
         closeHandlers = []
         let events = events
@@ -492,6 +579,8 @@ private final class State: @unchecked Sendable {
         for channel in channels.values {
             channel.finish()
         }
+        for tunnel in tunnels { tunnel.ended(.failed) }
+        for device in devices { device.finish() }
         events?.yield(.disconnected(error))
         events?.finish()
         for handler in handlers {

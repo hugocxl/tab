@@ -11,13 +11,17 @@ final class BrowserToolbar: ThemedView {
     let picker = IconButton(.code, label: "Select an element to copy its HTML and text")
     let external = IconButton(.externalLink, label: "Open in External Browser")
     let profile = BrowserProfileButton()
+    /// Names the server a remote tab's pages load through.
+    private let viaChip = makeLabel("", font: AppFont.footnote)
     private let progress = ThemedBackground(color: { $0.accent })
     private var progressWidth: NSLayoutConstraint?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         translatesAutoresizingMaskIntoConstraints = false
-        let row = NSStackView(views: [back, forward, reload, address, picker, external, profile])
+        viaChip.isHidden = true
+        viaChip.setContentCompressionResistancePriority(.required, for: .horizontal)
+        let row = NSStackView(views: [back, forward, reload, viaChip, address, picker, external, profile])
         row.orientation = .horizontal
         row.spacing = 4
         row.alignment = .centerY
@@ -47,7 +51,21 @@ final class BrowserToolbar: ThemedView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     override var theme: AppTheme {
-        didSet { address.theme = theme; progress.theme = theme }
+        didSet {
+            address.theme = theme
+            progress.theme = theme
+            viaChip.textColor = theme.fgMuted
+        }
+    }
+
+    /// The server pages load through, or `nil` for this Mac.
+    var via: String? {
+        get { viaChip.isHidden ? nil : viaChip.stringValue }
+        set {
+            viaChip.stringValue = newValue.map { "via \($0)" } ?? ""
+            viaChip.isHidden = newValue == nil
+            viaChip.toolTip = newValue.map { "Pages load from \($0)'s network, so localhost is \($0)." }
+        }
     }
 
     /// Shows the load progress as an accent line under the toolbar.

@@ -1,23 +1,31 @@
-import AppKit
+import Foundation
+import TabProtocol
 
 /// Turns Mac keys and text into USB keyboard usages (HID page 7) for a
 /// simulator's hardware keyboard.
-enum DeviceKeyboard {
-    static let leftShift: UInt32 = 0xE1
+public enum DeviceKeyboard {
+    public static let leftShift: UInt32 = 0xE1
 
     /// The usage of a Mac virtual key code, by position on an ANSI keyboard.
-    static func usage(keyCode: UInt16) -> UInt32? {
+    public static func usage(keyCode: UInt16) -> UInt32? {
         keyCodes[keyCode]
     }
 
-    /// The modifier usages a flags change presses or releases.
-    static let modifiers: [(NSEvent.ModifierFlags, UInt32)] = [
-        (.control, 0xE0), (.shift, 0xE1), (.option, 0xE2), (.command, 0xE3),
-    ]
+    /// The key presses that type `text`, with Shift where needed.
+    public static func input(typing text: String) -> [DeviceInput] {
+        var input: [DeviceInput] = []
+        for stroke in strokes(for: text) {
+            if stroke.shift { input.append(.key(usage: leftShift, down: true)) }
+            input.append(.key(usage: stroke.usage, down: true))
+            input.append(.key(usage: stroke.usage, down: false))
+            if stroke.shift { input.append(.key(usage: leftShift, down: false)) }
+        }
+        return input
+    }
 
     /// The keys that type `text` on a US layout, with Shift where needed.
     /// Characters a US keyboard can't type are skipped.
-    static func strokes(for text: String) -> [(usage: UInt32, shift: Bool)] {
+    public static func strokes(for text: String) -> [(usage: UInt32, shift: Bool)] {
         text.unicodeScalars.compactMap { scalar in
             let character = Character(scalar)
             if let usage = unshifted[character] { return (usage, false) }

@@ -11,6 +11,9 @@ final class ClientConnection: @unchecked Sendable {
     let outbox = Outbox()
     let worker: DispatchQueue
     let jobs = ExecJobs()
+    private(set) lazy var tunnels = TunnelTable(number: number, outbox: outbox) { [weak self] message in
+        self?.fatal(message)
+    }
 
     let lock = NSLock()
     private(set) var origin: ConnectionOrigin
@@ -97,6 +100,8 @@ final class ClientConnection: @unchecked Sendable {
         if let code = lock.withLock({ pairingCode }) { server.services.remote?.cancelPairing(code: code) }
         for channel in detached { channel.owner.detach(channel.attachment) }
         jobs.cancelAll()
+        tunnels.closeAll()
+        server.devices?.disconnected(self)
         outbox.close()
         frames.close()
         server.connectionClosed(self)
@@ -136,9 +141,12 @@ final class ClientConnection: @unchecked Sendable {
                 return
             }
             target.owner.input(data)
+        case .stream(let channel, let data):
+            guard isKnown(channel) else { return }
+            tunnels.received(data, on: channel)
         case .other:
             break
-        case .message, .screen:
+        case .message, .screen, .video:
             fatal("Misplaced client message")
         }
     }
@@ -175,14 +183,48 @@ final class ClientConnection: @unchecked Sendable {
         return target
     }
 
+    /// A channel this connection opened; others end the connection.
+    private func isKnown(_ channel: ChannelId) -> Bool {
+        let known = lock.withLock { channel.rawValue <= lastChannel }
+        if !known { fatal("Unknown channel \(channel)") }
+        return known
+    }
+
+    /// Reserves the next channel, for a tunnel or a device.
+    func reserveChannel() -> ChannelId {
+        lock.withLock {
+            lastChannel += 1
+            return ChannelId(lastChannel)
+        }
+    }
+
     private func session(_ channel: ChannelId, _ message: SessionMessage) {
-        guard let target = attached(channel) else { return }
         do {
             try message.validate()
         } catch {
             fatal("Invalid session message")
             return
         }
+        switch message {
+        case .credit(let bytes):
+            if isKnown(channel) { tunnels.credit(bytes, on: channel) }
+            return
+        case .streamEnd:
+            if isKnown(channel) { tunnels.clientEnded(channel) }
+            return
+        case .deviceInput(let input):
+            if isKnown(channel) { server.devices?.input(input, on: channel, from: self) }
+            return
+        case .requestKeyframe:
+            if isKnown(channel) { server.devices?.requestKeyframe(on: channel, from: self) }
+            return
+        case .ack(let seq) where lock.withLock({ channels[channel] == nil }):
+            if isKnown(channel) { outbox.ack(seq, on: channel) }
+            return
+        default:
+            break
+        }
+        guard let target = attached(channel) else { return }
         switch message {
         case .input(let input): target.owner.input(input)
         case .resize(let size): target.owner.resize(size)
@@ -191,8 +233,8 @@ final class ClientConnection: @unchecked Sendable {
         case .cellSize(let cell): target.owner.setCellSize(cell)
         case .requestHistory: target.owner.requestHistory(target.attachment)
         case .clear: target.owner.clearScreen()
-        case .unknown: break
-        case .metadata, .ended, .resized: fatal("Misplaced session message")
+        case .unknown, .credit, .streamEnd, .deviceInput, .requestKeyframe: break
+        case .metadata, .ended, .resized, .streamClosed, .deviceStopped: fatal("Misplaced session message")
         }
     }
 

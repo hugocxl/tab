@@ -1,7 +1,9 @@
 import Accelerate
-import AppKit
+import CoreGraphics
+import Foundation
 import IOSurface
 import TabCore
+import TabProtocol
 
 /// One device pane's link to an Android emulator through its gRPC control
 /// API, as Android Studio's embedded emulator uses it: screenshots stream
@@ -9,16 +11,16 @@ import TabCore
 /// sent one at a time so they arrive in order. The pane notices emulators
 /// starting and stopping from their discovery files.
 @MainActor
-final class AndroidSession: DeviceSession {
-    let avd: String
-    var onStateChange: ((Bool) -> Void)?
-    var onSurface: ((IOSurface) -> Void)?
-    var onFrame: (() -> Void)?
-    var onInputError: ((Error) -> Void)?
+public final class AndroidSession: DeviceSession {
+    public let avd: String
+    public var onStateChange: ((Bool) -> Void)?
+    public var onSurface: ((IOSurface) -> Void)?
+    public var onFrame: (() -> Void)?
+    public var onInputError: ((Error) -> Void)?
 
-    private(set) var isBooted = false
-    private(set) var surface: IOSurface?
-    let buttons: [DeviceButton] = [.back, .home, .recents, .lock]
+    public private(set) var isBooted = false
+    public private(set) var surface: IOSurface?
+    public let buttons: [DeviceButton] = [.back, .home, .recents, .lock]
 
     private let queue = DispatchQueue(label: "com.hugocorta.tab.android")
     private var emulator: RunningEmulator?
@@ -33,11 +35,11 @@ final class AndroidSession: DeviceSession {
     private var skinTurns = 0
     private var frameSize = CGSize.zero
 
-    init(avd: String) {
+    public init(avd: String) {
         self.avd = avd
     }
 
-    func connect() async throws {
+    public func connect() async throws {
         guard AndroidEmulators.sdk != nil else { throw AndroidError.noSDK }
         watchDiscovery()
         try await refresh()
@@ -110,12 +112,12 @@ final class AndroidSession: DeviceSession {
 
     // MARK: Screen
 
-    func startScreen() {
+    public func startScreen() {
         streaming = true
         requestScreen()
     }
 
-    func stopScreen() {
+    public func stopScreen() {
         streaming = false
         guard let client, let stream = screenStream else { return }
         screenStream = nil
@@ -170,15 +172,15 @@ final class AndroidSession: DeviceSession {
 
     // MARK: Input
 
-    func send(_ input: [DeviceInput]) {
+    public func send(_ input: [DeviceInput]) {
         guard let client, frameSize.width > 0 else { return }
         // Frames arrive turned upright; touches go to the display unturned.
         let turned = DeviceOrientation(quarterTurns: skinTurns)
         let native = turned.isLandscape ? CGSize(width: frameSize.height, height: frameSize.width) : frameSize
-        let calls = input.map { item -> (String, Data) in
+        let calls = input.compactMap { item -> (String, Data)? in
             switch item {
-            case let .touch(point, down):
-                let panel = turned.panelPoint(point)
+            case let .touch(x, y, down):
+                let panel = turned.panelPoint(CGPoint(x: x, y: y))
                 var touch = ProtobufWriter()
                 touch.int32(1, Int32((panel.x * native.width).rounded()))
                 touch.int32(2, Int32((panel.y * native.height).rounded()))
@@ -191,13 +193,21 @@ final class AndroidSession: DeviceSession {
                 event.varint(2, down ? 0 : 1)
                 event.int32(3, Int32(0x07_0000 | usage))
                 return ("sendKey", event.data)
+            case .button(let button):
+                return ("sendKey", Self.keypress(button))
+            case .unknown:
+                return nil
             }
         }
         enqueue(calls, on: client)
     }
 
-    func press(_ button: DeviceButton) {
+    public func press(_ button: DeviceButton) {
         guard let client else { return }
+        enqueue([("sendKey", Self.keypress(button))], on: client)
+    }
+
+    private static func keypress(_ button: DeviceButton) -> Data {
         let key: String
         switch button {
         case .home: key = "GoHome"
@@ -208,7 +218,7 @@ final class AndroidSession: DeviceSession {
         var event = ProtobufWriter()
         event.varint(2, 2) // keypress
         event.string(4, key)
-        enqueue([("sendKey", event.data)], on: client)
+        return event.data
     }
 
     private func enqueue(_ calls: [(String, Data)], on client: GRPCClient) {
@@ -227,28 +237,28 @@ final class AndroidSession: DeviceSession {
         return emulator
     }
 
-    func boot() async throws {
+    public func boot() async throws {
         try await AndroidEmulators.start(avd)
     }
 
-    func shutDown() async throws { try await AndroidEmulators.shutdown(try running()) }
-    func isDark() async throws -> Bool { try await AndroidEmulators.isDark(try running()) }
-    func setDark(_ dark: Bool) async throws { try await AndroidEmulators.setDark(try running(), dark) }
+    public func shutDown() async throws { try await AndroidEmulators.shutdown(try running()) }
+    public func isDark() async throws -> Bool { try await AndroidEmulators.isDark(try running()) }
+    public func setDark(_ dark: Bool) async throws { try await AndroidEmulators.setDark(try running(), dark) }
 
     /// Keys always reach the emulator, so it has no keyboard switch.
-    var hasHardwareKeyboardSwitch: Bool { false }
-    func setHardwareKeyboard(_ connected: Bool) async throws {}
+    public var hasHardwareKeyboardSwitch: Bool { false }
+    public func setHardwareKeyboard(_ connected: Bool) async throws {}
 
     /// Frames arrive upright, so the view never turns them.
-    func orientation() async throws -> DeviceOrientation { .portrait }
+    public func orientation() async throws -> DeviceOrientation { .portrait }
 
-    func rotate(by turns: Int) async throws -> DeviceOrientation {
+    public func rotate(by turns: Int) async throws -> DeviceOrientation {
         let emulator = try running()
         for _ in 0..<(((turns % 4) + 4) % 4) { try await AndroidEmulators.rotateLeft(emulator) }
         return .portrait
     }
 
-    func close() {
+    public func close() {
         closed = true
         watcher?.cancel()
         watcher = nil

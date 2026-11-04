@@ -1,5 +1,8 @@
 import AppKit
+import CryptoKit
+import Network
 import TabCore
+import TabProtocol
 import WebKit
 
 /// A browser profile: its own cookies, site data, logins and history.
@@ -37,10 +40,15 @@ public final class BrowserProfiles {
     public var defaultProfileId: String = ""
     /// Reports what a background job finished, such as an import.
     public var notify: ((String, _ isError: Bool) -> Void)?
+    /// The proxy that sends a remote server's pages through it.
+    var proxy: ((ServerId) -> ProxyConfiguration?)?
+    /// Every remote server the app knows, whose stores go with a profile.
+    var remoteServers: () -> [ServerId] = { [] }
 
     public private(set) var profiles: [BrowserProfile]
     private var histories: [String: BrowserHistoryStore] = [:]
     private var stores: [String: WKWebsiteDataStore] = [:]
+    private var remoteStores: [String: WKWebsiteDataStore] = [:]
     private let storeFactory: ((BrowserProfile) -> WKWebsiteDataStore)?
 
     public init(root: URL, storeFactory: ((BrowserProfile) -> WKWebsiteDataStore)? = nil) {
@@ -113,6 +121,35 @@ public final class BrowserProfiles {
         return store
     }
 
+    /// The store `profile` browses another computer's server with: its own
+    /// cookies and site data, since `localhost` there is another origin, and
+    /// a proxy that loads every page through that server. This Mac's server
+    /// uses `dataStore(for:)`.
+    public func dataStore(for profile: BrowserProfile, server: ServerId?) -> WKWebsiteDataStore {
+        guard let server, !server.isLocal else { return dataStore(for: profile) }
+        let key = "\(profile.id)|\(server)"
+        if let store = remoteStores[key] { return store }
+        let store: WKWebsiteDataStore
+        if let storeFactory {
+            store = storeFactory(profile)
+        } else {
+            store = WKWebsiteDataStore(forIdentifier: Self.remoteIdentifier(profile: profile.id, server: server))
+        }
+        store.proxyConfigurations = proxy?(server).map { [$0] } ?? []
+        remoteStores[key] = store
+        return store
+    }
+
+    /// A stable store identifier for a profile on a server.
+    nonisolated static func remoteIdentifier(profile: String, server: ServerId) -> UUID {
+        let digest = Array(SHA256.hash(data: Data("tab-browser|\(profile)|\(server)".utf8)))
+        var bytes = Array(digest.prefix(16))
+        bytes[6] = bytes[6] & 0x0F | 0x50
+        bytes[8] = bytes[8] & 0x3F | 0x80
+        return UUID(uuid: (bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+                           bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]))
+    }
+
     /// The folder holding `profile`'s app-side files.
     public func folder(for profile: BrowserProfile) -> URL {
         let name = Self.identifier(profile.id)?.uuidString.lowercased() ?? "default"
@@ -173,7 +210,11 @@ public final class BrowserProfiles {
         try save()
         histories[id] = nil
         stores[id] = nil
+        remoteStores = remoteStores.filter { !$0.key.hasPrefix("\(id)|") }
         try? FileManager.default.removeItem(at: folder(for: profile))
+        for server in remoteServers() {
+            try? await WKWebsiteDataStore.remove(forIdentifier: Self.remoteIdentifier(profile: id, server: server))
+        }
         guard let identifier = Self.identifier(id) else { return }
         try? await WKWebsiteDataStore.remove(forIdentifier: identifier)
     }
@@ -185,8 +226,10 @@ public final class BrowserProfiles {
             throw BrowserScripts.Failure("no browser profile with ID \(id)")
         }
         history(for: profile).clear()
-        let store = dataStore(for: profile)
-        await store.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast)
+        for server in [nil] + remoteServers() {
+            let store = dataStore(for: profile, server: server)
+            await store.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast)
+        }
     }
 
     private func validateName(_ name: String, excluding id: String? = nil) throws {

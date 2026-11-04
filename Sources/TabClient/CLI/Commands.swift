@@ -98,7 +98,7 @@ enum CLICommands {
     }
 
     static let groups: [CLIGroup] = [
-        session, project, worktree, exec, git, files, activity, settings, mobile, server,
+        session, project, worktree, exec, git, files, activity, settings, mobile, server, device, forward,
         pane, tab, browser, integrations, stdio,
     ]
 
@@ -446,6 +446,68 @@ enum CLICommands {
         notes: """
         Every other command starts the server when it isn't running; status and stop
         never do.
+        """)
+
+    static let device = CLIGroup(
+        name: "device", summary: "The server's iOS simulators and Android emulators", section: .server,
+        commands: [
+            CLICommandSpec("device list", [""], "One line per device: its ID, platform, name, OS and state", json: true) { a in
+                manage(a, .device(.list))
+            },
+            CLICommandSpec("device boot", ["DEVICE"], "Start a device", words: 1 ... 1) { a in
+                manage(a, .device(.boot(device: a.word(0))))
+            },
+            CLICommandSpec("device shutdown", ["[--device DEVICE]"], "Shut a device down", values: ["--device"]) { a in
+                manage(a, .device(.shutDown(device: a.value("--device"))))
+            },
+            CLICommandSpec("device screenshot", ["[--device DEVICE] [--output FILE]"],
+                           "Save the screen as a PNG, or write it to stdout", values: ["--device", "--output"]) { a in
+                manage(a, .device(.screenshot(device: a.value("--device"), output: a.value("--output"))))
+            },
+            CLICommandSpec("device tap", ["[--device DEVICE] X Y"], "Tap a point, in the screenshot's pixels",
+                           words: 2 ... 2, values: ["--device"]) { a in
+                guard let x = Double(a.word(0)), let y = Double(a.word(1)), x >= 0, y >= 0 else {
+                    throw CLIError("X and Y are pixels of the screenshot, from its top left")
+                }
+                return manage(a, .device(.tap(device: a.value("--device"), x: x, y: y)))
+            },
+            CLICommandSpec("device type", ["[--device DEVICE] TEXT"], "Type text on the device's keyboard",
+                           words: 1 ... 1, values: ["--device"]) { a in
+                manage(a, .device(.type(device: a.value("--device"), text: a.word(0))))
+            },
+            CLICommandSpec("device press", ["[--device DEVICE] home|back|recents|lock"], "Press a button",
+                           words: 1 ... 1, values: ["--device"]) { a in
+                guard let button = DeviceButton(rawValue: a.word(0)) else {
+                    throw CLIError("buttons are home, back, recents and lock")
+                }
+                return manage(a, .device(.press(device: a.value("--device"), button: button)))
+            },
+            CLICommandSpec("device open", ["[--device DEVICE] URL"], "Open a URL, such as an app's deep link",
+                           words: 1 ... 1, values: ["--device"]) { a in
+                manage(a, .device(.open(device: a.value("--device"), url: a.word(0))))
+            },
+        ],
+        notes: """
+        Devices belong to the server, so an agent in a remote terminal sees the
+        devices of the computer its app runs on. DEVICE is an ID or a name from list;
+        without --device, commands use the only running device.
+        """)
+
+    static let forward = CLIGroup(
+        name: "forward", summary: "Reach a server's port from this computer", section: .server,
+        commands: [
+            CLICommandSpec("forward", ["PORT [--local-port N]"],
+                           "Forward 127.0.0.1:PORT here to the server's localhost:PORT until interrupted",
+                           words: 1 ... 1, values: ["--local-port"]) { a in
+                guard let remote = UInt16(a.word(0)), remote > 0 else { throw CLIError("PORT is a TCP port, 1 to 65535") }
+                let local: UInt16? = a.value("--local-port") == nil ? nil : try a.number("--local-port", default: 0, 1 ... .max)
+                return manage(a, .forward(remote: remote, local: local ?? remote))
+            },
+        ],
+        notes: """
+        With --host, a physical phone or a Mac app on this computer reaches a server
+        on another one, such as its Metro bundler. Browser and device panes in a
+        remote tab use the server's network already.
         """)
 
     // MARK: App

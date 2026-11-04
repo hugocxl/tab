@@ -27,26 +27,38 @@ runs the same script.
   - `tab` is the CLI.
 - The app and the CLI start `tabd` when it isn't running and talk to it over a Unix
   socket, or `ssh host tab stdio` for a remote Mac.
+- A pane's processes, files and network belong to its tab's server; the app renders
+  and sends input. Browser panes render in the app, but a remote tab's pages load
+  through the server's tunnels, so `localhost` is the server's. Device panes show
+  the server's simulators and emulators: this Mac's surfaces directly, another
+  computer's as video.
 - Modules, with what each may depend on:
   - `TabProtocol`: messages, framing, binary screen codec. Depends on nothing.
   - `TabCore` (TabProtocol): models, settings, shortcut catalog, themes, logging.
     No UI or sockets.
   - `TabTerminal` (GhosttyVT, TabProtocol): the libghostty-vt wrapper and the PTY.
-  - `TabServer` (TabCore, TabProtocol, TabTerminal): everything `tabd` does.
-  - `TabClient` (TabCore, TabProtocol): connecting, handshake, reconnecting.
-  - `TabApp` (TabClient, TabCore, TabProtocol): the UI. Apps never link server code.
+  - `TabDevices` (TabCore, TabProtocol): simulators, emulators and the screen video
+    codec, without AppKit. Device code, not server code.
+  - `TabServer` (TabCore, TabDevices, TabProtocol, TabTerminal): everything `tabd`
+    does.
+  - `TabClient` (TabCore, TabProtocol): connecting, handshake, reconnecting, tunnels.
+  - `TabApp` (TabClient, TabCore, TabDevices, TabProtocol): the UI. Apps never link
+    server code.
   - Keep `Package.swift` and this list in sync.
 - Old and new builds talk to each other, so the protocol only grows. JSON messages
   are `Codable` enums with a `type` discriminator. Unknown fields are ignored, and
   unknown requests get an `unsupported` reply. Bump `ProtocolVersion` only for a
   breaking change.
 - Each session allows one screen frame in flight per client. Newer output merges
-  into the waiting frame, so a slow client never piles up frames.
+  into the waiting frame, so a slow client never piles up frames. Device video uses
+  the same credit, encoding only when the channel has it, and tunnels send only
+  what their reader granted. Terminals and control messages always go first.
 - The Ghostty engine isn't thread-safe. One serial queue owns each session's terminal.
-- Device panes live in the app (`Sources/TabApp/Devices`). iOS simulators use
-  Xcode's private CoreSimulator and SimulatorKit frameworks, loaded at runtime,
-  plus `simctl` and `devicectl`. Android emulators use the emulator's gRPC
-  control API and `adb`.
+- Device code lives in `Sources/TabDevices`, served by `tabd`'s `DeviceService` and
+  shown by the app's device panes. iOS simulators use Xcode's private CoreSimulator
+  and SimulatorKit frameworks, loaded at runtime, plus `simctl` and `devicectl`.
+  Android emulators use the emulator's gRPC control API and `adb`. `tabd` serves
+  its main queue, where CoreSimulator delivers callbacks.
 - Tabs and panes are different things; keep the words exact in code, docs and UI:
   - A **tab** is one card in the sidebar. It holds a split layout of panes. A
     project or worktree is a single tab, and Home holds one tab per card.

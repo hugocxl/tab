@@ -1,21 +1,22 @@
 import Foundation
 import TabCore
+import TabProtocol
 
 /// One Android Virtual Device on this Mac.
-struct AndroidVirtualDevice: Hashable, Sendable {
+public struct AndroidVirtualDevice: Hashable, Sendable {
     /// The AVD's name, as `emulator -avd` takes it.
-    var name: String
+    public var name: String
     /// What to show, such as "Pixel 8 API 35".
-    var displayName: String
+    public var displayName: String
     /// The Android version it runs, such as "Android API 35".
-    var runtime: String
-    var isTablet: Bool
+    public var runtime: String
+    public var isTablet: Bool
 }
 
 /// A running emulator, as its discovery file describes it.
-struct RunningEmulator: Hashable, Sendable {
-    var pid: Int32
-    var avd: String
+public struct RunningEmulator: Hashable, Sendable {
+    public var pid: Int32
+    public var avd: String
     /// The console port, which names it for adb: `emulator-<port>`.
     var consolePort: Int
     /// The gRPC port, if the control API is on.
@@ -31,9 +32,9 @@ struct RunningEmulator: Hashable, Sendable {
 
 /// Finds the Android SDK, its virtual devices and running emulators, and
 /// starts and controls emulators. Process launches run off the main thread.
-enum AndroidEmulators {
+public enum AndroidEmulators {
     /// The SDK folder: `ANDROID_HOME`, `ANDROID_SDK_ROOT` or the default.
-    static var sdk: URL? {
+    public static var sdk: URL? {
         let environment = ProcessInfo.processInfo.environment
         let candidates = [environment["ANDROID_HOME"], environment["ANDROID_SDK_ROOT"]].compactMap { $0 }
             + [NSHomeDirectory() + "/Library/Android/sdk"]
@@ -51,14 +52,14 @@ enum AndroidEmulators {
     }
 
     /// Where running emulators write their discovery files on macOS.
-    static var discoveryFolder: URL {
+    public static var discoveryFolder: URL {
         URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Caches/TemporaryItems/avd/running")
     }
 
     // MARK: Listing
 
     /// The AVDs, from their `.ini` files; empty without any.
-    static func virtualDevices() -> [AndroidVirtualDevice] {
+    public static func virtualDevices() -> [AndroidVirtualDevice] {
         let files = (try? FileManager.default.contentsOfDirectory(at: avdHome, includingPropertiesForKeys: nil)) ?? []
         return files.filter { $0.pathExtension == "ini" }.compactMap { file in
             let name = file.deletingPathExtension().lastPathComponent
@@ -80,7 +81,7 @@ enum AndroidEmulators {
     }
 
     /// The emulators running now whose process is alive.
-    static func running() -> [RunningEmulator] {
+    public static func running() -> [RunningEmulator] {
         let files = (try? FileManager.default.contentsOfDirectory(at: discoveryFolder, includingPropertiesForKeys: nil)) ?? []
         return files.compactMap { file -> RunningEmulator? in
             let stem = file.deletingPathExtension().lastPathComponent
@@ -119,7 +120,7 @@ enum AndroidEmulators {
 
     /// Starts `avd` without a window, with the control API on a free port
     /// behind a token. Returns once the emulator has launched, not booted.
-    static func start(_ avd: String) async throws {
+    public static func start(_ avd: String) async throws {
         guard let sdk else { throw AndroidError.noSDK }
         let port = try freePort()
         try await Task.detached(priority: .userInitiated) {
@@ -139,7 +140,7 @@ enum AndroidEmulators {
     }
 
     /// Asks the emulator to shut down, or ends its process without adb.
-    static func shutdown(_ emulator: RunningEmulator) async throws {
+    public static func shutdown(_ emulator: RunningEmulator) async throws {
         do {
             _ = try await adb(emulator, ["emu", "kill"])
         } catch AndroidError.noSDK {
@@ -148,15 +149,25 @@ enum AndroidEmulators {
     }
 
     /// Turns the emulator a quarter counterclockwise.
-    static func rotateLeft(_ emulator: RunningEmulator) async throws {
+    public static func rotateLeft(_ emulator: RunningEmulator) async throws {
         _ = try await adb(emulator, ["emu", "rotate"])
     }
 
-    static func isDark(_ emulator: RunningEmulator) async throws -> Bool {
+    /// Opens `url` in the app that handles it.
+    public static func openURL(_ emulator: RunningEmulator, _ url: String) async throws {
+        _ = try await adb(emulator, ["shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", shellQuoted(url)])
+    }
+
+    /// `adb shell` runs its arguments through the device's shell.
+    static func shellQuoted(_ text: String) -> String {
+        "'" + text.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    public static func isDark(_ emulator: RunningEmulator) async throws -> Bool {
         try await adb(emulator, ["shell", "cmd", "uimode", "night"]).contains("yes")
     }
 
-    static func setDark(_ emulator: RunningEmulator, _ dark: Bool) async throws {
+    public static func setDark(_ emulator: RunningEmulator, _ dark: Bool) async throws {
         _ = try await adb(emulator, ["shell", "cmd", "uimode", "night", dark ? "yes" : "no"])
     }
 
@@ -175,7 +186,7 @@ enum AndroidEmulators {
             let data = output.fileHandleForReading.readDataToEndOfFile()
             process.waitUntilExit()
             guard process.terminationStatus == 0 else {
-                Log.app.error("adb \(arguments.joined(separator: " "), privacy: .public) failed: \(process.terminationStatus)")
+                Log.devices.error("adb \(arguments.joined(separator: " "), privacy: .public) failed: \(process.terminationStatus)")
                 throw AndroidError.failed("adb \(arguments.first ?? "") failed")
             }
             return String(decoding: data, as: UTF8.self)
@@ -202,13 +213,13 @@ enum AndroidEmulators {
     }
 }
 
-enum AndroidError: Error, Equatable, CustomStringConvertible {
+public enum AndroidError: Error, Equatable, CustomStringConvertible {
     case noSDK
     case unsupportedAuth
     case noControlAPI
     case failed(String)
 
-    var description: String {
+    public var description: String {
         switch self {
         case .noSDK:
             return "The Android SDK wasn't found. Install it with Android Studio or set ANDROID_HOME."

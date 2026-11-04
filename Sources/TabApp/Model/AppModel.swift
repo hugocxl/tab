@@ -80,6 +80,10 @@ public final class AppModel {
     /// Git facts by project, filled by the side connections.
     public internal(set) var git: [ProjectId: GitInfo] = [:]
     var connections: [ServerId: ServerConnection] = [:]
+    /// The proxies remote tabs' browser panes load pages through, by server.
+    var browserProxies: [ServerId: ServerProxy] = [:]
+    /// Ports of remote servers reachable on this Mac's loopback, by server and remote port.
+    var portForwards: [ServerId: [UInt16: PortForwarder]] = [:]
     var navigation = NavigationHistory()
     var creating: Set<PaneId> = []
     var replaying: Set<ServerId> = []
@@ -201,6 +205,8 @@ public final class AppModel {
         registerNativeContent()
         browserProfiles.defaultProfileId = settings.browser.defaultProfile
         browserProfiles.notify = { [weak self] message, isError in self?.presenter?.showToast(message, error: isError) }
+        browserProfiles.proxy = { [weak self] server in self?.browserProxy(server)?.configuration }
+        browserProfiles.remoteServers = { [weak self] in self?.settings.servers.map(\.id) ?? [] }
         iconCache.onChange = { [weak self] _ in self?.notify(.activity) }
         recordNavigation()
         Publishers.Merge3(theme.$palette.dropFirst().map { _ in () }, theme.$interface.dropFirst().map { _ in () }, theme.$accessibility.dropFirst().map { _ in () }).sink { [weak self] _ in

@@ -1,9 +1,10 @@
 import Foundation
 import TabCore
+import TabProtocol
 
 /// One iOS, iPadOS, watchOS, tvOS or visionOS simulator on this Mac.
-struct SimulatorDevice: Hashable, Sendable {
-    enum State: String, Sendable {
+public struct SimulatorDevice: Hashable, Sendable {
+    public enum State: String, Sendable {
         case shutdown = "Shutdown"
         case booting = "Booting"
         case booted = "Booted"
@@ -11,59 +12,22 @@ struct SimulatorDevice: Hashable, Sendable {
         case unknown
     }
 
-    var udid: String
-    var name: String
+    public var udid: String
+    public var name: String
     /// The OS it runs, such as "iOS 27.0".
-    var runtime: String
-    var state: State
+    public var runtime: String
+    public var state: State
     /// When it last ran, if ever.
-    var lastUsed: Date?
+    public var lastUsed: Date?
 
-    var isBooted: Bool { state == .booted }
-}
-
-/// Which way up a device is held. Its screen's surface stays in the panel's
-/// native portrait; the system draws rotated content into it.
-enum DeviceOrientation: String, CaseIterable, Sendable {
-    case portrait
-    case landscapeLeft
-    case portraitUpsideDown
-    case landscapeRight
-
-    /// Quarter turns counterclockwise from portrait, as the device is held.
-    var quarterTurns: Int {
-        switch self {
-        case .portrait: return 0
-        case .landscapeLeft: return 1
-        case .portraitUpsideDown: return 2
-        case .landscapeRight: return 3
-        }
-    }
-
-    init(quarterTurns: Int) {
-        let turns = ((quarterTurns % 4) + 4) % 4
-        self = Self.allCases.first { $0.quarterTurns == turns } ?? .portrait
-    }
-
-    var isLandscape: Bool { quarterTurns % 2 == 1 }
-
-    /// A point on the screen as the user sees it, as fractions of its width
-    /// and height from the top left, on the panel's portrait surface.
-    func panelPoint(_ upright: CGPoint) -> CGPoint {
-        switch self {
-        case .portrait: return upright
-        case .landscapeLeft: return CGPoint(x: 1 - upright.y, y: upright.x)
-        case .portraitUpsideDown: return CGPoint(x: 1 - upright.x, y: 1 - upright.y)
-        case .landscapeRight: return CGPoint(x: upright.y, y: 1 - upright.x)
-        }
-    }
+    public var isBooted: Bool { state == .booted }
 }
 
 /// Lists, boots and configures simulators with `xcrun simctl` and
 /// `devicectl`, off the main thread.
-enum SimulatorControl {
+public enum SimulatorControl {
     /// The selected Xcode's Developer folder.
-    static func developerDirectory() throws -> String {
+    public static func developerDirectory() throws -> String {
         if let path = ProcessInfo.processInfo.environment["DEVELOPER_DIR"], !path.isEmpty { return path }
         let output = try runSync("/usr/bin/xcode-select", ["-p"])
         let path = output.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -77,12 +41,12 @@ enum SimulatorControl {
     }
 
     /// The available simulators, booted first, then the most recently used.
-    static func devices() async throws -> [SimulatorDevice] {
+    public static func devices() async throws -> [SimulatorDevice] {
         let output = try await simctl(["list", "devices", "available", "--json"])
         return try parse(Data(output.utf8))
     }
 
-    static func boot(_ udid: String) async throws {
+    public static func boot(_ udid: String) async throws {
         do {
             _ = try await simctl(["boot", udid])
         } catch SimulatorError.unavailable(let message) where message.contains("current state: Booted") {
@@ -90,31 +54,31 @@ enum SimulatorControl {
         }
     }
 
-    static func shutdown(_ udid: String) async throws {
+    public static func shutdown(_ udid: String) async throws {
         _ = try await simctl(["shutdown", udid])
     }
 
     /// Whether the device shows its dark appearance.
-    static func isDark(_ udid: String) async throws -> Bool {
+    public static func isDark(_ udid: String) async throws -> Bool {
         try await simctl(["ui", udid, "appearance"]).trimmingCharacters(in: .whitespacesAndNewlines) == "dark"
     }
 
-    static func setDark(_ udid: String, _ dark: Bool) async throws {
+    public static func setDark(_ udid: String, _ dark: Bool) async throws {
         _ = try await simctl(["ui", udid, "appearance", dark ? "dark" : "light"])
     }
 
-    static func openURL(_ udid: String, _ url: String) async throws {
+    public static func openURL(_ udid: String, _ url: String) async throws {
         _ = try await simctl(["openurl", udid, url])
     }
 
     /// The way the device is held; lying flat reads as the last upright
     /// orientation.
-    static func orientation(_ udid: String) async throws -> DeviceOrientation {
+    public static func orientation(_ udid: String) async throws -> DeviceOrientation {
         try parseOrientation(Data(try await devicectl(["device", "orientation", "get", "--device", udid]).utf8))
     }
 
     /// Turns the device, returning how it is held now.
-    static func setOrientation(_ udid: String, _ orientation: DeviceOrientation) async throws -> DeviceOrientation {
+    public static func setOrientation(_ udid: String, _ orientation: DeviceOrientation) async throws -> DeviceOrientation {
         let output = try await devicectl(["device", "orientation", "set", "--device", udid, orientation.rawValue])
         return try parseOrientation(Data(output.utf8))
     }
@@ -219,7 +183,7 @@ enum SimulatorControl {
         errorReader.wait()
         guard process.terminationStatus == 0 else {
             let message = String(decoding: errorData, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-            Log.app.error("\(tool, privacy: .public) \(arguments.joined(separator: " "), privacy: .public) failed: \(message, privacy: .public)")
+            Log.devices.error("\(tool, privacy: .public) \(arguments.joined(separator: " "), privacy: .public) failed: \(message, privacy: .public)")
             throw SimulatorError.unavailable(message.isEmpty ? "\(tool) exited with \(process.terminationStatus)" : message)
         }
         return String(decoding: data, as: UTF8.self)

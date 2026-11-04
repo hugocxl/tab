@@ -410,7 +410,7 @@ extension ServerClient {
         return state
     }
 
-    private func unexpected(_ reply: ReplyBody) -> ClientError {
+    func unexpected(_ reply: ReplyBody) -> ClientError {
         .unexpectedReply(reply.typeName)
     }
 }

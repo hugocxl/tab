@@ -3,6 +3,24 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.54.0 - 2026-11-04
+
+### Added
+
+- `tab device` lists, starts and shuts down a server's simulators and emulators,
+  and takes screenshots, taps, types, presses buttons and opens URLs on them, so
+  an agent in a remote terminal can check its own UI work.
+- `tab forward PORT` and a remote tab's Forwarded Ports menu make a port of the
+  server reachable on this Mac's localhost, such as for a phone on your desk.
+
+### Changed
+
+- Browser panes in a remote tab load pages through that server, so `localhost`
+  is the server's dev server, with their own cookies per server and a "via" label
+  in the address bar.
+- Device panes in a remote tab show that server's simulators and emulators,
+  streamed as video, so apps built and served there run where you see them.
+
 ## 0.53.0 - 2026-11-04
 
 ### Changed

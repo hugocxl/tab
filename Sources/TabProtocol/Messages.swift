@@ -196,9 +196,11 @@ public enum Topic: OpenEnum {
     case sessions
     case activity
     case remoteAccess
+    /// A device booted or stopped, or devices were added or removed.
+    case devices
     case unknown(String)
 
-    public static let knownCases: [Topic] = [.catalog, .sessions, .activity, .remoteAccess]
+    public static let knownCases: [Topic] = [.catalog, .sessions, .activity, .remoteAccess, .devices]
 
     public var rawValue: String {
         switch self {
@@ -206,6 +208,7 @@ public enum Topic: OpenEnum {
         case .sessions: "sessions"
         case .activity: "activity"
         case .remoteAccess: "remoteAccess"
+        case .devices: "devices"
         case .unknown(let value): value
         }
     }
@@ -290,6 +293,20 @@ public enum RequestBody: Hashable, Codable, Sendable {
     case cancelPairing
     case revokeDevice(DeviceId)
 
+    // Tunnels
+    /// Connects to `host:port` from the server; `host` resolves there.
+    case openTunnel(host: String, port: UInt16)
+    /// Frees a tunnel's channel at once, closing its connection.
+    case closeTunnel(ChannelId)
+
+    // Devices
+    case listDevices
+    case deviceAction(device: DeviceRef, action: DeviceAction)
+    case attachDevice(AttachDevice)
+    case detachDevice(ChannelId)
+    /// The device's screen as a PNG.
+    case deviceScreenshot(DeviceRef)
+
     /// A request from a newer build; answer with an `unsupported` error.
     case unknown(String)
 
@@ -353,6 +370,13 @@ public enum RequestBody: Hashable, Codable, Sendable {
         case "startPairing": self = .startPairing(hosts: try c("hosts"))
         case "cancelPairing": self = .cancelPairing
         case "revokeDevice": self = .revokeDevice(try c("device"))
+        case "openTunnel": self = .openTunnel(host: try c("host"), port: try c("port"))
+        case "closeTunnel": self = .closeTunnel(try c("channel"))
+        case "listDevices": self = .listDevices
+        case "deviceAction": self = .deviceAction(device: try c("device"), action: try c("action"))
+        case "attachDevice": self = .attachDevice(try c("request"))
+        case "detachDevice": self = .detachDevice(try c("channel"))
+        case "deviceScreenshot": self = .deviceScreenshot(try c("device"))
         default: self = .unknown(c.type)
         }
     }
@@ -509,6 +533,27 @@ public enum RequestBody: Hashable, Codable, Sendable {
         case .revokeDevice(let device):
             var c = try TaggedEncoding(encoder, "revokeDevice")
             try c(device, "device")
+        case .openTunnel(let host, let port):
+            var c = try TaggedEncoding(encoder, "openTunnel")
+            try c(host, "host")
+            try c(port, "port")
+        case .closeTunnel(let channel):
+            var c = try TaggedEncoding(encoder, "closeTunnel")
+            try c(channel, "channel")
+        case .listDevices: try TaggedEncoding(encoder, "listDevices")
+        case .deviceAction(let device, let action):
+            var c = try TaggedEncoding(encoder, "deviceAction")
+            try c(device, "device")
+            try c(action, "action")
+        case .attachDevice(let request):
+            var c = try TaggedEncoding(encoder, "attachDevice")
+            try c(request, "request")
+        case .detachDevice(let channel):
+            var c = try TaggedEncoding(encoder, "detachDevice")
+            try c(channel, "channel")
+        case .deviceScreenshot(let device):
+            var c = try TaggedEncoding(encoder, "deviceScreenshot")
+            try c(device, "device")
         case .unknown(let type): try TaggedEncoding(encoder, type)
         }
     }
@@ -582,6 +627,18 @@ public enum ReplyBody: Hashable, Codable, Sendable {
     case remoteAccess(RemoteAccessState)
     case pairing(PairingOffer)
 
+    // Tunnels
+    case tunnelOpened(channel: ChannelId)
+    case tunnelFailed(TunnelFailure)
+    case tunnelClosed
+
+    // Devices
+    case devices([DeviceInfo])
+    case deviceSettings(DeviceSettings)
+    case deviceAttached(DeviceStream)
+    case deviceDetached
+    case deviceScreenshot(png: Data)
+
     /// A reply from a newer build.
     case unknown(String)
 
@@ -635,6 +692,14 @@ public enum ReplyBody: Hashable, Codable, Sendable {
         case "paired": self = .paired(try c("paired"))
         case "remoteAccess": self = .remoteAccess(try c("state"))
         case "pairing": self = .pairing(try c("offer"))
+        case "tunnelOpened": self = .tunnelOpened(channel: try c("channel"))
+        case "tunnelFailed": self = .tunnelFailed(try c("failure"))
+        case "tunnelClosed": self = .tunnelClosed
+        case "devices": self = .devices(try c("devices"))
+        case "deviceSettings": self = .deviceSettings(try c("settings"))
+        case "deviceAttached": self = .deviceAttached(try c("stream"))
+        case "deviceDetached": self = .deviceDetached
+        case "deviceScreenshot": self = .deviceScreenshot(png: try c("png"))
         default: self = .unknown(c.type)
         }
     }
@@ -747,6 +812,26 @@ public enum ReplyBody: Hashable, Codable, Sendable {
         case .pairing(let offer):
             var c = try TaggedEncoding(encoder, "pairing")
             try c(offer, "offer")
+        case .tunnelOpened(let channel):
+            var c = try TaggedEncoding(encoder, "tunnelOpened")
+            try c(channel, "channel")
+        case .tunnelFailed(let failure):
+            var c = try TaggedEncoding(encoder, "tunnelFailed")
+            try c(failure, "failure")
+        case .tunnelClosed: try TaggedEncoding(encoder, "tunnelClosed")
+        case .devices(let devices):
+            var c = try TaggedEncoding(encoder, "devices")
+            try c(devices, "devices")
+        case .deviceSettings(let settings):
+            var c = try TaggedEncoding(encoder, "deviceSettings")
+            try c(settings, "settings")
+        case .deviceAttached(let stream):
+            var c = try TaggedEncoding(encoder, "deviceAttached")
+            try c(stream, "stream")
+        case .deviceDetached: try TaggedEncoding(encoder, "deviceDetached")
+        case .deviceScreenshot(let png):
+            var c = try TaggedEncoding(encoder, "deviceScreenshot")
+            try c(png, "png")
         case .unknown(let type): try TaggedEncoding(encoder, type)
         }
     }

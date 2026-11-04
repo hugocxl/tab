@@ -11,6 +11,10 @@ public struct FrameKind: RawRepresentable, Hashable, Sendable, CustomStringConve
     public static let screen = FrameKind(rawValue: 1)
     /// Raw bytes for a session's terminal, on its channel.
     public static let input = FrameKind(rawValue: 2)
+    /// Raw bytes on a tunnel's channel, both ways.
+    public static let stream = FrameKind(rawValue: 3)
+    /// A `VideoFrame` on a device's channel.
+    public static let video = FrameKind(rawValue: 4)
 
     /// Kinds from here up are reserved; a reader treats them as corrupt
     /// traffic rather than as a newer build's kind.
@@ -21,6 +25,8 @@ public struct FrameKind: RawRepresentable, Hashable, Sendable, CustomStringConve
         case .json: "json"
         case .screen: "screen"
         case .input: "input"
+        case .stream: "stream"
+        case .video: "video"
         default: "kind \(rawValue)"
         }
     }
@@ -106,6 +112,14 @@ public enum FrameEncoder {
 
     public static func encode(input: Data, channel: ChannelId) throws -> Data {
         try encode(kind: .input, channel: channel, payload: input)
+    }
+
+    public static func encode(stream: Data, channel: ChannelId) throws -> Data {
+        try encode(kind: .stream, channel: channel, payload: stream)
+    }
+
+    public static func encode(video: VideoFrame, channel: ChannelId) throws -> Data {
+        try encode(kind: .video, channel: channel, payload: video.encoded())
     }
 }
 
@@ -200,6 +214,9 @@ public enum IncomingFrame: Hashable, Sendable {
     case session(ChannelId, SessionMessage)
     case screen(ChannelId, ScreenFrame)
     case input(ChannelId, Data)
+    /// Bytes on a tunnel.
+    case stream(ChannelId, Data)
+    case video(ChannelId, VideoFrame)
     /// A kind from a newer build; ignore it.
     case other(Frame)
 }
@@ -216,6 +233,12 @@ extension Frame {
         case .screen, .input:
             if channel.isControl { throw FramingError.wrongChannel(kind: kind, channel: channel) }
             return kind == .screen ? .screen(channel, try ScreenCodec.decode(payload)) : .input(channel, payload)
+        case .stream:
+            if channel.isControl { throw FramingError.wrongChannel(kind: kind, channel: channel) }
+            return .stream(channel, payload)
+        case .video:
+            if channel.isControl { throw FramingError.wrongChannel(kind: kind, channel: channel) }
+            return .video(channel, try VideoFrame.decode(payload))
         default:
             return .other(self)
         }

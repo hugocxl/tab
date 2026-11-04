@@ -1,5 +1,6 @@
 import XCTest
-@testable import TabApp
+import TabProtocol
+@testable import TabDevices
 
 final class SimulatorControlTests: XCTestCase {
     func testParsesSimctlListingBootedFirstThenMostRecentlyUsed() throws {

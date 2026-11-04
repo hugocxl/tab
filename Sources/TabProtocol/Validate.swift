@@ -217,7 +217,20 @@ extension RequestBody {
             try settings.validate()
         case .startPairing(let hosts):
             try Validation.pairingHosts(hosts)
-        case .ping, .listSessions, .attachWithoutResize, .endSession, .closeSession, .discardSession,
+        case .openTunnel(let host, let port):
+            try Validation.tunnelHost(host)
+            if port == 0 { throw .badRequest }
+        case .closeTunnel(let channel), .detachDevice(let channel):
+            if channel.isControl { throw .unknownChannel }
+        case .deviceAction(let device, let action):
+            try device.validate()
+            try action.validate()
+        case .deviceScreenshot(let device):
+            try device.validate()
+        case .attachDevice(let request):
+            try request.device.validate()
+            if request.maxPixels == 0 || request.codecs.isEmpty || request.codecs.count > 8 { throw .badRequest }
+        case .ping, .listDevices, .listSessions, .attachWithoutResize, .endSession, .closeSession, .discardSession,
              .readSavedScreen, .identifyClient, .cancelCreation, .readCatalog, .listProjectSessions,
              .readServerSettings, .stopServer, .stopServerIfIdle, .restartServer, .cancelExec, .readActivity,
              .readRemoteAccess, .cancelPairing, .revokeDevice, .reportAgentState, .unknown:
@@ -308,10 +321,18 @@ extension ReplyBody {
             try offer.invite.validate()
         case .hello(let hello):
             try Validation.versions([hello.version])
+        case .tunnelOpened(let channel):
+            if channel.isControl { throw .unknownChannel }
+        case .deviceAttached(let stream):
+            if stream.channel.isControl || stream.width == 0 || stream.height == 0 { throw .badRequest }
+        case .devices(let devices):
+            if devices.count > Limits.maxDeviceList { throw .badRequest }
+            for device in devices { try device.device.validate() }
         case .versionUnsupported, .pong, .error, .detached, .sessionEnded, .sessionClosed, .sessionDiscarded,
              .creationCancelled, .screenCleared, .terminalColorsSet, .sessionReferencesSynced, .clientIdentified,
              .inputWritten, .agentStateReported, .projectMutated, .serverSettingsWritten, .serverStopping, .serverBusy,
-             .serverRestarting, .git, .execCancelled, .activityAcknowledged, .authenticated, .unknown:
+             .serverRestarting, .git, .execCancelled, .activityAcknowledged, .authenticated, .tunnelFailed, .tunnelClosed,
+             .deviceSettings, .deviceDetached, .deviceScreenshot, .unknown:
             break
         }
     }
@@ -341,7 +362,10 @@ extension SessionMessage {
         case .resized(let size), .resize(let size): try Validation.size(size)
         case .input(let input): try input.validate()
         case .cellSize(let cell): try Validation.cellSize(cell)
-        case .ended, .ack, .scroll, .requestHistory, .clear, .unknown: break
+        case .credit(let bytes): if bytes > Limits.tunnelWindow { throw .badRequest }
+        case .deviceInput(let input): try DeviceInput.validate(input)
+        case .ended, .ack, .scroll, .requestHistory, .clear, .streamEnd, .streamClosed, .requestKeyframe, .deviceStopped,
+             .unknown: break
         }
     }
 }

@@ -1,15 +1,7 @@
 import AppKit
 import IOSurface
-
-/// Input for a device, independent of how it is sent.
-enum DeviceInput: Equatable {
-    /// One finger at a point on the panel's portrait surface, as fractions
-    /// of its width and height from the top left; `down` is false for the
-    /// lift.
-    case touch(CGPoint, down: Bool)
-    /// A USB keyboard usage (HID page 7).
-    case key(UInt32, down: Bool)
-}
+import TabDevices
+import TabProtocol
 
 /// A device's screen, scaled to fit and centered with rounded corners, turned
 /// the way the device is held. The surface is the layer's contents, so the
@@ -19,6 +11,17 @@ enum DeviceInput: Equatable {
 final class DeviceScreenView: ThemedView {
     /// Input for the device, in order.
     var onInput: (([DeviceInput]) -> Void)?
+    /// The view's size changed: the most pixels it can show now.
+    var onResize: ((UInt32) -> Void)?
+
+    /// The most device pixels the view shows at its size, at least a small phone's.
+    var maxPixels: UInt32 {
+        let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+        let pixels = bounds.width * scale * bounds.height * scale
+        return UInt32(min(max(pixels, 640 * 960), 4096 * 4096))
+    }
+
+    private var reportedPixels: UInt32 = 0
 
     /// Which way up the device is; the surface keeps the panel's portrait.
     var orientation = DeviceOrientation.portrait {
@@ -93,6 +96,11 @@ final class DeviceScreenView: ThemedView {
 
     override func layout() {
         super.layout()
+        let pixels = maxPixels
+        if pixels != reportedPixels {
+            reportedPixels = pixels
+            onResize?(pixels)
+        }
         let rect = screenRect
         let panel = orientation.isLandscape ? CGSize(width: rect.height, height: rect.width) : rect.size
         screen.transform = CATransform3DIdentity
@@ -189,19 +197,19 @@ final class DeviceScreenView: ThemedView {
 
     override func keyDown(with event: NSEvent) {
         guard !event.isARepeat, let usage = DeviceKeyboard.usage(keyCode: event.keyCode) else { return }
-        onInput?([.key(usage, down: true)])
+        onInput?([.key(usage: usage, down: true)])
     }
 
     override func keyUp(with event: NSEvent) {
         guard let usage = DeviceKeyboard.usage(keyCode: event.keyCode) else { return }
-        onInput?([.key(usage, down: false)])
+        onInput?([.key(usage: usage, down: false)])
     }
 
     override func flagsChanged(with event: NSEvent) {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         var input: [DeviceInput] = []
-        for (flag, usage) in DeviceKeyboard.modifiers where flags.contains(flag) != modifiers.contains(flag) {
-            input.append(.key(usage, down: flags.contains(flag)))
+        for (flag, usage) in Self.modifierUsages where flags.contains(flag) != modifiers.contains(flag) {
+            input.append(.key(usage: usage, down: flags.contains(flag)))
         }
         modifiers = flags
         if !input.isEmpty { onInput?(input) }
@@ -214,20 +222,19 @@ final class DeviceScreenView: ThemedView {
 
     /// Lifts held modifiers so none stays down on the device.
     private func releaseModifiers() {
-        let held = DeviceKeyboard.modifiers.filter { modifiers.contains($0.0) }
+        let held = Self.modifierUsages.filter { modifiers.contains($0.0) }
         modifiers = []
-        if !held.isEmpty { onInput?(held.map { .key($0.1, down: false) }) }
+        if !held.isEmpty { onInput?(held.map { .key(usage: $0.1, down: false) }) }
     }
 
     /// Types `text` on the device's keyboard.
     func type(_ text: String) {
-        var input: [DeviceInput] = []
-        for stroke in DeviceKeyboard.strokes(for: text) {
-            if stroke.shift { input.append(.key(DeviceKeyboard.leftShift, down: true)) }
-            input.append(.key(stroke.usage, down: true))
-            input.append(.key(stroke.usage, down: false))
-            if stroke.shift { input.append(.key(DeviceKeyboard.leftShift, down: false)) }
-        }
+        let input = DeviceKeyboard.input(typing: text)
         if !input.isEmpty { onInput?(input) }
     }
+
+    /// The modifier usages a flags change presses or releases.
+    private static let modifierUsages: [(NSEvent.ModifierFlags, UInt32)] = [
+        (.control, 0xE0), (.shift, 0xE1), (.option, 0xE2), (.command, 0xE3),
+    ]
 }

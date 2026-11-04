@@ -70,7 +70,7 @@ extension Server {
     public func run(handleSignals: Bool = true) throws {
         let runner = try start()
         if handleSignals { runner.stopOnSignals() }
-        runner.wait()
+        runner.waitServingMain()
     }
 
     /// Takes the profile's lock, listens on the socket and serves clients in
@@ -177,6 +177,20 @@ public final class ServerRunner: @unchecked Sendable {
         removeOwnedFile(server.configuration.dirs.serverPid.path, identity: pidIdentity)
         ServerLog.info("server stopped")
         lock.withLock { finished = true }
+        stopped.signal()
+        // Wakes `waitServingMain`.
+        DispatchQueue.main.async {}
+    }
+
+    /// Blocks the main thread until the server stopped, serving the main
+    /// queue meanwhile: simulator frameworks deliver their callbacks there.
+    func waitServingMain() {
+        guard Thread.isMainThread else { return wait() }
+        // A port keeps the run loop waiting instead of returning at once.
+        RunLoop.main.add(Port(), forMode: .default)
+        while stopped.wait(timeout: .now()) == .timedOut {
+            RunLoop.main.run(mode: .default, before: .distantFuture)
+        }
         stopped.signal()
     }
 

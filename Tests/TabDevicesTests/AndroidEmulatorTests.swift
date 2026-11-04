@@ -1,6 +1,7 @@
 import IOSurface
 import XCTest
-@testable import TabApp
+import TabProtocol
+@testable import TabDevices
 
 final class AndroidEmulatorTests: XCTestCase {
     func testProtobufRoundTripsTheFieldsTheControlAPIUses() {

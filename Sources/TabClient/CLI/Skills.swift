@@ -204,12 +204,33 @@ public enum AgentSkill {
       `tab browser screenshot "$PAGE" | base64 -D > page.png`.
     - Close only browsers you opened.
 
+    ## Simulators and emulators
+
+    `tab device` drives the iOS simulators and Android emulators of the server
+    your terminal runs on, so you can check UI work where the app builds.
+
+    ```bash
+    tab device list                                    # id, platform, name, runtime, state
+    tab device boot "iPhone 17"
+    tab device screenshot --output screen.png          # look at it before tapping
+    tab device tap 200 640                             # pixels of that screenshot
+    tab device type "hello"
+    tab device press home
+    tab device open "myapp://settings"
+    ```
+
+    - Without `--device`, commands use the only running device.
+    - Take a new screenshot after each action to see its effect.
+    - Shut down only devices you started.
+
     ## Other computers
 
     Put `--host user@computer` before a server command, such as `session`,
     `project`, or `worktree`, to use another computer's server over SSH.
     Folders are then absolute paths on that computer. `pane`, `tab`, `browser`
     and `integrations` work on this Mac only and don't take `--host`.
+    `tab --host user@computer forward 8081` makes that computer's port 8081
+    reachable on this Mac's localhost until stopped.
 
     """#
 }

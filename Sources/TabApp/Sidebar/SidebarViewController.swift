@@ -350,6 +350,9 @@ final class SidebarViewController: NSViewController {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(path, forType: .string)
         })
+        if !project.serverId.isLocal {
+            items.append(.submenu("Forwarded Ports", model.portForwardItems(project.serverId)))
+        }
         return items
     }
 

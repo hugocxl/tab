@@ -1,51 +1,21 @@
 import AppKit
 import TabCore
+import TabProtocol
 
-/// A device the picker offers: an iOS simulator or an Android emulator.
+/// A device the picker offers: an iOS simulator or an Android emulator on
+/// the tab's server.
 struct DeviceChoice: Hashable, Sendable {
-    var platform: DevicePlatform
-    /// The UDID or the AVD name.
-    var id: String
-    var name: String
+    var info: DeviceInfo
+
+    var platform: DevicePlatform { info.device.platform }
+    var name: String { info.name }
     /// The OS it runs, such as "iOS 27.0" or "Android API 35".
-    var runtime: String
-    var isRunning: Bool
-    var isTablet: Bool
+    var runtime: String { info.runtime }
+    var isRunning: Bool { info.booted }
+    var isTablet: Bool { info.isTablet }
 
     var pane: DevicePane {
-        platform == .iOS ? DevicePane(udid: id, name: name) : DevicePane(avd: id, name: name)
-    }
-
-    init(_ simulator: SimulatorDevice) {
-        platform = .iOS
-        id = simulator.udid
-        name = simulator.name
-        runtime = simulator.runtime
-        isRunning = simulator.isBooted
-        isTablet = simulator.name.hasPrefix("iPad")
-    }
-
-    init(_ avd: AndroidVirtualDevice, running: Bool) {
-        platform = .android
-        id = avd.name
-        name = avd.displayName
-        runtime = avd.runtime
-        isRunning = running
-        isTablet = avd.isTablet
-    }
-
-    /// Every device on this Mac: running ones first, iOS before Android.
-    /// A platform whose tools are missing adds nothing.
-    static func all() async -> [DeviceChoice] {
-        let simulators = ((try? await SimulatorControl.devices()) ?? []).map(DeviceChoice.init)
-        let android = await Task.detached { () -> [DeviceChoice] in
-            let running = Set(AndroidEmulators.running().map(\.avd))
-            return AndroidEmulators.virtualDevices().map { DeviceChoice($0, running: running.contains($0.name)) }
-        }.value
-        return (simulators + android).enumerated().sorted { a, b in
-            if a.element.isRunning != b.element.isRunning { return a.element.isRunning }
-            return a.offset < b.offset
-        }.map(\.element)
+        platform == .iOS ? DevicePane(udid: info.device.id, name: name) : DevicePane(avd: info.device.id, name: name)
     }
 }
 
@@ -98,10 +68,13 @@ final class DevicePickerView: ThemedView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    func show(_ devices: [DeviceChoice]) {
+    /// Shows the devices of the tab's server; `host` names it when it is another computer.
+    func show(_ devices: [DeviceChoice], host: String?) {
         list.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        titleLabel.stringValue = host.map { "Choose a Device on \($0)" } ?? "Choose a Device"
+        let place = host ?? "this Mac"
         detailLabel.stringValue = devices.isEmpty
-            ? "No simulators or emulators were found. Add iOS simulators in Xcode, or Android ones in Android Studio."
+            ? "No simulators or emulators were found on \(place). Add iOS simulators in Xcode, or Android ones in Android Studio."
             : "It starts if it isn't running."
         for device in devices {
             let row = DevicePickerRow(device: device)

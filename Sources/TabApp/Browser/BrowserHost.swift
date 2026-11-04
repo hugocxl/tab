@@ -1,5 +1,6 @@
 import AppKit
 import TabCore
+import TabProtocol
 
 /// A browser pane as `tab browser list` reports it.
 public struct BrowserTab: Equatable, Sendable {
@@ -17,6 +18,19 @@ public struct BrowserTab: Equatable, Sendable {
     }
 }
 
+/// Whose network a browser pane loads pages from.
+public enum BrowserNetwork: Equatable, Sendable {
+    /// This Mac's.
+    case local
+    /// Another computer's server, through its tunnels.
+    case remote(server: ServerId, name: String)
+
+    var server: ServerId? {
+        if case .remote(let server, _) = self { return server }
+        return nil
+    }
+}
+
 /// What browser panes and `BrowserAutomation` need from the app shell. The
 /// shell owns panes, layouts and saving; the browser owns pages.
 @MainActor
@@ -25,6 +39,10 @@ public protocol BrowserHost: AnyObject {
     /// The browser settings in effect.
     var browserSettings: BrowserSettings { get }
     var browserProfiles: BrowserProfiles { get }
+    /// The network of the pane's tab: its server's.
+    func browserNetwork(forTab tabId: String) -> BrowserNetwork
+    /// Whether the server is connected now.
+    func browserServerConnected(_ server: ServerId) -> Bool
 
     // MARK: From a pane
 
@@ -58,4 +76,9 @@ public protocol BrowserHost: AnyObject {
     func browserPane(tabId: String) -> BrowserPaneController?
     /// Closes the pane; `false` when there is no such browser pane.
     func closeBrowserPane(tabId: String) -> Bool
+}
+
+extension BrowserHost {
+    public func browserNetwork(forTab tabId: String) -> BrowserNetwork { .local }
+    public func browserServerConnected(_ server: ServerId) -> Bool { true }
 }

@@ -1,4 +1,5 @@
-import AppKit
+import CoreGraphics
+import Foundation
 import IOSurface
 import ObjectiveC
 import TabCore
@@ -7,8 +8,8 @@ import TabCore
 /// loaded at runtime from the selected Xcode: the device's live screen as
 /// IOSurfaces and its touch, button and keyboard input as Indigo HID
 /// messages. Listing, booting and settings go through `simctl` instead.
-/// Everything here runs on `queue`, except the screen callbacks, which run on
-/// the main queue.
+/// Everything here runs on `queue`, except the notification and screen
+/// callbacks, which run on the queue their registration names.
 final class SimulatorBridge: @unchecked Sendable {
     static let shared = SimulatorBridge()
 
@@ -71,23 +72,35 @@ final class SimulatorBridge: @unchecked Sendable {
 
     /// The `SimDevice` with `udid`.
     func device(_ udid: String) throws -> AnyObject {
-        let set = try load().deviceSet
-        let devices = Self.call(set, "devices") as? [AnyObject] ?? []
-        guard let device = devices.first(where: { (Self.call($0, "UDID") as? NSUUID)?.uuidString == udid }) else {
+        guard let device = try devices().first(where: { Self.udid(of: $0) == udid }) else {
             throw SimulatorError.notFound
         }
         return device
     }
 
+    /// Every `SimDevice` in the default set.
+    func devices() throws -> [AnyObject] {
+        Self.call(try load().deviceSet, "devices") as? [AnyObject] ?? []
+    }
+
+    /// The default device set, which notifies when devices come and go.
+    func deviceSet() throws -> AnyObject {
+        try load().deviceSet
+    }
+
+    static func udid(of device: AnyObject) -> String? {
+        (call(device, "UDID") as? NSUUID)?.uuidString
+    }
+
     // MARK: State
 
-    /// Calls `handler` on the main queue whenever `device` changes state.
+    /// Calls `handler` on `queue` whenever `device` changes state.
     /// Returns the registration to pass to `unregisterNotifications`.
-    func registerNotifications(_ device: AnyObject, handler: @escaping () -> Void) -> UInt? {
+    func registerNotifications(_ device: AnyObject, queue: DispatchQueue, handler: @escaping () -> Void) -> UInt? {
         let selector = NSSelectorFromString("registerNotificationHandlerOnQueue:handler:")
         guard device.responds(to: selector), let method = class_getMethodImplementation(type(of: device), selector) else { return nil }
         typealias Function = @convention(c) (AnyObject, Selector, DispatchQueue, @escaping @convention(block) (NSDictionary?) -> Void) -> UInt
-        return unsafeBitCast(method, to: Function.self)(device, selector, .main) { _ in handler() }
+        return unsafeBitCast(method, to: Function.self)(device, selector, queue) { _ in handler() }
     }
 
     func unregisterNotifications(_ device: AnyObject, _ registration: UInt) {
@@ -120,9 +133,10 @@ final class SimulatorBridge: @unchecked Sendable {
         }
     }
 
-    /// Calls `surfaces` on the main queue when `screen` gets new surfaces,
+    /// Calls `surfaces` on `queue` when `screen` gets new surfaces,
     /// including once on registering, and `frame` whenever it draws.
-    func registerScreen(_ screen: AnyObject, id: UUID, surfaces: @escaping () -> Void, frame: @escaping () -> Void) {
+    func registerScreen(_ screen: AnyObject, id: UUID, queue: DispatchQueue, surfaces: @escaping () -> Void,
+                        frame: @escaping () -> Void) {
         guard let method = class_getMethodImplementation(type(of: screen), Self.registerScreen) else { return }
         typealias Function = @convention(c) (
             AnyObject, Selector, NSUUID, DispatchQueue,
@@ -130,7 +144,7 @@ final class SimulatorBridge: @unchecked Sendable {
             @escaping @convention(block) (AnyObject?, AnyObject?) -> Void,
             @escaping @convention(block) (AnyObject?) -> Void
         ) -> Void
-        unsafeBitCast(method, to: Function.self)(screen, Self.registerScreen, id as NSUUID, .main, frame, { _, _ in surfaces() }, { _ in })
+        unsafeBitCast(method, to: Function.self)(screen, Self.registerScreen, id as NSUUID, queue, frame, { _, _ in surfaces() }, { _ in })
     }
 
     func unregisterScreen(_ screen: AnyObject, id: UUID) {
@@ -260,13 +274,13 @@ final class SimulatorBridge: @unchecked Sendable {
 }
 
 /// Why a simulator can't be shown.
-enum SimulatorError: Error, Equatable, CustomStringConvertible {
+public enum SimulatorError: Error, Equatable, CustomStringConvertible {
     /// Xcode or its simulator frameworks are missing or changed.
     case unavailable(String)
     /// No simulator has the pane's UDID any more.
     case notFound
 
-    var description: String {
+    public var description: String {
         switch self {
         case .unavailable(let reason): return reason
         case .notFound: return "This simulator no longer exists"

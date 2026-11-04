@@ -2,9 +2,11 @@ import Foundation
 import TabProtocol
 
 /// What a connection's writer sends next: control messages first, then
-/// session-channel messages, then at most one screen frame in flight per
-/// channel. A frame that can't go yet merges into the waiting one, so a slow
-/// client never piles up frames.
+/// channel messages, then at most one screen frame in flight per channel,
+/// then at most one device video frame in flight per channel, then tunnel
+/// bytes. A screen frame that can't go yet merges into the waiting one, so a
+/// slow client never piles up frames; a device encodes only when its channel
+/// has credit; tunnels send only what their reader granted.
 final class Outbox: @unchecked Sendable {
     private let condition = NSCondition()
     private var control: [Message] = []
@@ -14,6 +16,25 @@ final class Outbox: @unchecked Sendable {
     /// Channels whose last frame was acknowledged (or that got none yet).
     private var credit: [ChannelId: Bool] = [:]
     private var sent: [ChannelId: UInt64] = [:]
+    private var videos: [ChannelId: VideoLane] = [:]
+    /// Tunnel bytes and the messages ordered with them, by channel.
+    private var streams: [ChannelId: [StreamItem]] = [:]
+    /// Tunnels that may still queue; a closed one drains what it queued.
+    private var openStreams: Set<ChannelId> = []
+    private var lastStream = ChannelId(0)
+
+    private struct VideoLane {
+        var credit = true
+        var waiting: VideoFrame?
+        var sent: UInt32?
+        /// Runs off the lock when the client acknowledged the last frame.
+        var onCredit: @Sendable () -> Void
+    }
+
+    private enum StreamItem {
+        case bytes(Data)
+        case message(SessionMessage)
+    }
     private var closed = false
     /// Sends what is queued for control, then ends.
     private var finishing = false
@@ -99,10 +120,16 @@ final class Outbox: @unchecked Sendable {
     @discardableResult
     func push(_ message: SessionMessage, on channel: ChannelId) -> Bool {
         condition.withLock {
-            guard !closed, credit[channel] != nil else { return false }
+            guard !closed, credit[channel] != nil || videos[channel] != nil || openStreams.contains(channel) else {
+                return false
+            }
             var queued = channelMessages[channel] ?? []
             if let index = queued.firstIndex(where: { Self.sameKind($0, message) }) {
-                queued[index] = message
+                if case .credit(let old) = queued[index], case .credit(let new) = message {
+                    queued[index] = .credit(old &+ new)
+                } else {
+                    queued[index] = message
+                }
             } else {
                 queued.append(message)
             }
@@ -115,6 +142,7 @@ final class Outbox: @unchecked Sendable {
     private static func sameKind(_ lhs: SessionMessage, _ rhs: SessionMessage) -> Bool {
         switch (lhs, rhs) {
         case (.resized, .resized): true
+        case (.credit, .credit): true
         case (.metadata(let old), .metadata(let new)):
             switch (old, new) {
             case (.title, .title), (.directory, .directory), (.foregroundProcess, .foregroundProcess),
@@ -144,10 +172,98 @@ final class Outbox: @unchecked Sendable {
 
     /// The client drew frame `seq`; the next one may go.
     func ack(_ seq: UInt64, on channel: ChannelId) {
-        condition.withLock {
-            guard sent[channel] == seq, credit[channel] == false else { return }
+        let onCredit: (@Sendable () -> Void)? = condition.withLock {
+            if var lane = videos[channel] {
+                guard lane.sent.map(UInt64.init) == seq, !lane.credit, lane.waiting == nil else { return nil }
+                lane.credit = true
+                lane.sent = nil
+                videos[channel] = lane
+                return lane.onCredit
+            }
+            guard sent[channel] == seq, credit[channel] == false else { return nil }
             credit[channel] = true
             condition.signal()
+            return nil
+        }
+        onCredit?()
+    }
+
+    // MARK: Device video
+
+    /// Opens a device channel; `onCredit` runs whenever the client
+    /// acknowledged the frame in flight, so the device may encode the next.
+    func openVideo(_ channel: ChannelId, onCredit: @escaping @Sendable () -> Void) {
+        condition.withLock {
+            guard !closed else { return }
+            videos[channel] = VideoLane(onCredit: onCredit)
+        }
+    }
+
+    /// Whether a frame may be encoded for `channel` now.
+    func hasVideoCredit(_ channel: ChannelId) -> Bool {
+        condition.withLock { videos[channel]?.credit == true && !closed }
+    }
+
+    /// Queues an encoded frame; false without credit or once closed.
+    @discardableResult
+    func push(video frame: VideoFrame, on channel: ChannelId) -> Bool {
+        condition.withLock {
+            guard !closed, var lane = videos[channel], lane.credit else { return false }
+            lane.credit = false
+            lane.waiting = frame
+            videos[channel] = lane
+            condition.signal()
+            return true
+        }
+    }
+
+    /// Stops a device channel; `flush` still sends its queued messages.
+    func closeVideo(_ channel: ChannelId, flush: Bool = false) {
+        condition.withLock {
+            videos[channel] = nil
+            if !flush { channelMessages[channel] = nil }
+        }
+    }
+
+    // MARK: Tunnels
+
+    func openStream(_ channel: ChannelId) {
+        condition.withLock {
+            guard !closed else { return }
+            openStreams.insert(channel)
+        }
+    }
+
+    /// Queues tunnel bytes, in order with `push(streamMessage:)`.
+    @discardableResult
+    func push(stream data: Data, on channel: ChannelId) -> Bool {
+        pushStream(.bytes(data), on: channel)
+    }
+
+    /// Queues a message that must follow the bytes queued before it, such
+    /// as `streamEnd`.
+    @discardableResult
+    func push(streamMessage message: SessionMessage, on channel: ChannelId) -> Bool {
+        pushStream(.message(message), on: channel)
+    }
+
+    private func pushStream(_ item: StreamItem, on channel: ChannelId) -> Bool {
+        condition.withLock {
+            guard !closed, openStreams.contains(channel) else { return false }
+            streams[channel, default: []].append(item)
+            condition.signal()
+            return true
+        }
+    }
+
+    /// Stops queuing on a tunnel; `flush` still sends what it queued.
+    func closeStream(_ channel: ChannelId, flush: Bool = false) {
+        condition.withLock {
+            openStreams.remove(channel)
+            if !flush {
+                streams[channel] = nil
+                channelMessages[channel] = nil
+            }
         }
     }
 
@@ -182,8 +298,34 @@ final class Outbox: @unchecked Sendable {
                 credit[channel] = true
                 continue
             }
+            if let channel = videos.first(where: { $0.value.waiting != nil })?.key, var lane = videos[channel],
+               let frame = lane.waiting {
+                lane.waiting = nil
+                lane.sent = frame.seq
+                videos[channel] = lane
+                if let data = encode({ try FrameEncoder.encode(video: frame, channel: channel) }) { return data }
+                continue
+            }
+            if let channel = nextStream(), var queued = streams[channel], !queued.isEmpty {
+                let item = queued.removeFirst()
+                streams[channel] = queued.isEmpty ? nil : queued
+                lastStream = channel
+                let data: Data?
+                switch item {
+                case .bytes(let bytes): data = encode({ try FrameEncoder.encode(stream: bytes, channel: channel) })
+                case .message(let message): data = encode({ try FrameEncoder.encode(message, channel: channel) })
+                }
+                if let data { return data }
+                continue
+            }
             condition.wait()
         }
+    }
+
+    /// The tunnel after the last one served, so one busy tunnel can't starve the rest.
+    private func nextStream() -> ChannelId? {
+        guard !streams.isEmpty else { return nil }
+        return streams.keys.filter { $0 > lastStream }.min() ?? streams.keys.min()
     }
 
     private func encode(_ body: () throws -> Data) -> Data? {
@@ -212,6 +354,9 @@ final class Outbox: @unchecked Sendable {
             frames.removeAll()
             credit.removeAll()
             sent.removeAll()
+            videos.removeAll()
+            streams.removeAll()
+            openStreams.removeAll()
             condition.broadcast()
         }
     }

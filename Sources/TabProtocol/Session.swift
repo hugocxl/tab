@@ -429,6 +429,22 @@ public enum SessionMessage: Hashable, Codable, Sendable {
     /// Clears the screen through the engine (Cmd+K).
     case clear
 
+    // Tunnels, both ways.
+    /// The reader wrote this many more bytes; the sender may send them.
+    case credit(UInt32)
+    /// The sender sends no more bytes; the other direction stays open.
+    case streamEnd
+    /// Server to client: the tunnel is gone, with why when it failed.
+    case streamClosed(TunnelFailure?)
+
+    // Devices.
+    /// Client to server: touches, keys and buttons, in order.
+    case deviceInput([DeviceInput])
+    /// Client to server: the next frame must be a keyframe, such as after a decode error.
+    case requestKeyframe
+    /// Server to client: the device shut down; the channel is closed.
+    case deviceStopped
+
     case unknown(String)
 
     public init(from decoder: Decoder) throws {
@@ -444,6 +460,12 @@ public enum SessionMessage: Hashable, Codable, Sendable {
         case "cellSize": self = .cellSize(try c("cell"))
         case "requestHistory": self = .requestHistory
         case "clear": self = .clear
+        case "credit": self = .credit(try c("bytes"))
+        case "streamEnd": self = .streamEnd
+        case "streamClosed": self = .streamClosed(try c("failure"))
+        case "deviceInput": self = .deviceInput(try c("input"))
+        case "requestKeyframe": self = .requestKeyframe
+        case "deviceStopped": self = .deviceStopped
         default: self = .unknown(c.type)
         }
     }
@@ -476,6 +498,18 @@ public enum SessionMessage: Hashable, Codable, Sendable {
             try c(cell, "cell")
         case .requestHistory: try TaggedEncoding(encoder, "requestHistory")
         case .clear: try TaggedEncoding(encoder, "clear")
+        case .credit(let bytes):
+            var c = try TaggedEncoding(encoder, "credit")
+            try c(bytes, "bytes")
+        case .streamEnd: try TaggedEncoding(encoder, "streamEnd")
+        case .streamClosed(let failure):
+            var c = try TaggedEncoding(encoder, "streamClosed")
+            try c(failure, "failure")
+        case .deviceInput(let input):
+            var c = try TaggedEncoding(encoder, "deviceInput")
+            try c(input, "input")
+        case .requestKeyframe: try TaggedEncoding(encoder, "requestKeyframe")
+        case .deviceStopped: try TaggedEncoding(encoder, "deviceStopped")
         case .unknown(let type): try TaggedEncoding(encoder, type)
         }
     }
