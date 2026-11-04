@@ -3,6 +3,18 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.50.0 - 2026-11-04
+
+### Added
+
+- Cmd-Opt-A opens a new agent pane beside the focused pane, and adding Shift to
+  Cmd-Opt-A, Cmd-Opt-B or Cmd-Opt-D opens the agent, browser or device pane
+  below it instead.
+
+### Changed
+
+- New Device Pane moves from Cmd-Opt-P to Cmd-Opt-D.
+
 ## 0.49.0 - 2026-11-04
 
 ### Changed

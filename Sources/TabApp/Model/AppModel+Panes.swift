@@ -98,11 +98,11 @@ extension AppModel {
         }
     }
 
-    /// Adds a `kind` pane to an existing tab, beside the pane it shows: the
-    /// Home tab `tab`, or `project`'s tab. A project with no tab yet gets
-    /// one holding the pane.
+    /// Adds a `kind` pane to an existing tab, on `edge` of the pane it
+    /// shows: the Home tab `tab`, or `project`'s tab. A project with no tab
+    /// yet gets one holding the pane.
     @discardableResult
-    public func newPane(_ kind: PaneKind, in project: ProjectId, tab: TabId? = nil) -> PaneId? {
+    public func newPane(_ kind: PaneKind, in project: ProjectId, tab: TabId? = nil, edge: Direction = .right) -> PaneId? {
         guard let target = state.project(project) else { return nil }
         let shown = tab.flatMap { id in target.tabs.first { $0.id == id } } ?? (target.home ? nil : target.tabs.first)
         let anchor = shown.flatMap { tab in
@@ -136,7 +136,7 @@ extension AppModel {
         let pane = Pane(title: kind == .browser ? "New Browser" : content.nativeTitle ?? kind.name, content: content)
         let directory = newPaneDirectory(in: target)
         guard edit({ state in
-            try state.insertSplitPane(after: anchor, pane, edge: .right)
+            try state.insertSplitPane(after: anchor, pane, edge: edge)
             if kind == .terminal { _ = state.prepareCreation(pane.id, directory: directory) }
             try state.focusPane(pane.id)
             state.revealCurrentProject()

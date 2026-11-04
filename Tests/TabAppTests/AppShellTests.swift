@@ -65,7 +65,7 @@ final class AppKeyDispatchTests: XCTestCase {
             "Previous Prompt", "Next Prompt", "Select Command Output",
         ])
         XCTAssertEqual(titles("File"), [
-            "New Terminal", "New Agent",
+            "New Terminal", "New Agent", "New Agent Pane",
             "New Browser Pane", "New Device Pane", "New Home Terminal", "New Terminal in Project…", "New Worktree…",
             "Switch Worktree…", "Open Project…", "-", "Close Tab",
         ])

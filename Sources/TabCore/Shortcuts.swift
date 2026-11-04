@@ -201,7 +201,8 @@ public enum ShortcutCatalog {
         .selectProject6, .selectProject7, .selectProject8, .selectProject9,
         .copy, .paste, .find, .findNext, .findPrevious, .scrollToBottom,
         .previousPrompt, .nextPrompt, .selectCommandOutput,
-        .increaseFontSize, .decreaseFontSize, .newBrowserPane, .newDevicePane,
+        .increaseFontSize, .decreaseFontSize, .newAgentPane, .newBrowserPane, .newDevicePane,
+        .newAgentPaneBelow, .newBrowserPaneBelow, .newDevicePaneBelow,
     ]
 
     /// Built-in defaults that give way to a key a user binding already has,
@@ -218,7 +219,8 @@ public enum ShortcutCatalog {
         .addProject, .closeTab, .splitRight, .splitDown,
         .focusPaneLeft, .focusPaneRight, .focusPaneUp, .focusPaneDown,
         .toggleZoomPane, .equalizeSplits, .closePane, .menuOpenSubmenu, .menuCloseSubmenu,
-        .newBrowserPane, .newDevicePane, .browserFocusAddress, .browserReload, .browserBack, .browserForward,
+        .newAgentPane, .newBrowserPane, .newDevicePane,
+        .newAgentPaneBelow, .newBrowserPaneBelow, .newDevicePaneBelow, .browserFocusAddress, .browserReload, .browserBack, .browserForward,
         .browserZoomIn, .browserZoomOut, .browserZoomReset, .browserCopyUrl, .browserInspect,
     ]
 
@@ -308,6 +310,7 @@ public enum ShortcutCatalog {
         let file: [ShortcutMenuItem] = [
             .shortcut(.newTab, title: "New Terminal"),
             .shortcut(.newAgent, title: "New Agent"),
+            .shortcut(.newAgentPane, title: "New Agent Pane"),
             .shortcut(.newBrowserPane, title: "New Browser Pane"),
             .shortcut(.newDevicePane, title: "New Device Pane"),
             .shortcut(.newHomeTab, title: "New Home Terminal"),
@@ -637,6 +640,10 @@ public enum ShortcutId: String, CaseIterable, Codable, Sendable {
     case commandPaletteActions = "command_palette.actions"
     case newBrowserPane = "new_browser_tab"
     case newDevicePane = "new_device_pane"
+    case newAgentPane = "new_agent_pane"
+    case newAgentPaneBelow = "new_agent_pane_below"
+    case newBrowserPaneBelow = "new_browser_pane_below"
+    case newDevicePaneBelow = "new_device_pane_below"
     case browserFocusAddress = "browser.focus_address"
     case browserReload = "browser.reload"
     case browserBack = "browser.back"
@@ -785,7 +792,11 @@ extension ShortcutCatalog {
         ShortcutDefinition(.toggleCommandPalette, keys: ["cmd-shift-p"], contexts: ["WorkspaceTabs"], keyContexts: [["WorkspaceTabs"]], group: .palette),
         ShortcutDefinition(.commandPaletteActions, keys: ["cmd-k"], contexts: ["CommandPalette"], keyContexts: [["CommandPalette"]], group: .palette),
         ShortcutDefinition(.newBrowserPane, keys: ["cmd-alt-b"], contexts: ["WorkspaceTabs"], keyContexts: [["WorkspaceTabs"]], group: .browser),
-        ShortcutDefinition(.newDevicePane, keys: ["cmd-alt-p"], contexts: ["WorkspaceTabs"], keyContexts: [["WorkspaceTabs"]], group: .panes),
+        ShortcutDefinition(.newDevicePane, keys: ["cmd-alt-d"], contexts: ["WorkspaceTabs"], keyContexts: [["WorkspaceTabs"]], group: .panes),
+        ShortcutDefinition(.newAgentPane, keys: ["cmd-alt-a"], contexts: ["WorkspaceTabs"], keyContexts: [["WorkspaceTabs"]], group: .panes),
+        ShortcutDefinition(.newAgentPaneBelow, keys: ["cmd-alt-shift-a"], contexts: ["WorkspaceTabs"], keyContexts: [["WorkspaceTabs"]], group: .panes),
+        ShortcutDefinition(.newBrowserPaneBelow, keys: ["cmd-alt-shift-b"], contexts: ["WorkspaceTabs"], keyContexts: [["WorkspaceTabs"]], group: .browser),
+        ShortcutDefinition(.newDevicePaneBelow, keys: ["cmd-alt-shift-d"], contexts: ["WorkspaceTabs"], keyContexts: [["WorkspaceTabs"]], group: .panes),
         ShortcutDefinition(.browserFocusAddress, keys: ["cmd-l"], contexts: ["Browser"], keyContexts: [["Browser"]], group: .browser),
         ShortcutDefinition(.browserReload, keys: ["cmd-r"], contexts: ["Browser"], keyContexts: [["Browser"]], group: .browser),
         ShortcutDefinition(.browserBack, keys: ["cmd-["], contexts: ["Browser"], keyContexts: [["Browser"]], group: .browser),

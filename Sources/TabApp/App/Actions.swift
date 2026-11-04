@@ -91,11 +91,19 @@ final class Actions {
         case .endAllSessionsAndQuit: window?.endAllSessionsAndQuit()
         case .openSettings: window?.showSettings()
         case .installCommandLineTool: CommandLineInstaller.installAndReport(on: window?.window)
-        case .newBrowserPane: model.newPane(.browser, in: model.currentProject.id, tab: model.activeTab?.id)
-        case .newDevicePane: model.newPane(.device, in: model.currentProject.id, tab: model.activeTab?.id)
+        case .newAgentPane: newPane(.agent, edge: .right)
+        case .newBrowserPane: newPane(.browser, edge: .right)
+        case .newDevicePane: newPane(.device, edge: .right)
+        case .newAgentPaneBelow: newPane(.agent, edge: .down)
+        case .newBrowserPaneBelow: newPane(.browser, edge: .down)
+        case .newDevicePaneBelow: newPane(.device, edge: .down)
         default: return false
         }
         return true
+    }
+
+    private func newPane(_ kind: PaneKind, edge: Direction) {
+        model.newPane(kind, in: model.currentProject.id, tab: model.activeTab?.id, edge: edge)
     }
 
     private func terminalCommand(_ command: TerminalCommand) -> Bool {
