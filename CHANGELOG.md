@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.49.0 - 2026-11-04
+
+### Changed
+
+- The right sidebar's Files and Source Control buttons now stand in a column
+  beside it, with the button that hides the sidebar at the bottom.
+
 ## 0.48.0 - 2026-11-04
 
 ### Added

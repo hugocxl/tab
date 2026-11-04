@@ -1,8 +1,9 @@
 import AppKit
 
-/// The right sidebar: a header on the window chrome, like the left sidebar's
-/// top row, with one button per tab and the collapse toggle, above a card
-/// holding the selected tab's content. Its left edge resizes it.
+/// The right sidebar: a card holding the selected tab's content and, right
+/// of it on the window chrome, a rail with one button per tab stacked
+/// vertically and the close button at the bottom. Pressing the open tab's
+/// button closes it too. The card's left edge resizes it.
 final class RightSidebarView: ThemedView {
     var content: NSView? {
         didSet {
@@ -36,6 +37,9 @@ final class RightSidebarView: ThemedView {
     private let toggle = ChromeButton(.panelRight, label: "Hide Sidebar")
     private let card = RightSidebarCard()
     private let handle = PanelResizeHandle()
+
+    /// The rail's width: a button with the gutter on either side.
+    static let railWidth: CGFloat = Metrics.gutter * 2 + ChromeButton.side
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -74,11 +78,13 @@ final class RightSidebarView: ThemedView {
     private func placeSubviews() {
         let gutter = Metrics.gutter
         let side = ChromeButton.side
-        let cardWidth = max(bounds.width - gutter, 0)
-        CircleButton.layOut(tabs.map(\.1), leadingAt: 0, y: gutter)
-        toggle.frame = CGRect(x: cardWidth - side, y: gutter, width: side, height: side)
-        let top = ChromeButton.rowHeight
-        card.frame = CGRect(x: 0, y: top, width: cardWidth, height: max(bounds.height - top - gutter, 0))
+        let railX = max(bounds.width - Self.railWidth, 0)
+        for (index, (_, button)) in tabs.enumerated() {
+            let y = gutter + CGFloat(index) * (side + ChromeButton.gap)
+            button.frame = CGRect(x: railX + gutter, y: y, width: side, height: side)
+        }
+        toggle.frame = CGRect(x: railX + gutter, y: max(bounds.height - gutter - side, gutter), width: side, height: side)
+        card.frame = CGRect(x: 0, y: gutter, width: railX, height: max(bounds.height - gutter * 2, 0))
         handle.frame = CGRect(x: 0, y: 0, width: 5, height: bounds.height)
     }
 }

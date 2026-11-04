@@ -73,7 +73,7 @@ final class WorkspaceView: ThemedView {
             }
             self.needsLayout = true
         }
-        rightSidebar.onSelect = { [weak model] kind in model?.selectRightPanel(kind) }
+        rightSidebar.onSelect = { [weak model] kind in model?.toggleRightPanel(kind) }
         rightSidebar.onToggle = { [weak model] in model?.toggleRightSidebar() }
         sidebarToggle.button.shortcut = .toggleSidebar
         sidebarToggle.button.onPress = { [weak model] in model?.toggleSidebar() }
@@ -178,11 +178,12 @@ final class WorkspaceView: ThemedView {
         model.appearance.sidebarExpanded ? (liveSidebarWidth ?? model.sidebarWidth) : 0
     }
 
-    /// The right sidebar's frame: the card's width plus the window gutter,
-    /// leaving the splits at least 240pt.
+    /// The right sidebar's frame: the card's width plus the rail, leaving
+    /// the splits at least 240pt.
     private func rightSidebarFrame(_ kind: RightPanelKind) -> NSRect {
-        let width = min(livePanelWidth ?? model.rightPanelWidth(kind), max(bounds.width - sidebarWidth - 240, RightPanelKind.minimumWidth))
-        return NSRect(x: bounds.width - Metrics.gutter - width, y: 0, width: width + Metrics.gutter, height: bounds.height)
+        let rail = RightSidebarView.railWidth
+        let width = min(livePanelWidth ?? model.rightPanelWidth(kind), max(bounds.width - sidebarWidth - rail - 240, RightPanelKind.minimumWidth))
+        return NSRect(x: bounds.width - rail - width, y: 0, width: width + rail, height: bounds.height)
     }
 
     override func layout() {
