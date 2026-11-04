@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.53.0 - 2026-11-04
+
+### Changed
+
+- The update chip at the bottom right uses diffused glass, so its message stays
+  readable over busy panes.
+
 ## 0.52.0 - 2026-11-04
 
 ### Changed

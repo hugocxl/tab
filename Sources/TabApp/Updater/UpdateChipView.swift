@@ -4,8 +4,8 @@ import TabCore
 
 /// The capsule floating at the window's bottom right that carries everything about
 /// updating: an icon, one line that scrolls when it doesn't fit, at most one
-/// button, and a close button. Glass like the sidebar's cards, tinted with
-/// the chip's tone, as are its buttons.
+/// button, and a close button. Diffused glass tinted with the chip's tone, as
+/// are its buttons.
 final class UpdateChipView: ThemedView {
     var onAction: ((UpdateChip.Action) -> Void)?
     var onDismiss: (() -> Void)?
