@@ -49,16 +49,23 @@ public struct WorktreeSettings: Codable, Equatable, Sendable {
     public var defaultLocation: WorktreeLocation
     /// The location each project last chose, remembered per project.
     public var projects: [ProjectId: WorktreeLocation]
+    /// The setup commands the user approved for each project's new
+    /// worktrees, exactly; quick worktrees run them again without asking
+    /// until they change.
+    public var approvedSetup: [ProjectId: [String]]
 
-    public init(defaultLocation: WorktreeLocation = WorktreeLocation(), projects: [ProjectId: WorktreeLocation] = [:]) {
+    public init(defaultLocation: WorktreeLocation = WorktreeLocation(), projects: [ProjectId: WorktreeLocation] = [:],
+                approvedSetup: [ProjectId: [String]] = [:]) {
         self.defaultLocation = defaultLocation
         self.projects = projects
+        self.approvedSetup = approvedSetup
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         defaultLocation = try container.value(.defaultLocation, WorktreeLocation())
         projects = try container.value(.projects, [:])
+        approvedSetup = try container.value(.approvedSetup, [:])
     }
 
     /// Where a new worktree named `name` on `branch` goes. `~` means `home`,

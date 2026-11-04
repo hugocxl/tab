@@ -418,3 +418,74 @@ final class AccessoryPill: HoverView {
         if bounds.contains(convert(event.locationInWindow, from: nil)) { action?() }
     }
 }
+
+/// A glass capsule beside the search field naming one of the page's
+/// choices, with the keycap that changes it.
+final class ModeChip: HoverView {
+    static let height: CGFloat = 28
+    var action: (() -> Void)?
+    private let glass = GlassView(style: .paletteChip)
+    private let glyph = NSImageView()
+    private let label: NSTextField
+    private let keycap = KeycapsView()
+
+    init(title: String, icon: AppIcon, key: KeyChord?) {
+        label = makeLabel(title, font: AppFont.system(12, weight: .medium))
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.cornerRadius = Self.height / 2
+        layer?.cornerCurve = .continuous
+        layer?.borderWidth = Metrics.border
+        glyph.image = icon.image(size: 14)
+        keycap.symbols = KeycapsView.symbols(key)
+        for view in [glass, glyph, label, keycap] as [NSView] {
+            view.translatesAutoresizingMaskIntoConstraints = true
+            addSubview(view)
+        }
+        toolTip = title
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+        setAccessibilityLabel(title)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override var intrinsicContentSize: NSSize {
+        let caps = keycap.intrinsicContentSize.width
+        return NSSize(width: 10 + 14 + 6 + label.textWidth + (caps > 0 ? 8 + caps + 6 : 12), height: Self.height)
+    }
+
+    override var mouseDownCanMoveWindow: Bool { false }
+    override var wantsUpdateLayer: Bool { true }
+
+    override func updateLayer() {
+        layer?.backgroundColor = theme.fg(alpha: isHovered ? 0.08 : 0.03).cgColor
+        layer?.borderColor = theme.fg(alpha: 0.08).cgColor
+    }
+
+    override func hoverDidChange() { needsDisplay = true }
+
+    override func themeDidChange() {
+        glass.appearance = theme.nsAppearance
+        glyph.contentTintColor = theme.accent
+        label.textColor = theme.fg
+        needsDisplay = true
+    }
+
+    override func layout() {
+        super.layout()
+        glass.frame = bounds
+        let middle = bounds.height / 2
+        glyph.frame = NSRect(x: 10, y: middle - 7, width: 14, height: 14)
+        let height = label.intrinsicContentSize.height
+        label.frame = NSRect(x: 30, y: (middle - height / 2).rounded(), width: label.textWidth, height: height)
+        let caps = keycap.intrinsicContentSize
+        keycap.frame = NSRect(x: bounds.width - 6 - caps.width, y: (middle - caps.height / 2).rounded(), width: caps.width, height: caps.height)
+    }
+
+    override func mouseDown(with event: NSEvent) {}
+
+    override func mouseUp(with event: NSEvent) {
+        if bounds.contains(convert(event.locationInWindow, from: nil)) { action?() }
+    }
+}

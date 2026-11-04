@@ -170,39 +170,225 @@ extension AppModel {
     /// an existing branch.
     public func createWorktree(parent: ProjectId, name: String, branch: String, base: String?,
                                directory: String, hooks: [WorktreeHook]?) async -> String? {
-        guard let side = sideClient(for: parent) else { return "Connect to the server to create a worktree." }
-        worktreeCreations[parent, default: []].append(name)
-        notify(.state)
-        defer {
-            worktreeCreations[parent]?.removeAll { $0 == name }
-            notify(.state)
-        }
         let intent = WorktreeIntent(
             action: .create(project: ProjectId(), directory: ServerPath(directory), branch: branch, base: base),
             options: WorktreeOptions(name: name, hooks: hooks)
         )
+        return await runWorktreeCreation(parent: parent, label: name, intent: intent, openTerminal: false, setup: nil)
+    }
+
+    /// Sends a worktree creation and opens what it made: the project, or
+    /// with `openTerminal` a new terminal in it that runs `setup` where the
+    /// user can watch.
+    private func runWorktreeCreation(parent: ProjectId, label: String, intent: WorktreeIntent,
+                                     openTerminal: Bool, setup: [WorktreeHook]?) async -> String? {
+        guard let side = sideClient(for: parent) else { return "Connect to the server to create a worktree." }
+        worktreeCreations[parent, default: []].append(label)
+        notify(.state)
+        defer {
+            worktreeCreations[parent]?.removeAll { $0 == label }
+            notify(.state)
+        }
         do {
             let reply = try await side.git(GitRequest(project: parent, action: .worktree(intent)))
-            let created: ProjectId?
+            let created: ProjectDescriptor?
             switch reply {
-            case .project(let descriptor): created = descriptor.id
+            case .project(let descriptor): created = descriptor
             case .worktreeSetupFailed(let descriptor, let message):
                 report("Worktree created, but its setup failed: \(message)")
-                created = descriptor.id
+                created = descriptor
             default: created = nil
             }
-            if let server = state.projectServer(parent), let main = connections[server]?.main,
-               let catalog = try? await main.catalog() {
-                applyCatalog(server, catalog)
+            if let server = state.projectServer(parent) { await applyLatestCatalog(server) }
+            guard let created else { return nil }
+            guard state.project(created.id) != nil else {
+                report("“\(created.name)” was created, but Tab couldn't load it yet; it appears once the server reconnects.")
+                return nil
             }
-            if let created {
-                selectProject(created)
-                refreshGit(created)
+            // Only a repository with a remote had something to fetch.
+            if intent.options?.fetchBase == true, case .create(_, _, _, let base?) = intent.action,
+               git[parent]?.summary?.upstream != nil,
+               case .summary(let summary?)? = try? await side.git(GitRequest(project: created.id, action: .summary)),
+               summary.base == base {
+                presenter?.showToast("Couldn't fetch the latest \(base), so “\(created.name)” starts from your local copy.", error: false)
             }
+            if openTerminal {
+                let command = setup.map {
+                    Self.setupCommand($0, worktree: created, repository: state.project(parent)?.directory.rawValue ?? "",
+                                      branch: git[created.id]?.summary?.branch ?? created.name)
+                }
+                newTerminal(in: created.id, command: command, directory: created.directory)
+            } else {
+                selectProject(created.id)
+            }
+            refreshGit(created.id)
             return nil
         } catch {
             return error.message
         }
+    }
+
+    /// Creates a worktree of `parent` in one step and opens a terminal in
+    /// it: branch `name` from `base` (the default branch when nil), fetched
+    /// from its remote first when `fetchBase`, in the project's last
+    /// worktree location. An existing branch is checked out instead, or its
+    /// worktree opened when one already has it. An empty `name` gets a short
+    /// random one. Setup commands run in the terminal once approved, and
+    /// approval is remembered until they change.
+    public func quickWorktree(parent: ProjectId, name: String, base chosen: String? = nil, fetchBase: Bool = false) {
+        guard let side = sideClient(for: parent) else { return report("Connect to the server to create a worktree.") }
+        let typed = Self.quickBranchName(name)
+        Task {
+            let branches: [GitBranch]
+            do {
+                branches = try await side.gitBranches(parent)
+            } catch {
+                return report(error.message)
+            }
+            var worktreeName = typed
+            while worktreeName.isEmpty || (typed.isEmpty && branches.contains { $0.name == worktreeName }) {
+                worktreeName = "wt-" + UUID().uuidString.prefix(4).lowercased()
+            }
+            var base: String?
+            if let existing = branches.first(where: { $0.name == worktreeName }) {
+                if existing.checkedOut { return await openWorktree(of: parent, branch: worktreeName) }
+            } else {
+                base = chosen ?? branches.first(where: \.isDefault)?.name ?? branches.first(where: \.current)?.name
+            }
+            guard let directory = quickWorktreeDirectory(parent: parent, name: worktreeName) else { return }
+            let setup = await approvedSetup(parent: parent, name: worktreeName)
+            let intent = WorktreeIntent(
+                action: .create(project: ProjectId(), directory: ServerPath(directory), branch: worktreeName, base: base),
+                options: WorktreeOptions(name: worktreeName, fetchBase: base != nil && fetchBase ? true : nil)
+            )
+            if let message = await runWorktreeCreation(parent: parent, label: worktreeName, intent: intent,
+                                                       openTerminal: true, setup: setup) {
+                report(message)
+            }
+        }
+    }
+
+    /// What a typed name becomes as a branch: trimmed, with spaces as `-`.
+    /// Slashes stay, so `feat/login` names that branch; its folder is made
+    /// safe separately.
+    static func quickBranchName(_ typed: String) -> String {
+        typed.split(whereSeparator: \.isWhitespace).joined(separator: "-")
+    }
+
+    /// Checks out pull request `number` of `parent` into a new worktree and
+    /// opens a terminal in it, as `quickWorktree` does.
+    public func pullRequestWorktree(parent: ProjectId, number: UInt64) {
+        let name = "pr-\(number)"
+        Task {
+            guard let directory = quickWorktreeDirectory(parent: parent, name: name) else { return }
+            let setup = await approvedSetup(parent: parent, name: name)
+            let intent = WorktreeIntent(action: .checkoutPullRequest(project: ProjectId(), directory: ServerPath(directory), number: number))
+            if let message = await runWorktreeCreation(parent: parent, label: name, intent: intent,
+                                                       openTerminal: true, setup: setup) {
+                report(message)
+            }
+        }
+    }
+
+    /// Opens the worktree that has `branch` checked out, adding it to the
+    /// sidebar when Tab doesn't show it yet.
+    private func openWorktree(of parent: ProjectId, branch: String) async {
+        guard let side = sideClient(for: parent) else { return }
+        do {
+            guard case .worktrees(let worktrees) = try await side.git(GitRequest(project: parent, action: .worktrees)),
+                  let found = worktrees.first(where: { $0.branch == branch }) else {
+                return report("Branch “\(branch)” is checked out somewhere Tab can't find.")
+            }
+            if found.primary { return selectProject(parent) }
+            if let registered = found.registered { return open(worktree: registered) }
+            let intent = WorktreeIntent(action: .register(project: ProjectId(), directory: found.directory))
+            guard case .project(let added) = try await side.git(GitRequest(project: parent, action: .worktree(intent))) else { return }
+            if let server = state.projectServer(parent) { await applyLatestCatalog(server) }
+            open(worktree: added.id)
+        } catch {
+            report(error.message)
+        }
+    }
+
+    /// Shows a worktree, with a terminal when nothing in it is open.
+    private func open(worktree: ProjectId) {
+        guard let project = state.project(worktree) else { return }
+        if project.tabs.contains(where: { !$0.panes.isEmpty }) {
+            selectProject(worktree)
+        } else {
+            newTerminal(in: worktree, directory: project.directory)
+        }
+    }
+
+    private func quickWorktreeDirectory(parent: ProjectId, name: String) -> String? {
+        let location = settings.worktrees.projects[parent] ?? WorktreeLocation()
+        do {
+            return try worktreeDirectory(parent: parent, location: location, name: name, branch: name)
+        } catch {
+            report(error.message)
+            return nil
+        }
+    }
+
+    /// The setup commands to run in a new worktree of `parent`: the ones the
+    /// user approved before when they haven't changed, else after asking.
+    /// Nil when there are none or the user declines.
+    private func approvedSetup(parent: ProjectId, name: String) async -> [WorktreeHook]? {
+        let hooks: [WorktreeHook]
+        switch await worktreeHooks(parent: parent, teardown: false) {
+        case .success(let list): hooks = list
+        case .failure(let error):
+            report("Setup commands could not be loaded, so “\(name)” is created without them: \(error.message)")
+            return nil
+        }
+        guard !hooks.isEmpty else { return nil }
+        let commands = hooks.map(\.command)
+        if settings.worktrees.approvedSetup[parent] == commands { return hooks }
+        let list = Self.hookList(hooks)
+        let run = await presenter?.confirm(
+            title: "Run Setup Commands?",
+            message: "The new worktree “\(name)” can run these setup commands in its terminal:\n\(list)\n\n"
+                + "Tab remembers your choice until they change. Cancel creates it without them.",
+            confirm: "Run", destructive: false
+        ) ?? false
+        guard run else { return nil }
+        var updated = settings
+        updated.worktrees.approvedSetup[parent] = commands
+        do {
+            try updated.saveWorktrees(to: dirs.settings)
+            settings = updated
+        } catch {
+            report(error)
+        }
+        return hooks
+    }
+
+    /// One line, typed into whatever shell the terminal runs, that runs
+    /// `hooks` in order as the server would: each in the user's shell with
+    /// the variables server hooks get, stopping at the first failure. The
+    /// script travels as base64 for `/bin/sh` to decode, so neither the
+    /// login shell's quoting (fish, nu) nor its line editor (tabs, newlines)
+    /// touches it, and the commands keep the terminal as their input.
+    static func setupCommand(_ hooks: [WorktreeHook], worktree: ProjectDescriptor, repository: String, branch: String) -> String {
+        let variables = [
+            "TAB_PROJECT_PATH=\(repository)", "TAB_WORKTREE_ID=\(worktree.id.description)",
+            "TAB_WORKTREE_PATH=\(worktree.directory.rawValue)", "TAB_WORKTREE_NAME=\(worktree.name)",
+            "TAB_WORKTREE_BRANCH=\(branch)",
+        ]
+        let script = hooks.map { "\"${SHELL:-/bin/sh}\" -c " + Executable.commandLine([$0.command]) }.joined(separator: " && ")
+        let decode = #"eval "$(printf %s "$1" | base64 -D)""#
+        return Executable.commandLine(["env"] + variables + ["/bin/sh", "-c", decode, "tab-setup", Data(script.utf8).base64EncodedString()])
+    }
+
+    /// Hooks as the questions about them list them.
+    static func hookList(_ hooks: [WorktreeHook]) -> String {
+        hooks.map { "[\($0.project ? "Project" : "Per-machine")] \($0.command)" }.joined(separator: "\n")
+    }
+
+    /// Re-reads `server`'s projects after a worktree change.
+    private func applyLatestCatalog(_ server: ServerId) async {
+        guard let main = connections[server]?.main, let catalog = try? await main.catalog() else { return }
+        applyCatalog(server, catalog)
     }
 
     /// The setup hooks a new worktree of `parent` would run.
@@ -220,55 +406,136 @@ extension AppModel {
     /// Removes a worktree and its files after confirmation, warning about
     /// uncommitted changes and running teardown hooks the user enables.
     public func confirmRemoveWorktree(_ project: ProjectId) {
-        guard let target = state.project(project), target.kind == .worktree, let side = sideClient(for: project) else { return }
+        guard pendingWorktreeRemovals.insert(project).inserted else { return }
         Task {
-            let removal: WorktreeRemoval
-            do {
-                let reply = try await side.git(GitRequest(project: project, action: .inspectRemoval))
-                guard case .removal(let found) = reply else { return }
-                removal = found
-            } catch {
-                report(error.message)
+            defer { pendingWorktreeRemovals.remove(project) }
+            _ = await removeWorktree(project, closing: nil)
+        }
+    }
+
+    /// Closes a worktree's tab by removing the worktree and its files; its
+    /// branch stays. Each pane is asked first, as closing it would, and the
+    /// user too unless Tab made the worktree and nothing would be lost: no
+    /// changes, no ignored files, a branch, no teardown commands. When the
+    /// worktree can't be removed, its panes still close.
+    public func closeWorktree(_ project: ProjectId) {
+        guard let target = state.project(project), target.kind == .worktree,
+              pendingWorktreeRemovals.insert(project).inserted else { return }
+        let panes = target.tabs.flatMap(\.panes).map(\.id)
+        Task {
+            defer { pendingWorktreeRemovals.remove(project) }
+            guard await panesWillClose(panes) else { return }
+            guard target.status == .available, sideClient(for: project) != nil else {
+                await commitClose(panes)
                 return
             }
-            let hooks = await worktreeHooks(parent: project, teardown: true)
-            var message = removal.dirty
-                ? "Remove worktree “\(target.name)” and permanently discard its uncommitted changes? Its terminals end and its files are deleted."
-                : "Remove worktree “\(target.name)” and delete its files? Its terminals end."
-            var approved: [WorktreeHook]?
-            switch hooks {
-            case .success(let list) where !list.isEmpty:
-                message += "\n\nTeardown commands that will run:\n" + list.map {
-                    "[\($0.project ? "Project" : "Per-machine")] \($0.command)"
-                }.joined(separator: "\n")
-                approved = list
-            case .success:
-                approved = nil
-            case .failure(let error):
-                message += "\n\nTeardown hooks could not be loaded: \(error)"
-            }
-            let confirmed = await presenter?.confirm(
-                title: "Remove Worktree and Files?", message: message, confirm: "Remove", destructive: true
-            ) ?? false
-            guard confirmed else { return }
-            worktreeRemovals.insert(project)
-            notify(.state)
-            defer {
-                worktreeRemovals.remove(project)
-                notify(.state)
-            }
-            let sessions = target.tabs.flatMap(\.panes).compactMap(\.content.session)
-            let intent = WorktreeIntent(action: .remove(expected: removal), options: WorktreeOptions(hooks: approved))
-            do {
-                _ = try await side.git(GitRequest(project: project, action: .worktree(intent)))
-                endSessions(sessions, on: target.serverId)
-                if let main = connections[target.serverId]?.main, let catalog = try? await main.catalog() {
-                    applyCatalog(target.serverId, catalog)
-                }
-            } catch {
-                report(error.message)
+            if case .failed(let message) = await removeWorktree(project, closing: panes) {
+                report("The worktree stays on disk: \(message)")
+                await commitClose(state.project(project)?.tabs.flatMap(\.panes).map(\.id) ?? [])
             }
         }
+    }
+
+    private enum RemovalOutcome { case removed, cancelled, failed(String) }
+
+    /// Removes a worktree after inspecting it. `closing` holds the panes of
+    /// a tab being closed, closed just before the files go; nil is Remove
+    /// Worktree, which always asks.
+    private func removeWorktree(_ project: ProjectId, closing: [PaneId]?) async -> RemovalOutcome {
+        guard let target = state.project(project), target.kind == .worktree, let side = sideClient(for: project) else {
+            return .failed("The server is not connected.")
+        }
+        let removal: WorktreeRemoval
+        do {
+            guard case .removal(let found) = try await side.git(GitRequest(project: project, action: .inspectRemoval)) else {
+                return .failed("The server gave an unexpected reply.")
+            }
+            removal = found
+        } catch {
+            if closing == nil { report(error.message) }
+            return .failed(error.message)
+        }
+        let hooks = await worktreeHooks(parent: project, teardown: true)
+        let kept = removal.branch.map { " Its branch “\($0)” is kept." } ?? ""
+        var message: String
+        if closing != nil {
+            message = removal.dirty
+                ? "“\(target.name)” has uncommitted changes. Closing it removes the worktree, discards them and deletes its files.\(kept)"
+                : "Closing “\(target.name)” removes the worktree and deletes its files.\(kept)"
+        } else {
+            message = removal.dirty
+                ? "Remove worktree “\(target.name)” and permanently discard its uncommitted changes? Its terminals end and its files are deleted."
+                : "Remove worktree “\(target.name)” and delete its files? Its terminals end."
+        }
+        // Closing removes silently only what Tab made and can tell is safe:
+        // a worktree on its own branch, with no changes, and nothing Git
+        // ignores beyond folders a build makes again.
+        let lost = (removal.ignoredPaths ?? []).filter { !Self.isRebuildable($0) }
+        if !lost.isEmpty {
+            message += "\n\nFiles Git ignores are deleted too: " + lost.prefix(5).joined(separator: ", ")
+                + (lost.count > 5 ? " and more." : ".")
+        }
+        if removal.branch == nil { message += "\n\nIt isn't on a branch, so commits made in it may be lost." }
+        var approved: [WorktreeHook]?
+        // The server lists at most 50 ignored paths, so a full list may hide more.
+        var mustAsk = closing == nil || removal.dirty || removal.branch == nil || removal.ignoredPaths == nil
+            || (removal.ignoredPaths?.count ?? 0) >= 50 || !lost.isEmpty || git[project]?.summary?.base == nil
+        switch hooks {
+        case .success(let list) where !list.isEmpty:
+            message += "\n\nTeardown commands that will run:\n" + Self.hookList(list)
+            approved = list
+            mustAsk = true
+        case .success:
+            approved = nil
+        case .failure(let error):
+            message += "\n\nTeardown hooks could not be loaded: \(error)"
+            mustAsk = true
+        }
+        if mustAsk {
+            let confirmed = await presenter?.confirm(
+                title: closing != nil ? "Close Worktree?" : "Remove Worktree and Files?", message: message,
+                confirm: closing != nil ? "Close and Remove" : "Remove", destructive: true
+            ) ?? false
+            guard confirmed else { return .cancelled }
+        }
+        worktreeRemovals.insert(project)
+        notify(.state)
+        defer {
+            worktreeRemovals.remove(project)
+            notify(.state)
+        }
+        if let closing {
+            // Panes opened while the question was up get asked too.
+            let current = state.project(project)?.tabs.flatMap(\.panes).map(\.id) ?? []
+            guard await panesWillClose(current.filter { !closing.contains($0) }), await commitClose(current) else {
+                return .cancelled
+            }
+        }
+        let sessions = target.tabs.flatMap(\.panes).compactMap(\.content.session)
+        let intent = WorktreeIntent(action: .remove(expected: removal), options: WorktreeOptions(hooks: approved))
+        do {
+            _ = try await side.git(GitRequest(project: project, action: .worktree(intent)))
+            endSessions(sessions, on: target.serverId)
+            await applyLatestCatalog(target.serverId)
+            return .removed
+        } catch {
+            if closing == nil { report(error.message) }
+            return .failed(error.message)
+        }
+    }
+
+    /// Folders that dependency managers and builds fill and fill again,
+    /// which closing a worktree may delete without asking.
+    static let rebuildableFolders: Set<String> = [
+        "node_modules", ".build", "dist", "target", ".next", ".nuxt", ".turbo", ".cache",
+        ".parcel-cache", "DerivedData", ".gradle", "Pods", ".venv", "venv", "__pycache__",
+        ".pytest_cache", ".mypy_cache", ".swiftpm", ".dart_tool",
+    ]
+
+    /// An ignored path as `git status` lists it: a whole folder ends in `/`.
+    static func isRebuildable(_ path: String) -> Bool {
+        guard path.hasSuffix("/") else { return false }
+        return rebuildableFolders.contains(String(path.dropLast().split(separator: "/").last ?? ""))
     }
 
     /// Where a worktree named `name` on `branch` goes for a location choice.

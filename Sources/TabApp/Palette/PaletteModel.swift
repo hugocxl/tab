@@ -222,6 +222,9 @@ public enum PaletteAccessory: Equatable {
     case toggle(id: String, label: String, active: Bool)
     /// A muted hint with an optional keycap.
     case hint(label: String, key: KeyChord?)
+    /// A glass chip naming one of the page's choices, with the key that
+    /// changes it; pressing either changes it.
+    case mode(id: String, label: String, icon: AppIcon, key: KeyChord?)
 }
 
 /// How a page presents itself.
@@ -233,6 +236,13 @@ public struct PageSpec: Equatable {
     public var accessories: [PaletteAccessory] = []
     /// Tab completes the query instead of moving the selection.
     public var completesOnTab = false
+    /// The `mode` accessory Tab switches instead of moving the selection.
+    public var tabSwitches: String?
+    /// The `mode` accessory Shift-Tab switches instead of moving the selection.
+    public var shiftTabSwitches: String?
+    /// The spec describes the selected row, so it is rebuilt as the
+    /// selection moves.
+    public var followsSelection = false
     /// Shown when the page is ready but has no rows.
     public var emptyMessage = "No results"
 

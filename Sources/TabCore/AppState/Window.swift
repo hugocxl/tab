@@ -32,6 +32,9 @@ public struct WindowState: Codable, Equatable, Sendable {
     public internal(set) var workspace: WorkspaceId?
     /// The fixed Remote Servers workspace filters the sidebar instead.
     public internal(set) var remoteServers: Bool
+    /// New Terminal in Project makes a new worktree rather than opening a
+    /// checkout, as the user last chose.
+    public internal(set) var newTerminalInWorktree: Bool
 
     init(currentProject: ProjectId) {
         activePane = nil
@@ -41,6 +44,7 @@ public struct WindowState: Codable, Equatable, Sendable {
         bounds = nil
         workspace = nil
         remoteServers = false
+        newTerminalInWorktree = false
     }
 
     public init(from decoder: Decoder) throws {
@@ -52,6 +56,7 @@ public struct WindowState: Codable, Equatable, Sendable {
         bounds = try container.decodeIfPresent(WindowBounds.self, forKey: .bounds)
         workspace = try container.decodeIfPresent(WorkspaceId.self, forKey: .workspace)
         remoteServers = try container.value(.remoteServers, false)
+        newTerminalInWorktree = try container.value(.newTerminalInWorktree, false)
     }
 
     mutating func activate(_ pane: PaneId?) {

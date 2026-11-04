@@ -22,6 +22,12 @@ extension GitService {
             repositoryProject = subject
         }
         let repository = repositoryProject.directory.rawValue
+        // Fetching talks to the network, so it happens before the lock that
+        // other worktree actions on this repository wait for.
+        var fetchedStart: String?
+        if case .create(_, _, _, let base?) = intent.action, intent.options?.fetchBase == true, !base.hasPrefix("-") {
+            fetchedStart = remoteStart(GitRepository(path: repository, git: git), base: base)
+        }
         return try lock(forRepository: repository).writing {
             let reserved = [owner, repositoryProject.id] + (created.map { [$0] } ?? [])
             return try operations.reserve(reserved, removal: removing ? canonical(subject.directory.rawValue) : nil) {
@@ -34,7 +40,7 @@ extension GitService {
                 switch intent.action {
                 case .create(let project, let directory, let branch, let base):
                     return try create(parent: subject, project: project, directory: directory, branch: branch,
-                                      base: base, name: intent.options?.name, hooks: approved)
+                                      base: base, name: intent.options?.name, hooks: approved, start: fetchedStart)
                 case .checkoutPullRequest(let project, let directory, let number):
                     try validateParent(subject, project: project, directory: directory)
                     if FileManager.default.fileExists(atPath: directory.rawValue) {
@@ -56,24 +62,28 @@ extension GitService {
     // MARK: - Create and register
 
     private func create(parent: ProjectDescriptor, project: ProjectId, directory: ServerPath, branch: String,
-                        base: String?, name: String?, hooks approved: [WorktreeHook]?,
+                        base: String?, name: String?, hooks approved: [WorktreeHook]?, start fetched: String? = nil,
                         validated: Bool = false) throws -> GitReply {
         let repository = GitRepository(path: parent.directory.rawValue, git: git)
+        var start = base
         if !validated {
             try validateParent(parent, project: project, directory: directory)
             try repository.validateBranch(branch)
             if let base {
                 if base.hasPrefix("-") { throw gitError("Invalid base branch") }
                 try git.run(repository.path, ["rev-parse", "--verify", "\(base)^{commit}"])
+                if let fetched { start = fetched }
             }
         }
+        let branchExisted = git.optionalText(repository.path, ["rev-parse", "--verify", "--quiet", "refs/heads/\(branch)"]) != nil
         try Self.reserveFolder(directory.rawValue)
         let target = canonical(directory.rawValue)
         guard let reserved = Self.identity(target) else { throw gitError("Reserved worktree directory is missing") }
         do {
-            try addWorktree(repository, target: target, branch: branch, base: base, reserved: reserved)
+            try addWorktree(repository, target: target, branch: branch, base: start, reserved: reserved)
         } catch {
             if let current = Self.identity(target), current == reserved { rmdir(target) }
+            if !branchExisted { deleteUnusedBranch(repository, branch) }
             throw error
         }
         let descriptor = ProjectDescriptor(id: project, directory: ServerPath(target), name: name ?? branch,
@@ -87,9 +97,43 @@ extension GitService {
                 setupFailure = error.message
             }
         }
-        try catalog.addWorktreeProject(descriptor)
+        do {
+            try catalog.addWorktreeProject(descriptor)
+        } catch {
+            // Without a project nothing shows the worktree, so undo it.
+            _ = git.optionalText(repository.path, ["worktree", "remove", "--force", "--", target])
+            if !branchExisted { deleteUnusedBranch(repository, branch) }
+            throw error
+        }
         if let setupFailure { return .worktreeSetupFailed(project: descriptor, message: setupFailure) }
         return .project(descriptor)
+    }
+
+    /// Fetches the branch `base` tracks (else the same name on `origin`)
+    /// and returns the fresh remote copy as a start point. Nil, which starts
+    /// from the local branch, when there is no remote or the fetch fails, so
+    /// a stale or deleted remote branch is never used.
+    private func remoteStart(_ repository: GitRepository, base: String) -> String? {
+        let remotes = git.optionalText(repository.path, ["remote"])?.split(separator: "\n").map(String.init) ?? []
+        let tracked = git.optionalText(repository.path, ["config", "--get", "branch.\(base).remote"]).flatMap { remotes.contains($0) ? $0 : nil }
+        let merge = tracked == nil ? nil : git.optionalText(repository.path, ["config", "--get", "branch.\(base).merge"])
+        let name = merge.flatMap { $0.hasPrefix("refs/heads/") ? String($0.dropFirst("refs/heads/".count)) : nil } ?? base
+        guard let remote = tracked ?? (remotes.contains("origin") ? "origin" : nil),
+              !remote.hasPrefix("-"), !name.hasPrefix("-") else { return nil }
+        let ref = "refs/remotes/\(remote)/\(name)"
+        do {
+            try git.network(repository.path, ["fetch", "--no-tags", "--", remote, "+refs/heads/\(name):\(ref)"])
+        } catch {
+            return nil
+        }
+        guard git.optionalText(repository.path, ["rev-parse", "--verify", "--quiet", "\(ref)^{commit}"]) != nil else { return nil }
+        return "\(remote)/\(name)"
+    }
+
+    /// Deletes a branch a failed creation made, unless a worktree uses it.
+    private func deleteUnusedBranch(_ repository: GitRepository, _ branch: String) {
+        guard let worktrees = try? repository.worktrees(), !worktrees.contains(where: { $0.branch == branch }) else { return }
+        _ = git.optionalText(repository.path, ["branch", "-D", "--", branch])
     }
 
     private func register(parent: ProjectDescriptor, project: ProjectId, directory: ServerPath,
@@ -128,7 +172,8 @@ extension GitService {
         }
         try git.run(repository.path, ["worktree", "prune"])
         var arguments = ["worktree", "add"]
-        if base != nil { arguments += ["-b", branch] }
+        // A remote start point would otherwise become the new branch's upstream.
+        if base != nil { arguments += ["--no-track", "-b", branch] }
         arguments += ["--", target, base ?? branch]
         do {
             try git.run(repository.path, arguments)
@@ -139,6 +184,10 @@ extension GitService {
         }
         if Self.identity(target) != reserved {
             throw gitError("Worktree directory was replaced during creation")
+        }
+        if let base {
+            // Only a label for the sidebar: losing it costs nothing.
+            _ = git.optionalText(repository.path, ["config", GitRepository.baseKey(branch), base])
         }
     }
 
@@ -158,8 +207,9 @@ extension GitService {
 
     // MARK: - Remove
 
-    /// The worktree's identity and Git state, which a removal must still match.
-    func inspectRemoval(_ project: ProjectDescriptor) throws -> WorktreeRemoval {
+    /// The worktree's identity and Git state, which a removal must still
+    /// match. `ignored` also lists what Git ignores, for the question.
+    func inspectRemoval(_ project: ProjectDescriptor, ignored: Bool = true) throws -> WorktreeRemoval {
         guard project.kind == .worktree else { throw gitError("Only a child worktree can be removed from disk") }
         guard let parentId = project.parentId else { throw gitError("Missing worktree parent") }
         let parent = try catalog.project(parentId)
@@ -175,24 +225,32 @@ extension GitService {
         let summary = try repository.summary()
         return WorktreeRemoval(directory: project.directory, device: UInt64(UInt32(bitPattern: info.st_dev)),
                                inode: info.st_ino, dirty: !status.isEmpty, status: status, head: summary.head,
-                               branch: summary.branch)
+                               branch: summary.branch, ignoredPaths: ignored ? try ignoredPaths(in: target) : nil)
+    }
+
+    /// Up to 50 ignored paths; `--untracked-files=normal` reports a folder
+    /// Git ignores whole as one `dir/` entry.
+    private func ignoredPaths(in directory: String) throws -> [String] {
+        let output = try git.run(directory, ["status", "--porcelain=v1", "-z", "--ignored=matching", "--untracked-files=normal"])
+        let entries = output.split(separator: 0).compactMap { String(data: Data($0), encoding: .utf8) }
+        return Array(entries.filter { $0.hasPrefix("!! ") }.map { String($0.dropFirst(3)) }.prefix(50))
     }
 
     private func remove(_ project: ProjectDescriptor, repository: String, expected: WorktreeRemoval,
                         hooks approved: [WorktreeHook]?) throws -> GitReply {
-        if try inspectRemoval(project) != expected {
+        if try !matches(inspectRemoval(project, ignored: false), expected) {
             throw gitError("Worktree changed; inspect and confirm removal again")
         }
         let target = project.directory.rawValue
         try catalog.endSessions(project: project.id, directory: canonical(target))
         try WorktreeProcesses.stop(in: target)
-        if try inspectRemoval(project) != expected {
+        if try !matches(inspectRemoval(project, ignored: false), expected) {
             throw gitError("Worktree changed while stopping sessions; inspect removal again")
         }
         if let approved, !approved.isEmpty {
             try hooks.run(approved, repository: repository, worktree: project, branch: expected.branch ?? "")
         }
-        let current = try inspectRemoval(project)
+        let current = try inspectRemoval(project, ignored: false)
         if current.device != expected.device || current.inode != expected.inode || current.head != expected.head
             || current.branch != expected.branch {
             throw gitError("Worktree identity changed during teardown; files were preserved")
@@ -200,6 +258,15 @@ extension GitService {
         try git.run(repository, ["worktree", "remove", "--force", "--", target])
         try catalog.removeWorktreeProject(project.id)
         return .done
+    }
+
+    /// Whether a fresh inspection still matches the confirmed one. Ignored
+    /// files only inform the question, and programs keep writing them, so
+    /// they don't count.
+    private func matches(_ current: WorktreeRemoval, _ expected: WorktreeRemoval) -> Bool {
+        var current = current
+        current.ignoredPaths = expected.ignoredPaths
+        return current == expected
     }
 
     // MARK: - Folder identity

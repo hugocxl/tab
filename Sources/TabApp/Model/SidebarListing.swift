@@ -28,15 +28,18 @@ public struct SidebarListing: Equatable {
         public var server: ServerId
         public var terminals: [(project: ProjectId, tab: TabId)]
         public var groups: [Group]
+        /// The Open Tabs layout's cards in order: the open tabs, oldest
+        /// first. Nil when the sidebar groups by project.
+        public var openTabs: [Target]?
 
         public static func == (left: Host, right: Host) -> Bool {
-            left.server == right.server && left.groups == right.groups
+            left.server == right.server && left.groups == right.groups && left.openTabs == right.openTabs
                 && left.terminals.map(\.tab) == right.terminals.map(\.tab)
                 && left.terminals.map(\.project) == right.terminals.map(\.project)
         }
 
         public var targets: [Target] {
-            terminals.map { .tab($0.tab) } + groups.flatMap { $0.cards.map { .project($0.project) } }
+            openTabs ?? terminals.map { .tab($0.tab) } + groups.flatMap { $0.cards.map { .project($0.project) } }
         }
     }
 
@@ -108,9 +111,34 @@ public struct SidebarListingBuilder {
             let hostTerminals = terminals.filter { state.project($0.project)?.serverId == server }
             let hostGroups = groups.filter { state.project($0.project)?.serverId == server }
             guard !hostTerminals.isEmpty || !hostGroups.isEmpty else { return nil }
-            return SidebarListing.Host(server: server, terminals: hostTerminals, groups: hostGroups)
+            var host = SidebarListing.Host(server: server, terminals: hostTerminals, groups: hostGroups)
+            if appearance.sidebarLayout == .tabs { host.openTabs = openTabs(host) }
+            return host
         }
         return SidebarListing(hosts: hosts)
+    }
+
+    /// `host`'s cards with a pane open, by when their tab opened. Tabs saved
+    /// before Tab recorded that come first, in the grouped order.
+    func openTabs(_ host: SidebarListing.Host) -> [SidebarListing.Target] {
+        let terminals = host.terminals.map { entry -> (SidebarListing.Target, Date?) in
+            (.tab(entry.tab), state.project(entry.project)?.tabs.first { $0.id == entry.tab }?.createdAt)
+        }
+        let cards = host.groups.flatMap(\.cards).compactMap { card -> (SidebarListing.Target, Date?)? in
+            let tabs = state.project(card.project)?.tabs.filter { !$0.panes.isEmpty } ?? []
+            guard !tabs.isEmpty else { return nil }
+            // An undated tab is older than any dated one.
+            return (.project(card.project), tabs.contains { $0.createdAt == nil } ? nil : tabs.compactMap(\.createdAt).min())
+        }
+        let open = terminals + cards
+        return open.enumerated().sorted { left, right in
+            switch (left.element.1, right.element.1) {
+            case let (l?, r?) where l != r: return l < r
+            case (nil, _?): return true
+            case (_?, nil): return false
+            default: return left.offset < right.offset
+            }
+        }.map(\.element.0)
     }
 
     /// The name a project goes by: another computer's Home by its server.

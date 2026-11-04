@@ -63,6 +63,12 @@ public enum InterfaceAnimation: String, Codable, Sendable, CaseIterable {
     case snappy, natural, off
 }
 
+/// How the sidebar lists tabs: under their projects, or as one flat list of
+/// the open ones, each card naming its project.
+public enum SidebarLayout: String, Codable, Sendable, CaseIterable {
+    case projects, tabs
+}
+
 /// An optional trackpad gesture for opening and closing the sidebar.
 public enum SidebarGesture: String, Codable, Sendable, CaseIterable {
     case off, swipe
@@ -85,6 +91,7 @@ public struct Appearance: Codable, Equatable, Sendable {
     public var darkTheme: String
     public var lightTheme: String
     public var sidebarExpanded: Bool
+    public var sidebarLayout: SidebarLayout
     public var sidebarHost: SidebarHost
     /// The expanded sidebar's width, as last dragged.
     public var sidebarExpandedWidth: Double?
@@ -107,7 +114,7 @@ public struct Appearance: Codable, Equatable, Sendable {
         case animationStyle
         case preservePaneWidth
         case sidebarGesture
-        case darkTheme, lightTheme, sidebarExpanded, sidebarHost, sidebarExpandedWidth
+        case darkTheme, lightTheme, sidebarExpanded, sidebarLayout, sidebarHost, sidebarExpandedWidth
         case worktreeRecent, projectRecent, paletteRecent
         case sidebarFocus, sidebarProjectOrder, sidePanel, lastSidePanel, sidePanelWidth
     }
@@ -122,6 +129,7 @@ public struct Appearance: Codable, Equatable, Sendable {
         darkTheme = ThemeCatalog.defaultDark
         lightTheme = ThemeCatalog.defaultLight
         sidebarExpanded = true
+        sidebarLayout = .projects
         sidebarHost = .all
         sidebarExpandedWidth = nil
         worktreeRecent = []
@@ -146,6 +154,7 @@ public struct Appearance: Codable, Equatable, Sendable {
         darkTheme = try container.value(.darkTheme, d.darkTheme)
         lightTheme = try container.value(.lightTheme, d.lightTheme)
         sidebarExpanded = try container.value(.sidebarExpanded, d.sidebarExpanded)
+        sidebarLayout = try container.value(.sidebarLayout, d.sidebarLayout)
         sidebarHost = try container.value(.sidebarHost, d.sidebarHost)
         sidebarExpandedWidth = try container.decodeIfPresent(Double.self, forKey: .sidebarExpandedWidth)
         worktreeRecent = try container.value(.worktreeRecent, d.worktreeRecent)
@@ -169,6 +178,7 @@ public struct Appearance: Codable, Equatable, Sendable {
         try container.encode(darkTheme, forKey: .darkTheme)
         try container.encode(lightTheme, forKey: .lightTheme)
         try container.encode(sidebarExpanded, forKey: .sidebarExpanded)
+        try container.encode(sidebarLayout, forKey: .sidebarLayout)
         try container.encode(sidebarHost, forKey: .sidebarHost)
         try container.encodeIfPresent(sidebarExpandedWidth, forKey: .sidebarExpandedWidth)
         try container.encode(worktreeRecent, forKey: .worktreeRecent)

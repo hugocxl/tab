@@ -176,6 +176,9 @@ final class PaletteController: NSObject, NSTextFieldDelegate {
     }
 
     private func reload(resetScroll: Bool) {
+        if let source, let page, stack.last?.spec.followsSelection == true {
+            stack[stack.count - 1].spec = specKeepingToggles(source.spec(for: page), stack[stack.count - 1].spec)
+        }
         guard let panel, let state = stack.last else { return }
         panel.header.configure(spec: state.spec, query: state.query, pushed: stack.count > 1, controller: self)
         panel.list.state = state
@@ -218,7 +221,7 @@ final class PaletteController: NSObject, NSTextFieldDelegate {
         case #selector(NSResponder.insertNewline(_:)): confirm()
         case #selector(NSResponder.cancelOperation(_:)): dismiss()
         case #selector(NSResponder.insertTab(_:)): tab()
-        case #selector(NSResponder.insertBacktab(_:)): move(-1)
+        case #selector(NSResponder.insertBacktab(_:)): backtab()
         case #selector(NSResponder.deleteBackward(_:)):
             guard actions == nil, stack.count > 1, query.isEmpty else { return false }
             pop()
@@ -310,8 +313,19 @@ final class PaletteController: NSObject, NSTextFieldDelegate {
         refresh()
     }
 
+    private func backtab() {
+        if actions == nil, let mode = stack.last?.spec.shiftTabSwitches { return switchMode(mode) }
+        move(-1)
+    }
+
+    /// The selected row's id on the current page.
+    var selectedItemId: String? { stack.last?.selectedItem?.id }
+    /// What the current page's search field holds.
+    var currentQuery: String { stack.last?.query ?? "" }
+
     private func tab() {
         guard let state = stack.last else { return }
+        if actions == nil, let mode = state.spec.tabSwitches { return switchMode(mode) }
         guard actions == nil, state.spec.completesOnTab else {
             move(1)
             return
@@ -332,6 +346,14 @@ final class PaletteController: NSObject, NSTextFieldDelegate {
         }
         if pop() { return }
         close()
+    }
+
+    /// Moves a `mode` accessory to its next mode; the source rebuilds the
+    /// page for it.
+    func switchMode(_ id: String) {
+        guard let page, !stack.isEmpty else { return }
+        source?.toggled(page, accessory: id, active: true)
+        refresh()
     }
 
     func toggleAccessory(_ id: String) {

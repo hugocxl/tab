@@ -663,6 +663,9 @@ extension WorktreeOptions {
             if invalid { throw .badRequest }
             if case .register = action { throw .badRequest }
         }
+        if fetchBase == true {
+            guard case .create(_, _, _, let base) = action, base != nil else { throw .badRequest }
+        }
     }
 }
 

@@ -84,6 +84,19 @@ struct GitRepository: Sendable {
                 summary.commitSubject = String(commit[commit.index(after: newline)...])
             }
         }
+        // Tab records a base only for the worktrees it creates, so the main
+        // checkout skips the lookup.
+        if let branch = summary.branch, isLinkedWorktree,
+           let base = git.optionalText(path, ["config", "--get", Self.baseKey(branch)]),
+           !base.isEmpty, !base.hasPrefix("-") {
+            summary.base = base
+            let counts = git.optionalText(path, ["rev-list", "--left-right", "--count", "\(base)...HEAD", "--"])?
+                .split(whereSeparator: \.isWhitespace).compactMap { UInt64($0) }
+            if let counts, counts.count == 2 {
+                summary.baseBehind = counts[0]
+                summary.baseAhead = counts[1]
+            }
+        }
         for file in status.files {
             summary.changed += 1
             if file.isStaged { summary.staged += 1 }
@@ -93,6 +106,15 @@ struct GitRepository: Sendable {
         }
         return summary
     }
+
+    /// A linked worktree has a `.git` file pointing at its repository.
+    private var isLinkedWorktree: Bool {
+        var directory: ObjCBool = false
+        return FileManager.default.fileExists(atPath: path + "/.git", isDirectory: &directory) && !directory.boolValue
+    }
+
+    /// The Git config key recording the branch `branch` started from.
+    static func baseKey(_ branch: String) -> String { "branch.\(branch).tabBase" }
 
     func branches() throws -> [GitBranch] {
         let defaultBranch = git.optionalText(path, ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"])

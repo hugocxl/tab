@@ -158,6 +158,10 @@ final class PaletteHeaderView: ThemedView {
                 let pill = AccessoryPill(id: id, title: label, active: active)
                 pill.action = { [weak controller] in controller?.toggleAccessory(id) }
                 return pill
+            case let .mode(id, label, icon, key):
+                let chip = ModeChip(title: label, icon: icon, key: key)
+                chip.action = { [weak controller] in controller?.switchMode(id) }
+                return chip
             case let .hint(label, key):
                 let stack = NSStackView()
                 stack.spacing = 6

@@ -316,10 +316,15 @@ public struct WorktreeOptions: Hashable, Codable, Sendable {
     public var name: String?
     /// `nil` skips hooks; otherwise approves exactly these commands.
     public var hooks: [WorktreeHook]?
+    /// Fetch the base branch from its remote first and start from the
+    /// remote's copy when there is one. Older servers ignore it and start
+    /// from the local branch.
+    public var fetchBase: Bool?
 
-    public init(name: String? = nil, hooks: [WorktreeHook]? = nil) {
+    public init(name: String? = nil, hooks: [WorktreeHook]? = nil, fetchBase: Bool? = nil) {
         self.name = name
         self.hooks = hooks
+        self.fetchBase = fetchBase
     }
 }
 
@@ -348,9 +353,14 @@ public struct WorktreeRemoval: Hashable, Codable, Sendable {
     public var status: Data
     public var head: String?
     public var branch: String?
+    /// Up to 50 paths Git ignores that removing the worktree deletes, such
+    /// as `.env`; a folder Git ignores whole ends in `/`, such as
+    /// `node_modules/`. Nil from servers that don't report them.
+    public var ignoredPaths: [String]?
 
     public init(directory: ServerPath, device: UInt64, inode: UInt64, dirty: Bool, status: Data = Data(),
-                head: String? = nil, branch: String? = nil) {
+                head: String? = nil, branch: String? = nil, ignoredPaths: [String]? = nil) {
+        self.ignoredPaths = ignoredPaths
         self.directory = directory
         self.device = device
         self.inode = inode
@@ -405,11 +415,21 @@ public struct GitSummary: Hashable, Codable, Sendable {
     public var commitSubject: String?
     /// The last commit's committer time, in Unix seconds.
     public var commitTimestamp: UInt64?
+    /// The branch Tab started this one from, as `branch.<name>.tabBase` records.
+    public var base: String?
+    /// Commits on this branch that `base` doesn't have; absent when `base`
+    /// is unknown or gone.
+    public var baseAhead: UInt64?
+    /// Commits on `base` this branch doesn't have.
+    public var baseBehind: UInt64?
 
     public init(branch: String? = nil, head: String? = nil, upstream: String? = nil, ahead: UInt64 = 0,
                 behind: UInt64 = 0, changed: UInt32 = 0, staged: UInt32 = 0, unstaged: UInt32 = 0,
                 untracked: UInt32 = 0, conflicted: UInt32 = 0, commitSubject: String? = nil,
-                commitTimestamp: UInt64? = nil) {
+                commitTimestamp: UInt64? = nil, base: String? = nil, baseAhead: UInt64? = nil, baseBehind: UInt64? = nil) {
+        self.base = base
+        self.baseAhead = baseAhead
+        self.baseBehind = baseBehind
         self.branch = branch
         self.head = head
         self.upstream = upstream

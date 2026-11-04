@@ -37,10 +37,12 @@ extension AppModel {
     }
 
     /// Where a new terminal in `project` starts: the focused terminal's
-    /// folder when it is on the same server, else the project's.
+    /// folder when it is in the same project (or anywhere on the same server,
+    /// for Home), else the project's.
     func newPaneDirectory(in project: Project) -> ServerPath {
         guard let pane = activePane,
               state.paneServer(pane) == project.serverId,
+              project.home || state.paneProject(pane) == project.id,
               let directory = (panes.controller(for: pane) as? TerminalPane)?.directory
         else { return project.directory }
         return directory
@@ -394,20 +396,54 @@ extension AppModel {
     }
 
     /// Closes every pane of the current project, or the current Home
-    /// terminal (Cmd+Shift+W).
+    /// terminal (Cmd+Shift+W). Closing a worktree's tab removes the worktree.
     public func closeTab() {
+        let project = currentProject
+        if project.kind == .worktree { return closeWorktree(project.id) }
         guard let tab = activeTab else { return }
-        let ids = tab.panes.map(\.id)
-        Task {
-            for id in ids {
-                guard await controller(for: id)?.willClose() ?? true else { return }
-            }
-            for id in ids {
-                guard await controller(for: id)?.commitClose() ?? true else { return }
-                remove(id)
-            }
-            focusActiveContent()
+        closePanes(tab.panes.map(\.id))
+    }
+
+    /// Closes a sidebar card: its tab's panes, or the whole worktree.
+    public func close(_ target: SidebarListing.Target) {
+        switch target {
+        case .tab(let id):
+            guard let tab = state.projects.lazy.flatMap(\.tabs).first(where: { $0.id == id }) else { return }
+            closePanes(tab.panes.map(\.id))
+        case .project(let id):
+            guard let project = state.project(id) else { return }
+            if project.kind == .worktree { return closeWorktree(id) }
+            let selected = state.window.selectedTab[id]
+            guard let tab = project.tabs.first(where: { $0.id == selected }) ?? project.tabs.first else { return }
+            closePanes(tab.panes.map(\.id))
         }
+    }
+
+    private func closePanes(_ ids: [PaneId]) {
+        Task {
+            guard await panesWillClose(ids) else { return }
+            await commitClose(ids)
+        }
+    }
+
+    /// Asks each pane whether it may close, such as a running program's
+    /// confirmation; false when one refuses.
+    func panesWillClose(_ ids: [PaneId]) async -> Bool {
+        for id in ids {
+            guard await controller(for: id)?.willClose() ?? true else { return false }
+        }
+        return true
+    }
+
+    /// Closes panes that agreed to close; false when one stays open.
+    @discardableResult
+    func commitClose(_ ids: [PaneId]) async -> Bool {
+        defer { focusActiveContent() }
+        for id in ids {
+            guard await controller(for: id)?.commitClose() ?? true else { return false }
+            remove(id)
+        }
+        return true
     }
 
     /// Closes the pane but leaves its terminal running.

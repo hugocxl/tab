@@ -35,6 +35,11 @@ struct ActivityCardData: Equatable {
     /// project or worktree name otherwise.
     var name: String
     var branch: String?
+    /// The branch this worktree's branch started from, and how far apart
+    /// they are.
+    var base: String?
+    var baseAhead: UInt64?
+    var baseBehind: UInt64?
     var primary: Bool
     var pullRequest: UInt64?
     var status: Status
@@ -91,7 +96,8 @@ struct ActivityCardData: Equatable {
         }
         let status = status(tabs: tabs, server: project.serverId, model: model)
         return ActivityCardData(
-            headline: headline, name: name, branch: branch, primary: primary, pullRequest: info?.pullRequest,
+            headline: headline, name: name, branch: branch, base: info?.summary?.base, baseAhead: info?.summary?.baseAhead,
+            baseBehind: info?.summary?.baseBehind, primary: primary, pullRequest: info?.pullRequest,
             status: status, workingSince: status == .working ? workingSince(tabs: tabs, server: project.serverId, model: model) : nil,
             selected: selected,
             unavailable: project.status == .missing || model.worktreeRemovals.contains(project.id)

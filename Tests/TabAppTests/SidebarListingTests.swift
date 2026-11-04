@@ -51,6 +51,27 @@ final class SidebarListingTests: XCTestCase {
         XCTAssertNotEqual(project, parent)
     }
 
+    /// The Open Tabs layout drops projects with nothing open and orders the
+    /// rest by when their tab opened; Cmd-1–9 must select what it shows.
+    func testOpenTabsListsOpenTabsOldestFirstAndTheNumberKeysFollow() async throws {
+        let (app, feature) = try await repository("app", worktree: "feature")
+        _ = try XCTUnwrap(model.addProject(try ModelFixtures.folder("lib")))
+        model.newTerminal(in: feature)
+        model.newHomeTerminal()
+        model.newTerminal(in: app)
+        model.updateAppearance { $0.sidebarLayout = .tabs }
+        let home = try XCTUnwrap(model.state.home.tabs.first?.id)
+
+        XCTAssertEqual(model.sidebarListing.targets, [.project(feature), .tab(home), .project(app)])
+        model.selectCard(0)
+        XCTAssertEqual(model.currentProject.id, feature)
+        model.selectCard(2)
+        XCTAssertEqual(model.currentProject.id, app)
+
+        model.updateAppearance { $0.sidebarLayout = .projects }
+        XCTAssertEqual(model.sidebarListing.targets.first, .tab(home))
+    }
+
     func testProjectsListInOrderWithTheirWorktreesAndHomeTerminalsFirst() async throws {
         let (app, feature) = try await repository("app", worktree: "feature")
         let lib = try XCTUnwrap(model.addProject(try ModelFixtures.folder("lib")))

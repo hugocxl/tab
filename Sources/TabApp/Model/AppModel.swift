@@ -108,6 +108,9 @@ public final class AppModel {
     public internal(set) var worktreeCreations: [ProjectId: [String]] = [:]
     /// Worktree projects being removed.
     public internal(set) var worktreeRemovals: Set<ProjectId> = []
+    /// Worktrees with a removal or close underway, from its first question
+    /// on, so a second click doesn't start another.
+    var pendingWorktreeRemovals: Set<ProjectId> = []
     let connectorOverride: ((ServerId, ServerEntry?) -> ServerConnector?)?
     /// The app's proxy from `proxy.json`.
     public let proxy: ProxyModel

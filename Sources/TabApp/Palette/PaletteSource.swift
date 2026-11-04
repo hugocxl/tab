@@ -99,7 +99,26 @@ final class PaletteSource: PaletteDataSource {
             return spec
         case .projects: return PageSpec(page, placeholder: "Switch to project…", breadcrumb: "Switch Project")
         case .workspaces: return PageSpec(page, placeholder: "Switch to workspace…", breadcrumb: "Switch Workspace")
-        case .newTerminal: return PageSpec(page, placeholder: "New terminal in project…", breadcrumb: "New Terminal in Project")
+        case .worktreeBase:
+            return PageSpec(page, placeholder: "Start the new worktree from…", breadcrumb: "Base Branch")
+        case .newTerminal:
+            var spec = PageSpec(page, placeholder: newTerminalInWorktree ? "Name the new worktree…" : "Open a terminal in…",
+                                breadcrumb: "New Terminal in Project")
+            let tab = try? KeyChord("tab")
+            if newTerminalInWorktree {
+                spec.accessories = [.mode(id: "worktree", label: "New worktree", icon: .gitBranch, key: tab)]
+                if let project = selectedWorktreeParent, Self.pullRequestNumber(palette?.currentQuery ?? "") == nil {
+                    let base = startLabel(of: project).map { "from \($0)" } ?? "from default branch"
+                    spec.accessories.append(.mode(id: "base", label: base, icon: .gitBranch, key: try? KeyChord("shift-tab")))
+                    spec.shiftTabSwitches = "base"
+                }
+            } else {
+                spec.accessories = [.mode(id: "worktree", label: "Current checkout", icon: .folder, key: tab)]
+            }
+            spec.tabSwitches = "worktree"
+            spec.followsSelection = true
+            spec.emptyMessage = newTerminalInWorktree ? "No Git projects" : "No results"
+            return spec
         case .themes: return PageSpec(page, placeholder: "Search themes…", breadcrumb: "Change Theme")
         case .addProject(let server):
             var spec = PageSpec(page, placeholder: "Search folders or enter a path…",
@@ -113,6 +132,10 @@ final class PaletteSource: PaletteDataSource {
 
     func opened(_ page: PalettePage) {
         switch page {
+        case .newTerminal:
+            worktreeBases = [:]
+            worktreeFromLocal = []
+        case .worktreeBase(let project): loadBranches(project, force: true)
         case .root:
             if !current.home { loadFiles(current.id) }
             if model.git[current.id]?.isRepository ?? false { loadBranches(current.id) }
@@ -146,6 +169,8 @@ final class PaletteSource: PaletteDataSource {
     }
 
     func toggled(_ page: PalettePage, accessory: String, active: Bool) {
+        if page == .newTerminal, accessory == "worktree" { _ = model.edit { $0.setNewTerminalInWorktree(!newTerminalInWorktree) } }
+        if page == .newTerminal, accessory == "base", let project = selectedWorktreeParent { palette?.push(.worktreeBase(project)) }
         guard page == .find else { return }
         if accessory == "case" { find.caseSensitive = active }
         if accessory == "regex" { find.regex = active }
@@ -168,6 +193,7 @@ final class PaletteSource: PaletteDataSource {
         case .projects: return .items(projectItems(query, limit: .max))
         case .workspaces: return .items(workspaceItems(query))
         case .newTerminal: return .items(newTerminalItems(query))
+        case .worktreeBase(let project): return worktreeBaseContent(project, query)
         case .themes: return .items(themeItems(query))
         case .addProject(let server): return addProjectContent(server, query)
         }
@@ -751,13 +777,51 @@ final class PaletteSource: PaletteDataSource {
         return items
     }
 
+    /// Each project and its worktrees, the current project's first, then
+    /// Home and other computers' Homes. In New worktree mode, the Git
+    /// projects instead, unfiltered: the query names the worktree.
     private func newTerminalItems(_ query: String) -> [PaletteItem] {
         let builder = model.listingBuilder()
-        var projects = [model.state.home] + model.state.projects.filter { $0.isRemoteHome }
-        for parent in builder.listedParents() where !parent.home {
+        let currentRoot = current.parentId ?? current.id
+        var parents = builder.listedParents().filter { !$0.home }
+        if let index = parents.firstIndex(where: { $0.id == currentRoot }) {
+            parents.insert(parents.remove(at: index), at: 0)
+        }
+        if newTerminalInWorktree {
+            let name = AppModel.quickBranchName(query)
+            let pullRequest = Self.pullRequestNumber(query)
+            return parents.filter { worktreeParent(of: $0) != nil }.map { project in
+                var item = PaletteItem(id: project.id.description, title: builder.title(project), target: .run { [weak self] in
+                    self?.createWorktree(in: project.id, query: query)
+                })
+                if let pullRequest {
+                    item.subtitle = "Check out pull request #\(pullRequest)"
+                    item.actions = [PaletteItemAction("create", "Check Out Pull Request"),
+                                    PaletteItemAction("checkout", "Use Current Checkout", shortcut: try? KeyChord("tab"))]
+                } else {
+                    item.actions = [
+                        PaletteItemAction("create", "Create Worktree"),
+                        PaletteItemAction("base", "Choose Base Branch…", shortcut: try? KeyChord("shift-tab")),
+                        PaletteItemAction("checkout", "Use Current Checkout", shortcut: try? KeyChord("tab")),
+                    ]
+                    item.actions.append(worktreeFromLocal.contains(project.id)
+                        ? PaletteItemAction("remote", "Start From the Remote Branch")
+                        : PaletteItemAction("local", "Start From the Local Branch"))
+                    let base = startLabel(of: project.id, load: false).map { " from \($0)" } ?? ""
+                    item.subtitle = (name.isEmpty ? "New branch" : "New worktree “\(name)”") + base
+                }
+                item.current = project.id == currentRoot
+                item.kind = PaletteKind.project.rawValue
+                item.tile = .icon(.gitBranch, .purple)
+                return item
+            }
+        }
+        var projects: [Project] = []
+        for parent in parents {
             projects.append(parent)
             projects += builder.children(of: parent.id)
         }
+        projects += [model.state.home] + model.state.projects.filter { $0.isRemoteHome }
         return rankKeepingOrder(projects, key: { builder.title($0) }, query: query, limit: .max).map { entry in
             let project = entry.item
             var item = PaletteItem(id: project.id.description, title: builder.title(project), target: .run { [weak self] in
@@ -768,10 +832,92 @@ final class PaletteSource: PaletteDataSource {
             item.highlights = entry.ranges
             item.subtitle = displayPath(project)
             item.disabled = project.status != .available
+            item.current = project.id == current.id
             item.kind = project.parentId == nil ? PaletteKind.project.rawValue : PaletteKind.worktree.rawValue
             item.tile = project.parentId == nil ? PaletteKind.project.tile : PaletteKind.worktree.tile
+            item.actions = [PaletteItemAction("open", "Open Terminal"),
+                            PaletteItemAction("worktree", "Use New Worktree", shortcut: try? KeyChord("tab"))]
             return item
         }
+    }
+
+    /// The repository of the selected New worktree row.
+    private var selectedWorktreeParent: ProjectId? {
+        guard let id = palette?.selectedItemId.flatMap(UUID.init(uuidString:)).map({ ProjectId(uuid: $0) }),
+              let project = model.state.project(id) else { return nil }
+        return worktreeParent(of: project)
+    }
+
+    /// The branch a new worktree of `project` starts from: the one chosen, else
+    /// the default branch once branches load.
+    /// Loads the project's branches when `load` and they aren't yet; rows
+    /// pass false so one page doesn't ask every repository at once.
+    private func worktreeBase(of project: ProjectId, load: Bool = true) -> String? {
+        if let chosen = worktreeBases[project] { return chosen }
+        if load { loadBranches(project) }
+        let list = branches[project]?.value
+        return list?.first(where: \.isDefault)?.name ?? list?.first(where: \.current)?.name
+    }
+
+    /// The remote a project's checkout tracks, read from its branch's
+    /// upstream, for naming the start point; the server finds the base's own
+    /// remote. Nil when the checkout tracks none.
+    private func remoteName(of project: ProjectId) -> String? {
+        guard let upstream = model.git[project]?.summary?.upstream, let slash = upstream.firstIndex(of: "/") else { return nil }
+        return String(upstream[..<slash])
+    }
+
+    /// What a new worktree of `project` starts from, as the chip and rows
+    /// name it: the base, on its remote unless the user chose the local branch.
+    private func startLabel(of project: ProjectId, load: Bool = true) -> String? {
+        guard let base = worktreeBase(of: project, load: load) else { return nil }
+        guard !worktreeFromLocal.contains(project), let remote = remoteName(of: project) else { return base }
+        return "\(remote)/\(base)"
+    }
+
+    /// `#482` as a pull request number.
+    static func pullRequestNumber(_ query: String) -> UInt64? {
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        guard trimmed.hasPrefix("#"), let number = UInt64(trimmed.dropFirst()), number > 0 else { return nil }
+        return number
+    }
+
+    /// Return on a New worktree row: a pull request's worktree for `#482`,
+    /// else a new worktree named after the query.
+    private func createWorktree(in project: ProjectId, query: String) {
+        if let number = Self.pullRequestNumber(query) { return model.pullRequestWorktree(parent: project, number: number) }
+        model.quickWorktree(parent: project, name: query, base: worktreeBases[project],
+                            fetchBase: !worktreeFromLocal.contains(project))
+    }
+
+    private func worktreeBaseContent(_ project: ProjectId, _ query: String) -> PageContent {
+        switch branches[project] {
+        case .loading?, nil: return .loading("Loading branches…")
+        case .failed(let message)?: return .error(message)
+        case .loaded?:
+            let chosen = worktreeBase(of: project)
+            let (items, _) = branchItems(project, query, limit: .max)
+            return items.isEmpty ? .empty("No branches match “\(query)”") : .items(items.map { branch in
+                var item = branch
+                let name = branch.id
+                item.target = .apply { [weak self] in
+                    self?.worktreeBases[project] = name
+                    self?.palette?.pop()
+                }
+                item.actions = []
+                // A branch checked out elsewhere is still a fine start point.
+                item.disabled = false
+                item.current = name == chosen
+                return item
+            })
+        }
+    }
+
+    /// The repository a new worktree from `project`'s row belongs to.
+    private func worktreeParent(of project: Project) -> ProjectId? {
+        guard !project.home, project.status == .available else { return nil }
+        let root = project.parentId ?? project.id
+        return model.git[root]?.isRepository == true ? root : nil
     }
 
     // MARK: Themes
@@ -799,6 +945,15 @@ final class PaletteSource: PaletteDataSource {
     var searchRoot: String {
         TabDirs.expandHome(model.settings.projects.searchRoot ?? "~")
     }
+
+    /// Projects whose new worktrees start from the local base branch rather
+    /// than its remote copy, chosen since the New Terminal page opened.
+    private var worktreeFromLocal: Set<ProjectId> = []
+    /// Base branches chosen on the New Terminal page since it opened.
+    private var worktreeBases: [ProjectId: String] = [:]
+
+    /// The New Terminal page makes a worktree rather than opening a checkout.
+    private var newTerminalInWorktree: Bool { model.state.window.newTerminalInWorktree }
 
     private var remoteFolders: [ServerId: (path: String, folders: Loadable<[ServerPath]>)] = [:]
 
@@ -973,6 +1128,26 @@ final class PaletteSource: PaletteDataSource {
             case "open": model.selectProject(id); palette?.close()
             case "rename": palette?.close(); actions?.rename(project: id, anchor: nil)
             case "remove": palette?.close(); model.confirmRemoveWorktree(id)
+            default: break
+            }
+        case .newTerminal:
+            guard let id = UUID(uuidString: item).map({ ProjectId(uuid: $0) }), let project = model.state.project(id) else { return }
+            switch action {
+            case "open":
+                palette?.close()
+                model.connectOnDemand(project.serverId)
+                model.newTerminal(in: id)
+            case "create":
+                palette?.close()
+                createWorktree(in: id, query: palette?.currentQuery ?? "")
+            case "local":
+                worktreeFromLocal.insert(id)
+            case "remote":
+                worktreeFromLocal.remove(id)
+            case "base":
+                palette?.push(.worktreeBase(id))
+            case "worktree", "checkout":
+                _ = model.edit { $0.setNewTerminalInWorktree(action == "worktree") }
             default: break
             }
         case .addProject(let server):

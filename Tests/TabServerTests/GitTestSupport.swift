@@ -9,6 +9,8 @@ final class GitTestCatalog: WorktreeCatalog, @unchecked Sendable {
     private var projects: [ProjectId: ProjectDescriptor] = [:]
     private(set) var endedSessions: [(ProjectId, String)] = []
     let homeProject = ProjectId()
+    /// Makes `addWorktreeProject` fail, as a full disk would.
+    var failsAddingWorktrees = false
 
     func add(_ project: ProjectDescriptor) {
         lock.lock()
@@ -40,6 +42,7 @@ final class GitTestCatalog: WorktreeCatalog, @unchecked Sendable {
     func addWorktreeProject(_ project: ProjectDescriptor) throws {
         lock.lock()
         defer { lock.unlock() }
+        if failsAddingWorktrees { throw ServiceError(.badRequest, "Catalog refused the worktree") }
         if let existing = projects[project.id], existing != project {
             throw ServiceError(.badRequest, "Worktree identity already exists")
         }

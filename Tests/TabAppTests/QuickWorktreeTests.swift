@@ -1,0 +1,81 @@
+import XCTest
+import TabCore
+import TabProtocol
+@testable import TabApp
+
+@MainActor
+final class QuickWorktreeTests: XCTestCase {
+    /// The setup line is typed into a shell, so a worktree name or path with
+    /// quotes or `$(…)` must stay data, and a failing command must stop the rest.
+    func testSetupCommandQuotesValuesPassesVariablesAndStopsAtTheFirstFailure() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("tab it's \(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let worktree = ProjectDescriptor(directory: ServerPath(directory.path), name: "it's $(touch injected)",
+                                         kind: .worktree, parentId: ProjectId())
+        let hooks = [
+            WorktreeHook(command: #"printf '%s|%s|%s\n' "$TAB_WORKTREE_NAME" "$TAB_WORKTREE_BRANCH" "$TAB_WORKTREE_PATH" > out"#, project: true),
+            WorktreeHook(command: "false", project: true),
+            WorktreeHook(command: "touch never", project: false),
+        ]
+        let command = AppModel.setupCommand(hooks, worktree: worktree, repository: "/repo", branch: "feat/x")
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", command]
+        process.currentDirectoryURL = directory
+        process.environment = ["SHELL": "/bin/sh", "PATH": "/usr/bin:/bin"]
+        try process.run()
+        process.waitUntilExit()
+
+        XCTAssertNotEqual(process.terminationStatus, 0)
+        let output = try String(contentsOf: directory.appendingPathComponent("out"), encoding: .utf8)
+        XCTAssertEqual(output, "it's $(touch injected)|feat/x|\(directory.path)\n")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("injected").path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("never").path))
+    }
+
+    /// A line editor acts on tabs and newlines as they're typed, so such a
+    /// command travels encoded and still runs as written.
+    func testSetupCommandWithControlCharactersIsEncodedAndStillRuns() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("tab-setup-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let worktree = ProjectDescriptor(directory: ServerPath(directory.path), name: "w", kind: .worktree, parentId: ProjectId())
+        let hooks = [WorktreeHook(command: "printf 'a\\tb\\n' > first\nprintf '%s\\n' \"$TAB_WORKTREE_NAME\" > second", project: true)]
+        let command = AppModel.setupCommand(hooks, worktree: worktree, repository: "/repo", branch: "w")
+        XCTAssertFalse(command.unicodeScalars.contains { $0.value < 0x20 })
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", command]
+        process.currentDirectoryURL = directory
+        process.environment = ["SHELL": "/bin/sh", "PATH": "/usr/bin:/bin"]
+        try process.run()
+        process.waitUntilExit()
+
+        XCTAssertEqual(process.terminationStatus, 0)
+        XCTAssertEqual(try String(contentsOf: directory.appendingPathComponent("first"), encoding: .utf8), "a\tb\n")
+        XCTAssertEqual(try String(contentsOf: directory.appendingPathComponent("second"), encoding: .utf8), "w\n")
+    }
+
+    /// Closing a worktree deletes without asking only folders a build fills
+    /// again; ignored files and other ignored folders may be the user's.
+    func testOnlyWholeBuildFoldersCountAsRebuildable() {
+        XCTAssertTrue(AppModel.isRebuildable("node_modules/"))
+        XCTAssertTrue(AppModel.isRebuildable("packages/web/.next/"))
+        XCTAssertFalse(AppModel.isRebuildable(".env"))
+        XCTAssertFalse(AppModel.isRebuildable("node_modules"))
+        XCTAssertFalse(AppModel.isRebuildable("secrets/"))
+        XCTAssertFalse(AppModel.isRebuildable("data/"))
+    }
+
+    func testOnlyAHashAndAPositiveNumberNameAPullRequest() {
+        XCTAssertEqual(PaletteSource.pullRequestNumber("#482"), 482)
+        XCTAssertEqual(PaletteSource.pullRequestNumber(" #7 "), 7)
+        XCTAssertNil(PaletteSource.pullRequestNumber("482"))
+        XCTAssertNil(PaletteSource.pullRequestNumber("#0"))
+        XCTAssertNil(PaletteSource.pullRequestNumber("#12a"))
+        XCTAssertNil(PaletteSource.pullRequestNumber("fix-#12"))
+    }
+}

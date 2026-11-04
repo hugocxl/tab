@@ -160,6 +160,7 @@ final class SidebarViewController: NSViewController {
     }
 
     private func buildHost(_ host: SidebarSnapshot.HostEntry, cardNumber: inout Int) {
+        if let cards = host.openTabs { return buildOpenTabs(cards, creating: host.groups.flatMap(\.creating), cardNumber: &cardNumber) }
         for card in host.terminals {
             let view = cardView(card, hint: hint(.tabs, &cardNumber))
             add(view)
@@ -190,6 +191,17 @@ final class SidebarViewController: NSViewController {
         }
     }
 
+    /// Open Tabs: the host's open tabs in the listing's order, each card
+    /// naming its project.
+    private func buildOpenTabs(_ cards: [SidebarSnapshot.CardEntry], creating: [String], cardNumber: inout Int) {
+        for card in cards {
+            add(cardView(card, hint: hint(.tabs, &cardNumber)))
+        }
+        for name in creating {
+            add(CreatingRow(name: name))
+        }
+    }
+
     private enum HintKind { case tabs }
 
     private func hint(_ kind: HintKind, _ counter: inout Int) -> String? {
@@ -206,9 +218,11 @@ final class SidebarViewController: NSViewController {
     }
 
     private func cardView(_ card: SidebarSnapshot.CardEntry, hint: String?) -> SidebarCardView {
-        let view = SidebarCardView(data: card.data, hint: hint)
+        let header = card.header.map { SidebarCardView.Header(title: $0.title, icon: model.projectIcon($0.project)) }
+        let view = SidebarCardView(data: card.data, hint: hint, header: header)
         let target = card.target
         view.onClick = { [weak self] in self?.model.select(target) }
+        view.onClose = { [weak self] in self?.model.close(target) }
         view.menuProvider = { [weak self, weak view] in self?.cardMenu(card, anchor: view) }
         return view
     }

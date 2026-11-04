@@ -93,6 +93,86 @@ final class GitWorktreeTests: XCTestCase {
         XCTAssertTrue(worktrees.contains { $0.branch == "release" && $0.directory.rawValue.hasSuffix("/release") })
     }
 
+    func testFetchedBaseStartsFromTheRemoteWithoutTrackingItAndIsRecorded() throws {
+        let repo = try GitTestRepo(commit: true)
+        try repo.addRemote()
+        try repo.run("commit", "--allow-empty", "-m", "only on the remote")
+        try repo.run("push", "origin", "main")
+        let remoteHead = try repo.run("rev-parse", "HEAD").trimmingCharacters(in: .whitespacesAndNewlines)
+        try repo.run("reset", "--hard", "HEAD~1")
+        try repo.run("update-ref", "-d", "refs/remotes/origin/main")
+
+        let id = ProjectId()
+        let directory = repo.path + "/checkout"
+        _ = try repo.git(.worktree(WorktreeIntent(
+            action: .create(project: id, directory: ServerPath(directory), branch: "feature", base: "main"),
+            options: WorktreeOptions(fetchBase: true))))
+
+        XCTAssertEqual(try GitTestRepo.git(directory, "rev-parse", "HEAD").trimmingCharacters(in: .whitespacesAndNewlines), remoteHead)
+        XCTAssertEqual(try repo.run("config", "--get", "branch.feature.tabBase").trimmingCharacters(in: .whitespacesAndNewlines),
+                       "origin/main")
+        XCTAssertThrowsError(try repo.run("config", "--get", "branch.feature.remote"), "the new branch must not push to the base")
+        guard case .summary(let fresh?) = try repo.git(.summary, project: id) else { return XCTFail("summary") }
+        XCTAssertEqual(fresh.base, "origin/main")
+        XCTAssertEqual(fresh.baseAhead, 0)
+        XCTAssertEqual(fresh.baseBehind, 0)
+        try GitTestRepo.git(directory, "commit", "--allow-empty", "-m", "work")
+        guard case .summary(let ahead?) = try repo.git(.summary, project: id) else { return XCTFail("summary") }
+        XCTAssertEqual(ahead.baseAhead, 1)
+    }
+
+    func testFetchedBaseFallsBackToTheLocalBranchWithoutARemote() throws {
+        let repo = try GitTestRepo(commit: true)
+        let id = ProjectId()
+        _ = try repo.git(.worktree(WorktreeIntent(
+            action: .create(project: id, directory: ServerPath(repo.path + "/checkout"), branch: "feature", base: "main"),
+            options: WorktreeOptions(fetchBase: true))))
+        XCTAssertEqual(try repo.run("config", "--get", "branch.feature.tabBase").trimmingCharacters(in: .whitespacesAndNewlines), "main")
+    }
+
+    func testAFailedFetchStartsFromTheLocalBranchNotAStaleRemoteCopy() throws {
+        let repo = try GitTestRepo(commit: true)
+        try repo.addRemote()
+        let stale = try repo.run("rev-parse", "HEAD").trimmingCharacters(in: .whitespacesAndNewlines)
+        try repo.run("commit", "--allow-empty", "-m", "local only")
+        // The remote never had main, but an old remote-tracking ref remains.
+        try repo.run("update-ref", "refs/remotes/origin/main", stale)
+        let directory = repo.path + "/checkout"
+        _ = try repo.git(.worktree(WorktreeIntent(
+            action: .create(project: ProjectId(), directory: ServerPath(directory), branch: "feature", base: "main"),
+            options: WorktreeOptions(fetchBase: true))))
+        XCTAssertEqual(try GitTestRepo.git(directory, "rev-parse", "HEAD"), try repo.run("rev-parse", "main"))
+        XCTAssertEqual(try repo.run("config", "--get", "branch.feature.tabBase").trimmingCharacters(in: .whitespacesAndNewlines), "main")
+    }
+
+    func testRemovalInspectionListsIgnoredPathsAndNewOnesDontBlockRemoval() throws {
+        let repo = try GitTestRepo(commit: true)
+        try repo.write(".gitignore", ".env\n*.log\nnode_modules/\n")
+        try repo.commit("ignore")
+        let (id, directory, _) = try create(repo)
+        try Data("SECRET=1".utf8).write(to: URL(fileURLWithPath: directory + "/.env"))
+        try FileManager.default.createDirectory(atPath: directory + "/node_modules/pkg", withIntermediateDirectories: true)
+        try Data("x".utf8).write(to: URL(fileURLWithPath: directory + "/node_modules/pkg/index.js"))
+        let expected = try inspect(repo, id)
+        XCTAssertFalse(expected.dirty)
+        XCTAssertEqual(Set(expected.ignoredPaths ?? []), [".env", "node_modules/"])
+
+        try Data("written by a dev server".utf8).write(to: URL(fileURLWithPath: directory + "/server.log"))
+        XCTAssertEqual(try repo.git(.worktree(WorktreeIntent(action: .remove(expected: expected))), project: id), .done)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory))
+    }
+
+    func testFailedRegistrationRemovesTheWorktreeAndTheBranchItMade() throws {
+        let repo = try GitTestRepo(commit: true)
+        try repo.run("branch", "existing")
+        repo.catalog.failsAddingWorktrees = true
+        XCTAssertThrowsError(try create(repo))
+        XCTAssertFalse(repo.exists("checkout"))
+        XCTAssertThrowsError(try repo.run("rev-parse", "--verify", "refs/heads/feature"))
+        XCTAssertThrowsError(try create(repo, branch: "existing", base: nil))
+        XCTAssertNoThrow(try repo.run("rev-parse", "--verify", "refs/heads/existing"), "a branch the user had stays")
+    }
+
     func testCheckoutHookFailureStillRegistersTheCreatedWorktree() throws {
         let repo = try GitTestRepo(commit: true)
         try makeExecutable(repo.path + "/.git/hooks/post-checkout", "#!/bin/sh\nexit 1\n")

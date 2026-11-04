@@ -18,6 +18,8 @@ public enum PalettePage: Hashable, Sendable {
     case workspaces
     /// New Terminal in Project.
     case newTerminal
+    /// The branch New Terminal in Project's new worktrees of a repository start from.
+    case worktreeBase(ProjectId)
     case themes
     /// Open Project on this computer or another one.
     case addProject(ServerId)

@@ -329,6 +329,11 @@ extension AppState {
         window.remoteServers = false
     }
 
+    /// Remembers whether New Terminal in Project makes a new worktree.
+    public mutating func setNewTerminalInWorktree(_ inWorktree: Bool) {
+        window.newTerminalInWorktree = inWorktree
+    }
+
     /// Filters the sidebar to each remote server's Home.
     public mutating func selectRemoteServers() {
         window.workspace = nil

@@ -92,6 +92,9 @@ extension SettingsModel {
         b.row("sidebar", b.toggle("sidebar", appearance.sidebarExpanded) { [store] value in
             store.updateAppearance("sidebar") { $0.sidebarExpanded = value }
         })
+        b.row("sidebar-layout", b.segmented("sidebar-layout", ["Projects", "Open Tabs"], selected: appearance.sidebarLayout == .tabs ? 1 : 0) { [store] index in
+            store.updateAppearance("sidebar-layout") { $0.sidebarLayout = index == 1 ? .tabs : .projects }
+        })
         b.row("preserve-pane-width", b.toggle("preserve-pane-width", appearance.preservePaneWidth) { [store] value in
             store.updateAppearance("preserve-pane-width") { $0.preservePaneWidth = value }
         })

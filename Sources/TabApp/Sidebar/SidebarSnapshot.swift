@@ -7,6 +7,13 @@ struct SidebarSnapshot: Equatable {
     struct CardEntry: Equatable {
         var target: SidebarListing.Target
         var data: ActivityCardData
+        /// The project the Open Tabs layout names on the card's first row.
+        var header: CardHeader?
+    }
+
+    struct CardHeader: Equatable {
+        var project: ProjectId
+        var title: String
     }
 
     struct GroupEntry: Equatable {
@@ -23,6 +30,8 @@ struct SidebarSnapshot: Equatable {
         var title: String
         var terminals: [CardEntry]
         var groups: [GroupEntry]
+        /// The Open Tabs layout's cards, in the listing's order.
+        var openTabs: [CardEntry]?
     }
 
     var expanded: Bool
@@ -39,6 +48,10 @@ struct SidebarSnapshot: Equatable {
         query = model.nameFilter
         let listing = model.sidebarListing
         showsHostHeaders = model.knownServers.count > 1
+        func header(_ project: Project) -> CardHeader {
+            let root = project.parentId.flatMap { model.state.project($0) } ?? project
+            return CardHeader(project: root.id, title: model.title(of: root))
+        }
         hosts = listing.hosts.map { host in
             let terminals = host.terminals.compactMap { entry -> CardEntry? in
                 guard let project = model.state.project(entry.project),
@@ -60,8 +73,19 @@ struct SidebarSnapshot: Equatable {
                     cards: cards, creating: model.worktreeCreations[project.id] ?? []
                 )
             }
+            let openTabs = host.openTabs.map { order -> [CardEntry] in
+                var projects: [SidebarListing.Target: ProjectId] = [:]
+                for entry in host.terminals { projects[.tab(entry.tab)] = entry.project }
+                for card in host.groups.flatMap(\.cards) { projects[.project(card.project)] = card.project }
+                let cards = Dictionary((terminals + groups.flatMap(\.cards)).map { ($0.target, $0) }, uniquingKeysWith: { first, _ in first })
+                return order.compactMap { target in
+                    guard var card = cards[target], let project = projects[target].flatMap({ model.state.project($0) }) else { return nil }
+                    card.header = header(project)
+                    return card
+                }
+            }
             return HostEntry(server: host.server, title: host.server.isLocal ? "This Mac" : model.serverName(host.server) ?? "Remote",
-                             terminals: terminals, groups: groups)
+                             terminals: terminals, groups: groups, openTabs: openTabs)
         }
     }
 }

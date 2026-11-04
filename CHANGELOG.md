@@ -3,6 +3,41 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.55.0 - 2026-11-04
+
+### Added
+
+- New Terminal in Project (Cmd-Shift-N) can make a new worktree: press Tab to
+  switch between Current checkout and New worktree, type its name, and press
+  Return to get a terminal in it.
+- A second chip, or Shift-Tab, chooses the branch a new worktree starts from,
+  and it starts from the remote's latest copy unless you choose the local
+  branch in the row's actions.
+- Type a pull request number such as #482 in New worktree mode to check it out
+  into its own worktree.
+- Hovering a sidebar card shows a check button that closes its tab; closing a
+  worktree's tab removes the worktree and keeps its branch, asking first
+  unless Tab made it and nothing in it would be lost.
+- Worktree cards show the branch they started from and how many commits they
+  are ahead, with details in their tooltip.
+- Settings → Interface → Sidebar layout can list only your open tabs, oldest
+  first, each card naming its project.
+
+### Changed
+
+- Setup commands for a quick worktree run in its first terminal, so you can
+  watch them, and Tab remembers your approval until they change.
+- Asking for a worktree whose branch another worktree has open takes you to
+  that worktree instead of failing.
+- New Terminal in Project lists the current project first and Home last, and
+  remembers whether you last chose a worktree.
+
+### Fixed
+
+- A new terminal opened in another project starts in that project's folder
+  instead of the folder of the terminal you were in.
+- A worktree that fails to be created no longer leaves its new branch behind.
+
 ## 0.54.0 - 2026-11-04
 
 ### Added

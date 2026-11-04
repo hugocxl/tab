@@ -220,9 +220,12 @@ public struct Tab: Codable, Equatable, Sendable, Identifiable {
     public var layout: Layout<PaneId>
     /// The pane shown alone, if one is zoomed.
     public var zoomed: PaneId?
+    /// When the tab opened; tabs saved before Tab recorded it have none.
+    public var createdAt: Date?
 
     public init(id: TabId = TabId(), panes: [Pane], layout: Layout<PaneId>) {
         self.id = id
+        createdAt = Date()
         customTitle = nil
         color = nil
         pinned = false
@@ -237,7 +240,7 @@ public struct Tab: Codable, Equatable, Sendable, Identifiable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, customTitle, color, pinned, panes, layout, zoomed
+        case id, customTitle, color, pinned, panes, layout, zoomed, createdAt
     }
 
     public init(from decoder: Decoder) throws {
@@ -250,6 +253,7 @@ public struct Tab: Codable, Equatable, Sendable, Identifiable {
         panes = savedPanes.compactMap(\.pane)
         layout = try container.decode(Layout<PaneId>.self, forKey: .layout)
         zoomed = try container.decodeIfPresent(PaneId.self, forKey: .zoomed)
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt)
         for saved in savedPanes where saved.pane == nil {
             layout.remove(saved.id)
             if zoomed == saved.id { zoomed = nil }
@@ -271,6 +275,7 @@ public struct Tab: Codable, Equatable, Sendable, Identifiable {
         try container.encode(panes, forKey: .panes)
         try container.encode(layout, forKey: .layout)
         try container.encodeIfPresent(zoomed, forKey: .zoomed)
+        try container.encodeIfPresent(createdAt, forKey: .createdAt)
     }
 
     mutating func sanitizeTitles() {

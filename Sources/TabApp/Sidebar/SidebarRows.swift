@@ -66,25 +66,55 @@ final class SidebarCardView: HoverView {
     let data: ActivityCardData
     var onClick: (() -> Void)?
     var menuProvider: (() -> NSMenu?)?
+    /// Shows a check button in place of the status while hovered.
+    var onClose: (() -> Void)? {
+        didSet { updateCloseButton() }
+    }
 
     private let lead: NSView
     private let headline: NSTextField
     private let shellLabel: NSTextField?
     private let nameLabel = makeLabel("", font: AppFont.footnote)
     private let branchLabel = makeLabel("", font: AppFont.footnote)
+    private let baseLabel = makeLabel("", font: AppFont.footnote)
+    private let aheadLabel = makeLabel("", font: AppFont.footnote)
     private let primaryBadge = PrimaryBadge()
     private let prLabel = makeLabel("", font: AppFont.footnote)
     private let dot = ActivityGlyph()
     private let elapsedLabel = makeLabel("", font: .monospacedDigitSystemFont(ofSize: 11, weight: .regular))
     private var elapsedTimer: Timer?
     private let glass = GlassView(style: .card)
+    private let closeButton = ChromeButton(.check, label: "Close Tab", side: 18, glyph: 11)
+
+    /// The project row the Open Tabs layout adds above the headline.
+    struct Header {
+        var title: String
+        var icon: NSImage?
+    }
 
     /// 1pt border, 6pt padding, the 18pt headline, a 3pt gap and the 13pt
     /// second line.
     static let height: CGFloat = 48
+    /// The project row's 14pt line and the 4pt gap below it.
+    static let headerHeight: CGFloat = 18
 
-    init(data: ActivityCardData, hint: String?) {
+    private let headerIcon: NSImageView?
+    private let headerLabel: NSTextField?
+
+    init(data: ActivityCardData, hint: String?, header: Header? = nil) {
         self.data = data
+        if let header {
+            let icon = NSImageView(image: header.icon ?? AppIcon.folder.image(size: 12) ?? NSImage())
+            icon.imageScaling = .scaleProportionallyUpOrDown
+            icon.wantsLayer = true
+            icon.layer?.cornerRadius = 3
+            icon.layer?.masksToBounds = true
+            headerIcon = icon
+            headerLabel = makeLabel(header.title, font: AppFont.footnoteMedium)
+        } else {
+            headerIcon = nil
+            headerLabel = nil
+        }
         var shell: NSTextField?
         let text: String
         let weight: NSFont.Weight
@@ -134,26 +164,50 @@ final class SidebarCardView: HoverView {
         addSubview(glass)
         nameLabel.stringValue = data.name
         branchLabel.stringValue = data.branch ?? ""
+        baseLabel.stringValue = data.base.map { "← \($0)" } ?? ""
+        aheadLabel.stringValue = (data.baseAhead ?? 0) > 0 ? "↑\(data.baseAhead ?? 0)" : ""
         prLabel.stringValue = data.pullRequest.map { "#\($0)" } ?? ""
-        for view in [lead, headline, nameLabel, branchLabel, primaryBadge, prLabel, elapsedLabel, dot] as [NSView] {
+        for view in [lead, headline, nameLabel, branchLabel, baseLabel, aheadLabel, primaryBadge, prLabel, elapsedLabel, dot] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = true
             addSubview(view)
         }
         if let shell { shell.translatesAutoresizingMaskIntoConstraints = true; addSubview(shell) }
+        for view in [headerIcon, headerLabel].compactMap({ $0 }) as [NSView] {
+            view.translatesAutoresizingMaskIntoConstraints = true
+            addSubview(view)
+        }
+        closeButton.shortcut = .closeTab
+        closeButton.isHidden = true
+        closeButton.onPress = { [weak self] _ in self?.onClose?() }
+        addSubview(closeButton)
         primaryBadge.isHidden = !data.primary
         branchLabel.isHidden = data.branch == nil
+        baseLabel.isHidden = data.base == nil
+        aheadLabel.isHidden = aheadLabel.stringValue.isEmpty
+        toolTip = Self.baseDescription(data)
         prLabel.isHidden = data.pullRequest == nil
         elapsedLabel.isHidden = data.workingSince == nil
         dot.isHidden = data.status == .idle
         alphaValue = data.unavailable ? 0.5 : 1
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
-        let parts = [shell?.stringValue, text, data.name, data.branch, data.primary ? "primary" : nil,
+        let parts = [headerLabel?.stringValue, shell?.stringValue, text, data.name, data.branch, data.primary ? "primary" : nil,
                      data.pullRequest.map { "pull request \($0)" }]
         setAccessibilityLabel(parts.compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", "))
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// "Branch wt-5c85, started from release · 3 commits ahead, 1 behind".
+    private static func baseDescription(_ data: ActivityCardData) -> String? {
+        guard let base = data.base else { return nil }
+        var text = "Branch \(data.branch ?? data.name), started from \(base)"
+        if let ahead = data.baseAhead, let behind = data.baseBehind {
+            func count(_ n: UInt64) -> String { n == 1 ? "1 commit" : "\(n) commits" }
+            text += " · \(count(ahead)) ahead, \(behind) behind"
+        }
+        return text
+    }
 
     private static func tone(_ headline: ActivityCardData.Headline) -> HeadlineChip.Tone {
         switch headline {
@@ -163,7 +217,9 @@ final class SidebarCardView: HoverView {
         }
     }
 
-    override var intrinsicContentSize: NSSize { NSSize(width: NSView.noIntrinsicMetric, height: Self.height) }
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: Self.height + (headerLabel == nil ? 0 : Self.headerHeight))
+    }
     override var mouseDownCanMoveWindow: Bool { false }
 
     override func themeDidChange() {
@@ -174,8 +230,12 @@ final class SidebarCardView: HoverView {
         default: headline.textColor = theme.fg
         }
         shellLabel?.textColor = theme.fgMuted
+        headerLabel?.textColor = theme.fgDim
+        if headerIcon?.image?.isTemplate ?? false { headerIcon?.contentTintColor = theme.fgDim }
         nameLabel.textColor = theme.fgMuted
         branchLabel.textColor = theme.fgDim
+        baseLabel.textColor = theme.fgDim
+        aheadLabel.textColor = theme.fgMuted
         prLabel.textColor = theme.accent
         elapsedLabel.textColor = theme.accent
         switch data.status {
@@ -222,15 +282,32 @@ final class SidebarCardView: HoverView {
         layer?.borderColor = (data.selected ? theme.fg(alpha: 0.08) : .clear).cgColor
     }
 
-    override func hoverDidChange() { needsDisplay = true }
+    override func hoverDidChange() {
+        needsDisplay = true
+        updateCloseButton()
+    }
+
+    private func updateCloseButton() {
+        let shown = isHovered && onClose != nil && !data.unavailable
+        guard closeButton.isHidden == shown else { return }
+        closeButton.isHidden = !shown
+        dot.isHidden = shown || data.status == .idle
+        needsLayout = true
+    }
 
     override func layout() {
         super.layout()
         glass.frame = bounds
         let inset = Metrics.border + 10
-        let top = Metrics.border + 6
+        var top = Metrics.border + 6
         let left = inset
         let right = bounds.width - inset
+        if let headerIcon, let headerLabel {
+            headerIcon.frame = CGRect(x: left + 2, y: top + 1, width: 14, height: 14)
+            let height = headerLabel.intrinsicContentSize.height
+            headerLabel.frame = CGRect(x: left + 24, y: (top + 8 - height / 2).rounded(), width: max(right - left - 24, 0), height: height)
+            top += Self.headerHeight
+        }
         let leadFrame = CGRect(x: left, y: top, width: 18, height: 18)
         lead.frame = lead is NSImageView ? leadFrame.insetBy(dx: 2, dy: 2) : leadFrame
         var x = left + 18 + 6
@@ -246,11 +323,13 @@ final class SidebarCardView: HoverView {
         let smallHeight = nameLabel.intrinsicContentSize.height
         let y2 = (line2Center - smallHeight / 2).rounded()
         dot.frame = CGRect(x: right - 12, y: line2Center - 6, width: 12, height: 12)
-        var trailing = dot.isHidden ? right : right - 12 - 6
+        closeButton.frame = CGRect(x: right - 15, y: line2Center - 9, width: 18, height: 18)
+        let closing = !closeButton.isHidden
+        var trailing = closing ? right - 18 - 4 : dot.isHidden ? right : right - 12 - 6
         if !elapsedLabel.isHidden {
             // The dots glyph is narrower than its 12pt box, so hug it.
             let width = elapsedLabel.textWidth
-            let labelTrailing = dot.isHidden ? trailing : right - 12 - 1
+            let labelTrailing = closing || dot.isHidden ? trailing : right - 12 - 1
             elapsedLabel.frame = CGRect(x: labelTrailing - width, y: y2, width: width, height: smallHeight)
             trailing = labelTrailing - width - 6
         }
@@ -267,6 +346,11 @@ final class SidebarCardView: HoverView {
             let reserve = data.primary ? primaryBadge.intrinsicContentSize.width + 6 : 0
             let width = max(min(branchLabel.textWidth, trailing - cursor - reserve), 0)
             branchLabel.frame = CGRect(x: cursor, y: y2, width: width, height: smallHeight)
+            cursor += width + 6
+        }
+        for label in [baseLabel, aheadLabel] where !label.isHidden {
+            let width = max(min(label.textWidth, trailing - cursor), 0)
+            label.frame = CGRect(x: cursor, y: y2, width: width, height: smallHeight)
             cursor += width + 6
         }
         if data.primary {
