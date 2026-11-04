@@ -268,7 +268,7 @@ final class TestBrowserHost: BrowserHost {
     func showToast(_ message: String, isError: Bool) {}
     func manageBrowserProfiles() {}
 
-    func openBrowserPane(url: String?, profile: String?, project: String?, worktree: String?, split: Bool) throws
+    func openBrowserPane(url: String?, profile: String?, project: String?, beside: SessionId?, newTab: Bool) throws
         -> BrowserPaneController {
         if project == "missing" { throw BrowserScripts.Failure("no project named 'missing'") }
         let pane = BrowserPaneController(tabId: UUID().uuidString, state: BrowserPane(url: url, profile: profile), host: self)
@@ -354,7 +354,7 @@ final class BrowserAutomationTests: XCTestCase {
     }
 
     func testClosedTabsCannotUseARetainedController() async throws {
-        let pane = try host.openBrowserPane(url: nil, profile: nil, project: nil, worktree: nil, split: false)
+        let pane = try host.openBrowserPane(url: nil, profile: nil, project: nil, beside: nil, newTab: false)
         let id = pane.tabId
         _ = try await call(.close, ["tabId": .string(id)])
         XCTAssertTrue(host.browserProfiles.panes.pane(id) === pane)
@@ -407,7 +407,7 @@ final class BrowserAutomationTests: XCTestCase {
 
         let listing = try await call(.list)
         guard case .array(let listed) = listing else { return XCTFail("list is not a list") }
-        XCTAssertEqual(listed.first?["tabId"], .string(id))
+        XCTAssertEqual(listed.first?["id"], .string(id))
         XCTAssertEqual(listed.first?["profile"], .string("Default"))
 
         try await expect(call(.close, tab), .null)

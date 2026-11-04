@@ -7,6 +7,11 @@ import TabProtocol
 enum Sessions {
     static func run(_ command: CLISession, client: ServerClient, target: Target, json: Bool) async throws {
         switch command {
+        case .new(let selector, let directory, let size, let command):
+            let project = try await project(selector, client: client, target: target)
+            let session = try await start(in: project, directory: directory, size: size, command: command,
+                                          client: client, target: target)
+            Output.record(record(session), columns: ["id"], json: json)
         case .list(let selector, let all):
             let projects = if let selector {
                 [try await Projects.resolve(selector, client: client, target: target)]
@@ -20,31 +25,19 @@ enum Sessions {
                 }
             }
             Output.list(records, columns: ["id", "projectId", "status", "attached", "directory", "name"], json: json)
-        case .create(let selector, let directory, let size, let command, let open):
-            try await create(selector, directory: directory, size: size, command: command, open: open, client: client,
-                             target: target, json: json)
-        case .open(let selector):
-            guard !target.isRemote else { throw CLIError("terminals open in the app on this computer; leave out --host") }
-            let session = try await calling(selector, client: client)
-            guard let info = try await client.sessions().first(where: { $0.id == session }) else {
-                throw CLIError("session \(session) isn't running")
-            }
-            try Panes.show(AppPane(kind: .terminal, session: session, project: info.project,
-                                   beside: Panes.caller(server: client.server.server)))
-            Output.ok(json: json)
-        case .end(let selector):
+        case .stop(let selector):
             try await client.endSession(try await calling(selector, client: client))
             Output.ok(json: json)
-        case .discard(let selector):
+        case .remove(let selector):
             try await client.discardSession(try await calling(selector, client: client))
             Output.ok(json: json)
         case .send(let selector, let text):
             try await input(Data(text.utf8), session: try await calling(selector, client: client), client: client)
             Output.ok(json: json)
-        case .keys(let selector, let bytes):
+        case .press(let selector, let bytes):
             try await input(bytes, session: try await calling(selector, client: client), client: client)
             Output.ok(json: json)
-        case .readScreen(let selector, let lines, let saved):
+        case .read(let selector, let lines, let saved):
             let session = try await calling(selector, client: client)
             let grid = if saved {
                 RunGrid(saved: try await client.readSavedScreen(session))
@@ -153,37 +146,40 @@ enum Sessions {
         return environment["TAB_SESSION_ID"].flatMap(SessionId.init(string:))
     }
 
-    /// The project of the Tab agent or terminal this command runs in.
+    /// The project `selector` names, else the one this command runs in.
+    static func project(_ selector: String?, client: ServerClient, target: Target) async throws -> ProjectDescriptor {
+        if let selector { return try await Projects.resolve(selector, client: client, target: target) }
+        return try await ownProject(client: client)
+    }
+
+    /// The project of the Tab agent or terminal this command runs in, else Home.
     static func ownProject(client: ServerClient) async throws -> ProjectDescriptor {
+        let projects = try await client.catalog().projects
         if let agent = Agents.hostingAgent(server: client.server.server) {
             let project = try await client.agentChat(.read(session: agent)).project
-            guard let descriptor = try await client.catalog().projects.first(where: { $0.id == project }) else {
+            guard let descriptor = projects.first(where: { $0.id == project }) else {
                 throw CLIError("this agent's project no longer exists")
             }
             return descriptor
         }
-        guard let session = hostingSession(server: client.server.server) else {
-            throw CLIError("give a project; this isn't a Tab terminal or agent on that server")
-        }
+        guard let session = hostingSession(server: client.server.server) else { return try home(projects) }
         guard let info = try await client.sessions().first(where: { $0.id == session }) else {
             throw CLIError("this terminal's session is no longer running")
         }
-        guard let project = try await client.catalog().projects.first(where: { $0.id == info.project }) else {
+        guard let project = projects.first(where: { $0.id == info.project }) else {
             throw CLIError("this terminal's project no longer exists")
         }
         return project
     }
 
-    static func create(_ selector: String?, directory: String?, size: Size, command: String?, open: Bool,
-                       client: ServerClient, target: Target, json: Bool) async throws {
-        guard !open || !target.isRemote else {
-            throw CLIError("terminals open in the app on this computer; leave out --host or --open")
-        }
-        let project = if let selector {
-            try await Projects.resolve(selector, client: client, target: target)
-        } else {
-            try await ownProject(client: client)
-        }
+    static func home(_ projects: [ProjectDescriptor]) throws -> ProjectDescriptor {
+        guard let home = projects.first(where: \.home) else { throw CLIError("the server has no Home project") }
+        return home
+    }
+
+    /// Starts a terminal in `project` and types `command` into it.
+    static func start(in project: ProjectDescriptor, directory: String?, size: Size = Size(cols: 80, rows: 24),
+                      command: String?, client: ServerClient, target: Target) async throws -> SessionInfo {
         let folder = try directory.map(target.directory) ?? project.directory.rawValue
         let typed = command.map { Data(($0 + "\r").utf8) }
         if let typed {
@@ -199,24 +195,19 @@ enum Sessions {
             do {
                 try await client.writeInput(session: session.id, bytes: typed)
             } catch {
-                throw CLIError("created session \(session.id), but could not type the command: \(CLI.message(error))")
+                throw CLIError("started session \(session.id), but could not type the command: \(CLI.message(error))")
             }
         }
-        if open {
-            do {
-                try Panes.show(AppPane(kind: .terminal, session: session.id, project: session.project,
-                                       beside: Panes.caller(server: client.server.server)))
-            } catch {
-                throw CLIError("created session \(session.id), but could not show it: \(CLI.message(error))")
-            }
-        }
+        return session
+    }
 
-        Output.record(.object([
+    static func record(_ session: SessionInfo) -> JSONValue {
+        .object([
             "id": .string(session.id.description),
             "name": .string(SessionName.of(session.id)),
             "projectId": .string(session.project.description),
             "directory": .string(session.directory.rawValue),
-        ]), columns: ["id"], json: json)
+        ])
     }
 
     static func input(_ bytes: Data, session: SessionId, client: ServerClient) async throws {

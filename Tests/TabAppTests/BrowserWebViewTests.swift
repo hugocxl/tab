@@ -183,7 +183,7 @@ final class BrowserWebViewTests: XCTestCase {
         try await expect(command("eval", id, ["script": .string("const x = 4; return x * 2;")]), .int(8))
         let listing = try await command("list")
         guard case .array(let tabs) = listing else { return XCTFail("list is not an array") }
-        XCTAssertEqual(tabs, [.object(["tabId": .string(id), "title": .string("Form Fixture"), "url": .string(pane.page.url), "profile": .string("Default"), "active": .bool(true)])])
+        XCTAssertEqual(tabs, [.object(["id": .string(id), "title": .string("Form Fixture"), "url": .string(pane.page.url), "profile": .string("Default"), "active": .bool(true)])])
         let screenshot = try await command("screenshot", id)
         let png = try XCTUnwrap(screenshot["png"]?.string.flatMap { Data(base64Encoded: $0) })
         XCTAssertEqual(Array(png.prefix(8)), [137, 80, 78, 71, 13, 10, 26, 10])

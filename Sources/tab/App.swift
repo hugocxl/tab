@@ -103,20 +103,12 @@ enum BrowserCommandRunner {
             Output.line("ok")
         case .json:
             Output.json(reply)
-        case .text:
-            Output.line(reply.string ?? reply.description)
-        case .tabs:
-            guard case .array(let tabs) = reply else { throw CLIError("invalid reply from Tab") }
-            for tab in tabs {
-                Output.line(["tabId", "title", "url", "profile", "active"].map { key in
-                    switch tab[key] {
-                    case .string(let text)?: text.replacingOccurrences(of: "\t", with: " ")
-                        .replacingOccurrences(of: "\n", with: " ").replacingOccurrences(of: "\r", with: " ")
-                    case .null?, nil: ""
-                    case let other?: other.description
-                    }
-                }.joined(separator: "\t"))
-            }
+        case .id, .idJSON:
+            guard let id = reply.string else { throw CLIError("invalid reply from Tab") }
+            Output.record(.object(["id": .string(id)]), columns: ["id"], json: invocation.output == .idJSON)
+        case .list:
+            guard case .array(let browsers) = reply else { throw CLIError("invalid reply from Tab") }
+            Output.list(browsers, columns: ["id", "title", "url", "profile", "active"], json: false)
         case .page:
             Output.line([reply["title"], reply["url"], reply["text"]].map { $0?.string ?? "" }.joined(separator: "\n"))
         case .screenshot:

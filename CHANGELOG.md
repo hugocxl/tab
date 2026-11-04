@@ -3,6 +3,43 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.51.0 - 2026-11-04
+
+### Added
+
+- `tab pane new terminal|agent|browser` adds a pane beside the terminal or agent
+  you run it from, and `tab tab new terminal|agent|browser` adds a tab to Home.
+- `tab worktree new PROJECT --pr NUMBER` checks out a pull request in a new
+  worktree.
+
+### Changed
+
+- The `tab` command line is reorganized so that each command reads
+  `tab <noun> <verb>`, and server commands never open anything in the app:
+  `session create` is now `session new`, `end` is `stop`, `discard` is
+  `remove`, `send-keys` is `press` and `read-screen` is `read`.
+- `project add` and `delete` are now `project new` and `remove`, and
+  `worktree create` is `worktree new`.
+- `session new` takes its project with `--project`, and outside Tab it starts
+  in Home.
+- `session create --open`, `session open`, `agent new`, `agent fork` and
+  `browser open` are replaced by `tab pane new` and `tab tab new`.
+- Timeouts are given in seconds everywhere with `--timeout`, and browser
+  commands name a browser by the ID that `pane new browser` prints.
+- `install-skills` is now `integrations install --dir`, and the agent hooks run
+  `tab integrations context` and `tab integrations report`, which Tab updates
+  when it starts.
+- `tab --help` groups commands by where they run, every command has its own
+  `--help`, and errors name the command and how to get its help.
+- Browser `reload`, `back`, `forward` and the storage and cookie changes print
+  `ok`, and `browser list` prints `id` instead of `tabId`.
+- `tab server stop --force` needs `--yes`, since it ends every terminal.
+
+### Fixed
+
+- `session events` prints tab-separated lines unless `--json` is given, as its
+  help now says.
+
 ## 0.50.0 - 2026-11-04
 
 ### Added

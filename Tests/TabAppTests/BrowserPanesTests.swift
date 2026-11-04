@@ -35,7 +35,7 @@ final class BrowserPanesTests: XCTestCase {
         XCTAssertEqual(model.browserProfiles.defaultProfileId, profile.id)
         XCTAssertTrue(controllers.allSatisfy { !$0.perform(.browserZoomIn) })
         XCTAssertNil(model.openBrowser(select: false))
-        XCTAssertThrowsError(try model.openBrowserPane(url: nil, profile: nil, project: nil, worktree: nil, split: false)) {
+        XCTAssertThrowsError(try model.openBrowserPane(url: nil, profile: nil, project: nil, beside: nil, newTab: false)) {
             XCTAssertEqual($0.localizedDescription, "the built-in browser is disabled")
         }
         settings.browser.enabled = true
@@ -103,29 +103,27 @@ final class BrowserPanesTests: XCTestCase {
         fails(web.id.description, "feature", "worktree 'feature' is ambiguous; pass its ID")
     }
 
-    func testCLIOpensSelectOnlyWhenUnscopedAndSplitBesideBackgroundShownPane() async throws {
+    func testCLIBrowsersOpenAsHomeTabsBesideTheCallerOrInTheBackgroundOfAProject() async throws {
         let model = try await model()
         defer { model.connection(.local)?.disconnect() }
         let background = try XCTUnwrap(model.addProject(try ModelFixtures.folder("background")))
         model.selectProject(model.state.home.id)
-        let foreground = try model.openBrowserPane(url: "about:blank", profile: nil, project: nil, worktree: nil, split: false)
-        XCTAssertEqual(model.activePane?.description, foreground.tabId)
-        let first = try model.openBrowserPane(url: "about:blank", profile: nil, project: background.description, worktree: nil, split: false)
-        let firstId = try XCTUnwrap(PaneId(first.tabId))
-        model.focusPane(firstId)
-        model.selectProject(model.state.home.id)
-        let second = try model.openBrowserPane(url: "about:blank", profile: nil, project: background.description, worktree: nil, split: true)
-        XCTAssertEqual(model.activePane?.description, foreground.tabId)
-        XCTAssertEqual(model.state.neighbor(of: firstId, .right)?.description, second.tabId)
-        let tabs = try model.browserTabs(project: nil, worktree: nil)
-        XCTAssertEqual(Set(tabs.filter(\.active).map(\.tabId)), [foreground.tabId, first.tabId])
-        let split = try model.openBrowserPane(url: "about:blank", profile: nil, project: nil, worktree: nil, split: true)
-        XCTAssertEqual(model.activePane?.description, split.tabId)
-        XCTAssertEqual(model.state.neighbor(of: try XCTUnwrap(PaneId(foreground.tabId)), .right)?.description, split.tabId)
-        let hidden = try model.openBrowserPane(url: "about:blank", profile: nil, project: model.state.home.id.description,
-                                              worktree: nil, split: false)
-        XCTAssertEqual(model.activePane?.description, split.tabId)
-        XCTAssertFalse(try XCTUnwrap(model.browserTabs(project: nil, worktree: nil).first { $0.tabId == hidden.tabId }).active)
+        let homeTabs = model.state.home.tabs.count
+        let tab = try model.openBrowserPane(url: "about:blank", profile: nil, project: nil, beside: nil, newTab: true)
+        XCTAssertEqual(model.activePane?.description, tab.tabId)
+        XCTAssertEqual(model.state.home.tabs.count, homeTabs + 1)
+
+        let scoped = try model.openBrowserPane(url: "about:blank", profile: nil, project: background.description,
+                                               beside: nil, newTab: false)
+        XCTAssertEqual(model.activePane?.description, tab.tabId)
+        XCTAssertEqual(model.state.paneProject(try XCTUnwrap(PaneId(scoped.tabId))), background)
+
+        let agent = try XCTUnwrap(model.newAgent(in: model.state.home.id))
+        let session = try XCTUnwrap(model.state.pane(agent)?.content.activitySession)
+        let beside = try model.openBrowserPane(url: "about:blank", profile: nil, project: nil, beside: session,
+                                               newTab: false)
+        XCTAssertEqual(model.state.neighbor(of: agent, .right)?.description, beside.tabId)
+        XCTAssertEqual(model.activePane?.description, beside.tabId)
     }
 
     func testCatalogMenuAndPaletteActionsReachTheBrowserController() async throws {

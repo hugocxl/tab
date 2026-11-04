@@ -200,19 +200,19 @@ final class EndToEndTests: XCTestCase {
             process.waitUntilExit()
             return (process.terminationStatus, String(decoding: data, as: UTF8.self))
         }
-        let (status, created) = try run(["session", "create", "Home", "--", "echo", "from-cli"])
-        guard status == 0 else { throw XCTSkip("tab session create failed: \(created)") }
+        let (status, created) = try run(["session", "new", "--project", "Home", "--", "echo", "from-cli"])
+        guard status == 0 else { throw XCTSkip("tab session new failed: \(created)") }
         let session = created.trimmingCharacters(in: .whitespacesAndNewlines)
         XCTAssertNotNil(SessionId(string: session), created)
-        let (waited, line) = try run(["session", "wait", session, "--text", "from-cli", "--timeout-ms", "10000"])
+        let (waited, line) = try run(["session", "wait", session, "--text", "from-cli", "--timeout", "10"])
         XCTAssertEqual(waited, 0, line)
         XCTAssertTrue(line.contains("from-cli"))
         let (listed, list) = try run(["session", "list", "--json"])
         XCTAssertEqual(listed, 0, list)
         XCTAssertTrue(list.contains(session))
-        let (ended, _) = try run(["session", "end", session])
+        let (ended, _) = try run(["session", "stop", session])
         XCTAssertEqual(ended, 1, "ending needs --yes")
-        XCTAssertEqual(try run(["session", "end", session, "--yes"]).0, 0)
+        XCTAssertEqual(try run(["session", "stop", session, "--yes"]).0, 0)
     }
 
     func testARemoteConnectionThroughTheStdioBridge() async throws {

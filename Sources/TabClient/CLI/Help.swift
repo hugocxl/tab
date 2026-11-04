@@ -1,299 +1,80 @@
-/// Usage text of the `tab` command line tool.
+/// Usage text of the `tab` command line tool, made from `CLICommands`.
 public enum CLIHelp {
-    public static let root = """
-    Tab - terminal client and server management
+    public static let root: String = {
+        func section(_ title: String, _ section: CLIGroup.Section, extra: [(String, String)] = []) -> String {
+            let rows = extra + CLICommands.groups.filter { $0.section == section && !$0.hidden }.map { ($0.name, $0.summary) }
+            return ([title] + rows.map { name, summary in
+                "  " + name.padding(toLength: 14, withPad: " ", startingAt: 0) + summary
+            }).joined(separator: "\n")
+        }
+        return """
+        Tab: terminals that keep running on a server, and the app that shows them
 
-    Usage: tab [--host DESTINATION] [COMMAND]
+        Usage: tab [--host DESTINATION] <command> ...
 
-      (no command)  Print command usage
-      <folder>      Open a folder as a project in the desktop app, or register it
-                    on the server without it or over SSH
-      server        Start, inspect or stop the server
-      project       List, add, edit or delete server projects
-      session       Create terminals, send input, read output and end sessions
-      agent         Open a new agent, or fork one, in a pane of the desktop app
-      worktree      List, create, register or remove Git worktree projects
-      settings      Read or update server settings
-      activity      Read or acknowledge agent activity
-      git           Run a server Git action using JSON
-      files         Run a server file action using JSON
-      exec          Execute a program in a server project
-      mobile        Enable access, pair phones and revoke devices
-      browser       Drive browser tabs in the desktop app on this computer
-      install-skills
-                    Install the tab-cli skill for AI coding agents
-      integrations  Show, install or remove the skill and hooks of coding agents
-      agent-context Print what an agent starting in a Tab terminal is told
-      stdio         Connect stdin/stdout to the server; used over SSH
-      --help | --version | --build-info
+        \(section("On the server; --host DESTINATION uses another computer's over SSH", .server))
 
-    Run tab <command> --help or tab help <command> for usage. Management
-    commands accept --json.
-    Commands connect directly to the server, starting it if needed, except server
-    status/stop, which never start it. --host uses the server on another computer
-    over SSH (user@host, an ssh_config alias or ssh://user@host:port); Tab must be
-    installed there, and directories are absolute paths on that computer.
-    TAB_DIR selects the local profile folder. No app is required, except by
-    browser commands, which start it for open.
-    Tabs, panes and workspaces belong to UI clients.
-    Project selectors accept an exact ID, unique name or directory path.
-    Inside a Tab terminal, session commands default to that terminal. Inside a
-    Tab agent, agent commands default to that agent, and panes open beside it.
-    Use ./NAME to open a folder named like a command.
-    Use -- before literal arguments that start with a dash, or before the command
-    of session create.
-    """
+        \(section("In the app on this Mac", .app, extra: [("<folder>", "Open a folder as a project")]))
 
-    public static let server = """
-    Usage: tab server start|status|stop [--json]
-      stop [--force]  Stop only if idle; --force ends all running terminals.
-    """
+        \(section("On this Mac", .local))
 
-    public static let project = """
-    Usage: tab project <action> [--json]
-      list
-      add <directory> [--name NAME] [--create] [--reuse]
-      rename <project> <name>
-      delete <project> --yes          Ends its terminals and deletes child projects;
-                                     files and worktree folders stay on disk
+        Run tab <command> --help, or tab help <command>, for its commands.
 
-    Add creates a distinct project even when its directory is already registered;
-    --reuse prints the existing one instead. --create makes the directory first.
-    Text list columns: id, name, directory (tab-separated).
-    """
+        A session is a terminal on the server; it runs whether or not the app shows
+        it. A tab is a card in the app's sidebar, and a pane is one terminal, agent or
+        browser in a tab's layout.
+        Projects are named by ID, unique name or folder; sessions by ID, a unique
+        start of one, or a name such as wispy-cedar. Inside a Tab terminal or agent,
+        a missing session means yours, a missing project yours, and new panes open
+        beside yours.
+        Commands that print data take --json. Put -- before words that start with a
+        dash. Use ./NAME to open a folder named like a command.
+        DESTINATION is user@host, an ssh_config alias or ssh://user@host:port; Tab
+        must be installed there, and folders are absolute paths on that computer.
+        TAB_DIR selects the profile folder.
+        """
+    }()
 
-    public static let session = """
-    Usage: tab session <action> [--json]
-      list [--project PROJECT] [--all]  Live sessions; --all includes saved/ended ones
-      create [project] [--directory PATH] [--cols N] [--rows N] [--open]
-             [-- COMMAND...]
-      open [id]                        Show the terminal in a pane of the desktop app
-      send [id] <text>                 Send literal text without pressing Return
-      send-keys [id] <key>             Enter, Tab, Escape, Backspace, Ctrl+C/D/Z
-      read-screen [id] [--lines N] [--saved]
-      history [id] [--before CURSOR] [--limit N] [--saved]
-      search [id] <text> [--ignore-case] [--before CURSOR] [--limit N] [--saved]
-      wait [id] --text TEXT [--ignore-case] | --exit
-           [--timeout SECONDS | --timeout-ms N]
-      events [id]                      Follow sessions, agents and notifications
-      end [id] --yes                   End the process, keeping saved output
-      discard [id] --yes               End the process and delete saved output
+    /// The usage of a group, or of one of its commands, for `tab help ...`.
+    static func topic(_ words: [String]) throws -> String {
+        guard let first = words.first else { return root }
+        guard let group = CLICommands.group(first) else { throw CLIError("unknown command \(first); run tab --help") }
+        let rest = Array(words.dropFirst())
+        guard !rest.isEmpty else { return self.group(group) }
+        let (spec, consumed) = group.command(for: rest)
+        guard let spec, consumed == rest.count else {
+            throw CLIError("unknown command tab \(words.joined(separator: " ")); run tab \(first) --help")
+        }
+        return command(spec, in: group)
+    }
 
-    Create prints the new session ID and types COMMAND into it, then Return.
-    COMMAND words are joined with spaces without shell quoting; quote the whole
-    command to preserve its quotes and shell syntax.
-    Sessions outlive this command; the app lists them under Existing Terminals.
-    --open and open show the terminal in a pane beside the Tab terminal or agent
-    this command runs in, else in its project, starting the app if needed.
-    Session IDs are UUIDs; a unique start of one, of at least 4 characters, works,
-    and so does a session's name, such as wispy-cedar, when no other has it.
-    Inside a Tab terminal, the ID defaults to that terminal and the project to its
-    project. Wait prints the first visible line containing TEXT, or how the session
-    ended; it fails after the timeout (default 30 seconds, maximum 3600).
-    Use exec in COMMAND when --exit should wait for that program to finish.
-    Read-screen and wait briefly attach to a live terminal; --saved reads its last
-    checkpoint instead and also works after it ends. They never close app panes.
-    Ended sessions and their saved output are automatically removed after 7 days.
-    Read-screen returns the last N visible rows (default 50), not scrollback.
-    History/search return one page as JSON, with next for --before; 0 starts paging.
-    Events prints one JSON object per line until interrupted: started, ended,
-    agent (its state: working, blocked or idle), attention, completed and
-    notification (a program's title and body). Without an id it follows every
-    session.
-    Text list columns: id, project-id, status, attached, directory, name.
-    """
+    /// Every command of the group, then what they share.
+    static func group(_ group: CLIGroup) -> String {
+        let list = group.commands.map { spec in
+            (usage(spec).map { "  " + $0 } + ["      " + spec.summary]).joined(separator: "\n")
+        }.joined(separator: "\n")
+        return "tab \(group.name): \(group.summary)\n\n\(list)\n\n\(group.notes)"
+    }
 
-    public static let agent = """
-    Usage: tab agent <action> [--json]
-      new [project] [--provider claude|codex]  A new conversation in an agent pane
-      fork [id]                        A copy of the conversation in a new agent pane
+    /// One command, then what its group's commands share. A group that is
+    /// one command, such as `git`, has one help.
+    static func command(_ spec: CLICommandSpec, in group: CLIGroup) -> String {
+        guard spec.path.count > 1 else { return self.group(group) }
+        let lines = usage(spec)
+        let usage = (["Usage: tab " + lines[0]] + lines.dropFirst().map { "   or: tab " + $0 }).joined(separator: "\n")
+        return "\(usage)\n\n\(spec.summary).\n\n\(group.notes)"
+    }
 
-    Both print the new agent's ID and open its pane beside the Tab terminal or
-    agent this command runs in, else in the project, starting the app if needed.
-    Fork keeps the transcript, provider, model, effort and access of the agent
-    (by default, the one this command runs in); from its next message the copy
-    continues on its own, and the original never sees what it says.
-    Inside a Tab agent, the project defaults to that agent's project. Agents
-    run on this computer's server only.
-    """
-
-    public static let worktree = """
-    Usage: tab worktree <action> [--json]
-      list <project>
-      create <project> <name> [--branch NAME] [--base REF | --existing]
-             [--directory PATH] [--hooks]
-      checkout-pr <project> <number> [--name NAME] [--directory PATH] [--hooks]
-      register <project> <directory>
-      remove <worktree-project> --yes [--force] [--hooks]
-
-    Create makes a new branch named after the worktree from HEAD; --existing checks
-    out a branch that exists. The directory defaults to ~/.tab/worktrees/<project>/
-    <name>. --hooks runs the setup or teardown commands from .tab/worktree.json
-    and ~/.config/tab/worktree.json, printing each one; without it none run.
-    Remove deletes the worktree directory and its project, ending its terminals,
-    and refuses uncommitted changes unless --force is given.
-    Text list columns: project-id, branch, directory (tab-separated).
-    """
-
-    public static let settings = """
-    Usage: tab settings get [--json]
-           tab settings set <key> <value> [--json]
-    Keys: startup-command (command line or 'default'), history-budget-bytes (integer),
-          shell-integration (true/false). Get returns JSON.
-    """
-
-    public static let activity = """
-    Usage: tab activity list [--json]
-           tab activity ack <event-id>... [--json]
-    Text list columns: session-id, project-id, provider, state, event-id, event
-    (tab-separated), one row per session. JSON returns the server's activity
-    snapshot.
-    """
-
-    public static let git = """
-    Usage: tab git <project> <action-json> [--json]
-    Examples: tab git Home '{"type":"summary"}'
-              tab git MyProject '{"type":"log","maxCount":20,"skip":0}'
-    Uses the protocol's GitAction JSON shape and prints the GitReply JSON.
-    Actions can modify the repository. Watch is unavailable on a one-shot client.
-    """
-
-    public static let files = """
-    Usage: tab files <project> <action-json> [--json]
-    Examples: tab files MyProject '{"type":"list","path":""}'
-              tab files MyProject '{"type":"read","path":"README.md"}'
-    Uses the protocol's FilesAction JSON shape and prints the FilesReply JSON.
-    Paths are relative to the project. Actions can write or delete files.
-    Watch/unwatch are unavailable on a one-shot client.
-    """
-
-    public static let exec = """
-    Usage: tab exec <project> [--json] [--timeout-ms N] -- <program> [args...]
-    Runs through the server in the project's directory, without a shell.
-    For shell syntax, explicitly use /bin/sh -c '...'. Timeout defaults to 30000ms
-    (maximum 300000ms). Text mode forwards stdout/stderr. JSON mode prints the
-    complete result. A failed, timed-out, cancelled or truncated run exits nonzero.
-    """
-
-    public static let mobile = """
-    Usage: tab mobile [action]
-      (no action)               Mobile access status and paired devices
-      enable [--port N]         Let phones connect; --port changes the port (7419)
-      disable                   Turn mobile access off
-      pair [--address HOST]...  Show a pairing code and wait for the phone
-      revoke <device>           Revoke a device by the start of its ID
-
-    Pairing codes list the server's own addresses. --address puts a DNS name or
-    IPv4 address first, for a server that phones reach by another name, such as a
-    cloud server's public name. Repeat it for more, up to 8 addresses in all.
-    """
-
-    public static let browser = """
-    Usage: tab browser <action>
-      open [url] [--split] [--project PROJECT] [--worktree WORKTREE]
-           [--profile PROFILE]          Open a tab and print its ID
-      list [--project PROJECT] [--worktree WORKTREE] [--json]
-      navigate <tab-id> <url>
-      read <tab-id> [--json]            Title, URL and page text
-      close <tab-id>
-      reload|back|forward <tab-id>
-      screenshot <tab-id>               Print the page as a base64 PNG
-      eval <tab-id> <javascript>        Print the result as JSON
-      click|hover|scroll-into-view|check|uncheck <tab-id> <selector>
-      fill <tab-id> <selector> <text>
-      type <tab-id> <selector> <text> [--submit]
-      press <tab-id> <key> [selector]
-      select <tab-id> <selector> <value>
-      is <tab-id> visible|hidden|enabled|disabled|checked <selector>
-      get-text|get-value|get-count <tab-id> <selector>
-      get-attribute <tab-id> <selector> <attribute>
-      get-html <tab-id> [selector]
-      find <tab-id> role|text|label|placeholder|testid <value>
-      snapshot <tab-id> [selector]      Interactive elements, each with a selector
-      wait <tab-id> [--selector SELECTOR] [--text TEXT] [--url-contains TEXT]
-           [--function JAVASCRIPT] [--timeout-ms N]
-      wait-for <tab-id> <selector> [ms]
-      wait-for-navigation <tab-id> [ms | --timeout-ms N]
-      storage get <tab-id> <key> [local|session]
-      storage set <tab-id> <key> <value> [local|session]
-      storage clear <tab-id> [local|session]
-      cookies get <tab-id> [url]
-      cookies set <tab-id> <name> <value> <domain> [--path PATH] [--secure]
-                  [--http-only] [--expires UNIX-SECONDS]
-      cookies delete <tab-id> <name> [domain]
-      cookies clear <tab-id>
-
-    Browser commands talk to the Tab desktop app on this computer, not to the
-    server, so they don't take --host. Open starts the app if it isn't running.
-    Tabs open in the current project, or the one named by --project and
-    --worktree; --split opens the tab beside the current pane instead.
-    Use the tab ID that open or list prints. Page actions print their result as
-    JSON. Waits give up after --timeout-ms or ms (default 5000, 10000 for
-    wait-for-navigation; maximum 60000).
-    TAB_CLI_TIMEOUT sets how many seconds the app has to answer (default 10).
-    Text list columns: tab-id, title, url, profile, active (tab-separated).
-    """
-
-    public static let installSkills = """
-    Usage: tab install-skills [--dir DIR]...
-    Installs the tab-cli skill, which teaches AI coding agents to use this command,
-    into each agent folder that exists: ~/.claude/skills, ~/.codex/skills and
-    ~/.agents/skills. --dir adds another skills folder; repeat it for more.
-    An installed copy is replaced.
-    """
-
-    public static let integrations = """
-    Usage: tab integrations [status|install|remove] [--json]
-    Teaches the coding agents on this computer (Claude Code, Codex, OpenCode and
-    Pi) to use Tab. install writes the tab-cli skill into each agent found, and a
-    session-start hook into Claude Code and Codex that runs tab agent-context.
-    remove takes them out again; other skills, hooks and settings are kept.
-    Codex runs a new or changed hook only after you approve it with /hooks.
-    Text status columns: agent, found, skill, hook (tab-separated).
-    """
-
-    public static let agentContext = """
-    Usage: tab agent-context
-    Prints what Tab tells a coding agent whose session starts in a Tab terminal:
-    which terminal it is and how to use tab. Prints nothing outside a Tab terminal.
-    Agent hooks installed by tab integrations run it.
-    """
-
-    public static let agentEvent = """
-    Usage: tab agent-event <agent> working|blocked|idle|ended
-    Tells Tab what the agent in this terminal is doing; agent is claude, codex,
-    opencode or pi. Agent hooks installed by tab integrations run it. It prints
-    nothing and never fails, so a missing server doesn't disturb the agent.
-    """
-
-    public static let stdio = """
-    Usage: tab stdio [--no-start]
-    Joins stdin and stdout to this computer's server, for Tab on another computer,
-    which runs it over SSH. --no-start uses only a running server.
-    """
-
-    /// The usage of a command group, for `tab help <group>`.
-    public static func topic(_ group: String) -> String? {
-        switch group {
-        case "server": server
-        case "project": project
-        case "session": session
-        case "agent": agent
-
-        case "worktree": worktree
-        case "settings": settings
-        case "activity": activity
-        case "git": git
-        case "files": files
-        case "exec": exec
-        case "mobile": mobile
-        case "browser": browser
-        case "install-skills": installSkills
-        case "integrations": integrations
-        case "agent-context": agentContext
-        case "agent-event": agentEvent
-        case "stdio": stdio
-        default: nil
+    /// The command's forms, with `--json` where it takes it.
+    private static func usage(_ spec: CLICommandSpec) -> [String] {
+        spec.usage.map { form in
+            guard spec.json else { return [spec.name, form].filter { !$0.isEmpty }.joined(separator: " ") }
+            // --json goes before the words after --, which are taken as given.
+            let parts = form.components(separatedBy: " [-- ")
+            let options = parts[0].components(separatedBy: " -- ")
+            let head = [options[0], "[--json]"].filter { !$0.isEmpty }.joined(separator: " ")
+            let literal = parts.count > 1 ? " [-- " + parts[1] : options.count > 1 ? " -- " + options[1] : ""
+            return "\(spec.name) \(head)\(literal)"
         }
     }
 }

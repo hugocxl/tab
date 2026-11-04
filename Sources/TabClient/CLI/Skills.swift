@@ -1,37 +1,19 @@
 import Foundation
 
 /// The tab-cli skill, which teaches AI coding agents to use `tab`, and
-/// installing it where agents look for skills.
+/// installing it into skills folders.
 public enum AgentSkill {
     public static let folderName = "tab-cli"
-    /// Agent folders in the home folder; each keeps its skills in `skills`.
-    public static let agents = [".claude", ".codex", ".agents"]
 
-    /// Writes the skill into every agent folder in `home` and into each of
-    /// `directories`, replacing an older copy, and returns the files written.
-    public static func install(home: String?, directories: [String],
+    /// Writes the skill into each of `directories`, replacing an older copy,
+    /// and returns the files written.
+    public static func install(directories: [String],
                                currentDirectory: String = FileManager.default.currentDirectoryPath) throws -> [URL] {
-        let fileManager = FileManager.default
-        var roots: [URL] = []
-        if let home {
-            for agent in agents {
-                let folder = URL(fileURLWithPath: home).appendingPathComponent(agent, isDirectory: true)
-                var isDirectory: ObjCBool = false
-                if fileManager.fileExists(atPath: folder.path, isDirectory: &isDirectory), isDirectory.boolValue {
-                    roots.append(folder.appendingPathComponent("skills", isDirectory: true))
-                }
-            }
-        }
-        for directory in directories {
-            roots.append(URL(fileURLWithPath: directory, relativeTo: URL(fileURLWithPath: currentDirectory))
-                .standardizedFileURL)
-        }
-        guard !roots.isEmpty else {
-            throw CLIError("found no AI agent folder (~/.claude, ~/.codex or ~/.agents); choose one with --dir")
-        }
-        return try roots.map { root in
+        try directories.map { directory in
+            let root = URL(fileURLWithPath: directory, relativeTo: URL(fileURLWithPath: currentDirectory, isDirectory: true))
+                .standardizedFileURL
             let folder = root.appendingPathComponent(folderName, isDirectory: true)
-            try fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             let file = folder.appendingPathComponent("SKILL.md")
             try Data(text.utf8).write(to: file, options: .atomic)
             return file
@@ -41,70 +23,51 @@ public enum AgentSkill {
     public static let text = #"""
     ---
     name: tab-cli
-    description: How to drive Tab from a shell with the `tab` command — start terminals that keep running, type into them, read and wait on their output, open terminal and agent panes in the app, fork your own conversation into a new agent pane, and manage projects and Git worktrees. Use this when you are an agent running inside a Tab terminal or Tab agent pane (or any script on the same computer) and want work to run in its own terminal instead of blocking yours, the user asks for a new terminal or agent pane, or to drive the Tab app's built-in browser.
+    description: How to drive Tab from a shell with the `tab` command — start terminals that keep running, type into them, read and wait on their output, open terminal, agent and browser panes in the app, fork your own conversation into a new agent pane, and manage projects and Git worktrees. Use this when you are an agent running inside a Tab terminal or Tab agent pane (or any script on the same computer) and want work to run in its own terminal instead of blocking yours, the user asks for a new terminal, agent or browser pane or tab, or to drive the Tab app's built-in browser.
     ---
 
     # Tab CLI
 
-    Tab keeps terminals in a background server. The `tab` command talks to that
-    server directly; the app doesn't need to be open. Terminals you start keep
-    running after your command returns, and the user can open them in the app from
-    **Existing Terminals**.
+    Tab keeps terminals in a background server. `tab` has two kinds of commands:
 
-    Run `tab --help` and `tab <command> --help` for every option. Add `--json`
-    to any management command for machine-readable output.
+    - **On the server**: `session`, `project`, `worktree` and the like. A
+      session is a terminal that keeps running after your command returns,
+      whether or not the app shows it. These never open anything in the app.
+    - **In the app**: `pane new` adds a pane beside yours, `tab new` adds a tab
+      (a card in the sidebar) to Home, and `browser` drives a browser pane.
+
+    Run `tab --help` and `tab <command> --help` for every option. Commands that
+    print data take `--json`.
 
     ## When to use it
 
     - Start a long-running process (a dev server, a test watcher, a log tail) in its
       own terminal, then check on it later.
     - Wait until that process prints something, or exits, before going on.
+    - Show the user a terminal, agent or browser in a pane.
     - Create a Git worktree for a task.
 
     Don't use it for work a plain command can do in your own terminal.
 
-    ## Inside a Tab terminal
+    ## Inside Tab
 
-    Tab sets `TAB_SESSION_ID` and `TAB_SERVER_ID` in every terminal. Session
-    commands then default to your own terminal, and `session create` to your
-    project, so most commands need no IDs.
-
-    ## Inside a Tab agent pane
-
-    Agents in Tab's own agent panes get `TAB_AGENT_ID` and `TAB_SERVER_ID`, and
-    `tab` on `PATH`. `session create` and `agent new` default to your project,
-    `agent fork` to your own conversation, and panes open beside yours.
-
-    ## Open panes in the app
-
-    When the user asks for a terminal or agent "pane", show it in the app;
-    a terminal started without `--open` runs unseen.
-
-    ```bash
-    tab session create --open                 # a new terminal pane beside yours
-    tab session create --open -- npm run dev  # the same, running a command
-    tab session open "$WEB"                   # show a terminal you started earlier
-    tab agent new                             # a new agent pane, a fresh conversation
-    tab agent fork                            # a new agent pane continuing this conversation
-    ```
-
-    `agent fork` copies your transcript, model, effort and access mode, so the
-    user can carry on in parallel. Never start `claude` or `codex` in a terminal
-    for that: it is a separate program that asks its own questions, such as
-    whether to trust the folder, regardless of the access mode chosen in Tab.
-
+    Tab sets `TAB_SESSION_ID` and `TAB_SERVER_ID` in every terminal, and
+    `TAB_AGENT_ID` in its own agent panes, which also have `tab` on `PATH`.
+    Session commands then default to your own terminal, a missing project to
+    your project, and new panes open beside yours, so most commands need no IDs.
 
     ## Start a terminal and capture its ID
 
-    `session create` prints the new session ID. Everything after `--` is typed into
-    the new terminal, followed by Return. Capture the ID; never guess one.
+    `session new` starts a terminal that runs unseen and prints its ID. Everything
+    after `--` is typed into it, followed by Return. Capture the ID; never guess one.
 
     ```bash
-    WEB=$(tab session create -- npm run dev)
-    TESTS=$(tab session create MyProject --directory ./packages/api -- exec npm test)
+    WEB=$(tab session new -- npm run dev)
+    TESTS=$(tab session new --project MyProject --directory ./packages/api -- exec npm test)
     ```
 
-    Outside a Tab terminal, name the project: an ID, a unique name, or its folder.
+    Outside Tab the project defaults to Home; name another with `--project`: an
+    ID, a unique name, or its folder.
 
     Every session also has a name, such as `wispy-cedar`, shown by `session list`.
     It works wherever an ID does while no other session has it.
@@ -113,20 +76,40 @@ public enum AgentSkill {
     its own quotes, pipes, or `;`:
 
     ```bash
-    tab session create -- 'grep -rn "TODO list" src | wc -l'
+    tab session new -- 'grep -rn "TODO list" src | wc -l'
     ```
+
+    ## Show things in the app
+
+    When the user asks for a terminal, agent or browser "pane", add one with
+    `pane new`; a terminal from `session new` runs unseen.
+
+    ```bash
+    tab pane new terminal                     # a new terminal pane beside yours
+    tab pane new terminal -- npm run dev      # the same, running a command
+    tab pane new terminal "$WEB"              # show a terminal you started earlier
+    tab pane new agent                        # a new agent pane, a fresh conversation
+    tab pane new agent --fork                 # a new agent pane continuing this conversation
+    tab pane new browser http://localhost:3000   # prints the browser's ID
+    tab tab new terminal                      # a new tab in Home instead
+    ```
+
+    `pane new agent --fork` copies your transcript, model, effort and access mode,
+    so the user can carry on in parallel. Never start `claude` or `codex` in a
+    terminal for that: it is a separate program that asks its own questions, such
+    as whether to trust the folder, regardless of the access mode chosen in Tab.
 
     ## Wait instead of polling
 
     ```bash
-    tab session wait "$WEB" --text "ready" --timeout-ms 120000   # prints the matching line
-    tab session wait "$TESTS" --exit                              # prints how it ended
+    tab session wait "$WEB" --text "ready" --timeout 120   # prints the matching line
+    tab session wait "$TESTS" --exit                        # prints how it ended
     ```
 
-    `wait` fails with a nonzero exit if the timeout passes (default 30 s) or, for
-    `--text`, if the terminal ends without showing the text. It looks at the
-    visible screen, not scrollback. Don't wait on your own terminal: it is busy
-    running `tab`.
+    `wait` fails with a nonzero exit if the timeout passes (default 30 seconds)
+    or, for `--text`, if the terminal ends without showing the text. It looks at
+    the visible screen, not scrollback. Don't wait on your own terminal: it is
+    busy running `tab`.
 
     `--exit` waits for the terminal's shell to end. Use `exec` for a one-shot command,
     as in the test example, so the program replaces the shell and its exit ends the
@@ -134,7 +117,7 @@ public enum AgentSkill {
 
     ## Follow what happens
 
-    `tab session events` prints one JSON object per line until stopped: sessions
+    `tab session events` prints one line per event until stopped: terminals
     starting and ending, agents changing state (`working`, `blocked`, `idle`),
     and notifications programs send. Give a session to follow only that one.
 
@@ -145,45 +128,46 @@ public enum AgentSkill {
     ## Read output
 
     ```bash
-    tab session read-screen "$WEB" --lines 40     # last visible rows, not scrollback
+    tab session read "$WEB" --lines 40          # last visible rows, not scrollback
     tab session search "$WEB" "error" --ignore-case
-    tab session history "$WEB" --limit 200        # JSON, paged with --before
+    tab session history "$WEB" --limit 200      # JSON, paged with --before
     ```
 
     After a terminal ends, add `--saved` to read its last saved output.
 
     ## Send input deliberately
 
-    `send` types text without pressing Return; `send-keys` presses one key
+    `send` types text without pressing Return; `press` presses one key
     (Enter, Tab, Escape, Backspace, Ctrl+C, Ctrl+D, Ctrl+Z).
 
     ```bash
-    tab session send-keys "$WEB" Ctrl+C
-    tab session read-screen "$WEB"
+    tab session press "$WEB" Ctrl+C
+    tab session read "$WEB"
     tab session send "$WEB" "npm run dev"
-    tab session send-keys "$WEB" Enter
+    tab session press "$WEB" Enter
     ```
 
     You are typing into a live terminal. Read the screen first if you are unsure
     what is running.
 
-    ## End terminals you started
+    ## Stop terminals you started
 
     ```bash
-    tab session list --project MyProject     # id, project-id, status, attached, directory
-    tab session end "$WEB" --yes
+    tab session list --project MyProject     # id, projectId, status, attached, directory, name
+    tab session stop "$WEB" --yes
     ```
 
-    Only end terminals you created. A terminal the user is looking at closes in
+    Only stop terminals you started. A terminal the user is looking at closes in
     their app too.
 
     ## Projects and worktrees
 
     ```bash
     tab project list
-    tab project add ~/code/app --reuse                 # prints the existing project if there is one
-    tab worktree create MyProject login                # branch "login" from HEAD, default location
-    tab worktree create MyProject fix --branch fix/x --base main --hooks
+    tab project new ~/code/app --reuse               # prints the existing project if there is one
+    tab worktree new MyProject login                 # branch "login" from HEAD, default location
+    tab worktree new MyProject fix --branch fix/x --base main --hooks
+    tab worktree new MyProject --pr 42               # check out pull request 42
     tab worktree list MyProject
     tab worktree remove login --yes
     ```
@@ -194,41 +178,38 @@ public enum AgentSkill {
 
     ## Browser
 
-    `tab browser` drives tabs in the Tab app's built-in browser: open a page,
-    read it, click and type, take screenshots. It talks to the app on this Mac,
-    so it needs the app (`open` starts it) and never takes `--host`.
+    `tab browser` drives the browser panes of the Tab app on this Mac: read a
+    page, click and type, take screenshots. Open one with `pane new browser` or
+    `tab new browser`, which print its ID.
 
     ```bash
-    PAGE=$(tab browser open http://localhost:3000)    # prints the new tab's ID
+    PAGE=$(tab pane new browser http://localhost:3000)
     tab browser wait-for-navigation "$PAGE"
     tab browser snapshot "$PAGE"                       # interactive elements, each with a selector
     tab browser fill "$PAGE" "#email" "me@example.com"
     tab browser click "$PAGE" "button[type=submit]"
-    tab browser wait "$PAGE" --text "Welcome" --timeout-ms 10000
+    tab browser wait "$PAGE" --text "Welcome" --timeout 10
     tab browser read "$PAGE"                           # title, URL and page text
     ```
 
-    - Capture the tab ID that `open` prints, or find it with `tab browser list`;
-      never guess one.
-    - Wait after anything that loads a page (`open`, `navigate`, a submitting
+    - Capture the ID that `pane new browser` prints, or find it with
+      `tab browser list`; never guess one.
+    - Wait after anything that loads a page (opening, `navigate`, a submitting
       `click`, `back`): `wait-for-navigation`, `wait-for <selector>`, or `wait`.
     - `snapshot` lists the interactive elements, each with a `selector` you can
       pass to `click`, `fill`, `type`, and the other element commands. They print
       `false` when nothing matches.
-    - `evaluate` runs JavaScript in the page and prints the result as JSON.
-    - Screenshots work on background tabs:
+    - `eval` runs JavaScript in the page and prints the result as JSON.
+    - Screenshots work on background browsers:
       `tab browser screenshot "$PAGE" | base64 -D > page.png`.
-    - Close only tabs you opened.
+    - Close only browsers you opened.
 
     ## Other computers
 
-    Put `--host user@computer` before a server-backed command, such as `project`,
-    `session`, or `worktree`, to use another computer's server over SSH. Directories
-    are then absolute paths on that computer.
-
-    Folder-opening commands, `browser`, and `install-skills` do not support
-    `--host`.
-    `install-skills --dir DIR` always installs into a local directory.
+    Put `--host user@computer` before a server command, such as `session`,
+    `project`, or `worktree`, to use another computer's server over SSH.
+    Folders are then absolute paths on that computer. `pane`, `tab`, `browser`
+    and `integrations` work on this Mac only and don't take `--host`.
 
     """#
 }

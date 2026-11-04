@@ -45,10 +45,11 @@ public protocol BrowserHost: AnyObject {
 
     // MARK: For automation (`tab browser`)
 
-    /// Opens a browser pane in the project `project` and `worktree` name (the
-    /// current project when both are `nil`), splitting when `split`. Throws a
+    /// Opens a browser pane: as a new tab of Home with `newTab`; else beside
+    /// the pane showing the terminal or agent `beside`, else in the tab of
+    /// `project` (Home when `nil`), where Home gets a new tab. Throws a
     /// message for an unknown project.
-    func openBrowserPane(url: String?, profile: String?, project: String?, worktree: String?, split: Bool) throws
+    func openBrowserPane(url: String?, profile: String?, project: String?, beside: SessionId?, newTab: Bool) throws
         -> BrowserPaneController
     /// The browser panes of the named project, or of every project when both
     /// are `nil`.

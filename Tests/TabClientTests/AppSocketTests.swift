@@ -20,9 +20,12 @@ final class AppSocketTests: XCTestCase {
         XCTAssertEqual(try json(evaluate), #"{"args":{"script":"1","tabId":"T"},"verb":"browser.eval"}"#)
         let session = SessionId(), project = ProjectId()
         let show = AppRequest.show(AppPane(kind: .agent, session: session, project: project, provider: .codex))
-        XCTAssertEqual(try json(show), #"{"pane":{"kind":"agent","project":"\#(project)","provider":"codex","#
-                       + #""session":"\#(session)"},"type":"show"}"#)
+        XCTAssertEqual(try json(show), #"{"pane":{"kind":"agent","placement":"pane","project":"\#(project)","#
+                       + #""provider":"codex","session":"\#(session)"},"type":"show"}"#)
         XCTAssertEqual(try JSONDecoder().decode(AppRequest.self, from: AppSocket.encode(show)), show)
+        let older = #"{"pane":{"kind":"terminal","project":"\#(project)","session":"\#(session)"},"type":"show"}"#
+        XCTAssertEqual(try JSONDecoder().decode(AppRequest.self, from: Data(older.utf8)),
+                       .show(AppPane(kind: .terminal, session: session, project: project)))
         XCTAssertEqual(BrowserCommand.storageGet.rawValue, "storage.get")
 
         XCTAssertEqual(BrowserCommand.waitForNavigation.rawValue, "waitForNavigation")

@@ -161,9 +161,10 @@ extension AppModel {
         return opened
     }
 
-    /// Shows a running terminal or agent conversation for `tab session open`
-    /// and `tab agent`: focuses the pane already showing it, else opens one
-    /// beside the pane showing `beside` on the same server, else in its project.
+    /// Shows a running terminal or agent conversation for `tab pane new` and
+    /// `tab tab new`: focuses the pane already showing it, else opens one as a
+    /// new tab of Home, or beside the pane showing `beside` on the same
+    /// server, else in its project.
     @discardableResult
     public func show(_ request: AppPane) -> PaneId? {
         if let shown = state.paneShowing(request.session) {
@@ -176,7 +177,11 @@ extension AppModel {
             ? .agent(session: request.session, provider: provider) : .terminal(session: request.session)
         let anchor = request.beside.flatMap(state.paneShowing).flatMap { state.paneServer($0) == project.serverId ? $0 : nil }
         var opened: PaneId?
-        if let anchor {
+        if request.placement == .tab, project.home {
+            let pane = Pane(title: request.kind == .agent ? "Agent" : "Terminal", content: content)
+            guard edit({ _ = try $0.openTab(project.id, pane) }) else { return nil }
+            opened = pane.id
+        } else if let anchor {
             let pane = Pane(title: request.kind == .agent ? "Agent" : "Terminal", content: content)
             guard edit({ state in
                 try state.insertSplitPane(after: anchor, pane, edge: .right)

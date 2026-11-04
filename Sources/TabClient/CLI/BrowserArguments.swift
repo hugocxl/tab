@@ -1,4 +1,5 @@
 import Foundation
+import TabProtocol
 
 /// A `tab browser` command as the request it sends to the app.
 public struct BrowserInvocation: Hashable, Sendable {
@@ -18,6 +19,14 @@ public struct BrowserInvocation: Hashable, Sendable {
         extraTime = 0
     }
 
+    /// Opens a page in a new pane beside the pane showing `beside`, else in
+    /// `project`'s tab, or in a new tab of Home.
+    public static func open(url: String?, profile: String?, project: String?, beside: SessionId?,
+                            placement: AppPane.Placement) -> BrowserInvocation {
+        BrowserInvocation(.open).optional("url", url).optional("profile", profile).optional("project", project)
+            .optional("beside", beside?.description).arg("tab", placement == .tab).output(.id)
+    }
+
     fileprivate func arg(_ key: String, _ value: JSONValue) -> Self {
         var copy = self
         copy.args[key] = value
@@ -31,290 +40,201 @@ public struct BrowserInvocation: Hashable, Sendable {
         value.map { arg(key, $0) } ?? self
     }
 
-    fileprivate func optional(_ key: String, _ value: UInt64?) -> Self {
-        value.map { arg(key, $0 <= UInt64(Int64.max) ? .int(Int64($0)) : .uint($0)) } ?? self
-    }
-
     fileprivate func output(_ output: BrowserOutput) -> Self {
         var copy = self
         copy.output = output
         return copy
     }
 
-    /// Gives the app as long as the wait it was asked for.
-    fileprivate func waiting(_ defaultWait: TimeInterval) -> Self {
+    /// Waits up to `--timeout` seconds, else the app's default `wait`, and
+    /// gives the app as long.
+    fileprivate func waiting(_ arguments: CLIArguments, default wait: TimeInterval) throws -> Self {
         var copy = self
-        if case .int(let milliseconds)? = args["timeoutMs"] {
-            copy.extraTime = min(TimeInterval(milliseconds) / 1000, BrowserCommand.maxWait)
-        } else if case .uint(let milliseconds)? = args["timeoutMs"] {
-            copy.extraTime = min(TimeInterval(milliseconds) / 1000, BrowserCommand.maxWait)
-        } else {
-            copy.extraTime = defaultWait
+        guard arguments.value("--timeout") != nil else {
+            copy.extraTime = wait
+            return copy
         }
+        let milliseconds = try arguments.timeout(default: wait, maximum: BrowserCommand.maxWait)
+        copy = copy.arg("timeoutMs", .int(Int64(milliseconds)))
+        copy.extraTime = TimeInterval(milliseconds) / 1000
         return copy
     }
 }
 
 /// How the app's reply is printed.
 public enum BrowserOutput: Hashable, Sendable {
-    /// A string as it is, such as a new tab's ID.
-    case text
+    /// A new browser's ID, or `{"id":…}` with `--json`.
+    case id
+    case idJSON
     /// `ok`, once the app has done it.
     case ok
     case json
-    /// One tab-separated line per tab.
-    case tabs
+    /// One tab-separated line per browser.
+    case list
     /// Title, URL and text, each on its own line.
     case page
     /// The PNG as base64, ready to decode.
     case screenshot
 }
 
-enum BrowserParser {
+extension CLICommands {
+    static let browser = CLIGroup(
+        name: "browser", summary: "Drive a browser pane: read, click, type and wait", section: .app,
+        commands: [
+            page("list", .list, ["[--project PROJECT]"], "The browsers in the app, one line each", words: 0 ... 0,
+                 values: ["--project"], json: true) { request, a in
+                request.optional("project", a.value("--project")).output(a.json ? .json : .list)
+            },
+            page("navigate", .navigate, ["BROWSER URL"], "Load a URL", words: 2 ... 2) { request, a in
+                request.arg("url", a.word(1)).output(.ok)
+            },
+            page("read", .read, ["BROWSER"], "Print the title, URL and text of the page", json: true) { request, a in
+                request.output(a.json ? .json : .page)
+            },
+            page("reload", .reload, ["BROWSER"], "Reload the page") { request, _ in request.output(.ok) },
+            page("back", .back, ["BROWSER"], "Go back") { request, _ in request.output(.ok) },
+            page("forward", .forward, ["BROWSER"], "Go forward") { request, _ in request.output(.ok) },
+            page("close", .close, ["BROWSER"], "Close the browser's pane") { request, _ in request.output(.ok) },
+            page("screenshot", .screenshot, ["BROWSER"], "Print the page as a base64 PNG") { request, _ in
+                var invocation = request.output(.screenshot)
+                invocation.extraTime = BrowserCommand.screenshotTime
+                return invocation
+            },
+            page("eval", .evaluate, ["BROWSER JAVASCRIPT"], "Run JavaScript and print its result", words: 2 ... 2) { request, a in
+                request.arg("script", a.word(1))
+            },
+            page("snapshot", .snapshot, ["BROWSER [SELECTOR]"], "Print the interactive elements, each with a selector",
+                 words: 1 ... 2) { request, a in
+                request.optional("selector", a.optional(1))
+            },
+            page("find", .find, ["BROWSER role|text|label|placeholder|testid VALUE"], "Print the elements that match",
+                 words: 3 ... 3) { request, a in
+                request.arg("kind", try a.choice(1, ["role", "text", "label", "placeholder", "testid"]))
+                    .arg("value", a.word(2))
+            },
+            element("click", .click, "Click the element"),
+            element("hover", .hover, "Move the pointer over the element"),
+            element("scroll-into-view", .scrollIntoView, "Scroll the element into view"),
+            page("check", .setChecked, ["BROWSER SELECTOR"], "Check a checkbox", words: 2 ... 2) { request, a in
+                request.arg("selector", a.word(1)).arg("checked", true)
+            },
+            page("uncheck", .setChecked, ["BROWSER SELECTOR"], "Uncheck a checkbox", words: 2 ... 2) { request, a in
+                request.arg("selector", a.word(1)).arg("checked", false)
+            },
+            page("fill", .fill, ["BROWSER SELECTOR TEXT"], "Replace the field's text", words: 3 ... 3) { request, a in
+                request.arg("selector", a.word(1)).arg("text", a.word(2))
+            },
+            page("type", .type, ["BROWSER SELECTOR TEXT [--submit]"], "Type into the field; --submit presses Return",
+                 words: 3 ... 3, flags: ["--submit"]) { request, a in
+                request.arg("selector", a.word(1)).arg("text", a.word(2)).arg("submit", a.flag("--submit"))
+            },
+            page("press", .press, ["BROWSER KEY [SELECTOR]"], "Press a key, in the element if given",
+                 words: 2 ... 3) { request, a in
+                request.arg("key", a.word(1)).optional("selector", a.optional(2))
+            },
+            page("select", .select, ["BROWSER SELECTOR VALUE"], "Choose an option of a menu", words: 3 ... 3) { request, a in
+                request.arg("selector", a.word(1)).arg("value", a.word(2))
+            },
+            page("is", .is, ["BROWSER visible|hidden|enabled|disabled|checked SELECTOR"], "Print true or false",
+                 words: 3 ... 3) { request, a in
+                request.arg("property", try a.choice(1, ["visible", "hidden", "enabled", "disabled", "checked"]))
+                    .arg("selector", a.word(2))
+            },
+            element("get-text", .getText, "Print the element's text"),
+            element("get-value", .getValue, "Print the field's value"),
+            element("get-count", .getCount, "Print how many elements match"),
+            page("get-attribute", .getAttribute, ["BROWSER SELECTOR ATTRIBUTE"], "Print an attribute of the element",
+                 words: 3 ... 3) { request, a in
+                request.arg("selector", a.word(1)).arg("attribute", a.word(2))
+            },
+            page("get-html", .getHTML, ["BROWSER [SELECTOR]"], "Print the HTML of the page or the element",
+                 words: 1 ... 2) { request, a in
+                request.optional("selector", a.optional(1))
+            },
+            page("wait", .wait, ["BROWSER [--selector SELECTOR] [--text TEXT] [--url-contains TEXT] [--function JAVASCRIPT] [--timeout SECONDS]"],
+                 "Wait until all the conditions hold; prints true, or false after the timeout",
+                 values: ["--selector", "--text", "--url-contains", "--function", "--timeout"]) { request, a in
+                try request.optional("selector", a.value("--selector")).optional("text", a.value("--text"))
+                    .optional("urlContains", a.value("--url-contains")).optional("function", a.value("--function"))
+                    .waiting(a, default: BrowserCommand.defaultWait)
+            },
+            page("wait-for", .waitFor, ["BROWSER SELECTOR [--timeout SECONDS]"], "Wait until the element shows",
+                 words: 2 ... 2, values: ["--timeout"]) { request, a in
+                try request.arg("selector", a.word(1)).waiting(a, default: BrowserCommand.defaultWait)
+            },
+            page("wait-for-navigation", .waitForNavigation, ["BROWSER [--timeout SECONDS]"], "Wait until a page finishes loading",
+                 values: ["--timeout"]) { request, a in
+                try request.waiting(a, default: BrowserCommand.defaultNavigationWait)
+            },
+            page("storage get", .storageGet, ["BROWSER KEY [local|session]"], "Print a stored value", words: 2 ... 3) { request, a in
+                request.arg("key", a.word(1)).arg("kind", try storage(a, 2))
+            },
+            page("storage set", .storageSet, ["BROWSER KEY VALUE [local|session]"], "Store a value", words: 3 ... 4) { request, a in
+                request.arg("key", a.word(1)).arg("value", a.word(2)).arg("kind", try storage(a, 3)).output(.ok)
+            },
+            page("storage clear", .storageClear, ["BROWSER [local|session]"], "Delete every stored value", words: 1 ... 2) { request, a in
+                request.arg("kind", try storage(a, 1)).output(.ok)
+            },
+            page("cookies get", .cookiesGet, ["BROWSER [URL]"], "Print the cookies, of a URL if given", words: 1 ... 2) { request, a in
+                request.optional("url", a.optional(1))
+            },
+            page("cookies set", .cookiesSet, ["BROWSER NAME VALUE DOMAIN [--path PATH] [--secure] [--http-only] [--expires UNIX-SECONDS]"],
+                 "Set a cookie", words: 4 ... 4, values: ["--path", "--expires"], flags: ["--secure", "--http-only"]) { request, a in
+                var invocation = request.arg("name", a.word(1)).arg("value", a.word(2)).arg("domain", a.word(3))
+                    .optional("path", a.value("--path")).output(.ok)
+                if a.value("--expires") != nil {
+                    let expires: UInt64 = try a.number("--expires", default: 0, 0 ... .max)
+                    invocation = invocation.arg("expires", expires <= UInt64(Int64.max) ? .int(Int64(expires)) : .uint(expires))
+                }
+                if a.flag("--secure") { invocation = invocation.arg("secure", true) }
+                if a.flag("--http-only") { invocation = invocation.arg("httpOnly", true) }
+                return invocation
+            },
+            page("cookies delete", .cookiesDelete, ["BROWSER NAME [DOMAIN]"], "Delete a cookie", words: 2 ... 3) { request, a in
+                request.arg("name", a.word(1)).optional("domain", a.optional(2)).output(.ok)
+            },
+            page("cookies clear", .cookiesClear, ["BROWSER"], "Delete every cookie") { request, _ in
+                request.output(.ok)
+            },
+        ],
+        notes: """
+        BROWSER is the ID that tab pane new browser, tab tab new browser and list
+        print. Browsers live in the app on this Mac, which must be running.
+        Element commands take a CSS selector, such as one snapshot prints, and print
+        their result as JSON: false when nothing matches. Waits give up after
+        --timeout seconds: 5 by default, 10 for wait-for-navigation, at most 60.
+        TAB_CLI_TIMEOUT sets how many seconds the app has to answer (default 10).
+        list prints the columns id, title, url, profile and active.
+        """)
+
+    /// A browser command; every one but `list` names the browser first.
+    private static func page(_ name: String, _ command: BrowserCommand, _ usage: [String], _ summary: String,
+                             words: ClosedRange<Int> = 1 ... 1, values: [String] = [], flags: [String] = [],
+                             json: Bool = false,
+                             build: @escaping @Sendable (BrowserInvocation, CLIArguments) throws -> BrowserInvocation)
+        -> CLICommandSpec {
+        CLICommandSpec("browser \(name)", usage, summary, words: words, values: values, flags: flags, json: json,
+                       place: .app) { a in
+            var request = BrowserInvocation(command)
+            if command != .list { request = request.arg("tabId", a.word(0)) }
+            return .browser(try build(request, a))
+        }
+    }
+
+    private static func element(_ name: String, _ command: BrowserCommand, _ summary: String) -> CLICommandSpec {
+        page(name, command, ["BROWSER SELECTOR"], summary, words: 2 ... 2) { request, a in
+            request.arg("selector", a.word(1))
+        }
+    }
+
+    /// Which web storage a `storage` command uses: `local` unless given.
+    private static func storage(_ a: CLIArguments, _ index: Int) throws -> String {
+        guard a.optional(index) != nil else { return "local" }
+        return try a.choice(index, ["local", "session"])
+    }
+}
+
+extension BrowserCommand {
+    /// How long a screenshot may take.
     static let screenshotTime: TimeInterval = 20
-
-    static func parse(_ words: [String]) throws -> CLICommand {
-        let beforeLiteral = words.prefix { $0 != "--" }
-        if words.isEmpty || beforeLiteral.contains("--help") || beforeLiteral.contains("-h") {
-            return .help(CLIHelp.browser)
-        }
-        return .browser(try invocation(words))
-    }
-
-    static func command(_ action: String) -> BrowserCommand? {
-        switch action {
-        case "open": .open
-        case "navigate": .navigate
-        case "list": .list
-        case "read": .read
-        case "close": .close
-        case "eval", "evaluate": .evaluate
-        case "click": .click
-        case "type": .type
-        case "fill": .fill
-        case "press": .press
-        case "select": .select
-        case "hover": .hover
-        case "scroll-into-view": .scrollIntoView
-        case "check", "uncheck": .setChecked
-        case "is": .is
-        case "wait": .wait
-        case "wait-for": .waitFor
-        case "wait-for-navigation": .waitForNavigation
-        case "get-text": .getText
-        case "get-html": .getHTML
-        case "get-value": .getValue
-        case "get-attribute": .getAttribute
-        case "get-count": .getCount
-        case "find": .find
-        case "snapshot": .snapshot
-        case "reload": .reload
-        case "back": .back
-        case "forward": .forward
-        case "screenshot": .screenshot
-        case "storage get": .storageGet
-        case "storage set": .storageSet
-        case "storage clear": .storageClear
-        case "cookies get": .cookiesGet
-        case "cookies set": .cookiesSet
-        case "cookies delete": .cookiesDelete
-        case "cookies clear": .cookiesClear
-        default: nil
-        }
-    }
-
-    static func invocation(_ words: [String]) throws -> BrowserInvocation {
-        let action: String
-        let rest: [String]
-        if ["storage", "cookies"].contains(words[0]), words.count >= 2 {
-            action = "\(words[0]) \(words[1])"
-            rest = Array(words.dropFirst(2))
-        } else {
-            action = words[0]
-            rest = Array(words.dropFirst())
-        }
-        guard let command = command(action) else { throw unknown }
-        let request = BrowserInvocation(command)
-        func given(_ shape: String, _ count: ClosedRange<Int>, values: [String] = [],
-                   flags: [String] = []) throws -> Given {
-            try Given(rest, usage: "\(action) \(shape)", count: count, values: values, flags: flags)
-        }
-        switch action {
-        case "open":
-            let g = try given("[url] [--split] [--project PROJECT] [--worktree WORKTREE] [--profile PROFILE]", 0 ... 1,
-                              values: ["--project", "--worktree", "--profile"], flags: ["--split"])
-            return request.optional("url", g.optional(0)).arg("split", g.flag("--split"))
-                .optional("project", g.value("--project")).optional("worktree", g.value("--worktree"))
-                .optional("profile", g.value("--profile")).output(.text)
-        case "list":
-            let g = try given("[--project PROJECT] [--worktree WORKTREE] [--json]", 0 ... 0,
-                              values: ["--project", "--worktree"], flags: ["--json"])
-            return request.optional("project", g.value("--project")).optional("worktree", g.value("--worktree"))
-                .output(g.flag("--json") ? .json : .tabs)
-        case "read":
-            let g = try given("<tab-id> [--json]", 1 ... 1, flags: ["--json"])
-            return request.arg("tabId", g.word(0)).output(g.flag("--json") ? .json : .page)
-        case "navigate":
-            let g = try given("<tab-id> <url>", 2 ... 2)
-            return request.arg("tabId", g.word(0)).arg("url", g.word(1)).output(.ok)
-        case "close":
-            let g = try given("<tab-id>", 1 ... 1)
-            return request.arg("tabId", g.word(0)).output(.ok)
-        case "reload", "back", "forward", "cookies clear":
-            let g = try given("<tab-id>", 1 ... 1)
-            return request.arg("tabId", g.word(0))
-        case "screenshot":
-            let g = try given("<tab-id>", 1 ... 1)
-            var invocation = request.arg("tabId", g.word(0)).output(.screenshot)
-            invocation.extraTime = screenshotTime
-            return invocation
-        case "eval", "evaluate":
-            let g = try given("<tab-id> <javascript>", 2 ... 2)
-            return request.arg("tabId", g.word(0)).arg("script", g.word(1))
-        case "click", "hover", "scroll-into-view", "get-text", "get-value", "get-count":
-            let g = try given("<tab-id> <selector>", 2 ... 2)
-            return request.arg("tabId", g.word(0)).arg("selector", g.word(1))
-        case "check", "uncheck":
-            let g = try given("<tab-id> <selector>", 2 ... 2)
-            return request.arg("tabId", g.word(0)).arg("selector", g.word(1)).arg("checked", action == "check")
-        case "fill":
-            let g = try given("<tab-id> <selector> <text>", 3 ... 3)
-            return request.arg("tabId", g.word(0)).arg("selector", g.word(1)).arg("text", g.word(2))
-        case "type":
-            let g = try given("<tab-id> <selector> <text> [--submit]", 3 ... 3, flags: ["--submit"])
-            return request.arg("tabId", g.word(0)).arg("selector", g.word(1)).arg("text", g.word(2))
-                .arg("submit", g.flag("--submit"))
-        case "press":
-            let g = try given("<tab-id> <key> [selector]", 2 ... 3)
-            return request.arg("tabId", g.word(0)).arg("key", g.word(1)).optional("selector", g.optional(2))
-        case "select":
-            let g = try given("<tab-id> <selector> <value>", 3 ... 3)
-            return request.arg("tabId", g.word(0)).arg("selector", g.word(1)).arg("value", g.word(2))
-        case "is":
-            let g = try given("<tab-id> visible|hidden|enabled|disabled|checked <selector>", 3 ... 3)
-            return request.arg("tabId", g.word(0))
-                .arg("property", try g.choice(1, ["visible", "hidden", "enabled", "disabled", "checked"]))
-                .arg("selector", g.word(2))
-        case "get-attribute":
-            let g = try given("<tab-id> <selector> <attribute>", 3 ... 3)
-            return request.arg("tabId", g.word(0)).arg("selector", g.word(1)).arg("attribute", g.word(2))
-        case "get-html", "snapshot":
-            let g = try given("<tab-id> [selector]", 1 ... 2)
-            return request.arg("tabId", g.word(0)).optional("selector", g.optional(1))
-        case "find":
-            let g = try given("<tab-id> role|text|label|placeholder|testid <value>", 3 ... 3)
-            return request.arg("tabId", g.word(0))
-                .arg("kind", try g.choice(1, ["role", "text", "label", "placeholder", "testid"]))
-                .arg("value", g.word(2))
-        case "wait":
-            let g = try given("<tab-id> [--selector SELECTOR] [--text TEXT] [--url-contains TEXT] "
-                + "[--function JAVASCRIPT] [--timeout-ms N]", 1 ... 1,
-                values: ["--selector", "--text", "--url-contains", "--function", "--timeout-ms"])
-            return request.arg("tabId", g.word(0)).optional("selector", g.value("--selector"))
-                .optional("text", g.value("--text")).optional("urlContains", g.value("--url-contains"))
-                .optional("function", g.value("--function"))
-                .optional("timeoutMs", try number(g.value("--timeout-ms"), "--timeout-ms"))
-                .waiting(BrowserCommand.defaultWait)
-        case "wait-for":
-            let g = try given("<tab-id> <selector> [ms]", 2 ... 3)
-            return request.arg("tabId", g.word(0)).arg("selector", g.word(1))
-                .optional("timeoutMs", try number(g.optional(2), "ms")).waiting(BrowserCommand.defaultWait)
-        case "wait-for-navigation":
-            let g = try given("<tab-id> [ms] [--timeout-ms N]", 1 ... 2, values: ["--timeout-ms"])
-            let timeout: UInt64?
-            switch (g.optional(1), g.value("--timeout-ms")) {
-            case (.some, .some): throw g.usage
-            case (let ms?, nil): timeout = try number(ms, "ms")
-            case (nil, let flag): timeout = try number(flag, "--timeout-ms")
-            }
-            return request.arg("tabId", g.word(0)).optional("timeoutMs", timeout)
-                .waiting(BrowserCommand.defaultNavigationWait)
-        case "storage get":
-            let g = try given("<tab-id> <key> [local|session]", 2 ... 3)
-            return request.arg("tabId", g.word(0)).arg("key", g.word(1)).arg("kind", try g.storage(2))
-        case "storage set":
-            let g = try given("<tab-id> <key> <value> [local|session]", 3 ... 4)
-            return request.arg("tabId", g.word(0)).arg("key", g.word(1)).arg("value", g.word(2))
-                .arg("kind", try g.storage(3))
-        case "storage clear":
-            let g = try given("<tab-id> [local|session]", 1 ... 2)
-            return request.arg("tabId", g.word(0)).arg("kind", try g.storage(1))
-        case "cookies get":
-            let g = try given("<tab-id> [url]", 1 ... 2)
-            return request.arg("tabId", g.word(0)).optional("url", g.optional(1))
-        case "cookies set":
-            let g = try given("<tab-id> <name> <value> <domain> [--path PATH] [--secure] [--http-only] "
-                + "[--expires UNIX-SECONDS]", 4 ... 4, values: ["--path", "--expires"],
-                flags: ["--secure", "--http-only"])
-            var invocation = request.arg("tabId", g.word(0)).arg("name", g.word(1)).arg("value", g.word(2))
-                .arg("domain", g.word(3)).optional("path", g.value("--path"))
-                .optional("expires", try number(g.value("--expires"), "--expires"))
-            if g.flag("--secure") { invocation = invocation.arg("secure", true) }
-            if g.flag("--http-only") { invocation = invocation.arg("httpOnly", true) }
-            return invocation
-        case "cookies delete":
-            let g = try given("<tab-id> <name> [domain]", 2 ... 3)
-            return request.arg("tabId", g.word(0)).arg("name", g.word(1)).optional("domain", g.optional(2))
-        default:
-            throw unknown
-        }
-    }
-
-    static func number(_ text: String?, _ name: String) throws -> UInt64? {
-        guard let text else { return nil }
-        guard let value = UInt64(text) else { throw CLIError("invalid value for \(name)") }
-        return value
-    }
-
-    static var unknown: CLIError { CLIError("unknown browser command; run tab browser --help") }
-
-    /// The words after the action. Only a word that is exactly one of the
-    /// action's options counts as one, so other words starting with a dash
-    /// stay positional, and `--` ends options.
-    struct Given {
-        let shape: String
-        var words: [String] = []
-        var values: [String: String] = [:]
-        var flags: Set<String> = []
-
-        init(_ rest: [String], usage: String, count: ClosedRange<Int>, values known: [String],
-             flags knownFlags: [String]) throws {
-            shape = usage
-            var iterator = rest.makeIterator()
-            while let word = iterator.next() {
-                if word == "--" {
-                    while let literal = iterator.next() { words.append(literal) }
-                    break
-                }
-                if known.contains(word) {
-                    guard let value = iterator.next() else { throw CLIError("missing value for \(word)") }
-                    guard values.updateValue(value, forKey: word) == nil else {
-                        throw CLIError("duplicate option \(word)")
-                    }
-                } else if knownFlags.contains(word) {
-                    guard flags.insert(word).inserted else { throw CLIError("duplicate option \(word)") }
-                } else {
-                    words.append(word)
-                }
-            }
-            guard count.contains(words.count) else { throw CLIError("usage: tab browser \(usage)") }
-        }
-
-        var usage: CLIError { CLIError("usage: tab browser \(shape)") }
-        func word(_ index: Int) -> String { words[index] }
-        func optional(_ index: Int) -> String? { index < words.count ? words[index] : nil }
-        func value(_ name: String) -> String? { values[name] }
-        func flag(_ name: String) -> Bool { flags.contains(name) }
-
-        func choice(_ index: Int, _ choices: [String]) throws -> String {
-            guard choices.contains(words[index]) else { throw usage }
-            return words[index]
-        }
-
-        /// Which web storage a `storage` action uses: `local` unless given.
-        func storage(_ index: Int) throws -> String {
-            guard optional(index) != nil else { return "local" }
-            return try choice(index, ["local", "session"])
-        }
-    }
 }

@@ -103,8 +103,8 @@ public final class BrowserAutomation {
             url: url,
             profile: profileId,
             project: BrowserScripts.optionalString(args, "project"),
-            worktree: BrowserScripts.optionalString(args, "worktree"),
-            split: BrowserScripts.flag(args, "split"))
+            beside: BrowserScripts.optionalString(args, "beside").flatMap(SessionId.init(string:)),
+            newTab: BrowserScripts.flag(args, "tab"))
         return pane.tabId
     }
 
@@ -118,7 +118,7 @@ public final class BrowserAutomation {
             let title = live?.pageTitle ?? BrowserAddress.displayTitle("", url: url) ?? ""
             let profile = live?.profile.name ?? profiles.profile(forSaved: tab.state.profile).name
             return .object([
-                "tabId": .string(tab.tabId),
+                "id": .string(tab.tabId),
                 "title": .string(title),
                 "url": .string(BrowserAddress.isBlank(url) ? "" : url),
                 "profile": .string(profile),

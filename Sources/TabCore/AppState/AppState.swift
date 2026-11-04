@@ -452,6 +452,21 @@ public struct AppState: Codable, Equatable, Sendable {
         return (tab.id, pane.id)
     }
 
+    /// Opens `pane` as a new tab of `project`, which must be Home: other
+    /// projects hold a single tab. Selects and focuses it.
+    @discardableResult
+    public mutating func openTab(_ project: ProjectId, _ pane: Pane) throws -> TabId {
+        try projects[projectIndex(project)].requireAvailable()
+        guard !isSingleTab(project) else { throw AppError.invalidState("only Home holds several tabs") }
+        let tab = Tab(pane: pane)
+        try addTab(project, tab)
+        try selectProject(project)
+        try selectTab(project, tab.id)
+        try focusPane(pane.id)
+        revealCurrentProject()
+        return tab.id
+    }
+
     func isSingleTab(_ project: ProjectId) -> Bool {
         self.project(project).map { !$0.home } ?? false
     }

@@ -17,29 +17,14 @@ enum CLI {
             throw CLIError("tab --askpass answers ssh's prompts for the Tab app; it isn't run by hand")
         case .open(let folder):
             try await OpenFolder.run(folder)
+        case .pane(let pane, let json):
+            try await Panes.run(pane, json: json)
         case .browser(let browser):
             try BrowserCommandRunner.run(browser)
-        case .installSkills(let directories):
-            let home = ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory()
-            for file in try AgentSkill.install(home: home, directories: directories) {
-                Output.line(file.path)
-            }
         case .integrations(let action, let json):
-            try Integrations.run(action, json: json)
-        case .agentContext:
-            let cli = Executable.currentURL()
-            if let context = AgentIntegrations.context(environment: ProcessInfo.processInfo.environment, cli: cli) {
-                Output.line(context)
-            }
-        case .agentEvent(let provider, let state):
-            await AgentEventReport.send(provider: provider, state: state)
+            try await Integrations.run(action, json: json)
         case .stdio(let start):
             try StdioBridge.serve(try LocalServer.profile(), start: start)
-        case .mobile(let command):
-            let target = Target(host: invocation.host)
-            let client = try await target.connect(start: true)
-            defer { client.close() }
-            try await target.explaining { try await Mobile.run(command, client: client) }
         case .manage(let manage):
             try await Manage.run(manage, host: invocation.host)
         }

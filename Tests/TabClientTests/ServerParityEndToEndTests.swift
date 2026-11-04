@@ -46,7 +46,7 @@ final class ServerParityEndToEndTests: XCTestCase {
     override func tearDown() async throws {
         readers.forEach { $0.cancel() }
         if daemon?.isRunning == true {
-            let stopped = try run("tab", ["server", "stop", "--force"])
+            let stopped = try run("tab", ["server", "stop", "--force", "--yes"])
             XCTAssertEqual(stopped.status, 0, stopped.text)
             if stopped.status != 0 { _ = try? await client?.stopServer(force: true) }
             for _ in 0..<100 where daemon?.isRunning == true {
@@ -188,7 +188,7 @@ final class ServerParityEndToEndTests: XCTestCase {
         try write("home/.config/tab/worktree.json", #"{"setup":["printf user > order"],"teardown":["printf user >> \"$TAB_PROJECT_PATH/removed\""]}"#)
         try write("repo/.tab/worktree.json", #"{"setup":["printf project >> order","printf '%s\\n' \"$TAB_PROJECT_PATH\" \"$TAB_WORKTREE_PATH\" \"$TAB_WORKTREE_NAME\" \"$TAB_WORKTREE_BRANCH\" \"$TAB_WORKTREE_ID\" \"$PWD\" > hook-env"],"teardown":["printf project > \"$TAB_PROJECT_PATH/removed\""]}"#)
         let target = root.appendingPathComponent("hook-tree")
-        let data = try cli(["worktree", "create", parent.id.description, "Friendly", "--branch", "feature", "--base", "main",
+        let data = try cli(["worktree", "new", parent.id.description, "Friendly", "--branch", "feature", "--base", "main",
                             "--directory", target.path, "--hooks", "--json"])
         let object = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
         let id = try XCTUnwrap(object["id"] as? String)
@@ -337,7 +337,7 @@ final class ServerParityEndToEndTests: XCTestCase {
         XCTAssertEqual(try git(["config", "branch.pr/42/feature.tab-pr-number"]), "42")
         _ = try git(["switch", "main"])
         let target = root.appendingPathComponent("pr-tree")
-        _ = try cli(["worktree", "checkout-pr", parent.id.description, "42", "--directory", target.path, "--json"])
+        _ = try cli(["worktree", "new", parent.id.description, "--pr", "42", "--directory", target.path, "--json"])
         XCTAssertEqual(try git(["-C", target.path, "branch", "--show-current"]), "pr/42/feature")
         let calls = try String(contentsOf: root.appendingPathComponent("gh-calls"), encoding: .utf8)
             .components(separatedBy: "\0\0").filter { !$0.isEmpty }.map { $0.components(separatedBy: "\0") }

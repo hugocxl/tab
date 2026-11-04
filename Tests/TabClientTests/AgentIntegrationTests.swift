@@ -117,9 +117,12 @@ final class AgentIntegrationTests: XCTestCase {
     }
 
     func testOnlyTabsOwnHooksCount() {
-        XCTAssertNotNil(HookDocument.parse("'/Applications/Tab Dev.app/Contents/MacOS/tab' agent-context"))
+        XCTAssertNotNil(HookDocument.parse("'/Applications/Tab Dev.app/Contents/MacOS/tab' integrations context"))
+        XCTAssertEqual(HookDocument.parse("/x/tab integrations report codex idle")?.arguments,
+                       ["integrations", "report", "codex", "idle"])
         XCTAssertEqual(HookDocument.parse("/x/tab agent-event codex idle")?.arguments, ["agent-event", "codex", "idle"])
-        XCTAssertNil(HookDocument.parse("/usr/local/bin/other agent-context"))
+        XCTAssertNil(HookDocument.parse("/usr/local/bin/other integrations context"))
+        XCTAssertNil(HookDocument.parse("/x/tab integrations install"))
         XCTAssertNil(HookDocument.parse("tab session list"))
     }
 
@@ -134,20 +137,5 @@ final class AgentIntegrationTests: XCTestCase {
 
         XCTAssertEqual(integrations().status(.claude).hook, .installed)
         XCTAssertEqual(try HookDocument.read(file).tabHooks.count, TabHook.all(for: .claude).count)
-    }
-
-    func testAgentEventArguments() throws {
-        XCTAssertEqual(try CLIParser.parse(["agent-event", "claude", "blocked"]).command,
-                       .agentEvent(provider: .claude, state: .blocked))
-        XCTAssertEqual(try CLIParser.parse(["agent-event", "codex", "ended"]).command,
-                       .agentEvent(provider: .codex, state: nil))
-        XCTAssertThrowsError(try CLIParser.parse(["agent-event", "claude", "sleeping"]))
-    }
-
-    func testIntegrationsArguments() throws {
-        XCTAssertEqual(try CLIParser.parse(["integrations"]).command, .integrations(.status, json: false))
-        XCTAssertEqual(try CLIParser.parse(["integrations", "install", "--json"]).command, .integrations(.install, json: true))
-        XCTAssertEqual(try CLIParser.parse(["agent-context"]).command, .agentContext)
-        XCTAssertThrowsError(try CLIParser.parse(["--host", "box", "integrations"]))
     }
 }

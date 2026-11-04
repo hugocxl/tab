@@ -3,8 +3,8 @@ import TabClient
 import TabCore
 import TabProtocol
 
-/// `server`, `project`, `session`, `worktree`, `settings`, `activity`, `git`,
-/// `files` and `exec`.
+/// The commands that use a server: `session`, `project`, `worktree`, `exec`,
+/// `git`, `files`, `activity`, `settings`, `mobile` and `server`.
 enum Manage {
     static func run(_ invocation: ManageInvocation, host: SSHTarget?) async throws {
         let target = Target(host: host)
@@ -82,9 +82,8 @@ enum Manage {
             try await Projects.worktree(command, client: client, target: target, json: json)
         case .session(let command):
             try await Sessions.run(command, client: client, target: target, json: json)
-        case .agent(let command):
-            try await Agents.run(command, client: client, target: target, json: json)
-
+        case .mobile(let command):
+            try await Mobile.run(command, client: client)
         case .settingsGet:
             let settings = try await client.serverSettings()
             Output.json(.object([
@@ -112,7 +111,7 @@ enum Manage {
                 guard let enabled = Bool(value) else { throw CLIError("shell-integration must be true or false") }
                 settings.shellIntegration = enabled
             default:
-                throw CLIError("unknown server setting; run tab settings --help")
+                throw CLIError("unknown setting \(key); run tab settings --help")
             }
             do {
                 try settings.validate()
@@ -137,9 +136,9 @@ enum Manage {
             do {
                 action = try WireJSON.decode(GitAction.self, from: Data(actionJSON.utf8))
             } catch {
-                throw CLIError("invalid Git action JSON; run tab git --help")
+                throw CLIError("the action isn't a Git action as JSON; run tab git --help")
             }
-            if action == .watch || action == .unwatch { throw CLIError("watch requires a persistent client") }
+            if action == .watch || action == .unwatch { throw CLIError("watching needs a client that stays connected") }
             let id = try await Projects.resolve(project, client: client, target: target).id
             try Output.wire(try await client.git(GitRequest(project: id, action: action)))
         case .files(let project, let actionJSON):
@@ -147,9 +146,9 @@ enum Manage {
             do {
                 action = try WireJSON.decode(FilesAction.self, from: Data(actionJSON.utf8))
             } catch {
-                throw CLIError("invalid files action JSON; run tab files --help")
+                throw CLIError("the action isn't a files action as JSON; run tab files --help")
             }
-            if action == .watch || action == .unwatch { throw CLIError("watch requires a persistent client") }
+            if action == .watch || action == .unwatch { throw CLIError("watching needs a client that stays connected") }
             let id = try await Projects.resolve(project, client: client, target: target).id
             try Output.wire(try await client.files(FilesRequest(project: id, action: action)))
         case .exec(let project, let argv, let timeoutMs):

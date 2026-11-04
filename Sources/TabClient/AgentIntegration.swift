@@ -62,8 +62,8 @@ public struct AgentIntegrations: Sendable {
     /// The `tab` the hooks run.
     public var cli: URL
 
-    /// The command line hooks run, without arguments.
-    public static let contextCommand = "agent-context"
+    /// The `tab` arguments of the hook that runs when an agent's session starts.
+    static let contextArguments = ["integrations", "context"]
 
     public init(home: URL, environment: [String: String] = ProcessInfo.processInfo.environment, cli: URL) {
         self.home = home
@@ -150,11 +150,11 @@ public struct AgentIntegrations: Sendable {
     // MARK: Changing
 
     /// Installs the skill and hook into every agent found, replacing older
-    /// copies. Fails when no agent is found.
+    /// copies. Fails when no agent is found, unless `required` is false.
     @discardableResult
-    public func install() throws -> [AgentIntegrationStatus] {
+    public func install(required: Bool = true) throws -> [AgentIntegrationStatus] {
         let found = CodingAgent.allCases.filter { isDirectory(root($0)) }
-        guard !found.isEmpty else {
+        guard !found.isEmpty || !required else {
             throw CLIError("found no coding agent (Claude Code, Codex, OpenCode or Pi) on this computer")
         }
         for agent in found {
@@ -230,9 +230,9 @@ struct TabHook: Hashable {
     static func all(for agent: CodingAgent) -> [TabHook] {
         let name = agent.rawValue
         let state = { (event: String, matcher: String?, state: String) in
-            TabHook(event: event, matcher: matcher, arguments: ["agent-event", name, state])
+            TabHook(event: event, matcher: matcher, arguments: ["integrations", "report", name, state])
         }
-        let context = TabHook(event: "SessionStart", matcher: nil, arguments: [AgentIntegrations.contextCommand])
+        let context = TabHook(event: "SessionStart", matcher: nil, arguments: AgentIntegrations.contextArguments)
         switch agent {
         case .claude:
             return [context, state("UserPromptSubmit", nil, "working"), state("PreToolUse", nil, "working"),
@@ -352,10 +352,14 @@ struct HookDocument {
     }
 
     /// The `tab` and its arguments, for a command Tab wrote; `nil` for others.
+    /// Commands of older builds count too, so installing replaces them.
     static func parse(_ command: String) -> (program: URL, arguments: [String])? {
         guard let words = try? Executable.commandArguments(command), words.count >= 2,
-              (words[0] as NSString).lastPathComponent == Executable.cli,
-              [AgentIntegrations.contextCommand, "agent-event"].contains(words[1]) else { return nil }
-        return (URL(fileURLWithPath: words[0]), Array(words.dropFirst()))
+              (words[0] as NSString).lastPathComponent == Executable.cli else { return nil }
+        let arguments = Array(words.dropFirst())
+        let current = arguments.count >= 2 && arguments[0] == "integrations" && ["context", "report"].contains(arguments[1])
+        let older = ["agent-context", "agent-event"].contains(arguments[0])
+        guard current || older else { return nil }
+        return (URL(fileURLWithPath: words[0]), arguments)
     }
 }

@@ -127,11 +127,17 @@ public enum AppRequest: Hashable, Sendable, Codable {
 }
 
 /// A terminal or agent conversation for the app to show. A pane already
-/// showing it is focused; otherwise a new pane opens beside the pane showing
-/// `beside`, such as the agent or terminal that asked, else in `project`.
+/// showing it is focused. Otherwise, as a pane, it opens beside the pane
+/// showing `beside`, such as the agent or terminal that asked, else in
+/// `project`; as a tab, it opens as a new tab of the Home `project`.
 public struct AppPane: Hashable, Sendable, Codable {
     public enum Kind: String, Hashable, Sendable, Codable {
         case terminal, agent
+    }
+
+    /// Where a new pane goes: into an existing tab, or a new tab in Home.
+    public enum Placement: String, Hashable, Sendable, Codable {
+        case pane, tab
     }
 
     public var kind: Kind
@@ -140,14 +146,28 @@ public struct AppPane: Hashable, Sendable, Codable {
     /// An agent's provider; Claude Code when missing.
     public var provider: AgentChatProvider?
     public var beside: SessionId?
+    public var placement: Placement
 
     public init(kind: Kind, session: SessionId, project: ProjectId, provider: AgentChatProvider? = nil,
-                beside: SessionId? = nil) {
+                beside: SessionId? = nil, placement: Placement = .pane) {
         self.kind = kind
         self.session = session
         self.project = project
         self.provider = provider
         self.beside = beside
+        self.placement = placement
+    }
+
+    private enum Keys: String, CodingKey { case kind, session, project, provider, beside, placement }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: Keys.self)
+        kind = try container.decode(Kind.self, forKey: .kind)
+        session = try container.decode(SessionId.self, forKey: .session)
+        project = try container.decode(ProjectId.self, forKey: .project)
+        provider = try container.decodeIfPresent(AgentChatProvider.self, forKey: .provider)
+        beside = try container.decodeIfPresent(SessionId.self, forKey: .beside)
+        placement = try container.decodeIfPresent(Placement.self, forKey: .placement) ?? .pane
     }
 }
 
@@ -343,9 +363,10 @@ public final class AppSocketServer: @unchecked Sendable {
 /// `"selector"` and answer `false` when nothing matches. Waits take an
 /// optional `"timeoutMs"` (capped at 60000).
 public enum BrowserCommand: String, Hashable, Sendable, CaseIterable {
-    /// `url?`, `split`, `project?`, `worktree?`, `profile?` → the new tab's ID (string).
+    /// `url?`, `profile?`, `project?`, `beside?` (a terminal or agent's session),
+    /// `tab` (a new tab in Home) → the new browser's ID (string).
     case open
-    /// `project?`, `worktree?` → `[{"tabId","title","url","profile","active"}]`.
+    /// `project?`, `worktree?` → `[{"id","title","url","profile","active"}]`.
     case list
     /// `url` → `true`.
     case navigate

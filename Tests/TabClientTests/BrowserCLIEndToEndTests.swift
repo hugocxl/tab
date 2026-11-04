@@ -35,6 +35,8 @@ final class BrowserCLIEndToEndTests: XCTestCase {
         environment["TAB_CLI_TIMEOUT"] = timeout
         environment["SSH_CONNECTION"] = arguments.first == "browser" ? "test" : nil
         environment["SSH_TTY"] = nil
+        environment["TAB_SESSION_ID"] = nil
+        environment["TAB_AGENT_ID"] = nil
         process.environment = environment
         let out = Pipe()
         let err = Pipe()
@@ -104,17 +106,12 @@ final class BrowserCLIEndToEndTests: XCTestCase {
     }
 
     private let actions: [(String, String, String)] = [
-
-        ("open", "browser.open", ##"{"split":false}"##),
-        ("open a.test --split --project App --worktree fix --profile Work", "browser.open",
-         ##"{"url":"a.test","split":true,"project":"App","worktree":"fix","profile":"Work"}"##),
         ("navigate T a.test", "browser.navigate", ##"{"tabId":"T","url":"a.test"}"##),
         ("list", "browser.list", "{}"),
-        ("list --project App --worktree fix --json", "browser.list", ##"{"project":"App","worktree":"fix"}"##),
+        ("list --project App --json", "browser.list", ##"{"project":"App"}"##),
         ("read T", "browser.read", ##"{"tabId":"T"}"##),
         ("close T", "browser.close", ##"{"tabId":"T"}"##),
         ("eval T 1+1", "browser.eval", ##"{"tabId":"T","script":"1+1"}"##),
-        ("evaluate T 1+1", "browser.eval", ##"{"tabId":"T","script":"1+1"}"##),
         ("click T #go", "browser.click", ##"{"tabId":"T","selector":"#go"}"##),
         ("type T #q rust", "browser.type", ##"{"tabId":"T","selector":"#q","text":"rust","submit":false}"##),
         ("type T #q rust --submit", "browser.type", ##"{"tabId":"T","selector":"#q","text":"rust","submit":true}"##),
@@ -128,13 +125,12 @@ final class BrowserCLIEndToEndTests: XCTestCase {
         ("uncheck T #ok", "browser.setChecked", ##"{"tabId":"T","selector":"#ok","checked":false}"##),
         ("is T visible #ok", "browser.is", ##"{"tabId":"T","property":"visible","selector":"#ok"}"##),
         ("wait T", "browser.wait", ##"{"tabId":"T"}"##),
-        ("wait T --selector #a --text Done --url-contains /done --function ready --timeout-ms 250", "browser.wait",
+        ("wait T --selector #a --text Done --url-contains /done --function ready --timeout 0.25", "browser.wait",
          ##"{"tabId":"T","selector":"#a","text":"Done","urlContains":"/done","function":"ready","timeoutMs":250}"##),
         ("wait-for T #a", "browser.waitFor", ##"{"tabId":"T","selector":"#a"}"##),
-        ("wait-for T #a 800", "browser.waitFor", ##"{"tabId":"T","selector":"#a","timeoutMs":800}"##),
+        ("wait-for T #a --timeout 0.8", "browser.waitFor", ##"{"tabId":"T","selector":"#a","timeoutMs":800}"##),
         ("wait-for-navigation T", "browser.waitForNavigation", ##"{"tabId":"T"}"##),
-        ("wait-for-navigation T 900", "browser.waitForNavigation", ##"{"tabId":"T","timeoutMs":900}"##),
-        ("wait-for-navigation T --timeout-ms 700", "browser.waitForNavigation", ##"{"tabId":"T","timeoutMs":700}"##),
+        ("wait-for-navigation T --timeout 0.7", "browser.waitForNavigation", ##"{"tabId":"T","timeoutMs":700}"##),
         ("get-text T h1", "browser.getText", ##"{"tabId":"T","selector":"h1"}"##),
         ("get-html T", "browser.getHTML", ##"{"tabId":"T"}"##),
         ("get-html T main", "browser.getHTML", ##"{"tabId":"T","selector":"main"}"##),
@@ -179,18 +175,17 @@ final class BrowserCLIEndToEndTests: XCTestCase {
             let value: String
             let expected: String
             switch verb {
-            case "browser.open":
-                value = #""tab-1""#
-                expected = "tab-1\n"
             case "browser.list":
-                value = #"[{"tabId":"t1","title":"Docs\tHome\nPage\r","url":"https://a.test/","profile":null,"active":true}]"#
+                value = #"[{"id":"t1","title":"Docs\tHome\nPage\r","url":"https://a.test/","profile":null,"active":true}]"#
                 expected = line.contains("--json")
                     ? try JSONDecoder().decode(JSONValue.self, from: Data(value.utf8)).description + "\n"
-                    : "t1\tDocs Home Page \thttps://a.test/\t\ttrue\n"
+                    : "t1\tDocs\\tHome\\nPage\\r\thttps://a.test/\t\ttrue\n"
             case "browser.read":
                 value = #"{"title":"Example","url":"https://example.com/","text":"Hello\nworld"}"#
                 expected = "Example\nhttps://example.com/\nHello\nworld\n"
-            case "browser.navigate", "browser.close":
+            case "browser.navigate", "browser.close", "browser.reload", "browser.back", "browser.forward",
+                 "browser.storage.set", "browser.storage.clear", "browser.cookies.set", "browser.cookies.delete",
+                 "browser.cookies.clear":
                 value = "null"
                 expected = "ok\n"
             case "browser.screenshot":
@@ -222,6 +217,21 @@ final class BrowserCLIEndToEndTests: XCTestCase {
         }
     }
 
+    func testNewBrowserPanesAndTabsOpenThroughTheApp() throws {
+        for (words, arguments, expected) in [
+            (["pane", "new", "browser", "a.test", "--project", "App"], ##"{"url":"a.test","project":"App","tab":false}"##,
+             "b1\n"),
+            (["tab", "new", "browser", "--profile", "Work", "--json"], ##"{"profile":"Work","tab":true}"##,
+             ##"{"id":"b1"}"## + "\n"),
+        ] {
+            let (request, output) = try exchange(words, reply: #"{"ok":true,"value":"b1"}"#)
+            XCTAssertEqual(request, .object(["verb": .string("browser.open"), "args":
+                try JSONDecoder().decode(JSONValue.self, from: Data(arguments.utf8))]), "\(words)")
+            XCTAssertEqual(output.status, 0, output.stderr)
+            XCTAssertEqual(output.stdout, expected, "\(words)")
+        }
+    }
+
     func testErrorsMalformedRepliesAndNotRunning() throws {
         for (reply, message) in [
             (#"{"ok":false,"error":"browser tab not found missing"}"#, "browser tab not found missing"),
@@ -248,19 +258,19 @@ final class BrowserCLIEndToEndTests: XCTestCase {
     func testHelpAndArgumentErrors() throws {
         let help = try run(["browser", "--help"])
         XCTAssertEqual(help.status, 0)
-        XCTAssertEqual(help.stdout, CLIHelp.browser + "\n")
+        XCTAssertEqual(help.stdout, CLIHelp.group(CLICommands.browser) + "\n")
         XCTAssertEqual(help.stderr, "")
         let rootHelp = try run(["--help"])
         XCTAssertEqual(rootHelp.status, 0)
         XCTAssertEqual(rootHelp.stdout, CLIHelp.root + "\n")
         for (arguments, message) in [
-            (["click", "T"], "usage: tab browser click <tab-id> <selector>"),
-            (["open", "--project"], "missing value for --project"),
-            (["wait", "T", "--timeout-ms", "-5"], "invalid value for --timeout-ms"),
-            (["wait", "T", "--text", "a", "--text", "b"], "duplicate option --text"),
-            (["type", "T", "#q", "x", "--submit", "--submit"], "duplicate option --submit"),
-            (["screenshot", "T", "page.png"], "usage: tab browser screenshot <tab-id>"),
-            (["nope"], "unknown browser command; run tab browser --help"),
+            (["click", "T"], "usage: tab browser click BROWSER SELECTOR"),
+            (["list", "--project"], "missing value for --project"),
+            (["wait", "T", "--timeout", "-5"], "--timeout must be a number of seconds, more than 0 and at most 60"),
+            (["wait", "T", "--text", "a", "--text", "b"], "--text given twice"),
+            (["type", "T", "#q", "x", "--submit", "--submit"], "--submit given twice"),
+            (["screenshot", "T", "page.png"], "usage: tab browser screenshot BROWSER"),
+            (["nope"], "unknown command tab browser nope; run tab browser --help"),
         ] {
             let result = try run(["browser"] + arguments)
             XCTAssertEqual(result.status, 1)
@@ -273,11 +283,11 @@ final class BrowserCLIEndToEndTests: XCTestCase {
     }
 
     func testWaitAddsItsDurationAndTimeoutFailsWithMessage() throws {
-        let (_, waited) = try exchange(["browser", "wait", "T", "--timeout-ms", "2000"],
+        let (_, waited) = try exchange(["browser", "wait", "T", "--timeout", "2"],
                                        reply: #"{"ok":true,"value":false}"#, delay: 1.2, timeout: "1")
         XCTAssertEqual(waited.status, 0, waited.stderr)
         XCTAssertEqual(waited.stdout, "false\n")
-        let (_, expired) = try exchange(["browser", "wait", "T", "--timeout-ms", "0"],
+        let (_, expired) = try exchange(["browser", "wait", "T", "--timeout", "0.001"],
                                         reply: #"{"ok":true,"value":true}"#, delay: 1.2, timeout: "1")
         XCTAssertEqual(expired.status, 1)
         XCTAssertEqual(expired.stdout, "")

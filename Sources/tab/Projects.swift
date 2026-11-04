@@ -10,7 +10,7 @@ enum Projects {
         case .list:
             let projects = ordered(try await client.catalog().projects)
             Output.list(projects.map(record), columns: ["id", "name", "directory"], json: json)
-        case .add(let directory, let name, let create, let reuse):
+        case .new(let directory, let name, let create, let reuse):
             var directory = try target.directory(directory)
             if create { try await makeDirectory(directory, client: client, target: target) }
             if !target.isRemote {
@@ -31,7 +31,7 @@ enum Projects {
             let project = try await resolve(selector, client: client, target: target)
             try await mutate(.rename(project: project.id, name: name), client: client)
             Output.ok(json: json)
-        case .delete(let selector):
+        case .remove(let selector):
             let project = try await resolve(selector, client: client, target: target)
             try await mutate(.delete(project.id), client: client)
             Output.ok(json: json)
@@ -140,12 +140,12 @@ enum Projects {
             guard case .worktrees(let worktrees) = try await client.git(GitRequest(project: root.id, action: .worktrees))
             else { throw CLIError("unexpected worktree list reply") }
             Output.list(worktrees.map(worktreeRecord), columns: ["projectId", "branch", "directory"], json: json)
-        case .create(let project, let name, let branch, let base, let directory, let hooks):
+        case .new(let project, let name, let branch, let base, let directory, let hooks):
             let root = try await root(project, client: client, target: target)
             let folder = try await worktreeDirectory(directory, root: root, name: name, client: client, target: target)
             try await create(.create(project: ProjectId(), directory: ServerPath(folder), branch: branch, base: base),
                              root: root, name: name, hooks: hooks, client: client, json: json)
-        case .checkoutPullRequest(let project, let number, let name, let directory, let hooks):
+        case .pullRequest(let project, let number, let name, let directory, let hooks):
             let root = try await root(project, client: client, target: target)
             let fallback = name ?? "pr-\(number)"
             let folder = try await worktreeDirectory(directory, root: root, name: fallback, client: client,
@@ -199,7 +199,7 @@ enum Projects {
         if target.isRemote {
             let projects = try await client.catalog().projects
             guard let serverHome = projects.first(where: \.home)?.directory.rawValue else {
-                throw CLIError("the server has no Home project; pass --directory")
+                throw CLIError("the server has no Home project; give --directory")
             }
             home = serverHome
         } else {

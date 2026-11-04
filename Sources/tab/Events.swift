@@ -3,7 +3,7 @@ import TabClient
 import TabCore
 import TabProtocol
 
-/// `session events`: what happens to sessions, as JSON lines, until interrupted.
+/// `session events`: what happens to sessions, one line each, until interrupted.
 enum SessionEvents {
     static func follow(_ only: SessionId?, client: ServerClient, json: Bool) async throws {
         // Reading starts the server's catalog and activity events for this connection.
@@ -75,7 +75,7 @@ enum SessionEvents {
     }
 }
 
-/// `agent-event`: an agent's hook reports its state. It prints nothing and
+/// `integrations report`: an agent's hook reports its state. It prints nothing and
 /// never fails, so an agent never sees an error from Tab.
 enum AgentEventReport {
     static let timeout: TimeInterval = 2
