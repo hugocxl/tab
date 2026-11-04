@@ -47,7 +47,7 @@ struct SidebarSnapshot: Equatable {
         hints = model.shortcutHints
         query = model.nameFilter
         let listing = model.sidebarListing
-        showsHostHeaders = model.knownServers.count > 1
+        showsHostHeaders = model.appearance.sidebarLayout == .tabs ? listing.hosts.count > 1 : model.knownServers.count > 1
         func header(_ project: Project) -> CardHeader {
             let root = project.parentId.flatMap { model.state.project($0) } ?? project
             return CardHeader(project: root.id, title: model.title(of: root))

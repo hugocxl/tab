@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.55.1 - 2026-11-04
+
+### Changed
+
+- The Open Tabs sidebar layout shows a heading per computer only when its tabs
+  come from more than one computer.
+
 ## 0.55.0 - 2026-11-04
 
 ### Added
