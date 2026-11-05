@@ -3,6 +3,18 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.58.0 - 2026-11-05
+
+### Added
+
+- New Agent in Project (Cmd-Shift-O) works like New Terminal in Project but
+  opens an agent, in a project, a new worktree or a pull request's worktree.
+
+### Fixed
+
+- The Open Tabs sidebar layout leaves out computers with no tab open, so tabs
+  from a single computer show without a heading.
+
 ## 0.57.0 - 2026-11-05
 
 ### Changed

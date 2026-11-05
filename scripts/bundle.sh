@@ -2,7 +2,10 @@
 # Assembles Tab.app from a SwiftPM build. Usage: scripts/bundle.sh [debug|release]
 # The bundle lands in build/<config>/ and holds TabDesktop, tabd and tab. Its
 # version is RELEASE_VERSION, or CHANGELOG.md's newest; the build number is the
-# commit count.
+# commit count. A debug bundle built in a linked Git worktree is named after it,
+# such as "Tab Dev (wt-3513)", with its own bundle id and profile folder, so
+# several worktrees' builds run at once; TAB_DEV_VARIANT overrides the name.
+# The bundle's file keeps the plain name: build/debug/Tab Dev.app.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CONFIG="${1:-debug}"
@@ -20,10 +23,23 @@ if [ -n "${BASH_REMATCH[2]}" ] && [ "${BASH_REMATCH[2]}" != "$BUILD_NUMBER" ]; t
     exit 1
 fi
 SHORT_VERSION="${VERSION%%-*}"
+DEV_VARIANT=""
 if [ "$CONFIG" = "release" ]; then
     BUNDLE_ID="com.hugocorta.tab"; APP_NAME="Tab"
 else
     BUNDLE_ID="com.hugocorta.tab-dev"; APP_NAME="Tab Dev"
+    if [ -n "${TAB_DEV_VARIANT+set}" ]; then
+        DEV_VARIANT="$TAB_DEV_VARIANT"
+    elif [ "$(git -C "$ROOT" rev-parse --git-dir 2>/dev/null)" != "$(git -C "$ROOT" rev-parse --git-common-dir 2>/dev/null)" ]; then
+        DEV_VARIANT="$(basename "$ROOT")"
+    fi
+    # Bundle ids allow letters, digits and hyphens; the cap keeps the profile's
+    # socket paths under the SUN_LEN limit.
+    DEV_VARIANT="$(printf '%s' "$DEV_VARIANT" | tr -c 'A-Za-z0-9-' '-' | cut -c 1-24)"
+fi
+FILE_NAME="$APP_NAME"
+if [ -n "$DEV_VARIANT" ]; then
+    BUNDLE_ID="$BUNDLE_ID.$DEV_VARIANT"; APP_NAME="Tab Dev ($DEV_VARIANT)"
 fi
 
 for product in TabDesktop tabd tab; do
@@ -31,7 +47,7 @@ for product in TabDesktop tabd tab; do
 done
 BIN="$(cd "$ROOT" && swift build "${SWIFT_FLAGS[@]}" -c "$CONFIG" --show-bin-path)"
 swift "$ROOT/scripts/build-icon.swift"
-APP="$ROOT/build/$CONFIG/$APP_NAME.app"
+APP="$ROOT/build/$CONFIG/$FILE_NAME.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN/TabDesktop" "$BIN/tabd" "$BIN/tab" "$APP/Contents/MacOS/"
@@ -55,6 +71,7 @@ cp "$ROOT/THIRD_PARTY_NOTICES.md" "$APP/Contents/Resources/THIRD_PARTY_NOTICES.m
 sed -e "s/__BUNDLE_ID__/$BUNDLE_ID/g" -e "s/__APP_NAME__/$APP_NAME/g" -e "s/__VERSION__/$VERSION/g" \
     -e "s/__SHORT_VERSION__/$SHORT_VERSION/g" \
     -e "s/__BUILD_NUMBER__/$BUILD_NUMBER/g" \
+    -e "s/__DEV_VARIANT__/$DEV_VARIANT/g" \
     "$ROOT/packaging/Info.plist" > "$APP/Contents/Info.plist"
 plutil -lint "$APP/Contents/Info.plist"
 echo -n "APPL????" > "$APP/Contents/PkgInfo"

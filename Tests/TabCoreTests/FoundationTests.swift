@@ -56,6 +56,8 @@ final class FoundationTests: XCTestCase {
     func testProfileFoldersSeparateBuildsAndHonorTheOverride() throws {
         XCTAssertEqual(try TabDirs.resolveRoot(override: nil, home: "/Users/dev", name: TabDirs.folderName(debug: false)).path, "/Users/dev/Library/Application Support/Tab")
         XCTAssertEqual(TabDirs.folderName(debug: true), "Tab Dev")
+        XCTAssertEqual(TabDirs.folderName(debug: true, variant: "wt-3513"), "Tab Dev (wt-3513)", "worktree builds keep separate profiles")
+        XCTAssertEqual(TabDirs.folderName(debug: false, variant: "wt-3513"), "Tab")
         XCTAssertEqual(try TabDirs.resolveRoot(override: "/tmp/t", home: nil, name: "Tab").path, "/tmp/t")
         XCTAssertThrowsError(try TabDirs.resolveRoot(override: "", home: "/Users/dev", name: "Tab"))
         XCTAssertThrowsError(try TabDirs.resolveRoot(override: nil, home: "", name: "Tab"))

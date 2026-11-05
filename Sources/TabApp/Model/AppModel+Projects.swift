@@ -174,14 +174,14 @@ extension AppModel {
             action: .create(project: ProjectId(), directory: ServerPath(directory), branch: branch, base: base),
             options: WorktreeOptions(name: name, hooks: hooks)
         )
-        return await runWorktreeCreation(parent: parent, label: name, intent: intent, openTerminal: false, setup: nil)
+        return await runWorktreeCreation(parent: parent, label: name, intent: intent, opening: nil, setup: nil)
     }
 
     /// Sends a worktree creation and opens what it made: the project, or
-    /// with `openTerminal` a new terminal in it that runs `setup` where the
-    /// user can watch.
+    /// with `opening` a new pane of that kind in it. `setup` runs in a new
+    /// terminal where the user can watch, beside an agent pane.
     private func runWorktreeCreation(parent: ProjectId, label: String, intent: WorktreeIntent,
-                                     openTerminal: Bool, setup: [WorktreeHook]?) async -> String? {
+                                     opening: PaneKind?, setup: [WorktreeHook]?) async -> String? {
         guard let side = sideClient(for: parent) else { return "Connect to the server to create a worktree." }
         worktreeCreations[parent, default: []].append(label)
         notify(.state)
@@ -212,12 +212,17 @@ extension AppModel {
                summary.base == base {
                 presenter?.showToast("Couldn't fetch the latest \(base), so “\(created.name)” starts from your local copy.", error: false)
             }
-            if openTerminal {
+            if let opening {
                 let command = setup.map {
                     Self.setupCommand($0, worktree: created, repository: state.project(parent)?.directory.rawValue ?? "",
                                       branch: git[created.id]?.summary?.branch ?? created.name)
                 }
-                newTerminal(in: created.id, command: command, directory: created.directory)
+                if opening == .agent, command == nil {
+                    newAgent(in: created.id)
+                } else {
+                    newTerminal(in: created.id, command: command, directory: created.directory)
+                    if opening == .agent { newPane(.agent, in: created.id) }
+                }
             } else {
                 selectProject(created.id)
             }
@@ -228,14 +233,15 @@ extension AppModel {
         }
     }
 
-    /// Creates a worktree of `parent` in one step and opens a terminal in
-    /// it: branch `name` from `base` (the default branch when nil), fetched
-    /// from its remote first when `fetchBase`, in the project's last
+    /// Creates a worktree of `parent` in one step and opens an `opening`
+    /// pane in it: branch `name` from `base` (the default branch when nil),
+    /// fetched from its remote first when `fetchBase`, in the project's last
     /// worktree location. An existing branch is checked out instead, or its
     /// worktree opened when one already has it. An empty `name` gets a short
     /// random one. Setup commands run in the terminal once approved, and
     /// approval is remembered until they change.
-    public func quickWorktree(parent: ProjectId, name: String, base chosen: String? = nil, fetchBase: Bool = false) {
+    public func quickWorktree(parent: ProjectId, name: String, base chosen: String? = nil, fetchBase: Bool = false,
+                              opening: PaneKind = .terminal) {
         guard let side = sideClient(for: parent) else { return report("Connect to the server to create a worktree.") }
         let typed = Self.quickBranchName(name)
         Task {
@@ -251,7 +257,7 @@ extension AppModel {
             }
             var base: String?
             if let existing = branches.first(where: { $0.name == worktreeName }) {
-                if existing.checkedOut { return await openWorktree(of: parent, branch: worktreeName) }
+                if existing.checkedOut { return await openWorktree(of: parent, branch: worktreeName, opening: opening) }
             } else {
                 base = chosen ?? branches.first(where: \.isDefault)?.name ?? branches.first(where: \.current)?.name
             }
@@ -262,7 +268,7 @@ extension AppModel {
                 options: WorktreeOptions(name: worktreeName, fetchBase: base != nil && fetchBase ? true : nil)
             )
             if let message = await runWorktreeCreation(parent: parent, label: worktreeName, intent: intent,
-                                                       openTerminal: true, setup: setup) {
+                                                       opening: opening, setup: setup) {
                 report(message)
             }
         }
@@ -276,15 +282,15 @@ extension AppModel {
     }
 
     /// Checks out pull request `number` of `parent` into a new worktree and
-    /// opens a terminal in it, as `quickWorktree` does.
-    public func pullRequestWorktree(parent: ProjectId, number: UInt64) {
+    /// opens a pane of `opening` in it, as `quickWorktree` does.
+    public func pullRequestWorktree(parent: ProjectId, number: UInt64, opening: PaneKind = .terminal) {
         let name = "pr-\(number)"
         Task {
             guard let directory = quickWorktreeDirectory(parent: parent, name: name) else { return }
             let setup = await approvedSetup(parent: parent, name: name)
             let intent = WorktreeIntent(action: .checkoutPullRequest(project: ProjectId(), directory: ServerPath(directory), number: number))
             if let message = await runWorktreeCreation(parent: parent, label: name, intent: intent,
-                                                       openTerminal: true, setup: setup) {
+                                                       opening: opening, setup: setup) {
                 report(message)
             }
         }
@@ -292,7 +298,7 @@ extension AppModel {
 
     /// Opens the worktree that has `branch` checked out, adding it to the
     /// sidebar when Tab doesn't show it yet.
-    private func openWorktree(of parent: ProjectId, branch: String) async {
+    private func openWorktree(of parent: ProjectId, branch: String, opening: PaneKind) async {
         guard let side = sideClient(for: parent) else { return }
         do {
             guard case .worktrees(let worktrees) = try await side.git(GitRequest(project: parent, action: .worktrees)),
@@ -300,21 +306,23 @@ extension AppModel {
                 return report("Branch “\(branch)” is checked out somewhere Tab can't find.")
             }
             if found.primary { return selectProject(parent) }
-            if let registered = found.registered { return open(worktree: registered) }
+            if let registered = found.registered { return open(worktree: registered, opening: opening) }
             let intent = WorktreeIntent(action: .register(project: ProjectId(), directory: found.directory))
             guard case .project(let added) = try await side.git(GitRequest(project: parent, action: .worktree(intent))) else { return }
             if let server = state.projectServer(parent) { await applyLatestCatalog(server) }
-            open(worktree: added.id)
+            open(worktree: added.id, opening: opening)
         } catch {
             report(error.message)
         }
     }
 
-    /// Shows a worktree, with a terminal when nothing in it is open.
-    private func open(worktree: ProjectId) {
+    /// Shows a worktree, with an `opening` pane when nothing in it is open.
+    private func open(worktree: ProjectId, opening: PaneKind) {
         guard let project = state.project(worktree) else { return }
         if project.tabs.contains(where: { !$0.panes.isEmpty }) {
             selectProject(worktree)
+        } else if opening == .agent {
+            newAgent(in: worktree)
         } else {
             newTerminal(in: worktree, directory: project.directory)
         }

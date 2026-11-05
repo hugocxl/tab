@@ -47,12 +47,11 @@ struct SidebarSnapshot: Equatable {
         hints = model.shortcutHints
         query = model.nameFilter
         let listing = model.sidebarListing
-        showsHostHeaders = model.appearance.sidebarLayout == .tabs ? listing.hosts.count > 1 : model.knownServers.count > 1
         func header(_ project: Project) -> CardHeader {
             let root = project.parentId.flatMap { model.state.project($0) } ?? project
             return CardHeader(project: root.id, title: model.title(of: root))
         }
-        hosts = listing.hosts.map { host in
+        let hosts = listing.hosts.map { host in
             let terminals = host.terminals.compactMap { entry -> CardEntry? in
                 guard let project = model.state.project(entry.project),
                       let tab = project.tabs.first(where: { $0.id == entry.tab }) else { return nil }
@@ -86,6 +85,14 @@ struct SidebarSnapshot: Equatable {
             }
             return HostEntry(server: host.server, title: host.server.isLocal ? "This Mac" : model.serverName(host.server) ?? "Remote",
                              terminals: terminals, groups: groups, openTabs: openTabs)
+        }
+        if model.appearance.sidebarLayout == .tabs {
+            // A computer whose projects have no tab open shows nothing in Open Tabs.
+            self.hosts = hosts.filter { !($0.openTabs?.isEmpty ?? true) || $0.groups.contains { !$0.creating.isEmpty } }
+            showsHostHeaders = self.hosts.count > 1
+        } else {
+            self.hosts = hosts
+            showsHostHeaders = model.knownServers.count > 1
         }
     }
 }

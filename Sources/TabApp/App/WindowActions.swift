@@ -16,8 +16,8 @@ public enum PalettePage: Hashable, Sendable {
     case terminals(ProjectId)
     case projects
     case workspaces
-    /// New Terminal in Project.
-    case newTerminal
+    /// New Terminal in Project, or New Agent in Project for `.agent`.
+    case newInProject(PaneKind)
     /// The branch New Terminal in Project's new worktrees of a repository start from.
     case worktreeBase(ProjectId)
     case themes

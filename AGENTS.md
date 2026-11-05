@@ -11,6 +11,7 @@ scripts/build-ghostty.sh          # once: vendor/GhosttyVT.xcframework (needs Zi
 swift build
 swift test --filter TabCoreTests  # one module; plain `swift test` runs all
 scripts/bundle.sh debug           # build/debug/Tab Dev.app
+scripts/run-dev.sh                # bundle, then quit and relaunch this checkout's dev app
 scripts/validate.sh               # build (warnings are errors), tests, debug bundle
 ```
 
@@ -80,6 +81,10 @@ runs the same script.
   views directly.
 - State lives in `~/Library/Application Support/Tab`, or `Tab Dev` for debug
   builds. Override it with `TAB_DIR`.
+- A debug build from a linked worktree is its own app, `Tab Dev (<worktree>)`,
+  with its own bundle id, profile folder and `tabd`, so several worktrees' builds
+  run at once. Launch it with `scripts/run-dev.sh`, never a bare `open`: shells
+  inside Tab export `TAB_DIR`, which would attach it to another profile.
 
 ## Performance
 

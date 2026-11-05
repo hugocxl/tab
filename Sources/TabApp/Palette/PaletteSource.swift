@@ -101,9 +101,10 @@ final class PaletteSource: PaletteDataSource {
         case .workspaces: return PageSpec(page, placeholder: "Switch to workspace…", breadcrumb: "Switch Workspace")
         case .worktreeBase:
             return PageSpec(page, placeholder: "Start the new worktree from…", breadcrumb: "Base Branch")
-        case .newTerminal:
-            var spec = PageSpec(page, placeholder: newTerminalInWorktree ? "Name the new worktree…" : "Open a terminal in…",
-                                breadcrumb: "New Terminal in Project")
+        case .newInProject(let kind):
+            let opens = kind == .agent ? "an agent" : "a terminal"
+            var spec = PageSpec(page, placeholder: newTerminalInWorktree ? "Name the new worktree…" : "Open \(opens) in…",
+                                breadcrumb: kind == .agent ? "New Agent in Project" : "New Terminal in Project")
             let tab = try? KeyChord("tab")
             if newTerminalInWorktree {
                 spec.accessories = [.mode(id: "worktree", label: "New worktree", icon: .gitBranch, key: tab)]
@@ -132,7 +133,7 @@ final class PaletteSource: PaletteDataSource {
 
     func opened(_ page: PalettePage) {
         switch page {
-        case .newTerminal:
+        case .newInProject:
             worktreeBases = [:]
             worktreeFromLocal = []
         case .worktreeBase(let project): loadBranches(project, force: true)
@@ -169,8 +170,8 @@ final class PaletteSource: PaletteDataSource {
     }
 
     func toggled(_ page: PalettePage, accessory: String, active: Bool) {
-        if page == .newTerminal, accessory == "worktree" { _ = model.edit { $0.setNewTerminalInWorktree(!newTerminalInWorktree) } }
-        if page == .newTerminal, accessory == "base", let project = selectedWorktreeParent { palette?.push(.worktreeBase(project)) }
+        if case .newInProject = page, accessory == "worktree" { _ = model.edit { $0.setNewTerminalInWorktree(!newTerminalInWorktree) } }
+        if case .newInProject = page, accessory == "base", let project = selectedWorktreeParent { palette?.push(.worktreeBase(project)) }
         guard page == .find else { return }
         if accessory == "case" { find.caseSensitive = active }
         if accessory == "regex" { find.regex = active }
@@ -192,7 +193,7 @@ final class PaletteSource: PaletteDataSource {
         case .terminals(let project): return terminalsContent(project, query)
         case .projects: return .items(projectItems(query, limit: .max))
         case .workspaces: return .items(workspaceItems(query))
-        case .newTerminal: return .items(newTerminalItems(query))
+        case .newInProject(let kind): return .items(newInProjectItems(kind, query))
         case .worktreeBase(let project): return worktreeBaseContent(project, query)
         case .themes: return .items(themeItems(query))
         case .addProject(let server): return addProjectContent(server, query)
@@ -221,7 +222,8 @@ final class PaletteSource: PaletteDataSource {
         command(.newTab, "New Terminal", .terminal)
         command(.newAgent, "New Agent", .panes, disabled: missing)
         command(.newHomeTab, "New Home Terminal", .terminal)
-        page(ShortcutId.newTabInProject.rawValue, "New Terminal in Project…", .terminal, .newTerminal, shortcut: .newTabInProject)
+        page(ShortcutId.newTabInProject.rawValue, "New Terminal in Project…", .terminal, .newInProject(.terminal), shortcut: .newTabInProject)
+        page(ShortcutId.newAgentInProject.rawValue, "New Agent in Project…", .panes, .newInProject(.agent), shortcut: .newAgentInProject)
         page(ShortcutId.existingTerminals.rawValue, "Existing Terminals…", .terminal, .terminals(project), shortcut: .existingTerminals)
         command(.closeTab, "Close Tab", .terminal, disabled: model.activeTab == nil)
         let single = model.sidebarListing.targets.count < 2
@@ -780,7 +782,7 @@ final class PaletteSource: PaletteDataSource {
     /// Each project and its worktrees, the current project's first, then
     /// Home and other computers' Homes. In New worktree mode, the Git
     /// projects instead, unfiltered: the query names the worktree.
-    private func newTerminalItems(_ query: String) -> [PaletteItem] {
+    private func newInProjectItems(_ kind: PaneKind, _ query: String) -> [PaletteItem] {
         let builder = model.listingBuilder()
         let currentRoot = current.parentId ?? current.id
         var parents = builder.listedParents().filter { !$0.home }
@@ -792,7 +794,7 @@ final class PaletteSource: PaletteDataSource {
             let pullRequest = Self.pullRequestNumber(query)
             return parents.filter { worktreeParent(of: $0) != nil }.map { project in
                 var item = PaletteItem(id: project.id.description, title: builder.title(project), target: .run { [weak self] in
-                    self?.createWorktree(in: project.id, query: query)
+                    self?.createWorktree(in: project.id, query: query, opening: kind)
                 })
                 if let pullRequest {
                     item.subtitle = "Check out pull request #\(pullRequest)"
@@ -827,7 +829,7 @@ final class PaletteSource: PaletteDataSource {
             var item = PaletteItem(id: project.id.description, title: builder.title(project), target: .run { [weak self] in
                 guard let self else { return }
                 self.model.connectOnDemand(project.serverId)
-                self.model.newTerminal(in: project.id)
+                self.open(kind, in: project.id)
             })
             item.highlights = entry.ranges
             item.subtitle = displayPath(project)
@@ -835,7 +837,7 @@ final class PaletteSource: PaletteDataSource {
             item.current = project.id == current.id
             item.kind = project.parentId == nil ? PaletteKind.project.rawValue : PaletteKind.worktree.rawValue
             item.tile = project.parentId == nil ? PaletteKind.project.tile : PaletteKind.worktree.tile
-            item.actions = [PaletteItemAction("open", "Open Terminal"),
+            item.actions = [PaletteItemAction("open", kind == .agent ? "Open Agent" : "Open Terminal"),
                             PaletteItemAction("worktree", "Use New Worktree", shortcut: try? KeyChord("tab"))]
             return item
         }
@@ -884,10 +886,17 @@ final class PaletteSource: PaletteDataSource {
 
     /// Return on a New worktree row: a pull request's worktree for `#482`,
     /// else a new worktree named after the query.
-    private func createWorktree(in project: ProjectId, query: String) {
-        if let number = Self.pullRequestNumber(query) { return model.pullRequestWorktree(parent: project, number: number) }
+    private func createWorktree(in project: ProjectId, query: String, opening kind: PaneKind) {
+        if let number = Self.pullRequestNumber(query) {
+            return model.pullRequestWorktree(parent: project, number: number, opening: kind)
+        }
         model.quickWorktree(parent: project, name: query, base: worktreeBases[project],
-                            fetchBase: !worktreeFromLocal.contains(project))
+                            fetchBase: !worktreeFromLocal.contains(project), opening: kind)
+    }
+
+    /// Opens the New in Project page's pane: an agent, else a terminal.
+    private func open(_ kind: PaneKind, in project: ProjectId) {
+        if kind == .agent { model.newAgent(in: project) } else { model.newTerminal(in: project) }
     }
 
     private func worktreeBaseContent(_ project: ProjectId, _ query: String) -> PageContent {
@@ -1130,16 +1139,16 @@ final class PaletteSource: PaletteDataSource {
             case "remove": palette?.close(); model.confirmRemoveWorktree(id)
             default: break
             }
-        case .newTerminal:
+        case .newInProject(let kind):
             guard let id = UUID(uuidString: item).map({ ProjectId(uuid: $0) }), let project = model.state.project(id) else { return }
             switch action {
             case "open":
                 palette?.close()
                 model.connectOnDemand(project.serverId)
-                model.newTerminal(in: id)
+                open(kind, in: id)
             case "create":
                 palette?.close()
-                createWorktree(in: id, query: palette?.currentQuery ?? "")
+                createWorktree(in: id, query: palette?.currentQuery ?? "", opening: kind)
             case "local":
                 worktreeFromLocal.insert(id)
             case "remote":

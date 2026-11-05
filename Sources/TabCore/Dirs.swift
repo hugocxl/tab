@@ -2,7 +2,8 @@ import Foundation
 
 /// Where Tab keeps its files. Everything lives in one profile folder:
 /// `~/Library/Application Support/Tab` for release builds, `Tab Dev` for debug
-/// builds, or `TAB_DIR` when set.
+/// builds (`Tab Dev (wt-3513)` for one built from a worktree), or `TAB_DIR`
+/// when set.
 public struct TabDirs: Sendable, Equatable {
     /// The profile folder.
     public let root: URL
@@ -17,7 +18,7 @@ public struct TabDirs: Sendable, Equatable {
         let root = try resolveRoot(
             override: environment["TAB_DIR"],
             home: environment["HOME"] ?? NSHomeDirectory(),
-            name: folderName(debug: Release.isDebugBuild)
+            name: folderName(debug: Release.isDebugBuild, variant: Release.devVariant)
         )
         try FileManager.default.createDirectory(
             at: root,
@@ -27,9 +28,11 @@ public struct TabDirs: Sendable, Equatable {
         return TabDirs(root: root)
     }
 
-    /// Release and debug builds keep their data apart.
-    public static func folderName(debug: Bool) -> String {
-        debug ? "Tab Dev" : "Tab"
+    /// Release and debug builds keep their data apart, and so do debug
+    /// builds of different worktrees.
+    public static func folderName(debug: Bool, variant: String? = nil) -> String {
+        guard debug else { return "Tab" }
+        return variant.map { "Tab Dev (\($0))" } ?? "Tab Dev"
     }
 
     static func resolveRoot(override: String?, home: String?, name: String) throws -> URL {

@@ -104,6 +104,7 @@ public struct ShortcutDefinition: Sendable {
         switch id {
         case .newTab: label = "new terminal"
         case .newTabInProject: label = "new terminal in project"
+        case .newAgentInProject: label = "new agent in project"
         case .newAgent: label = "new agent"
         case .newClaudeAgent: label = "new agent — Claude Code"
         case .newCodexAgent: label = "new agent — Codex"
@@ -188,7 +189,7 @@ public enum ShortcutCatalog {
     /// Commands a user can rebind in Settings → Keyboard and the keymap.
     public static let keymapActions: [ShortcutId] = [
         .newAgent, .newClaudeAgent, .newCodexAgent,
-        .openSettings, .newHomeTab, .newTabInProject, .newWorktree, .switchWorktree,
+        .openSettings, .newHomeTab, .newTabInProject, .newAgentInProject, .newWorktree, .switchWorktree,
         .toggleSidebar, .toggleFiles, .toggleSourceControl, .goToFile, .findInFiles, .toggleFullScreen, .toggleThemePicker,
         .toggleCommandPalette, .navigateBack, .navigateForward, .quit, .hideApp, .hideOthers,
         .minimize, .newTab, .existingTerminals, .detachTerminal, .closeTab, .splitRight,
@@ -208,7 +209,7 @@ public enum ShortcutCatalog {
     /// Built-in defaults that give way to a key a user binding already has,
     /// so a newer default never takes a key someone bound before it existed.
     public static let yielding: [ShortcutId] = [
-        .openSettings, .newHomeTab, .newTabInProject, .newWorktree, .switchWorktree,
+        .openSettings, .newHomeTab, .newTabInProject, .newAgentInProject, .newWorktree, .switchWorktree,
         .toggleSidebar, .toggleFiles, .toggleSourceControl, .goToFile,
         .findInFiles, .toggleFullScreen, .toggleThemePicker, .toggleCommandPalette,
         .navigateBack, .navigateForward, .quit, .hideApp, .hideOthers, .minimize,
@@ -315,6 +316,7 @@ public enum ShortcutCatalog {
             .shortcut(.newDevicePane, title: "New Device Pane"),
             .shortcut(.newHomeTab, title: "New Home Terminal"),
             .shortcut(.newTabInProject, title: "New Terminal in Project…"),
+            .shortcut(.newAgentInProject, title: "New Agent in Project…"),
             .shortcut(.newWorktree, title: "New Worktree…"),
             .shortcut(.switchWorktree, title: "Switch Worktree…"),
             .shortcut(.addProject, title: "Open Project…"),
@@ -554,6 +556,7 @@ public enum ShortcutId: String, CaseIterable, Codable, Sendable {
     case decreaseFontSize = "decrease_font_size"
     case newHomeTab = "new_home_tab"
     case newTabInProject = "new_tab_in_project"
+    case newAgentInProject = "new_agent_in_project"
     case newWorktree = "new_worktree"
     case switchWorktree = "switch_worktree"
     case toggleSidebar = "toggle_sidebar"
@@ -707,6 +710,7 @@ extension ShortcutCatalog {
         ShortcutDefinition(.decreaseFontSize, keys: ["cmd--"], contexts: ["WorkspaceTabs"], keyContexts: [["WorkspaceTabs"]], group: .terminal),
         ShortcutDefinition(.newHomeTab, keys: ["cmd-n"], contexts: ["WorkspaceTabs"], keyContexts: [["WorkspaceTabs"]], group: .panes),
         ShortcutDefinition(.newTabInProject, keys: ["cmd-shift-n"], contexts: ["WorkspaceTabs"], keyContexts: [["WorkspaceTabs"]], group: .projects),
+        ShortcutDefinition(.newAgentInProject, keys: ["cmd-shift-o"], contexts: ["WorkspaceTabs"], keyContexts: [["WorkspaceTabs"]], group: .projects),
         ShortcutDefinition(.newWorktree, keys: ["cmd-alt-n"], contexts: ["WorkspaceTabs"], keyContexts: [["WorkspaceTabs"]], group: .projects),
         ShortcutDefinition(.switchWorktree, keys: ["cmd-alt-w"], contexts: ["WorkspaceTabs"], keyContexts: [["WorkspaceTabs"]], group: .projects),
         ShortcutDefinition(.toggleSidebar, keys: ["cmd-b"], contexts: ["WorkspaceTabs"], keyContexts: [["WorkspaceTabs"]], group: .projects),

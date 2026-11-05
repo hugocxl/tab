@@ -179,4 +179,28 @@ final class SidebarListingTests: XCTestCase {
         XCTAssertEqual(named.first?.groups.last?.project, remoteProjects[0])
         XCTAssertEqual(named.first?.terminals.map(\.tab), [remoteTabs[0]])
     }
+
+    /// Open Tabs hides a computer whose projects have no tab open, and its
+    /// heading with it, so one computer's tabs show without headings.
+    func testOpenTabsHeadingsCountOnlyComputersWithOpenTabs() async throws {
+        let local = try XCTUnwrap(model.addProject(try ModelFixtures.folder("local")))
+        let remote = ServerEntry(name: "Mac Mini", ssh: "mini")
+        var settings = model.settings
+        settings.servers = [remote]
+        model.apply(settings: settings)
+        let home = ProjectDescriptor.home(directory: "/remote/home")
+        let project = ProjectDescriptor(directory: "/remote/repo", name: "repo")
+        model.applyCatalog(remote.id, CatalogPage(server: ServerId(), home: home.id, revision: 1, projects: [home, project]))
+        model.newTerminal(in: project.id)
+        model.updateAppearance { $0.sidebarLayout = .tabs }
+
+        let single = SidebarSnapshot(model: model)
+        XCTAssertEqual(single.hosts.map(\.server), [remote.id])
+        XCTAssertFalse(single.showsHostHeaders)
+
+        model.newTerminal(in: local)
+        let both = SidebarSnapshot(model: model)
+        XCTAssertEqual(both.hosts.map(\.server), [.local, remote.id])
+        XCTAssertTrue(both.showsHostHeaders)
+    }
 }
