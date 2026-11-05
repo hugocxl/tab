@@ -336,11 +336,15 @@ final class AgentSessionsTests: XCTestCase {
     }
 
     func testForkCopiesTheConversationAndForksItsProviderSessionUntilItHasItsOwn() async throws {
-        let root = try root(), box = AgentRuntimeBox()
+        let root = try root(), box = AgentRuntimeBox(), messages = AgentEventCount()
         let factory: AgentSessions.Factory = { _, _, resume, callback in
             let runtime = FakeAgentRuntime(callback)
             runtime.providerSession = resume == nil ? "source-conversation" : "forked-conversation"
-            runtime.onSend = { callback(.status(.idle)) }
+            runtime.onSend = {
+                messages.increment()
+                callback(.providerMessage("message-\(messages.count)"))
+                callback(.status(.idle))
+            }
             box.install(runtime)
             return runtime
         }
@@ -362,6 +366,10 @@ final class AgentSessionsTests: XCTestCase {
         XCTAssertEqual(copied.status, .idle)
         let again = try await sessions.handle(.fork(session: fork, from: source))
         XCTAssertEqual(again, copied)
+        // What the source says after the fork stays out of it, and out of a fork of the fork.
+        _ = try await sessions.handle(.send(session: source, text: "More", model: "claude-opus-5-5"))
+        let branch = SessionId()
+        _ = try await sessions.handle(.fork(session: branch, from: fork))
 
         // The fork survives a server restart before its first message.
         sessions.shutdown()
@@ -369,16 +377,21 @@ final class AgentSessionsTests: XCTestCase {
         defer { sessions.shutdown() }
         let continued = try await sessions.handle(.send(session: fork, text: "Next", model: "claude-opus-5-5"))
         XCTAssertEqual(box.runtime?.launches.first?.forkSource, "source-conversation")
+        XCTAssertEqual(box.runtime?.launches.first?.forkPoint, "message-1")
         XCTAssertEqual(box.runtime?.launches.first?.environment["TAB_AGENT_ID"], fork.description)
         XCTAssertEqual(continued.providerSession, "forked-conversation")
         XCTAssertEqual(continued.items.filter { $0.kind == .user }.map(\.text), ["Start", "Next"])
         let unchanged = try await sessions.handle(.read(session: source))
-        XCTAssertEqual(unchanged.items.filter { $0.kind == .user }.map(\.text), ["Start"])
+        XCTAssertEqual(unchanged.items.filter { $0.kind == .user }.map(\.text), ["Start", "More"])
 
         sessions.shutdown()
         sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: factory)
         _ = try await sessions.handle(.send(session: fork, text: "Later", model: "claude-opus-5-5"))
         XCTAssertNil(box.runtime?.launches.first?.forkSource, "A fork with its own conversation resumes it")
+        XCTAssertNil(box.runtime?.launches.first?.forkPoint)
+        _ = try await sessions.handle(.send(session: branch, text: "Branch", model: "claude-opus-5-5"))
+        XCTAssertEqual(box.runtime?.launches.first?.forkSource, "source-conversation")
+        XCTAssertEqual(box.runtime?.launches.first?.forkPoint, "message-1")
     }
 
     func testImportedConversationResumesItsProviderSessionAndIsImportedOnce() async throws {

@@ -522,10 +522,11 @@ enum CLICommands {
                 .pane(CLIPane(placement: .pane, project: a.value("--project"),
                               content: try terminal(a)), json: a.json)
             },
-            CLICommandSpec("pane new agent", ["[--project PROJECT] [--provider claude|codex]", "--fork [AGENT]"],
+            CLICommandSpec("pane new agent", ["[--project PROJECT] [--provider claude|codex] [-- MESSAGE...]",
+                                              "--fork [AGENT] [-- MESSAGE...]"],
                            "Start an agent conversation in a new pane, or copy one with --fork; prints its ID",
                            words: 0 ... 1, values: ["--project", "--provider"], flags: ["--fork"], json: true,
-                           place: .app) { a in
+                           literal: true, place: .app) { a in
                 guard a.flag("--fork") else {
                     guard a.words.isEmpty else { throw a.usage }
                     return .pane(CLIPane(placement: .pane, project: a.value("--project"), content: try agent(a)),
@@ -535,7 +536,8 @@ enum CLICommands {
                     throw CLIError("a fork keeps its project and provider; leave out --project and --provider")
                 }
                 if let agent = a.optional(0), SessionId(string: agent) == nil { throw CLIError("an agent is named by its ID") }
-                return .pane(CLIPane(placement: .pane, project: nil, content: .fork(agent: a.optional(0))), json: a.json)
+                return .pane(CLIPane(placement: .pane, project: nil,
+                                     content: .fork(agent: a.optional(0), message: try message(a))), json: a.json)
             },
             CLICommandSpec("pane new browser", ["[URL] [--project PROJECT] [--profile PROFILE]"],
                            "Open a page in a new pane; prints the browser's ID", words: 0 ... 1,
@@ -553,6 +555,9 @@ enum CLICommands {
         SESSION is a terminal started earlier, such as with tab session new. A fork
         keeps the conversation's transcript, provider, model, effort and access, and
         then goes on by itself; AGENT defaults to the agent this command runs in.
+        MESSAGE is sent to the new agent as its first message, such as the part of
+        the work a fork takes on; without it, the agent waits for the user. Its
+        replies show in its own pane, not to the command.
         Use the printed browser ID with tab browser.
         """)
 
@@ -564,9 +569,9 @@ enum CLICommands {
                            json: true, literal: true, place: .app) { a in
                 .pane(CLIPane(placement: .tab, project: nil, content: try terminal(a)), json: a.json)
             },
-            CLICommandSpec("tab new agent", ["[--provider claude|codex]"],
+            CLICommandSpec("tab new agent", ["[--provider claude|codex] [-- MESSAGE...]"],
                            "Start an agent conversation in a new tab; prints its ID", values: ["--provider"],
-                           json: true, place: .app) { a in
+                           json: true, literal: true, place: .app) { a in
                 .pane(CLIPane(placement: .tab, project: nil, content: try agent(a)), json: a.json)
             },
             CLICommandSpec("tab new browser", ["[URL] [--profile PROFILE]"],
@@ -599,7 +604,16 @@ enum CLICommands {
         guard let provider = AgentChatProvider(rawValue: name) else {
             throw CLIError("--provider must be \(AgentChatProvider.allCases.map(\.rawValue).joined(separator: " or "))")
         }
-        return .agent(provider: provider)
+        return .agent(provider: provider, message: try message(a))
+    }
+
+    /// The first message for a new agent: the words after `--`.
+    private static func message(_ a: CLIArguments) throws -> String? {
+        guard let message = a.literal?.joined(separator: " ") else { return nil }
+        guard !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw CLIError("missing message after --")
+        }
+        return message
     }
 
     // MARK: This Mac

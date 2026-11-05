@@ -23,7 +23,7 @@ public enum AgentSkill {
     public static let text = #"""
     ---
     name: tab-cli
-    description: How to drive Tab from a shell with the `tab` command — start terminals that keep running, type into them, read and wait on their output, open terminal, agent and browser panes in the app, fork your own conversation into a new agent pane, and manage projects and Git worktrees. Use this when you are an agent running inside a Tab terminal or Tab agent pane (or any script on the same computer) and want work to run in its own terminal instead of blocking yours, the user asks for a new terminal, agent or browser pane or tab, or to drive the Tab app's built-in browser.
+    description: How to drive Tab from a shell with the `tab` command — start terminals that keep running, type into them, read and wait on their output, open terminal, agent and browser panes in the app, fork your own conversation into a new agent pane, and manage projects and Git worktrees. Use this when you are an agent running inside a Tab terminal or Tab agent pane (or any script on the same computer) and want work to run in its own terminal instead of blocking yours, the user asks for a new terminal, agent or browser pane or tab, asks to branch or fork the conversation or split work into panes, or to drive the Tab app's built-in browser.
     ---
 
     # Tab CLI
@@ -89,6 +89,7 @@ public enum AgentSkill {
     tab pane new terminal -- npm run dev      # the same, running a command
     tab pane new terminal "$WEB"              # show a terminal you started earlier
     tab pane new agent                        # a new agent pane, a fresh conversation
+    tab pane new agent -- "Review the open PR"   # the same, starting on that message
     tab pane new agent --fork                 # a new agent pane continuing this conversation
     tab pane new browser http://localhost:3000   # prints the browser's ID
     tab tab new terminal                      # a new tab in Home instead
@@ -98,6 +99,21 @@ public enum AgentSkill {
     so the user can carry on in parallel. Never start `claude` or `codex` in a
     terminal for that: it is a separate program that asks its own questions, such
     as whether to trust the folder, regardless of the access mode chosen in Tab.
+
+    ## Branch the conversation
+
+    When the user asks to branch or fork this conversation, or to split work
+    into panes, fork once per branch and give each its part after `--`:
+
+    ```bash
+    tab pane new agent --fork -- "Show the first draft and edit it with me"
+    tab pane new agent --fork -- "Show the second draft and edit it with me"
+    ```
+
+    Each branch knows everything said up to the fork, starts on its message, and
+    the user talks to it in its pane. Your own subagent or task tools are not
+    panes: Tab doesn't show them. You can't see a branch's replies, so don't
+    report what it found; tell the user the branches are open.
 
     ## Wait instead of polling
 

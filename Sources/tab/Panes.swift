@@ -23,6 +23,8 @@ enum Panes {
         let caller = pane.placement == .pane ? caller(server: client.server.server) : nil
         let shown: AppPane
         let record: JSONValue
+        var started: AgentChatSnapshot?
+        var message: String?
         switch pane.content {
         case .terminal(let selector?, _, _):
             let session = try await Sessions.calling(selector, client: client)
@@ -39,19 +41,23 @@ enum Panes {
             shown = AppPane(kind: .terminal, session: session.id, project: session.project, beside: caller,
                             placement: pane.placement)
             record = Sessions.record(session)
-        case .agent(let provider):
+        case .agent(let provider, let text):
             let project = try await project(pane, client: client, target: target).id
             let snapshot = try await client.agentChat(.create(session: SessionId(), project: project, provider: provider))
             shown = AppPane(kind: .agent, session: snapshot.session, project: snapshot.project,
                             provider: snapshot.provider, beside: caller, placement: pane.placement)
             record = agentRecord(snapshot)
-        case .fork(let agent):
+            started = snapshot
+            message = text
+        case .fork(let agent, let text):
             guard let source = agent.flatMap(SessionId.init(string:)) ?? Agents.hostingAgent(server: client.server.server)
             else { throw CLIError("give an agent ID; this isn't a Tab agent on that server") }
             let snapshot = try await client.agentChat(.fork(session: SessionId(), from: source))
             shown = AppPane(kind: .agent, session: snapshot.session, project: snapshot.project,
                             provider: snapshot.provider, beside: caller, placement: pane.placement)
             record = agentRecord(snapshot)
+            started = snapshot
+            message = text
         case .browser:
             return
         }
@@ -59,6 +65,14 @@ enum Panes {
             _ = try App.call(.show(shown), timeout: try App.replyTime(), startApp: true)
         } catch {
             throw CLIError("started \(shown.session), but could not show it: \(CLI.message(error))")
+        }
+        if let started, let message {
+            do {
+                _ = try await client.agentChat(.send(session: started.session, text: message, model: started.model,
+                                                     reasoningEffort: started.reasoningEffort))
+            } catch {
+                throw CLIError("started \(started.session), but could not send it the message: \(CLI.message(error))")
+            }
         }
         Output.record(record, columns: ["id"], json: json)
     }

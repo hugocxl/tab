@@ -3,6 +3,23 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.64.0 - 2026-11-05
+
+### Added
+
+- Ask an agent to branch the conversation and it opens one agent pane per
+  branch beside it, each knowing the conversation so far and starting on its
+  own part of the work.
+- `tab pane new agent` and `tab tab new agent` take a first message for the new
+  agent after `--`, with or without `--fork`.
+
+### Fixed
+
+- Agents in Tab's agent panes know they run in Tab, so asking for panes opens
+  real panes instead of hidden subagents.
+- A forked Claude conversation leaves out what the original says after the
+  fork.
+
 ## 0.63.2 - 2026-11-05
 
 ### Fixed

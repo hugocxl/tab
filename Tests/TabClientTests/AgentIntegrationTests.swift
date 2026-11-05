@@ -110,10 +110,14 @@ final class AgentIntegrationTests: XCTestCase {
         XCTAssertEqual(try HookDocument.read(dotfiles).tabHooks.count, TabHook.all(for: .claude).count)
     }
 
-    func testContextOnlyInsideATabTerminal() {
+    func testContextOnlyInsideATabTerminalOrAgentPane() {
         XCTAssertNil(AgentIntegrations.context(environment: [:], cli: nil))
         let context = AgentIntegrations.context(environment: ["TAB_SESSION_ID": "s1"], cli: nil)
         XCTAssertTrue(context?.contains("session s1") ?? false)
+        // Agent panes have no terminal session, and branching means Tab's panes.
+        let agent = AgentIntegrations.context(environment: ["TAB_AGENT_ID": "a1"], cli: nil)
+        XCTAssertTrue(agent?.contains("agent a1") ?? false)
+        XCTAssertTrue(agent?.contains("tab pane new agent --fork --") ?? false)
     }
 
     func testOnlyTabsOwnHooksCount() {

@@ -24,6 +24,8 @@ struct AgentLaunch: Sendable, Equatable {
     /// The provider conversation to fork rather than resume, until the provider
     /// names the new one.
     var forkSource: String?
+    /// The message of `forkSource` to fork at, rather than its latest.
+    var forkPoint: String?
 }
 
 extension AgentSessionRuntime {
@@ -68,6 +70,11 @@ final class AgentSessions: @unchecked Sendable {
         var deferredEventOverflow = false
         /// The provider conversation this one forks, until the provider names its own.
         var forkSource: String?
+        /// The message of `forkSource` the fork ends at, so it leaves out what the
+        /// source said after the fork was made.
+        var forkPoint: String?
+        /// The latest message the provider wrote to this conversation.
+        var lastProviderMessage: String?
 
         init(_ snapshot: AgentChatSnapshot, directory: String) {
             self.snapshot = snapshot
@@ -82,6 +89,8 @@ final class AgentSessions: @unchecked Sendable {
         var directory: String
         var hasSuccessfulTurn: Bool?
         var forkSource: String?
+        var forkPoint: String?
+        var lastProviderMessage: String?
     }
 
     private final class PendingReply: @unchecked Sendable {
@@ -143,6 +152,8 @@ final class AgentSessions: @unchecked Sendable {
                 let entry = Entry(saved.snapshot, directory: saved.directory)
                 entry.hasSuccessfulTurn = saved.hasSuccessfulTurn ?? entry.hasSuccessfulTurn
                 entry.forkSource = saved.forkSource
+                entry.forkPoint = saved.forkPoint
+                entry.lastProviderMessage = saved.lastProviderMessage
                 bound(entry)
                 let checkpointDirectory = root.appendingPathComponent("checkpoints", isDirectory: true)
                     .appendingPathComponent(entry.snapshot.session.description, isDirectory: true)
@@ -444,7 +455,8 @@ final class AgentSessions: @unchecked Sendable {
             if let runtime = entry.runtime {
                 var environment = launchEnvironment
                 environment["TAB_AGENT_ID"] = id.description
-                runtime.prepare(AgentLaunch(environment: environment, path: cliDirectory, forkSource: entry.forkSource))
+                runtime.prepare(AgentLaunch(environment: environment, path: cliDirectory, forkSource: entry.forkSource,
+                                            forkPoint: entry.forkPoint))
                 configureAccess(entry, runtime: runtime, mode: entry.snapshot.accessMode ?? .standard)
             }
         }
@@ -637,6 +649,12 @@ final class AgentSessions: @unchecked Sendable {
             guard entry.snapshot.providerSession != id else { return }
             entry.snapshot.providerSession = id
             entry.forkSource = nil
+            entry.forkPoint = nil
+            entry.lastProviderMessage = nil
+        case .providerMessage(let id):
+            guard id.utf8.count <= 4096 else { return }
+            entry.lastProviderMessage = id
+            return
         case .contextUsage(let usage):
             guard usage.usedTokens >= 0, usage.contextWindow.map({ $0 > 0 }) ?? true,
                   entry.snapshot.contextUsage != usage else { return }
@@ -668,7 +686,9 @@ final class AgentSessions: @unchecked Sendable {
 
     /// A new conversation `id` holding `from`'s transcript and choices. Its
     /// provider forks `from`'s conversation on the first message, so neither
-    /// sees what the other says next.
+    /// sees what the other says next. Claude forks at the message `from` had
+    /// reached when the fork was made; Codex forks the whole thread as it is
+    /// at the first message.
     private func fork(_ id: SessionId, from: SessionId) throws -> AgentChatSnapshot {
         guard let source = entries[from] else { throw ServiceError.unknownSession(from) }
         if let entry = entries[id] {
@@ -689,7 +709,13 @@ final class AgentSessions: @unchecked Sendable {
         for index in snapshot.items.indices { snapshot.items[index].isComplete = true }
         let entry = Entry(snapshot, directory: source.directory)
         entry.hasSuccessfulTurn = source.hasSuccessfulTurn
-        entry.forkSource = source.forkSource ?? source.snapshot.providerSession
+        if let pending = source.forkSource {
+            entry.forkSource = pending
+            entry.forkPoint = source.forkPoint
+        } else {
+            entry.forkSource = source.snapshot.providerSession
+            entry.forkPoint = source.lastProviderMessage
+        }
         entries[id] = entry
         touch(entry)
         persist(entry)
@@ -1264,7 +1290,8 @@ final class AgentSessions: @unchecked Sendable {
 
     private func persist(_ entry: Entry) {
         let saved = Saved(snapshot: entry.snapshot, directory: entry.directory, hasSuccessfulTurn: entry.hasSuccessfulTurn,
-                          forkSource: entry.forkSource)
+                          forkSource: entry.forkSource, forkPoint: entry.forkPoint,
+                          lastProviderMessage: entry.lastProviderMessage)
         let file = root.appendingPathComponent(entry.snapshot.session.description + ".json")
         writer.async {
             do {

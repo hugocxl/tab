@@ -50,6 +50,9 @@ internal final class ClaudeAgentRuntime {
         }
         // Subagent messages belong to their tool, not the root assistant stream.
         if let parent = message["parent_tool_use_id"], !(parent is NSNull) { return }
+        if ["assistant", "user"].contains(message["type"] as? String), let uuid = message["uuid"] as? String {
+            onEvent(.providerMessage(uuid))
+        }
         switch message["type"] as? String {
         case "system":
             receiveCompaction(message)

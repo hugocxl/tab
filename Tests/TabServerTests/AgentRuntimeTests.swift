@@ -469,13 +469,15 @@ final class AgentRuntimeTests: XCTestCase {
         emit "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"$id\",\"response\":{}}}"
         take
         emit '{"type":"system","subtype":"init","session_id":"forked-session"}'
+        emit '{"type":"assistant","uuid":"reply-message","session_id":"forked-session","parent_tool_use_id":null,"message":{"id":"m1","content":[{"type":"text","text":"Done"}]}}'
+        emit '{"type":"assistant","uuid":"subagent-message","session_id":"forked-session","parent_tool_use_id":"tool-1","message":{"id":"m2","content":[]}}'
         emit '{"type":"result","subtype":"success","is_error":false,"result":"Done"}'
         hold
         """#)
         defer { fixture.remove() }
         let recorder = AgentRuntimeRecorder()
         let runtime = fixture.runtime(.claude, recorder: recorder, resume: "original-session")
-        runtime.prepare(AgentLaunch(forkSource: "original-session"))
+        runtime.prepare(AgentLaunch(forkSource: "original-session", forkPoint: "source-message"))
         defer { runtime.stop() }
         for model in ["claude-opus-5-5", "claude-sonnet-5-5"] {
             let idle = expectation(description: "turn completed")
@@ -486,9 +488,11 @@ final class AgentRuntimeTests: XCTestCase {
         let launches = try fixture.launches()
         XCTAssertEqual(launches.count, 2)
         guard launches.count == 2 else { return }
-        XCTAssertTrue(launches[0].contains("--resume\noriginal-session\n--fork-session\n"))
+        XCTAssertTrue(launches[0].contains("--resume\noriginal-session\n--fork-session\n--resume-session-at\nsource-message\n"))
         XCTAssertTrue(launches[1].contains("--resume\nforked-session\n"))
         XCTAssertFalse(launches[1].contains("--fork-session"))
+        XCTAssertFalse(launches[1].contains("--resume-session-at"))
+        XCTAssertEqual(Set(recorder.messages), ["reply-message"], "A subagent's messages aren't where the conversation is")
     }
 
     func testCodexForkStartsAThreadForkAndResumesTheNewThreadAfterwards() async throws {
@@ -701,6 +705,7 @@ final class AgentRuntimeRecorder: @unchecked Sendable {
     var statuses: [AgentChatStatus] { snapshot.compactMap { if case .status(let value) = $0 { return value }; return nil } }
     var failures: [String] { snapshot.compactMap { if case .failure(let value) = $0 { return value }; return nil } }
     var sessions: [String] { snapshot.compactMap { if case .providerSession(let value) = $0 { return value }; return nil } }
+    var messages: [String] { snapshot.compactMap { if case .providerMessage(let value) = $0 { return value }; return nil } }
     var contextUsage: [AgentContextUsage] { snapshot.compactMap { if case .contextUsage(let value) = $0 { return value }; return nil } }
     var resolvedModels: [String] { snapshot.compactMap { if case .resolvedModel(let value) = $0 { return value }; return nil } }
     var transcript: [String: AgentChatItem] {

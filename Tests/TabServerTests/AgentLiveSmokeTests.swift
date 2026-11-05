@@ -142,7 +142,7 @@ private final class LiveAgentEvents: @unchecked Sendable {
                 }
             case .textDelta(let id, let text): rows[id, default: ""] += text
             case .providerSession(let id): session = id
-            case .contextUsage, .resolvedModel: break
+            case .contextUsage, .resolvedModel, .providerMessage: break
             case .failure(let message): error = message
             case .status(let status):
                 statuses.append(status.rawValue)

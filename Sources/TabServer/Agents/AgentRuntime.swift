@@ -8,6 +8,8 @@ internal enum AgentRuntimeEvent: Sendable {
     case textDelta(id: String, text: String)
     case status(AgentChatStatus)
     case providerSession(String)
+    /// The latest message the provider wrote to its conversation, where a fork made now begins.
+    case providerMessage(String)
     case contextUsage(AgentContextUsage)
     case resolvedModel(String)
     case commands([String])
@@ -216,7 +218,10 @@ internal final class AgentRuntime: @unchecked Sendable {
             : ["app-server"]
         if provider == .claude {
             if let resumeSession { arguments += ["--resume", resumeSession] }
-            if forking { arguments.append("--fork-session") }
+            if forking {
+                arguments.append("--fork-session")
+                if let point = launch.forkPoint { arguments += ["--resume-session-at", point] }
+            }
             if let model { arguments += ["--model", model] }
             if let reasoningEffort { arguments += ["--effort", claudeWireEffort(reasoningEffort, model: model)] }
             self.model = model
