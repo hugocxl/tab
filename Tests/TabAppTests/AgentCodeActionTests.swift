@@ -85,7 +85,7 @@ final class AgentCodeActionTests: XCTestCase {
         code.copyCode()
         XCTAssertEqual(NSPasteboard.general.string(forType: .string), "echo hello\n")
         XCTAssertEqual(code.copy.toolTip, "Copied")
-        try await Task.sleep(for: .milliseconds(1400))
+        await code.copyReset?.value
         XCTAssertEqual(code.copy.toolTip, "Copy code")
         code.wrap.perform()
         XCTAssertEqual(code.wrap.toolTip, "Wrap lines")

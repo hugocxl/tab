@@ -37,7 +37,7 @@ final class AgentTableSelectionTests: XCTestCase {
         let table = AgentResponseTable(frame: .zero)
         table.copyToPasteboard(.csv)
         XCTAssertEqual(table.copy.toolTip, "Copied")
-        try await Task.sleep(for: .milliseconds(1350))
+        await table.copyReset?.value
         XCTAssertEqual(table.copy.toolTip, "Copy table")
         XCTAssertEqual(table.copy.title, "")
     }

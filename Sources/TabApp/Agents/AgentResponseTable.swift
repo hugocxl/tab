@@ -16,7 +16,7 @@ final class AgentResponseTable: AgentResponseSection {
     private var measuredWidth: CGFloat?
     private var gridWidth: CGFloat = 0
     private var gridHeight: CGFloat = 0
-    private var copyReset: Task<Void, Never>?
+    private(set) var copyReset: Task<Void, Never>?
     private var copyIcon: AgentConversationIcon = .copy
 
     override init(frame frameRect: NSRect) {

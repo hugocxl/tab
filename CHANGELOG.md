@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.60.1 - 2026-11-05
+
+### Fixed
+
+- Releases no longer fail now and then on tests of copy buttons and media
+  previews that depended on timing.
+
 ## 0.60.0 - 2026-11-05
 
 ### Changed
