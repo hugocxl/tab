@@ -3,6 +3,16 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.59.0 - 2026-11-05
+
+### Changed
+
+- The Glass interface style's window is ordinary desktop vibrancy, like other
+  Mac apps, rather than a glass sheet of its own.
+- Glass panes project the desktop's colors through their glass and catch its
+  light at their edges, as Rex's panes do: the window's darkening is cut out
+  under each pane, so its glass sees the desktop rather than the chrome.
+
 ## 0.58.0 - 2026-11-05
 
 ### Added

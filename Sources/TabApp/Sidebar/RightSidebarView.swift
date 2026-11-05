@@ -70,6 +70,13 @@ final class RightSidebarView: ThemedView {
     /// The card's width, which the sidebar's width is measured by.
     var cardWidth: CGFloat { card.frame.width }
 
+    /// The card's glass frame for the current bounds, in this view's
+    /// coordinates, known before the card itself is laid out.
+    var surfaceFrame: CGRect {
+        let gutter = Metrics.gutter
+        return CGRect(x: 0, y: gutter, width: max(bounds.width - Self.railWidth, 0), height: max(bounds.height - gutter * 2, 0))
+    }
+
     override func layout() {
         super.layout()
         placeSubviews()
@@ -84,7 +91,7 @@ final class RightSidebarView: ThemedView {
             button.frame = CGRect(x: railX + gutter, y: y, width: side, height: side)
         }
         toggle.frame = CGRect(x: railX + gutter, y: max(bounds.height - gutter - side, gutter), width: side, height: side)
-        card.frame = CGRect(x: 0, y: gutter, width: railX, height: max(bounds.height - gutter * 2, 0))
+        card.frame = surfaceFrame
         handle.frame = CGRect(x: 0, y: 0, width: 5, height: bounds.height)
     }
 }

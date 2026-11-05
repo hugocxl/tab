@@ -11,8 +11,10 @@ final class WorkspaceView: ThemedView {
     let splits: SplitContainerView
     private let rightSidebar = RightSidebarView()
     private let banner = BannerView()
-    private let glass = GlassView(style: .window, behindWindow: true)
+    private let backdrop = GlassView(style: .window, behindWindow: true)
+    private let veil = WindowVeilView()
     private let rim = WindowRimView()
+    private var inWorkspaceTransition = false
     private let updateChip = UpdateChipView()
     private var shownPanel: RightPanelKind?
     private var shownPanelProject: ProjectId?
@@ -35,7 +37,8 @@ final class WorkspaceView: ThemedView {
         self.sidebar = sidebar
         splits = SplitContainerView(model: model)
         super.init(frame: .zero)
-        addSubview(glass)
+        addSubview(backdrop)
+        addSubview(veil)
         addSubview(rim)
         addSubview(sidebar.view)
         addSubview(splits)
@@ -81,6 +84,10 @@ final class WorkspaceView: ThemedView {
         sidebarToggle.button.onPress = { [weak model] in model?.toggleSidebar() }
         rightSidebarToggle.onPress = { [weak model] in model?.toggleRightSidebar() }
         subscription = model.changes.sink { [weak self] changes in self?.modelChanged(changes) }
+        splits.onLayout = { [weak self] animated in
+            guard let self, !self.inWorkspaceTransition else { return }
+            self.cutVeil(animated: animated)
+        }
         splits.reload()
         syncPanel()
         updateBanner()
@@ -116,9 +123,11 @@ final class WorkspaceView: ThemedView {
     override var redrawsOnKeyChange: Bool { true }
 
     override func updateLayer() {
-        glass.isHidden = !theme.glassEnabled
-        glass.appearance = theme.nsAppearance
-        glass.apply(theme.windowGlass(isKey: window?.isKeyWindow ?? true))
+        backdrop.isHidden = !theme.glassEnabled
+        backdrop.appearance = theme.nsAppearance
+        backdrop.apply(theme.windowBackdrop(isKey: window?.isKeyWindow ?? true))
+        veil.isHidden = !theme.glassEnabled
+        veil.apply(theme.windowVeil(isKey: window?.isKeyWindow ?? true))
         rim.isHidden = !theme.glassEnabled
         layer?.backgroundColor = (theme.glassEnabled ? NSColor.clear : theme.chrome).cgColor
         window?.isOpaque = !theme.glassEnabled
@@ -193,7 +202,8 @@ final class WorkspaceView: ThemedView {
 
     override func layout() {
         super.layout()
-        glass.frame = bounds
+        backdrop.frame = bounds
+        veil.frame = bounds
         rim.frame = bounds
         let oldSplitFrame = InterfaceMotion.frame(splits)
         let oldSidebarFrame = InterfaceMotion.frame(sidebar.view)
@@ -203,12 +213,17 @@ final class WorkspaceView: ThemedView {
         let style = model.appearance.animationStyle
         defer {
             if changed {
+                inWorkspaceTransition = true
                 splits.layoutForWorkspaceTransition()
+                inWorkspaceTransition = false
                 InterfaceMotion.animate(splits, from: oldSplitFrame, style: style)
                 if model.appearance.sidebarExpanded {
                     InterfaceMotion.animate(sidebar.view, from: previousSidebarExpanded == true ? oldSidebarFrame : nil, style: style)
                 }
                 if shownPanel != nil { InterfaceMotion.animate(rightSidebar, from: previousPanel == nil ? nil : oldPanelFrame, style: style) }
+                cutVeil(animated: true)
+            } else {
+                cutVeil(animated: false)
             }
             previousSidebarExpanded = model.appearance.sidebarExpanded
             previousPanel = shownPanel
@@ -237,6 +252,15 @@ final class WorkspaceView: ThemedView {
         let chipWidth = min(updateChip.fittingWidth, UpdateChipView.maximumWidth, max(bounds.width - inset * 2, 0))
         updateChip.frame = NSRect(x: bounds.width - inset - chipWidth, y: bounds.height - inset - UpdateChipView.height,
                                   width: chipWidth, height: UpdateChipView.height)
+    }
+
+    /// Cuts the veil out under every glass surface, following the cards'
+    /// animation when they move.
+    private func cutVeil(animated: Bool) {
+        guard theme.glassEnabled else { return }
+        var holes = splits.surfaceFrames.map { splits.convert($0, to: veil) }
+        if !rightSidebar.isHidden { holes.append(rightSidebar.convert(rightSidebar.surfaceFrame, to: veil)) }
+        veil.cutOut(holes, radius: Metrics.cardRadius, duration: animated ? InterfaceMotion.duration(model.appearance.animationStyle) : 0)
     }
 
     /// Shows the updater's chip, whether or not the sidebar is open.
@@ -353,6 +377,71 @@ final class BannerView: ThemedView {
         button.frame = NSRect(x: bounds.width - size.width - 4, y: (bounds.height - size.height) / 2, width: size.width, height: size.height)
         let height = label.intrinsicContentSize.height
         label.frame = NSRect(x: 12, y: (bounds.height - height) / 2, width: max(button.frame.minX - 20, 0), height: height)
+    }
+}
+
+/// The chrome's tint and darkening over the window backdrop, cut out under
+/// every glass surface so its glass samples the backdrop alone and the
+/// desktop's colors project through it.
+private final class WindowVeilView: ThemedView {
+    private let planes = [CALayer(), CALayer()]
+    private let masks = [CAShapeLayer(), CAShapeLayer()]
+    private var holeCount = 0
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        for (plane, mask) in zip(planes, masks) {
+            mask.fillRule = .evenOdd
+            plane.mask = mask
+            layer?.addSublayer(plane)
+        }
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    func apply(_ recipe: GlassRecipe) {
+        planes[0].backgroundColor = recipe.tint.cgColor
+        planes[1].isHidden = recipe.fill == nil
+        planes[1].backgroundColor = recipe.fill?.color.cgColor
+        planes[1].compositingFilter = recipe.fill?.blend
+    }
+
+    /// Leaves `holes` clear, moving there over `duration` when the number
+    /// of holes is unchanged, as the cards they follow do.
+    func cutOut(_ holes: [CGRect], radius: CGFloat, duration: TimeInterval) {
+        let path = CGMutablePath()
+        path.addRect(bounds)
+        for hole in holes { path.addRoundedRect(in: hole, cornerWidth: radius, cornerHeight: radius) }
+        let animates = duration > 0 && holes.count == holeCount
+        holeCount = holes.count
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for mask in masks {
+            let previous = mask.presentation()?.path ?? mask.path
+            mask.frame = bounds
+            mask.path = path
+            guard animates, let previous, previous != path else {
+                mask.removeAnimation(forKey: "interface")
+                continue
+            }
+            let motion = CABasicAnimation(keyPath: "path")
+            motion.fromValue = previous
+            motion.toValue = path
+            motion.duration = duration
+            motion.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.8, 0.2, 1)
+            mask.add(motion, forKey: "interface")
+        }
+        CATransaction.commit()
+    }
+
+    override func layout() {
+        super.layout()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for plane in planes { plane.frame = bounds }
+        CATransaction.commit()
     }
 }
 

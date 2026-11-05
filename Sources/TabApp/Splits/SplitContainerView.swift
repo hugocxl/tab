@@ -76,6 +76,15 @@ final class SplitContainerView: ThemedView {
         needsLayout = true
     }
 
+    /// Called after each layout pass with whether the cards animate to their
+    /// new frames, so the workspace can keep its veil cut out under them.
+    var onLayout: ((_ animated: Bool) -> Void)?
+
+    /// The glass surfaces' frames, in this view's coordinates.
+    var surfaceFrames: [CGRect] {
+        emptyView.isHidden ? cards.values.map(\.frame) : [emptyView.frame]
+    }
+
     /// The workspace animates this whole surface when a sidebar changes.
     func layoutForWorkspaceTransition() {
         animateNextLayout = false
@@ -99,6 +108,7 @@ final class SplitContainerView: ThemedView {
             }
             animateNextLayout = false
             hasLaidOut = true
+            onLayout?(shouldAnimate)
         }
         emptyView.frame = content
         defer { placeSidebarToggles() }

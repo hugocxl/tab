@@ -213,35 +213,47 @@ public final class AppTheme: ObservableObject {
         let color = isLight ? ChromeColor(red: 1, green: 1, blue: 1).blended(over: palette.bg, amount: 0.65).nsColor : floating
         return glassEnabled ? color.withAlphaComponent(0.3) : color
     }
-    /// The window's glass in the Glass interface style, as native glass apps
-    /// draw it: a canvas-tinted glass, a plate under it and a blend over it.
-    public func windowGlass(isKey: Bool) -> GlassRecipe {
+    /// What lies under every glass surface in the Glass interface style:
+    /// HUD vibrancy sampling the desktop, under a plate that desaturates it
+    /// toward the raised color in dark themes or whitens it with the canvas
+    /// in light ones. Panes sample this, so the desktop's colors still
+    /// project through their glass.
+    public func windowBackdrop(isKey: Bool) -> GlassRecipe {
         let canvas = palette.bg.nsColor
         if isLight {
-            return GlassRecipe(
-                tint: isKey ? NSColor(white: 0.118, alpha: 0.5) : NSColor(white: 1, alpha: 0.5),
-                backdrop: GlassPlane(canvas.withAlphaComponent(isKey ? 0.55 : 0.6))
-            )
+            return GlassRecipe(tint: .clear, fill: GlassPlane(canvas.withAlphaComponent(isKey ? 0.8 : 0.85)))
+        }
+        return GlassRecipe(tint: .clear, fill: GlassPlane(palette.raised.nsColor.withAlphaComponent(isKey ? 0.75 : 0.8)))
+    }
+
+    /// The window chrome between the glass surfaces: a canvas tint over the
+    /// backdrop, darkened further in dark themes. It is cut out under every
+    /// pane, so their glass sees the backdrop alone.
+    public func windowVeil(isKey: Bool) -> GlassRecipe {
+        let canvas = palette.bg.nsColor
+        if isLight {
+            return GlassRecipe(tint: canvas.withAlphaComponent(isKey ? 0.75 : 0.8))
         }
         return GlassRecipe(
-            tint: canvas.withAlphaComponent(0.5),
-            backdrop: isKey ? GlassPlane(palette.raised.nsColor.withAlphaComponent(0.5), blend: "colorBlendMode") : nil,
+            tint: canvas.withAlphaComponent(0.85),
             fill: isKey ? GlassPlane(NSColor.black.withAlphaComponent(0.3), blend: "overlayBlendMode") : GlassPlane(NSColor.black.withAlphaComponent(0.2))
         )
     }
 
-    /// A pane's glass when glass panes are on: clear glass with a faint
-    /// canvas tint and no border, so its edges catch the desktop's light.
-    /// Other panes than the active one sit under a darker or lighter veil.
+    /// A pane's glass when glass panes are on: glass with a faint canvas
+    /// tint and no border, so the desktop's colors project through it and
+    /// its edges catch the light. The active pane in a light theme sits on
+    /// a raised plate; other panes sit under a darker or lighter veil.
     public func paneGlass(isKey: Bool, isActive: Bool) -> GlassRecipe {
         let canvas = palette.bg.nsColor
         if isLight {
+            let raised = palette.raised.nsColor
             let fill: GlassPlane? = switch (isKey, isActive) {
-            case (true, true): GlassPlane(palette.raised.nsColor.withAlphaComponent(0.5))
+            case (true, true): GlassPlane(raised.withAlphaComponent(0.5))
             case (true, false): GlassPlane(NSColor(srgbRed: 0.122, green: 0.137, blue: 0.157, alpha: 0.05), blend: "plusD")
-            case (false, _): GlassPlane(palette.raised.nsColor.withAlphaComponent(0.4))
+            case (false, _): GlassPlane(raised.withAlphaComponent(0.4))
             }
-            return GlassRecipe(tint: canvas.withAlphaComponent(0.1), fill: fill)
+            return GlassRecipe(tint: canvas.withAlphaComponent(0.1), backdrop: isKey && isActive ? GlassPlane(raised.withAlphaComponent(0.85)) : nil, fill: fill)
         }
         return GlassRecipe(
             tint: canvas.withAlphaComponent(0.35),

@@ -18,26 +18,26 @@ public final class GlassView: NSView {
         public var regular: Bool
         /// Whether to use Liquid Glass when available, rather than flat vibrancy.
         public var usesLiquidGlass: Bool
-        /// The `NSVisualEffectView` material on releases without Liquid Glass.
+        /// The `NSVisualEffectView` material on releases without Liquid Glass,
+        /// and on every release for styles that never use it.
         public var fallbackMaterial: NSVisualEffectView.Material
-        /// The desktop-sampling material under Liquid Glass behind the window.
-        public var backdropMaterial: NSVisualEffectView.Material
 
-        public init(cornerRadius: CGFloat, opacity: CGFloat = 1, fallbackMaterial: NSVisualEffectView.Material = .sidebar, backdropMaterial: NSVisualEffectView.Material = .underWindowBackground, regular: Bool = false, usesLiquidGlass: Bool = true) {
+        public init(cornerRadius: CGFloat, opacity: CGFloat = 1, fallbackMaterial: NSVisualEffectView.Material = .sidebar, regular: Bool = false, usesLiquidGlass: Bool = true) {
             self.cornerRadius = cornerRadius
             self.opacity = opacity
             self.regular = regular
             self.usesLiquidGlass = usesLiquidGlass
             self.fallbackMaterial = fallbackMaterial
-            self.backdropMaterial = backdropMaterial
         }
 
         /// Flat, desktop-sampling vibrancy with a translucent palette overlay.
         public static let workspace = Style(cornerRadius: 0, fallbackMaterial: .underWindowBackground, usesLiquidGlass: false)
-        /// The main window's background: clear Liquid Glass over HUD vibrancy.
-        public static let window = Style(cornerRadius: 0, fallbackMaterial: .underWindowBackground, backdropMaterial: .hudWindow)
+        /// The main window's background: HUD vibrancy sampling the desktop,
+        /// as other apps' windows do. Never Liquid Glass: glass over glass
+        /// goes flat, and the panes' glass must find the desktop beneath it.
+        public static let window = Style(cornerRadius: 0, fallbackMaterial: .hudWindow, usesLiquidGlass: false)
         /// A pane's continuous glass surface, underneath its header and content.
-        public static let pane = Style(cornerRadius: Metrics.cardRadius)
+        public static let pane = Style(cornerRadius: Metrics.cardRadius, regular: true)
 
         /// Always-on, diffused material for the command palette.
         public static let commandPalette = Style(cornerRadius: PaletteLayout.radius, fallbackMaterial: .popover, regular: true)
@@ -57,12 +57,12 @@ public final class GlassView: NSView {
     }
 
     private let material: NSView
-    private var backing: NSVisualEffectView?
     private var fallbackTint: NSView?
     private let backdropPlane = NSView()
     private let fillPlane = NSView()
 
-    /// A color layer under the glass, such as a darkening plate.
+    /// A color layer under the glass, such as a darkening plate. Behind-window
+    /// vibrancy covers it, so window backgrounds use `fill` and `tint` only.
     public var backdrop: GlassPlane? {
         didSet { if backdrop != oldValue { backdropPlane.apply(backdrop) } }
     }
@@ -104,14 +104,6 @@ public final class GlassView: NSView {
         }
         super.init(frame: .zero)
         alphaValue = style.opacity
-        if behindWindow, !(material is NSVisualEffectView) {
-            let backing = NSVisualEffectView()
-            backing.material = style.backdropMaterial
-            backing.blendingMode = .behindWindow
-            backing.state = .active
-            self.backing = backing
-            addSubview(backing)
-        }
         for plane in [backdropPlane, fillPlane] {
             plane.wantsLayer = true
             plane.layer?.cornerRadius = style.cornerRadius
@@ -139,7 +131,6 @@ public final class GlassView: NSView {
     public override func layout() {
         super.layout()
         fallbackTint?.frame = bounds
-        backing?.frame = bounds
         backdropPlane.frame = bounds
         material.frame = bounds
         fillPlane.frame = bounds
