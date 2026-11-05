@@ -3,6 +3,15 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.60.0 - 2026-11-05
+
+### Changed
+
+- A new device pane's device list takes the keyboard: the arrow keys move the
+  selection and Return opens the device.
+- The device list sits on an inset card with the same rows, hover and selection
+  as the app's other lists, and running devices show an accent dot.
+
 ## 0.59.0 - 2026-11-05
 
 ### Changed

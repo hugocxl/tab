@@ -66,7 +66,16 @@ final class DevicePaneController: PaneContentController {
     // MARK: Pane
 
     func focusContent() {
-        root.window?.makeFirstResponder(phase == .live ? screen : root)
+        root.window?.makeFirstResponder(focusTarget)
+    }
+
+    /// What takes the keyboard in the current phase.
+    private var focusTarget: NSView {
+        switch phase {
+        case .live: return screen
+        case .picking: return picker
+        default: return root
+        }
     }
 
     func willClose() async -> Bool { true }
@@ -420,7 +429,10 @@ final class DevicePaneController: PaneContentController {
         case .live, .picking:
             break
         }
-        if phase == .live, root.window?.firstResponder === root { root.window?.makeFirstResponder(screen) }
+        if let window = root.window, let responder = window.firstResponder as? NSView,
+           responder === root || responder === screen || responder === picker {
+            window.makeFirstResponder(focusTarget)
+        }
         titleDidChange?()
     }
 }
