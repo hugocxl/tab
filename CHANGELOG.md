@@ -3,19 +3,8 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
-## 0.65.0 - 2026-11-05
+## 0.66.0 - 2026-11-05
 
-<<<<<<< Updated upstream
-### Changed
-
-- Settings lists, such as privacy permissions, agents, browser profiles and
-  paired phones, show one row per entry, lined up like every other setting.
-- The Interface, Themes and Shortcuts pages in Settings use the same layout as
-  the other pages.
-- Browser profiles are renamed, cleared and deleted from a menu on their row,
-  and renaming asks for the new name.
-||||||| Stash base
-=======
 ### Added
 
 - `tab agent read`, `tab agent wait` and `tab agent send` read an agent pane's
@@ -41,7 +30,17 @@ Changelog.
   bundle.
 - The skill's `tab new browser` example names the real `tab tab new browser`
   command, and its `--directory` example uses a path that works from anywhere.
->>>>>>> Stashed changes
+
+## 0.65.0 - 2026-11-05
+
+### Changed
+
+- Settings lists, such as privacy permissions, agents, browser profiles and
+  paired phones, show one row per entry, lined up like every other setting.
+- The Interface, Themes and Shortcuts pages in Settings use the same layout as
+  the other pages.
+- Browser profiles are renamed, cleared and deleted from a menu on their row,
+  and renaming asks for the new name.
 
 ## 0.64.0 - 2026-11-05
 
