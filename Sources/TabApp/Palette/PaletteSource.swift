@@ -734,6 +734,7 @@ final class PaletteSource: PaletteDataSource {
             })
             item.highlights = entry.ranges
             item.subtitle = displayPath(project)
+            item.location = location(project)
             item.current = project.id == current.id || project.id == current.parentId
             item.disabled = project.status != .available
             item.kind = PaletteKind.project.rawValue
@@ -745,7 +746,13 @@ final class PaletteSource: PaletteDataSource {
     func displayPath(_ project: Project) -> String {
         let path = project.directory.rawValue
         if project.serverId.isLocal { return TabDirs.abbreviateHome(path, home: NSHomeDirectory()) ?? path }
-        return "\(model.serverName(project.serverId) ?? "") · \(path)"
+        return path
+    }
+
+    /// The computer a project's row names before its subtitle: another
+    /// computer's name, nil for this Mac.
+    func location(_ project: Project) -> String? {
+        project.serverId.isLocal ? nil : model.serverName(project.serverId) ?? "Remote"
     }
 
     private func workspaceItems(_ query: String) -> [PaletteItem] {
@@ -812,6 +819,7 @@ final class PaletteSource: PaletteDataSource {
                     let base = startLabel(of: project.id, load: false).map { " from \($0)" } ?? ""
                     item.subtitle = (name.isEmpty ? "New branch" : "New worktree “\(name)”") + base
                 }
+                item.location = location(project)
                 item.current = project.id == currentRoot
                 item.kind = PaletteKind.project.rawValue
                 item.tile = .icon(.gitBranch, .purple)
@@ -833,6 +841,7 @@ final class PaletteSource: PaletteDataSource {
             })
             item.highlights = entry.ranges
             item.subtitle = displayPath(project)
+            item.location = location(project)
             item.disabled = project.status != .available
             item.current = project.id == current.id
             item.kind = project.parentId == nil ? PaletteKind.project.rawValue : PaletteKind.worktree.rawValue

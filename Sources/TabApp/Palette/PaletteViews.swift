@@ -171,9 +171,8 @@ final class PaletteItemView: NSView {
             font: AppFont.system(13, weight: item.current ? .semibold : .medium),
             color: item.disabled ? theme.fgDim : theme.fg, accent: theme.accent
         )
-        subtitle.stringValue = item.subtitle ?? ""
-        subtitle.isHidden = item.subtitle == nil
-        subtitle.textColor = theme.fgMuted
+        subtitle.attributedStringValue = subtitleText(item)
+        subtitle.isHidden = item.subtitle == nil && item.location == nil
         check.isHidden = !item.current
         check.contentTintColor = theme.accent
         badge.text = item.badge
@@ -187,6 +186,22 @@ final class PaletteItemView: NSView {
         alphaValue = item.disabled ? 0.6 : 1
         needsLayout = true
         needsDisplay = true
+    }
+
+    /// The location in a heavier weight, then the subtitle, both muted.
+    private func subtitleText(_ item: PaletteItem) -> NSAttributedString {
+        let style = NSMutableParagraphStyle()
+        style.lineBreakMode = .byTruncatingTail
+        func run(_ string: String, _ font: NSFont) -> NSAttributedString {
+            NSAttributedString(string: string, attributes: [.font: font, .foregroundColor: theme.fgMuted, .paragraphStyle: style])
+        }
+        let text = NSMutableAttributedString()
+        if let location = item.location {
+            text.append(run(location, AppFont.system(13, weight: .semibold)))
+            if item.subtitle != nil { text.append(run(" · ", AppFont.body)) }
+        }
+        text.append(run(item.subtitle ?? "", AppFont.body))
+        return text
     }
 
     override func draw(_ dirtyRect: NSRect) {

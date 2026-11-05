@@ -119,7 +119,8 @@ private final class PaletteGlassBackground: ThemedView {
     }
 }
 
-/// The search row: a magnifier or the back chip, the field, accessories.
+/// The search row: a magnifier or the back chip, the field, the toggles and
+/// hints. Mode chips sit in the footer.
 final class PaletteHeaderView: ThemedView {
     let field = PaletteSearchField()
     let back = BackChip()
@@ -152,16 +153,13 @@ final class PaletteHeaderView: ThemedView {
             .font: AppFont.system(PaletteLayout.searchFont), .foregroundColor: theme.fgDim,
         ])
         accessories.forEach { $0.removeFromSuperview() }
-        accessories = spec.accessories.map { accessory -> NSView in
+        accessories = spec.accessories.compactMap { accessory -> NSView? in
             switch accessory {
             case let .toggle(id, label, active):
                 let pill = AccessoryPill(id: id, title: label, active: active)
                 pill.action = { [weak controller] in controller?.toggleAccessory(id) }
                 return pill
-            case let .mode(id, label, icon, key):
-                let chip = ModeChip(title: label, icon: icon, key: key)
-                chip.action = { [weak controller] in controller?.switchMode(id) }
-                return chip
+            case .mode: return nil
             case let .hint(label, key):
                 let stack = NSStackView()
                 stack.spacing = 6
@@ -220,12 +218,14 @@ final class PaletteSearchField: NSTextField {
     }
 }
 
-/// The footer: a glass capsule at the bottom right with the primary action
-/// and ↩, then Actions and ⌘K. Clicks beside the capsule reach the rows.
+/// The footer: the page's mode chips at the bottom left, and a glass capsule
+/// at the bottom right with the primary action and ↩, then Actions and ⌘K.
+/// Clicks beside them reach the rows.
 final class PaletteFooterView: ThemedView {
     let capsule = GlassCapsuleView()
     let primary = FooterButton()
     let actions = FooterButton()
+    private var modes: [ModeChip] = []
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -239,7 +239,15 @@ final class PaletteFooterView: ThemedView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    func configure(primary title: String?, actionsEnabled: Bool) {
+    func configure(primary title: String?, actionsEnabled: Bool, spec: PageSpec, controller: PaletteController) {
+        modes.forEach { $0.removeFromSuperview() }
+        modes = spec.accessories.compactMap { accessory in
+            guard case let .mode(id, label, icon, key) = accessory else { return nil }
+            let chip = ModeChip(title: label, icon: icon, key: key)
+            chip.action = { [weak controller] in controller?.switchMode(id) }
+            return chip
+        }
+        for chip in modes { addSubview(chip) }
         primary.isHidden = title == nil
         primary.label.stringValue = title ?? ""
         primary.invalidateIntrinsicContentSize()
@@ -266,6 +274,12 @@ final class PaletteFooterView: ThemedView {
         let width = x + size.width + inset
         let margin = (bounds.height - PaletteLayout.capsule) / 2
         capsule.frame = NSRect(x: bounds.width - margin - width, y: margin, width: width, height: PaletteLayout.capsule)
+        var left = margin
+        for chip in modes {
+            let size = chip.intrinsicContentSize
+            chip.frame = NSRect(x: left, y: capsule.frame.midY - size.height / 2, width: size.width, height: size.height)
+            left += size.width + 8
+        }
     }
 }
 

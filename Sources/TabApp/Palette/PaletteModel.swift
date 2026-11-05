@@ -141,6 +141,9 @@ public struct PaletteItem {
     /// UTF-16 ranges of `title` drawn in the accent color.
     public var highlights: [Range<Int>] = []
     public var subtitle: String?
+    /// The computer the row belongs to, drawn before the subtitle in a
+    /// heavier muted weight.
+    public var location: String?
     /// The muted label at the right edge, such as "Command" or "File".
     public var kind: String?
     public var badge: String?
@@ -169,6 +172,7 @@ public struct PaletteItem {
 
     func sameAppearance(_ other: PaletteItem) -> Bool {
         id == other.id && title == other.title && highlights == other.highlights && subtitle == other.subtitle
+            && location == other.location
             && kind == other.kind && badge == other.badge && tile == other.tile && shortcut == other.shortcut
             && actions == other.actions && disabled == other.disabled && current == other.current
             && target.kindKey == other.target.kindKey

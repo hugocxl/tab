@@ -185,7 +185,7 @@ final class PaletteController: NSObject, NSTextFieldDelegate {
         panel.list.reloadRows()
         panel.message = state.showsRows ? nil : state.message
         let selected = state.selectedItem.flatMap { $0.disabled ? nil : $0 }
-        panel.footer.configure(primary: selected?.primaryTitle, actionsEnabled: selected != nil)
+        panel.footer.configure(primary: selected?.primaryTitle, actionsEnabled: selected != nil, spec: state.spec, controller: self)
         if let row = state.selectedRow { panel.list.reveal(row, top: resetScroll) }
         panel.actionsPanel = actions.map { state in
             let view = ActionsPanelView(state: state)

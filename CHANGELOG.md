@@ -3,6 +3,16 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.61.0 - 2026-11-05
+
+### Changed
+
+- New Terminal in Project and New Agent in Project show the New worktree and
+  base branch buttons at the bottom left, leaving the search field room for
+  the worktree's name.
+- New worktree rows name the other computer a project is on, and palette rows
+  show computer names in a heavier weight.
+
 ## 0.60.0 - 2026-11-05
 
 ### Changed
