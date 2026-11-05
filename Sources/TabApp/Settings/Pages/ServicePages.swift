@@ -23,31 +23,18 @@ extension SettingsModel {
         b.row("browser-home-page", b.field("browser-home-page", browser.homePage, placeholder: "Start page") { [store] text in
             store.updateBrowser("browser-home-page") { $0.homePage = text }
         })
-        b.row("browser-profiles", profileList(b), stacked: true)
-        b.row("browser-import", importButtons(b), stacked: true)
+        profiles(b)
+        browserImports(b)
     }
 
-    private func profileList(_ b: SettingsPageBuilder) -> SettingControl {
+    /// A row per profile with its actions, then a row adding one.
+    private func profiles(_ b: SettingsPageBuilder) {
         let defaultId = store.settings.browser.defaultProfile
-        let hasName = !profileName.trimmingCharacters(in: .whitespaces).isEmpty
-        var rows: [SettingControl] = []
         for profile in store.browserProfiles {
-            var controls: [SettingControl] = [.label(profile.name)]
-            if profile.id == defaultId {
-                controls.append(.label("Default", .badge))
-            } else {
-                controls.append(b.button("Make Default") { [store] in
-                    store.updateBrowser("browser-profiles") { $0.defaultProfile = profile.id }
-                })
-            }
-            var actions: [SettingControl] = [
-                b.button("Rename to Name Below", enabled: hasName) { [weak self] in
-                    guard let self else { return }
-                    store.renameBrowserProfile(profile.id, profileName)
-                    profileName = ""
-                    reload()
-                },
-                b.button("Clear Data") { [weak self] in
+            let isDefault = profile.id == defaultId
+            var actions = [
+                ButtonSpec(title: "Rename…") { [weak self] in self?.renameProfile(profile) },
+                ButtonSpec(title: "Clear Data…") { [weak self] in
                     self?.confirm(
                         "Clear data for “\(profile.name)”?",
                         "This signs out and removes all cookies, cache, history, and logins for this profile, including imported ones.",
@@ -56,7 +43,7 @@ extension SettingsModel {
                 },
             ]
             if !profile.id.isEmpty {
-                actions.append(b.button("Delete", style: .destructive) { [weak self] in
+                actions.append(ButtonSpec(title: "Delete…", style: .destructive) { [weak self] in
                     self?.confirm(
                         "Delete “\(profile.name)”?",
                         "This permanently deletes the profile's cookies, history, and browsing data. Its tabs use the default profile.",
@@ -64,7 +51,14 @@ extension SettingsModel {
                     ) { self?.store.deleteBrowserProfile(profile.id) }
                 })
             }
-            rows.append(.column([.row(controls), .row(actions)]))
+            var controls: [SettingControl] = []
+            if !isDefault {
+                controls.append(b.button("Make Default") { [store] in
+                    store.updateBrowser("browser-profiles") { $0.defaultProfile = profile.id }
+                })
+            }
+            controls.append(.actions("\(profile.name) Actions", actions))
+            b.item("browser-profiles", key: profile.id, label: profile.name, description: isDefault ? "New browser panes use this profile" : nil, .row(controls))
         }
         let name = b.field("browser-profiles", profileName, placeholder: "Profile name") { [weak self] text in
             guard let self else { return }
@@ -74,31 +68,46 @@ extension SettingsModel {
         } commit: { [weak self] in
             self?.profileName = $0
         }
-        let add = b.button("Add Profile") { [weak self] in
+        let add = b.button("Add", enabled: !profileName.trimmingCharacters(in: .whitespaces).isEmpty) { [weak self] in
             guard let self else { return }
             store.addBrowserProfile(profileName)
             if store.errors["browser-profiles"] == nil { profileName = "" }
             reload()
         }
-        rows.append(.row([name, add]))
-        return .column(rows)
+        b.row("browser-profiles", .row([name, add]), label: "New profile", description: "")
+        b.note("browser-profiles", SettingsCatalog.item("browser-profiles")?.description ?? "")
     }
 
-    private func importButtons(_ b: SettingsPageBuilder) -> SettingControl {
+    private func renameProfile(_ profile: BrowserProfileSummary) {
+        guard nameSheet == nil else { return }
+        let sheet = NamePromptSheet(title: "Rename “\(profile.name)”", label: "Profile name", value: profile.name, confirm: "Rename") { [weak self] name in
+            guard let self else { return }
+            nameSheet = nil
+            guard let name else { return }
+            store.renameBrowserProfile(profile.id, name)
+            reload()
+        }
+        nameSheet = sheet
+        sheet.present(on: window)
+    }
+
+    /// A row per other browser, with what Tab can import from it.
+    private func browserImports(_ b: SettingsPageBuilder) {
         let sources = store.host?.browserImportSources() ?? []
-        guard !sources.isEmpty else { return .label("No other browsers were found on this computer.", .note) }
-        var rows: [SettingControl] = sources.map { source in
+        guard !sources.isEmpty else {
+            b.row("browser-import", .label("No other browsers found", .secondary))
+            return
+        }
+        for source in sources {
             var controls: [SettingControl] = [
-                .label(source.name),
                 b.button("History & Bookmarks") { [store] in store.importBrowserData(source, cookies: false) },
             ]
             if source.supportsCookies {
                 controls.append(b.button("Cookies") { [store] in store.importBrowserData(source, cookies: true) })
             }
-            return .row(controls)
+            b.item("browser-import", key: source.name, label: "Import from \(source.name)", .row(controls))
         }
-        rows.append(.label("Imports go into the default profile. Cookies bring your sign-ins; macOS may ask to allow access to the browser's key.", .note))
-        return .column(rows)
+        b.note("browser-import", "Imports go into the default profile. Cookies bring your sign-ins; macOS may ask to allow access to the browser's key.")
     }
 
     // MARK: Server
@@ -140,7 +149,19 @@ extension SettingsModel {
         let (status, failed) = Self.status(state)
         b.row("mobile-status", .label(status, failed ? .error : .secondary))
         b.row("mobile-pair", pairing(b, state), stacked: store.pairing != nil)
-        b.row("mobile-devices", devices(b, state), stacked: true)
+        guard !state.devices.isEmpty else {
+            b.row("mobile-devices", .label("None", .secondary))
+            return
+        }
+        for device in state.devices {
+            b.item("mobile-devices", key: device.id.uuid.uuidString, label: device.name, description: Self.lastSeen(device),
+                   b.button("Revoke", style: .destructive) { [weak self] in
+                       self?.confirm("Revoke “\(device.name)”?", "The phone disconnects now and must be paired again to connect.", "Revoke") {
+                           self?.store.revokeDevice(device.id)
+                       }
+                   })
+        }
+        b.note("mobile-devices", "Phones that can connect. Revoking one disconnects it immediately.")
     }
 
     static func status(_ state: RemoteAccessState) -> (String, Bool) {
@@ -174,20 +195,6 @@ extension SettingsModel {
         return .column(views)
     }
 
-    private func devices(_ b: SettingsPageBuilder, _ state: RemoteAccessState) -> SettingControl {
-        guard !state.devices.isEmpty else { return .label("No paired devices yet.", .note) }
-        return .column(state.devices.map { device in
-            .row([
-                .column([.label(device.name), .label(Self.lastSeen(device), .secondary)]),
-                b.button("Revoke", style: .destructive) { [weak self] in
-                    self?.confirm("Revoke “\(device.name)”?", "The phone disconnects now and must be paired again to connect.", "Revoke") {
-                        self?.store.revokeDevice(device.id)
-                    }
-                },
-            ])
-        })
-    }
-
     static func lastSeen(_ device: PairedDevice) -> String {
         if device.connected { return "Connected" }
         guard let seen = device.lastSeen else { return "Never connected" }
@@ -200,7 +207,7 @@ extension SettingsModel {
 
     func buildBackup(_ b: SettingsPageBuilder) {
         b.row("backup-export", b.button("Export…", enabled: !store.backupBusy) { [weak self] in self?.exportBackup() })
-        var restore: [SettingControl] = [b.button("Choose file…", enabled: !store.backupBusy) { [weak self] in self?.chooseBackup() }]
+        var restore: [SettingControl] = [b.button("Choose File…", enabled: !store.backupBusy) { [weak self] in self?.chooseBackup() }]
         if store.hasPendingRestore {
             restore.append(b.button("Cancel Import") { [store] in store.cancelRestore() })
         }

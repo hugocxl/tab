@@ -3,6 +3,17 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.65.0 - 2026-11-05
+
+### Changed
+
+- Settings lists, such as privacy permissions, agents, browser profiles and
+  paired phones, show one row per entry, lined up like every other setting.
+- The Interface, Themes and Shortcuts pages in Settings use the same layout as
+  the other pages.
+- Browser profiles are renamed, cleared and deleted from a menu on their row,
+  and renaming asks for the new name.
+
 ## 0.64.0 - 2026-11-05
 
 ### Added

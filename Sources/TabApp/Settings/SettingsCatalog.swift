@@ -153,7 +153,14 @@ public enum SettingsCatalog {
         SettingItem("agent-integration-agents", "Agents", "", .integrations, "Coding Agents"),
         SettingItem("terminal-migration", "Migrate from another terminal", "An agent reads that terminal's configuration and brings its shortcuts, font, cursor and colors into Tab.", .integrations, "Migration"),
         // Privacy
-        SettingItem("privacy-permissions", "Permissions", "Programs in Tab's terminals ask macOS for access as Tab, so these answers are theirs. Change one in System Settings.", .privacy, "Terminal Programs"),
+        SettingItem("privacy-camera", "Camera", "", .privacy, "Permissions"),
+        SettingItem("privacy-microphone", "Microphone", "", .privacy, "Permissions"),
+        SettingItem("privacy-contacts", "Contacts", "", .privacy, "Permissions"),
+        SettingItem("privacy-calendars", "Calendars", "", .privacy, "Permissions"),
+        SettingItem("privacy-reminders", "Reminders", "", .privacy, "Permissions"),
+        SettingItem("privacy-photos", "Photos", "", .privacy, "Permissions"),
+        SettingItem("privacy-location", "Location Services", "", .privacy, "Permissions"),
+        SettingItem("privacy-bluetooth", "Bluetooth", "", .privacy, "Permissions"),
         SettingItem("privacy-automation", "Automation", "Lets programs control other apps, such as with osascript.", .privacy, "Terminal Programs"),
         SettingItem("privacy-files", "Full Disk Access", "Lets programs read protected folders, such as Mail and Safari data.", .privacy, "Terminal Programs"),
         // Browser

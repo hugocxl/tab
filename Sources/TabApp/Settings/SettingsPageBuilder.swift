@@ -10,6 +10,8 @@ struct SettingRow: Identifiable {
     /// The control goes under the label, full width, such as a list.
     let stacked: Bool
     let error: String?
+    /// Shown before the label, such as an agent's logo.
+    var icon: NSImage?
 }
 
 /// Collects a page's rows in order, keeping only those the current page or
@@ -71,16 +73,30 @@ final class SettingsPageBuilder {
     @discardableResult
     func row(_ id: String, _ makeControl: @autoclosure () -> SettingControl?, stacked: Bool = false, label: String? = nil, description: String? = nil) -> SettingRow? {
         guard shows(id), let item = items[id] else { return nil }
+        let description = description ?? item.description
         let row = SettingRow(
             id: id,
             label: label ?? item.label,
-            description: description ?? (item.description.isEmpty ? nil : item.description),
+            description: description.isEmpty ? nil : description,
             control: makeControl(),
             stacked: stacked,
             error: store.errors[id]
         )
         append(.row(row), item)
         rowIds.append(id)
+        return row
+    }
+
+    /// Adds a row for one entry of `id`'s list, such as a paired phone, to
+    /// `id`'s section, so each entry lines up like any other setting.
+    @discardableResult
+    func item(_ id: String, key: String, label: String, description: String? = nil, icon: NSImage? = nil,
+              _ makeControl: @autoclosure () -> SettingControl?) -> SettingRow? {
+        guard shows(id), let item = items[id] else { return nil }
+        let row = SettingRow(id: "\(id)/\(key)", label: label, description: description, control: makeControl(),
+                             stacked: false, error: nil, icon: icon)
+        append(.row(row), item)
+        if rowIds.last != id { rowIds.append(id) }
         return row
     }
 

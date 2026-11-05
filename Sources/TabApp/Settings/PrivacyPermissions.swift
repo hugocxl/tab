@@ -24,6 +24,9 @@ public enum PrivacyPermission: String, CaseIterable, Sendable {
         }
     }
 
+    /// Its row in `SettingsCatalog`.
+    public var settingId: String { "privacy-\(rawValue)" }
+
     /// The pane of System Settings › Privacy & Security that changes it.
     public var settingsPane: String {
         switch self {

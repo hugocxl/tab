@@ -305,7 +305,7 @@ final class NamePromptSheet: SheetWindow {
     private func finish(_ confirmed: Bool) {
         let name = field.field.stringValue.trimmingCharacters(in: .whitespaces)
         if confirmed && name.isEmpty {
-            error.stringValue = "Enter a group name"
+            error.stringValue = "Enter a name"
             error.isHidden = false
             fitContent()
             return

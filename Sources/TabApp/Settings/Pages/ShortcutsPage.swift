@@ -8,70 +8,63 @@ struct ShortcutsPage: View {
     @State private var query = ""
 
     var body: some View {
-        SwiftUI.ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "magnifyingglass")
-                            .foregroundStyle(.secondary)
-                        TextField("Filter Shortcuts…", text: $query)
-                            .textFieldStyle(.plain)
-                            .accessibilityLabel("Filter Shortcuts")
-                        if !query.isEmpty {
-                            Button {
-                                query = ""
-                            } label: {
-                                Image(systemName: "xmark.circle.fill")
-                            }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(.secondary)
-                            .help("Clear shortcut filter")
-                            .accessibilityLabel("Clear shortcut filter")
-                        }
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .overlay(Capsule().strokeBorder((theme?.secondaryText ?? .secondary).opacity(0.35)))
-
-                    Text("Search by command, category, or key, such as cmd+k. Click a shortcut to record a new one.")
-                        .font(.subheadline)
+        Form {
+            Section {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
                         .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.horizontal, 12)
+                    TextField("Filter Shortcuts", text: $query, prompt: Text("Filter Shortcuts"))
+                        .textFieldStyle(.plain)
+                        .labelsHidden()
+                    if !query.isEmpty {
+                        Button {
+                            query = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                        }
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(.secondary)
+                        .help("Clear shortcut filter")
+                        .accessibilityLabel("Clear shortcut filter")
+                    }
                 }
+                .listRowBackground(theme?.card)
+            } footer: {
+                Text("Search by command, category, or key, such as cmd+k. Click a shortcut to record a new one.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
 
-                let groups = filteredGroups
-                if groups.isEmpty {
+            let groups = filteredGroups
+            if groups.isEmpty {
+                Section {
                     Text("No shortcuts match “\(query)”.")
                         .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(12)
-                }
-                ForEach(groups) { group in
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text(group.section)
-                            .font(.headline)
-                            .padding(.horizontal, 12)
-                        VStack(spacing: 0) {
-                            let rows = group.blocks.compactMap { block -> SettingRow? in
-                                if case .row(let row) = block { return row }
-                                return nil
-                            }
-                            ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-                                if index > 0 { SwiftUI.Divider().padding(.horizontal, 12) }
-                                SettingRowView(row: row, model: model)
-                                    .labeledContentStyle(ShortcutRowStyle())
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 10)
-                            }
-                        }
-                        .background(theme?.card ?? .clear, in: RoundedRectangle(cornerRadius: 12))
-                    }
+                        .listRowBackground(theme?.card)
                 }
             }
-            .padding(20)
+            ForEach(groups) { group in
+                Section {
+                    ForEach(rows(of: group)) { row in
+                        SettingRowView(row: row, model: model)
+                            .listRowBackground(theme?.card)
+                    }
+                } header: {
+                    Text(group.section)
+                }
+            }
         }
+        .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
         .background { theme?.background.ignoresSafeArea() }
+    }
+
+    private func rows(of group: SettingsPageBuilder.Group) -> [SettingRow] {
+        group.blocks.compactMap { block in
+            if case .row(let row) = block { return row }
+            return nil
+        }
     }
 
     private var filteredGroups: [SettingsPageBuilder.Group] {
@@ -83,16 +76,6 @@ struct ShortcutsPage: View {
                 return ShortcutFilter.matches(shortcut, query: query, keymap: model.store.settings.keymap)
             }
             return filtered.blocks.isEmpty ? nil : filtered
-        }
-    }
-}
-
-private struct ShortcutRowStyle: LabeledContentStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        HStack {
-            configuration.label
-            Spacer(minLength: 16)
-            configuration.content
         }
     }
 }

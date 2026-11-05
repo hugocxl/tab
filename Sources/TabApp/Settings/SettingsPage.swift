@@ -126,6 +126,20 @@ private struct SettingLabel: View {
     @Environment(\.settingsTheme) private var theme
 
     var body: some View {
+        if let icon = row.icon {
+            HStack(spacing: 10) {
+                Image(nsImage: icon)
+                    .resizable()
+                    .frame(width: 20, height: 20)
+                    .accessibilityHidden(true)
+                text
+            }
+        } else {
+            text
+        }
+    }
+
+    private var text: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(row.label)
             if let description = row.description {
@@ -214,6 +228,22 @@ struct SettingControlView: View {
             TerminalPreviewView(spec: spec)
         case .disclosure:
             Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+        case .actions(let label, let actions):
+            Menu {
+                ForEach(actions.indices, id: \.self) { index in
+                    let action = actions[index]
+                    Button(action.title, role: action.style == .destructive ? .destructive : nil, action: action.action)
+                        .disabled(!action.enabled)
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .tint(.secondary)
+            .fixedSize()
+            .help(label)
+            .accessibilityLabel(label)
         case .text(let spec):
             TextFieldView(spec: spec, model: model)
         case .button(let spec):

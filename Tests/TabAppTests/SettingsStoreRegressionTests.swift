@@ -139,18 +139,18 @@ final class SettingsStoreRegressionTests: XCTestCase {
         (page.lastBuild?.rows ?? []).flatMap { buttons(in: $0.control) }
     }
 
-    func testProfileRenameEnablesWhileTypingAndDefaultSavesToBrowserSettings() throws {
+    func testProfileAddEnablesWhileTypingAndDefaultSavesToBrowserSettings() throws {
         host.base.profiles.append(BrowserProfileSummary(id: "work", name: "Work"))
         let store = store()
         store.refreshBrowserProfiles()
         let page = SettingsModel(store: store)
         page.select(.browser)
         let field = try XCTUnwrap(page.fields["browser-profiles"])
-        XCTAssertFalse(try XCTUnwrap(buttons(on: page).last { $0.title == "Rename to Name Below" }).enabled)
+        XCTAssertFalse(try XCTUnwrap(buttons(on: page).last { $0.title == "Add" }).enabled)
         field.change?("Personal")
-        let rename = try XCTUnwrap(buttons(on: page).last { $0.title == "Rename to Name Below" })
-        XCTAssertTrue(rename.enabled)
-        rename.action()
+        let add = try XCTUnwrap(buttons(on: page).last { $0.title == "Add" })
+        XCTAssertTrue(add.enabled)
+        add.action()
         XCTAssertEqual(host.base.profiles.last?.name, "Personal")
         page.reload()
         let makeDefault = try XCTUnwrap(buttons(on: page).first { $0.title == "Make Default" })

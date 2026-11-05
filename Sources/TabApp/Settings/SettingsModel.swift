@@ -25,6 +25,7 @@ final class SettingsModel: ObservableObject {
 
     /// Transient editors on the page.
     var profileName = ""
+    var nameSheet: NamePromptSheet?
     /// The bundled changelog, read when its page first opens.
     private(set) lazy var changelog: Changelog? = Changelog.bundled()
 

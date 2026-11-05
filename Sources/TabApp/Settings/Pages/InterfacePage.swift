@@ -7,55 +7,44 @@ struct InterfacePage: View {
     @Environment(\.settingsTheme) private var theme
 
     var body: some View {
-        SwiftUI.ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
-                if let build = model.lastBuild {
-                    ForEach(build.groups) { group in
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text(group.section).font(.headline).padding(.horizontal, 4)
-                            VStack(spacing: 0) {
-                                if group.section == "Appearance" {
-                                    appearanceChoices.padding(16)
-                                }
-                                let rows = build.rows.filter { row in
-                                    SettingsCatalog.item(row.id)?.section == group.section &&
-                                        !["color-scheme", "interface-style"].contains(row.id) &&
-                                        (row.id != "glass-panes" || model.store.settings.appearance.interfaceStyle == .glass)
-                                }
-                                ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-                                    if index > 0 || group.section == "Appearance" { SwiftUI.Divider().padding(.horizontal, 16) }
-                                    setting(row).padding(16)
-                                }
-                            }
-                            .background(theme?.card ?? .clear, in: RoundedRectangle(cornerRadius: 16))
-                            if group.section == "Appearance" {
-                                ForEach(["color-scheme", "interface-style"], id: \.self) { id in
-                                    if let error = model.store.errors[id] { Text(error).foregroundStyle(theme?.danger ?? .red) }
-                                }
+        Form {
+            if let build = model.lastBuild {
+                ForEach(build.groups) { group in
+                    Section {
+                        if group.section == "Appearance" {
+                            appearanceChoices
+                                .padding(.vertical, 6)
+                                .listRowBackground(theme?.card)
+                        }
+                        ForEach(rows(of: group)) { row in
+                            SettingRowView(row: row, model: model)
+                                .listRowBackground(theme?.card)
+                        }
+                    } header: {
+                        Text(group.section)
+                    } footer: {
+                        if group.section == "Appearance" {
+                            ForEach(["color-scheme", "interface-style"], id: \.self) { id in
+                                if let error = model.store.errors[id] { Text(error).foregroundStyle(theme?.danger ?? .red) }
                             }
                         }
                     }
                 }
             }
-            .padding(20)
         }
+        .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
         .background { theme?.background.ignoresSafeArea() }
     }
 
-    private func setting(_ row: SettingRow) -> some View {
-        HStack(spacing: 16) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(row.label)
-                if let description = row.description {
-                    Text(description).font(.subheadline).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                if let error = row.error { Text(error).font(.subheadline).foregroundStyle(theme?.danger ?? .red) }
-            }
-            Spacer(minLength: 0)
-            if let control = row.control { SettingControlView(control: control, model: model).fixedSize() }
+    /// The group's rows, without the two the previews above replace.
+    private func rows(of group: SettingsPageBuilder.Group) -> [SettingRow] {
+        group.blocks.compactMap { block in
+            guard case .row(let row) = block,
+                  !["color-scheme", "interface-style"].contains(row.id),
+                  row.id != "glass-panes" || model.store.settings.appearance.interfaceStyle == .glass else { return nil }
+            return row
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var appearanceChoices: some View {

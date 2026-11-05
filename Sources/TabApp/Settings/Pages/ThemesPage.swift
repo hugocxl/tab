@@ -14,25 +14,33 @@ struct ThemesPage: View {
     }
 
     var body: some View {
-        SwiftUI.ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
-                ForEach(["application", "configuration"], id: \.self) { id in
-                    if let message = model.store.errors[id] {
-                        HStack {
-                            Text(message).foregroundStyle(theme?.danger ?? .red)
+        Form {
+            ForEach(["application", "configuration"], id: \.self) { id in
+                if let message = model.store.errors[id] {
+                    Section {
+                        HStack(alignment: .firstTextBaseline) {
+                            Label(message, systemImage: "exclamationmark.triangle.fill")
+                                .foregroundStyle(theme?.danger ?? .red)
                             Spacer()
                             Button("Dismiss") { model.store.dismissError(id) }
                         }
+                        .listRowBackground(theme?.card)
                     }
                 }
-                mode(dark: false)
-                mode(dark: true)
-                ForEach(model.store.theme.catalog.errors, id: \.self) { problem in
-                    Text(problem).font(.subheadline).foregroundStyle(theme?.danger ?? .red)
+            }
+            mode(dark: false)
+            mode(dark: true)
+            if !model.store.theme.catalog.errors.isEmpty {
+                Section {
+                    ForEach(model.store.theme.catalog.errors, id: \.self) { problem in
+                        Text(problem).font(.subheadline).foregroundStyle(theme?.danger ?? .red)
+                            .listRowBackground(theme?.card)
+                    }
                 }
             }
-            .padding(20)
         }
+        .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
         .background { theme?.background.ignoresSafeArea() }
     }
 
@@ -47,16 +55,8 @@ struct ThemesPage: View {
         // Keep every existing choice available, with this mode's colors first.
         let others = remaining.filter { ChromePalette(scheme: $0.scheme).isLight != dark }
             + remaining.filter { ChromePalette(scheme: $0.scheme).isLight == dark }
-        return VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 6) {
-                Text(dark ? "Dark Mode" : "Light Mode").fontWeight(.semibold)
-                if appTheme.interfaceIsDark == dark {
-                    Text("— Active").foregroundStyle(.secondary)
-                }
-            }
-            .font(.system(size: 15))
-            .padding(.horizontal, 4)
-
+        let error = model.store.errors[dark ? "dark-theme" : "light-theme"]
+        return Section {
             ScrollViewReader { proxy in
                 SwiftUI.ScrollView(.horizontal) {
                     HStack(alignment: .top, spacing: 18) {
@@ -69,21 +69,34 @@ struct ThemesPage: View {
                         }
                         themeGroup("Themes", entries: others, selected: current, dark: dark)
                     }
-                    .padding(16)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 12)
                 }
                 .scrollIndicators(.hidden)
-                .background(theme?.card ?? .clear, in: RoundedRectangle(cornerRadius: 16))
                 .onAppear {
                     if current != defaultName { proxy.scrollTo(current, anchor: .center) }
                 }
             }
-            if catalog.find(selected) == nil {
-                Text("“\(selected)” is unavailable. Using \(defaultName).")
-                    .font(.subheadline).foregroundStyle(.secondary)
+            .listRowInsets(EdgeInsets())
+            .listRowBackground(theme?.card)
+        } header: {
+            HStack(spacing: 6) {
+                Text(dark ? "Dark Mode" : "Light Mode")
+                if appTheme.interfaceIsDark == dark {
+                    Text("Active").foregroundStyle(.secondary).fontWeight(.regular)
+                }
             }
-            if let error = model.store.errors[dark ? "dark-theme" : "light-theme"] {
-                Text(error).font(.subheadline).foregroundStyle(theme?.danger ?? .red)
+        } footer: {
+            VStack(alignment: .leading, spacing: 4) {
+                if catalog.find(selected) == nil {
+                    Text("“\(selected)” is unavailable. Using \(defaultName).")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
+                if let error {
+                    Text(error).font(.subheadline).foregroundStyle(theme?.danger ?? .red)
+                }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 

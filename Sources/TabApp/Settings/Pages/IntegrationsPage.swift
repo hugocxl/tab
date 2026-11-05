@@ -11,22 +11,19 @@ extension SettingsModel {
             store.setAgentIntegration($0)
         })
         b.note("agent-integration", "Teach Claude Code, Codex, OpenCode and Pi how to use Tab.")
-        b.row("agent-integration-agents", statuses.map(agentList) ?? .label("Looking for agents…", .note), stacked: true)
+        if let statuses {
+            let light = AppTheme.shared.palette.isLight
+            for status in statuses {
+                b.item("agent-integration-agents", key: status.agent.rawValue, label: status.agent.name, description: Self.summary(status),
+                       icon: AgentLogo.image(for: Self.provider(status.agent), lightBackground: light), nil)
+            }
+        } else {
+            b.row("agent-integration-agents", .label("Looking for agents…", .secondary))
+        }
         if statuses?.contains(where: { $0.agent == .codex && $0.hook == .installed }) ?? false {
             b.note("agent-integration-agents", "Codex runs a new or changed hook only after you approve it: type /hooks in Codex.")
         }
         b.row("terminal-migration", migrationButtons(b), stacked: true)
-    }
-
-    private func agentList(_ statuses: [AgentIntegrationStatus]) -> SettingControl {
-        .column(statuses.map { status in
-            var controls: [SettingControl] = []
-            if let logo = AgentLogo.image(for: Self.provider(status.agent), lightBackground: AppTheme.shared.palette.isLight) {
-                controls.append(.image(logo, side: 20))
-            }
-            controls.append(.column([.label(status.agent.name), .label(Self.summary(status), .secondary)]))
-            return .row(controls)
-        })
     }
 
     static func provider(_ agent: CodingAgent) -> AgentProvider {

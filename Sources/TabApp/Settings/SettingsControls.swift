@@ -22,6 +22,8 @@ indirect enum SettingControl {
     case fontName(family: String, style: String)
     /// A terminal sample drawn with the page's settings.
     case preview(PreviewSpec)
+    /// An ellipsis menu of a list entry's actions, such as Rename and Delete.
+    case actions(String, [ButtonSpec])
     /// A chevron: the row opens another page.
     case disclosure(() -> Void)
     /// Controls side by side.
