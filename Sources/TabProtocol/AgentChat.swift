@@ -182,8 +182,10 @@ public enum AgentChatRequest: Codable, Hashable, Sendable {
     case setAccess(session: SessionId, mode: AgentAccessMode)
     case interrupt(session: SessionId)
     case close(session: SessionId)
-    /// Idempotent: a new conversation `session` in `from`'s project that starts with
-    /// everything `from` said so far, with its provider, model, effort and access, and
-    /// continues on its own from the next message.
-    case fork(session: SessionId, from: SessionId)
+    /// Idempotent: a new conversation `session` that starts with everything `from`
+    /// said so far, with its provider, model, effort and access, and continues on its
+    /// own from the next message. It works in `project`, such as a worktree of
+    /// `from`'s, or else in `from`'s project; a server that predates `project`
+    /// ignores it.
+    case fork(session: SessionId, from: SessionId, project: ProjectId? = nil)
 }

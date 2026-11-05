@@ -189,6 +189,57 @@ extension AppModel {
         return opened
     }
 
+    /// Opens a device, editor or diff pane for `tab pane new` and `tab tab new`:
+    /// focuses the editor or diff already showing its file, else opens one as a
+    /// new tab of Home, or beside the pane showing `beside` on the same server,
+    /// else in its project.
+    @discardableResult
+    public func add(_ request: AppNewPane) -> PaneId? {
+        guard let project = state.project(request.project) else { return nil }
+        let content: PaneContent
+        var line: Int?
+        do {
+            switch request.content {
+            case .device(let device): content = .device(device)
+            case .editor(let path, let at):
+                content = .editor(path: try PaneContent.relativePath(Self.relative(path, in: project)))
+                line = at
+            case .diff(let path, let staged):
+                content = .diff(path: try PaneContent.relativePath(Self.relative(path, in: project)), staged: staged)
+            }
+        } catch {
+            return nil
+        }
+        let isFile = if case .device = content { false } else { true }
+        var opened = isFile ? project.tabs.flatMap(\.panes).first { $0.content == content }?.id : nil
+        if let opened {
+            focusPane(opened)
+        } else {
+            let pane = Pane(content: content)
+            let anchor = request.beside.flatMap(state.paneShowing)
+                .flatMap { state.paneServer($0) == project.serverId ? $0 : nil }
+            if request.placement == .tab, project.home {
+                guard edit({ _ = try $0.openTab(project.id, pane) }) else { return nil }
+            } else if let anchor {
+                guard edit({ state in
+                    try state.insertSplitPane(after: anchor, pane, edge: .right)
+                    try state.focusPane(pane.id)
+                    state.revealCurrentProject()
+                }) else { return nil }
+            } else {
+                guard edit({ try $0.openPane(project.id, pane) }) else { return nil }
+            }
+            opened = pane.id
+        }
+        guard let opened else { return nil }
+        if let line {
+            editorLocations[opened] = (line, 1)
+            (controller(for: opened) as? EditorLocationReceiver)?.reveal(line: line, column: 1)
+        }
+        focusActiveContent()
+        return opened
+    }
+
     /// Puts `prompt` in the composer of the agent pane `pane`, once the pane
 
     /// shows and its composer takes text, for the user to review and send.

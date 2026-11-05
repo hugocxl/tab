@@ -60,8 +60,20 @@ public enum ManageAction: Hashable, Sendable {
     case files(project: String, action: String)
     case exec(project: String, argv: [String], timeoutMs: UInt32)
     case device(CLIDevice)
+    case agent(CLIAgent)
     /// Exposes the server's `localhost:remote` on this computer until interrupted.
     case forward(remote: UInt16, local: UInt16?)
+}
+
+/// Tab's agent conversations on the server, named by ID, a unique start of
+/// one, or a name.
+public enum CLIAgent: Hashable, Sendable {
+    /// The agent's state and latest reply, or with `all` its whole conversation.
+    case read(agent: String, all: Bool)
+    /// Waits until the agent stops working, then prints its latest reply.
+    case wait(agent: String, timeoutMs: UInt32)
+    /// Sends a message, as the user would in its pane.
+    case send(agent: String, text: String)
 }
 
 /// The server's simulators and emulators. A missing device means the only
@@ -99,7 +111,8 @@ public enum CLISession: Hashable, Sendable {
     case new(project: String?, directory: String?, size: Size, command: String?)
     case list(project: String?, all: Bool)
     case send(session: String?, text: String)
-    case press(session: String?, bytes: Data)
+    /// A key, encoded by the server for the program's keyboard modes.
+    case press(session: String?, key: KeyEvent)
     case read(session: String?, lines: Int, saved: Bool)
     /// `before` 0 starts at the newest rows.
     case history(session: String?, before: UInt64, limit: UInt16, saved: Bool)
@@ -126,10 +139,17 @@ public struct CLIPane: Hashable, Sendable {
         case terminal(session: String?, directory: String?, command: String?)
         /// A new conversation, sent `message` first when there is one.
         case agent(provider: AgentChatProvider, message: String?)
-        /// A copy of the conversation `agent`, or of the caller's, sent `message`
-        /// first when there is one.
-        case fork(agent: String?, message: String?)
+        /// A copy of the conversation `agent`, or of the caller's, working in
+        /// `project` or else in its source's, sent `message` first when there is one.
+        case fork(agent: String?, project: String?, message: String?)
         case browser(url: String?, profile: String?)
+        /// A simulator or emulator by ID or name; `nil`, the only running one,
+        /// else the device picker.
+        case device(device: String?)
+        /// A file in an editor, at a 1-based `line`.
+        case editor(path: String, line: Int?)
+        /// A file's working tree changes, or its staged ones.
+        case diff(path: String, staged: Bool)
     }
 
     public var placement: AppPane.Placement

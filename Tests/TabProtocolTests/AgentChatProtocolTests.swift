@@ -11,7 +11,8 @@ final class AgentChatProtocolTests: XCTestCase {
             .send(session: session, text: "Selected", model: "gpt-6.1-sol", reasoningEffort: .xhigh, provider: .codex),
             .setAccess(session: session, mode: .fullAccess),
             .approve(session: session, request: "permission", allow: false),
-            .interrupt(session: session), .close(session: session)
+            .interrupt(session: session), .close(session: session),
+            .fork(session: SessionId(), from: session), .fork(session: SessionId(), from: session, project: project),
         ]
         let snapshot = AgentChatSnapshot(session: session, project: project, provider: .codex,
                                          providerSession: "resume", reasoningEffort: .high, status: .waiting, revision: 12,
@@ -26,6 +27,15 @@ final class AgentChatProtocolTests: XCTestCase {
             XCTAssertEqual(try WireJSON.decode(Message.self, from: encoded), message)
             try message.validate()
         }
+    }
+
+    func testAForkWithoutAProjectReadsTheSameOnEitherSide() throws {
+        let fork = SessionId(), source = SessionId()
+        let encoded = try JSONEncoder().encode(AgentChatRequest.fork(session: fork, from: source))
+        XCTAssertFalse(String(decoding: encoded, as: UTF8.self).contains("project"), "Older servers see what they know")
+        let older = #"{"fork":{"session":"\#(fork)","from":"\#(source)"}}"#
+        XCTAssertEqual(try JSONDecoder().decode(AgentChatRequest.self, from: Data(older.utf8)),
+                       .fork(session: fork, from: source))
     }
 
     func testCheckpointWireMessagesAndInvalidIdentifiers() throws {

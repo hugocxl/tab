@@ -71,7 +71,7 @@ final class ArgumentTests: XCTestCase {
     func testErrorsNameTheCommand() {
         for (words, message) in [
             (["session", "frob"], "unknown command tab session frob; run tab session --help"),
-            (["pane", "new", "editor"], "unknown command tab pane new editor; run tab pane --help"),
+            (["pane", "new", "window"], "unknown command tab pane new window; run tab pane --help"),
             (["session", "send", "1a2b", "two", "three"], "usage: tab session send [SESSION] TEXT"),
             (["session", "list", "--json", "--json"], "--json given twice"),
             (["session", "list", "--verbose"],
@@ -156,14 +156,44 @@ final class ArgumentTests: XCTestCase {
         }
     }
 
+    func testAgentCommandsReadWaitForAndMessageAnAgent() throws {
+        XCTAssertEqual(try action(["agent", "read", "wispy-cedar"]), .agent(.read(agent: "wispy-cedar", all: false)))
+        XCTAssertEqual(try action(["agent", "read", "abcd", "--all", "--json"]), .agent(.read(agent: "abcd", all: true)))
+        XCTAssertEqual(try action(["agent", "wait", "abcd"]), .agent(.wait(agent: "abcd", timeoutMs: 600_000)))
+        XCTAssertEqual(try action(["agent", "wait", "abcd", "--timeout", "5"]), .agent(.wait(agent: "abcd", timeoutMs: 5000)))
+        XCTAssertEqual(try action(["--host", "me@mini", "agent", "send", "abcd", "Clean the links"]),
+                       .agent(.send(agent: "abcd", text: "Clean the links")))
+        for words in [
+            ["agent", "read", "a", "b"], ["agent", "send", "abcd", " "],
+            ["agent", "wait", "abcd", "--timeout", "3601"], ["agent", "list"],
+        ] {
+            assertRefused(words)
+        }
+    }
+
     func testSessionCommandsDefaultToTheCallingTerminal() throws {
         let id = SessionId().description
         XCTAssertEqual(try action(["session", "send", "hello"]), .session(.send(session: nil, text: "hello")))
         XCTAssertEqual(try action(["session", "send", id, "hello"]), .session(.send(session: id, text: "hello")))
         XCTAssertEqual(try action(["session", "send", "1a2b", "--", "--literal"]),
                        .session(.send(session: "1a2b", text: "--literal")))
-        XCTAssertEqual(try action(["session", "press", "Ctrl+C"]), .session(.press(session: nil, bytes: Data([3]))))
-        XCTAssertEqual(try action(["session", "press", id, "enter"]), .session(.press(session: id, bytes: Data([13]))))
+        XCTAssertEqual(try action(["session", "press", "Ctrl+C"]),
+                       .session(.press(session: nil, key: KeyEvent(key: "c", modifiers: .control,
+                                                                    unshiftedCodepoint: 0x63))))
+        XCTAssertEqual(try action(["session", "press", id, "enter"]),
+                       .session(.press(session: id, key: KeyEvent(key: "enter"))))
+        // Keys for menus and editors: arrows, modified keys, and keys that type.
+        XCTAssertEqual(try CLICommands.key("Up"), KeyEvent(key: "arrow_up"))
+        XCTAssertEqual(try CLICommands.key("Shift+Tab"), KeyEvent(key: "tab", modifiers: .shift))
+        XCTAssertEqual(try CLICommands.key("PageDown"), KeyEvent(key: "page_down"))
+        XCTAssertEqual(try CLICommands.key("F5"), KeyEvent(key: "f5"))
+        XCTAssertEqual(try CLICommands.key("Space"), KeyEvent(key: "space", text: " ", unshiftedCodepoint: 0x20))
+        XCTAssertEqual(try CLICommands.key("y"), KeyEvent(key: "y", text: "y", unshiftedCodepoint: 0x79))
+        XCTAssertEqual(try CLICommands.key("Shift+Y"), KeyEvent(key: "y", modifiers: .shift, text: "Y",
+                                                                unshiftedCodepoint: 0x79))
+        XCTAssertEqual(try CLICommands.key("Ctrl+Alt+R"), KeyEvent(key: "r", modifiers: [.control, .alt],
+                                                                   unshiftedCodepoint: 0x72))
+        for key in ["F99", "Hyper+A", "ab", "Ctrl+", "+"] { XCTAssertThrowsError(try CLICommands.key(key), key) }
         XCTAssertEqual(try action(["session", "read", "--lines", "10", "--saved"]),
                        .session(.read(session: nil, lines: 10, saved: true)))
         XCTAssertEqual(try action(["session", "read", id]), .session(.read(session: id, lines: 50, saved: false)))
@@ -237,14 +267,26 @@ final class ArgumentTests: XCTestCase {
         XCTAssertEqual(try pane(["pane", "new", "agent", "--project", "App", "--provider", "codex"]),
                        CLIPane(placement: .pane, project: "App", content: .agent(provider: .codex, message: nil)))
         XCTAssertEqual(try pane(["pane", "new", "agent", "--fork"]),
-                       CLIPane(placement: .pane, project: nil, content: .fork(agent: nil, message: nil)))
+                       CLIPane(placement: .pane, project: nil, content: .fork(agent: nil, project: nil, message: nil)))
         XCTAssertEqual(try pane(["pane", "new", "agent", "--fork", id]),
-                       CLIPane(placement: .pane, project: nil, content: .fork(agent: id, message: nil)))
+                       CLIPane(placement: .pane, project: nil, content: .fork(agent: id, project: nil, message: nil)))
         // Branches start on their own part of the work.
         XCTAssertEqual(try pane(["pane", "new", "agent", "--fork", "--", "Show", "the", "first", "draft"]),
-                       CLIPane(placement: .pane, project: nil, content: .fork(agent: nil, message: "Show the first draft")))
+                       CLIPane(placement: .pane, project: nil, content: .fork(agent: nil, project: nil, message: "Show the first draft")))
         XCTAssertEqual(try pane(["pane", "new", "agent", "--fork", id, "--", "Go on"]),
-                       CLIPane(placement: .pane, project: nil, content: .fork(agent: id, message: "Go on")))
+                       CLIPane(placement: .pane, project: nil, content: .fork(agent: id, project: nil, message: "Go on")))
+        // A branch that changes files works in a worktree of its own.
+        XCTAssertEqual(try pane(["pane", "new", "agent", "--fork", "--project", "app-login", "--", "Try it"]),
+                       CLIPane(placement: .pane, project: "app-login",
+                               content: .fork(agent: nil, project: "app-login", message: "Try it")))
+        XCTAssertEqual(try pane(["pane", "new", "device", "iPhone 17"]),
+                       CLIPane(placement: .pane, project: nil, content: .device(device: "iPhone 17")))
+        XCTAssertEqual(try pane(["tab", "new", "device"]),
+                       CLIPane(placement: .tab, project: nil, content: .device(device: nil)))
+        XCTAssertEqual(try pane(["pane", "new", "editor", "Sources/a.swift", "--line", "42"]),
+                       CLIPane(placement: .pane, project: nil, content: .editor(path: "Sources/a.swift", line: 42)))
+        XCTAssertEqual(try pane(["pane", "new", "diff", "README.md", "--staged", "--project", "App"]),
+                       CLIPane(placement: .pane, project: "App", content: .diff(path: "README.md", staged: true)))
         XCTAssertEqual(try pane(["pane", "new", "agent", "--", "Review the PR"]),
                        CLIPane(placement: .pane, project: nil, content: .agent(provider: .claude, message: "Review the PR")))
         XCTAssertEqual(try pane(["tab", "new", "agent", "--", "Plan the release"]),
@@ -263,6 +305,8 @@ final class ArgumentTests: XCTestCase {
         for words in [
             ["pane", "new", "agent", "--provider", "gemini"], ["pane", "new", "agent", "App"],
             ["pane", "new", "agent", "--fork", "wispy-cedar"], ["pane", "new", "agent", "--fork", "--provider", "codex"],
+            ["pane", "new", "editor", "a", "--line", "0"], ["pane", "new", "diff", "a", "b"],
+            ["tab", "new", "editor", "a"], ["pane", "new", "device", "a", "b"],
             ["pane", "new", "terminal", "a", "b"], ["pane", "new", "terminal", id, "--", "ls"],
             ["pane", "new", "browser", "a.test", "b.test"], ["tab", "new", "terminal", id],
             ["tab", "new", "agent", "--fork"], ["tab", "new", "browser", "--project", "App"],
@@ -495,7 +539,9 @@ final class ArgumentTests: XCTestCase {
             guard !command.hasPrefix("<command>"), !command.hasPrefix("--help"), !command.contains("`") else {
                 return nil
             }
-            let trimmed = command.components(separatedBy: "  #")[0].trimmingCharacters(in: .whitespaces)
+            // A shell pipe after the command isn't part of it.
+            let trimmed = command.components(separatedBy: "  #")[0].components(separatedBy: " | ")[0]
+                .trimmingCharacters(in: .whitespaces)
             return trimmed.hasSuffix(")") ? String(trimmed.dropLast()) : trimmed
         }
         XCTAssertGreaterThan(commands.count, 15, "\(commands)")

@@ -67,6 +67,13 @@ private final class AgentRuntimeResumes: @unchecked Sendable {
     func append(_ value: String?) { lock.withLock { recorded.append(value) } }
 }
 
+private final class AgentDirectories: @unchecked Sendable {
+    let lock = NSLock()
+    private var list: [String] = []
+    var values: [String] { lock.withLock { list } }
+    func append(_ directory: String) { lock.withLock { list.append(directory) } }
+}
+
 private final class AgentEventCount: @unchecked Sendable {
     let lock = NSLock()
     private var value = 0
@@ -456,6 +463,40 @@ final class AgentSessionsTests: XCTestCase {
         XCTAssertNil(box.runtime?.launches.first?.forkSource)
         XCTAssertEqual(continued.providerSession, "thread-1")
         XCTAssertEqual(continued.items.filter { $0.kind == .user }.map(\.text), ["Fix the login bug", "Thanks"])
+    }
+
+    func testForkIntoAnotherProjectWorksInItsFolder() async throws {
+        let root = try root(), box = AgentRuntimeBox(), directories = AgentDirectories()
+        let worktree = root.appendingPathComponent("worktree", isDirectory: true)
+        try FileManager.default.createDirectory(at: worktree, withIntermediateDirectories: true)
+        let source = SessionId(), fork = SessionId(), project = ProjectId(), branch = ProjectId()
+        let factory: AgentSessions.Factory = { _, directory, resume, callback in
+            directories.append(directory)
+            let runtime = FakeAgentRuntime(callback)
+            runtime.providerSession = resume == nil ? "source-conversation" : "forked-conversation"
+            runtime.onSend = { callback(.status(.idle)) }
+            box.install(runtime)
+            return runtime
+        }
+        let sessions = try AgentSessions(root: root, projectDirectory: { $0 == branch ? worktree.path : root.path },
+                                         factory: factory)
+        defer { sessions.shutdown() }
+        _ = try await sessions.handle(.create(session: source, project: project, provider: .claude))
+        _ = try await sessions.handle(.send(session: source, text: "Plan both fixes", model: nil))
+
+        let copied = try await sessions.handle(.fork(session: fork, from: source, project: branch))
+        XCTAssertEqual(copied.project, branch)
+        XCTAssertEqual(copied.items.filter { $0.kind == .user }.map(\.text), ["Plan both fixes"])
+        let again = try await sessions.handle(.fork(session: fork, from: source, project: branch))
+        XCTAssertEqual(again, copied)
+        do {
+            _ = try await sessions.handle(.fork(session: fork, from: source))
+            XCTFail("A fork's ID can't be reused for a fork in another project")
+        } catch {}
+
+        _ = try await sessions.handle(.send(session: fork, text: "Try the first", model: nil))
+        XCTAssertEqual(directories.values, [root.path, worktree.path])
+        XCTAssertEqual(box.runtime?.launches.first?.forkSource, "source-conversation")
     }
 
     private func root() throws -> URL {

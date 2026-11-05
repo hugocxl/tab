@@ -6,6 +6,8 @@ public enum Executable {
     public static let server = "tabd"
     public static let cli = "tab"
     public static let app = "Tab"
+    /// The app's executable in a bundle, apart from the case-insensitive `tab`.
+    public static let desktop = "TabDesktop"
 
     /// The running executable with symbolic links resolved, so a CLI started
     /// through `~/.local/bin/tab` finds the bundle it points into.

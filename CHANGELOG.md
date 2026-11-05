@@ -5,6 +5,7 @@ Changelog.
 
 ## 0.65.0 - 2026-11-05
 
+<<<<<<< Updated upstream
 ### Changed
 
 - Settings lists, such as privacy permissions, agents, browser profiles and
@@ -13,6 +14,34 @@ Changelog.
   the other pages.
 - Browser profiles are renamed, cleared and deleted from a menu on their row,
   and renaming asks for the new name.
+||||||| Stash base
+=======
+### Added
+
+- `tab agent read`, `tab agent wait` and `tab agent send` read an agent pane's
+  latest reply, wait for it to finish, and message it.
+- `tab pane new agent --fork --project` starts a branch of the conversation in
+  another project, such as a worktree, so branches that change files don't
+  change the same ones.
+- `tab pane new device`, `tab pane new editor`, `tab pane new diff` and
+  `tab tab new device` open simulators, files and their changes in the app.
+- `tab session press` presses arrows, Space, Delete, Home, End, Page Up and Down,
+  F1 to F12, letters and digits, with Ctrl, Alt and Shift.
+
+### Changed
+
+- Keys from `tab session press` reach programs the way the app's keyboard sends
+  them, following the program's keyboard modes.
+- The skill that teaches agents to use `tab` covers branching into worktrees,
+  following branches, agent panes, tabs of other computers, and the new panes.
+
+### Fixed
+
+- `tab server start` starts the server again when run from inside Tab's app
+  bundle.
+- The skill's `tab new browser` example names the real `tab tab new browser`
+  command, and its `--directory` example uses a path that works from anywhere.
+>>>>>>> Stashed changes
 
 ## 0.64.0 - 2026-11-05
 

@@ -211,11 +211,12 @@ public struct AgentIntegrations: Sendable {
             You are running in a Tab agent pane, agent \(agent): the Tab app shows this conversation, and \
             \(command) drives the app from a shell. When the user asks for panes, tabs or a split, or to \
             branch or fork this conversation, they mean Tab's panes, not your own subagents, which Tab \
-            doesn't show. Open a terminal, agent or browser pane beside this one with `tab pane new`. To \
-            branch, run `tab pane new agent --fork -- "<what this branch does>"` once per branch: each \
-            pane continues this conversation and starts on its message, and the user talks to it there. \
-            Its replies show only in its pane, so don't report what it found. Read the tab-cli skill, or \
-            run `tab --help`, before using it.
+            doesn't show. Open a terminal, agent, browser, device, editor or diff pane beside this one with \
+            `tab pane new`. To branch, run `tab pane new agent --fork -- "<what this branch does>"` once per \
+            branch: each pane continues this conversation and starts on its message, and the user talks to \
+            it there. Branches that change files need a worktree each (`tab worktree new`, then `--fork \
+            --project <worktree>`). `tab agent wait` and `tab agent read` give a branch's latest reply. Read \
+            the tab-cli skill, or run `tab --help`, before using it.
             """
         }
         guard let session = environment["TAB_SESSION_ID"], !session.isEmpty else { return nil }
@@ -224,8 +225,9 @@ public struct AgentIntegrations: Sendable {
         You are running in a Tab terminal, session \(session)\(name). Tab keeps terminals running in a \
         background server, and \(command) drives them from a shell: start long-running work such as a \
         dev server or test watcher in its own terminal, wait for its output instead of polling, read \
-        its screen, and manage projects and Git worktrees. Inside this terminal, session commands \
-        default to it. Read the tab-cli skill, or run `tab --help`, before using it.
+        its screen, open terminal, agent, browser, device, editor and diff panes beside this one, and \
+        manage projects and Git worktrees. Inside this terminal, session commands default to it. Read \
+        the tab-cli skill, or run `tab --help`, before using it.
         """
     }
 }

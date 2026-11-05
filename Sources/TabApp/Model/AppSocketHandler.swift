@@ -4,7 +4,8 @@ import TabClient
 import TabCore
 
 /// Answers `app.sock`: `tab <folder>`, a second launch handing its folder
-/// over, `tab browser`, and showing terminals and agents in panes.
+/// over, `tab browser`, showing terminals and agents in panes, and opening
+/// device, editor and diff panes.
 
 @MainActor
 public final class AppSocketHandler {
@@ -43,6 +44,10 @@ public final class AppSocketHandler {
             defer { model.presenter?.bringToFront() }
             guard let shown = model.show(pane) else { return .failed("Could not show \(pane.session)") }
             return .ok(.string(shown.description))
+        case .add(let pane):
+            defer { model.presenter?.bringToFront() }
+            guard model.add(pane) != nil else { return .failed("Could not open the pane") }
+            return .ok(.bool(true))
         case .unknown(let type):
             return .failed("unknown command \(type)")
         }

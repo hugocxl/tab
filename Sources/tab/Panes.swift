@@ -3,8 +3,8 @@ import TabClient
 import TabCore
 import TabProtocol
 
-/// `pane new` and `tab new`: terminals, agents and browsers shown in the app
-/// on this computer.
+/// `pane new` and `tab new`: terminals, agents, browsers, devices, editors
+/// and diffs shown in the app on this computer.
 enum Panes {
     static func run(_ pane: CLIPane, json: Bool) async throws {
         guard !App.overSSH else { throw CLIError("panes open in the app on this Mac, not over SSH") }
@@ -21,6 +21,17 @@ enum Panes {
         let client = try await target.connect(start: true)
         defer { client.close() }
         let caller = pane.placement == .pane ? caller(server: client.server.server) : nil
+        if let content = try await content(pane, client: client) {
+            let project = try await project(pane, client: client, target: target)
+            let request = AppNewPane(content: try file(content, in: project), project: project.id, beside: caller,
+                                     placement: pane.placement)
+            do {
+                _ = try App.call(.add(request), timeout: try App.replyTime(), startApp: true)
+            } catch {
+                throw CLIError("could not open the pane: \(CLI.message(error))")
+            }
+            return Output.ok(json: json)
+        }
         let shown: AppPane
         let record: JSONValue
         var started: AgentChatSnapshot?
@@ -49,16 +60,23 @@ enum Panes {
             record = agentRecord(snapshot)
             started = snapshot
             message = text
-        case .fork(let agent, let text):
+        case .fork(let agent, let selector, let text):
             guard let source = agent.flatMap(SessionId.init(string:)) ?? Agents.hostingAgent(server: client.server.server)
             else { throw CLIError("give an agent ID; this isn't a Tab agent on that server") }
-            let snapshot = try await client.agentChat(.fork(session: SessionId(), from: source))
+            var project: ProjectId?
+            if let selector { project = try await Projects.resolve(selector, client: client, target: target).id }
+            let snapshot = try await client.agentChat(.fork(session: SessionId(), from: source, project: project))
+            if let project, snapshot.project != project {
+                // A server older than forking into another project forked in place.
+                _ = try? await client.agentChat(.close(session: snapshot.session))
+                throw CLIError("the server can't fork into another project; update Tab")
+            }
             shown = AppPane(kind: .agent, session: snapshot.session, project: snapshot.project,
                             provider: snapshot.provider, beside: caller, placement: pane.placement)
             record = agentRecord(snapshot)
             started = snapshot
             message = text
-        case .browser:
+        case .browser, .device, .editor, .diff:
             return
         }
         do {
@@ -75,6 +93,44 @@ enum Panes {
             }
         }
         Output.record(record, columns: ["id"], json: json)
+    }
+
+    /// A device, editor or diff pane's content, with its device found on the
+    /// server; `nil` for other panes.
+    static func content(_ pane: CLIPane, client: ServerClient) async throws -> AppNewPane.Content? {
+        switch pane.content {
+        case .device(let name):
+            let running = try await client.listDevices().filter(\.booted)
+            let chosen = name == nil && running.count != 1 ? nil : try await Devices.resolve(name, client: client)
+            guard let device = chosen else { return .device(DevicePane()) }
+            return .device(device.device.platform == .iOS ? DevicePane(udid: device.device.id, name: device.name)
+                                                          : DevicePane(avd: device.device.id, name: device.name))
+        case .editor(let path, let line): return .editor(path: path, line: line)
+        case .diff(let path, let staged): return .diff(path: path, staged: staged)
+        case .terminal, .agent, .fork, .browser: return nil
+        }
+    }
+
+    /// `content` with its file made absolute, refusing one outside `project`
+    /// or, for an editor, one that isn't a file.
+    static func file(_ content: AppNewPane.Content, in project: ProjectDescriptor) throws -> AppNewPane.Content {
+        let root = project.directory.rawValue
+        func inside(_ path: String) throws -> String {
+            let absolute = Paths.absolute(path)
+            guard absolute.hasPrefix(root.hasSuffix("/") ? root : root + "/") else {
+                throw CLIError("\(path) isn't in the project \(project.name) (\(root))")
+            }
+            return absolute
+        }
+        switch content {
+        case .device: return content
+        case .editor(let path, let line):
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: Paths.absolute(path), isDirectory: &isDirectory),
+                  !isDirectory.boolValue else { throw CLIError("\(path) isn't a file") }
+            return .editor(path: try inside(path), line: line)
+        case .diff(let path, let staged): return .diff(path: try inside(path), staged: staged)
+        }
     }
 
     /// Where a new terminal or agent belongs: Home for a tab; for a pane, the
@@ -95,17 +151,5 @@ enum Panes {
     /// The Tab agent or terminal this command runs in, for a new pane to open beside.
     static func caller(server: ServerId) -> SessionId? {
         Agents.hostingAgent(server: server) ?? Sessions.hostingSession(server: server)
-    }
-}
-
-/// Tab's own agent panes.
-enum Agents {
-    /// The Tab agent this command runs in, when it belongs to `server`.
-    static func hostingAgent(server: ServerId,
-                             environment: [String: String] = ProcessInfo.processInfo.environment) -> SessionId? {
-        guard let inherited = environment["TAB_SERVER_ID"].flatMap(ServerId.init(string:)), inherited == server else {
-            return nil
-        }
-        return environment["TAB_AGENT_ID"].flatMap(SessionId.init(string:))
     }
 }

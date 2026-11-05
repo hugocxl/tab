@@ -114,12 +114,17 @@ public enum ServerHost {
         return process.terminationStatus
     }
 
-    /// The app executable that can host `server`: the running one, when it
-    /// is inside an app bundle and `server` is the one beside it.
+    /// The app executable that can host `server`: the bundle's, when the
+    /// running executable, such as `tab`, is inside an app bundle and `server`
+    /// is the one beside it.
     static func app(for server: URL) -> URL? {
-        guard let executable = Executable.currentURL(), Executable.containingBundle(of: executable) != nil,
-              executable.deletingLastPathComponent().appendingPathComponent(Executable.server).standardizedFileURL
-              == server.standardizedFileURL else { return nil }
-        return executable
+        guard let executable = Executable.currentURL(), Executable.containingBundle(of: executable) != nil else {
+            return nil
+        }
+        let folder = executable.deletingLastPathComponent()
+        guard folder.appendingPathComponent(Executable.server).standardizedFileURL == server.standardizedFileURL
+        else { return nil }
+        let app = folder.appendingPathComponent(Executable.desktop)
+        return Executable.isExecutableFile(app) ? app : nil
     }
 }

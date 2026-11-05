@@ -269,8 +269,8 @@ final class AgentSessions: @unchecked Sendable {
             continuation.resume(returning: entry.snapshot)
             return
         }
-        if case .fork(let id, let from) = request {
-            continuation.resume(returning: try fork(id, from: from))
+        if case .fork(let id, let from, let project) = request {
+            continuation.resume(returning: try fork(id, from: from, into: project))
             return
         }
         let id: SessionId
@@ -689,25 +689,29 @@ final class AgentSessions: @unchecked Sendable {
     /// sees what the other says next. Claude forks at the message `from` had
     /// reached when the fork was made; Codex forks the whole thread as it is
     /// at the first message.
-    private func fork(_ id: SessionId, from: SessionId) throws -> AgentChatSnapshot {
+    private func fork(_ id: SessionId, from: SessionId, into project: ProjectId?) throws -> AgentChatSnapshot {
         guard let source = entries[from] else { throw ServiceError.unknownSession(from) }
+        let project = project ?? source.snapshot.project
         if let entry = entries[id] {
-            guard entry.snapshot.project == source.snapshot.project else {
+            guard entry.snapshot.project == project else {
                 throw ServiceError(.badRequest, "This agent session ID is already in use")
             }
             return entry.snapshot
         }
         guard !stopping else { throw ServiceError(.badRequest, "The server is stopping") }
-        _ = try projectDirectory(source.snapshot.project)
-        try checkDirectory(source.directory)
+        let folder = try projectDirectory(project)
+        // A fork in its source's project keeps working where the source does.
+        let directory = project == source.snapshot.project ? source.directory : folder
+        try checkDirectory(directory)
         var snapshot = source.snapshot
         snapshot.session = id
+        snapshot.project = project
         snapshot.revision = 0
         snapshot.status = .idle
         snapshot.turns = nil
         snapshot.items = snapshot.items.filter { $0.kind != .approval || $0.isComplete }
         for index in snapshot.items.indices { snapshot.items[index].isComplete = true }
-        let entry = Entry(snapshot, directory: source.directory)
+        let entry = Entry(snapshot, directory: directory)
         entry.hasSuccessfulTurn = source.hasSuccessfulTurn
         if let pending = source.forkSource {
             entry.forkSource = pending

@@ -38,6 +38,10 @@ final class AppSocketTests: XCTestCase {
                 "tabId": .string("T"), "expires": .int(1_767_225_600), "secure": .bool(true), "ratio": .double(0.5),
                 "list": .array([.null, .string("x")]), "nested": .object(["a": .int(-1)]),
             ]),
+            .add(AppNewPane(content: .device(DevicePane(udid: "U", name: "iPhone 17")), project: ProjectId(),
+                            beside: SessionId())),
+            .add(AppNewPane(content: .editor(path: "/srv/app/a.swift", line: 3), project: ProjectId(), placement: .tab)),
+            .add(AppNewPane(content: .diff(path: "README.md", staged: true), project: ProjectId())),
         ]
         for value in values {
             XCTAssertEqual(try JSONDecoder().decode(AppRequest.self, from: AppSocket.encode(value)), value)
@@ -71,6 +75,7 @@ final class AppSocketTests: XCTestCase {
                     return .ok(.null)
                 case .browser(let command, let args): return .failed("\(command) \(args["tabId"]?.string ?? "")")
                 case .show(let pane): return .ok(.string(pane.session.description))
+                case .add: return .ok(.bool(true))
                 case .unknown(let type): return .failed(type)
 
                 }

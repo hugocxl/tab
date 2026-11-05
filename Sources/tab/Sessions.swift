@@ -34,8 +34,12 @@ enum Sessions {
         case .send(let selector, let text):
             try await input(Data(text.utf8), session: try await calling(selector, client: client), client: client)
             Output.ok(json: json)
-        case .press(let selector, let bytes):
-            try await input(bytes, session: try await calling(selector, client: client), client: client)
+        case .press(let selector, let key):
+            // On a channel, so the server encodes the key for the program's
+            // keyboard modes, such as application cursor keys or kitty's protocol.
+            try await attached(try await calling(selector, client: client), client: client) {
+                try client.sendInput(channel: $0.channel, .key(key))
+            }
             Output.ok(json: json)
         case .read(let selector, let lines, let saved):
             let session = try await calling(selector, client: client)

@@ -21,12 +21,12 @@ public enum CLIHelp {
         Run tab <command> --help, or tab help <command>, for its commands.
 
         A session is a terminal on the server; it runs whether or not the app shows
-        it. A tab is a card in the app's sidebar, and a pane is one terminal, agent or
-        browser in a tab's layout.
-        Projects are named by ID, unique name or folder; sessions by ID, a unique
-        start of one, or a name such as wispy-cedar. Inside a Tab terminal or agent,
-        a missing session means yours, a missing project yours, and new panes open
-        beside yours.
+        it. A tab is a card in the app's sidebar, and a pane is one terminal, agent,
+        browser, device, editor or diff in a tab's layout.
+        Projects are named by ID, unique name or folder; sessions and agents by ID,
+        a unique start of one, or a name such as wispy-cedar. Inside a Tab terminal,
+        a missing session means yours; inside a Tab terminal or agent, a missing
+        project means yours, and new panes open beside yours.
         Commands that print data take --json. Put -- before words that start with a
         dash. Use ./NAME to open a folder named like a command.
         DESTINATION is user@host, an ssh_config alias or ssh://user@host:port; Tab

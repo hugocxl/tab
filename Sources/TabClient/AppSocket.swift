@@ -81,6 +81,8 @@ public enum AppRequest: Hashable, Sendable, Codable {
     case browser(command: String, args: [String: JSONValue])
     /// Shows a running terminal or agent conversation in a pane, focusing it.
     case show(AppPane)
+    /// Opens a device, editor or diff pane.
+    case add(AppNewPane)
     /// A request from a newer `tab`; answer with an error.
     case unknown(String)
 
@@ -103,6 +105,7 @@ public enum AppRequest: Hashable, Sendable, Codable {
         switch type {
         case "open": self = .open(path: try container.decode(String.self, forKey: .path))
         case "show": self = .show(try container.decode(AppPane.self, forKey: .pane))
+        case "add": self = .add(try container.decode(AppNewPane.self, forKey: .pane))
         default: self = .unknown(type)
         }
     }
@@ -120,9 +123,40 @@ public enum AppRequest: Hashable, Sendable, Codable {
         case .show(let pane):
             try container.encode("show", forKey: .type)
             try container.encode(pane, forKey: .pane)
+        case .add(let pane):
+            try container.encode("add", forKey: .type)
+            try container.encode(pane, forKey: .pane)
         case .unknown(let type):
             try container.encode(type, forKey: .verb)
         }
+    }
+}
+
+/// A pane without a session for the app to open: a device, an editor or a
+/// diff. An editor or diff already showing its file is focused. Otherwise, as
+/// a pane, it opens beside the pane showing `beside`, else in `project`; as a
+/// tab, it opens as a new tab of the Home `project`.
+public struct AppNewPane: Hashable, Sendable, Codable {
+    public enum Content: Hashable, Sendable, Codable {
+        /// A simulator or emulator; one not chosen shows the device picker.
+        case device(DevicePane)
+        /// A file, absolute or relative to the project, at a 1-based `line`.
+        case editor(path: String, line: Int?)
+        /// A file's working tree changes, or its staged ones.
+        case diff(path: String, staged: Bool)
+    }
+
+    public var content: Content
+    public var project: ProjectId
+    public var beside: SessionId?
+    public var placement: AppPane.Placement
+
+    public init(content: Content, project: ProjectId, beside: SessionId? = nil,
+                placement: AppPane.Placement = .pane) {
+        self.content = content
+        self.project = project
+        self.beside = beside
+        self.placement = placement
     }
 }
 

@@ -4,7 +4,7 @@ import TabCore
 import TabProtocol
 
 /// The commands that use a server: `session`, `project`, `worktree`, `exec`,
-/// `git`, `files`, `activity`, `settings`, `mobile` and `server`.
+/// `agent`, `git`, `files`, `activity`, `settings`, `mobile`, `server`, `device` and `forward`.
 enum Manage {
     static func run(_ invocation: ManageInvocation, host: SSHTarget?) async throws {
         let target = Target(host: host)
@@ -166,6 +166,8 @@ enum Manage {
             }
         case .device(let command):
             try await Devices.run(command, client: client, json: json)
+        case .agent(let command):
+            try await Agents.run(command, client: client, json: json)
         case .forward(let remote, let local):
             try await Devices.forward(remote: remote, local: local, client: client, target: target)
         }

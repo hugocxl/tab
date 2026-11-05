@@ -159,7 +159,7 @@ public enum CommandLineInstaller {
 
 /// The app binary has a distinct name from the case-insensitive `tab` CLI.
 enum DesktopExecutable {
-    static let name = "TabDesktop"
+    static let name = Executable.desktop
 
     static func accepts(_ name: String) -> Bool {
         name == Self.name || name == Executable.app

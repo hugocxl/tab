@@ -6,7 +6,7 @@ import Foundation
 extension PaneContent {
     /// A project-relative path with `/` separators, refusing paths that
     /// leave the project.
-    static func relativePath(_ path: String) throws -> String {
+    public static func relativePath(_ path: String) throws -> String {
         var path = Substring(path)
         while path.hasPrefix("./") { path = path.dropFirst(2) }
         while path.hasSuffix("/") { path = path.dropLast() }

@@ -98,7 +98,7 @@ enum CLICommands {
     }
 
     static let groups: [CLIGroup] = [
-        session, project, worktree, exec, git, files, activity, settings, mobile, server, device, forward,
+        session, agent, project, worktree, exec, git, files, activity, settings, mobile, server, device, forward,
         pane, tab, browser, integrations, stdio,
     ]
 
@@ -133,8 +133,8 @@ enum CLICommands {
                 manage(a, .session(.send(session: try a.session(before: 1), text: a.trailing(0, after: 1))))
             },
             CLICommandSpec("session press", ["[SESSION] KEY"],
-                           "Press Enter, Tab, Escape, Backspace, Ctrl+C, Ctrl+D or Ctrl+Z", words: 1 ... 2) { a in
-                manage(a, .session(.press(session: try a.session(before: 1), bytes: try key(a.trailing(0, after: 1)))))
+                           "Press a key, such as Enter, Up, Shift+Tab or Ctrl+C", words: 1 ... 2) { a in
+                manage(a, .session(.press(session: try a.session(before: 1), key: try key(a.trailing(0, after: 1)))))
             },
             CLICommandSpec("session read", ["[SESSION] [--lines N] [--saved]"],
                            "Print the last N visible rows (50 by default)", words: 0 ... 1, values: ["--lines"],
@@ -354,6 +354,41 @@ enum CLICommands {
         Actions can write and delete files.
         """)
 
+    static let agent = CLIGroup(
+        name: "agent", summary: "Tab's agent conversations: read, wait for and message them", section: .server,
+        commands: [
+            CLICommandSpec("agent read", ["AGENT [--all]"],
+                           "Print the agent's latest reply; --all prints the whole conversation", words: 1 ... 1,
+                           flags: ["--all"], json: true) { a in
+                manage(a, .agent(.read(agent: a.word(0), all: a.flag("--all"))))
+            },
+            CLICommandSpec("agent wait", ["AGENT [--timeout SECONDS]"],
+                           "Wait until the agent stops working, then print its latest reply", words: 1 ... 1,
+                           values: ["--timeout"], json: true) { a in
+                manage(a, .agent(.wait(agent: a.word(0), timeoutMs: try a.timeout(default: 600, maximum: 3600))))
+            },
+            CLICommandSpec("agent send", ["AGENT TEXT"], "Send the agent a message, as the user would in its pane",
+                           words: 2 ... 2) { a in
+                let text = a.word(1)
+                guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    throw CLIError("the message can't be empty")
+                }
+                return manage(a, .agent(.send(agent: a.word(0), text: text)))
+            },
+        ],
+        notes: """
+        An agent is a conversation in one of Tab's agent panes, such as one that
+        tab pane new agent started or forked. AGENT is the ID that command prints,
+        a unique start of one (at least 4 characters), or a name such as
+        wispy-cedar.
+        read prints the last message of the agent's latest reply. wait returns
+        once the agent is idle; it fails when the agent waits for the user to
+        approve something, fails, or closes, or after --timeout seconds: 600 by
+        default, at most 3600. send starts a new turn, or joins the running one.
+        --json prints the agent's id, project, provider, status and reply, and
+        with read --all its messages.
+        """)
+
     static let activity = CLIGroup(
         name: "activity", summary: "Agent states and unread events", section: .server,
         commands: [
@@ -488,9 +523,10 @@ enum CLICommands {
             },
         ],
         notes: """
-        Devices belong to the server, so an agent in a remote terminal sees the
-        devices of the computer its app runs on. DEVICE is an ID or a name from list;
-        without --device, commands use the only running device.
+        Devices belong to the server, so an agent in a terminal of another computer
+        sees that computer's devices. DEVICE is an ID or a name from list; without
+        --device, commands use the only running device. iOS simulators have the
+        home and lock buttons; Android emulators also have back and recents.
         """)
 
     static let forward = CLIGroup(
@@ -513,7 +549,7 @@ enum CLICommands {
     // MARK: App
 
     static let pane = CLIGroup(
-        name: "pane", summary: "Add a terminal, agent or browser pane beside yours", section: .app,
+        name: "pane", summary: "Add a terminal, agent, browser, device, editor or diff pane beside yours", section: .app,
         commands: [
             CLICommandSpec("pane new terminal", ["[SESSION] [--project PROJECT] [--directory DIR] [-- COMMAND...]"],
                            "Show SESSION, or start a terminal, in a new pane; prints the session ID",
@@ -523,7 +559,7 @@ enum CLICommands {
                               content: try terminal(a)), json: a.json)
             },
             CLICommandSpec("pane new agent", ["[--project PROJECT] [--provider claude|codex] [-- MESSAGE...]",
-                                              "--fork [AGENT] [-- MESSAGE...]"],
+                                              "--fork [AGENT] [--project PROJECT] [-- MESSAGE...]"],
                            "Start an agent conversation in a new pane, or copy one with --fork; prints its ID",
                            words: 0 ... 1, values: ["--project", "--provider"], flags: ["--fork"], json: true,
                            literal: true, place: .app) { a in
@@ -532,12 +568,13 @@ enum CLICommands {
                     return .pane(CLIPane(placement: .pane, project: a.value("--project"), content: try agent(a)),
                                  json: a.json)
                 }
-                guard a.value("--project") == nil, a.value("--provider") == nil else {
-                    throw CLIError("a fork keeps its project and provider; leave out --project and --provider")
+                guard a.value("--provider") == nil else {
+                    throw CLIError("a fork keeps its provider; leave out --provider")
                 }
                 if let agent = a.optional(0), SessionId(string: agent) == nil { throw CLIError("an agent is named by its ID") }
-                return .pane(CLIPane(placement: .pane, project: nil,
-                                     content: .fork(agent: a.optional(0), message: try message(a))), json: a.json)
+                return .pane(CLIPane(placement: .pane, project: a.value("--project"),
+                                     content: .fork(agent: a.optional(0), project: a.value("--project"),
+                                                    message: try message(a))), json: a.json)
             },
             CLICommandSpec("pane new browser", ["[URL] [--project PROJECT] [--profile PROFILE]"],
                            "Open a page in a new pane; prints the browser's ID", words: 0 ... 1,
@@ -545,24 +582,53 @@ enum CLICommands {
                 .pane(CLIPane(placement: .pane, project: a.value("--project"),
                               content: .browser(url: a.optional(0), profile: a.value("--profile"))), json: a.json)
             },
+            CLICommandSpec("pane new device", ["[DEVICE] [--project PROJECT]"],
+                           "Show a simulator or emulator in a new pane", words: 0 ... 1, values: ["--project"],
+                           place: .app) { a in
+                .pane(CLIPane(placement: .pane, project: a.value("--project"), content: .device(device: a.optional(0))),
+                      json: a.json)
+            },
+            CLICommandSpec("pane new editor", ["FILE [--line N] [--project PROJECT]"],
+                           "Open a file in an editor pane", words: 1 ... 1, values: ["--line", "--project"],
+                           place: .app) { a in
+                let line: Int? = a.value("--line") == nil ? nil : try a.number("--line", default: 1, 1 ... Int(Int32.max))
+                return .pane(CLIPane(placement: .pane, project: a.value("--project"),
+                                     content: .editor(path: a.word(0), line: line)), json: a.json)
+            },
+            CLICommandSpec("pane new diff", ["FILE [--staged] [--project PROJECT]"],
+                           "Show a file's uncommitted changes in a diff pane", words: 1 ... 1, values: ["--project"],
+                           flags: ["--staged"], place: .app) { a in
+                .pane(CLIPane(placement: .pane, project: a.value("--project"),
+                              content: .diff(path: a.word(0), staged: a.flag("--staged"))), json: a.json)
+            },
         ],
         notes: """
         Panes open in the app on this Mac, which starts if it isn't running. A new
-        pane goes beside the Tab terminal or agent this command runs in. Elsewhere it
-        goes into the tab of PROJECT, by default Home, where it becomes a new tab.
-        To add a tab of its own, use tab tab new.
+        pane goes beside the Tab terminal or agent this command runs in, working in
+        PROJECT's folder when given. Elsewhere it goes into the tab of PROJECT, by
+        default Home, where it becomes a new tab. To add a tab of its own, use
+        tab tab new.
 
-        SESSION is a terminal started earlier, such as with tab session new. A fork
-        keeps the conversation's transcript, provider, model, effort and access, and
-        then goes on by itself; AGENT defaults to the agent this command runs in.
-        MESSAGE is sent to the new agent as its first message, such as the part of
-        the work a fork takes on; without it, the agent waits for the user. Its
-        replies show in its own pane, not to the command.
+        SESSION is a terminal started earlier, such as with tab session new.
+
+        A fork keeps the conversation's transcript, provider, model, effort and
+        access, and then goes on by itself; AGENT defaults to the agent this command
+        runs in. It works in its source's folder, or with --project in that
+        project's, such as a worktree, so branches don't change the same files.
+        MESSAGE is the new agent's first message, such as the part of the work a
+        fork takes on; without it, the agent waits for the user. Read its replies
+        with tab agent.
+
+        DEVICE is an ID or a name from tab device list; without it, the pane shows
+        the only running device, else the device picker. FILE is absolute or
+        relative to the current folder, and inside the project; --staged shows the
+        changes staged for the next commit.
+
         Use the printed browser ID with tab browser.
         """)
 
     static let tab = CLIGroup(
-        name: "tab", summary: "Add a terminal, agent or browser tab to Home", section: .app,
+        name: "tab", summary: "Add a terminal, agent, browser or device tab to Home", section: .app,
         commands: [
             CLICommandSpec("tab new terminal", ["[--directory DIR] [-- COMMAND...]"],
                            "Start a terminal in a new tab; prints the session ID", values: ["--directory"],
@@ -579,6 +645,10 @@ enum CLICommands {
                            values: ["--profile"], json: true, place: .app) { a in
                 .pane(CLIPane(placement: .tab, project: nil,
                               content: .browser(url: a.optional(0), profile: a.value("--profile"))), json: a.json)
+            },
+            CLICommandSpec("tab new device", ["[DEVICE]"], "Show a simulator or emulator in a new tab",
+                           words: 0 ... 1, place: .app) { a in
+                .pane(CLIPane(placement: .tab, project: nil, content: .device(device: a.optional(0))), json: a.json)
             },
         ],
         notes: """
@@ -635,7 +705,7 @@ enum CLICommands {
                 .integrations(.remove, json: a.json)
             },
             CLICommandSpec("integrations context", [""],
-                           "Print what an agent starting in a Tab terminal is told (run by the hooks)",
+                           "Print what an agent starting in a Tab terminal or agent pane is told (run by the hooks)",
                            place: .local) { _ in
                 .integrations(.context, json: false)
             },
@@ -681,17 +751,44 @@ enum CLICommands {
 
     // MARK: Helpers
 
-    static func key(_ key: String) throws -> Data {
-        switch key.lowercased() {
-        case "escape", "esc": Data([0x1B])
-        case "enter", "return": Data([0x0D])
-        case "tab": Data([0x09])
-        case "ctrl+c", "ctrl-c": Data([0x03])
-        case "ctrl+d", "ctrl-d": Data([0x04])
-        case "ctrl+z", "ctrl-z": Data([0x1A])
-        case "backspace": Data([0x7F])
-        default: throw CLIError("unknown key \(key); use Enter, Tab, Escape, Backspace, Ctrl+C, Ctrl+D or Ctrl+Z")
+    /// Keys `session press` names: a letter, a digit or one of `namedKeys`,
+    /// after any of Ctrl+, Alt+ and Shift+.
+    static func key(_ name: String) throws -> KeyEvent {
+        var words = name.lowercased().components(separatedBy: "+")
+        let base = words.removeLast()
+        var modifiers: KeyModifiers = []
+        for word in words {
+            switch word {
+            case "ctrl", "control": modifiers.insert(.control)
+            case "alt", "option": modifiers.insert(.alt)
+            case "shift": modifiers.insert(.shift)
+            default: throw keyUsage(name)
+            }
         }
+        // Keys that type something carry their text, as a keyboard's do.
+        let types = modifiers.isDisjoint(with: [.control, .alt])
+        if let named = namedKeys[base] {
+            let space = named == "space"
+            return KeyEvent(key: named, modifiers: modifiers, text: space && types ? " " : "",
+                            unshiftedCodepoint: space ? 0x20 : 0)
+        }
+        guard base.count == 1, let scalar = base.unicodeScalars.first,
+              ("a" ... "z").contains(scalar) || ("0" ... "9").contains(scalar) else { throw keyUsage(name) }
+        let shiftedDigit = modifiers.contains(.shift) && ("0" ... "9").contains(scalar)
+        let text = !types || shiftedDigit ? "" : modifiers.contains(.shift) ? base.uppercased() : base
+        return KeyEvent(key: base, modifiers: modifiers, text: text, unshiftedCodepoint: scalar.value)
+    }
+
+    private static let namedKeys: [String: String] = [
+        "enter": "enter", "return": "enter", "tab": "tab", "escape": "escape", "esc": "escape",
+        "backspace": "backspace", "delete": "delete", "insert": "insert", "space": "space",
+        "home": "home", "end": "end", "pageup": "page_up", "pagedown": "page_down",
+        "up": "arrow_up", "down": "arrow_down", "left": "arrow_left", "right": "arrow_right",
+    ].merging((1 ... 12).map { ("f\($0)", "f\($0)") }, uniquingKeysWith: { first, _ in first })
+
+    private static func keyUsage(_ name: String) -> CLIError {
+        CLIError("unknown key \(name); use a letter, a digit, Enter, Tab, Escape, Backspace, Delete, Space, Up, "
+            + "Down, Left, Right, Home, End, PageUp, PageDown or F1 to F12, after any of Ctrl+, Alt+ and Shift+")
     }
 
     static func projectName(_ name: String) throws -> String {
