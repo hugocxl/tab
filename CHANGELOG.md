@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.63.1 - 2026-11-05
+
+### Fixed
+
+- The release checks no longer fail when agent composer suggestions load slowly.
+
 ## 0.63.0 - 2026-11-05
 
 ### Changed

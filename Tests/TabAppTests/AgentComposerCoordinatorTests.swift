@@ -5,6 +5,19 @@ import XCTest
 
 @MainActor
 final class AgentComposerCoordinatorTests: XCTestCase {
+    /// Waits for the suggestions loaded in the background to show, failing
+    /// after a timeout long enough for a busy machine.
+    private func suggestions(_ surface: AgentPaneView, _ loaded: ([AgentComposerSuggestion]) -> Bool,
+                             file: StaticString = #filePath, line: UInt = #line) async throws {
+        let deadline = Date().addingTimeInterval(5)
+        while !loaded(surface.suggestions.items) {
+            guard Date() < deadline else {
+                return XCTFail("suggestions did not load: \(surface.suggestions.items.map(\.title))", file: file, line: line)
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+    }
+
     func testProviderCommandSelectionPreservesCommandForNativeExecution() async throws {
         let surface = AgentPaneView(frame: NSRect(x: 0, y: 0, width: 700, height: 700))
         let coordinator = AgentComposerCoordinator(surface: surface)
@@ -35,7 +48,7 @@ final class AgentComposerCoordinatorTests: XCTestCase {
         surface.composer.string = "/"
         surface.composer.setSelectedRange(NSRange(location: 1, length: 0))
         coordinator.changed()
-        try await Task.sleep(for: .milliseconds(250))
+        try await suggestions(surface) { $0.contains { $0.title == "/skill:notes" } }
         let items = surface.suggestions.items
         let titles = items.map(\.title)
         XCTAssertEqual(Set(items.map(\.id)).count, items.count)
@@ -71,8 +84,7 @@ final class AgentComposerCoordinatorTests: XCTestCase {
         surface.composer.string = "Compare @re with this"
         surface.composer.setSelectedRange(NSRange(location: 11, length: 0))
         coordinator.changed()
-        try await Task.sleep(for: .milliseconds(250))
-        XCTAssertEqual(surface.suggestions.items.first?.kind, .thread)
+        try await suggestions(surface) { $0.first?.kind == .thread }
         surface.suggestions.moveSelection(-surface.suggestions.selectedIndex)
         XCTAssertTrue(coordinator.handle(#selector(NSResponder.insertTab(_:))))
         XCTAssertTrue(surface.composer.string.hasPrefix("Compare @\"Reader review\" "))
@@ -89,8 +101,7 @@ final class AgentComposerCoordinatorTests: XCTestCase {
         surface.composer.string = "/skill:rev"
         surface.composer.setSelectedRange(NSRange(location: 10, length: 0))
         coordinator.changed()
-        try await Task.sleep(for: .milliseconds(250))
-        XCTAssertEqual(surface.suggestions.items.first?.title, "/skill:review")
+        try await suggestions(surface) { $0.first?.title == "/skill:review" }
         var context = ""
         coordinator.onContext = { _, value in context = value }
         XCTAssertTrue(coordinator.handle(#selector(NSResponder.insertNewline(_:))))
