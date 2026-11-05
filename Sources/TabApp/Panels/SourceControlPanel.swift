@@ -31,7 +31,7 @@ public final class SourceControlController: NSViewController, NSTableViewDataSou
         set { card.drawsCard = newValue }
     }
     private let header = NativePanelHeader(icon: .gitBranch, title: "Source Control")
-    private let refreshButton = IconButton(.refresh, label: "Refresh")
+    private let refreshButton = HeaderButton(.refresh, label: "Refresh")
     private let spinner = Spinner()
     let messageField = CommitMessageField(placeholder: "Message (⌘↩ to commit)")
     private let amendBox = NSButton(checkboxWithTitle: "Amend", target: nil, action: nil)
@@ -94,18 +94,21 @@ public final class SourceControlController: NSViewController, NSTableViewDataSou
         scroll.borderType = .noBorder
 
         message.theme = theme
-        let stack = NSStackView(views: [header, messageField, commitRow, message, scroll])
+        let stack = NSStackView(views: [messageField, commitRow, message, scroll])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = Metrics.controlGap
         stack.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(header)
         card.addSubview(stack)
         NSLayoutConstraint.activate([
+            header.topAnchor.constraint(equalTo: card.topAnchor),
+            header.leadingAnchor.constraint(equalTo: card.leadingAnchor),
+            header.trailingAnchor.constraint(equalTo: card.trailingAnchor),
             stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: Metrics.gutter),
             stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -Metrics.gutter),
-            stack.topAnchor.constraint(equalTo: card.topAnchor, constant: Metrics.gutter),
+            stack.topAnchor.constraint(equalTo: header.bottomAnchor, constant: Metrics.gutter),
             stack.bottomAnchor.constraint(equalTo: card.bottomAnchor),
-            header.widthAnchor.constraint(equalTo: stack.widthAnchor),
             messageField.widthAnchor.constraint(equalTo: stack.widthAnchor),
             commitRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             message.widthAnchor.constraint(equalTo: stack.widthAnchor),

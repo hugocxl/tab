@@ -194,8 +194,8 @@ public final class NativePanelCard: ThemedView {
     }
 }
 
-/// A 36pt panel header: a glyph, a 13pt semibold title and trailing
-/// 16pt glyph buttons.
+/// A panel header laid out like a pane's: 36pt tall at the card's top edge,
+/// a glyph and title inset by the gutter, and trailing header buttons.
 final class NativePanelHeader: ThemedView {
     let titleLabel: NSTextField
     private let iconView = NSImageView()
@@ -209,21 +209,21 @@ final class NativePanelHeader: ThemedView {
         iconView.translatesAutoresizingMaskIntoConstraints = false
         titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         trailing.orientation = .horizontal
-        trailing.spacing = ChromeButton.gap
+        trailing.spacing = 4
         trailing.translatesAutoresizingMaskIntoConstraints = false
         addSubview(iconView)
         addSubview(titleLabel)
         addSubview(trailing)
         NSLayoutConstraint.activate([
             heightAnchor.constraint(equalToConstant: Metrics.headerHeight),
-            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
+            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Metrics.gutter),
             iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
             iconView.widthAnchor.constraint(equalToConstant: Metrics.glyph),
             iconView.heightAnchor.constraint(equalToConstant: Metrics.glyph),
             titleLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: Metrics.controlGap),
             titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
             titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailing.leadingAnchor, constant: -Metrics.controlGap),
-            trailing.trailingAnchor.constraint(equalTo: trailingAnchor),
+            trailing.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Metrics.gutter),
             trailing.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
     }
@@ -240,7 +240,7 @@ final class NativePanelHeader: ThemedView {
     }
 
     override func themeDidChange() {
-        titleLabel.textColor = theme.fgMuted
+        titleLabel.textColor = theme.fg
         iconView.contentTintColor = theme.fgMuted
     }
 }

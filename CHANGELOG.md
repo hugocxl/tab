@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.57.0 - 2026-11-05
+
+### Changed
+
+- The Files and Source Control headers in the right sidebar match a pane's
+  header, with the same spacing, title and buttons.
+
 ## 0.56.0 - 2026-11-04
 
 ### Added

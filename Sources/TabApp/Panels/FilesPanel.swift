@@ -64,7 +64,7 @@ public final class FilesPanelController: NSViewController, NSTableViewDataSource
             (.refresh, "Refresh", { [weak self] in self?.refreshAll() }),
         ]
         for (icon, label, action) in buttons {
-            header.addTrailing(IconButton(icon, label: label, action: action))
+            header.addTrailing(HeaderButton(icon, label: label, action: action))
         }
 
         editArea.orientation = .vertical
@@ -99,18 +99,21 @@ public final class FilesPanelController: NSViewController, NSTableViewDataSource
         scroll.autohidesScrollers = true
         scroll.borderType = .noBorder
 
-        let stack = NSStackView(views: [header, editArea, statusLabel, scroll])
+        let stack = NSStackView(views: [editArea, statusLabel, scroll])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 4
         stack.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(header)
         card.addSubview(stack)
         NSLayoutConstraint.activate([
+            header.topAnchor.constraint(equalTo: card.topAnchor),
+            header.leadingAnchor.constraint(equalTo: card.leadingAnchor),
+            header.trailingAnchor.constraint(equalTo: card.trailingAnchor),
             stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: Metrics.gutter),
             stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -Metrics.gutter),
-            stack.topAnchor.constraint(equalTo: card.topAnchor, constant: Metrics.gutter),
+            stack.topAnchor.constraint(equalTo: header.bottomAnchor, constant: Metrics.gutter),
             stack.bottomAnchor.constraint(equalTo: card.bottomAnchor),
-            header.widthAnchor.constraint(equalTo: stack.widthAnchor),
             editArea.widthAnchor.constraint(equalTo: stack.widthAnchor),
             statusLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
             scroll.widthAnchor.constraint(equalTo: stack.widthAnchor),
