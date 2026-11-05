@@ -416,10 +416,12 @@ private final class State: @unchecked Sendable {
         return unclaimed.removeValue(forKey: channel)
     }
 
+    /// Ends a channel's events. A stream its attacher hasn't claimed yet is
+    /// kept, so a session that ends right after the attach reply still
+    /// delivers what came before its end.
     func finishChannel(_ channel: ChannelId) {
         lock.lock()
         let continuation = channels.removeValue(forKey: channel)
-        unclaimed.removeValue(forKey: channel)
         lock.unlock()
         continuation?.finish()
     }

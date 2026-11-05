@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.63.2 - 2026-11-05
+
+### Fixed
+
+- Attaching to a terminal that ends at that moment shows its last output
+  instead of failing.
+
 ## 0.63.1 - 2026-11-05
 
 ### Fixed
