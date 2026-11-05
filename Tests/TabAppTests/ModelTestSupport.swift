@@ -30,6 +30,8 @@ final class ModelFakeServer: ServerAPI, TerminalBackend, @unchecked Sendable {
     private var _closed: [SessionId] = []
     private var _references: [[SessionId]] = []
     private var _mutations: [ProjectIntent] = []
+    private var _tabs = TabsSnapshot(revision: 0)
+    private var _tabIntents: [TabIntent] = []
     private var _activity = ActivitySnapshot()
     private var _acknowledged: [UInt64] = []
     private var _claims: [[UInt64]] = []
@@ -48,10 +50,10 @@ final class ModelFakeServer: ServerAPI, TerminalBackend, @unchecked Sendable {
         (events, continuation) = AsyncStream<ClientEvent>.makeStream()
     }
 
-    func locked<T>(_ body: () -> T) -> T {
+    func locked<T>(_ body: () throws -> T) rethrows -> T {
         lock.lock()
         defer { lock.unlock() }
-        return body()
+        return try body()
     }
 
     var live: [SessionInfo] {
@@ -68,6 +70,11 @@ final class ModelFakeServer: ServerAPI, TerminalBackend, @unchecked Sendable {
     var closed: [SessionId] { locked { _closed } }
     var references: [[SessionId]] { locked { _references } }
     var mutations: [ProjectIntent] { locked { _mutations } }
+    var tabIntents: [TabIntent] { locked { _tabIntents } }
+    var tabSnapshot: TabsSnapshot {
+        get { locked { _tabs } }
+        set { locked { _tabs = newValue } }
+    }
     var gitRequests: [GitRequest] { locked { _gitRequests } }
 
     var activitySnapshot: ActivitySnapshot {
@@ -101,8 +108,40 @@ final class ModelFakeServer: ServerAPI, TerminalBackend, @unchecked Sendable {
         locked {
             _created.append(session)
             _live.append(info)
+            guard let pane = session.pane else { return }
+            var board = TabBoard(home: _catalog.home, projects: _tabs.projects)
+            if TabReducer.bind(info.id, to: pane, proxy: !session.environment.isEmpty, in: &board) {
+                _tabs = TabsSnapshot(revision: _tabs.revision + 1, applied: _tabs.applied, projects: board.projects)
+            }
         }
         return info
+    }
+
+    func tabs() async throws -> TabsSnapshot { tabSnapshot }
+
+    /// Keeps `state`'s tabs of this computer, as a server that already had
+    /// them does; this computer's Home is the server's.
+    func keepTabs(of state: AppState) {
+        let home = state.home.id
+        tabSnapshot = TabsSnapshot(revision: tabSnapshot.revision + 1, projects: state.projects
+            .filter { $0.serverId.isLocal && !$0.tabs.isEmpty }
+            .map { ProjectTabs(project: $0.id == home ? catalogPage.home : $0.id, tabs: $0.tabs) })
+    }
+
+    /// Applies the change as the server does, ending the terminals of the
+    /// panes it closes.
+    func mutateTabs(_ intent: TabIntent) async throws -> UInt64 {
+        try locked {
+            _tabIntents.append(intent)
+            var board = TabBoard(home: _catalog.home, projects: _tabs.projects)
+            let projects = Set(_catalog.projects.map(\.id))
+            let effects = try TabReducer.apply(intent.mutation, to: &board) { projects.contains($0) }
+            _closed += effects.endedSessions
+            _live.removeAll { effects.endedSessions.contains($0.id) }
+            _tabs = TabsSnapshot(revision: _tabs.revision + 1, applied: _tabs.applied + [intent.operation],
+                                 projects: board.projects)
+            return _tabs.revision
+        }
     }
 
     func closeSession(_ session: SessionId, operation: OperationId) async throws {
@@ -231,5 +270,36 @@ enum ModelFixtures {
             try? await Task.sleep(nanoseconds: 10_000_000)
         }
         return true
+    }
+}
+
+extension AppState {
+    /// Opens a terminal and returns the tab holding it.
+    @discardableResult
+    mutating func openTerminalTab(_ project: ProjectId) throws -> TabId {
+        let pane = try openTerminal(project)
+        guard let tab = self.project(project)?.tabs.first(where: { $0.layout.contains(pane) }) else {
+            throw AppError.unknownPane(pane)
+        }
+        return tab.id
+    }
+
+    /// Answers as `server` would after taking every change waiting for it,
+    /// with `change` made on the server meanwhile.
+    mutating func confirmTabs(_ server: ServerId = .local, _ change: (inout TabBoard) -> Void = { _ in }) throws {
+        guard let home = serverHome(server)?.id else { throw AppError.invalidState("no Home") }
+        var board = TabBoard(home: home, projects: projects.filter { $0.serverId == server }
+            .map { ProjectTabs(project: $0.id, tabs: $0.tabs) })
+        change(&board)
+        let pending = pendingTabIntents(server)
+        applyTabs(server, TabsSnapshot(revision: (tabsRevision(server) ?? 0) + 1, applied: pending.map(\.operation),
+                                       projects: board.projects))
+        completeLegacyTabs(server)
+    }
+
+    /// Shows `session` in `pane`, as its server does once it starts it.
+    mutating func setPaneSession(_ pane: PaneId, _ session: SessionId, proxy: Bool = false) throws {
+        guard let server = paneServer(pane) else { throw AppError.unknownPane(pane) }
+        try confirmTabs(server) { _ = TabReducer.bind(session, to: pane, proxy: proxy, in: &$0) }
     }
 }

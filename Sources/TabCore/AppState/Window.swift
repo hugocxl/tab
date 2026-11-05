@@ -35,6 +35,8 @@ public struct WindowState: Codable, Equatable, Sendable {
     /// New Terminal in Project makes a new worktree rather than opening a
     /// checkout, as the user last chose.
     public internal(set) var newTerminalInWorktree: Bool
+    /// The pane each tab shows alone here, if one is zoomed.
+    public internal(set) var zoomed: [TabId: PaneId]
 
     init(currentProject: ProjectId) {
         activePane = nil
@@ -45,6 +47,7 @@ public struct WindowState: Codable, Equatable, Sendable {
         workspace = nil
         remoteServers = false
         newTerminalInWorktree = false
+        zoomed = [:]
     }
 
     public init(from decoder: Decoder) throws {
@@ -57,6 +60,7 @@ public struct WindowState: Codable, Equatable, Sendable {
         workspace = try container.decodeIfPresent(WorkspaceId.self, forKey: .workspace)
         remoteServers = try container.value(.remoteServers, false)
         newTerminalInWorktree = try container.value(.newTerminalInWorktree, false)
+        zoomed = try container.value(.zoomed, [:])
     }
 
     mutating func activate(_ pane: PaneId?) {

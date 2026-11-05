@@ -245,6 +245,13 @@ extension ClientConnection {
         case .listFolders(let path):
             return .folders(try Folders.list(path))
 
+        // Tabs
+        case .readTabs:
+            watchTabs()
+            return .tabs(server.tabs.snapshot())
+        case .mutateTabs(let intent):
+            return .tabsMutated(revision: try server.mutateTabs(intent))
+
         // Server
         case .readServerSettings:
             return .serverSettings(server.settings.settings)

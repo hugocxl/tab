@@ -37,8 +37,6 @@ final class AgentPaneStateTests: XCTestCase {
         XCTAssertEqual(restored.pane(agent)?.content, .agent(session: session, provider: .codex))
         try state.closePane(agent)
         XCTAssertEqual(state.project(project)?.tabs.first?.layout, .leaf(terminal))
-        XCTAssertTrue(state.pendingDiscards(.local).isEmpty)
-        XCTAssertTrue(state.pendingCancellations(.local).isEmpty)
     }
 
     func testSavedConversationLinkOpensAndReusesItsExistingSessionIdentity() throws {
@@ -88,9 +86,13 @@ final class AgentPaneStateTests: XCTestCase {
         let pane = try state.openAgent(state.home.id, provider: .codex)
         let content = try XCTUnwrap(state.pane(pane)?.content)
         try state.setPaneTitle(pane, "Codex")
-        let tab = try XCTUnwrap(state.home.tabs.first?.id)
-        try state.setTabTitle(tab, "My task")
-        let restored = try AppStateStore.decode(AppStateStore.encode(state))
+        var legacy = try state.legacyJSON()
+        var projects = try XCTUnwrap(legacy["projects"] as? [[String: Any]])
+        var tabs = try XCTUnwrap(projects[0]["tabs"] as? [[String: Any]])
+        tabs[0]["customTitle"] = "My task"
+        projects[0]["tabs"] = tabs
+        legacy["projects"] = projects
+        let restored = try decodeState(legacy)
         XCTAssertEqual(restored.pane(pane)?.title, "Agent")
         XCTAssertEqual(restored.pane(pane)?.content, content)
         XCTAssertEqual(restored.home.tabs.first?.customTitle, "My task")

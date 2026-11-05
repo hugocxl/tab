@@ -1,26 +1,49 @@
 import Foundation
 
 /// What the app keeps per server: its identity, queued project edits, and
-/// terminal creations and closes waiting for it.
+/// its tabs with this app's changes on their way to it.
 struct ServerState: Codable, Equatable, Sendable {
     /// The server that answered last time; another one is refused.
     var identity: ServerId?
     var catalogRevision: UInt64 = 0
     var projectIntents: [ProjectIntent] = []
-    var pendingCancellations: [OperationId] = []
-    var pendingDiscards: [SessionId] = []
-    var closeOperations: [SessionId: OperationId] = [:]
+    /// The server's tabs as it last sent them, shown until it sends newer.
+    var tabs: TabsSnapshot?
+    /// Tabs this app kept before servers kept them, until the server takes them.
+    var legacyTabs: [ProjectTabs] = []
+    /// Tab changes made here that the server hasn't confirmed, oldest first.
+    /// Saved, so a change made while the server can't be reached survives a
+    /// relaunch; its operation id makes sending it again safe.
+    var pendingTabs: [TabIntent] = []
+    /// The revision at which the server took each pending change, which
+    /// stays shown until a snapshot that new arrives. Not saved: sending a
+    /// change again is safe.
+    var acknowledgedTabs: [OperationId: UInt64] = [:]
 
     init() {}
+
+    enum CodingKeys: String, CodingKey {
+        case identity, catalogRevision, projectIntents, tabs, legacyTabs, pendingTabs
+    }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         identity = try container.decodeIfPresent(ServerId.self, forKey: .identity)
         catalogRevision = try container.value(.catalogRevision, 0)
         projectIntents = try container.value(.projectIntents, [])
-        pendingCancellations = try container.value(.pendingCancellations, [])
-        pendingDiscards = try container.value(.pendingDiscards, [])
-        closeOperations = try container.value(.closeOperations, [:])
+        tabs = try container.decodeIfPresent(TabsSnapshot.self, forKey: .tabs)
+        legacyTabs = try container.value(.legacyTabs, [])
+        pendingTabs = try container.value(.pendingTabs, [])
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(identity, forKey: .identity)
+        try container.encode(catalogRevision, forKey: .catalogRevision)
+        if !projectIntents.isEmpty { try container.encode(projectIntents, forKey: .projectIntents) }
+        try container.encodeIfPresent(tabs, forKey: .tabs)
+        if !legacyTabs.isEmpty { try container.encode(legacyTabs, forKey: .legacyTabs) }
+        if !pendingTabs.isEmpty { try container.encode(pendingTabs, forKey: .pendingTabs) }
     }
 }
 
@@ -45,71 +68,6 @@ extension AppState {
     public func sessionReferences(_ server: ServerId) -> [SessionId] {
         Set(projects.filter { $0.serverId == server }.flatMap(\.tabs).flatMap(\.panes).compactMap(\.content.session))
             .sorted()
-    }
-
-    public func pendingDiscards(_ server: ServerId) -> [SessionId] { servers[server]?.pendingDiscards ?? [] }
-
-    /// Gives each waiting discard an operation id, kept until it completes.
-    public mutating func prepareCloses(_ server: ServerId) {
-        guard var state = servers[server] else { return }
-        state.closeOperations = state.closeOperations.filter { state.pendingDiscards.contains($0.key) }
-        for session in state.pendingDiscards where state.closeOperations[session] == nil {
-            state.closeOperations[session] = OperationId()
-        }
-        servers[server] = state
-    }
-
-    public func closeOperation(_ server: ServerId, _ session: SessionId) -> OperationId? {
-        servers[server]?.closeOperations[session]
-    }
-
-    /// Ends `session` on `server`, now or once it is reachable.
-    public mutating func queueDiscard(_ server: ServerId, _ session: SessionId) {
-        var state = servers[server] ?? ServerState()
-        if state.closeOperations[session] == nil { state.closeOperations[session] = OperationId() }
-        if !state.pendingDiscards.contains(session) { state.pendingDiscards.append(session) }
-        servers[server] = state
-    }
-
-    public mutating func completeDiscard(_ server: ServerId, _ session: SessionId) {
-        servers[server]?.closeOperations[session] = nil
-        servers[server]?.pendingDiscards.removeAll { $0 == session }
-    }
-
-    mutating func discardUnreferenced(server: ServerId, session: SessionId) {
-        if !sessionReferences(server).contains(session) { queueDiscard(server, session) }
-    }
-
-    // MARK: Terminal creation
-
-    /// Where `pane`'s terminal starts, remembered until its server creates it.
-    public mutating func prepareCreation(_ pane: PaneId, directory: ServerPath) -> ServerPath {
-        if let existing = startingDirectories[pane] { return existing }
-        startingDirectories[pane] = directory
-        return directory
-    }
-
-    public func pendingCancellations(_ server: ServerId) -> [OperationId] {
-        servers[server]?.pendingCancellations ?? []
-    }
-
-    public mutating func completeCancellation(_ server: ServerId, _ operation: OperationId) {
-        servers[server]?.pendingCancellations.removeAll { $0 == operation }
-    }
-
-    /// Forgets a terminal that was about to be created; one its server may
-    /// already be creating is cancelled there.
-    mutating func cancelPendingCreation(_ pane: PaneId) {
-        startupCommands[pane] = nil
-        guard startingDirectories.removeValue(forKey: pane) != nil,
-              let found = self.pane(pane), found.content == .terminal(session: nil),
-              let server = paneServer(pane)
-        else { return }
-        var state = servers[server] ?? ServerState()
-        if !state.pendingCancellations.contains(pane.creationToken) {
-            state.pendingCancellations.append(pane.creationToken)
-        }
-        servers[server] = state
     }
 
     // MARK: Catalog
@@ -224,15 +182,8 @@ extension AppState {
         retainWorkspaceMembers()
         let projectIds = Set(projects.map(\.id))
         window.selectedTab = window.selectedTab.filter { projectIds.contains($0.key) }
-        let panes = Set(projects.flatMap(\.tabs).flatMap(\.panes).map(\.id))
-        window.focusHistory.removeAll { !panes.contains($0) }
-        startupCommands = startupCommands.filter { panes.contains($0.key) }
-        startingDirectories = startingDirectories.filter { panes.contains($0.key) }
         if !projectIds.contains(window.currentProject) { window.currentProject = catalog.home }
-        if let active = window.activePane, !panes.contains(active) {
-            window.activePane = nil
-            focusSelectedTab()
-        }
+        materializeTabs(server)
     }
 
     /// A server whose Home has a new id keeps its old Home's tabs.
@@ -251,6 +202,25 @@ extension AppState {
             default:
                 break
             }
+        }
+        for index in state.pendingTabs.indices {
+            switch state.pendingTabs[index].mutation {
+            case let .createTab(project, tab, after) where project == old:
+                state.pendingTabs[index].mutation = .createTab(project: home, tab: tab, after: after)
+            case let .adoptTabs(project, tabs) where project == old:
+                state.pendingTabs[index].mutation = .adoptTabs(project: home, tabs: tabs)
+            default:
+                break
+            }
+        }
+        for index in state.legacyTabs.indices where state.legacyTabs[index].project == old {
+            state.legacyTabs[index].project = home
+        }
+        if var snapshot = state.tabs {
+            for index in snapshot.projects.indices where snapshot.projects[index].project == old {
+                snapshot.projects[index].project = home
+            }
+            state.tabs = snapshot
         }
         servers[server] = state
     }
@@ -273,8 +243,8 @@ extension AppState {
         let panes = Set(removed.flatMap(\.tabs).flatMap(\.panes).map(\.id))
         window.selectedTab = window.selectedTab.filter { !projectIds.contains($0.key) }
         window.focusHistory.removeAll { panes.contains($0) }
-        startupCommands = startupCommands.filter { !panes.contains($0.key) }
-        startingDirectories = startingDirectories.filter { !panes.contains($0.key) }
+        paneTitles = paneTitles.filter { !panes.contains($0.key) }
+        window.zoomed = window.zoomed.filter { !panes.contains($0.value) }
         retainWorkspaceMembers()
         if projectIds.contains(window.currentProject) {
             window.currentProject = home.id
@@ -409,7 +379,7 @@ extension AppState {
     /// moving the user's view.
     @discardableResult
     public mutating func openBrowser(_ project: ProjectId, _ browser: BrowserPane, select: Bool) throws -> (TabId, PaneId) {
-        let pane = Pane(title: "New Browser", content: .browser(browser))
+        let pane = Pane(content: .browser(browser))
         if isSingleTab(project) {
             let (tab, id) = try openPaneInContainer(project, pane: pane, focusLeaf: window.activePane)
             if select {
@@ -420,19 +390,18 @@ extension AppState {
             return (tab, id)
         }
         try projects[projectIndex(project)].requireAvailable()
-        let tab = Tab(pane: pane)
-        try addTab(project, tab)
+        let tab = try addTab(project, Tab(pane: pane))
         if select {
             try selectProject(project)
-            try selectTab(project, tab.id)
+            try selectTab(project, tab)
         }
-        return (tab.id, pane.id)
+        return (tab, pane.id)
     }
 
     /// Splits `pane` with a browser on its right.
     @discardableResult
     public mutating func splitBrowser(_ pane: PaneId, _ browser: BrowserPane, focus: Bool) throws -> PaneId {
-        let new = Pane(title: "New Browser", content: .browser(browser))
+        let new = Pane(content: .browser(browser))
         try insertSplitPane(after: pane, new, edge: .right)
         if focus { try focusPane(new.id) }
         return new.id
@@ -461,7 +430,7 @@ extension AppState {
         let url = url.flatMap { BrowserAddress.isBlank($0) ? nil : $0 }
         guard browser.url != url else { return false }
         browser.url = url
-        try updatePane(pane) { $0.content = .browser(browser) }
+        try changePane(pane, .browser(browser))
         return true
     }
 
@@ -470,8 +439,14 @@ extension AppState {
         guard var browser = browser(pane) else { throw AppError.invalidState("pane is not a browser") }
         guard browser.profile != profile else { return false }
         browser.profile = profile
-        try updatePane(pane) { $0.content = .browser(browser) }
+        try changePane(pane, .browser(browser))
         return true
+    }
+
+    /// Changes what a browser or device pane shows, on its server.
+    private mutating func changePane(_ pane: PaneId, _ content: PaneContent) throws {
+        guard let server = paneServer(pane) else { throw AppError.unknownPane(pane) }
+        try perform(server, .updatePane(pane, content: content))
     }
 }
 
@@ -482,7 +457,7 @@ extension AppState {
     /// `openBrowser`.
     @discardableResult
     public mutating func openDevice(_ project: ProjectId, _ device: DevicePane, select: Bool) throws -> (TabId, PaneId) {
-        let pane = Pane(title: device.name ?? "Device", content: .device(device))
+        let pane = Pane(content: .device(device))
         if isSingleTab(project) {
             let (tab, id) = try openPaneInContainer(project, pane: pane, focusLeaf: window.activePane)
             if select {
@@ -493,13 +468,12 @@ extension AppState {
             return (tab, id)
         }
         try projects[projectIndex(project)].requireAvailable()
-        let tab = Tab(pane: pane)
-        try addTab(project, tab)
+        let tab = try addTab(project, Tab(pane: pane))
         if select {
             try selectProject(project)
-            try selectTab(project, tab.id)
+            try selectTab(project, tab)
         }
-        return (tab.id, pane.id)
+        return (tab, pane.id)
     }
 
     public func device(_ pane: PaneId) -> DevicePane? {
@@ -512,10 +486,8 @@ extension AppState {
     public mutating func setDevice(_ pane: PaneId, _ device: DevicePane) throws -> Bool {
         guard let current = self.device(pane) else { throw AppError.invalidState("pane is not a device") }
         guard current != device else { return false }
-        try updatePane(pane) {
-            $0.content = .device(device)
-            $0.title = device.name ?? "Device"
-        }
+        try changePane(pane, .device(device))
+        if paneTitles[pane] == nil { try updatePane(pane) { $0.title = $0.content.defaultTitle } }
         return true
     }
 }
@@ -544,14 +516,13 @@ public struct LiveSession: Hashable, Sendable {
     }
 }
 
-/// What to do with a server's terminal panes after connecting to it.
+/// What to do with a server's terminal panes after connecting to it. Panes
+/// whose terminal ended are the server's to remove.
 public struct RestorePlan: Equatable, Sendable {
     /// Panes whose session is still running.
     public var attach: [PaneSession] = []
     /// Panes that never got a session, in available projects.
     public var create: [PaneId] = []
-    /// Panes whose session is gone: they show the saved screen, then close.
-    public var close: [PaneSession] = []
 
     public init() {}
 
@@ -565,8 +536,6 @@ public struct RestorePlan: Equatable, Sendable {
                 if let session {
                     if live.contains(LiveSession(project: project.id, session: session)) {
                         plan.attach.append(PaneSession(pane.id, session))
-                    } else {
-                        plan.close.append(PaneSession(pane.id, session))
                     }
                 } else if project.status == .available {
                     plan.create.append(pane.id)

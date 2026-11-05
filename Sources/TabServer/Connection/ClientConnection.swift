@@ -30,6 +30,7 @@ final class ClientConnection: @unchecked Sendable {
     private var positions: [SessionId: UInt64] = [:]
     private var watchesCatalog = false
     private var watchesActivity = false
+    private var watchesTabs = false
     private var colors: TerminalColors?
     /// The pairing code this client asked for, cancelled when it leaves, so a
     /// code shown by a closed `tab mobile pair` or app stops working.
@@ -403,6 +404,8 @@ final class ClientConnection: @unchecked Sendable {
     func watchActivity() { lock.withLock { watchesActivity = true } }
     var watchingCatalog: Bool { lock.withLock { watchesCatalog } }
     var watchingActivity: Bool { lock.withLock { watchesActivity } }
+    func watchTabs() { lock.withLock { watchesTabs = true } }
+    var watchingTabs: Bool { lock.withLock { watchesTabs } }
 
     func sessionMetadata(_ session: SessionId, _ metadata: SessionMetadata) {
         let send: Bool = lock.withLock {

@@ -4,7 +4,8 @@ import TabCore
 /// How a backup's `state.json` meets the current one: the backup holds this
 /// computer's projects with their layouts but no sessions. Existing projects
 /// stay; a backed-up project whose folder is already one gets the backup's
-/// layout; the rest are added.
+/// panes; the rest are added. The layouts go to this computer's server the
+/// next time the app connects, as tabs kept from before servers kept them.
 enum BackupStateMerge {
     static func merge(imported: Data, current: Data?) throws -> Data {
         let current = try current ?? AppStateStore.encode(AppState.bootstrap())
@@ -131,10 +132,15 @@ enum BackupStateMerge {
         let local = ServerId.local.description
         var projects = (root["projects"] as? [[String: Any]] ?? []).filter { ($0["serverId"] as? String) == local }
         for index in projects.indices {
-            guard var tabs = projects[index]["tabs"] as? [[String: Any]] else { continue }
+            guard let id = (projects[index]["id"] as? String).flatMap(ProjectId.init(string:)),
+                  let shown = state.project(id)?.tabs,
+                  var tabs = try JSONSerialization.jsonObject(with: JSONEncoder().encode(shown)) as? [[String: Any]]
+            else { continue }
             for tab in tabs.indices {
                 guard var panes = tabs[tab]["panes"] as? [[String: Any]] else { continue }
+                tabs[tab]["zoomed"] = shown[tab].zoomed?.description
                 for pane in panes.indices {
+                    panes[pane]["title"] = shown[tab].panes[pane].title
                     panes[pane]["proxy"] = nil
                     guard var content = panes[pane]["content"] as? [String: Any] else { continue }
                     content["session"] = nil
@@ -148,13 +154,13 @@ enum BackupStateMerge {
         let panes = Set(projects.flatMap { $0["tabs"] as? [[String: Any]] ?? [] }.flatMap { $0["panes"] as? [[String: Any]] ?? [] }.compactMap { $0["id"] as? String })
         root["terminalFontSizes"] = terminalFontSizes.filter { panes.contains($0.key) }
         root["servers"] = [String: Any]()
-        root["startingDirectories"] = [String: Any]()
-        root["startupCommands"] = nil
+        root["paneTitles"] = nil
         var window = root["window"] as? [String: Any] ?? [:]
         window["currentProject"] = state.home.id.description
         window["activePane"] = nil
         window["focusHistory"] = [Any]()
         window["selectedTab"] = [String: Any]()
+        window["zoomed"] = [String: Any]()
         window["remoteServers"] = false
         root["window"] = window
         let ids = Set(projects.compactMap { $0["id"] as? String })

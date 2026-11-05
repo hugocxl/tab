@@ -33,6 +33,7 @@ final class NotificationParityTests: XCTestCase {
             }
         }
         server.live = sessions.map { SessionInfo(project: home.id, id: $0, directory: home.directory) }
+        server.keepTabs(of: model.state)
         model.connection(.local)?.start()
         let ready = await ModelFixtures.wait { model.connections[.local]?.activityLoaded == true }
         XCTAssertTrue(ready)

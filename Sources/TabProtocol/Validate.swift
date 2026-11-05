@@ -194,6 +194,8 @@ extension RequestBody {
             if sessions.count > Limits.maxSessionReferences { throw .badRequest }
         case .mutateProject(let intent):
             try intent.mutation.validate()
+        case .mutateTabs(let intent):
+            try intent.mutation.validate()
         case .writeServerSettings(let settings):
             try settings.validate()
         case .searchHistory(let source, let query, _, _, let maxResults):
@@ -233,7 +235,7 @@ extension RequestBody {
             try request.device.validate()
             if request.maxPixels == 0 || request.codecs.isEmpty || request.codecs.count > 8 { throw .badRequest }
         case .ping, .listDevices, .listSessions, .attachWithoutResize, .endSession, .closeSession, .discardSession,
-             .readSavedScreen, .identifyClient, .cancelCreation, .readCatalog, .listProjectSessions,
+             .readSavedScreen, .identifyClient, .cancelCreation, .readCatalog, .listProjectSessions, .readTabs,
              .readServerSettings, .stopServer, .stopServerIfIdle, .restartServer, .cancelExec, .readActivity,
              .readRemoteAccess, .cancelPairing, .revokeDevice, .reportAgentState, .unknown:
             break
@@ -247,6 +249,70 @@ extension CreateSession {
         try Validation.environment(environment)
         try Validation.size(size)
         if let command, command.utf8.count > 64 * 1024 || Validation.hasNul(command) { throw .badRequest }
+        if let input, input.utf8.count > 64 * 1024 || Validation.hasNul(input) { throw .badRequest }
+    }
+}
+
+extension TabMutation {
+    /// Checks what can be checked without the server's tabs.
+    public func validate() throws(ErrorCode) {
+        switch self {
+        case .createTab(_, let tab, _):
+            try tab.validateShape()
+        case .insertPane(let pane, _, _), .replacePane(_, let pane):
+            try pane.validateShape()
+        case .dockPane(_, _, _, let level):
+            if level < 0 || level > 64 { throw .badRequest }
+        case .setRatio(_, _, let ratio):
+            if !ratio.isFinite { throw .badRequest }
+        case .updatePane(_, let content):
+            try content.validateShape()
+        case .adoptTabs(_, let tabs):
+            if tabs.count > Limits.maxTabs { throw .badRequest }
+            for tab in tabs { try tab.validateShape() }
+        case .closeTab, .removePane, .swapPanes, .equalize:
+            break
+        }
+    }
+}
+
+extension Tab {
+    func validateShape() throws(ErrorCode) {
+        if panes.count > Limits.maxPanesPerTab { throw .badRequest }
+        if let customTitle, customTitle.utf8.count > 1024 { throw .badRequest }
+        do {
+            try validate()
+        } catch {
+            throw .badRequest
+        }
+        for pane in panes { try pane.validateShape() }
+    }
+}
+
+extension Pane {
+    func validateShape() throws(ErrorCode) {
+        try content.validateShape()
+        if let launch {
+            if let directory = launch.directory { try directory.validateAbsolute() }
+            if let command = launch.command, command.utf8.count > 64 * 1024 || Validation.hasNul(command) {
+                throw .badRequest
+            }
+        }
+    }
+}
+
+extension PaneContent {
+    func validateShape() throws(ErrorCode) {
+        let texts: [String?]
+        switch self {
+        case .terminal, .agent: texts = []
+        case .browser(let browser): texts = [browser.url, browser.profile]
+        case .device(let device): texts = [device.udid, device.avd, device.name]
+        case .editor(let path), .diff(let path, _): texts = [path]
+        }
+        for text in texts.compactMap({ $0 }) where text.utf8.count > Limits.maxPathBytes || Validation.hasNul(text) {
+            throw .badRequest
+        }
     }
 }
 
@@ -301,6 +367,8 @@ extension ReplyBody {
             try result.validate()
         case .catalog(let page):
             try page.validate()
+        case .tabs(let snapshot):
+            if snapshot.projects.reduce(0, { $0 + $1.tabs.count }) > Limits.maxTabs { throw .badRequest }
         case .projectSessions(let page):
             try page.validate()
         case .serverSettings(let settings):
@@ -334,7 +402,7 @@ extension ReplyBody {
             for device in devices { try device.device.validate() }
         case .versionUnsupported, .pong, .error, .detached, .sessionEnded, .sessionClosed, .sessionDiscarded,
              .creationCancelled, .screenCleared, .terminalColorsSet, .sessionReferencesSynced, .clientIdentified,
-             .inputWritten, .agentStateReported, .projectMutated, .serverSettingsWritten, .serverStopping, .serverBusy,
+             .inputWritten, .agentStateReported, .projectMutated, .tabsMutated, .serverSettingsWritten, .serverStopping, .serverBusy,
              .serverRestarting, .git, .execCancelled, .activityAcknowledged, .authenticated, .tunnelFailed, .tunnelClosed,
              .deviceSettings, .deviceDetached, .deviceScreenshot, .unknown:
             break

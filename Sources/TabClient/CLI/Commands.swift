@@ -198,7 +198,7 @@ enum CLICommands {
         ],
         notes: """
         A session is a terminal on the server. It keeps running after this command
-        returns, whether or not the app is open, and the app lists it under Existing
+        returns, whether or not the app is open, and the app lists it under Detached
         Terminals. To show one in the app, run tab pane new terminal SESSION.
 
         SESSION is an ID, a unique start of one (at least 4 characters), or a name

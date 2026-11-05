@@ -39,7 +39,7 @@ public struct UnitRect: Equatable, Sendable {
 
     public static let unit = UnitRect(x: 0, y: 0, width: 1, height: 1)
 
-    subscript(axis: Axis) -> (origin: Double, size: Double) {
+    public subscript(axis: Axis) -> (origin: Double, size: Double) {
         switch axis {
         case .horizontal: return (x, width)
         case .vertical: return (y, height)
@@ -47,11 +47,28 @@ public struct UnitRect: Equatable, Sendable {
     }
 }
 
+/// Why a layout, tab or tab change is invalid.
 public struct LayoutError: Error, Equatable, CustomStringConvertible {
     public let message: String
     public init(_ message: String) { self.message = message }
     public var description: String { message }
 }
+
+/// A split named by its axis and the first leaf on each of its sides. The
+/// name stays right while other splits are added or removed around it.
+public struct SplitAnchor<Leaf: Hashable & Sendable>: Hashable, Sendable {
+    public var axis: Axis
+    public var first: Leaf
+    public var second: Leaf
+
+    public init(axis: Axis, first: Leaf, second: Leaf) {
+        self.axis = axis
+        self.first = first
+        self.second = second
+    }
+}
+
+extension SplitAnchor: Codable where Leaf: Codable {}
 
 /// A split tree of leaves, such as a tab's panes.
 public indirect enum Layout<Leaf: Hashable & Sendable>: Hashable, Sendable {
@@ -157,6 +174,32 @@ public indirect enum Layout<Leaf: Hashable & Sendable>: Hashable, Sendable {
         }
         if let failure { throw failure }
         if !found { throw LayoutError("unknown split path") }
+    }
+
+    /// The split at `path`, named so another edit of the layout can't make
+    /// the name point at a different split.
+    public func anchor(at path: [Branch]) -> SplitAnchor<Leaf>? {
+        guard case let .split(axis, _, first, second) = node(at: path),
+              let firstLeaf = first.leaves.first, let secondLeaf = second.leaves.first
+        else { return nil }
+        return SplitAnchor(axis: axis, first: firstLeaf, second: secondLeaf)
+    }
+
+    /// The path of the split `anchor` names, if the layout still has it.
+    public func path(of anchor: SplitAnchor<Leaf>) -> [Branch]? {
+        guard case let .split(axis, _, first, second) = self else { return nil }
+        if axis == anchor.axis, first.leaves.first == anchor.first, second.leaves.first == anchor.second {
+            return []
+        }
+        if let path = first.path(of: anchor) { return [.first] + path }
+        if let path = second.path(of: anchor) { return [.second] + path }
+        return nil
+    }
+
+    /// Sets the ratio of the split `anchor` names, clamped like `setRatio(at:to:)`.
+    public mutating func setRatio(of anchor: SplitAnchor<Leaf>, to value: Double) throws {
+        guard let path = path(of: anchor) else { throw LayoutError("the split no longer exists") }
+        try setRatio(at: path, to: value)
     }
 
     /// Checks every ratio is in range.

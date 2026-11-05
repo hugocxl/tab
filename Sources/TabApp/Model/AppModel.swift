@@ -87,6 +87,10 @@ public final class AppModel {
     var navigation = NavigationHistory()
     var creating: Set<PaneId> = []
     var replaying: Set<ServerId> = []
+    /// Servers whose tab changes are being sent now.
+    var sendingTabs: Set<ServerId> = []
+    /// Servers too old to keep tabs, already reported.
+    var outdatedTabServers: Set<ServerId> = []
     var shownPanes: Set<PaneId> = []
     var deliveredNotifications: [ServerId: Set<UInt64>] = [:]
     /// Server starts whose unclean predecessor was already reported, by instance.
@@ -315,7 +319,7 @@ public final class AppModel {
         scheduleSave()
         scheduleReferenceSync()
         replayAllIntents()
-        flushClosures()
+        sendAllTabIntents()
         recordNavigation()
         clearUnreferencedNotifications()
         syncVisible()
@@ -508,6 +512,7 @@ public final class AppModel {
         if active {
             acknowledgeFocusedActivity()
             edit { $0.refreshProjectStatuses() }
+            for pane in visiblePanes { (panes.controller(for: pane) as? TerminalPane)?.session?.reclaimSize() }
         }
     }
 }

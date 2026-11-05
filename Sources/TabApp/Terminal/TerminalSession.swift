@@ -272,7 +272,9 @@ public extension TerminalSessionControllerDelegate {
             view.updateGrid { $0.cursor.visible = false }
             setState(.ended(reason))
         case .resized:
-            break
+            // Another app sized the terminal to its pane; this app's size
+            // goes back once it is the one in use.
+            sentSize = nil
         }
     }
 
@@ -380,8 +382,15 @@ public extension TerminalSessionControllerDelegate {
         }
     }
 
+    /// Sends this pane's size again: the app became the one in use.
+    public func reclaimSize() {
+        scheduleResize()
+    }
+
+    /// A terminal has one size, so only the app in use sets it: another
+    /// app showing the same terminal leaves it alone until it is used.
     private func sendResize() {
-        guard let channel, state == .live, view.bounds.width > 0, view.bounds.height > 0 else { return }
+        guard let channel, state == .live, NSApp.isActive, view.bounds.width > 0, view.bounds.height > 0 else { return }
         let size = view.viewport
         guard size != sentSize else { return }
         sentSize = size
@@ -395,6 +404,7 @@ public extension TerminalSessionControllerDelegate {
 
     func terminalView(_ view: TerminalView, send input: TerminalInput) {
         guard let channel, state == .live else { return }
+        if sentSize == nil { scheduleResize() }
         do {
             try backend.sendInput(channel: channel, input)
         } catch {

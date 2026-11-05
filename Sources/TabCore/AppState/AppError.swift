@@ -14,6 +14,8 @@ public enum AppError: Error, CustomStringConvertible, LocalizedError {
     case invalidTabIndex(index: Int, count: Int)
     case unsupportedVersion(Int)
     case invalidState(String)
+    /// The server is offline, so its tabs can't change until it reconnects.
+    case serverOffline(ServerId)
     case io(path: String, message: String)
     case json(path: String, message: String)
 
@@ -39,6 +41,8 @@ public enum AppError: Error, CustomStringConvertible, LocalizedError {
             return "unsupported app state version \(version)"
         case .invalidState(let message):
             return "invalid app state: \(message)"
+        case .serverOffline:
+            return "the server is offline; its tabs can change once it reconnects"
         case let .io(path, message), let .json(path, message):
             return "\(path): \(message)"
         }

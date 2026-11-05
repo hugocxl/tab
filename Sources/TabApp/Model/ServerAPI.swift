@@ -33,6 +33,8 @@ public protocol ServerAPI: AnyObject, Sendable {
 
     func catalog() async throws -> CatalogPage
     func mutateProject(_ intent: ProjectIntent) async throws -> UInt64
+    func tabs() async throws -> TabsSnapshot
+    func mutateTabs(_ intent: TabIntent) async throws -> UInt64
     func listFolders(_ path: ServerPath) async throws -> [ServerPath]
 
     func activity() async throws -> ActivitySnapshot

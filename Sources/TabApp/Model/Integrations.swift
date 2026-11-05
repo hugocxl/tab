@@ -112,19 +112,16 @@ extension AppModel: ProxyHost {
         Task {
             defer { proxy.forget(pane) }
             guard await controller(for: pane)?.willClose() ?? true else { return }
-            guard let server = state.paneServer(pane), let old = state.pane(pane)?.content.session,
+            guard state.pane(pane)?.content.session != nil,
                   let projectId = state.paneProject(pane), let project = state.project(projectId) else { return }
             let directory = (panes.controller(for: pane) as? TerminalPane)?.directory ?? project.directory
+            let launch = Self.launch(in: project, directory: directory)
             var created: PaneId?
             edit { state in
-                created = try state.restartTerminal(pane)
-                if let created {
-                    proxy.transferChoice(from: pane, to: created)
-                    _ = state.prepareCreation(created, directory: directory)
-                }
+                created = try state.restartTerminal(pane, launch: launch)
+                if let created { proxy.transferChoice(from: pane, to: created) }
             }
             panes.remove(pane)
-            endSessions([old], on: server)
             if let created { focusPane(created) }
         }
     }

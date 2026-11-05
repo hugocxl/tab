@@ -7,8 +7,25 @@ Changelog.
 
 ### Changed
 
+<<<<<<< Updated upstream
 - The right sidebar's Explorer and Git panels share the panes' background, and
   turn to glass only when glass panes are on.
+||||||| Stash base
+=======
+- Each computer's server keeps its tabs and split layouts, so every Mac
+  connected to it shows the same tabs and sees changes made on the others.
+- Each Mac keeps its own selected tab, focused pane, zoom and pane titles for
+  the tabs it shares with other Macs.
+- Closing a pane on any Mac ends its terminal, and a terminal that ends closes
+  its pane on every Mac.
+- When two Macs show the same terminal, the Mac in use sets its size.
+- A remote server's tabs stay visible while it is offline, and can change again
+  once it reconnects.
+- Existing Terminals is now Detached Terminals and lists running terminals no
+  tab shows.
+- Restoring a backup adds its saved panes beside a project's open ones instead
+  of replacing them.
+>>>>>>> Stashed changes
 
 ## 0.61.0 - 2026-11-05
 

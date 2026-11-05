@@ -51,7 +51,7 @@ final class AppStateTests: XCTestCase {
         try state.openTerminalTab(state.home.id)
         let first = state.home.tabs[0].panes[0].id
         try state.splitPane(first, edge: .right)
-        let valid = try jsonObject(state)
+        let valid = try state.legacyJSON()
         func mutateTab(_ change: (inout [String: Any]) -> Void) throws -> [String: Any] {
             var object = valid
             var projects = try XCTUnwrap(object["projects"] as? [[String: Any]])
@@ -84,7 +84,7 @@ final class AppStateTests: XCTestCase {
         for (index, variant) in variants.enumerated() {
             XCTAssertThrowsError(try decodeState(mutateTab(variant)), "variant \(index)")
         }
-        XCTAssertEqual(try decodeState(valid), state)
+        XCTAssertEqual(try decodeState(valid).home.tabs, state.home.tabs)
     }
 
     func testWindowOwnsFocusAndClosingChoosesNeighborsWithoutStealingFocus() throws {
@@ -158,7 +158,7 @@ final class AppStateTests: XCTestCase {
         let first = try active(state)
         let second = try state.splitPane(first, edge: .right)
         try state.setPaneTitle(second, "Build")
-        try state.setPaneProxy(second, true)
+        try state.setPaneSession(second, SessionId(), proxy: true)
         try state.toggleZoom(second)
         let before = state.home.tabs[0].layout.rects.map(\.1)
         let restarted = try state.restartTerminal(second)
@@ -172,6 +172,7 @@ final class AppStateTests: XCTestCase {
         XCTAssertEqual(tab.layout.rects.map(\.1), before)
         XCTAssertEqual(tab.zoomed, restarted)
         XCTAssertEqual(state.activePane, restarted)
+        XCTAssertEqual(try roundTrip(state), state)
     }
 
     func testOnlyProxiedPanesSaveTheProxyFlag() throws {
@@ -180,14 +181,14 @@ final class AppStateTests: XCTestCase {
         let pane = try active(state)
         let saved = try AppStateStore.encode(state)
         XCTAssertFalse(String(decoding: saved, as: UTF8.self).contains("\"proxy\""))
-        try state.setPaneProxy(pane, true)
+        try state.setPaneSession(pane, SessionId(), proxy: true)
         XCTAssertTrue(try roundTrip(state).home.tabs[0].panes[0].proxy)
         XCTAssertFalse(try AppStateStore.decode(saved).home.tabs[0].panes[0].proxy)
     }
 
     // MARK: Single tab per project
 
-    func testTerminalAndAdjacentCreationSplitTheFocusedLeaf() throws {
+    func testTerminalCreationSplitsTheFocusedLeaf() throws {
         var state = try AppState.bootstrap()
         let project = try state.addProject(server: .local, directory: currentDirectory)
         try state.selectProject(project)
@@ -199,7 +200,7 @@ final class AppStateTests: XCTestCase {
         try state.focusPane(first)
         var expected = [first]
         for _ in 0..<2 {
-            XCTAssertEqual(try state.openTerminalTab(project, adjacentTo: tab), tab)
+            XCTAssertEqual(try state.openTerminalTab(project), tab)
             expected.append(try active(state))
         }
         expected.append(second)
@@ -272,7 +273,7 @@ final class AppStateTests: XCTestCase {
         let focused = tabs[2].panes[0].id
         tabs[2].zoomed = focused
         let subtrees = tabs.map(\.layout)
-        var stored = try jsonObject(state)
+        var stored = try state.legacyJSON()
         var projects = try XCTUnwrap(stored["projects"] as? [[String: Any]])
         projects[1]["tabs"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(tabs))
         stored["projects"] = projects
@@ -297,9 +298,10 @@ final class AppStateTests: XCTestCase {
         XCTAssertEqual(loaded.window.selectedTab[project], first)
         XCTAssertEqual(loaded.activePane, focused)
         XCTAssertNil(tab.zoomed)
-        var normalized = try XCTUnwrap(loaded.project(project))
-        AppState.normalize(&normalized)
-        XCTAssertEqual(normalized, loaded.project(project))
+        var confirmed = loaded
+        try confirmed.confirmTabs()
+        XCTAssertEqual(confirmed.project(project)?.tabs, loaded.project(project)?.tabs)
+        XCTAssertTrue(confirmed.legacyTabIntents(.local).isEmpty)
     }
 
     func testClosingLastPaneLeavesAnEmptyProjectAndANewTerminalRecreatesIt() throws {
@@ -326,7 +328,7 @@ final class AppStateTests: XCTestCase {
             let retired = try active(state)
             let survivor = mixed ? try state.splitPane(retired, edge: .right) : nil
             try state.focusPane(retired)
-            var json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(state)) as? [String: Any])
+            var json = try state.legacyJSON()
             var projects = try XCTUnwrap(json["projects"] as? [[String: Any]])
             for p in projects.indices {
                 var tabs = try XCTUnwrap(projects[p]["tabs"] as? [[String: Any]])
@@ -399,9 +401,6 @@ final class AppStateTests: XCTestCase {
         try state.splitPane(pane, edge: .down)
         let second = try state.openTerminalTab(home)
         let focused = try active(state)
-        var project = state.home
-        AppState.normalize(&project)
-        XCTAssertEqual(project, state.home)
         let path = directory.file("state.json")
         try AppStateStore.save(state, to: path)
         let loaded = try AppStateStore.load(path)
@@ -616,9 +615,10 @@ final class AppStateTests: XCTestCase {
         try state.setPaneSession(remote, session)
         XCTAssertEqual(state.sessionReferences(.local), [session])
         XCTAssertEqual(state.sessionReferences(server), [session])
-        try state.closeSessionPane(remote)
-        XCTAssertEqual(state.pendingDiscards(server), [session])
-        XCTAssertTrue(state.pendingDiscards(.local).isEmpty)
+        try state.closePane(remote)
+        XCTAssertEqual(state.nextTabIntent(server)?.mutation, .removePane(remote, keepSession: false))
+        XCTAssertNil(state.nextTabIntent(.local))
+        XCTAssertEqual(state.sessionReferences(.local), [session])
         let plan = RestorePlan.plan(state, server: .local, sessions: [LiveSession(project: state.home.id, session: session)])
         XCTAssertEqual(plan.attach.map(\.session), [session])
     }
@@ -673,49 +673,83 @@ final class AppStateTests: XCTestCase {
         let before = state
         let plan = RestorePlan.plan(state, server: .local, sessions: [LiveSession(project: state.home.id, session: live)])
         XCTAssertEqual(plan.attach, [PaneSession(first, live)])
-        XCTAssertEqual(plan.close, [PaneSession(second, ended)])
         XCTAssertEqual(plan.create, [third])
         XCTAssertEqual(state, before)
         let allMissing = RestorePlan.plan(state, server: .local, sessions: [])
-        XCTAssertEqual(allMissing.close, [PaneSession(first, live), PaneSession(second, ended)])
         XCTAssertTrue(allMissing.attach.isEmpty)
+        XCTAssertEqual(allMissing.create, [third])
     }
 
-    func testClosingOfflinePersistsCleanupWithoutRestoringTheTab() throws {
+    func testTabChangesTheServerHasNotTakenSurviveARelaunch() throws {
         let directory = try TemporaryDirectory()
         let path = directory.file("state.json")
         var state = try AppState.bootstrap()
         let tab = try state.openTerminalTab(state.home.id)
-        let session = SessionId()
-        try state.setPaneSession(state.home.tabs[0].panes[0].id, session)
-        state.queueDiscard(.local, session)
-        state.queueDiscard(.local, session)
+        try state.setPaneSession(state.home.tabs[0].panes[0].id, SessionId())
         try state.closeTab(state.home.id, tab)
+        let kept = try state.openTerminal(state.home.id, launch: TerminalLaunch(directory: "/tmp", command: "make test"))
         try AppStateStore.save(state, to: path)
         var loaded = try AppStateStore.load(path)
-        XCTAssertTrue(loaded.home.tabs.isEmpty)
-        XCTAssertEqual(loaded.pendingDiscards(.local), [session])
-        XCTAssertNotNil(loaded.closeOperation(.local, session))
-        XCTAssertEqual(RestorePlan.plan(loaded, server: .local, sessions: []), RestorePlan())
-        loaded.completeDiscard(.local, session)
-        try AppStateStore.save(loaded, to: path)
-        XCTAssertTrue(try AppStateStore.load(path).pendingDiscards(.local).isEmpty)
+        XCTAssertEqual(loaded, state)
+        XCTAssertEqual(loaded.home.tabs.flatMap(\.panes).map(\.id), [kept])
+        XCTAssertEqual(loaded.pane(kept)?.launch, TerminalLaunch(directory: "/tmp", command: "make test"))
+        XCTAssertEqual(loaded.nextTabIntent(.local)?.mutation, .closeTab(tab, keepSessions: false))
+        try loaded.confirmTabs()
+        XCTAssertFalse(loaded.hasPendingTabs(.local))
+        XCTAssertEqual(loaded.home.tabs.flatMap(\.panes).map(\.id), [kept])
     }
 
-    func testCancellingAPendingCreationIsRememberedForItsServer() throws {
+    func testTabsShowTheServersAnswerWithChangesStillOnTheirWayOnTop() throws {
+        var state = try AppState.bootstrap()
+        let tab = try state.openTerminalTab(state.home.id)
+        let first = try active(state)
+        try state.confirmTabs()
+        let second = try state.splitPane(first, edge: .right)
+        var newer = try XCTUnwrap(state.servers[.local]?.tabs)
+        newer.revision += 1
+        state.applyTabs(.local, newer)
+        XCTAssertEqual(state.home.tabs.first?.layout.leaves, [first, second])
+        XCTAssertEqual(state.activePane, second)
+        try state.confirmTabs { board in
+            _ = try? TabReducer.apply(.closeTab(tab, keepSessions: false), to: &board) { _ in true }
+        }
+        XCTAssertTrue(state.home.tabs.isEmpty)
+        XCTAssertNil(state.activePane)
+        XCTAssertFalse(state.hasPendingTabs(.local))
+    }
+
+    func testAnotherAppClosingTheFocusedPaneMovesFocusToItsNeighbor() throws {
         var state = try AppState.bootstrap()
         try state.openTerminalTab(state.home.id)
-        let pane = try active(state)
-        let second = try state.splitPane(pane, edge: .right)
-        XCTAssertEqual(state.prepareCreation(second, directory: "/tmp"), "/tmp")
-        XCTAssertEqual(state.prepareCreation(second, directory: "/elsewhere"), "/tmp")
-        try state.setStartupCommand(second, "  make test  ")
-        XCTAssertEqual(state.startupCommand(second), "make test")
-        try state.closePane(second)
-        XCTAssertEqual(state.pendingCancellations(.local), [second.creationToken])
-        XCTAssertNil(state.startupCommand(second))
-        state.completeCancellation(.local, second.creationToken)
-        XCTAssertTrue(state.pendingCancellations(.local).isEmpty)
+        let left = try active(state)
+        let middle = try state.splitPane(left, edge: .right)
+        let right = try state.splitPane(middle, edge: .right)
+        try state.focusPane(middle)
+        try state.toggleZoom(middle)
+        try state.confirmTabs { board in
+            _ = try? TabReducer.apply(.removePane(middle, keepSession: false), to: &board) { _ in true }
+        }
+        XCTAssertEqual(state.home.tabs.first?.layout.leaves, [left, right])
+        XCTAssertEqual(state.activePane, right)
+        XCTAssertNil(state.home.tabs.first?.zoomed)
+        XCTAssertFalse(state.window.focusHistory.contains(middle))
+    }
+
+    func testAnOfflineServersTabsAreReadOnly() throws {
+        var state = try AppState.bootstrap()
+        let server = ServerId()
+        let home = ProjectId()
+        try state.applyCatalog(server, remoteCatalog(home: home, identity: ServerId(), projects: []))
+        let tab = try state.openTerminalTab(home)
+        state.setTabsReadOnly(server, true)
+        let before = state
+        XCTAssertThrowsError(try state.openTerminalTab(home))
+        XCTAssertThrowsError(try state.closeTab(home, tab))
+        XCTAssertEqual(state, before)
+        try state.openTerminalTab(state.home.id)
+        state.setTabsReadOnly(server, false)
+        try state.closeTab(home, tab)
+        XCTAssertEqual(state.project(home)?.tabs.isEmpty, true)
     }
 
     func testMissingFileBootstrapsAndCorruptOrInvalidFilesAreErrorsLeftInPlace() throws {
@@ -745,16 +779,18 @@ final class AppStateTests: XCTestCase {
         }
         var foreignFocus = valid
         var window = valid["window"] as? [String: Any] ?? [:]
-        window["activePane"] = PaneId().description
+        let stray = PaneId()
+        window["activePane"] = stray.description
         foreignFocus["window"] = window
-        invalid.append(foreignFocus)
-        var duplicateTab = valid
-        var projects = valid["projects"] as? [[String: Any]] ?? []
+        XCTAssertEqual(try decodeState(foreignFocus).activePane, state.home.tabs[0].panes[0].id,
+                       "focus on a pane the server no longer keeps moves to the selected tab")
+        var mismatchedTab = try state.legacyJSON()
+        var projects = mismatchedTab["projects"] as? [[String: Any]] ?? []
         var tabs = projects[0]["tabs"] as? [[String: Any]] ?? []
-        tabs.append(tabs[0])
+        tabs[0]["layout"] = ["leaf": PaneId().description]
         projects[0]["tabs"] = tabs
-        duplicateTab["projects"] = projects
-        invalid.append(duplicateTab)
+        mismatchedTab["projects"] = projects
+        invalid.append(mismatchedTab)
         var badId = valid
         projects = valid["projects"] as? [[String: Any]] ?? []
         projects[0]["id"] = "invalid"
@@ -776,8 +812,7 @@ final class AppStateTests: XCTestCase {
         var object = try jsonObject(state)
         object["futureFeature"] = ["anything": true]
         object["workspaces"] = nil
-        object["servers"] = nil
-        object["startingDirectories"] = nil
+        object["paneTitles"] = nil
         var window = try XCTUnwrap(object["window"] as? [String: Any])
         window["focusHistory"] = nil
         window["newWindowField"] = 3

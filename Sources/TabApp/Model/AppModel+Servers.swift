@@ -65,6 +65,12 @@ extension AppModel {
             }
             edit { $0.forgetRemoteStatuses(connection.id) }
         }
+        let readOnly: Bool
+        switch connection.state {
+        case .reconnecting, .needsUser: readOnly = !connection.id.isLocal
+        case .idle, .connecting, .ready: readOnly = false
+        }
+        if state.canEditTabs(connection.id) == readOnly { edit { $0.setTabsReadOnly(connection.id, readOnly) } }
         notify(.activity)
         notify(.state)
     }
@@ -87,8 +93,11 @@ extension AppModel {
                 applyCatalog(server, catalog)
                 await replayIntents(server)
                 guard connection.main === main else { return }
+                edit { $0.forgetTabAcknowledgements(server) }
+                await refreshTabs(server)
+                await sendTabIntents(server)
+                guard connection.main === main else { return }
                 restore(server, sessions: sessions)
-                await flushClosures(server)
                 await syncReferences(server)
                 await refreshActivity(server)
                 for (id, controller) in panes.all where state.paneServer(id) == server {
@@ -166,58 +175,86 @@ extension AppModel {
         }
     }
 
-    /// Closes panes whose session is gone and starts the ones never started.
+    /// Starts the terminals never started. The server already removed the
+    /// panes of terminals that ended.
     func restore(_ server: ServerId, sessions: [SessionInfo]) {
-        let live = sessions.map { LiveSession(project: $0.project, session: $0.id) }
-        let plan = RestorePlan.plan(state, server: server, sessions: live)
-        if !plan.close.isEmpty {
-            edit { state in
-                for entry in plan.close { try state.closeSessionPanes(server: server, session: entry.session) }
-            }
-        }
         createMissingSessions()
     }
 
-    // MARK: Closures
+    // MARK: Tabs
 
-    /// Ends sessions closed while offline and cancels creations that were
-    /// abandoned, on every ready server.
-    func flushClosures() {
-        for server in knownServers where connectionState(server).isReady
-            && (!state.pendingDiscards(server).isEmpty || !state.pendingCancellations(server).isEmpty)
-        {
-            Task { await flushClosures(server) }
+    /// Shows the tabs `server` keeps now. A server too old to keep tabs
+    /// leaves the ones this app kept, unchanged.
+    func refreshTabs(_ server: ServerId) async {
+        guard let connection = connections[server], let main = connection.main else { return }
+        do {
+            let snapshot = try await main.tabs()
+            guard connection.main === main, snapshot.revision >= connection.tabsRevision ?? 0 else { return }
+            connection.tabsRevision = snapshot.revision
+            let active = activePane
+            edit { $0.applyTabs(server, snapshot) }
+            if let active, state.pane(active) == nil { focusActiveContent() }
+        } catch let error as ClientError where error.serverCode == .unsupported {
+            edit { $0.setTabsReadOnly(server, true) }
+            if outdatedTabServers.insert(server).inserted {
+                let subject = server.isLocal ? "This Mac's server" : "The server on \(serverName(server) ?? "another computer")"
+                report("\(subject) is out of date. Restart it to change its tabs.")
+            }
+        } catch {
+            Log.app.error("tabs of \(self.serverLabel(server), privacy: .public) not loaded: \(error.message, privacy: .public)")
         }
     }
 
-    /// Sends the current session references before the closes: the server
-    /// keeps a terminal its requester still lists as shown.
-    func flushClosures(_ server: ServerId) async {
-        guard let main = connections[server]?.main else { return }
-        for operation in state.pendingCancellations(server) {
+    /// Sends every ready server the tab changes made here.
+    func sendAllTabIntents() {
+        for server in knownServers where connectionState(server).isReady
+            && (state.hasPendingTabs(server) || !state.legacyTabIntents(server).isEmpty)
+        {
+            Task { await sendTabIntents(server) }
+        }
+    }
+
+    /// Sends `server` the tabs this app kept before servers kept them, then
+    /// the changes made here, oldest first, once its projects are up to
+    /// date. A change the server refuses, because another app changed the
+    /// same tab first, gives way to the server's tabs.
+    func sendTabIntents(_ server: ServerId) async {
+        guard let main = connections[server]?.main, state.tabsRevision(server) != nil,
+              state.projectIntents(server).isEmpty, sendingTabs.insert(server).inserted
+        else { return }
+        defer { sendingTabs.remove(server) }
+        var sent = false
+        let legacy = state.legacyTabIntents(server)
+        for mutation in legacy {
             do {
-                try await main.cancelCreation(operation)
-            } catch let error as ClientError where error.serverCode == nil {
+                _ = try await main.mutateTabs(TabIntent(mutation: mutation))
+            } catch let error as ClientError where error.serverCode != nil {
+                Log.app.error("tabs kept here not taken: \(error.description, privacy: .public)")
+            } catch {
                 return
-            } catch {}
-            edit { $0.completeCancellation(server, operation) }
+            }
         }
-        edit { $0.prepareCloses(server) }
-        guard !state.pendingDiscards(server).isEmpty else { return }
-        do {
-            try await main.syncSessionReferences(owner: nil, revision: 0, sessions: state.sessionReferences(server))
-        } catch {
-            return
+        if !legacy.isEmpty {
+            edit { $0.completeLegacyTabs(server) }
+            sent = true
         }
-        for session in state.pendingDiscards(server) {
-            guard let operation = state.closeOperation(server, session) else { continue }
-            do {
-                try await main.closeSession(session, operation: operation)
-            } catch let error as ClientError where error.serverCode == nil {
-                return
-            } catch {}
-            edit { $0.completeDiscard(server, session) }
-        }
+        // Changes made while the tabs are read back are sent in the next round.
+        repeat {
+            while let intent = state.nextTabIntent(server) {
+                do {
+                    let revision = try await main.mutateTabs(intent)
+                    edit { $0.acknowledgeTabIntent(server, intent.operation, revision: revision) }
+                } catch let error as ClientError where error.serverCode != nil {
+                    Log.app.info("tab change refused: \(error.description, privacy: .public)")
+                    edit { $0.completeTabIntent(server, intent.operation) }
+                } catch {
+                    return
+                }
+                sent = true
+            }
+            if sent { await refreshTabs(server) }
+            sent = false
+        } while state.hasPendingTabs(server) && connections[server]?.main === main
     }
 
     // MARK: Session references
@@ -245,48 +282,40 @@ extension AppModel {
 
     /// Asks each ready server to start the terminals its panes are waiting
     /// for: visible panes first, all of them once restored.
+    /// Starts the terminals of panes their server already has. Any app may
+    /// start one: the pane names the creation, so the server starts it once
+    /// and shows it in the pane.
     func createMissingSessions() {
         for project in state.projects where project.status == .available {
             guard let connection = connections[project.serverId], connection.state.isReady,
                   connection.main != nil, state.projectIntents(project.serverId).isEmpty
             else { continue }
-            for pane in project.tabs.flatMap(\.panes) where pane.content == .terminal(session: nil) {
-                createSession(pane.id, in: project)
+            let confirmed = state.confirmedPanes(project.serverId)
+            for pane in project.tabs.flatMap(\.panes)
+            where pane.content == .terminal(session: nil) && confirmed.contains(pane.id) {
+                createSession(pane, in: project)
             }
         }
     }
 
-    private func createSession(_ pane: PaneId, in project: Project) {
-        guard !creating.contains(pane), let main = connections[project.serverId]?.main else { return }
-        creating.insert(pane)
-        var directory = project.directory
-        edit { directory = $0.prepareCreation(pane, directory: project.directory) }
-        let (environment, proxied) = creationEnvironment(pane, server: project.serverId)
-        if proxied { edit { try $0.setPaneProxy(pane, true) } }
+    private func createSession(_ pane: Pane, in project: Project) {
+        guard !creating.contains(pane.id), let main = connections[project.serverId]?.main else { return }
+        creating.insert(pane.id)
+        let (environment, _) = creationEnvironment(pane.id, server: project.serverId)
         let request = CreateSession(
-            project: project.id, operation: pane.creationToken, directory: directory,
-            size: (panes.controller(for: pane) as? TerminalPane)?.estimatedSize ?? Size(cols: 80, rows: 24),
-            environment: environment
+            project: project.id, operation: pane.id.creationToken, directory: pane.launch?.directory ?? project.directory,
+            size: (panes.controller(for: pane.id) as? TerminalPane)?.estimatedSize ?? Size(cols: 80, rows: 24),
+            environment: environment, pane: pane.id, input: pane.launch?.command
         )
         let server = project.serverId
         Task {
-            defer { creating.remove(pane) }
+            defer { creating.remove(pane.id) }
             do {
-                let info = try await main.createSession(request)
-                guard state.pane(pane) != nil else {
-                    edit { $0.queueDiscard(server, info.id) }
-                    return
-                }
-                proxy.forget(pane)
-                edit { try $0.setPaneSession(pane, info.id) }
-                var command: String?
-                edit { command = $0.takeStartupCommand(pane) }
-                if let command {
-                    do { try await main.writeInput(session: info.id, bytes: Data((command + "\r").utf8)) }
-                    catch { report("Could not run command in terminal: \(error.message)") }
-                }
+                _ = try await main.createSession(request)
+                proxy.forget(pane.id)
+                await refreshTabs(server)
             } catch {
-                guard state.pane(pane) != nil else { return }
+                guard state.pane(pane.id) != nil else { return }
                 report("Could not start a terminal: \(error.message)")
             }
         }
@@ -316,6 +345,8 @@ extension AppModel {
                 if server.isLocal { notify(.remoteAccess) }
             case .devices:
                 devicesChanged(server)
+            case .tabs:
+                Task { await refreshTabs(server) }
             case .unknown: break
             }
         case .sessionMetadata(let session, let metadata):
@@ -352,14 +383,9 @@ extension AppModel {
         }
     }
 
-    /// A terminal's program ended: its panes close everywhere.
+    /// A terminal's program ended: its server closes its panes everywhere.
     func sessionEnded(_ server: ServerId, _ session: SessionId) {
         connections[server]?.progress[session] = nil
-        let closing = sessionPanes(server, session)
-        guard !closing.isEmpty else { return }
-        let hadFocus = activePane.map(closing.contains) ?? false
-        edit { try $0.closeSessionPanes(server: server, session: session) }
-        if hadFocus { focusActiveContent() }
     }
 
     // MARK: Git

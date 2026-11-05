@@ -12,7 +12,7 @@ public enum PalettePage: Hashable, Sendable {
     case newBranch(ProjectId)
     case changes(ProjectId)
     case worktrees(ProjectId)
-    /// Existing Terminals of a project.
+    /// Detached Terminals of a project: running terminals no tab shows.
     case terminals(ProjectId)
     case projects
     case workspaces

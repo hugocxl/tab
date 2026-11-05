@@ -43,8 +43,7 @@ final class BackupLaunchTests: XCTestCase {
             let split = try state.splitPane(pane, edge: .down)
             originalPanes = [pane, split]
             try state.setRatio(try XCTUnwrap(state.project(first)?.tabs.first?.id), path: [], ratio: 0.3)
-            try state.setPaneSession(pane, live)
-            try state.setPaneProxy(pane, true)
+            try state.setPaneSession(pane, live, proxy: true)
             try state.setPaneTitle(pane, "Saved main")
             try state.setPaneTitle(split, "Saved split")
             _ = try state.openTerminalTab(second)
@@ -118,12 +117,16 @@ final class BackupLaunchTests: XCTestCase {
             for (name, data) in originals { XCTAssertEqual(try Data(contentsOf: recovery.appendingPathComponent(name)), data) }
             XCTAssertEqual(try String(contentsOf: recovery.appendingPathComponent("themes/Old"), encoding: .utf8), "background = 654321\n")
             let restoredProject = try XCTUnwrap(restored.state.project(matched ?? first))
+            // A project already there keeps its panes beside the saved ones.
             let panes = restoredProject.tabs.flatMap(\.panes)
-            XCTAssertEqual(panes.map(\.title), ["Saved main", "Saved split"])
+            XCTAssertEqual(panes.count, matched == nil ? 2 : 3)
+            let saved = Array(panes.prefix(2))
+            XCTAssertEqual(saved.map(\.title), ["Saved main", "Saved split"])
             XCTAssertTrue(panes.allSatisfy { !originalPanes.contains($0.id) && $0.content.session == nil && !$0.proxy })
-            XCTAssertEqual(restoredProject.tabs.first?.layout, .split(axis: .vertical, ratio: 0.3,
-                                                                     first: .leaf(panes[0].id), second: .leaf(panes[1].id)))
-            XCTAssertEqual(restored.terminalFontSizes[try XCTUnwrap(panes.first).id.description], 27)
+            let savedLayout = Layout<PaneId>.split(axis: .vertical, ratio: 0.3, first: .leaf(saved[0].id), second: .leaf(saved[1].id))
+            XCTAssertEqual(restoredProject.tabs.first?.layout, matched == nil ? savedLayout
+                : .split(axis: .horizontal, ratio: 0.5, first: savedLayout, second: .leaf(panes[2].id)))
+            XCTAssertEqual(restored.terminalFontSizes[saved[0].id.description], 27)
             XCTAssertNotNil(restored.state.project(second))
             if let kept { XCTAssertNotNil(restored.state.project(kept)) }
             if let matched {

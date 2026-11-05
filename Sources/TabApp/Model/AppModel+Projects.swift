@@ -68,24 +68,19 @@ extension AppModel {
         }
     }
 
-    /// Removes a project and ends its terminals.
+    /// Removes a project; its server ends its terminals when it removes it.
     public func removeProject(_ project: ProjectId) {
-        guard let target = state.project(project) else { return }
-        var sessions: [SessionId] = []
+        guard state.project(project) != nil else { return }
         let children = state.projects.filter { $0.parentId == project }.map(\.id)
-        guard edit({ state in
-            for child in children { sessions += try state.removeProject(child) }
-            sessions += try state.removeProject(project)
-        }) else { return }
-        endSessions(sessions, on: target.serverId)
+        edit { state in
+            for child in children { _ = try state.removeProject(child) }
+            _ = try state.removeProject(project)
+        }
     }
 
+    /// Ends `sessions` on a server that is connected.
     func endSessions(_ sessions: [SessionId], on server: ServerId) {
-        guard !sessions.isEmpty else { return }
-        guard let main = connections[server]?.main else {
-            edit { state in for session in sessions { state.queueDiscard(server, session) } }
-            return
-        }
+        guard !sessions.isEmpty, let main = connections[server]?.main else { return }
         Task {
             for session in sessions { try? await main.endSession(session) }
         }

@@ -71,6 +71,9 @@ public final class ServerConnection {
     /// The last activity the server reported.
     public internal(set) var activity = ActivitySnapshot()
     var activityLoaded = false
+    /// The newest tabs revision applied from this connection; answers that
+    /// arrive out of order are older and dropped.
+    var tabsRevision: UInt64?
     var activityRefreshing = false
     var activityDirty = false
     /// Terminal progress by session.
@@ -178,6 +181,7 @@ public final class ServerConnection {
         failures = 0
         lastFailure = nil
         self.main = main
+        tabsRevision = nil
         self.side = side
         let events = main.events
         eventTask = Task { [weak self] in

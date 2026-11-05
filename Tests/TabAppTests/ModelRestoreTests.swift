@@ -12,8 +12,9 @@ final class ModelRestoreTests: XCTestCase {
     }
 
     /// A project with two terminals, saved; after a restart one session is
-    /// gone: its pane closes and its session is discarded, the other stays.
-    func testRestoreClosesDeadPanesKeepsLiveOnesAndPersists() async throws {
+    /// gone and its server dropped its pane: the app shows what the server
+    /// keeps, attaches the live one and saves that.
+    func testRestoreShowsTheServersPanesKeepsLiveOnesAndPersists() async throws {
         let dirs = try ModelFixtures.profile()
         let folder = try ModelFixtures.folder("app")
         let identity = ServerId()
@@ -40,13 +41,15 @@ final class ModelRestoreTests: XCTestCase {
         first.connection(.local)?.disconnect()
         let restarted = ModelFakeServer(identity: identity, catalog: server.catalogPage)
         restarted.live = server.live.filter { $0.id == sessions[0] }
+        var kept = TabBoard(home: server.catalogPage.home, projects: server.tabSnapshot.projects)
+        XCTAssertTrue(TabReducer.removePanes(showing: sessions[1], in: &kept))
+        restarted.tabSnapshot = TabsSnapshot(revision: server.tabSnapshot.revision + 1, projects: kept.projects)
         let second = ModelFixtures.model(dirs, server: restarted)
-        XCTAssertEqual(second.state.project(project)?.tabs.flatMap(\.panes).count, 2, "state.json restores both panes")
+        XCTAssertEqual(second.state.project(project)?.tabs.flatMap(\.panes).count, 2, "state.json shows both panes at once")
         second.start()
-        let restored = await ModelFixtures.wait {
-            second.state.project(project)?.tabs.flatMap(\.panes).count == 1 && restarted.closed.contains(sessions[1])
-        }
-        XCTAssertTrue(restored, "the dead pane closes and its session is discarded")
+        let restored = await ModelFixtures.wait { second.state.project(project)?.tabs.flatMap(\.panes).count == 1 }
+        XCTAssertTrue(restored, "the pane the server dropped closes")
+        XCTAssertTrue(restarted.created.isEmpty, "no terminal starts for a pane the server dropped")
         XCTAssertEqual(second.state.project(project)?.tabs.flatMap(\.panes).first?.content.session, sessions[0])
         let synced = await ModelFixtures.wait { restarted.references.last == [sessions[0]] }
         XCTAssertTrue(synced, "the server learns which sessions this app shows")

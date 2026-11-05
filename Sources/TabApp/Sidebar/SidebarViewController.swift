@@ -348,7 +348,7 @@ final class SidebarViewController: NSViewController {
     private func terminalItems(_ id: ProjectId) -> [NSMenuItem] {
         [
             model.newPaneSubmenu(in: id),
-            ClosureMenuItem("Existing Terminals…") { [weak self] in self?.actions?.openPalette(.terminals(id)) },
+            ClosureMenuItem("Detached Terminals…") { [weak self] in self?.actions?.openPalette(.terminals(id)) },
         ]
     }
 

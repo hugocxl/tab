@@ -109,9 +109,7 @@ final class AgentCodeActionTests: XCTestCase {
         let terminal = try XCTUnwrap(model.activePane)
         XCTAssertNotEqual(terminal, paneID)
         XCTAssertEqual(model.state.paneProject(terminal), project.id)
-        XCTAssertEqual(model.state.startupCommand(terminal), "printf '%s' 'exact command'")
-        var state = model.state
-        XCTAssertEqual(state.prepareCreation(terminal, directory: "/wrong-fallback"), project.directory)
+        XCTAssertEqual(model.state.pane(terminal)?.launch, TerminalLaunch(command: "printf '%s' 'exact command'"))
     }
 
     func testCodeHeaderSnapshots() throws {

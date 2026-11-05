@@ -36,6 +36,7 @@ public final class Server: @unchecked Sendable {
 
     let settings: ServerSettingsStore
     let catalog: Catalog
+    let tabs: TabStore
     let archive: ArchiveStore
     let activity = Activity()
     let uploads: Uploads
@@ -45,6 +46,9 @@ public final class Server: @unchecked Sendable {
     let agentHistory: AgentHistory
     let shellIntegration: ShellIntegration?
     let lifecycle = DispatchQueue(label: "tab.server.lifecycle", qos: .utility)
+    /// Ends the terminals of closed panes, which can take a while, away from
+    /// requests and from `lifecycle`, where ending sessions report back.
+    let cleanup = DispatchQueue(label: "tab.server.cleanup", qos: .utility)
 
     private let serviceLock = NSLock()
     private var installedServices = ServerServices()
@@ -76,6 +80,8 @@ public final class Server: @unchecked Sendable {
         let catalog = try Catalog(directory: dirs.sessions, homeDirectory: configuration.homeDirectory,
                                   hasSavedScreen: { archive.contains($0) })
         self.catalog = catalog
+        tabs = try TabStore(directory: dirs.sessions, home: catalog.homeId,
+                            isProject: { (try? catalog.project($0)) != nil }, isLive: { _ in false })
         agentComposerContext = AgentComposerContextService(home: URL(fileURLWithPath: configuration.homeDirectory),
             projectDirectory: { project in
                 let directory = try catalog.project(project).directory
@@ -111,6 +117,7 @@ public final class Server: @unchecked Sendable {
         info = ServerInfo(build: BuildInfo(version: Release.version), instance: UInt64.random(in: 1...UInt64.max),
                           server: catalog.serverId, previousStopUnclean: unclean)
         catalog.onChange = { [weak self] revision in self?.catalogChanged(revision) }
+        tabs.onChange = { [weak self] revision in self?.tabsChanged(revision) }
         activity.onChange = { [weak self] revision in self?.activityChanged(revision) }
         agents.activityChanged = { [weak self] snapshot in self?.activity.updateChat(snapshot) }
         agents.publishActivity()
@@ -185,6 +192,9 @@ public final class Server: @unchecked Sendable {
         try Validation.size(request.size)
         _ = try catalog.project(request.project)
         guard directory.isDirectory else { throw ServiceError(.badPath, "\(directory.rawValue) is not a folder") }
+        if let pane = request.pane, tabs.pane(pane)?.content != .terminal(session: nil) {
+            throw ServiceError(.badRequest, "The pane for this terminal was closed")
+        }
 
         let id = try sessionLock.withLock { () throws -> SessionId in
             guard !stopping else { throw ServiceError(.spawnFailed, "The server is stopping") }
@@ -224,7 +234,26 @@ public final class Server: @unchecked Sendable {
         try? catalog.setLive(id)
         ServerLog.info("session created: \(id)")
         requester?.createdSession(id)
+        if let input = request.input, !input.isEmpty {
+            owner.writeInput(Data((input + "\r").utf8)) { error in
+                if let error { ServerLog.error("session \(id) didn't take its startup command: \(error)") }
+            }
+        }
+        if let pane = request.pane { show(id, in: pane, proxy: !request.environment.isEmpty) }
         return info
+    }
+
+    /// Shows a new terminal in the pane it was created for, or ends it when
+    /// that pane closed meanwhile.
+    private func show(_ session: SessionId, in pane: PaneId, proxy: Bool) {
+        let shown: Bool
+        do {
+            shown = try tabs.edit { TabReducer.bind(session, to: pane, proxy: proxy, in: &$0) }
+        } catch {
+            ServerLog.error("session \(session) not shown in its pane: \(error)")
+            shown = false
+        }
+        if !shown { endLater([session]) }
     }
 
     /// A live session a client may attach to.
@@ -257,6 +286,27 @@ public final class Server: @unchecked Sendable {
         try endAndWait(session)
         try archive.discardNow(session)
         try catalog.finishDiscard(session)
+    }
+
+    /// Ends and discards `sessions` on the cleanup queue. They are marked
+    /// first, so a crash before they end still discards them on restart.
+    func endLater(_ sessions: [SessionId]) {
+        for session in sessions {
+            do {
+                try catalog.beginDiscard(session)
+            } catch {
+                ServerLog.error("session \(session) not marked for discarding: \(error)")
+            }
+        }
+        cleanup.async { [self] in
+            for session in sessions {
+                do {
+                    try discard(session)
+                } catch {
+                    ServerLog.error("session \(session) not discarded: \(error)")
+                }
+            }
+        }
     }
 
     func cancelCreation(_ operation: OperationId) throws {
@@ -319,6 +369,66 @@ public final class Server: @unchecked Sendable {
             for session in catalog.sessions(of: project) { try discardOwned(session) }
         }
         try catalog.finishDeletions()
+        try pruneTabs()
+    }
+
+    /// Drops the tabs of projects the catalog no longer has.
+    private func pruneTabs() throws {
+        try tabs.edit { board in
+            let before = board.projects.count
+            board.retainProjects { [catalog] in (try? catalog.project($0)) != nil }
+            return board.projects.count != before
+        }
+    }
+
+    // MARK: Tabs
+
+    /// Applies an app's tab change, then ends the terminals and cancels the
+    /// creations of the panes it closed.
+    func mutateTabs(_ intent: TabIntent) throws -> UInt64 {
+        let applying = try checkedSessions(intent.mutation)
+        let (revision, effects) = try tabs.mutate(intent, applying: applying) { [catalog] project in
+            (try? catalog.project(project)) != nil
+        }
+        if !effects.endedSessions.isEmpty { endLater(effects.endedSessions) }
+        if !effects.cancelledCreations.isEmpty {
+            cleanup.async { [self] in
+                for operation in effects.cancelledCreations { try? cancelCreation(operation) }
+            }
+        }
+        return revision
+    }
+
+    /// The change with its panes' terminals checked: a pane may show only a
+    /// running terminal of its own project. Adopted tabs leave out the rest.
+    private func checkedSessions(_ mutation: TabMutation) throws -> TabMutation {
+        func runs(_ pane: Pane, in project: ProjectId?) -> Bool {
+            guard let session = pane.content.session else { return true }
+            guard let info = owner(session)?.info, !catalog.isDiscarding(session) else { return false }
+            return project == nil || info.project == project
+        }
+        switch mutation {
+        case let .createTab(project, tab, _):
+            guard tab.panes.allSatisfy({ runs($0, in: project) }) else { throw ServiceError(.badRequest, "A pane can only show a running terminal of its project") }
+        case let .insertPane(pane, anchor, _):
+            let project = TabBoard(home: catalog.homeId, projects: tabs.snapshot().projects).locate(pane: anchor)?.project
+            guard runs(pane, in: project) else { throw ServiceError(.badRequest, "A pane can only show a running terminal of its project") }
+        case .replacePane(_, let pane):
+            guard pane.content.session == nil else { throw ServiceError(.badRequest, "A restarted pane starts a new terminal") }
+        case let .adoptTabs(project, tabs):
+            return .adoptTabs(project: project, tabs: tabs.compactMap { tab in
+                var tab = tab
+                for pane in tab.panes where !runs(pane, in: project) {
+                    tab.layout.remove(pane.id)
+                    tab.panes.removeAll { $0.id == pane.id }
+                    if tab.zoomed == pane.id { tab.zoomed = nil }
+                }
+                return tab.panes.isEmpty ? nil : tab
+            })
+        default:
+            break
+        }
+        return mutation
     }
 
     // MARK: Catalog
@@ -335,7 +445,11 @@ public final class Server: @unchecked Sendable {
             break
         }
         let revision = try catalog.mutate(intent)
-        if case .delete = intent.mutation { try finishDeletions() }
+        switch intent.mutation {
+        case .delete: try finishDeletions()
+        case .pruneWorktree: try pruneTabs()
+        case .create, .rename: break
+        }
         return max(revision, catalog.revision)
     }
 
@@ -520,6 +634,12 @@ public final class Server: @unchecked Sendable {
         }
     }
 
+    private func tabsChanged(_ revision: UInt64) {
+        for connection in liveConnections() where connection.watchingTabs {
+            connection.outbox.push(.event(.changed(topic: .tabs, revision: revision)))
+        }
+    }
+
     private func activityChanged(_ revision: UInt64) {
         for connection in liveConnections() where connection.watchingActivity {
             connection.outbox.push(.event(.changed(topic: .activity, revision: revision)))
@@ -610,6 +730,18 @@ extension Server: SessionOwnerDelegate {
             ServerLog.info("session ended: \(id) (\(reason))")
             for connection in liveConnections() { connection.sessionEnded(id, reason: reason) }
             owner.signalFinished()
+            // A stopping server's terminals keep their panes until it starts
+            // again, which removes them before any app sees them.
+            if reason != .serverStopped { removePanes(showing: id) }
+        }
+    }
+
+    /// The terminal `session` ended: its panes close on every app.
+    private func removePanes(showing session: SessionId) {
+        do {
+            try tabs.edit { TabReducer.removePanes(showing: session, in: &$0) }
+        } catch {
+            ServerLog.error("panes of session \(session) not removed: \(error)")
         }
     }
 }

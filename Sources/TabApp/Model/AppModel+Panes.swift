@@ -16,19 +16,20 @@ extension AppModel {
     /// A new terminal in `project`, switching to it.
     public func newTerminal(in project: ProjectId, command: String? = nil, directory: ServerPath? = nil) {
         guard let target = state.project(project) else { return }
-        let directory = directory ?? newPaneDirectory(in: target)
-        var created: PaneId?
+        let launch = Self.launch(in: target, directory: directory ?? newPaneDirectory(in: target), command: command)
         edit { state in
-            let tab = try state.openTerminalTab(project)
-            created = state.window.activePane ?? state.project(project)?.tabs.first { $0.id == tab }?.layout.leaves.last
-            if let pane = created {
-                _ = state.prepareCreation(pane, directory: directory)
-                if let command { try state.setStartupCommand(pane, command) }
-            }
+            _ = try state.openTerminal(project, launch: launch)
             state.revealCurrentProject()
         }
         connectOnDemand(target.serverId)
         focusActiveContent()
+    }
+
+    /// How a new terminal in `project` starts: `nil` for a shell in its folder.
+    static func launch(in project: Project, directory: ServerPath, command: String? = nil) -> TerminalLaunch? {
+        let command = command.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.flatMap { $0.isEmpty ? nil : $0 }
+        let directory = directory == project.directory ? nil : directory
+        return directory == nil && command == nil ? nil : TerminalLaunch(directory: directory, command: command)
     }
 
     /// A new Home terminal (Cmd+N).
@@ -54,29 +55,16 @@ extension AppModel {
             newTerminal()
             return
         }
-        let directory = newPaneDirectory(in: project)
-        edit { state in
-            let new = try state.splitPane(pane, edge: edge)
-            _ = state.prepareCreation(new, directory: directory)
-        }
+        let launch = Self.launch(in: project, directory: newPaneDirectory(in: project))
+        edit { state in _ = try state.splitPane(pane, edge: edge, launch: launch) }
         focusActiveContent()
     }
 
-    /// Opens a running session of `project` that this app doesn't show.
+    /// Opens a running session of `project` that no tab shows.
     public func openExistingSession(_ session: SessionId, in project: ProjectId) {
         edit { state in
-            guard let target = state.project(project) else { return }
-            if target.home {
-                let tab = try state.openTerminalTab(project)
-                guard let pane = state.project(project)?.tabs.first(where: { $0.id == tab })?.layout.leaves.first else { return }
-                try state.setPaneSession(pane, session)
-                try state.focusPane(pane)
-            } else {
-                let pane = Pane(title: "Terminal", content: .terminal(session: session))
-                try state.openPaneInContainer(project, pane: pane, focusLeaf: state.window.activePane)
-                try state.selectProject(project)
-                try state.focusPane(pane.id)
-            }
+            guard state.project(project) != nil else { return }
+            try state.openPane(project, Pane(content: .terminal(session: session)))
         }
         focusActiveContent()
     }
@@ -135,11 +123,10 @@ extension AppModel {
             }
         case .editor, .diff: return nil
         }
-        let pane = Pane(title: kind == .browser ? "New Browser" : content.nativeTitle ?? kind.name, content: content)
-        let directory = newPaneDirectory(in: target)
+        let launch = kind == .terminal ? Self.launch(in: target, directory: newPaneDirectory(in: target)) : nil
+        let pane = Pane(content: content, launch: launch)
         guard edit({ state in
             try state.insertSplitPane(after: anchor, pane, edge: edge)
-            if kind == .terminal { _ = state.prepareCreation(pane.id, directory: directory) }
             try state.focusPane(pane.id)
             state.revealCurrentProject()
         }) else { return nil }
@@ -180,11 +167,11 @@ extension AppModel {
         let anchor = request.beside.flatMap(state.paneShowing).flatMap { state.paneServer($0) == project.serverId ? $0 : nil }
         var opened: PaneId?
         if request.placement == .tab, project.home {
-            let pane = Pane(title: request.kind == .agent ? "Agent" : "Terminal", content: content)
+            let pane = Pane(content: content)
             guard edit({ _ = try $0.openTab(project.id, pane) }) else { return nil }
             opened = pane.id
         } else if let anchor {
-            let pane = Pane(title: request.kind == .agent ? "Agent" : "Terminal", content: content)
+            let pane = Pane(content: content)
             guard edit({ state in
                 try state.insertSplitPane(after: anchor, pane, edge: .right)
                 try state.focusPane(pane.id)
@@ -387,7 +374,7 @@ extension AppModel {
             if settings.window.closeBehavior == .detach {
                 edit { try $0.detachPane(pane) }
             } else {
-                edit { try $0.closeSessionPane(pane) }
+                edit { try $0.closePane(pane) }
             }
         } else {
             edit { try $0.closePane(pane) }

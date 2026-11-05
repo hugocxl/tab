@@ -6,44 +6,8 @@ public enum ProjectStatus: Sendable {
     case missing
 }
 
-/// A tab's color from the tab palette, as `#rrggbb`.
-public struct TabColor: Hashable, Codable, Sendable, CustomStringConvertible {
-    public let hex: String
-
-    public init(_ value: String) throws {
-        let utf8 = Array(value.utf8)
-        guard utf8.count == 7, utf8[0] == UInt8(ascii: "#"),
-              value.dropFirst().allSatisfy(\.isHexDigit)
-        else { throw AppError.invalidState("color must be a #RRGGBB hex string") }
-        hex = value.lowercased()
-    }
-
-    public var description: String { hex }
-
-    /// The palette, by English name.
-    public static let palette: [(name: String, hex: String)] = [
-        ("Red", "#e5484d"), ("Orange", "#f76b15"), ("Amber", "#f5a623"), ("Yellow", "#ebcb00"),
-        ("Lime", "#9bcd1e"), ("Green", "#30a46c"), ("Teal", "#12a594"), ("Cyan", "#05a2c2"),
-        ("Blue", "#3e63dd"), ("Indigo", "#5b5bd6"), ("Violet", "#8e4ec6"), ("Pink", "#d6409f"),
-    ]
-
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.singleValueContainer()
-        do {
-            try self.init(container.decode(String.self))
-        } catch {
-            throw DecodingError.dataCorruptedError(in: container, debugDescription: "\(error)")
-        }
-    }
-
-    public func encode(to encoder: Encoder) throws {
-        var container = encoder.singleValueContainer()
-        try container.encode(hex)
-    }
-}
-
-/// A project as this app shows it: the server's description plus the app's
-/// own tabs and layouts.
+/// A project as this app shows it: the server's description and tabs. Its
+/// tabs are never saved with it: `state.json` keeps each server's tabs.
 public struct Project: Codable, Equatable, Sendable, Identifiable {
     public var id: ProjectId
     public var home: Bool
@@ -53,7 +17,8 @@ public struct Project: Codable, Equatable, Sendable, Identifiable {
     public var directory: ServerPath
     public var kind: ProjectKind?
     public var parentId: ProjectId?
-    public var tabs: [Tab]
+    /// The tabs shown, from its server; read from an old `state.json` only.
+    public internal(set) var tabs: [Tab]
     /// Checked on disk for this computer's projects; never saved.
     public internal(set) var status: ProjectStatus = .available
 
@@ -84,7 +49,6 @@ public struct Project: Codable, Equatable, Sendable, Identifiable {
         try container.encode(directory, forKey: .directory)
         try container.encodeIfPresent(kind, forKey: .kind)
         try container.encodeIfPresent(parentId, forKey: .parentId)
-        try container.encode(tabs, forKey: .tabs)
     }
 
     /// `server`'s project as `descriptor` describes it, with no tabs yet.

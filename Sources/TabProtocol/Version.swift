@@ -104,6 +104,9 @@ public enum Limits {
     public static let maxGraphicsPlacements = 1024
     public static let catalogPageSize = 128
     public static let maxProjects = 4096
+    /// The most tabs a server keeps, across its projects.
+    public static let maxTabs = 1024
+    public static let maxPanesPerTab = 64
     public static let maxHistoryPage = 500
     public static let maxAttachHistory = 200
     public static let maxSearchQuery = 256

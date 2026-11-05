@@ -1,11 +1,13 @@
 import Foundation
 
-/// The app's projects, their layouts and panes, workspaces and window state,
-/// saved as `state.json`. Every change keeps it valid: Home first, layouts
-/// matching their panes, focus inside the selected tab.
+/// The app's projects, workspaces and window state, saved as `state.json`.
+/// Every change keeps it valid: Home first, layouts matching their panes,
+/// focus inside the selected tab.
 ///
-/// Every non-Home project has zero or one tab holding its split layout;
-/// Home keeps standalone terminal tabs, each with its own splits.
+/// Each server keeps its projects' tabs. `Project.tabs` shows them: the
+/// server's last word with this app's changes still on their way on top,
+/// and this app's own titles and zoom. Every non-Home project has zero or
+/// one tab holding its split layout; Home keeps one tab per card.
 public struct AppState: Codable, Equatable, Sendable {
     /// The state format this build writes.
     public static let currentVersion = 1
@@ -13,17 +15,17 @@ public struct AppState: Codable, Equatable, Sendable {
     public var agentComposerDefaults: AgentComposerPreferences?
     public internal(set) var agentComposerDrafts: [PaneId: AgentComposerPreferences] = [:]
     var servers: [ServerId: ServerState]
-    /// Where each pane's terminal starts, kept until its server creates it.
-    var startingDirectories: [PaneId: ServerPath]
-    /// Commands to type into each pane's new terminal once it starts.
-    var startupCommands: [PaneId: String]
+    /// The titles panes reported here, such as a terminal's or a page's.
+    var paneTitles: [PaneId: String]
+    /// Servers whose tabs can't change now: they are offline.
+    var readOnlyServers: Set<ServerId> = []
     public private(set) var version: Int
     public internal(set) var projects: [Project]
     public internal(set) var workspaces: [Workspace]
     public internal(set) var window: WindowState
 
     enum CodingKeys: String, CodingKey {
-        case agentComposerDefaults, agentComposerDrafts, servers, startingDirectories, startupCommands, version, projects, workspaces, window
+        case agentComposerDefaults, agentComposerDrafts, servers, paneTitles, version, projects, workspaces, window
     }
 
     /// A fresh state: just this computer's Home.
@@ -31,8 +33,7 @@ public struct AppState: Codable, Equatable, Sendable {
         let home = try newHome(directory: homeDirectory())
         return AppState(
             servers: [:],
-            startingDirectories: [:],
-            startupCommands: [:],
+            paneTitles: [:],
             version: currentVersion,
             projects: [home],
             workspaces: [],
@@ -42,16 +43,14 @@ public struct AppState: Codable, Equatable, Sendable {
 
     private init(
         servers: [ServerId: ServerState],
-        startingDirectories: [PaneId: ServerPath],
-        startupCommands: [PaneId: String],
+        paneTitles: [PaneId: String],
         version: Int,
         projects: [Project],
         workspaces: [Workspace],
         window: WindowState
     ) {
         self.servers = servers
-        self.startingDirectories = startingDirectories
-        self.startupCommands = startupCommands
+        self.paneTitles = paneTitles
         self.version = version
         self.projects = projects
         self.workspaces = workspaces
@@ -61,16 +60,18 @@ public struct AppState: Codable, Equatable, Sendable {
     /// Only repairs focus on a removed management pane; unknown references remain errors.
     private static func isRetiredPane(_ id: PaneId, in container: KeyedDecodingContainer<CodingKeys>) throws -> Bool {
         enum ContentKeys: String, CodingKey { case type }
+        enum TabKeys: String, CodingKey { case panes }
+        enum PaneKeys: String, CodingKey { case id, content }
         var projects = try container.nestedUnkeyedContainer(forKey: .projects)
         while !projects.isAtEnd {
             let project = try projects.nestedContainer(keyedBy: Project.CodingKeys.self)
             guard project.contains(.tabs) else { continue }
             var tabs = try project.nestedUnkeyedContainer(forKey: .tabs)
             while !tabs.isAtEnd {
-                let tab = try tabs.nestedContainer(keyedBy: Tab.CodingKeys.self)
+                let tab = try tabs.nestedContainer(keyedBy: TabKeys.self)
                 var panes = try tab.nestedUnkeyedContainer(forKey: .panes)
                 while !panes.isAtEnd {
-                    let pane = try panes.nestedContainer(keyedBy: Pane.CodingKeys.self)
+                    let pane = try panes.nestedContainer(keyedBy: PaneKeys.self)
                     guard try pane.decode(PaneId.self, forKey: .id) == id else { continue }
                     let content = try pane.nestedContainer(keyedBy: ContentKeys.self, forKey: .content)
                     return try content.decode(String.self, forKey: .type) == "servers"
@@ -94,8 +95,7 @@ public struct AppState: Codable, Equatable, Sendable {
         }
         self.init(
             servers: try container.value(.servers, [:]),
-            startingDirectories: try container.value(.startingDirectories, [:]),
-            startupCommands: try container.value(.startupCommands, [:]),
+            paneTitles: try container.value(.paneTitles, [:]),
             version: version,
             projects: try container.decode([Project].self, forKey: .projects),
             workspaces: try container.value(.workspaces, []),
@@ -107,6 +107,7 @@ public struct AppState: Codable, Equatable, Sendable {
         }
         agentComposerDefaults = try container.decodeIfPresent(AgentComposerPreferences.self, forKey: .agentComposerDefaults)
         agentComposerDrafts = try container.value(.agentComposerDrafts, [:])
+        keepLegacyTabs()
         do {
             try repairLoaded()
         } catch {
@@ -119,12 +120,26 @@ public struct AppState: Codable, Equatable, Sendable {
         try container.encodeIfPresent(agentComposerDefaults, forKey: .agentComposerDefaults)
         if !agentComposerDrafts.isEmpty { try container.encode(agentComposerDrafts, forKey: .agentComposerDrafts) }
         try container.encode(servers, forKey: .servers)
-        try container.encode(startingDirectories, forKey: .startingDirectories)
-        if !startupCommands.isEmpty { try container.encode(startupCommands, forKey: .startupCommands) }
+        if !paneTitles.isEmpty { try container.encode(paneTitles, forKey: .paneTitles) }
         try container.encode(version, forKey: .version)
         try container.encode(projects, forKey: .projects)
         if !workspaces.isEmpty { try container.encode(workspaces, forKey: .workspaces) }
         try container.encode(window, forKey: .window)
+    }
+
+    /// Moves tabs `state.json` kept before servers kept them aside, to give
+    /// to their servers, with this app's titles and zoom.
+    private mutating func keepLegacyTabs() {
+        for index in projects.indices where !projects[index].tabs.isEmpty {
+            let project = projects[index]
+            var state = servers[project.serverId] ?? ServerState()
+            state.legacyTabs.append(ProjectTabs(project: project.id, tabs: project.tabs))
+            servers[project.serverId] = state
+            for tab in project.tabs {
+                if let zoomed = tab.zoomed { window.zoomed[tab.id] = zoomed }
+                for pane in tab.panes where pane.title != pane.content.defaultTitle { paneTitles[pane.id] = pane.title }
+            }
+        }
     }
 
     private mutating func repairLoaded() throws {
@@ -132,20 +147,33 @@ public struct AppState: Codable, Equatable, Sendable {
         let previousTab = window.selectedTab[previousProject]
         try ensureHome()
         retainWorkspaceMembers()
-        if window.currentProject != previousProject || window.selectedTab[window.currentProject] != previousTab {
+        for server in Set(projects.map(\.serverId)) { materializeTabs(server, repair: false) }
+        let panes = Set(projects.flatMap(\.tabs).flatMap(\.panes).map(\.id))
+        if window.currentProject != previousProject { window.activePane = nil }
+        if let active = window.activePane, !panes.contains(active) { window.activePane = nil }
+        if let active = window.activePane {
+            // Tabs kept from before may have merged into one: focus stays.
+            if let tab = currentProject.tabs.first(where: { $0.layout.contains(active) }) {
+                window.selectedTab[window.currentProject] = tab.id
+            } else {
+                window.activePane = nil
+            }
+        }
+        window.selectedTab = window.selectedTab.filter { projectId, tab in
+            project(projectId)?.tabs.contains { $0.id == tab } ?? false
+        }
+        for project in projects {
+            if let tab = project.tabs.first, window.selectedTab[project.id] == nil {
+                window.selectedTab[project.id] = tab.id
+            }
+        }
+        if window.selectedTab[window.currentProject] != previousTab, let active = window.activePane,
+           !currentProject.tabs.contains(where: { $0.id == window.selectedTab[window.currentProject] && $0.layout.contains(active) })
+        {
             window.activePane = nil
         }
-        let selected = window.selectedTab[window.currentProject]
-        if window.activePane == nil,
-           let tab = projects.lazy.flatMap(\.tabs).first(where: { $0.id == selected })
-        {
-            window.activePane = tab.layout.leaves.first
-        }
-        let panes = Set(projects.flatMap(\.tabs).flatMap(\.panes).map(\.id))
-        agentComposerDrafts = agentComposerDrafts.filter { panes.contains($0.key) }
         window.focusHistory.removeAll { !panes.contains($0) }
-        try validate()
-        normalizeProjects()
+        focusSelectedTab()
         try validate()
     }
 
@@ -157,8 +185,6 @@ public struct AppState: Codable, Equatable, Sendable {
     public var home: Project { projects[0] }
 
     public var currentProject: Project { project(window.currentProject) ?? home }
-
-    public func startupCommand(_ pane: PaneId) -> String? { startupCommands[pane] }
 
     /// The pane `tab` shows as its own: the active pane, or the one last
     /// focused in it.
@@ -287,7 +313,7 @@ public struct AppState: Codable, Equatable, Sendable {
         }
         var sessions: [SessionId] = []
         for pane in project.tabs.flatMap(\.panes) {
-            startupCommands[pane.id] = nil
+            paneTitles[pane.id] = nil
             if let session = pane.content.session, !sessions.contains(session) { sessions.append(session) }
         }
         return sessions
@@ -296,95 +322,36 @@ public struct AppState: Codable, Equatable, Sendable {
     // MARK: Tabs
 
     /// Opens a terminal: in a project, a new pane in its layout; in Home, a
-    /// new standalone tab. Returns the tab that holds it.
+    /// new standalone tab. Returns the new pane.
     @discardableResult
-    public mutating func openTerminalTab(_ project: ProjectId) throws -> TabId {
-        try openTerminalTab(project, near: window.selectedTab[project])
+    public mutating func openTerminal(_ project: ProjectId, launch: TerminalLaunch? = nil) throws -> PaneId {
+        let pane = Pane.terminal(launch: launch)
+        try openPane(project, pane)
+        return pane.id
     }
 
-    private mutating func openTerminalTab(_ project: ProjectId, near: TabId?) throws -> TabId {
+    /// Opens `pane` in `project` and focuses it: a new tab in Home, else a
+    /// pane in the project's tab.
+    public mutating func openPane(_ project: ProjectId, _ pane: Pane) throws {
         try projects[projectIndex(project)].requireAvailable()
+        let tab: TabId
         if isSingleTab(project) {
-            let (tab, pane) = try openPaneInContainer(project, pane: .terminal(), focusLeaf: window.activePane)
-            window.selectedTab[project] = tab
-            window.currentProject = project
-            window.activate(pane)
-            return tab
+            tab = try openPaneInContainer(project, pane: pane, focusLeaf: window.activePane).0
+        } else {
+            tab = try addTab(project, Tab(pane: pane))
         }
-        let tab = Tab(pane: .terminal())
-        window.activate(tab.layout.leaves.first)
-        try addTab(project, tab)
-        window.selectedTab[project] = tab.id
+        window.selectedTab[project] = tab
         window.currentProject = project
-        return tab.id
-    }
-
-    /// Opens a terminal tab right after `anchor`, after any pinned tabs.
-    @discardableResult
-    public mutating func openTerminalTab(_ project: ProjectId, adjacentTo anchor: TabId) throws -> TabId {
-        let projectIndex = try projectIndex(project)
-        try projects[projectIndex].requireAvailable()
-        guard let index = projects[projectIndex].tabs.firstIndex(where: { $0.id == anchor }) else {
-            throw AppError.unknownTab(project: project, tab: anchor)
-        }
-        if isSingleTab(project) { return try openTerminalTab(project, near: anchor) }
-        let boundary = projects[projectIndex].tabs.prefix { $0.pinned }.count
-        let destination = max(index + 1, boundary)
-        let id = try openTerminalTab(project, near: anchor)
-        let tab = projects[projectIndex].tabs.removeLast()
-        projects[projectIndex].tabs.insert(tab, at: destination)
-        return id
-    }
-
-    public mutating func setTabTitle(_ tab: TabId, _ title: String?) throws {
-        let (p, t) = try availableTab(tab)
-        projects[p].tabs[t].customTitle = title
-        projects[p].tabs[t].sanitizeTitles()
-    }
-
-    public mutating func setTabColor(_ tab: TabId, _ color: TabColor?) throws {
-        let (p, t) = try availableTab(tab)
-        projects[p].tabs[t].color = color
-    }
-
-    /// Pins or unpins a tab; pinned tabs come first.
-    public mutating func toggleTabPin(_ tab: TabId) throws {
-        let (p, t) = try availableTab(tab)
-        var moved = projects[p].tabs.remove(at: t)
-        moved.pinned.toggle()
-        let boundary = projects[p].tabs.prefix { $0.pinned }.count
-        projects[p].tabs.insert(moved, at: boundary)
+        try focusPane(pane.id)
     }
 
     /// Closes a tab with its panes. Focus moves to a neighboring tab, or for
     /// a Home terminal to the most recently focused surviving pane.
     public mutating func closeTab(_ project: ProjectId, _ tab: TabId) throws {
-        let p = try projectIndex(project)
-        guard let t = projects[p].tabs.firstIndex(where: { $0.id == tab }) else {
+        guard self.project(project)?.tabs.contains(where: { $0.id == tab }) == true else {
             throw AppError.unknownTab(project: project, tab: tab)
         }
-        for pane in projects[p].tabs[t].panes { cancelPendingCreation(pane.id) }
-        let removedActive = window.activePane.map { projects[p].tabs[t].layout.contains($0) } ?? false
-        let next = projects[p].tabAfterClose(tab)
-        let removed = projects[p].tabs.remove(at: t)
-        var nextPane: PaneId?
-        if let next, let index = projects[p].tabs.firstIndex(where: { $0.id == next }) {
-            nextPane = projects[p].tabs[index].layout.leaves.first
-            if removedActive { projects[p].tabs[index].zoomed = nil }
-        }
-        window.focusHistory.removeAll { removed.layout.contains($0) }
-        if window.selectedTab[project] == tab { window.selectedTab[project] = next }
-        guard removedActive else { return }
-        if projects[p].home {
-            let recent = window.focusHistory.reversed().first { pane in
-                projects.contains { $0.status == .available && $0.tabs.contains { $0.layout.contains(pane) } }
-            }
-            if let recent {
-                try focusPane(recent)
-                return
-            }
-        }
-        window.activate(nextPane)
+        try perform(projects[projectIndex(project)].serverId, .closeTab(tab, keepSessions: false))
     }
 
     public mutating func selectTab(_ project: ProjectId, _ tab: TabId) throws {
@@ -398,41 +365,6 @@ public struct AppState: Codable, Equatable, Sendable {
         focusSelectedTab()
     }
 
-    /// Moves a tab within its project; pinned and unpinned tabs stay apart.
-    public mutating func moveTab(_ project: ProjectId, from: Int, to: Int) throws {
-        let p = try projectIndex(project)
-        try projects[p].requireAvailable()
-        let count = projects[p].tabs.count
-        for index in [from, to] where !(0..<count).contains(index) {
-            throw AppError.invalidTabIndex(index: index, count: count)
-        }
-        let boundary = projects[p].tabs.prefix { $0.pinned }.count
-        let destination = projects[p].tabs[from].pinned ? min(to, max(boundary - 1, 0)) : max(to, boundary)
-        let tab = projects[p].tabs.remove(at: from)
-        projects[p].tabs.insert(tab, at: destination)
-    }
-
-    /// Moves `from` to where `to` is among the tabs listed in `visible`,
-    /// leaving hidden tabs where they are.
-    public mutating func moveVisibleTab(_ project: ProjectId, from: TabId, to: TabId, visible: [TabId]) throws {
-        let p = try projectIndex(project)
-        try projects[p].requireAvailable()
-        guard let pinned = projects[p].tabs.first(where: { $0.id == from })?.pinned else { return }
-        let indices = projects[p].tabs.indices.filter {
-            projects[p].tabs[$0].pinned == pinned && visible.contains(projects[p].tabs[$0].id)
-        }
-        guard let start = indices.firstIndex(where: { projects[p].tabs[$0].id == from }),
-              let end = indices.firstIndex(where: { projects[p].tabs[$0].id == to })
-        else { return }
-        if start < end {
-            for position in start..<end { projects[p].tabs.swapAt(indices[position], indices[position + 1]) }
-        } else if start > end {
-            for position in stride(from: start, to: end, by: -1) {
-                projects[p].tabs.swapAt(indices[position - 1], indices[position])
-            }
-        }
-    }
-
     /// Opens a pane in the project's layout, right of `focusLeaf` or its
     /// last pane, creating the layout when the project has none. Does not
     /// change focus.
@@ -441,9 +373,7 @@ public struct AppState: Codable, Equatable, Sendable {
         let p = try projectIndex(project)
         try projects[p].requireAvailable()
         guard let tab = projects[p].tabs.first else {
-            let tab = Tab(pane: pane)
-            try addTab(project, tab)
-            return (tab.id, pane.id)
+            return (try addTab(project, Tab(pane: pane)), pane.id)
         }
         guard let leaf = focusLeaf.flatMap({ tab.layout.contains($0) ? $0 : nil }) ?? tab.layout.leaves.last else {
             throw AppError.invalidState("container has no panes")
@@ -458,109 +388,53 @@ public struct AppState: Codable, Equatable, Sendable {
     public mutating func openTab(_ project: ProjectId, _ pane: Pane) throws -> TabId {
         try projects[projectIndex(project)].requireAvailable()
         guard !isSingleTab(project) else { throw AppError.invalidState("only Home holds several tabs") }
-        let tab = Tab(pane: pane)
-        try addTab(project, tab)
+        let tab = try addTab(project, Tab(pane: pane))
         try selectProject(project)
-        try selectTab(project, tab.id)
+        try selectTab(project, tab)
         try focusPane(pane.id)
         revealCurrentProject()
-        return tab.id
+        return tab
     }
 
     func isSingleTab(_ project: ProjectId) -> Bool {
         self.project(project).map { !$0.home } ?? false
     }
 
-    mutating func addTab(_ project: ProjectId, _ tab: Tab) throws {
+    /// Adds `tab` to `project`, returning the tab that holds its panes: a
+    /// project other than Home that has a tab already merges it in.
+    @discardableResult
+    mutating func addTab(_ project: ProjectId, _ tab: Tab) throws -> TabId {
         let p = try projectIndex(project)
-        projects[p].tabs.append(tab)
-        if !projects[p].home { Self.normalize(&projects[p]) }
-    }
-
-    /// Merges a project's tabs into one in order: the first tab survives and
-    /// each later layout is appended on the right intact, keeping every pane
-    /// and session. Home keeps its tabs; an empty project stays empty.
-    public static func normalize(_ project: inout Project) {
-        guard !project.home, var survivor = project.tabs.first else { return }
-        if project.tabs.count > 1 { survivor.zoomed = nil }
-        for tab in project.tabs.dropFirst() {
-            survivor.layout = .split(axis: .horizontal, ratio: 0.5, first: survivor.layout, second: tab.layout)
-            survivor.panes += tab.panes
-        }
-        project.tabs = [survivor]
-    }
-
-    /// Normalizes every project and repairs selection and focus.
-    mutating func normalizeProjects() {
-        for index in projects.indices where !projects[index].home {
-            Self.normalize(&projects[index])
-            window.selectedTab[projects[index].id] = projects[index].tabs.first?.id
-        }
-        focusSelectedTab()
+        try perform(projects[p].serverId, .createTab(project: project, tab: tab, after: nil))
+        guard let leaf = tab.layout.leaves.first else { return tab.id }
+        return projects[p].tabs.first { $0.layout.contains(leaf) }?.id ?? tab.id
     }
 
     // MARK: Panes
 
     public mutating func closePane(_ pane: PaneId) throws {
         _ = try availablePaneTab(pane)
-        try removePane(pane)
+        try removePane(pane, keepSession: false)
     }
 
     /// Closes the pane but leaves its terminal running.
     public mutating func detachPane(_ pane: PaneId) throws {
         _ = try availablePaneTab(pane)
-        startingDirectories[pane] = nil
-        try removePane(pane)
-    }
-
-    /// Closes every pane of `server` that shows `session`.
-    public mutating func closeSessionPanes(server: ServerId, session: SessionId) throws {
-        let panes = projects.filter { $0.serverId == server }.flatMap(\.tabs).flatMap(\.panes)
-            .filter { $0.content.session == session }.map(\.id)
-        for pane in panes { try removePane(pane) }
-        discardUnreferenced(server: server, session: session)
-    }
-
-    /// Closes a terminal pane, queuing its session's end when no other pane
-    /// shows it.
-    public mutating func closeSessionPane(_ pane: PaneId) throws {
-        guard let server = paneServer(pane), let content = self.pane(pane)?.content else {
-            throw AppError.unknownPane(pane)
-        }
-        try removePane(pane)
-        if let session = content.session { discardUnreferenced(server: server, session: session) }
-    }
-
-    /// Closes `server`'s terminal panes.
-    public mutating func clearTerminalPanes(server: ServerId) throws {
-        let panes = projects.filter { $0.serverId == server }.flatMap(\.tabs).flatMap(\.panes)
-            .filter(\.content.isTerminal).map(\.id)
-        for pane in panes { try removePane(pane) }
+        try removePane(pane, keepSession: true)
     }
 
     /// Removes a pane, even in a project whose folder is missing. Its
-    /// neighbor takes focus, and the row it leaves is equalized.
-    mutating func removePane(_ pane: PaneId) throws {
-        guard let (p, t) = paneTab(pane) else { throw AppError.unknownPane(pane) }
-        cancelPendingCreation(pane)
-        if projects[p].tabs[t].panes.count == 1 {
-            try closeTab(projects[p].id, projects[p].tabs[t].id)
-            return
-        }
-        let layout = projects[p].tabs[t].layout
-        let neighbor = [Direction.right, .left, .down, .up].lazy.compactMap { layout.neighbor(of: pane, $0) }.first
-        projects[p].tabs[t].layout.removeEqualized(pane)
-        projects[p].tabs[t].panes.removeAll { $0.id == pane }
-        if projects[p].tabs[t].zoomed == pane { projects[p].tabs[t].zoomed = nil }
-        let fallback = neighbor ?? projects[p].tabs[t].layout.leaves.first
-        window.focusHistory.removeAll { $0 == pane }
-        if window.activePane == pane { window.activate(fallback) }
+    /// neighbor takes focus, and the row it leaves is equalized. Its server
+    /// ends its terminal unless `keepSession` or another pane shows it.
+    mutating func removePane(_ pane: PaneId, keepSession: Bool) throws {
+        guard let server = paneServer(pane) else { throw AppError.unknownPane(pane) }
+        try perform(server, .removePane(pane, keepSession: keepSession))
     }
 
     /// Splits `pane` with a new terminal on its `edge` and focuses it.
     @discardableResult
-    public mutating func splitPane(_ pane: PaneId, edge: Direction) throws -> PaneId {
-        let new = Pane.terminal()
+    public mutating func splitPane(_ pane: PaneId, edge: Direction, launch: TerminalLaunch? = nil) throws -> PaneId {
+        let new = Pane.terminal(launch: launch)
         try insertSplitPane(after: pane, new, edge: edge)
         try focusPane(new.id)
         return new.id
@@ -569,43 +443,40 @@ public struct AppState: Codable, Equatable, Sendable {
     /// Every typed pane goes in through here: split beside `pane`, equalize
     /// the row it joins, and leave zoom.
     public mutating func insertSplitPane(after pane: PaneId, _ new: Pane, edge: Direction) throws {
-        let (p, t) = try availablePaneTab(pane)
-        projects[p].tabs[t].layout.split(pane, new: new.id, edge: edge)
-        projects[p].tabs[t].layout.equalizeParent(of: new.id)
-        projects[p].tabs[t].zoomed = nil
-        projects[p].tabs[t].panes.append(new)
+        _ = try availablePaneTab(pane)
+        guard let server = paneServer(pane) else { throw AppError.unknownPane(pane) }
+        try perform(server, .insertPane(new, anchor: pane, edge: edge))
     }
 
     /// Puts a new terminal where `pane` is, with its title, and returns it.
-    /// The old terminal's session is the caller's to end.
-    public mutating func restartTerminal(_ pane: PaneId) throws -> PaneId {
-        cancelPendingCreation(pane)
+    /// The server ends the old terminal.
+    public mutating func restartTerminal(_ pane: PaneId, launch: TerminalLaunch? = nil) throws -> PaneId {
         let (p, t) = try availablePaneTab(pane)
-        guard let index = projects[p].tabs[t].panes.firstIndex(where: { $0.id == pane }) else {
-            throw AppError.unknownPane(pane)
-        }
-        guard projects[p].tabs[t].panes[index].content.isTerminal else { throw AppError.notTerminal(pane) }
-        let new = Pane.terminal(title: projects[p].tabs[t].panes[index].title)
-        projects[p].tabs[t].layout.replace(pane, with: new.id)
-        projects[p].tabs[t].panes[index] = new
-        if projects[p].tabs[t].zoomed == pane { projects[p].tabs[t].zoomed = new.id }
+        guard let old = projects[p].tabs[t].pane(pane) else { throw AppError.unknownPane(pane) }
+        guard old.content.isTerminal else { throw AppError.notTerminal(pane) }
+        let new = Pane.terminal(title: old.title, launch: launch)
+        let saved = (window, paneTitles)
+        paneTitles[new.id] = paneTitles[pane]
         window.focusHistory = window.focusHistory.map { $0 == pane ? new.id : $0 }
         if window.activePane == pane { window.activePane = new.id }
+        if projects[p].tabs[t].zoomed == pane { window.zoomed[projects[p].tabs[t].id] = new.id }
+        do {
+            try perform(projects[p].serverId, .replacePane(pane, with: new))
+        } catch {
+            (window, paneTitles) = saved
+            throw error
+        }
         return new.id
-    }
-
-    public mutating func setPaneProxy(_ pane: PaneId, _ proxy: Bool) throws {
-        try updatePane(pane) { $0.proxy = proxy }
     }
 
     /// Drops `pane` on `target`: on its `edge`, or swapping places.
     public mutating func movePane(_ pane: PaneId, onto target: PaneId, edge: Direction?) throws {
+        if let edge { return try dockPane(pane, beside: target, edge: edge, level: 0) }
         let (p, t) = try availablePaneTab(pane)
-        guard let layout = projects[p].tabs[t].layout.moved(pane, onto: target, edge: edge) else {
+        guard projects[p].tabs[t].layout.moved(pane, onto: target, edge: nil) != nil else {
             throw AppError.invalidState("invalid pane drop")
         }
-        projects[p].tabs[t].layout = layout
-        projects[p].tabs[t].zoomed = nil
+        try perform(projects[p].serverId, .swapPanes(pane, target))
         try focusPane(pane)
     }
 
@@ -613,58 +484,58 @@ public struct AppState: Codable, Equatable, Sendable {
     /// `level` picks.
     public mutating func dockPane(_ pane: PaneId, beside anchor: PaneId, edge: Direction, level: Int) throws {
         let (p, t) = try availablePaneTab(pane)
-        guard let layout = projects[p].tabs[t].layout.docked(pane, beside: anchor, edge: edge, level: level) else {
+        guard projects[p].tabs[t].layout.docked(pane, beside: anchor, edge: edge, level: level) != nil else {
             throw AppError.invalidState("invalid pane dock")
         }
-        projects[p].tabs[t].layout = layout
-        projects[p].tabs[t].zoomed = nil
+        try perform(projects[p].serverId, .dockPane(pane, anchor: anchor, edge: edge, level: level))
         try focusPane(pane)
     }
 
     /// Focuses `pane`, selecting its project and tab. A zoomed tab zooms it.
     public mutating func focusPane(_ pane: PaneId) throws {
         let (p, t) = try availablePaneTab(pane)
-        if projects[p].tabs[t].zoomed != nil { projects[p].tabs[t].zoomed = pane }
+        if projects[p].tabs[t].zoomed != nil { setZoom(projects[p].tabs[t].id, pane) }
         window.currentProject = projects[p].id
         window.selectedTab[projects[p].id] = projects[p].tabs[t].id
         window.activate(pane)
     }
 
+    /// Zooms `pane` alone in its tab, or shows the whole tab again. Only this
+    /// app's view changes.
     public mutating func toggleZoom(_ pane: PaneId) throws {
         try focusPane(pane)
         let (p, t) = try availablePaneTab(pane)
-        projects[p].tabs[t].zoomed = projects[p].tabs[t].zoomed == pane ? nil : pane
+        setZoom(projects[p].tabs[t].id, projects[p].tabs[t].zoomed == pane ? nil : pane)
+    }
+
+    mutating func setZoom(_ tab: TabId, _ pane: PaneId?) {
+        window.zoomed[tab] = pane
+        for p in projects.indices {
+            guard let t = projects[p].tabs.firstIndex(where: { $0.id == tab }) else { continue }
+            projects[p].tabs[t].zoomed = pane
+        }
     }
 
     public mutating func setRatio(_ tab: TabId, path: [Branch], ratio: Double) throws {
         let (p, t) = try availableTab(tab)
-        do {
-            try projects[p].tabs[t].layout.setRatio(at: path, to: ratio)
-        } catch {
-            throw AppError.invalidState("\(error)")
+        guard ratio.isFinite, let split = projects[p].tabs[t].layout.anchor(at: path) else {
+            throw AppError.invalidState("unknown split path")
         }
+        try perform(projects[p].serverId, .setRatio(tab, split: split, ratio: ratio))
     }
 
     /// Gives every row and column of `pane`'s layout equal shares.
     public mutating func equalizeSplits(_ pane: PaneId) throws {
         let (p, t) = try availablePaneTab(pane)
-        guard let layout = projects[p].tabs[t].layout.equalized() else {
-            throw AppError.invalidState("layout has an empty split")
-        }
-        projects[p].tabs[t].layout = layout
+        try perform(projects[p].serverId, .equalize(projects[p].tabs[t].id))
     }
 
-    public mutating func setPaneSession(_ pane: PaneId, _ session: SessionId?) throws {
-        guard self.pane(pane)?.content.isTerminal ?? false else {
-            throw self.pane(pane) == nil ? AppError.unknownPane(pane) : AppError.notTerminal(pane)
-        }
-        try updatePane(pane) { $0.content = .terminal(session: session) }
-    }
-
+    /// Records the title a pane shows here.
     public mutating func setPaneTitle(_ pane: PaneId, _ title: String) throws {
-        try updatePane(pane) { pane in
-            pane.title = pane.content.isTerminal ? TerminalTitle.sanitizeOrDefault(title) : title
-        }
+        guard let found = self.pane(pane) else { throw AppError.unknownPane(pane) }
+        let title = found.content.isTerminal ? TerminalTitle.sanitizeOrDefault(title) : title
+        paneTitles[pane] = title == found.content.defaultTitle ? nil : title
+        try updatePane(pane) { $0.title = title }
     }
 
     public mutating func setWindowBounds(_ bounds: WindowBounds?) throws {
@@ -693,7 +564,7 @@ public struct AppState: Codable, Equatable, Sendable {
             try focusPane(existing.id)
             return existing.id
         }
-        let pane = Pane(title: content.nativeTitle ?? "", content: content)
+        let pane = Pane(content: content)
         if isSingleTab(project) {
             let (tab, id) = try openPaneInContainer(project, pane: pane, focusLeaf: window.activePane)
             try selectProject(project)
@@ -701,25 +572,10 @@ public struct AppState: Codable, Equatable, Sendable {
             try focusPane(id)
             return id
         }
-        let tab = Tab(pane: pane)
-        try addTab(project, tab)
+        let tab = try addTab(project, Tab(pane: pane))
         try selectProject(project)
-        try selectTab(project, tab.id)
+        try selectTab(project, tab)
         return pane.id
-    }
-
-    // MARK: Startup commands
-
-    /// Types `command` into the pane's new terminal once it starts.
-    public mutating func setStartupCommand(_ pane: PaneId, _ command: String) throws {
-        guard let found = self.pane(pane) else { throw AppError.unknownPane(pane) }
-        guard found.content.isTerminal else { throw AppError.notTerminal(pane) }
-        let command = command.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !command.isEmpty { startupCommands[pane] = command }
-    }
-
-    public mutating func takeStartupCommand(_ pane: PaneId) -> String? {
-        startupCommands.removeValue(forKey: pane)
     }
 
     // MARK: Focus
@@ -840,14 +696,6 @@ public struct AppState: Codable, Equatable, Sendable {
         }
         refreshProjectStatuses()
         if project(window.currentProject) == nil { window.currentProject = home.id }
-        window.selectedTab = window.selectedTab.filter { projectId, tab in
-            project(projectId)?.tabs.contains { $0.id == tab } ?? false
-        }
-        for project in projects {
-            if let tab = project.tabs.first, window.selectedTab[project.id] == nil {
-                window.selectedTab[project.id] = tab.id
-            }
-        }
     }
 
     /// Moves the Home at `index` in front of its server's other projects, and

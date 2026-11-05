@@ -92,15 +92,23 @@ public struct CreateSession: Hashable, Codable, Sendable {
     public var command: String?
     /// More environment for the program, such as a proxy.
     public var environment: [String: String]
+    /// The tab pane the session is for. The server shows the session there
+    /// once it starts, and doesn't start it if the pane is gone.
+    public var pane: PaneId?
+    /// Typed into the shell once it starts, only by the request that starts it.
+    public var input: String?
 
     public init(project: ProjectId, operation: OperationId = OperationId(), directory: ServerPath, size: Size,
-                command: String? = nil, environment: [String: String] = [:]) {
+                command: String? = nil, environment: [String: String] = [:], pane: PaneId? = nil,
+                input: String? = nil) {
         self.project = project
         self.operation = operation
         self.directory = directory
         self.size = size
         self.command = command
         self.environment = environment
+        self.pane = pane
+        self.input = input
     }
 }
 
@@ -198,9 +206,11 @@ public enum Topic: OpenEnum {
     case remoteAccess
     /// A device booted or stopped, or devices were added or removed.
     case devices
+    /// A tab, pane or layout changed.
+    case tabs
     case unknown(String)
 
-    public static let knownCases: [Topic] = [.catalog, .sessions, .activity, .remoteAccess, .devices]
+    public static let knownCases: [Topic] = [.catalog, .sessions, .activity, .remoteAccess, .devices, .tabs]
 
     public var rawValue: String {
         switch self {
@@ -209,6 +219,7 @@ public enum Topic: OpenEnum {
         case .activity: "activity"
         case .remoteAccess: "remoteAccess"
         case .devices: "devices"
+        case .tabs: "tabs"
         case .unknown(let value): value
         }
     }
@@ -265,6 +276,10 @@ public enum RequestBody: Hashable, Codable, Sendable {
     case listProjectSessions(project: ProjectId, after: SessionId?, revision: UInt64?)
     /// The folders directly inside an absolute path, for remote project pickers.
     case listFolders(ServerPath)
+
+    // Tabs
+    case readTabs
+    case mutateTabs(TabIntent)
 
     // Server
     case readServerSettings
@@ -356,6 +371,8 @@ public enum RequestBody: Hashable, Codable, Sendable {
         case "listProjectSessions":
             self = .listProjectSessions(project: try c("project"), after: try c("after"), revision: try c("revision"))
         case "listFolders": self = .listFolders(try c("path"))
+        case "readTabs": self = .readTabs
+        case "mutateTabs": self = .mutateTabs(try c("intent"))
         case "readServerSettings": self = .readServerSettings
         case "writeServerSettings": self = .writeServerSettings(try c("settings"))
         case "stopServer": self = .stopServer(force: try c("force"))
@@ -489,6 +506,11 @@ public enum RequestBody: Hashable, Codable, Sendable {
         case .mutateProject(let intent):
             var c = try TaggedEncoding(encoder, "mutateProject")
             try c(intent, "intent")
+        case .readTabs:
+            try TaggedEncoding(encoder, "readTabs")
+        case .mutateTabs(let intent):
+            var c = try TaggedEncoding(encoder, "mutateTabs")
+            try c(intent, "intent")
         case .listProjectSessions(let project, let after, let revision):
             var c = try TaggedEncoding(encoder, "listProjectSessions")
             try c(project, "project")
@@ -608,6 +630,8 @@ public enum ReplyBody: Hashable, Codable, Sendable {
     // Catalog
     case catalog(CatalogPage)
     case projectMutated(revision: UInt64)
+    case tabs(TabsSnapshot)
+    case tabsMutated(revision: UInt64)
     case projectSessions(ProjectSessions)
     /// Folder names, sorted ignoring case.
     case folders([ServerPath])
@@ -687,6 +711,8 @@ public enum ReplyBody: Hashable, Codable, Sendable {
         case "agentStateReported": self = .agentStateReported
         case "catalog": self = .catalog(try c("page"))
         case "projectMutated": self = .projectMutated(revision: try c("revision"))
+        case "tabs": self = .tabs(try c("tabs"))
+        case "tabsMutated": self = .tabsMutated(revision: try c("revision"))
         case "projectSessions": self = .projectSessions(try c("page"))
         case "folders": self = .folders(try c("names"))
         case "serverSettings": self = .serverSettings(try c("settings"))
@@ -785,6 +811,12 @@ public enum ReplyBody: Hashable, Codable, Sendable {
             try c(page, "page")
         case .projectMutated(let revision):
             var c = try TaggedEncoding(encoder, "projectMutated")
+            try c(revision, "revision")
+        case .tabs(let tabs):
+            var c = try TaggedEncoding(encoder, "tabs")
+            try c(tabs, "tabs")
+        case .tabsMutated(let revision):
+            var c = try TaggedEncoding(encoder, "tabsMutated")
             try c(revision, "revision")
         case .projectSessions(let page):
             var c = try TaggedEncoding(encoder, "projectSessions")

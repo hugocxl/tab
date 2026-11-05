@@ -176,6 +176,38 @@ enum Samples {
         cursorStyle: .underline, cursorBlink: true
     )
 
+    static let pane = PaneId(uuid: uuid(40))
+    static let otherPane = PaneId(uuid: uuid(41))
+    static let tabId = TabId(uuid: uuid(42))
+    static let tab: Tab = {
+        var tab = Tab(id: tabId, panes: [
+            Pane(id: pane, content: .terminal(session: session), proxy: true),
+            Pane(id: otherPane, content: .terminal(session: nil),
+                 launch: TerminalLaunch(directory: "/tmp", command: "make test")),
+        ], layout: .split(axis: .horizontal, ratio: 0.4, first: .leaf(pane), second: .leaf(otherPane)))
+        tab.createdAt = Date(timeIntervalSinceReferenceDate: 100)
+        tab.pinned = true
+        tab.color = try? TabColor("#3e63dd")
+        tab.customTitle = "Build"
+        return tab
+    }()
+
+    static let tabMutations: [TabMutation] = [
+        .createTab(project: project, tab: tab, after: TabId(uuid: uuid(43))),
+        .closeTab(tabId, keepSessions: true),
+        .insertPane(Pane(id: PaneId(uuid: uuid(44)), content: .agent(session: session, provider: .codex)),
+                    anchor: pane, edge: .down),
+        .removePane(pane, keepSession: false),
+        .replacePane(pane, with: Pane(id: PaneId(uuid: uuid(45)), content: .terminal(session: nil))),
+        .swapPanes(pane, otherPane),
+        .dockPane(pane, anchor: otherPane, edge: .left, level: 1),
+        .setRatio(tabId, split: SplitAnchor(axis: .horizontal, first: pane, second: otherPane), ratio: 0.3),
+        .equalize(tabId),
+        .updatePane(pane, content: .browser(BrowserPane(url: "https://example.com", profile: "work"))),
+        .updatePane(pane, content: .device(DevicePane(udid: "UDID", name: "iPhone", hardwareKeyboard: false))),
+        .adoptTabs(project: project, tabs: [tab]),
+    ]
+
     static let requests: [RequestBody] = [
         .hello(Hello(versions: [.v1], client: .desktop, clientId: client,
                      build: BuildInfo(version: "1.0.0"))),
@@ -198,6 +230,9 @@ enum Samples {
         .mutateProject(ProjectIntent(operation: operation, mutation: .rename(project: project, name: "New"))),
         .mutateProject(ProjectIntent(operation: operation, mutation: .delete(project))),
         .mutateProject(ProjectIntent(operation: operation, mutation: .pruneWorktree(project))),
+        .readTabs,
+        .createSession(CreateSession(project: project, operation: pane.creationToken, directory: directory, size: size,
+                                     pane: pane, input: "make test")),
         .listProjectSessions(project: project, after: session, revision: 2), .listFolders("/Users"),
         .readServerSettings,
         .writeServerSettings(ServerSettingsDoc(startupCommand: ["/bin/zsh"], historyBudgetBytes: 1024,
@@ -216,7 +251,7 @@ enum Samples {
         .readRemoteAccess, .writeRemoteAccess(RemoteAccessSettings(enabled: true, port: 7419)),
         .startPairing(hosts: ["mac.local", "192.168.1.2"]), .cancelPairing, .revokeDevice(device),
         .unknown("someFutureRequest"),
-    ]
+    ] + tabMutations.map { .mutateTabs(TabIntent(operation: operation, mutation: $0)) }
 
     static let invite = PairingInvite(hosts: ["mac.local"], port: 7419, fingerprint: Data(repeating: 0xab, count: 32),
                                       code: Data(repeating: 0x01, count: 16))
@@ -252,6 +287,8 @@ enum Samples {
                              revision: 1, projects: [ProjectDescriptor(id: project, home: true, directory: "/Users/me",
                                                                        name: "Home")], next: nil)),
         .projectMutated(revision: 4),
+        .tabs(TabsSnapshot(revision: 9, applied: [operation], projects: [ProjectTabs(project: project, tabs: [tab])])),
+        .tabsMutated(revision: 10),
         .projectSessions(ProjectSessions(revision: 1, sessions: [
             ProjectSession(info: SessionInfo(project: project, id: session, directory: directory), status: .live,
                            owner: SessionClient(id: client, kind: .desktop), attached: true),
@@ -276,6 +313,7 @@ enum Samples {
 
     static let events: [EventBody] = [
         .changed(topic: .catalog, revision: 1), .changed(topic: .remoteAccess, revision: 2),
+        .changed(topic: .tabs, revision: 3),
         .sessionMetadata(session: session, metadata: SessionMetadata(title: "t", directory: directory,
                                                                      process: ForegroundProcess(name: "zsh",
                                                                                                 isShell: true))),

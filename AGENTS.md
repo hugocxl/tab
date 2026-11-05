@@ -23,8 +23,8 @@ runs the same script.
 - Three executables ship in one bundle:
   - `TabDesktop` is the AppKit app. It isn't named `Tab` because `Tab` and `tab`
     collide on a case-insensitive disk.
-  - `tabd` is the server. It owns terminals, agent chats, projects, history, Git
-    and files, and keeps running after the app quits.
+  - `tabd` is the server. It owns terminals, agent chats, projects, tabs, history,
+    Git and files, and keeps running after the app quits.
   - `tab` is the CLI.
 - The app and the CLI start `tabd` when it isn't running and talk to it over a Unix
   socket, or `ssh host tab stdio` for a remote Mac.
@@ -46,6 +46,13 @@ runs the same script.
   - `TabApp` (TabClient, TabCore, TabDevices, TabProtocol): the UI. Apps never link
     server code.
   - Keep `Package.swift` and this list in sync.
+- Each server keeps its projects' tabs and their split layouts in
+  `sessions/tabs.json`, so every app connected to it shows the same tabs. Apps
+  change them with `TabIntent`s that the server and the app apply through the
+  same `TabReducer`; the app shows the server's tabs with its unconfirmed changes
+  on top. Each app keeps only its own view: selection, focus, zoom and pane titles.
+  The server ends a pane's terminal when the pane closes, and closes a pane when
+  its terminal ends.
 - Old and new builds talk to each other, so the protocol only grows. JSON messages
   are `Codable` enums with a `type` discriminator. Unknown fields are ignored, and
   unknown requests get an `unsupported` reply. Bump `ProtocolVersion` only for a

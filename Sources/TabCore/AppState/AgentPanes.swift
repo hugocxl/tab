@@ -18,15 +18,13 @@ extension AppState {
             revealCurrentProject()
             return existing.id
         }
-        let pane = Pane(title: "Agent", content: .agent(session: session, provider: provider))
+        let pane = Pane(content: .agent(session: session, provider: provider))
         let tab: TabId
         if isSingleTab(project) {
             tab = try openPaneInContainer(project, pane: pane, focusLeaf: window.activePane).0
         } else {
             try projects[projectIndex(project)].requireAvailable()
-            let standalone = Tab(pane: pane)
-            try addTab(project, standalone)
-            tab = standalone.id
+            tab = try addTab(project, Tab(pane: pane))
         }
         try selectTab(project, tab)
         try focusPane(pane.id)

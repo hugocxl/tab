@@ -222,6 +222,20 @@ extension ServerClient {
         return result
     }
 
+    /// Every tab the server keeps; it then reports changes as `changed(.tabs)`.
+    public func tabs() async throws -> TabsSnapshot {
+        let reply = try await request(.readTabs)
+        guard case .tabs(let snapshot) = reply else { throw unexpected(reply) }
+        return snapshot
+    }
+
+    /// Changes the server's tabs, returning their revision with the change.
+    public func mutateTabs(_ intent: TabIntent) async throws -> UInt64 {
+        let reply = try await request(.mutateTabs(intent))
+        guard case .tabsMutated(let revision) = reply else { throw unexpected(reply) }
+        return revision
+    }
+
     public func mutateProject(_ intent: ProjectIntent) async throws -> UInt64 {
         let reply = try await request(.mutateProject(intent))
         guard case .projectMutated(let revision) = reply else { throw unexpected(reply) }

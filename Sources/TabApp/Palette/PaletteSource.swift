@@ -94,8 +94,8 @@ final class PaletteSource: PaletteDataSource {
         case .changes: return PageSpec(page, placeholder: "Filter changes…", breadcrumb: "Changes")
         case .worktrees: return PageSpec(page, placeholder: "Switch to worktree…", breadcrumb: "Switch Worktree")
         case .terminals:
-            var spec = PageSpec(page, placeholder: "Search terminals…", breadcrumb: "Existing Terminals")
-            spec.emptyMessage = "Every terminal of this project is open"
+            var spec = PageSpec(page, placeholder: "Search terminals…", breadcrumb: "Detached Terminals")
+            spec.emptyMessage = "Every terminal of this project is in a tab"
             return spec
         case .projects: return PageSpec(page, placeholder: "Switch to project…", breadcrumb: "Switch Project")
         case .workspaces: return PageSpec(page, placeholder: "Switch to workspace…", breadcrumb: "Switch Workspace")
@@ -224,7 +224,7 @@ final class PaletteSource: PaletteDataSource {
         command(.newHomeTab, "New Home Terminal", .terminal)
         page(ShortcutId.newTabInProject.rawValue, "New Terminal in Project…", .terminal, .newInProject(.terminal), shortcut: .newTabInProject)
         page(ShortcutId.newAgentInProject.rawValue, "New Agent in Project…", .panes, .newInProject(.agent), shortcut: .newAgentInProject)
-        page(ShortcutId.existingTerminals.rawValue, "Existing Terminals…", .terminal, .terminals(project), shortcut: .existingTerminals)
+        page(ShortcutId.existingTerminals.rawValue, "Detached Terminals…", .terminal, .terminals(project), shortcut: .existingTerminals)
         command(.closeTab, "Close Tab", .terminal, disabled: model.activeTab == nil)
         let single = model.sidebarListing.targets.count < 2
         command(.nextTab, "Next Tab", .terminal, disabled: single)
@@ -689,15 +689,12 @@ final class PaletteSource: PaletteDataSource {
                     self?.model.openExistingSession(session.info.id, in: project)
                 })
                 item.highlights = match.ranges
-                if let owner = session.owner {
-                    item.subtitle = owner.kind == .desktop ? "Opened in another Tab window" : "Opened by \(owner.kind.rawValue)"
-                }
                 item.badge = session.status == .starting ? "starting" : nil
                 item.kind = PaletteKind.terminal.rawValue
                 item.tile = PaletteKind.terminal.tile
                 return item
             }
-            return items.isEmpty ? .empty(query.isEmpty ? "Every terminal of this project is open" : "No terminals match") : .items(items)
+            return items.isEmpty ? .empty(query.isEmpty ? "Every terminal of this project is in a tab" : "No terminals match") : .items(items)
         }
     }
 
