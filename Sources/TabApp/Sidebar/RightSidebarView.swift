@@ -96,8 +96,8 @@ final class RightSidebarView: ThemedView {
     }
 }
 
-/// The card the selected tab's content fills: the panel color, a hairline
-/// border and the cards' corner radius.
+/// The card the selected tab's content fills: the panes' background, a
+/// hairline border and the cards' corner radius.
 private final class RightSidebarCard: ThemedView {
     private let glass = GlassView(style: .pane)
     override init(frame frameRect: NSRect) {
@@ -121,11 +121,11 @@ private final class RightSidebarCard: ThemedView {
     }
 
     override func updateLayer() {
-        glass.isHidden = !theme.glassEnabled
+        glass.isHidden = !theme.glassPanes
         glass.appearance = theme.nsAppearance
         glass.apply(theme.paneGlass(isKey: window?.isKeyWindow ?? true, isActive: false))
-        layer?.backgroundColor = (theme.glassEnabled ? NSColor.clear : NativeStyle.panel(theme)).cgColor
-        layer?.borderWidth = theme.glassEnabled ? 0 : Metrics.border
+        layer?.backgroundColor = theme.paneBackground.cgColor
+        layer?.borderWidth = theme.glassPanes ? 0 : Metrics.border
         layer?.borderColor = theme.cardBorder.cgColor
     }
 }

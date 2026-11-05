@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.62.0 - 2026-11-05
+
+### Changed
+
+- The right sidebar's Explorer and Git panels share the panes' background, and
+  turn to glass only when glass panes are on.
+
 ## 0.61.0 - 2026-11-05
 
 ### Changed
