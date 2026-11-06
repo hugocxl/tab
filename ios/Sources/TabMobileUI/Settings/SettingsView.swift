@@ -32,6 +32,14 @@ struct SettingsView: View {
                     Text("To stop a device on the Mac, revoke it in Tab's Mobile settings.")
                 }
 
+                Section("Appearance") {
+                    Picker("Appearance", selection: $preferences.appearance) {
+                        ForEach(Preferences.Appearance.allCases, id: \.self) { Text($0.title).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                }
+
                 Section("Terminal") {
                     LabeledContent("Text Size") {
                         Stepper(value: $preferences.fontSize, in: 8...28, step: 1) {

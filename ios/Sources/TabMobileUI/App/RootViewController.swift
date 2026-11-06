@@ -32,11 +32,58 @@ public final class RootViewController: UIViewController {
 
     public override func updateProperties() {
         super.updateProperties()
+        let style = Preferences.shared.appearance.style
+        if view.window?.overrideUserInterfaceStyle != style { view.window?.overrideUserInterfaceStyle = style }
         if app.servers.isEmpty {
             showWelcome()
         } else {
             showTabs()
         }
+    }
+
+    public override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        setNeedsUpdateProperties()
+    }
+
+    // MARK: Hardware keyboard
+
+    /// The desktop's shortcuts for tabs, so an iPad with a keyboard works the same.
+    public override var keyCommands: [UIKeyCommand]? {
+        guard split != nil else { return nil }
+        var commands = [
+            UIKeyCommand(title: "New Terminal Tab", action: #selector(newTerminalTab), input: "t", modifierFlags: .command),
+            UIKeyCommand(title: "New Agent Tab", action: #selector(newAgentTab), input: "a", modifierFlags: [.command, .alternate]),
+            UIKeyCommand(title: "Next Tab", action: #selector(nextTab), input: "]", modifierFlags: .command),
+            UIKeyCommand(title: "Previous Tab", action: #selector(previousTab), input: "[", modifierFlags: .command),
+            UIKeyCommand(title: "Filter Tabs", action: #selector(filterTabs), input: "f", modifierFlags: .command),
+            UIKeyCommand(title: "Toggle Sidebar", action: #selector(toggleSidebarCommand), input: "b", modifierFlags: .command),
+            UIKeyCommand(title: "Settings", action: #selector(settingsCommand), input: ",", modifierFlags: .command),
+        ]
+        for number in 1...9 {
+            // One entry in the shortcut overlay stands for all nine.
+            commands.append(UIKeyCommand(title: number == 1 ? "Tab 1…9" : "", action: #selector(selectNumberedTab),
+                                         input: "\(number)", modifierFlags: .command))
+        }
+        return commands
+    }
+
+    @objc private func newTerminalTab() { list?.newTab(.terminal) }
+    @objc private func newAgentTab() { list?.newTab(.agent(.claude)) }
+    @objc private func nextTab() { list?.selectAdjacentTab(1) }
+    @objc private func previousTab() { list?.selectAdjacentTab(-1) }
+    @objc private func filterTabs() { list?.focusFilter() }
+    @objc private func settingsCommand() { showSettings() }
+
+    @objc private func selectNumberedTab(_ command: UIKeyCommand) {
+        guard let number = command.input.flatMap(Int.init) else { return }
+        list?.selectTab(number: number)
+    }
+
+    @objc private func toggleSidebarCommand() {
+        guard let split else { return }
+        let hidden = split.displayMode == .secondaryOnly
+        split.preferredDisplayMode = hidden ? .oneBesideSecondary : .secondaryOnly
     }
 
     /// Pairs from a `tab://pair` link the system opened.
@@ -115,6 +162,12 @@ public final class RootViewController: UIViewController {
         guard let split else { return }
         showsDetail = true
         server.watchGit(card.project.id)
+        // The same tab when the detail already shows it: refocus, no reload.
+        if let current = (split.viewController(for: .secondary) as? UINavigationController)?.viewControllers.first
+            as? TabViewController, current.server === server, current.tabId == card.tab.id {
+            split.show(.secondary)
+            return
+        }
         split.setViewController(UINavigationController(rootViewController: TabViewController(server: server, tab: card.tab.id)),
                                 for: .secondary)
         split.show(.secondary)

@@ -65,7 +65,8 @@ public final class ServerModel: Identifiable {
     @ObservationIgnored private var tabsDirty = false
     @ObservationIgnored private var active = false
     @ObservationIgnored private var terminals: [SessionId: TerminalController] = [:]
-    @ObservationIgnored private var agents: [SessionId: AgentChatController] = [:]
+    // Observed, so cards that read a pane's chosen agent follow it from the moment the pane opens.
+    private var agents: [SessionId: AgentChatController] = [:]
     @ObservationIgnored private var gitRead: [ProjectId: Date] = [:]
     @ObservationIgnored private var watchedProject: ProjectId?
     @ObservationIgnored private var iconSearches: Set<ProjectId> = []
@@ -491,6 +492,9 @@ public final class ServerModel: Identifiable {
         agents[session] = controller
         return controller
     }
+
+    /// The open controller of an agent pane, if one is shown.
+    func agentController(_ session: SessionId) -> AgentChatController? { agents[session] }
 
     /// Drops controllers of panes no longer on the board.
     public func pruneControllers() {

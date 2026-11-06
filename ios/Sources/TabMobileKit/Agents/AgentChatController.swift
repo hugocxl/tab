@@ -13,7 +13,11 @@ public final class AgentChatController {
     public let project: ProjectId
     public private(set) var provider: AgentChatProvider
     public private(set) var snapshot: AgentChatSnapshot?
-    public private(set) var models: [AgentModelDescriptor] = []
+    /// Each provider's models, as its CLI on the Mac reports them.
+    public private(set) var models: [AgentChatProvider: [AgentModelDescriptor]] = [:]
+    /// The provider and model the next message goes to; nil model is the provider's default.
+    public private(set) var selection: (provider: AgentChatProvider, model: String?)
+    public private(set) var effort: AgentReasoningEffort?
     /// A command is on its way; sending again waits for it.
     public private(set) var busy = false
     public private(set) var error: String?
@@ -29,6 +33,20 @@ public final class AgentChatController {
         self.project = project
         self.provider = provider
         self.server = server
+        selection = (provider, nil)
+    }
+
+    /// The provider stays open to change until the conversation starts, as on the desktop.
+    public var canChangeProvider: Bool { snapshot?.providerSession == nil }
+
+    /// The model the next message uses: the chosen one, the conversation's, or the default.
+    public var effectiveModel: String? {
+        selection.model ?? (selection.provider == snapshot?.provider ? snapshot?.resolvedModel ?? snapshot?.model : nil)
+            ?? models[selection.provider]?.first(where: \.isDefault)?.id
+    }
+
+    public var selectedModel: AgentModelDescriptor? {
+        models[selection.provider]?.first { $0.id == effectiveModel }
     }
 
     public var status: AgentChatStatus { snapshot?.status ?? .idle }
@@ -85,15 +103,26 @@ public final class AgentChatController {
 
     private func accept(_ next: AgentChatSnapshot) {
         guard next.revision >= (snapshot?.revision ?? 0) else { return }
+        let first = snapshot == nil
         snapshot = next
         provider = next.provider
+        // The conversation's own provider and model win, unless this pane chose others for its first message.
+        if first || !canChangeProvider {
+            selection = (next.provider, next.model)
+            effort = next.reasoningEffort
+        }
         error = nil
     }
 
     private func loadModels() {
-        guard models.isEmpty, let client = server?.client else { return }
-        let request = AgentModelCatalogRequest(project: project, provider: provider, forceRefresh: false)
-        Task { models = (try? await client.agentModelCatalog(request))?.models ?? [] }
+        guard let client = server?.client else { return }
+        for provider in AgentChatProvider.allCases where models[provider] == nil {
+            let request = AgentModelCatalogRequest(project: project, provider: provider, forceRefresh: false)
+            Task {
+                guard let reply = try? await client.agentModelCatalog(request) else { return }
+                models[provider] = reply.models
+            }
+        }
     }
 
     // MARK: Commands
@@ -102,16 +131,21 @@ public final class AgentChatController {
     public func send(_ text: String, attachments: [AgentChatAttachment] = []) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty || !attachments.isEmpty else { return }
-        run(.send(session: session, text: trimmed, model: snapshot?.model, reasoningEffort: snapshot?.reasoningEffort,
-                  provider: nil, attachments: attachments.isEmpty ? nil : attachments))
+        run(.send(session: session, text: trimmed, model: selection.model, reasoningEffort: effort,
+                  provider: selection.provider == snapshot?.provider ? nil : selection.provider,
+                  attachments: attachments.isEmpty ? nil : attachments))
     }
 
-    public func setModel(_ model: String?, effort: AgentReasoningEffort?) {
-        // The model applies to the next message; keep it until then.
-        guard var snapshot else { return }
-        snapshot.model = model
-        snapshot.reasoningEffort = effort
-        self.snapshot = snapshot
+    /// Chooses the provider and model for the next message.
+    public func select(provider: AgentChatProvider, model: String?) {
+        guard canChangeProvider || provider == snapshot?.provider else { return }
+        selection = (provider, model)
+        let supported = models[provider]?.first { $0.id == effectiveModel }?.reasoningEfforts ?? []
+        if let effort, !supported.contains(effort) { self.effort = nil }
+    }
+
+    public func select(effort: AgentReasoningEffort?) {
+        self.effort = effort
     }
 
     public func approve(_ item: AgentChatItem, allow: Bool) {

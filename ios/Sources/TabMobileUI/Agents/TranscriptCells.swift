@@ -26,6 +26,7 @@ final class UserMessageCell: UICollectionViewCell {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
+        let column = ReadableColumn.guide(in: contentView)
         bubble.backgroundColor = UIColor.tintColor.withAlphaComponent(0.16)
         bubble.layer.cornerRadius = 20
         bubble.layer.cornerCurve = .continuous
@@ -37,8 +38,8 @@ final class UserMessageCell: UICollectionViewCell {
         NSLayoutConstraint.activate([
             bubble.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 10),
             bubble.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -6),
-            bubble.trailingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.trailingAnchor),
-            bubble.leadingAnchor.constraint(greaterThanOrEqualTo: contentView.layoutMarginsGuide.leadingAnchor,
+            bubble.trailingAnchor.constraint(equalTo: column.trailingAnchor),
+            bubble.leadingAnchor.constraint(greaterThanOrEqualTo: column.leadingAnchor,
                                             constant: 48),
             text.topAnchor.constraint(equalTo: bubble.topAnchor, constant: 10),
             text.bottomAnchor.constraint(equalTo: bubble.bottomAnchor, constant: -10),
@@ -63,13 +64,14 @@ final class AssistantMessageCell: UICollectionViewCell {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
+        let column = ReadableColumn.guide(in: contentView)
         text.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(text)
         NSLayoutConstraint.activate([
             text.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 8),
             text.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -8),
-            text.leadingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.leadingAnchor),
-            text.trailingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.trailingAnchor),
+            text.leadingAnchor.constraint(equalTo: column.leadingAnchor),
+            text.trailingAnchor.constraint(equalTo: column.trailingAnchor),
         ])
     }
 
@@ -92,6 +94,7 @@ final class ToolCell: UICollectionViewCell {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
+        let column = ReadableColumn.guide(in: contentView)
         card.backgroundColor = .secondarySystemBackground
         card.layer.cornerRadius = 14
         card.layer.cornerCurve = .continuous
@@ -125,8 +128,8 @@ final class ToolCell: UICollectionViewCell {
         NSLayoutConstraint.activate([
             card.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 3),
             card.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -3),
-            card.leadingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.leadingAnchor),
-            card.trailingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.trailingAnchor),
+            card.leadingAnchor.constraint(equalTo: column.leadingAnchor),
+            card.trailingAnchor.constraint(equalTo: column.trailingAnchor),
             stack.topAnchor.constraint(equalTo: card.topAnchor, constant: 10),
             stack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -10),
             stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 12),
@@ -214,6 +217,7 @@ final class ThinkingCell: UICollectionViewCell {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
+        let column = ReadableColumn.guide(in: contentView)
         label.numberOfLines = 0
         label.font = .preferredFont(forTextStyle: .footnote)
         label.adjustsFontForContentSizeCategory = true
@@ -223,8 +227,8 @@ final class ThinkingCell: UICollectionViewCell {
         NSLayoutConstraint.activate([
             label.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 6),
             label.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -6),
-            label.leadingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.leadingAnchor),
-            label.trailingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.trailingAnchor),
+            label.leadingAnchor.constraint(equalTo: column.leadingAnchor),
+            label.trailingAnchor.constraint(equalTo: column.trailingAnchor),
         ])
     }
 
@@ -254,6 +258,7 @@ final class ApprovalCell: UICollectionViewCell {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
+        let column = ReadableColumn.guide(in: contentView)
         let card = UIView()
         card.backgroundColor = UIColor.systemOrange.withAlphaComponent(0.12)
         card.layer.cornerRadius = 20
@@ -291,8 +296,8 @@ final class ApprovalCell: UICollectionViewCell {
         NSLayoutConstraint.activate([
             card.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 8),
             card.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -8),
-            card.leadingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.leadingAnchor),
-            card.trailingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.trailingAnchor),
+            card.leadingAnchor.constraint(equalTo: column.leadingAnchor),
+            card.trailingAnchor.constraint(equalTo: column.trailingAnchor),
             stack.topAnchor.constraint(equalTo: card.topAnchor, constant: 16),
             stack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -16),
             stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 16),
@@ -335,6 +340,7 @@ final class NoticeCell: UICollectionViewCell {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
+        let column = ReadableColumn.guide(in: contentView)
         label.numberOfLines = 0
         label.adjustsFontForContentSizeCategory = true
         card.layer.cornerRadius = 14
@@ -346,8 +352,8 @@ final class NoticeCell: UICollectionViewCell {
         NSLayoutConstraint.activate([
             card.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 4),
             card.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -4),
-            card.leadingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.leadingAnchor),
-            card.trailingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.trailingAnchor),
+            card.leadingAnchor.constraint(equalTo: column.leadingAnchor),
+            card.trailingAnchor.constraint(equalTo: column.trailingAnchor),
             label.topAnchor.constraint(equalTo: card.topAnchor, constant: 8),
             label.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -8),
             label.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 12),
@@ -381,6 +387,7 @@ final class WorkCell: UICollectionViewCell {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
+        let column = ReadableColumn.guide(in: contentView)
         label.font = .preferredFont(forTextStyle: .footnote)
         label.adjustsFontForContentSizeCategory = true
         label.textColor = .secondaryLabel
@@ -397,8 +404,8 @@ final class WorkCell: UICollectionViewCell {
         NSLayoutConstraint.activate([
             stack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 8),
             stack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -8),
-            stack.leadingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.trailingAnchor),
+            stack.leadingAnchor.constraint(equalTo: column.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: column.trailingAnchor),
         ])
     }
 
@@ -431,6 +438,7 @@ final class WorkingCell: UICollectionViewCell {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
+        let column = ReadableColumn.guide(in: contentView)
         icon.tintColor = .tintColor
         icon.preferredSymbolConfiguration = UIImage.SymbolConfiguration(textStyle: .body, scale: .large)
         label.font = .preferredFont(forTextStyle: .footnote)
@@ -443,8 +451,8 @@ final class WorkingCell: UICollectionViewCell {
         NSLayoutConstraint.activate([
             stack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 8),
             stack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -8),
-            stack.leadingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.trailingAnchor),
+            stack.leadingAnchor.constraint(equalTo: column.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: column.trailingAnchor),
         ])
     }
 

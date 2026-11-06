@@ -179,11 +179,8 @@ final class TabViewController: UIViewController {
             UIAction(title: "Terminal", image: UIImage(systemName: "apple.terminal")) { [weak self] _ in
                 self?.addPane(.terminal, project: project)
             },
-            UIAction(title: "Claude Code", image: UIImage(systemName: "sparkles")) { [weak self] _ in
+            UIAction(title: "Agent", image: UIImage(systemName: "sparkles")) { [weak self] _ in
                 self?.addPane(.agent(.claude), project: project)
-            },
-            UIAction(title: "Codex", image: UIImage(systemName: "sparkle")) { [weak self] _ in
-                self?.addPane(.agent(.codex), project: project)
             },
         ]))
         add.accessibilityLabel = "New Pane"
@@ -204,8 +201,7 @@ final class TabViewController: UIViewController {
     static func symbol(_ kind: PaneSummary.Kind) -> String {
         switch kind {
         case .terminal: "apple.terminal"
-        case .agent(.claude): "sparkles"
-        case .agent: "sparkle"
+        case .agent: "sparkles"
         case .other: "macwindow"
         }
     }
@@ -228,6 +224,63 @@ final class TabViewController: UIViewController {
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         alert.popoverPresentationController?.sourceItem = navigationItem.rightBarButtonItems?.first
         present(alert, animated: true)
+    }
+
+    // MARK: Hardware keyboard
+
+    /// The desktop's pane shortcuts. In Home, new terminals and agents are
+    /// tabs, which the root handles when these leave ⌘T and ⌘⌥A alone.
+    override var keyCommands: [UIKeyCommand]? {
+        guard let (project, tab) = server.tab(tabId) else { return nil }
+        var commands = [
+            UIKeyCommand(title: tab.panes.count > 1 ? "Close Pane" : "Close Tab", action: #selector(closeCommand),
+                         input: "w", modifierFlags: .command),
+            UIKeyCommand(title: "Close Tab", action: #selector(closeTabCommand), input: "w", modifierFlags: [.command, .shift]),
+        ]
+        if server.project(project)?.home == false {
+            commands += [
+                UIKeyCommand(title: "New Terminal Pane", action: #selector(newTerminalPane), input: "t", modifierFlags: .command),
+                UIKeyCommand(title: "New Agent Pane", action: #selector(newAgentPane), input: "a",
+                             modifierFlags: [.command, .alternate]),
+            ]
+        }
+        if tab.panes.count > 1 {
+            commands += [
+                UIKeyCommand(title: "Next Pane", action: #selector(nextPane), input: "]", modifierFlags: [.command, .shift]),
+                UIKeyCommand(title: "Previous Pane", action: #selector(previousPane), input: "[", modifierFlags: [.command, .shift]),
+            ]
+        }
+        return commands
+    }
+
+    @objc private func closeCommand() {
+        guard let focused, let tab = server.tab(tabId)?.tab, tab.panes.count > 1 else {
+            confirmCloseTab()
+            return
+        }
+        try? server.closePane(focused)
+    }
+
+    @objc private func closeTabCommand() { confirmCloseTab() }
+
+    @objc private func newTerminalPane() {
+        guard let project = server.tab(tabId)?.project else { return }
+        addPane(.terminal, project: project)
+    }
+
+    @objc private func newAgentPane() {
+        guard let project = server.tab(tabId)?.project else { return }
+        addPane(.agent(.claude), project: project)
+    }
+
+    @objc private func nextPane() { focusAdjacentPane(1) }
+    @objc private func previousPane() { focusAdjacentPane(-1) }
+
+    private func focusAdjacentPane(_ offset: Int) {
+        guard let tab = server.tab(tabId)?.tab, !tab.panes.isEmpty else { return }
+        let ids = tab.panes.map(\.id)
+        let current = ids.firstIndex { $0 == focused } ?? 0
+        focus(ids[(current + offset + ids.count) % ids.count])
     }
 
     private func showClosed() {

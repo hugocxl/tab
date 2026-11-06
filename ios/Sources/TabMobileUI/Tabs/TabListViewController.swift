@@ -19,6 +19,27 @@ final class TabListViewController: UICollectionViewController {
     var onSettings: (() -> Void)?
     var onPair: (() -> Void)?
     private(set) var selected: TabId?
+    /// The tab shown last time, reopened on an iPad once its Mac reports it.
+    private var restoring = LastTab.load()
+
+    private struct LastTab: Codable {
+        var server: UUID
+        var tab: UUID
+
+        static let key = "lastTab"
+
+        static func load() -> LastTab? {
+            guard UIDevice.current.userInterfaceIdiom == .pad, let data = UserDefaults.standard.data(forKey: key) else {
+                return nil
+            }
+            return try? JSONDecoder().decode(LastTab.self, from: data)
+        }
+
+        func save() {
+            guard let data = try? JSONEncoder().encode(self) else { return }
+            UserDefaults.standard.set(data, forKey: Self.key)
+        }
+    }
 
     init(app: AppModel) {
         self.app = app
@@ -167,6 +188,39 @@ final class TabListViewController: UICollectionViewController {
         open(card, on: server)
     }
 
+    /// A new tab on the chosen tab's Mac, else the first connected one.
+    func newTab(_ kind: MobilePaneKind) {
+        let current = selected.flatMap { cards[$0]?.server }
+        guard let server = current ?? app.servers.first(where: { $0.board != nil }) else { return }
+        newTab(kind, on: server)
+    }
+
+    // MARK: Keyboard navigation
+
+    private var listedCards: [(server: ServerModel, card: TabCard)] {
+        dataSource.snapshot().itemIdentifiers.compactMap { cards[$0] }
+    }
+
+    func selectTab(number: Int) {
+        let listed = listedCards
+        guard listed.indices.contains(number - 1) else { return }
+        open(listed[number - 1].card, on: listed[number - 1].server)
+    }
+
+    func selectAdjacentTab(_ offset: Int) {
+        let listed = listedCards
+        guard !listed.isEmpty else { return }
+        let current = listed.firstIndex { $0.card.id == selected }
+        let next = current.map { ($0 + offset + listed.count) % listed.count } ?? (offset > 0 ? 0 : listed.count - 1)
+        open(listed[next].card, on: listed[next].server)
+    }
+
+    func focusFilter() {
+        guard let search = navigationItem.searchController else { return }
+        search.isActive = true
+        search.searchBar.becomeFirstResponder()
+    }
+
     // MARK: Cards
 
     private func configureDataSource() {
@@ -229,6 +283,19 @@ final class TabListViewController: UICollectionViewController {
             collectionView.selectItem(at: path, animated: false, scrollPosition: [])
         }
         showStatus(servers, empty: next.isEmpty)
+        restoreLastTab(servers)
+    }
+
+    private func restoreLastTab(_ servers: [ServerModel]) {
+        guard let last = restoring, selected == nil, let server = servers.first(where: { $0.id.uuid == last.server }),
+              server.board != nil else { return }
+        if let entry = cards[TabId(uuid: last.tab)] {
+            restoring = nil
+            DispatchQueue.main.async { [weak self] in self?.open(entry.card, on: entry.server) }
+        } else if !server.cards.isEmpty {
+            // The Mac reports its tabs and that one is gone.
+            restoring = nil
+        }
     }
 
     private static func headlineText(_ headline: CardHeadline) -> String {
@@ -288,13 +355,17 @@ final class TabListViewController: UICollectionViewController {
     override func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         guard let id = dataSource.itemIdentifier(for: indexPath), let entry = cards[id] else { return }
         open(entry.card, on: entry.server)
-        // Selection changes which hairlines show.
-        collectionView.collectionViewLayout.invalidateLayout()
     }
 
     func open(_ card: TabCard, on server: ServerModel) {
         selected = card.id
+        restoring = nil
+        LastTab(server: server.id.uuid, tab: card.id.uuid).save()
         server.markRead(sessions: Set(card.tab.panes.compactMap(\.content.activitySession)))
+        if let path = dataSource.indexPath(for: card.id), splitViewController?.isCollapsed == false {
+            collectionView.selectItem(at: path, animated: false, scrollPosition: [])
+            collectionView.collectionViewLayout.invalidateLayout()
+        }
         onOpen?(server, card)
     }
 

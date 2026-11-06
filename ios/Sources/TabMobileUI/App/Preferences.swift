@@ -22,6 +22,31 @@ final class Preferences {
         didSet { defaults.set(lightTheme, forKey: "terminal.lightTheme"); schemes = [:] }
     }
 
+    /// Light or dark for the whole app, or whatever the device uses.
+    enum Appearance: String, CaseIterable {
+        case system, light, dark
+
+        var title: String {
+            switch self {
+            case .system: "System"
+            case .light: "Light"
+            case .dark: "Dark"
+            }
+        }
+
+        var style: UIUserInterfaceStyle {
+            switch self {
+            case .system: .unspecified
+            case .light: .light
+            case .dark: .dark
+            }
+        }
+    }
+
+    var appearance: Appearance {
+        didSet { defaults.set(appearance.rawValue, forKey: "appearance") }
+    }
+
     @ObservationIgnored private var schemes: [String: ColorScheme] = [:]
 
     private init() {
@@ -29,6 +54,7 @@ final class Preferences {
         fontSize = stored > 0 ? CGFloat(stored) : (UIDevice.current.userInterfaceIdiom == .pad ? 14 : 12)
         darkTheme = defaults.string(forKey: "terminal.darkTheme") ?? ThemeCatalog.defaultDark
         lightTheme = defaults.string(forKey: "terminal.lightTheme") ?? ThemeCatalog.defaultLight
+        appearance = defaults.string(forKey: "appearance").flatMap(Appearance.init) ?? .system
     }
 
     /// The terminal colors for the appearance, read from the bundled theme file.

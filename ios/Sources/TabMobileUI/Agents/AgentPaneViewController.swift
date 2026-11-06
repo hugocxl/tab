@@ -15,7 +15,10 @@ final class AgentPaneViewController: UIViewController, UICollectionViewDelegate 
     private var rendered: [String: (text: String, value: NSAttributedString)] = [:]
     private let composer = AgentComposerView()
     private let emptyView = UIContentUnavailableView(configuration: .empty())
+    private let latestButton = UIButton(configuration: .glass())
+    private let errorNotice = UILabel()
     private var didInitialScroll = false
+    private var showsLatest = false
 
     init(controller: AgentChatController) {
         self.controller = controller
@@ -39,11 +42,6 @@ final class AgentPaneViewController: UIViewController, UICollectionViewDelegate 
         view.addSubview(collectionView)
         configureDataSource()
 
-        var empty = UIContentUnavailableConfiguration.empty()
-        empty.image = UIImage(systemName: "sparkles")
-        empty.text = controller.provider.name
-        empty.secondaryText = "Ask for anything in this project. It runs on your Mac."
-        emptyView.configuration = empty
         emptyView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(emptyView)
 
@@ -52,6 +50,27 @@ final class AgentPaneViewController: UIViewController, UICollectionViewDelegate 
         composer.onStop = { [weak self] in self?.controller.interrupt() }
         view.addSubview(composer)
 
+        // What went wrong with the last command, above the composer until the next reply.
+        errorNotice.font = .preferredFont(forTextStyle: .footnote)
+        errorNotice.adjustsFontForContentSizeCategory = true
+        errorNotice.textColor = .systemRed
+        errorNotice.textAlignment = .center
+        errorNotice.numberOfLines = 3
+        errorNotice.isHidden = true
+        errorNotice.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(errorNotice)
+
+        latestButton.configuration?.image = UIImage(systemName: "arrow.down",
+                                                    withConfiguration: UIImage.SymbolConfiguration(weight: .semibold))
+        latestButton.configuration?.cornerStyle = .capsule
+        latestButton.accessibilityLabel = "Scroll to latest"
+        latestButton.isHidden = true
+        latestButton.translatesAutoresizingMaskIntoConstraints = false
+        latestButton.addAction(UIAction { [weak self] _ in self?.scrollToBottom(animated: true) }, for: .primaryActionTriggered)
+        view.addSubview(latestButton)
+
+        // Text keeps a readable measure: full width on a phone, a column on an iPad.
+        let readable = ReadableColumn.guide(in: view, margin: 12)
         NSLayoutConstraint.activate([
             collectionView.topAnchor.constraint(equalTo: view.topAnchor),
             collectionView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -60,23 +79,53 @@ final class AgentPaneViewController: UIViewController, UICollectionViewDelegate 
             emptyView.centerXAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerXAnchor),
             emptyView.centerYAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerYAnchor, constant: -40),
             emptyView.widthAnchor.constraint(lessThanOrEqualTo: view.widthAnchor, constant: -40),
-            composer.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 12),
-            composer.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -12),
+            composer.leadingAnchor.constraint(equalTo: readable.leadingAnchor),
+            composer.trailingAnchor.constraint(equalTo: readable.trailingAnchor),
             composer.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor, constant: -8),
+            errorNotice.leadingAnchor.constraint(equalTo: composer.leadingAnchor, constant: 12),
+            errorNotice.trailingAnchor.constraint(equalTo: composer.trailingAnchor, constant: -12),
+            errorNotice.bottomAnchor.constraint(equalTo: composer.topAnchor, constant: -8),
+            latestButton.trailingAnchor.constraint(equalTo: composer.trailingAnchor),
+            latestButton.bottomAnchor.constraint(equalTo: composer.topAnchor, constant: -12),
+            latestButton.widthAnchor.constraint(equalToConstant: 44),
+            latestButton.heightAnchor.constraint(equalToConstant: 44),
         ])
         // The transcript scrolls under the composer, which blurs it as glass does.
         collectionView.contentInset.bottom = 8
+        addKeyCommand(UIKeyCommand(title: "Send", action: #selector(sendCommand), input: "\r", modifierFlags: .command))
     }
+
+    @objc private func sendCommand() { composer.sendNow() }
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        let inset = view.bounds.maxY - composer.frame.minY - view.safeAreaInsets.bottom + 8
+        let top = errorNotice.isHidden ? composer.frame.minY : errorNotice.frame.minY
+        let inset = view.bounds.maxY - top - view.safeAreaInsets.bottom + 8
         if collectionView.contentInset.bottom != inset {
             let atBottom = isNearBottom
             collectionView.contentInset.bottom = inset
             collectionView.verticalScrollIndicatorInsets.bottom = inset
             if atBottom { scrollToBottom(animated: false) }
         }
+        updateLatestButton()
+    }
+
+    /// Offers a way back to the newest message once the reader has scrolled up.
+    private func updateLatestButton() {
+        let wanted = !order.isEmpty && !isNearBottom
+        guard wanted != showsLatest else { return }
+        showsLatest = wanted
+        if wanted { latestButton.isHidden = false }
+        UIView.animate(withDuration: 0.2) {
+            self.latestButton.alpha = wanted ? 1 : 0
+            self.latestButton.transform = wanted ? .identity : CGAffineTransform(scaleX: 0.6, y: 0.6)
+        } completion: { _ in
+            if !self.showsLatest { self.latestButton.isHidden = true }
+        }
+    }
+
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        updateLatestButton()
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -93,11 +142,26 @@ final class AgentPaneViewController: UIViewController, UICollectionViewDelegate 
     override func updateProperties() {
         super.updateProperties()
         let snapshot = controller.snapshot
-        composer.update(running: controller.isRunning, busy: controller.busy, provider: controller.provider,
-                        models: controller.models, snapshot: snapshot, controller: controller)
+        composer.update(controller)
         apply(AgentTranscript.rows(snapshot, expanded: expandedTurns))
         emptyView.isHidden = !(snapshot?.items.isEmpty ?? false)
-        if let error = controller.error { composer.show(error: error) }
+        if !emptyView.isHidden { showEmpty(controller.selection.provider) }
+        let error = controller.error
+        if errorNotice.text != error {
+            errorNotice.text = error
+            errorNotice.isHidden = error == nil
+            view.setNeedsLayout()
+        }
+    }
+
+    /// A new conversation: which agent it starts with, and that the menu changes it.
+    private func showEmpty(_ provider: AgentChatProvider) {
+        var empty = UIContentUnavailableConfiguration.empty()
+        empty.image = AgentLogo.image(provider)
+        empty.imageProperties.maximumSize = CGSize(width: 44, height: 44)
+        empty.text = "New Agent"
+        empty.secondaryText = "\(provider.name) runs on your Mac, in this project. Choose another agent or model from the menu beside the message."
+        emptyView.configuration = empty
     }
 
     // MARK: Transcript
@@ -214,13 +278,56 @@ final class AgentPaneViewController: UIViewController, UICollectionViewDelegate 
         UISelectionFeedbackGenerator().selectionChanged()
         return false
     }
+
+    /// Long press copies a message, a tool's output or a thought.
+    func collectionView(_ collectionView: UICollectionView, contextMenuConfigurationForItemsAt indexPaths: [IndexPath],
+                        point: CGPoint) -> UIContextMenuConfiguration? {
+        guard let path = indexPaths.first, let id = dataSource.itemIdentifier(for: path), let text = copyText(rows[id]) else {
+            return nil
+        }
+        return UIContextMenuConfiguration(actionProvider: { _ in
+            UIMenu(children: [UIAction(title: "Copy", image: UIImage(systemName: "doc.on.doc")) { _ in
+                UIPasteboard.general.string = text
+            }])
+        })
+    }
+
+    private func copyText(_ row: TranscriptRow?) -> String? {
+        let text: String?
+        switch row {
+        case .user(let item)?, .assistant(let item)?: text = item.text
+        case .tool(let item)?: text = item.tool?.output ?? item.detail ?? item.tool?.summary
+        case .thinking(let item)?: text = item.detail
+        default: text = nil
+        }
+        guard let text = text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
+        return text
+    }
+}
+
+/// The message field: Return sends from a hardware keyboard, Shift-Return
+/// starts a new line, as on the desktop; the on-screen keyboard's Return
+/// stays a line break with the Send button beside it.
+final class ComposerTextView: UITextView {
+    var onReturn: (() -> Void)?
+
+    override var keyCommands: [UIKeyCommand]? {
+        let send = UIKeyCommand(title: "Send", action: #selector(returnPressed), input: "\r")
+        send.wantsPriorityOverSystemBehavior = true
+        let newline = UIKeyCommand(title: "New Line", action: #selector(newLine), input: "\r", modifierFlags: .shift)
+        newline.wantsPriorityOverSystemBehavior = true
+        return [send, newline]
+    }
+
+    @objc private func returnPressed() { onReturn?() }
+    @objc private func newLine() { insertText("\n") }
 }
 
 /// The message field in a glass capsule: settings, text, and Send that
 /// turns into Stop while the agent works.
 final class AgentComposerView: UIView, UITextViewDelegate {
     private let glass = UIVisualEffectView(effect: UIGlassEffect())
-    private let text = UITextView()
+    private let text = ComposerTextView()
     private let placeholder = UILabel()
     private let send = UIButton(configuration: .prominentGlass())
     private let options = UIButton(configuration: .plain())
@@ -242,12 +349,12 @@ final class AgentComposerView: UIView, UITextViewDelegate {
         text.textContainerInset = UIEdgeInsets(top: 11, left: 0, bottom: 11, right: 0)
         text.translatesAutoresizingMaskIntoConstraints = false
         text.accessibilityLabel = "Message"
+        text.onReturn = { [weak self] in self?.sendNow() }
         placeholder.font = .preferredFont(forTextStyle: .body)
         placeholder.textColor = .placeholderText
         placeholder.translatesAutoresizingMaskIntoConstraints = false
 
-        options.configuration?.image = UIImage(systemName: "slider.horizontal.3")
-        options.configuration?.baseForegroundColor = .secondaryLabel
+        options.configuration?.baseForegroundColor = .label
         options.showsMenuAsPrimaryAction = true
         options.accessibilityLabel = "Model and access"
         options.translatesAutoresizingMaskIntoConstraints = false
@@ -286,47 +393,62 @@ final class AgentComposerView: UIView, UITextViewDelegate {
 
     required init?(coder: NSCoder) { fatalError("not used") }
 
-    func update(running: Bool, busy: Bool, provider: AgentChatProvider, models: [AgentModelDescriptor],
-                snapshot: AgentChatSnapshot?, controller: AgentChatController) {
-        self.running = running
+    func update(_ controller: AgentChatController) {
+        running = controller.isRunning
+        let provider = controller.selection.provider
         placeholder.text = "Message \(provider.name)"
-        options.menu = Self.menu(models: models, snapshot: snapshot, controller: controller)
+        options.configuration?.image = AgentLogo.image(provider)?.preparingThumbnail(of: CGSize(width: 22, height: 22))
+        options.accessibilityLabel = "\(provider.name), \(controller.selectedModel?.title ?? "default model")"
+        options.menu = Self.menu(controller)
         refreshSend()
     }
 
-    func show(error: String) {
-        placeholder.text = error
+    /// Sends the typed message, if there is one.
+    func sendNow() {
+        guard !text.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        primary()
     }
 
-    private static func menu(models: [AgentModelDescriptor], snapshot: AgentChatSnapshot?,
-                             controller: AgentChatController) -> UIMenu {
-        let current = snapshot?.model
-        let modelActions = models.map { model in
-            UIAction(title: model.title, state: (current ?? models.first(where: \.isDefault)?.id) == model.id ? .on : .off) { _ in
-                controller.setModel(model.id, effort: snapshot?.reasoningEffort)
+    /// As the desktop's model menu: each agent with its models, locked to the
+    /// conversation's agent once it has started, then effort and access.
+    private static func menu(_ controller: AgentChatController) -> UIMenu {
+        let selection = controller.selection
+        let current = controller.effectiveModel
+        let providers = AgentChatProvider.allCases.map { provider -> UIMenuElement in
+            let models = controller.models[provider]
+            let locked = !controller.canChangeProvider && provider != controller.snapshot?.provider
+            var children: [UIMenuElement] = (models ?? []).map { model in
+                UIAction(title: model.title, attributes: locked ? .disabled : [],
+                         state: provider == selection.provider && model.id == current ? .on : .off) { _ in
+                    controller.select(provider: provider, model: model.id)
+                }
             }
+            if children.isEmpty {
+                children = [UIAction(title: models == nil ? "Loading models…" : "No models reported", attributes: .disabled) { _ in }]
+            }
+            let menu = UIMenu(title: provider.name, subtitle: locked ? "Open a new agent pane to use it" : nil,
+                              image: AgentLogo.image(provider)?.preparingThumbnail(of: CGSize(width: 20, height: 20)),
+                              children: children)
+            return menu
         }
-        let effortSource = models.first { $0.id == current } ?? models.first(where: \.isDefault)
-        let efforts = (effortSource?.reasoningEfforts ?? []).map { effort in
-            UIAction(title: effort.title, state: snapshot?.reasoningEffort == effort ? .on : .off) { _ in
-                controller.setModel(snapshot?.model, effort: effort)
+        let efforts = (controller.selectedModel?.reasoningEfforts ?? []).map { effort in
+            UIAction(title: effort.title, state: controller.effort == effort ? .on : .off) { _ in
+                controller.select(effort: effort)
             }
         }
         let access = AgentAccessMode.allCases.map { mode in
-            UIAction(title: mode.title, state: snapshot?.accessMode == mode ? .on : .off) { _ in
+            UIAction(title: mode.title, state: (controller.snapshot?.accessMode ?? .standard) == mode ? .on : .off) { _ in
                 controller.setAccess(mode)
             }
         }
-        var children: [UIMenuElement] = []
-        if !modelActions.isEmpty {
-            children.append(UIMenu(title: "Model", image: UIImage(systemName: "cpu"), children: modelActions))
-        }
+        var children: [UIMenuElement] = [UIMenu(options: .displayInline, children: providers)]
         if !efforts.isEmpty {
             children.append(UIMenu(title: "Effort", image: UIImage(systemName: "gauge.with.dots.needle.50percent"),
-                                   children: efforts))
+                                   children: [UIAction(title: "Auto", state: controller.effort == nil ? .on : .off) { _ in
+                                       controller.select(effort: nil)
+                                   }] + efforts))
         }
-        children.append(UIMenu(title: "Access", image: UIImage(systemName: "lock.shield"), options: .displayInline,
-                               children: access))
+        children.append(UIMenu(title: "Access", image: UIImage(systemName: "lock.shield"), children: access))
         return UIMenu(children: children)
     }
 
@@ -359,5 +481,12 @@ final class AgentComposerView: UIView, UITextViewDelegate {
         heightConstraint.constant = min(max(44, fitting), maximum)
         textView.isScrollEnabled = fitting > maximum
         refreshSend()
+    }
+}
+
+/// The Claude and Codex logos the desktop shows beside an agent.
+enum AgentLogo {
+    static func image(_ provider: AgentChatProvider) -> UIImage? {
+        UIImage(named: provider == .claude ? "AgentClaude" : "AgentCodex")
     }
 }

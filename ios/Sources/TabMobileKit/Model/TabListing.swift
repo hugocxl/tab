@@ -128,7 +128,9 @@ extension ServerModel {
     private func headline(_ pane: Pane?, project: ProjectDescriptor) -> CardHeadline {
         guard let pane else { return .empty }
         switch pane.content {
-        case .agent(let session, let provider):
+        case .agent(let session, let seed):
+            // As on the desktop: the agent this pane chose for its next message, else the one it started with.
+            let provider = agentController(session)?.selection.provider ?? seed
             let task = agentActivity(session)?.title
             return .agent(provider == .claude ? .claude : .codex, task: task?.isEmpty == false && task != "Agent" ? task : nil)
         case .terminal(let session):
@@ -154,7 +156,7 @@ extension ServerModel {
             return PaneSummary(id: pane.id, kind: .terminal, title: session.map(terminalTitle) ?? "Terminal")
         case .agent(let session, let provider):
             let task = agentActivity(session)?.title ?? ""
-            return PaneSummary(id: pane.id, kind: .agent(provider), title: task.isEmpty ? provider.name : task)
+            return PaneSummary(id: pane.id, kind: .agent(provider), title: task.isEmpty || task == "Agent" ? "Agent" : task)
         default:
             return PaneSummary(id: pane.id, kind: .other, title: pane.content.defaultTitle)
         }

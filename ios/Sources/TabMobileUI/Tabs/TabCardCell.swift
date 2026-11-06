@@ -304,8 +304,8 @@ final class TabCardCell: UICollectionViewListCell {
     private func showLogo(_ provider: AgentProvider) {
         let image: UIImage?
         switch provider {
-        case .claude: image = UIImage(named: "AgentClaude")
-        case .codex: image = UIImage(named: "AgentCodex")
+        case .claude: image = AgentLogo.image(.claude)
+        case .codex: image = AgentLogo.image(.codex)
         default: image = nil
         }
         lead.image = image ?? UIImage(systemName: "sparkles")
