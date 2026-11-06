@@ -173,6 +173,7 @@ final class WorkspaceView: ThemedView {
             shownPanelProject = project.id
             content.projectDidChange(project.home ? nil : project)
         }
+        model.focusRightPanelIfRequested(kind)
     }
 
     private func updateBanner() {

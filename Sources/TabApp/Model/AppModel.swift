@@ -100,6 +100,8 @@ public final class AppModel {
     /// connection.
     var gitWatch: (project: ProjectId, connection: ObjectIdentifier)?
     var rightPanels: [RightPanelKind: RightPanelContent] = [:]
+    /// The right panel to give the keyboard once the shell shows it.
+    var rightPanelAwaitingFocus: RightPanelKind?
     var editorLocations: [PaneId: (line: Int, column: Int)] = [:]
     var projectIcons: [ProjectId: NSImage?] = [:]
     var iconSearches: Set<ProjectId> = []

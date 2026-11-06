@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.68.1 - 2026-11-06
+
+### Fixed
+
+- Opening Files or Source Control with its shortcut now gives the panel the
+  keyboard, so you can move through it with the arrow keys right away.
+
 ## 0.68.0 - 2026-11-06
 
 ### Changed

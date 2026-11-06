@@ -104,7 +104,15 @@ extension AppModel {
             appearance.sidePanel = kind.sidePanel
             appearance.lastSidePanel = kind.sidePanel
         }
+        rightPanelAwaitingFocus = kind
         notify(.panel)
+    }
+
+    /// Gives the keyboard to `kind` if opening it asked for that; the shell
+    /// calls this once the panel's content is in the window.
+    public func focusRightPanelIfRequested(_ kind: RightPanelKind) {
+        guard rightPanelAwaitingFocus == kind else { return }
+        rightPanelAwaitingFocus = nil
         rightPanelContent(kind)?.focusContent()
     }
 
@@ -118,6 +126,7 @@ extension AppModel {
     }
 
     private func closeRightSidebar() {
+        rightPanelAwaitingFocus = nil
         updateAppearance { $0.sidePanel = .none }
         notify(.panel)
     }
