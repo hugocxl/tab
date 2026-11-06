@@ -95,7 +95,7 @@ final class SidebarCardView: HoverView {
     /// 1pt border, 6pt padding, the 18pt headline, a 3pt gap and the 13pt
     /// second line.
     static let height: CGFloat = 48
-    /// The project row's 14pt line and the 4pt gap below it.
+    /// The project row's 14pt line and the 4pt gap above it, below the second line.
     static let headerHeight: CGFloat = 18
 
     private let headerIcon: NSImageView?
@@ -299,14 +299,14 @@ final class SidebarCardView: HoverView {
         super.layout()
         glass.frame = bounds
         let inset = Metrics.border + 10
-        var top = Metrics.border + 6
+        let top = Metrics.border + 6
         let left = inset
         let right = bounds.width - inset
         if let headerIcon, let headerLabel {
-            headerIcon.frame = CGRect(x: left + 2, y: top + 1, width: 14, height: 14)
+            let headerTop = top + 18 + 3 + 13 + 4
+            headerIcon.frame = CGRect(x: left + 2, y: headerTop, width: 14, height: 14)
             let height = headerLabel.intrinsicContentSize.height
-            headerLabel.frame = CGRect(x: left + 24, y: (top + 8 - height / 2).rounded(), width: max(right - left - 24, 0), height: height)
-            top += Self.headerHeight
+            headerLabel.frame = CGRect(x: left + 24, y: (headerTop + 7 - height / 2).rounded(), width: max(right - left - 24, 0), height: height)
         }
         let leadFrame = CGRect(x: left, y: top, width: 18, height: 18)
         lead.frame = lead is NSImageView ? leadFrame.insetBy(dx: 2, dy: 2) : leadFrame

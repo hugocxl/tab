@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.67.0 - 2026-11-06
+
+### Changed
+
+- Sidebar tab cards show their project's icon and name at the bottom instead of
+  the top.
+
 ## 0.66.0 - 2026-11-05
 
 ### Added
