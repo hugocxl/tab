@@ -3,9 +3,9 @@ import TabProtocol
 
 /// What a connection's writer sends next: control messages first, then
 /// channel messages, then at most one screen frame in flight per channel,
-/// then at most one device video frame in flight per channel, then tunnel
+/// then at most one simulator video frame in flight per channel, then tunnel
 /// bytes. A screen frame that can't go yet merges into the waiting one, so a
-/// slow client never piles up frames; a device encodes only when its channel
+/// slow client never piles up frames; a simulator encodes only when its channel
 /// has credit; tunnels send only what their reader granted.
 final class Outbox: @unchecked Sendable {
     private let condition = NSCondition()
@@ -188,10 +188,10 @@ final class Outbox: @unchecked Sendable {
         onCredit?()
     }
 
-    // MARK: Device video
+    // MARK: Simulator video
 
-    /// Opens a device channel; `onCredit` runs whenever the client
-    /// acknowledged the frame in flight, so the device may encode the next.
+    /// Opens a simulator channel; `onCredit` runs whenever the client
+    /// acknowledged the frame in flight, so the simulator may encode the next.
     func openVideo(_ channel: ChannelId, onCredit: @escaping @Sendable () -> Void) {
         condition.withLock {
             guard !closed else { return }
@@ -217,7 +217,7 @@ final class Outbox: @unchecked Sendable {
         }
     }
 
-    /// Stops a device channel; `flush` still sends its queued messages.
+    /// Stops a simulator channel; `flush` still sends its queued messages.
     func closeVideo(_ channel: ChannelId, flush: Bool = false) {
         condition.withLock {
             videos[channel] = nil

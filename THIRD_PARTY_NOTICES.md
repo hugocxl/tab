@@ -88,7 +88,7 @@ The Apache 2.0 license and attribution are bundled as
 
 ## serve-sim
 
-Device panes call Xcode's simulator frameworks the way serve-sim does. Tab
+Simulator panes call Xcode's simulator frameworks the way serve-sim does. Tab
 follows its notes on the Indigo HID hardware button codes and targets. No
 serve-sim code is included.
 
@@ -96,7 +96,7 @@ Source: https://github.com/EvanBacon/serve-sim (Apache 2.0)
 
 ## Android Emulator control protocol
 
-Device panes talk to Android emulators over the emulator's gRPC control
+Simulator panes talk to Android emulators over the emulator's gRPC control
 protocol from the Android Open Source Project, implemented in Swift. No AOSP
 code is included.
 

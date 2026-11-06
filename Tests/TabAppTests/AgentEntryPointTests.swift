@@ -95,21 +95,21 @@ final class AgentEntryPointTests: XCTestCase {
 
     func testNewTabAddsACardWhileNewPaneJoinsAnExistingTab() throws {
         let model = AppModel(dirs: try ModelFixtures.profile(), connectorFactory: { _, _ in nil })
-        model.panes.register(.device) { EntryTestController(title: $0.pane.title) }
+        model.panes.register(.simulator) { EntryTestController(title: $0.pane.title) }
         let before = model.state.home.tabs.count
-        let first = try XCTUnwrap(model.newTab(.device))
-        _ = try XCTUnwrap(model.newTab(.device))
+        let first = try XCTUnwrap(model.newTab(.simulator))
+        _ = try XCTUnwrap(model.newTab(.simulator))
         XCTAssertEqual(model.state.home.tabs.count, before + 2, "each New Tab is its own card")
         let card = try XCTUnwrap(model.state.home.tabs.first { $0.panes.contains { $0.id == first } })
-        let added = try XCTUnwrap(model.newPane(.device, in: model.state.home.id, tab: card.id))
+        let added = try XCTUnwrap(model.newPane(.simulator, in: model.state.home.id, tab: card.id))
         XCTAssertEqual(model.state.home.tabs.count, before + 2, "New Pane adds no card")
         XCTAssertEqual(model.state.home.tabs.first { $0.id == card.id }?.layout.leaves, [first, added])
 
         var project: ProjectId?
         XCTAssertTrue(model.edit { project = try $0.addProject(server: .local, directory: FileManager.default.currentDirectoryPath) })
         let id = try XCTUnwrap(project)
-        let opened = try XCTUnwrap(model.newPane(.device, in: id))
-        let beside = try XCTUnwrap(model.newPane(.device, in: id))
+        let opened = try XCTUnwrap(model.newPane(.simulator, in: id))
+        let beside = try XCTUnwrap(model.newPane(.simulator, in: id))
         XCTAssertEqual(model.state.project(id)?.tabs.count, 1, "a project is one card")
         XCTAssertEqual(model.state.project(id)?.tabs.first?.layout.leaves, [opened, beside])
         XCTAssertEqual(model.activePane, beside)
@@ -119,7 +119,7 @@ final class AgentEntryPointTests: XCTestCase {
         let model = AppModel(dirs: try ModelFixtures.profile(), connectorFactory: { _, _ in nil })
         model.panes.register(.agent) { EntryTestController(title: $0.pane.title) }
         let menu = model.newTabMenu()
-        XCTAssertEqual(menu.items.map(\.title), ["Terminal Tab", "Agent Tab", "Browser Tab", "Device Tab"])
+        XCTAssertEqual(menu.items.map(\.title), ["Terminal Tab", "Agent Tab", "Browser Tab", "Simulator Tab"])
         let item = try XCTUnwrap(menu.items.first { $0.title == "Agent Tab" })
         XCTAssertNil(item.submenu, "An agent opens directly, without choosing a provider")
         for _ in 0..<2 {

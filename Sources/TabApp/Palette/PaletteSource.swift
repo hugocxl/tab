@@ -245,13 +245,13 @@ final class PaletteSource: PaletteDataSource {
             command(id, title, .panes, disabled: missing || paneCount < 2)
         }
         let browserOff = missing || !model.settings.browser.enabled
-        let deviceKeywords = "simulator emulator ios android iphone ipad"
+        let simulatorKeywords = "simulator emulator ios android iphone ipad"
         command(.newAgentPane, "New Agent Pane", .panes, disabled: missing)
         command(.newAgentPaneBelow, "New Agent Pane Below", .panes, disabled: missing)
         command(.newBrowserPane, "New Browser Pane", .panes, disabled: browserOff)
         command(.newBrowserPaneBelow, "New Browser Pane Below", .panes, disabled: browserOff)
-        command(.newDevicePane, "New Device Pane", .panes, keywords: deviceKeywords, disabled: missing)
-        command(.newDevicePaneBelow, "New Device Pane Below", .panes, keywords: deviceKeywords, disabled: missing)
+        command(.newSimulatorPane, "New Simulator Pane", .panes, keywords: simulatorKeywords, disabled: missing)
+        command(.newSimulatorPaneBelow, "New Simulator Pane Below", .panes, keywords: simulatorKeywords, disabled: missing)
         page(ShortcutId.goToFile.rawValue, "Go to File…", .files, .files, shortcut: .goToFile, keywords: "quick open file")
         page(ShortcutId.findInFiles.rawValue, "Find in Files…", .files, .find, shortcut: .findInFiles, keywords: "search grep")
         command(.toggleFiles, "Toggle Files", .files, keywords: "explorer tree folder")

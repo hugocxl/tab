@@ -81,7 +81,7 @@ public enum AppRequest: Hashable, Sendable, Codable {
     case browser(command: String, args: [String: JSONValue])
     /// Shows a running terminal or agent conversation in a pane, focusing it.
     case show(AppPane)
-    /// Opens a device, editor or diff pane.
+    /// Opens a simulator, editor or diff pane.
     case add(AppNewPane)
     /// A request from a newer `tab`; answer with an error.
     case unknown(String)
@@ -132,14 +132,14 @@ public enum AppRequest: Hashable, Sendable, Codable {
     }
 }
 
-/// A pane without a session for the app to open: a device, an editor or a
+/// A pane without a session for the app to open: a simulator, an editor or a
 /// diff. An editor or diff already showing its file is focused. Otherwise, as
 /// a pane, it opens beside the pane showing `beside`, else in `project`; as a
 /// tab, it opens as a new tab of the Home `project`.
 public struct AppNewPane: Hashable, Sendable, Codable {
     public enum Content: Hashable, Sendable, Codable {
-        /// A simulator or emulator; one not chosen shows the device picker.
-        case device(DevicePane)
+        /// A simulator or emulator; one not chosen shows the simulator picker.
+        case simulator(SimulatorPane)
         /// A file, absolute or relative to the project, at a 1-based `line`.
         case editor(path: String, line: Int?)
         /// A file's working tree changes, or its staged ones.

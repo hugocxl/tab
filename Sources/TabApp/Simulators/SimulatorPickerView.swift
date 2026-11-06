@@ -2,35 +2,35 @@ import AppKit
 import TabCore
 import TabProtocol
 
-/// A device the picker offers: an iOS simulator or an Android emulator on
+/// A simulator the picker offers: an iOS simulator or an Android emulator on
 /// the tab's server.
-struct DeviceChoice: Hashable, Sendable {
-    var info: DeviceInfo
+struct SimulatorChoice: Hashable, Sendable {
+    var info: SimulatorInfo
 
-    var platform: DevicePlatform { info.device.platform }
+    var platform: SimulatorPlatform { info.simulator.platform }
     var name: String { info.name }
     /// The OS it runs, such as "iOS 27.0" or "Android API 35".
     var runtime: String { info.runtime }
     var isRunning: Bool { info.booted }
     var isTablet: Bool { info.isTablet }
 
-    var pane: DevicePane {
-        platform == .iOS ? DevicePane(udid: info.device.id, name: name) : DevicePane(avd: info.device.id, name: name)
+    var pane: SimulatorPane {
+        platform == .iOS ? SimulatorPane(udid: info.simulator.id, name: name) : SimulatorPane(avd: info.simulator.id, name: name)
     }
 }
 
-/// The devices to choose from: running ones first, then the most recently
+/// The simulators to choose from: running ones first, then the most recently
 /// used, each with its OS. It takes the keyboard: the arrows move the
 /// selection and Return chooses it.
-final class DevicePickerView: ThemedView {
-    var onChoose: ((DeviceChoice) -> Void)?
+final class SimulatorPickerView: ThemedView {
+    var onChoose: ((SimulatorChoice) -> Void)?
 
-    private let titleLabel = makeLabel("Choose a Device", font: AppFont.system(15, weight: .semibold))
+    private let titleLabel = makeLabel("Choose a Simulator", font: AppFont.system(15, weight: .semibold))
     private let detailLabel = makeLabel("It starts if it isn't running.", font: AppFont.body)
     private let card = Card()
     private let list = NSStackView()
     private let scroll = NSScrollView()
-    private var devices: [DeviceChoice] = []
+    private var simulators: [SimulatorChoice] = []
     private var rows: [ListRow] = []
     private var selected = 0
 
@@ -78,36 +78,36 @@ final class DevicePickerView: ThemedView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    /// Shows the devices of the tab's server; `host` names it when it is
-    /// another computer. The selection stays on the same device across reloads.
-    func show(_ devices: [DeviceChoice], host: String?) {
-        let kept = self.devices.indices.contains(selected) ? self.devices[selected].info.device : nil
-        self.devices = devices
+    /// Shows the simulators of the tab's server; `host` names it when it is
+    /// another computer. The selection stays on the same simulator across reloads.
+    func show(_ simulators: [SimulatorChoice], host: String?) {
+        let kept = self.simulators.indices.contains(selected) ? self.simulators[selected].info.simulator : nil
+        self.simulators = simulators
         rows.forEach { $0.removeFromSuperview() }
-        rows = devices.enumerated().map { index, device in
-            let row = Self.row(for: device)
+        rows = simulators.enumerated().map { index, simulator in
+            let row = Self.row(for: simulator)
             row.theme = theme
             row.onClick = { [weak self] in self?.choose(index) }
             list.addArrangedSubview(row)
             return row
         }
-        titleLabel.stringValue = host.map { "Choose a Device on \($0)" } ?? "Choose a Device"
+        titleLabel.stringValue = host.map { "Choose a Simulator on \($0)" } ?? "Choose a Simulator"
         let place = host ?? "this Mac"
-        detailLabel.stringValue = devices.isEmpty
+        detailLabel.stringValue = simulators.isEmpty
             ? "No simulators or emulators were found on \(place). Add iOS simulators in Xcode, or Android ones in Android Studio."
             : "It starts if it isn't running."
-        card.isHidden = devices.isEmpty
-        select(devices.firstIndex { $0.info.device == kept } ?? 0)
+        card.isHidden = simulators.isEmpty
+        select(simulators.firstIndex { $0.info.simulator == kept } ?? 0)
     }
 
-    private static func row(for device: DeviceChoice) -> ListRow {
-        let symbol = device.isTablet ? "ipad" : device.platform == .android ? "candybarphone" : "iphone"
+    private static func row(for simulator: SimulatorChoice) -> ListRow {
+        let symbol = simulator.isTablet ? "ipad" : simulator.platform == .android ? "candybarphone" : "iphone"
         let icon = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
             .withSymbolConfiguration(.init(pointSize: 13, weight: .regular))
-        let row = ListRow(title: device.name, subtitle: device.runtime, icon: icon,
-                          accessory: device.isRunning ? RunningBadge() : nil)
+        let row = ListRow(title: simulator.name, subtitle: simulator.runtime, icon: icon,
+                          accessory: simulator.isRunning ? RunningBadge() : nil)
         row.heightAnchor.constraint(greaterThanOrEqualToConstant: 40).isActive = true
-        row.setAccessibilityLabel(device.isRunning ? "\(device.name), \(device.runtime), Running" : "\(device.name), \(device.runtime)")
+        row.setAccessibilityLabel(simulator.isRunning ? "\(simulator.name), \(simulator.runtime), Running" : "\(simulator.name), \(simulator.runtime)")
         return row
     }
 
@@ -120,9 +120,9 @@ final class DevicePickerView: ThemedView {
     }
 
     private func choose(_ index: Int) {
-        guard devices.indices.contains(index) else { return }
+        guard simulators.indices.contains(index) else { return }
         select(index)
-        onChoose?(devices[index])
+        onChoose?(simulators[index])
     }
 
     // MARK: Keyboard
@@ -153,7 +153,7 @@ final class DevicePickerView: ThemedView {
     }
 }
 
-/// A running device's accent dot and "Running".
+/// A running simulator's accent dot and "Running".
 private final class RunningBadge: NSStackView {
     private let dot = StatusDot()
     private let label = makeLabel("Running", font: AppFont.footnote)
@@ -179,9 +179,9 @@ private final class RunningBadge: NSStackView {
     }
 }
 
-/// A centered message with an optional button, such as a device that is
+/// A centered message with an optional button, such as a simulator that is
 /// shut down or a missing Xcode.
-final class DeviceMessageView: ThemedView {
+final class SimulatorMessageView: ThemedView {
     private let titleLabel = makeLabel("", font: AppFont.system(15, weight: .semibold))
     private let detailLabel = makeLabel("", font: AppFont.body)
     private let spinner = NSProgressIndicator()

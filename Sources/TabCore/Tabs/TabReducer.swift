@@ -240,10 +240,10 @@ public enum TabReducer {
             try board.editTab(tab) { tab in
                 guard let index = tab.panes.firstIndex(where: { $0.id == id }) else { return }
                 switch (tab.panes[index].content, content) {
-                case (.browser, .browser), (.device, .device):
+                case (.browser, .browser), (.simulator, .simulator):
                     tab.panes[index].content = content
                 default:
-                    throw TabChangeError.invalid("only a browser's page or a device can change")
+                    throw TabChangeError.invalid("only a browser's page or a simulator can change")
                 }
             }
             return []
@@ -316,7 +316,7 @@ public enum TabReducer {
                 if !remaining.contains(where: { $0.content.agentSession == session }) {
                     effects.closedAgents.append(session)
                 }
-            case .browser, .device, .editor, .diff:
+            case .browser, .simulator, .editor, .diff:
                 break
             }
         }

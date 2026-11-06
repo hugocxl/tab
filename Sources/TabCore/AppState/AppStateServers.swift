@@ -443,21 +443,21 @@ extension AppState {
         return true
     }
 
-    /// Changes what a browser or device pane shows, on its server.
+    /// Changes what a browser or simulator pane shows, on its server.
     private mutating func changePane(_ pane: PaneId, _ content: PaneContent) throws {
         guard let server = paneServer(pane) else { throw AppError.unknownPane(pane) }
         try perform(server, .updatePane(pane, content: content))
     }
 }
 
-// MARK: Device panes
+// MARK: Simulator panes
 
 extension AppState {
-    /// Opens a device pane in `project`'s tab, or as a new tab in Home, like
+    /// Opens a simulator pane in `project`'s tab, or as a new tab in Home, like
     /// `openBrowser`.
     @discardableResult
-    public mutating func openDevice(_ project: ProjectId, _ device: DevicePane, select: Bool) throws -> (TabId, PaneId) {
-        let pane = Pane(content: .device(device))
+    public mutating func openSimulator(_ project: ProjectId, _ simulator: SimulatorPane, select: Bool) throws -> (TabId, PaneId) {
+        let pane = Pane(content: .simulator(simulator))
         if isSingleTab(project) {
             let (tab, id) = try openPaneInContainer(project, pane: pane, focusLeaf: window.activePane)
             if select {
@@ -476,17 +476,17 @@ extension AppState {
         return (tab, pane.id)
     }
 
-    public func device(_ pane: PaneId) -> DevicePane? {
-        if case .device(let device) = self.pane(pane)?.content { return device }
+    public func simulator(_ pane: PaneId) -> SimulatorPane? {
+        if case .simulator(let simulator) = self.pane(pane)?.content { return simulator }
         return nil
     }
 
-    /// Records the simulator a device pane shows, reporting whether it changed.
+    /// Records the simulator a simulator pane shows, reporting whether it changed.
     @discardableResult
-    public mutating func setDevice(_ pane: PaneId, _ device: DevicePane) throws -> Bool {
-        guard let current = self.device(pane) else { throw AppError.invalidState("pane is not a device") }
-        guard current != device else { return false }
-        try changePane(pane, .device(device))
+    public mutating func setSimulator(_ pane: PaneId, _ simulator: SimulatorPane) throws -> Bool {
+        guard let current = self.simulator(pane) else { throw AppError.invalidState("pane is not a simulator") }
+        guard current != simulator else { return false }
+        try changePane(pane, .simulator(simulator))
         if paneTitles[pane] == nil { try updatePane(pane) { $0.title = $0.content.defaultTitle } }
         return true
     }

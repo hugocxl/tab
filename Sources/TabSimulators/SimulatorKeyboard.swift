@@ -3,7 +3,7 @@ import TabProtocol
 
 /// Turns Mac keys and text into USB keyboard usages (HID page 7) for a
 /// simulator's hardware keyboard.
-public enum DeviceKeyboard {
+public enum SimulatorKeyboard {
     public static let leftShift: UInt32 = 0xE1
 
     /// The usage of a Mac virtual key code, by position on an ANSI keyboard.
@@ -12,8 +12,8 @@ public enum DeviceKeyboard {
     }
 
     /// The key presses that type `text`, with Shift where needed.
-    public static func input(typing text: String) -> [DeviceInput] {
-        var input: [DeviceInput] = []
+    public static func input(typing text: String) -> [SimulatorInput] {
+        var input: [SimulatorInput] = []
         for stroke in strokes(for: text) {
             if stroke.shift { input.append(.key(usage: leftShift, down: true)) }
             input.append(.key(usage: stroke.usage, down: true))

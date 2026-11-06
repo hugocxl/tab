@@ -71,14 +71,14 @@ public struct BrowserPane: Codable, Hashable, Sendable {
     }
 }
 
-/// What a device pane keeps: the iOS simulator or Android emulator it
-/// shows. With neither, it shows the device picker.
-public struct DevicePane: Codable, Hashable, Sendable {
+/// What a simulator pane keeps: the iOS simulator or Android emulator it
+/// shows. With neither, it shows the simulator picker.
+public struct SimulatorPane: Codable, Hashable, Sendable {
     /// An iOS simulator's UDID.
     public var udid: String?
-    /// An Android virtual device's name.
+    /// An Android virtual simulator's name.
     public var avd: String?
-    /// The device's name when it was chosen, shown until it is found.
+    /// The simulator's name when it was chosen, shown until it is found.
     public var name: String?
     /// Whether the simulator has a hardware keyboard connected, so the Mac's
     /// keys type on it; `nil` means connected.
@@ -91,10 +91,10 @@ public struct DevicePane: Codable, Hashable, Sendable {
         self.hardwareKeyboard = hardwareKeyboard
     }
 
-    /// Whether a device was chosen.
+    /// Whether a simulator was chosen.
     public var isChosen: Bool { udid != nil || avd != nil }
 
-    /// Whether the Mac's keys type on the device instead of its on-screen
+    /// Whether the Mac's keys type on the simulator instead of its on-screen
     /// keyboard.
     public var simulatesHardwareKeyboard: Bool { hardwareKeyboard ?? true }
 }
@@ -107,7 +107,7 @@ public enum PaneContent: Codable, Hashable, Sendable {
     case agent(session: SessionId, provider: AgentChatProvider)
     case browser(BrowserPane)
     /// A simulator's or emulator's screen, on the tab's server.
-    case device(DevicePane)
+    case simulator(SimulatorPane)
     /// A file editor; `path` is project-relative with `/` separators.
     case editor(path: String)
     /// One file's working tree (or, when `staged`, index) diff.
@@ -139,7 +139,7 @@ public enum PaneContent: Codable, Hashable, Sendable {
         case .editor(let path): return Self.basename(path)
         case let .diff(path, staged): return staged ? "\(Self.basename(path)) (staged)" : Self.basename(path)
         case .agent: return "Agent"
-        case .terminal, .browser, .device: return nil
+        case .terminal, .browser, .simulator: return nil
         }
     }
 
@@ -148,7 +148,7 @@ public enum PaneContent: Codable, Hashable, Sendable {
         switch self {
         case .terminal: return "Terminal"
         case .browser: return "New Browser"
-        case .device(let device): return device.name ?? "Device"
+        case .simulator(let simulator): return simulator.name ?? "Simulator"
         case .agent, .editor, .diff: return nativeTitle ?? ""
         }
     }
@@ -166,9 +166,9 @@ public enum PaneContent: Codable, Hashable, Sendable {
             self = .agent(session: try c("session"), provider: try c("provider"))
         case "browser":
             self = .browser(BrowserPane(url: try c("url"), profile: try c("profile")))
-        case "device":
-            self = .device(DevicePane(udid: try c("udid"), avd: try c("avd"), name: try c("name"),
-                                      hardwareKeyboard: try c("hardwareKeyboard")))
+        case "simulator":
+            self = .simulator(SimulatorPane(udid: try c("udid"), avd: try c("avd"), name: try c("name"),
+                                            hardwareKeyboard: try c("hardwareKeyboard")))
         case "editor":
             self = .editor(path: try c("path"))
         case "diff":
@@ -191,12 +191,12 @@ public enum PaneContent: Codable, Hashable, Sendable {
             var c = try TaggedEncoding(encoder, "browser")
             try c(browser.url, "url")
             try c(browser.profile, "profile")
-        case .device(let device):
-            var c = try TaggedEncoding(encoder, "device")
-            try c(device.udid, "udid")
-            try c(device.avd, "avd")
-            try c(device.name, "name")
-            try c(device.hardwareKeyboard, "hardwareKeyboard")
+        case .simulator(let simulator):
+            var c = try TaggedEncoding(encoder, "simulator")
+            try c(simulator.udid, "udid")
+            try c(simulator.avd, "avd")
+            try c(simulator.name, "name")
+            try c(simulator.hardwareKeyboard, "hardwareKeyboard")
         case .editor(let path):
             var c = try TaggedEncoding(encoder, "editor")
             try c(path, "path")
@@ -222,7 +222,7 @@ public struct TerminalLaunch: Codable, Hashable, Sendable {
     }
 }
 
-/// A pane: one terminal, agent, browser, device, editor or diff in a tab's
+/// A pane: one terminal, agent, browser, simulator, editor or diff in a tab's
 /// split layout.
 public struct Pane: Codable, Hashable, Sendable, Identifiable {
     public var id: PaneId
@@ -444,7 +444,7 @@ public enum TabMutation: Hashable, Codable, Sendable {
     case setRatio(TabId, split: SplitAnchor<PaneId>, ratio: Double)
     /// Gives every row and column of a tab equal shares.
     case equalize(TabId)
-    /// Changes what a pane shows: a browser's page, a device.
+    /// Changes what a pane shows: a browser's page, a simulator.
     case updatePane(PaneId, content: PaneContent)
     /// Adds tabs an app kept before its server kept them. Home gets them as
     /// they are; another project's tabs merge into its one tab. Panes the

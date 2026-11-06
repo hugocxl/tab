@@ -23,8 +23,8 @@ final class Actions {
            let browser = model.controller(for: pane) as? BrowserPaneContent,
            browser.controller.perform(id) { return true }
         if let pane = model.activePane,
-           let device = model.controller(for: pane) as? DevicePaneController,
-           device.perform(id) { return true }
+           let simulator = model.controller(for: pane) as? SimulatorPaneController,
+           simulator.perform(id) { return true }
         if let pane = model.activePane,
            let agent = model.controller(for: pane) as? AgentPaneController,
            agent.performConversationShortcut(id) { return true }
@@ -94,10 +94,10 @@ final class Actions {
         case .installCommandLineTool: CommandLineInstaller.installAndReport(on: window?.window)
         case .newAgentPane: newPane(.agent, edge: .right)
         case .newBrowserPane: newPane(.browser, edge: .right)
-        case .newDevicePane: newPane(.device, edge: .right)
+        case .newSimulatorPane: newPane(.simulator, edge: .right)
         case .newAgentPaneBelow: newPane(.agent, edge: .down)
         case .newBrowserPaneBelow: newPane(.browser, edge: .down)
-        case .newDevicePaneBelow: newPane(.device, edge: .down)
+        case .newSimulatorPaneBelow: newPane(.simulator, edge: .down)
         default: return false
         }
         return true

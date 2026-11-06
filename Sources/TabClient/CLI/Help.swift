@@ -22,7 +22,7 @@ public enum CLIHelp {
 
         A session is a terminal on the server; it runs whether or not the app shows
         it. A tab is a card in the app's sidebar, and a pane is one terminal, agent,
-        browser, device, editor or diff in a tab's layout.
+        browser, simulator, editor or diff in a tab's layout.
         Projects are named by ID, unique name or folder; sessions and agents by ID,
         a unique start of one, or a name such as wispy-cedar. Inside a Tab terminal,
         a missing session means yours; inside a Tab terminal or agent, a missing

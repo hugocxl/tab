@@ -66,11 +66,11 @@ public enum AndroidEmulators {
             let pointer = ini(file)
             let folder = pointer["path"].map { URL(fileURLWithPath: $0) } ?? avdHome.appendingPathComponent("\(name).avd")
             let config = ini(folder.appendingPathComponent("config.ini"))
-            return device(name: name, config: config)
+            return simulator(name: name, config: config)
         }.sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
     }
 
-    static func device(name: String, config: [String: String]) -> AndroidVirtualDevice {
+    static func simulator(name: String, config: [String: String]) -> AndroidVirtualDevice {
         let display = config["avd.ini.displayname"] ?? name.replacingOccurrences(of: "_", with: " ")
         let image = config["image.sysdir.1"] ?? ""
         let api = image.split(separator: "/").first { $0.hasPrefix("android-") }.map { $0.dropFirst("android-".count) }
@@ -158,7 +158,7 @@ public enum AndroidEmulators {
         _ = try await adb(emulator, ["shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", shellQuoted(url)])
     }
 
-    /// `adb shell` runs its arguments through the device's shell.
+    /// `adb shell` runs its arguments through the simulator's shell.
     static func shellQuoted(_ text: String) -> String {
         "'" + text.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
@@ -186,7 +186,7 @@ public enum AndroidEmulators {
             let data = output.fileHandleForReading.readDataToEndOfFile()
             process.waitUntilExit()
             guard process.terminationStatus == 0 else {
-                Log.devices.error("adb \(arguments.joined(separator: " "), privacy: .public) failed: \(process.terminationStatus)")
+                Log.simulators.error("adb \(arguments.joined(separator: " "), privacy: .public) failed: \(process.terminationStatus)")
                 throw AndroidError.failed("adb \(arguments.first ?? "") failed")
             }
             return String(decoding: data, as: UTF8.self)

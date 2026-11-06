@@ -114,7 +114,7 @@ public enum SettingsCatalog {
         SettingItem("sidebar-layout", "Sidebar layout", "Group tabs under their projects, or list only the open tabs, each showing its project.", .interface, "Window"),
         SettingItem("color-scheme", "Color scheme", "Choose an appearance or follow macOS.", .interface, "Appearance"),
         SettingItem("interface-style", "Interface style", "Native macOS glass, always tinted with your theme.", .interface, "Appearance"),
-        SettingItem("glass-panes", "Use glass for panes", "Web pages and device screens keep their own backgrounds.", .interface, "Appearance"),
+        SettingItem("glass-panes", "Use glass for panes", "Web pages and simulator screens keep their own backgrounds.", .interface, "Appearance"),
         SettingItem("preserve-pane-width", "Preserve pane width when resizing sidebar", "", .interface, "Window"),
         SettingItem("sidebar-gesture", "Use a gesture to toggle the sidebar", "Option-scroll always scrolls content sideways.", .interface, "Window"),
         SettingItem("animation-style", "Animation style", "Pane transitions and sidebars follow this style. Reduce Motion turns animations off.", .interface, "Animation"),

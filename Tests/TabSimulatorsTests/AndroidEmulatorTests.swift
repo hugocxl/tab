@@ -1,7 +1,7 @@
 import IOSurface
 import XCTest
 import TabProtocol
-@testable import TabDevices
+@testable import TabSimulators
 
 final class AndroidEmulatorTests: XCTestCase {
     func testProtobufRoundTripsTheFieldsTheControlAPIUses() {
@@ -63,12 +63,12 @@ final class AndroidEmulatorTests: XCTestCase {
         let studio = try XCTUnwrap(AndroidEmulators.emulator(pid: 7, ["avd.name": "A", "port.serial": "5556", "grpc.jwks": "/x"]))
         XCTAssertTrue(studio.needsUnsupportedAuth)
         XCTAssertNil(AndroidEmulators.emulator(pid: 7, ["avd.name": "A"]))
-        let device = AndroidEmulators.device(name: "Pixel_Tablet_API_35", config: [
+        let simulator = AndroidEmulators.simulator(name: "Pixel_Tablet_API_35", config: [
             "image.sysdir.1": "system-images/android-35/google_apis/arm64-v8a/", "hw.device.name": "pixel_tablet",
         ])
-        XCTAssertEqual(device.displayName, "Pixel Tablet API 35")
-        XCTAssertEqual(device.runtime, "Android API 35")
-        XCTAssertTrue(device.isTablet)
+        XCTAssertEqual(simulator.displayName, "Pixel Tablet API 35")
+        XCTAssertEqual(simulator.runtime, "Android API 35")
+        XCTAssertTrue(simulator.isTablet)
     }
 
     func testHPACKIntegersUseTheirPrefixAndContinuationBytes() {

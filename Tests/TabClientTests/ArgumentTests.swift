@@ -279,10 +279,10 @@ final class ArgumentTests: XCTestCase {
         XCTAssertEqual(try pane(["pane", "new", "agent", "--fork", "--project", "app-login", "--", "Try it"]),
                        CLIPane(placement: .pane, project: "app-login",
                                content: .fork(agent: nil, project: "app-login", message: "Try it")))
-        XCTAssertEqual(try pane(["pane", "new", "device", "iPhone 17"]),
-                       CLIPane(placement: .pane, project: nil, content: .device(device: "iPhone 17")))
-        XCTAssertEqual(try pane(["tab", "new", "device"]),
-                       CLIPane(placement: .tab, project: nil, content: .device(device: nil)))
+        XCTAssertEqual(try pane(["pane", "new", "simulator", "iPhone 17"]),
+                       CLIPane(placement: .pane, project: nil, content: .simulator(simulator: "iPhone 17")))
+        XCTAssertEqual(try pane(["tab", "new", "simulator"]),
+                       CLIPane(placement: .tab, project: nil, content: .simulator(simulator: nil)))
         XCTAssertEqual(try pane(["pane", "new", "editor", "Sources/a.swift", "--line", "42"]),
                        CLIPane(placement: .pane, project: nil, content: .editor(path: "Sources/a.swift", line: 42)))
         XCTAssertEqual(try pane(["pane", "new", "diff", "README.md", "--staged", "--project", "App"]),
@@ -306,7 +306,7 @@ final class ArgumentTests: XCTestCase {
             ["pane", "new", "agent", "--provider", "gemini"], ["pane", "new", "agent", "App"],
             ["pane", "new", "agent", "--fork", "wispy-cedar"], ["pane", "new", "agent", "--fork", "--provider", "codex"],
             ["pane", "new", "editor", "a", "--line", "0"], ["pane", "new", "diff", "a", "b"],
-            ["tab", "new", "editor", "a"], ["pane", "new", "device", "a", "b"],
+            ["tab", "new", "editor", "a"], ["pane", "new", "simulator", "a", "b"],
             ["pane", "new", "terminal", "a", "b"], ["pane", "new", "terminal", id, "--", "ls"],
             ["pane", "new", "browser", "a.test", "b.test"], ["tab", "new", "terminal", id],
             ["tab", "new", "agent", "--fork"], ["tab", "new", "browser", "--project", "App"],

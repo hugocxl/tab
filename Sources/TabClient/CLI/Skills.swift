@@ -23,7 +23,7 @@ public enum AgentSkill {
     public static let text = #"""
     ---
     name: tab-cli
-    description: How to drive Tab from a shell with the `tab` command — start terminals that keep running, type into them, read and wait on their output, open terminal, agent, browser, device, editor and diff panes in the app, branch your own conversation into agent panes and read their replies, check apps on iOS simulators and Android emulators, and manage projects and Git worktrees. Use this when you are an agent running inside a Tab terminal or Tab agent pane (or any script on the same computer) and want work to run in its own terminal instead of blocking yours, the user asks for a new pane or tab, of any kind, asks to branch or fork the conversation or split work into panes, or to drive the Tab app's built-in browser or a simulator.
+    description: How to drive Tab from a shell with the `tab` command — start terminals that keep running, type into them, read and wait on their output, open terminal, agent, browser, simulator, editor and diff panes in the app, branch your own conversation into agent panes and read their replies, check apps on iOS simulators and Android emulators, and manage projects and Git worktrees. Use this when you are an agent running inside a Tab terminal or Tab agent pane (or any script on the same computer) and want work to run in its own terminal instead of blocking yours, the user asks for a new pane or tab, of any kind, asks to branch or fork the conversation or split work into panes, or to drive the Tab app's built-in browser or a simulator.
     ---
 
     # Tab CLI
@@ -31,7 +31,7 @@ public enum AgentSkill {
     Tab keeps terminals and agent conversations in a background server. `tab` has
     two kinds of commands:
 
-    - **On the server**: `session`, `agent`, `project`, `worktree`, `device` and
+    - **On the server**: `session`, `agent`, `project`, `worktree`, `simulator` and
       the like. A session is a terminal that keeps running after your command
       returns, whether or not the app shows it. These never open anything in the app.
     - **In the app**: `pane new` adds a pane beside yours, `tab new` adds a tab
@@ -61,7 +61,7 @@ public enum AgentSkill {
       missing project means your agent's, and new panes open beside yours. Your
       own subagent or task tools are not panes: Tab doesn't show them.
     - **In a tab of another computer**: `tab` uses that computer's server, so
-      sessions, projects and devices are its own, and folders are paths there.
+      sessions, projects and simulators are its own, and folders are paths there.
       `pane`, `tab` and `browser` can't reach the app the user is looking at; tell
       the user what to open instead.
     - **Anywhere else**: a missing project means Home.
@@ -104,18 +104,18 @@ public enum AgentSkill {
     tab pane new agent                        # a new agent pane, a fresh conversation
     tab pane new agent -- "Review the open PR"   # the same, starting on that message
     tab pane new browser http://localhost:3000   # prints the browser's ID
-    tab pane new device "iPhone 17"           # a simulator or emulator's screen
+    tab pane new simulator "iPhone 17"        # a simulator or emulator's screen
     tab pane new editor Sources/App.swift --line 42
     tab pane new diff Sources/App.swift       # its uncommitted changes; --staged for staged ones
     tab tab new terminal                      # a new tab in Home instead
-    tab tab new device
+    tab tab new simulator
     ```
 
     - Inside Tab, a pane always opens beside yours. With `--project` it works in
       that project's folder, but it still opens beside you.
     - `editor` and `diff` take a file inside the project, absolute or relative to
       your current folder. A pane already showing that file is focused instead.
-    - `device` without a name shows the only running device, else the picker.
+    - `simulator` without a name shows the only running simulator, else the picker.
     - Never start `claude` or `codex` in a terminal to give the user another agent:
       it is a separate program that asks its own questions, such as whether to trust
       the folder, regardless of the access mode chosen in Tab. Use `pane new agent`.
@@ -277,25 +277,25 @@ public enum AgentSkill {
 
     ## Simulators and emulators
 
-    `tab device` drives the iOS simulators and Android emulators of the server
+    `tab simulator` drives the iOS simulators and Android emulators of the server
     your terminal runs on, so you can check UI work where the app builds. Show
-    one to the user with `pane new device`.
+    one to the user with `pane new simulator`.
 
     ```bash
-    tab device list                                    # id, platform, name, runtime, state
-    tab device boot "iPhone 17"
-    tab device screenshot --output screen.png          # look at it before tapping
-    tab device tap 200 640                             # pixels of that screenshot
-    tab device type "hello"
-    tab device press home
-    tab device open "myapp://settings"
+    tab simulator list                                 # id, platform, name, runtime, state
+    tab simulator boot "iPhone 17"
+    tab simulator screenshot --output screen.png       # look at it before tapping
+    tab simulator tap 200 640                          # pixels of that screenshot
+    tab simulator type "hello"
+    tab simulator press home
+    tab simulator open "myapp://settings"
     ```
 
-    - Without `--device`, commands use the only running device.
+    - Without `--simulator`, commands use the only running simulator.
     - iOS simulators have the `home` and `lock` buttons; Android emulators also
       have `back` and `recents`.
     - Take a new screenshot after each action to see its effect.
-    - Shut down only devices you started.
+    - Shut down only simulators you started.
 
     ## Other computers
 

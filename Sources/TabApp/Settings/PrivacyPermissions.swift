@@ -55,7 +55,7 @@ public enum PrivacyAccess: Sendable, Equatable {
     /// Allowed in part, such as calendars without reading or some photos.
     case limited
     case denied
-    /// A device policy decides.
+    /// A simulator policy decides.
     case restricted
     case notAsked
 

@@ -55,7 +55,7 @@ do {
         files: FilesService(projects: server, events: server),
         detector: AgentDetector(),
         remote: RemoteAccess(dirs: configuration.dirs, server: server.info, events: server),
-        devices: DeviceService(events: server)))
+        simulators: SimulatorService(events: server)))
     try server.run()
 } catch let error as ServerStartError {
     ServerLog.error("\(error)")

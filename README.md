@@ -13,7 +13,7 @@
   <a href="CHANGELOG.md">Changelog</a>
 </p>
 
-Tab brings your projects, terminal sessions, agent conversations, browser pages, and device simulators into one AppKit window. Arrange them as split panes, move between projects and Git worktrees from the sidebar, and pick up where you left off: the `tabd` server keeps terminal sessions running after the app closes.
+Tab brings your projects, terminal sessions, agent conversations, browser pages, and iOS and Android simulators into one AppKit window. Arrange them as split panes, move between projects and Git worktrees from the sidebar, and pick up where you left off: the `tabd` server keeps terminal sessions running after the app closes.
 
 Made for **macOS 14 or later on Apple silicon**. The desktop app is written in Swift and uses the vendored Ghostty terminal engine.
 
@@ -28,7 +28,7 @@ Made for **macOS 14 or later on Apple silicon**. The desktop app is written in S
 - **Terminals that stay alive.** Sessions belong to the background server, so closing the desktop window does not end your work.
 - **Agents beside your tools.** Talk to Claude Code or Codex in a native conversation pane using their installed CLIs, or run an agent in a terminal pane.
 - **Projects and worktrees.** Keep each project or worktree in its own sidebar tab, with the panes you need arranged together.
-- **More than terminals.** Open browser, file, Git, and device views alongside your shell and agents. Device panes can show iOS simulators and Android emulators.
+- **More than terminals.** Open browser, file, Git, and simulator views alongside your shell and agents. Simulator panes can show iOS simulators and Android emulators.
 - **Remote Mac workspaces.** Connect to a Tab server over SSH and work with remote terminals and projects from the same app.
 
 ## Get Tab

@@ -3,7 +3,7 @@ import TabCore
 import TabProtocol
 
 /// One iOS, iPadOS, watchOS, tvOS or visionOS simulator on this Mac.
-public struct SimulatorDevice: Hashable, Sendable {
+public struct IOSSimulator: Hashable, Sendable {
     public enum State: String, Sendable {
         case shutdown = "Shutdown"
         case booting = "Booting"
@@ -25,23 +25,23 @@ public struct SimulatorDevice: Hashable, Sendable {
 
 /// Lists, boots and configures simulators with `xcrun simctl` and
 /// `devicectl`, off the main thread.
-public enum SimulatorControl {
+public enum IOSSimulatorControl {
     /// The selected Xcode's Developer folder.
     public static func developerDirectory() throws -> String {
         if let path = ProcessInfo.processInfo.environment["DEVELOPER_DIR"], !path.isEmpty { return path }
         let output = try runSync("/usr/bin/xcode-select", ["-p"])
         let path = output.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !path.isEmpty, FileManager.default.fileExists(atPath: path) else {
-            throw SimulatorError.unavailable("Xcode is not installed")
+            throw IOSSimulatorError.unavailable("Xcode is not installed")
         }
         guard FileManager.default.fileExists(atPath: path + "/usr/bin/simctl") else {
-            throw SimulatorError.unavailable("Simulators need Xcode, not only the Command Line Tools")
+            throw IOSSimulatorError.unavailable("Simulators need Xcode, not only the Command Line Tools")
         }
         return path
     }
 
     /// The available simulators, booted first, then the most recently used.
-    public static func devices() async throws -> [SimulatorDevice] {
+    public static func simulators() async throws -> [IOSSimulator] {
         let output = try await simctl(["list", "devices", "available", "--json"])
         return try parse(Data(output.utf8))
     }
@@ -49,7 +49,7 @@ public enum SimulatorControl {
     public static func boot(_ udid: String) async throws {
         do {
             _ = try await simctl(["boot", udid])
-        } catch SimulatorError.unavailable(let message) where message.contains("current state: Booted") {
+        } catch IOSSimulatorError.unavailable(let message) where message.contains("current state: Booted") {
             return
         }
     }
@@ -58,7 +58,7 @@ public enum SimulatorControl {
         _ = try await simctl(["shutdown", udid])
     }
 
-    /// Whether the device shows its dark appearance.
+    /// Whether the simulator shows its dark appearance.
     public static func isDark(_ udid: String) async throws -> Bool {
         try await simctl(["ui", udid, "appearance"]).trimmingCharacters(in: .whitespacesAndNewlines) == "dark"
     }
@@ -71,14 +71,14 @@ public enum SimulatorControl {
         _ = try await simctl(["openurl", udid, url])
     }
 
-    /// The way the device is held; lying flat reads as the last upright
+    /// The way the simulator is held; lying flat reads as the last upright
     /// orientation.
-    public static func orientation(_ udid: String) async throws -> DeviceOrientation {
+    public static func orientation(_ udid: String) async throws -> SimulatorOrientation {
         try parseOrientation(Data(try await devicectl(["device", "orientation", "get", "--device", udid]).utf8))
     }
 
-    /// Turns the device, returning how it is held now.
-    public static func setOrientation(_ udid: String, _ orientation: DeviceOrientation) async throws -> DeviceOrientation {
+    /// Turns the simulator, returning how it is held now.
+    public static func setOrientation(_ udid: String, _ orientation: SimulatorOrientation) async throws -> SimulatorOrientation {
         let output = try await devicectl(["device", "orientation", "set", "--device", udid, orientation.rawValue])
         return try parseOrientation(Data(output.utf8))
     }
@@ -94,10 +94,10 @@ public enum SimulatorControl {
     }
 
     /// The orientation in `devicectl device orientation` JSON output.
-    static func parseOrientation(_ data: Data) throws -> DeviceOrientation {
+    static func parseOrientation(_ data: Data) throws -> SimulatorOrientation {
         let result = try JSONDecoder().decode(OrientationResult.self, from: data).result
         let name = result.deviceOrientationNonFlat ?? result.deviceOrientation ?? ""
-        return DeviceOrientation(rawValue: name) ?? .portrait
+        return SimulatorOrientation(rawValue: name) ?? .portrait
     }
 
     private struct DeviceList: Decodable {
@@ -112,20 +112,20 @@ public enum SimulatorControl {
         var lastUsedAt: String?
     }
 
-    /// The devices in `simctl list devices --json` output.
-    static func parse(_ data: Data) throws -> [SimulatorDevice] {
+    /// The simulators in `simctl list devices --json` output.
+    static func parse(_ data: Data) throws -> [IOSSimulator] {
         let list = try JSONDecoder().decode(DeviceList.self, from: data)
         let dates = ISO8601DateFormatter()
-        let devices = list.devices.flatMap { runtime, entries in
+        let simulators = list.devices.flatMap { runtime, entries in
             entries.filter { $0.isAvailable ?? true }.map { entry in
-                SimulatorDevice(
+                IOSSimulator(
                     udid: entry.udid, name: entry.name, runtime: runtimeName(runtime),
-                    state: SimulatorDevice.State(rawValue: entry.state) ?? .unknown,
+                    state: IOSSimulator.State(rawValue: entry.state) ?? .unknown,
                     lastUsed: entry.lastUsedAt.flatMap { dates.date(from: $0) }
                 )
             }
         }
-        return devices.sorted { a, b in
+        return simulators.sorted { a, b in
             if a.isBooted != b.isBooted { return a.isBooted }
             if a.lastUsed != b.lastUsed { return (a.lastUsed ?? .distantPast) > (b.lastUsed ?? .distantPast) }
             if a.runtime != b.runtime { return a.runtime.compare(b.runtime, options: .numeric) == .orderedDescending }
@@ -173,7 +173,7 @@ public enum SimulatorControl {
         do {
             try process.run()
         } catch {
-            throw SimulatorError.unavailable("\(tool) could not run: \(error.localizedDescription)")
+            throw IOSSimulatorError.unavailable("\(tool) could not run: \(error.localizedDescription)")
         }
         var errorData = Data()
         let errorReader = DispatchWorkItem { errorData = errors.fileHandleForReading.readDataToEndOfFile() }
@@ -183,8 +183,8 @@ public enum SimulatorControl {
         errorReader.wait()
         guard process.terminationStatus == 0 else {
             let message = String(decoding: errorData, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-            Log.devices.error("\(tool, privacy: .public) \(arguments.joined(separator: " "), privacy: .public) failed: \(message, privacy: .public)")
-            throw SimulatorError.unavailable(message.isEmpty ? "\(tool) exited with \(process.terminationStatus)" : message)
+            Log.simulators.error("\(tool, privacy: .public) \(arguments.joined(separator: " "), privacy: .public) failed: \(message, privacy: .public)")
+            throw IOSSimulatorError.unavailable(message.isEmpty ? "\(tool) exited with \(process.terminationStatus)" : message)
         }
         return String(decoding: data, as: UTF8.self)
     }

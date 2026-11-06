@@ -204,13 +204,13 @@ public enum Topic: OpenEnum {
     case sessions
     case activity
     case remoteAccess
-    /// A device booted or stopped, or devices were added or removed.
-    case devices
+    /// A simulator booted or stopped, or simulators were added or removed.
+    case simulators
     /// A tab, pane or layout changed.
     case tabs
     case unknown(String)
 
-    public static let knownCases: [Topic] = [.catalog, .sessions, .activity, .remoteAccess, .devices, .tabs]
+    public static let knownCases: [Topic] = [.catalog, .sessions, .activity, .remoteAccess, .simulators, .tabs]
 
     public var rawValue: String {
         switch self {
@@ -218,7 +218,7 @@ public enum Topic: OpenEnum {
         case .sessions: "sessions"
         case .activity: "activity"
         case .remoteAccess: "remoteAccess"
-        case .devices: "devices"
+        case .simulators: "simulators"
         case .tabs: "tabs"
         case .unknown(let value): value
         }
@@ -318,13 +318,13 @@ public enum RequestBody: Hashable, Codable, Sendable {
     /// Frees a tunnel's channel at once, closing its connection.
     case closeTunnel(ChannelId)
 
-    // Devices
-    case listDevices
-    case deviceAction(device: DeviceRef, action: DeviceAction)
-    case attachDevice(AttachDevice)
-    case detachDevice(ChannelId)
-    /// The device's screen as a PNG.
-    case deviceScreenshot(DeviceRef)
+    // Simulators
+    case listSimulators
+    case simulatorAction(simulator: SimulatorRef, action: SimulatorAction)
+    case attachSimulator(AttachSimulator)
+    case detachSimulator(ChannelId)
+    /// The simulator's screen as a PNG.
+    case simulatorScreenshot(SimulatorRef)
 
     /// A request from a newer build; answer with an `unsupported` error.
     case unknown(String)
@@ -395,11 +395,11 @@ public enum RequestBody: Hashable, Codable, Sendable {
         case "revokeDevice": self = .revokeDevice(try c("device"))
         case "openTunnel": self = .openTunnel(host: try c("host"), port: try c("port"))
         case "closeTunnel": self = .closeTunnel(try c("channel"))
-        case "listDevices": self = .listDevices
-        case "deviceAction": self = .deviceAction(device: try c("device"), action: try c("action"))
-        case "attachDevice": self = .attachDevice(try c("request"))
-        case "detachDevice": self = .detachDevice(try c("channel"))
-        case "deviceScreenshot": self = .deviceScreenshot(try c("device"))
+        case "listSimulators": self = .listSimulators
+        case "simulatorAction": self = .simulatorAction(simulator: try c("simulator"), action: try c("action"))
+        case "attachSimulator": self = .attachSimulator(try c("request"))
+        case "detachSimulator": self = .detachSimulator(try c("channel"))
+        case "simulatorScreenshot": self = .simulatorScreenshot(try c("simulator"))
         default: self = .unknown(c.type)
         }
     }
@@ -574,20 +574,20 @@ public enum RequestBody: Hashable, Codable, Sendable {
         case .closeTunnel(let channel):
             var c = try TaggedEncoding(encoder, "closeTunnel")
             try c(channel, "channel")
-        case .listDevices: try TaggedEncoding(encoder, "listDevices")
-        case .deviceAction(let device, let action):
-            var c = try TaggedEncoding(encoder, "deviceAction")
-            try c(device, "device")
+        case .listSimulators: try TaggedEncoding(encoder, "listSimulators")
+        case .simulatorAction(let simulator, let action):
+            var c = try TaggedEncoding(encoder, "simulatorAction")
+            try c(simulator, "simulator")
             try c(action, "action")
-        case .attachDevice(let request):
-            var c = try TaggedEncoding(encoder, "attachDevice")
+        case .attachSimulator(let request):
+            var c = try TaggedEncoding(encoder, "attachSimulator")
             try c(request, "request")
-        case .detachDevice(let channel):
-            var c = try TaggedEncoding(encoder, "detachDevice")
+        case .detachSimulator(let channel):
+            var c = try TaggedEncoding(encoder, "detachSimulator")
             try c(channel, "channel")
-        case .deviceScreenshot(let device):
-            var c = try TaggedEncoding(encoder, "deviceScreenshot")
-            try c(device, "device")
+        case .simulatorScreenshot(let simulator):
+            var c = try TaggedEncoding(encoder, "simulatorScreenshot")
+            try c(simulator, "simulator")
         case .unknown(let type): try TaggedEncoding(encoder, type)
         }
     }
@@ -669,12 +669,12 @@ public enum ReplyBody: Hashable, Codable, Sendable {
     case tunnelFailed(TunnelFailure)
     case tunnelClosed
 
-    // Devices
-    case devices([DeviceInfo])
-    case deviceSettings(DeviceSettings)
-    case deviceAttached(DeviceStream)
-    case deviceDetached
-    case deviceScreenshot(png: Data)
+    // Simulators
+    case simulators([SimulatorInfo])
+    case simulatorSettings(SimulatorSettings)
+    case simulatorAttached(SimulatorStream)
+    case simulatorDetached
+    case simulatorScreenshot(png: Data)
 
     /// A reply from a newer build.
     case unknown(String)
@@ -735,11 +735,11 @@ public enum ReplyBody: Hashable, Codable, Sendable {
         case "tunnelOpened": self = .tunnelOpened(channel: try c("channel"))
         case "tunnelFailed": self = .tunnelFailed(try c("failure"))
         case "tunnelClosed": self = .tunnelClosed
-        case "devices": self = .devices(try c("devices"))
-        case "deviceSettings": self = .deviceSettings(try c("settings"))
-        case "deviceAttached": self = .deviceAttached(try c("stream"))
-        case "deviceDetached": self = .deviceDetached
-        case "deviceScreenshot": self = .deviceScreenshot(png: try c("png"))
+        case "simulators": self = .simulators(try c("simulators"))
+        case "simulatorSettings": self = .simulatorSettings(try c("settings"))
+        case "simulatorAttached": self = .simulatorAttached(try c("stream"))
+        case "simulatorDetached": self = .simulatorDetached
+        case "simulatorScreenshot": self = .simulatorScreenshot(png: try c("png"))
         default: self = .unknown(c.type)
         }
     }
@@ -868,18 +868,18 @@ public enum ReplyBody: Hashable, Codable, Sendable {
             var c = try TaggedEncoding(encoder, "tunnelFailed")
             try c(failure, "failure")
         case .tunnelClosed: try TaggedEncoding(encoder, "tunnelClosed")
-        case .devices(let devices):
-            var c = try TaggedEncoding(encoder, "devices")
-            try c(devices, "devices")
-        case .deviceSettings(let settings):
-            var c = try TaggedEncoding(encoder, "deviceSettings")
+        case .simulators(let simulators):
+            var c = try TaggedEncoding(encoder, "simulators")
+            try c(simulators, "simulators")
+        case .simulatorSettings(let settings):
+            var c = try TaggedEncoding(encoder, "simulatorSettings")
             try c(settings, "settings")
-        case .deviceAttached(let stream):
-            var c = try TaggedEncoding(encoder, "deviceAttached")
+        case .simulatorAttached(let stream):
+            var c = try TaggedEncoding(encoder, "simulatorAttached")
             try c(stream, "stream")
-        case .deviceDetached: try TaggedEncoding(encoder, "deviceDetached")
-        case .deviceScreenshot(let png):
-            var c = try TaggedEncoding(encoder, "deviceScreenshot")
+        case .simulatorDetached: try TaggedEncoding(encoder, "simulatorDetached")
+        case .simulatorScreenshot(let png):
+            var c = try TaggedEncoding(encoder, "simulatorScreenshot")
             try c(png, "png")
         case .unknown(let type): try TaggedEncoding(encoder, type)
         }

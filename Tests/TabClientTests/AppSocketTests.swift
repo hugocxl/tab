@@ -38,7 +38,7 @@ final class AppSocketTests: XCTestCase {
                 "tabId": .string("T"), "expires": .int(1_767_225_600), "secure": .bool(true), "ratio": .double(0.5),
                 "list": .array([.null, .string("x")]), "nested": .object(["a": .int(-1)]),
             ]),
-            .add(AppNewPane(content: .device(DevicePane(udid: "U", name: "iPhone 17")), project: ProjectId(),
+            .add(AppNewPane(content: .simulator(SimulatorPane(udid: "U", name: "iPhone 17")), project: ProjectId(),
                             beside: SessionId())),
             .add(AppNewPane(content: .editor(path: "/srv/app/a.swift", line: 3), project: ProjectId(), placement: .tab)),
             .add(AppNewPane(content: .diff(path: "README.md", staged: true), project: ProjectId())),

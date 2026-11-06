@@ -59,7 +59,7 @@ public enum ManageAction: Hashable, Sendable {
     case git(project: String, action: String)
     case files(project: String, action: String)
     case exec(project: String, argv: [String], timeoutMs: UInt32)
-    case device(CLIDevice)
+    case simulator(CLISimulator)
     case agent(CLIAgent)
     /// Exposes the server's `localhost:remote` on this computer until interrupted.
     case forward(remote: UInt16, local: UInt16?)
@@ -76,19 +76,19 @@ public enum CLIAgent: Hashable, Sendable {
     case send(agent: String, text: String)
 }
 
-/// The server's simulators and emulators. A missing device means the only
+/// The server's simulators and emulators. A missing simulator means the only
 /// running one.
-public enum CLIDevice: Hashable, Sendable {
+public enum CLISimulator: Hashable, Sendable {
     case list
-    case boot(device: String)
-    case shutDown(device: String?)
+    case boot(simulator: String)
+    case shutDown(simulator: String?)
     /// Saves a PNG to `output`, or writes it to stdout.
-    case screenshot(device: String?, output: String?)
+    case screenshot(simulator: String?, output: String?)
     /// A tap at a point of the screenshot, in its pixels.
-    case tap(device: String?, x: Double, y: Double)
-    case type(device: String?, text: String)
-    case press(device: String?, button: DeviceButton)
-    case open(device: String?, url: String)
+    case tap(simulator: String?, x: Double, y: Double)
+    case type(simulator: String?, text: String)
+    case press(simulator: String?, button: SimulatorButton)
+    case open(simulator: String?, url: String)
 }
 
 public enum CLIServer: Hashable, Sendable {
@@ -144,8 +144,8 @@ public struct CLIPane: Hashable, Sendable {
         case fork(agent: String?, project: String?, message: String?)
         case browser(url: String?, profile: String?)
         /// A simulator or emulator by ID or name; `nil`, the only running one,
-        /// else the device picker.
-        case device(device: String?)
+        /// else the simulator picker.
+        case simulator(simulator: String?)
         /// A file in an editor, at a 1-based `line`.
         case editor(path: String, line: Int?)
         /// A file's working tree changes, or its staged ones.

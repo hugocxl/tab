@@ -5,7 +5,7 @@ import IOSurface
 import TabProtocol
 import VideoToolbox
 
-/// Why a device's screen can't be encoded or decoded.
+/// Why a simulator's screen can't be encoded or decoded.
 public enum VideoError: Error, Equatable, CustomStringConvertible {
     case unsupported(VideoCodec)
     case failed(String, OSStatus)
@@ -29,9 +29,9 @@ public struct EncodedFrame: Sendable {
     public var sample: Data
 }
 
-/// A real-time, low-latency encoder for a device's screen: no B-frames and
+/// A real-time, low-latency encoder for a simulator's screen: no B-frames and
 /// no reordering, so every frame goes out as soon as it is encoded. It scales
-/// the device's surface down to at most `maxPixels`, since a pane never
+/// the simulator's surface down to at most `maxPixels`, since a pane never
 /// shows more. Encode on one serial queue.
 public final class VideoEncoder: @unchecked Sendable {
     public let codec: VideoCodec

@@ -5,7 +5,7 @@ import TabCore
 
 /// Answers `app.sock`: `tab <folder>`, a second launch handing its folder
 /// over, `tab browser`, showing terminals and agents in panes, and opening
-/// device, editor and diff panes.
+/// simulator, editor and diff panes.
 
 @MainActor
 public final class AppSocketHandler {

@@ -5,13 +5,13 @@ import IOSurface
 import TabCore
 import TabProtocol
 
-/// One device pane's link to an Android emulator through its gRPC control
+/// One simulator pane's link to an Android emulator through its gRPC control
 /// API, as Android Studio's embedded emulator uses it: screenshots stream
 /// as RGBA frames copied into a surface, and touches and keys are calls
 /// sent one at a time so they arrive in order. The pane notices emulators
 /// starting and stopping from their discovery files.
 @MainActor
-public final class AndroidSession: DeviceSession {
+public final class AndroidSession: SimulatorSession {
     public let avd: String
     public var onStateChange: ((Bool) -> Void)?
     public var onSurface: ((IOSurface) -> Void)?
@@ -20,7 +20,7 @@ public final class AndroidSession: DeviceSession {
 
     public private(set) var isBooted = false
     public private(set) var surface: IOSurface?
-    public let buttons: [DeviceButton] = [.back, .home, .recents, .lock]
+    public let buttons: [SimulatorButton] = [.back, .home, .recents, .lock]
 
     private let queue = DispatchQueue(label: "com.hugocorta.tab.android")
     private var emulator: RunningEmulator?
@@ -172,10 +172,10 @@ public final class AndroidSession: DeviceSession {
 
     // MARK: Input
 
-    public func send(_ input: [DeviceInput]) {
+    public func send(_ input: [SimulatorInput]) {
         guard let client, frameSize.width > 0 else { return }
         // Frames arrive turned upright; touches go to the display unturned.
-        let turned = DeviceOrientation(quarterTurns: skinTurns)
+        let turned = SimulatorOrientation(quarterTurns: skinTurns)
         let native = turned.isLandscape ? CGSize(width: frameSize.height, height: frameSize.width) : frameSize
         let calls = input.compactMap { item -> (String, Data)? in
             switch item {
@@ -202,12 +202,12 @@ public final class AndroidSession: DeviceSession {
         enqueue(calls, on: client)
     }
 
-    public func press(_ button: DeviceButton) {
+    public func press(_ button: SimulatorButton) {
         guard let client else { return }
         enqueue([("sendKey", Self.keypress(button))], on: client)
     }
 
-    private static func keypress(_ button: DeviceButton) -> Data {
+    private static func keypress(_ button: SimulatorButton) -> Data {
         let key: String
         switch button {
         case .home: key = "GoHome"
@@ -250,9 +250,9 @@ public final class AndroidSession: DeviceSession {
     public func setHardwareKeyboard(_ connected: Bool) async throws {}
 
     /// Frames arrive upright, so the view never turns them.
-    public func orientation() async throws -> DeviceOrientation { .portrait }
+    public func orientation() async throws -> SimulatorOrientation { .portrait }
 
-    public func rotate(by turns: Int) async throws -> DeviceOrientation {
+    public func rotate(by turns: Int) async throws -> SimulatorOrientation {
         let emulator = try running()
         for _ in 0..<(((turns % 4) + 4) % 4) { try await AndroidEmulators.rotateLeft(emulator) }
         return .portrait

@@ -10,7 +10,7 @@ struct ActivityCardData: Equatable {
         /// A command running, as its terminal titles it.
         case command(String)
         case browser(String)
-        case device(String)
+        case simulator(String)
         case editor(String)
         case diff(String)
         /// An agent and what it is working on.
@@ -75,8 +75,8 @@ struct ActivityCardData: Equatable {
                 headline = .empty
             } else if case .browser? = shownPane?.content {
                 headline = .browser(title)
-            } else if case .device? = shownPane?.content {
-                headline = .device(title)
+            } else if case .simulator? = shownPane?.content {
+                headline = .simulator(title)
             } else if let directory = idleDirectory(title) {
                 headline = .shell(shellName, directory: !project.home && directory != project.name ? directory : nil)
             } else {

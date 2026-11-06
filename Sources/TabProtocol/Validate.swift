@@ -224,17 +224,17 @@ extension RequestBody {
         case .openTunnel(let host, let port):
             try Validation.tunnelHost(host)
             if port == 0 { throw .badRequest }
-        case .closeTunnel(let channel), .detachDevice(let channel):
+        case .closeTunnel(let channel), .detachSimulator(let channel):
             if channel.isControl { throw .unknownChannel }
-        case .deviceAction(let device, let action):
-            try device.validate()
+        case .simulatorAction(let simulator, let action):
+            try simulator.validate()
             try action.validate()
-        case .deviceScreenshot(let device):
-            try device.validate()
-        case .attachDevice(let request):
-            try request.device.validate()
+        case .simulatorScreenshot(let simulator):
+            try simulator.validate()
+        case .attachSimulator(let request):
+            try request.simulator.validate()
             if request.maxPixels == 0 || request.codecs.isEmpty || request.codecs.count > 8 { throw .badRequest }
-        case .ping, .listDevices, .listSessions, .attachWithoutResize, .endSession, .closeSession, .discardSession,
+        case .ping, .listSimulators, .listSessions, .attachWithoutResize, .endSession, .closeSession, .discardSession,
              .readSavedScreen, .identifyClient, .cancelCreation, .readCatalog, .listProjectSessions, .readTabs,
              .readServerSettings, .stopServer, .stopServerIfIdle, .restartServer, .cancelExec, .readActivity,
              .readRemoteAccess, .cancelPairing, .revokeDevice, .reportAgentState, .unknown:
@@ -307,7 +307,7 @@ extension PaneContent {
         switch self {
         case .terminal, .agent: texts = []
         case .browser(let browser): texts = [browser.url, browser.profile]
-        case .device(let device): texts = [device.udid, device.avd, device.name]
+        case .simulator(let simulator): texts = [simulator.udid, simulator.avd, simulator.name]
         case .editor(let path), .diff(let path, _): texts = [path]
         }
         for text in texts.compactMap({ $0 }) where text.utf8.count > Limits.maxPathBytes || Validation.hasNul(text) {
@@ -395,16 +395,16 @@ extension ReplyBody {
             try Validation.versions([hello.version])
         case .tunnelOpened(let channel):
             if channel.isControl { throw .unknownChannel }
-        case .deviceAttached(let stream):
+        case .simulatorAttached(let stream):
             if stream.channel.isControl || stream.width == 0 || stream.height == 0 { throw .badRequest }
-        case .devices(let devices):
-            if devices.count > Limits.maxDeviceList { throw .badRequest }
-            for device in devices { try device.device.validate() }
+        case .simulators(let simulators):
+            if simulators.count > Limits.maxSimulatorList { throw .badRequest }
+            for simulator in simulators { try simulator.simulator.validate() }
         case .versionUnsupported, .pong, .error, .detached, .sessionEnded, .sessionClosed, .sessionDiscarded,
              .creationCancelled, .screenCleared, .terminalColorsSet, .sessionReferencesSynced, .clientIdentified,
              .inputWritten, .agentStateReported, .projectMutated, .tabsMutated, .serverSettingsWritten, .serverStopping, .serverBusy,
              .serverRestarting, .git, .execCancelled, .activityAcknowledged, .authenticated, .tunnelFailed, .tunnelClosed,
-             .deviceSettings, .deviceDetached, .deviceScreenshot, .unknown:
+             .simulatorSettings, .simulatorDetached, .simulatorScreenshot, .unknown:
             break
         }
     }
@@ -435,8 +435,8 @@ extension SessionMessage {
         case .input(let input): try input.validate()
         case .cellSize(let cell): try Validation.cellSize(cell)
         case .credit(let bytes): if bytes > Limits.tunnelWindow { throw .badRequest }
-        case .deviceInput(let input): try DeviceInput.validate(input)
-        case .ended, .ack, .scroll, .requestHistory, .clear, .streamEnd, .streamClosed, .requestKeyframe, .deviceStopped,
+        case .simulatorInput(let input): try SimulatorInput.validate(input)
+        case .ended, .ack, .scroll, .requestHistory, .clear, .streamEnd, .streamClosed, .requestKeyframe, .simulatorStopped,
              .unknown: break
         }
     }

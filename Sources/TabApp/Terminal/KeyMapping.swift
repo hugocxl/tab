@@ -6,7 +6,7 @@ import TabProtocol
 /// modifiers, consumed modifiers, text, unshifted code point) and into
 /// `KeyChord`s for bindings.
 public enum KeyMapping {
-    /// The device-dependent bits AppKit sets for the left and right Option keys.
+    /// The simulator-dependent bits AppKit sets for the left and right Option keys.
     static let leftOption: UInt = 0x20
     static let rightOption: UInt = 0x40
 

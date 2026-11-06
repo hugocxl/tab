@@ -15,7 +15,7 @@ public enum Log {
     public static let git = Logger(subsystem: subsystem, category: "git")
     public static let app = Logger(subsystem: subsystem, category: "app")
     public static let browser = Logger(subsystem: subsystem, category: "browser")
-    public static let devices = Logger(subsystem: subsystem, category: "devices")
+    public static let simulators = Logger(subsystem: subsystem, category: "simulators")
     public static let cli = Logger(subsystem: subsystem, category: "cli")
     public static let mobile = Logger(subsystem: subsystem, category: "mobile")
     public static let updates = Logger(subsystem: subsystem, category: "updates")

@@ -26,6 +26,18 @@ final class ShortcutTests: XCTestCase {
         XCTAssertEqual(conflicts, [], "\(conflicts)")
     }
 
+    func testDefaultsAvoidChordsMacOSTakesBeforeTheApp() throws {
+        // Dock hiding, Force Quit, Spotlight, Finder search, Mission Control
+        // and the input source switcher never reach the app.
+        let reserved = try Set(["cmd-alt-d", "cmd-alt-escape", "cmd-space", "cmd-alt-space", "ctrl-up", "ctrl-down",
+                                "ctrl-space", "ctrl-alt-space", "cmd-alt-8"].map(KeyChord.init))
+        for shortcut in ShortcutCatalog.all {
+            for key in shortcut.keys {
+                XCTAssertFalse(reserved.contains(try KeyChord(key)), "\(shortcut.name): \(key)")
+            }
+        }
+    }
+
     func testChordsParseCanonicallyAndShowMacGlyphs() throws {
         XCTAssertEqual(try KeyChord("Shift-Cmd-P").rawValue, "cmd-shift-p")
         XCTAssertEqual(try KeyChord("super-k").rawValue, "cmd-k")

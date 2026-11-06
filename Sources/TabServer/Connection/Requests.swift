@@ -92,9 +92,9 @@ extension ClientConnection {
         case .closeTunnel(let channel):
             tunnels.close(channel)
             reply(id, .tunnelClosed)
-        case .listDevices, .deviceAction, .attachDevice, .detachDevice, .deviceScreenshot:
-            guard let devices = server.devices else { return unavailable(id, "Devices") }
-            device(id, body, devices)
+        case .listSimulators, .simulatorAction, .attachSimulator, .detachSimulator, .simulatorScreenshot:
+            guard let simulators = server.simulators else { return unavailable(id, "Simulators") }
+            simulator(id, body, simulators)
         default:
             worker.async { [self] in
                 guard !isClosed else { return }
@@ -107,13 +107,13 @@ extension ClientConnection {
         }
     }
 
-    private func device(_ id: RequestId, _ body: RequestBody, _ devices: DeviceService) {
-        if case .attachDevice(let request) = body {
+    private func simulator(_ id: RequestId, _ body: RequestBody, _ simulators: SimulatorService) {
+        if case .attachSimulator(let request) = body {
             Task { [self] in
                 do {
-                    let stream = try await devices.attach(request, channel: reserveChannel(), connection: self)
-                    reply(id, .deviceAttached(stream))
-                    devices.begin(stream.channel, connection: self)
+                    let stream = try await simulators.attach(request, channel: reserveChannel(), connection: self)
+                    reply(id, .simulatorAttached(stream))
+                    simulators.begin(stream.channel, connection: self)
                 } catch {
                     reply(id, .error(errorReply(error)))
                 }
@@ -123,15 +123,15 @@ extension ClientConnection {
         Task { [self] in
             reply(id, await asyncResult {
                 switch body {
-                case .listDevices:
-                    return .devices(await devices.list())
-                case .deviceAction(let device, let action):
-                    return .deviceSettings(try await devices.perform(action, on: device))
-                case .deviceScreenshot(let device):
-                    return .deviceScreenshot(png: try await devices.screenshot(device))
-                case .detachDevice(let channel):
-                    devices.detach(channel, connection: self)
-                    return .deviceDetached
+                case .listSimulators:
+                    return .simulators(await simulators.list())
+                case .simulatorAction(let simulator, let action):
+                    return .simulatorSettings(try await simulators.perform(action, on: simulator))
+                case .simulatorScreenshot(let simulator):
+                    return .simulatorScreenshot(png: try await simulators.screenshot(simulator))
+                case .detachSimulator(let channel):
+                    simulators.detach(channel, connection: self)
+                    return .simulatorDetached
                 default:
                     throw ServiceError(.badRequest, "Unexpected request")
                 }
@@ -299,8 +299,8 @@ extension ClientConnection {
             return .remoteAccess(remote.state())
 
         case .hello, .ping, .unknown, .authenticate, .pair, .git, .files, .exec, .cancelExec, .agentChat, .agentCheckpoint, .agentAttachment,
-             .agentComposerContext, .agentModelCatalog, .agentHistory, .importAgentHistory, .openTunnel, .closeTunnel, .listDevices, .deviceAction, .attachDevice,
-             .detachDevice, .deviceScreenshot:
+             .agentComposerContext, .agentModelCatalog, .agentHistory, .importAgentHistory, .openTunnel, .closeTunnel, .listSimulators, .simulatorAction, .attachSimulator,
+             .detachSimulator, .simulatorScreenshot:
             throw ServiceError(.badRequest, "Unexpected request")
         }
     }

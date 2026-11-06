@@ -51,11 +51,11 @@ public struct Feature: RawRepresentable, Hashable, Codable, Sendable {
     public static let tunnels = Feature(rawValue: "tunnels")
 
     /// The server lists, controls and streams its simulators and emulators.
-    public static let devices = Feature(rawValue: "devices")
+    public static let simulators = Feature(rawValue: "simulators")
 
     /// Features this build's server supports.
     public static let all: [Feature] = [.terminalInput, .sessionEnvironment, .fileSearch, .fileByteRanges, .pullRequestPreview,
-                                        .fileWriteParents, .agentStateReports, .tunnels, .devices]
+                                        .fileWriteParents, .agentStateReports, .tunnels, .simulators]
 }
 
 /// What kind of program a client is.
@@ -137,10 +137,10 @@ public enum Limits {
     /// The bytes each direction of a tunnel may send before the reader grants credit.
     public static let tunnelWindow: UInt32 = 512 * 1024
     public static let maxTunnelHost = 255
-    /// The most input one device message carries.
-    public static let maxDeviceInput = 1024
-    /// The most devices a listing returns.
-    public static let maxDeviceList = 1024
+    /// The most input one simulator message carries.
+    public static let maxSimulatorInput = 1024
+    /// The most simulators a listing returns.
+    public static let maxSimulatorList = 1024
     public static let maxDeviceName = 64
     public static let maxPairingHosts = 8
     public static let defaultRemotePort: UInt16 = 7419

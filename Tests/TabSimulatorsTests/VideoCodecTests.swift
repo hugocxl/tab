@@ -2,7 +2,7 @@ import CoreVideo
 import IOSurface
 import TabProtocol
 import XCTest
-@testable import TabDevices
+@testable import TabSimulators
 
 /// The screen codec: what the server encodes, the app decodes into a
 /// surface it can show, at the size the pane asked for.

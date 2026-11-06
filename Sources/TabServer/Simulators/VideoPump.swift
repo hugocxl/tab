@@ -1,7 +1,7 @@
 import Foundation
 import TabProtocol
 
-/// Sends one channel's device screen under the outbox's one-frame credit:
+/// Sends one channel's simulator screen under the outbox's one-frame credit:
 /// a frame is encoded only when the channel has credit, and a screen that
 /// drew meanwhile is only marked dirty, so the next credit encodes the
 /// screen as it is then. The encoder sees only frames it sends, so P-frames
@@ -81,7 +81,7 @@ final class VideoPump: @unchecked Sendable {
         do {
             frame = try encode(keyframe)
         } catch {
-            ServerLog.error("device frame not encoded: \(error)")
+            ServerLog.error("simulator frame not encoded: \(error)")
             return
         }
         guard var frame else { return }

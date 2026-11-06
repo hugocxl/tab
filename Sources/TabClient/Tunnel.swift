@@ -143,19 +143,19 @@ public final class Tunnel: @unchecked Sendable {
     }
 }
 
-/// Something that happened on an attached device's channel.
-public enum DeviceChannelEvent: Sendable {
+/// Something that happened on an attached simulator's channel.
+public enum SimulatorChannelEvent: Sendable {
     /// Decode and show it, then `ack` its `seq` so the server sends the next one.
     case frame(VideoFrame)
-    /// The device shut down; the channel is closed.
+    /// The simulator shut down; the channel is closed.
     case stopped
 }
 
-/// An attached device's screen stream: its format and its channel's events,
-/// which end on detach, when the device stops, or when the connection closes.
-public struct DeviceAttachment: Sendable {
-    public let stream: DeviceStream
-    public let events: AsyncStream<DeviceChannelEvent>
+/// An attached simulator's screen stream: its format and its channel's events,
+/// which end on detach, when the simulator stops, or when the connection closes.
+public struct SimulatorAttachment: Sendable {
+    public let stream: SimulatorStream
+    public let events: AsyncStream<SimulatorChannelEvent>
 }
 
 extension ServerClient {
@@ -176,47 +176,47 @@ extension ServerClient {
         }
     }
 
-    // MARK: Devices
+    // MARK: Simulators
 
-    public func listDevices() async throws -> [DeviceInfo] {
-        let reply = try await request(.listDevices, timeout: max(defaultTimeout, 30))
-        guard case .devices(let devices) = reply else { throw unexpected(reply) }
-        return devices
+    public func listSimulators() async throws -> [SimulatorInfo] {
+        let reply = try await request(.listSimulators, timeout: max(defaultTimeout, 30))
+        guard case .simulators(let simulators) = reply else { throw unexpected(reply) }
+        return simulators
     }
 
-    /// Runs an action and returns the device's settings afterwards.
-    public func deviceAction(_ action: DeviceAction, on device: DeviceRef) async throws -> DeviceSettings {
-        let reply = try await request(.deviceAction(device: device, action: action), timeout: max(defaultTimeout, 60))
-        guard case .deviceSettings(let settings) = reply else { throw unexpected(reply) }
+    /// Runs an action and returns the simulator's settings afterwards.
+    public func simulatorAction(_ action: SimulatorAction, on simulator: SimulatorRef) async throws -> SimulatorSettings {
+        let reply = try await request(.simulatorAction(simulator: simulator, action: action), timeout: max(defaultTimeout, 60))
+        guard case .simulatorSettings(let settings) = reply else { throw unexpected(reply) }
         return settings
     }
 
-    /// The device's screen as a PNG.
-    public func deviceScreenshot(_ device: DeviceRef) async throws -> Data {
-        let reply = try await request(.deviceScreenshot(device), timeout: max(defaultTimeout, 30))
-        guard case .deviceScreenshot(let png) = reply else { throw unexpected(reply) }
+    /// The simulator's screen as a PNG.
+    public func simulatorScreenshot(_ simulator: SimulatorRef) async throws -> Data {
+        let reply = try await request(.simulatorScreenshot(simulator), timeout: max(defaultTimeout, 30))
+        guard case .simulatorScreenshot(let png) = reply else { throw unexpected(reply) }
         return png
     }
 
-    public func attachDevice(_ request: AttachDevice) async throws -> DeviceAttachment {
-        let reply = try await self.request(.attachDevice(request), timeout: max(defaultTimeout, 30))
-        guard case .deviceAttached(let stream) = reply, let events = claimDeviceChannel(stream.channel) else {
+    public func attachSimulator(_ request: AttachSimulator) async throws -> SimulatorAttachment {
+        let reply = try await self.request(.attachSimulator(request), timeout: max(defaultTimeout, 30))
+        guard case .simulatorAttached(let stream) = reply, let events = claimSimulatorChannel(stream.channel) else {
             throw unexpected(reply)
         }
-        return DeviceAttachment(stream: stream, events: events)
+        return SimulatorAttachment(stream: stream, events: events)
     }
 
-    /// Stops a device's stream; its events finish. A channel the server no
+    /// Stops a simulator's stream; its events finish. A channel the server no
     /// longer knows counts as detached.
-    public func detachDevice(channel: ChannelId) async throws {
-        defer { finishDeviceChannel(channel) }
-        let reply = try await request(.detachDevice(channel))
-        guard case .deviceDetached = reply else { throw unexpected(reply) }
+    public func detachSimulator(channel: ChannelId) async throws {
+        defer { finishSimulatorChannel(channel) }
+        let reply = try await request(.detachSimulator(channel))
+        guard case .simulatorDetached = reply else { throw unexpected(reply) }
     }
 
-    /// Sends touches, keys and buttons to an attached device, in order.
-    public func sendDeviceInput(channel: ChannelId, _ input: [DeviceInput]) throws {
-        try sendChannelMessage(.deviceInput(input), channel: channel)
+    /// Sends touches, keys and buttons to an attached simulator, in order.
+    public func sendSimulatorInput(channel: ChannelId, _ input: [SimulatorInput]) throws {
+        try sendChannelMessage(.simulatorInput(input), channel: channel)
     }
 
     /// Asks for a keyframe next, such as after a decode error.

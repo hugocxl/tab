@@ -379,7 +379,7 @@ final class EmptyProjectView: ThemedView {
         message.stringValue = missing
             ? "This project’s folder could not be found. Remove the project from the sidebar to clear its tabs."
             : onboarding
-                ? "Your workspace for terminals, AI agents, browsers, and devices. Pick a place to begin."
+                ? "Your workspace for terminals, AI agents, browsers, and simulators. Pick a place to begin."
                 : "Open a pane to start working in this project."
         tips.stringValue = onboarding
             ? "A tab is a card in the sidebar. Panes live inside a tab and can be split side by side.\n\nAdd a code folder with Add Project, or press ⌘T for a terminal."

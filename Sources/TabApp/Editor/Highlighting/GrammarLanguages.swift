@@ -559,7 +559,7 @@ extension Grammars {
             attribute break buffer case centroid const continue default discard do else flat for highp if in inout \
             layout lowp mediump noperspective out precision return smooth struct switch uniform varying while \
             cbuffer register groupshared numthreads technique pass typedef static fn var let private storage \
-            workgroup loop continuing alias enum vertex fragment kernel constant device thread threadgroup \
+            workgroup loop continuing alias enum vertex fragment kernel constant simulator thread threadgroup \
             namespace using template builtin compute
             """,
             types: vectors,

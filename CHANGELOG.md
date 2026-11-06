@@ -3,6 +3,18 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.68.0 - 2026-11-06
+
+### Changed
+
+- Device panes and tabs are now called simulator panes and tabs everywhere,
+  including `tab simulator` and `tab pane new simulator` in the command line.
+- New Simulator Pane is ⌥⌘S and New Simulator Pane Below is ⌥⌘⇧S.
+
+### Fixed
+
+- The shortcut for a new simulator pane works, instead of hiding the Dock.
+
 ## 0.67.0 - 2026-11-06
 
 ### Changed

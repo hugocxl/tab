@@ -1,54 +1,54 @@
 import Foundation
 
 // Simulators and emulators belong to a server, like its terminals. A client
-// lists them, controls them with `deviceAction`, and attaches one to get its
+// lists them, controls them with `simulatorAction`, and attaches one to get its
 // screen as `video` frames on a channel, one frame in flight like a
 // terminal's screen: the client acknowledges each frame with `ack`, and
-// sends touches and keys as `deviceInput` on the same channel.
+// sends touches and keys as `simulatorInput` on the same channel.
 
-/// The device platforms a server shows.
-public enum DevicePlatform: String, Hashable, Codable, Sendable {
+/// The simulator platforms a server shows.
+public enum SimulatorPlatform: String, Hashable, Codable, Sendable {
     case iOS
     case android
 }
 
-/// Names one device on a server: a simulator's UDID or an AVD's name.
-public struct DeviceRef: Hashable, Codable, Sendable, CustomStringConvertible {
-    public var platform: DevicePlatform
+/// Names one simulator on a server: a simulator's UDID or an AVD's name.
+public struct SimulatorRef: Hashable, Codable, Sendable, CustomStringConvertible {
+    public var platform: SimulatorPlatform
     public var id: String
 
-    public init(platform: DevicePlatform, id: String) {
+    public init(platform: SimulatorPlatform, id: String) {
         self.platform = platform
         self.id = id
     }
 
-    public static func simulator(_ udid: String) -> DeviceRef { DeviceRef(platform: .iOS, id: udid) }
-    public static func emulator(_ avd: String) -> DeviceRef { DeviceRef(platform: .android, id: avd) }
+    public static func iOS(_ udid: String) -> SimulatorRef { SimulatorRef(platform: .iOS, id: udid) }
+    public static func android(_ avd: String) -> SimulatorRef { SimulatorRef(platform: .android, id: avd) }
 
     public var description: String { id }
 }
 
-/// A hardware or navigation button a device has.
-public enum DeviceButton: String, Hashable, Codable, Sendable, CaseIterable {
+/// A hardware or navigation button a simulator has.
+public enum SimulatorButton: String, Hashable, Codable, Sendable, CaseIterable {
     case home, back, recents, lock
 }
 
-/// One device on a server, as its picker lists it.
-public struct DeviceInfo: Hashable, Codable, Sendable {
-    public var device: DeviceRef
+/// One simulator on a server, as its picker lists it.
+public struct SimulatorInfo: Hashable, Codable, Sendable {
+    public var simulator: SimulatorRef
     public var name: String
     /// The OS it runs, such as "iOS 27.0" or "Android API 35".
     public var runtime: String
     public var booted: Bool
     public var isTablet: Bool
     /// The buttons it has.
-    public var buttons: [DeviceButton]
+    public var buttons: [SimulatorButton]
     /// Whether it can connect and disconnect a hardware keyboard.
     public var hardwareKeyboardSwitch: Bool
 
-    public init(device: DeviceRef, name: String, runtime: String, booted: Bool, isTablet: Bool = false,
-                buttons: [DeviceButton], hardwareKeyboardSwitch: Bool) {
-        self.device = device
+    public init(simulator: SimulatorRef, name: String, runtime: String, booted: Bool, isTablet: Bool = false,
+                buttons: [SimulatorButton], hardwareKeyboardSwitch: Bool) {
+        self.simulator = simulator
         self.name = name
         self.runtime = runtime
         self.booted = booted
@@ -59,25 +59,25 @@ public struct DeviceInfo: Hashable, Codable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        device = try container.decode(DeviceRef.self, forKey: .device)
+        simulator = try container.decode(SimulatorRef.self, forKey: .simulator)
         name = try container.decode(String.self, forKey: .name)
         runtime = try container.decodeIfPresent(String.self, forKey: .runtime) ?? ""
         booted = try container.decodeIfPresent(Bool.self, forKey: .booted) ?? false
         isTablet = try container.decodeIfPresent(Bool.self, forKey: .isTablet) ?? false
-        buttons = (try? container.decodeIfPresent([DeviceButton].self, forKey: .buttons)) ?? []
+        buttons = (try? container.decodeIfPresent([SimulatorButton].self, forKey: .buttons)) ?? []
         hardwareKeyboardSwitch = try container.decodeIfPresent(Bool.self, forKey: .hardwareKeyboardSwitch) ?? false
     }
 }
 
-/// Which way up a device is held. Its screen stays in the panel's native
+/// Which way up a simulator is held. Its screen stays in the panel's native
 /// portrait; the system draws rotated content into it.
-public enum DeviceOrientation: String, Hashable, Codable, Sendable, CaseIterable {
+public enum SimulatorOrientation: String, Hashable, Codable, Sendable, CaseIterable {
     case portrait
     case landscapeLeft
     case portraitUpsideDown
     case landscapeRight
 
-    /// Quarter turns counterclockwise from portrait, as the device is held.
+    /// Quarter turns counterclockwise from portrait, as the simulator is held.
     public var quarterTurns: Int {
         switch self {
         case .portrait: 0
@@ -106,15 +106,15 @@ public enum DeviceOrientation: String, Hashable, Codable, Sendable, CaseIterable
     }
 }
 
-/// Input for a device, in order.
-public enum DeviceInput: Hashable, Codable, Sendable {
+/// Input for a simulator, in order.
+public enum SimulatorInput: Hashable, Codable, Sendable {
     /// One finger at a point on the panel's portrait screen, as fractions of
     /// its width and height from the top left; `down` is false for the lift.
     case touch(x: Double, y: Double, down: Bool)
     /// A USB keyboard usage (HID page 7).
     case key(usage: UInt32, down: Bool)
     /// Presses and releases a button.
-    case button(DeviceButton)
+    case button(SimulatorButton)
     case unknown(String)
 
     public init(from decoder: Decoder) throws {
@@ -146,9 +146,9 @@ public enum DeviceInput: Hashable, Codable, Sendable {
     }
 }
 
-/// Something a client asks a device to do. Every action replies with the
-/// device's settings as they are afterwards.
-public enum DeviceAction: Hashable, Codable, Sendable {
+/// Something a client asks a simulator to do. Every action replies with the
+/// simulator's settings as they are afterwards.
+public enum SimulatorAction: Hashable, Codable, Sendable {
     /// Starts it; replies once it launched, not booted.
     case boot
     case shutDown
@@ -156,8 +156,8 @@ public enum DeviceAction: Hashable, Codable, Sendable {
     /// Turns it a quarter counterclockwise per turn.
     case rotate(turns: Int)
     case setHardwareKeyboard(Bool)
-    /// Sends input without attaching, such as `tab device tap`.
-    case input([DeviceInput])
+    /// Sends input without attaching, such as `tab simulator tap`.
+    case input([SimulatorInput])
     /// Types text as key presses.
     case type(String)
     case openURL(String)
@@ -208,15 +208,15 @@ public enum DeviceAction: Hashable, Codable, Sendable {
     }
 }
 
-/// A device's settings after an action.
-public struct DeviceSettings: Hashable, Codable, Sendable {
+/// A simulator's settings after an action.
+public struct SimulatorSettings: Hashable, Codable, Sendable {
     public var booted: Bool
     /// `nil` when it isn't booted or can't say.
     public var dark: Bool?
     /// How the screen turns to show it upright.
-    public var orientation: DeviceOrientation
+    public var orientation: SimulatorOrientation
 
-    public init(booted: Bool, dark: Bool? = nil, orientation: DeviceOrientation = .portrait) {
+    public init(booted: Bool, dark: Bool? = nil, orientation: SimulatorOrientation = .portrait) {
         self.booted = booted
         self.dark = dark
         self.orientation = orientation
@@ -226,11 +226,11 @@ public struct DeviceSettings: Hashable, Codable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         booted = try container.decodeIfPresent(Bool.self, forKey: .booted) ?? false
         dark = try container.decodeIfPresent(Bool.self, forKey: .dark)
-        orientation = (try? container.decodeIfPresent(DeviceOrientation.self, forKey: .orientation)) ?? .portrait
+        orientation = (try? container.decodeIfPresent(SimulatorOrientation.self, forKey: .orientation)) ?? .portrait
     }
 }
 
-/// A video codec both sides can use for device screens.
+/// A video codec both sides can use for simulator screens.
 public enum VideoCodec: OpenEnum {
     case h264
     case hevc
@@ -247,23 +247,23 @@ public enum VideoCodec: OpenEnum {
     }
 }
 
-/// Asks for a device's screen.
-public struct AttachDevice: Hashable, Codable, Sendable {
-    public var device: DeviceRef
+/// Asks for a simulator's screen.
+public struct AttachSimulator: Hashable, Codable, Sendable {
+    public var simulator: SimulatorRef
     /// The most pixels the client shows, so the stream never sends more.
     public var maxPixels: UInt32
     /// Codecs the client decodes, preferred first.
     public var codecs: [VideoCodec]
 
-    public init(device: DeviceRef, maxPixels: UInt32, codecs: [VideoCodec] = [.h264]) {
-        self.device = device
+    public init(simulator: SimulatorRef, maxPixels: UInt32, codecs: [VideoCodec] = [.h264]) {
+        self.simulator = simulator
         self.maxPixels = maxPixels
         self.codecs = codecs
     }
 }
 
-/// A device's screen stream.
-public struct DeviceStream: Hashable, Codable, Sendable {
+/// A simulator's screen stream.
+public struct SimulatorStream: Hashable, Codable, Sendable {
     public var channel: ChannelId
     public var codec: VideoCodec
     public var width: UInt16
@@ -277,7 +277,7 @@ public struct DeviceStream: Hashable, Codable, Sendable {
     }
 }
 
-/// One encoded access unit of a device's screen:
+/// One encoded access unit of a simulator's screen:
 ///
 ///     u32 big-endian frame number
 ///     u8  flags: bit 0 is a keyframe
@@ -392,7 +392,7 @@ struct ByteReader {
     }
 }
 
-extension DeviceInput {
+extension SimulatorInput {
     func validate() throws(ErrorCode) {
         switch self {
         case .touch(let x, let y, _):
@@ -401,22 +401,22 @@ extension DeviceInput {
         }
     }
 
-    static func validate(_ input: [DeviceInput]) throws(ErrorCode) {
-        if input.count > Limits.maxDeviceInput { throw .badRequest }
+    static func validate(_ input: [SimulatorInput]) throws(ErrorCode) {
+        if input.count > Limits.maxSimulatorInput { throw .badRequest }
         for item in input { try item.validate() }
     }
 }
 
-extension DeviceRef {
+extension SimulatorRef {
     func validate() throws(ErrorCode) {
         if id.isEmpty || id.utf8.count > 256 || Validation.hasNul(id) || id.contains("/") { throw .badRequest }
     }
 }
 
-extension DeviceAction {
+extension SimulatorAction {
     func validate() throws(ErrorCode) {
         switch self {
-        case .input(let input): try DeviceInput.validate(input)
+        case .input(let input): try SimulatorInput.validate(input)
         case .type(let text): if text.utf8.count > Limits.maxInput || Validation.hasNul(text) { throw .badRequest }
         case .openURL(let url): if url.isEmpty || url.utf8.count > Limits.maxLinkURI || Validation.hasNul(url) { throw .badRequest }
         case .rotate(let turns): if abs(turns) > 4 { throw .badRequest }

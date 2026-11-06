@@ -238,12 +238,12 @@ public final class ServerClient: @unchecked Sendable {
         state.claimTunnel(channel)
     }
 
-    func claimDeviceChannel(_ channel: ChannelId) -> AsyncStream<DeviceChannelEvent>? {
-        state.claimDeviceChannel(channel)
+    func claimSimulatorChannel(_ channel: ChannelId) -> AsyncStream<SimulatorChannelEvent>? {
+        state.claimSimulatorChannel(channel)
     }
 
-    func finishDeviceChannel(_ channel: ChannelId) {
-        state.finishDeviceChannel(channel)
+    func finishSimulatorChannel(_ channel: ChannelId) {
+        state.finishSimulatorChannel(channel)
     }
 }
 
@@ -265,8 +265,8 @@ private final class State: @unchecked Sendable {
     /// Tunnels by channel, made when the `tunnelOpened` reply is read.
     private var tunnels: [ChannelId: Tunnel] = [:]
     private var unclaimedTunnels: Set<ChannelId> = []
-    private var devices: [ChannelId: AsyncStream<DeviceChannelEvent>.Continuation] = [:]
-    private var unclaimedDevices: [ChannelId: AsyncStream<DeviceChannelEvent>] = [:]
+    private var simulators: [ChannelId: AsyncStream<SimulatorChannelEvent>.Continuation] = [:]
+    private var unclaimedSimulators: [ChannelId: AsyncStream<SimulatorChannelEvent>] = [:]
     private var closeHandlers: [@Sendable (ClientError) -> Void] = []
     private var closedWith: ClientError?
     private var connection: FrameConnection?
@@ -357,11 +357,11 @@ private final class State: @unchecked Sendable {
         if case .tunnelOpened(let channel) = body {
             openTunnel(channel, claimed: waiting != nil)
         }
-        if waiting != nil, case .deviceAttached(let stream) = body {
-            devices.removeValue(forKey: stream.channel)?.finish()
-            let (events, continuation) = AsyncStream<DeviceChannelEvent>.makeStream()
-            devices[stream.channel] = continuation
-            unclaimedDevices[stream.channel] = events
+        if waiting != nil, case .simulatorAttached(let stream) = body {
+            simulators.removeValue(forKey: stream.channel)?.finish()
+            let (events, continuation) = AsyncStream<SimulatorChannelEvent>.makeStream()
+            simulators[stream.channel] = continuation
+            unclaimedSimulators[stream.channel] = events
         }
         lock.unlock()
         waiting?.continuation.resume(returning: body)
@@ -398,14 +398,14 @@ private final class State: @unchecked Sendable {
         lock.withLock { unclaimedTunnels.remove(channel) != nil ? tunnels[channel] : nil }
     }
 
-    func claimDeviceChannel(_ channel: ChannelId) -> AsyncStream<DeviceChannelEvent>? {
-        lock.withLock { unclaimedDevices.removeValue(forKey: channel) }
+    func claimSimulatorChannel(_ channel: ChannelId) -> AsyncStream<SimulatorChannelEvent>? {
+        lock.withLock { unclaimedSimulators.removeValue(forKey: channel) }
     }
 
-    func finishDeviceChannel(_ channel: ChannelId) {
-        let continuation = lock.withLock { () -> AsyncStream<DeviceChannelEvent>.Continuation? in
-            unclaimedDevices[channel] = nil
-            return devices.removeValue(forKey: channel)
+    func finishSimulatorChannel(_ channel: ChannelId) {
+        let continuation = lock.withLock { () -> AsyncStream<SimulatorChannelEvent>.Continuation? in
+            unclaimedSimulators[channel] = nil
+            return simulators.removeValue(forKey: channel)
         }
         continuation?.finish()
     }
@@ -462,7 +462,7 @@ private final class State: @unchecked Sendable {
         case .stream(let channel, let data):
             lock.withLock { tunnels[channel] }?.received(data)
         case .video(let channel, let frame):
-            lock.withLock { devices[channel] }?.yield(.frame(frame))
+            lock.withLock { simulators[channel] }?.yield(.frame(frame))
         case .input, .other:
             break
         }
@@ -535,10 +535,10 @@ private final class State: @unchecked Sendable {
                 unclaimedTunnels.remove(channel)
                 return tunnels.removeValue(forKey: channel)
             }?.ended(failure)
-        case .deviceStopped:
-            lock.withLock { devices[channel] }?.yield(.stopped)
-            finishDeviceChannel(channel)
-        case .input, .resize, .ack, .scroll, .cellSize, .requestHistory, .clear, .deviceInput, .requestKeyframe, .unknown:
+        case .simulatorStopped:
+            lock.withLock { simulators[channel] }?.yield(.stopped)
+            finishSimulatorChannel(channel)
+        case .input, .resize, .ack, .scroll, .cellSize, .requestHistory, .clear, .simulatorInput, .requestKeyframe, .unknown:
             break
         }
     }
@@ -565,9 +565,9 @@ private final class State: @unchecked Sendable {
         let tunnels = Array(self.tunnels.values)
         self.tunnels = [:]
         unclaimedTunnels = []
-        let devices = Array(self.devices.values)
-        self.devices = [:]
-        unclaimedDevices = [:]
+        let simulators = Array(self.simulators.values)
+        self.simulators = [:]
+        unclaimedSimulators = [:]
         let handlers = closeHandlers
         closeHandlers = []
         let events = events
@@ -582,7 +582,7 @@ private final class State: @unchecked Sendable {
             channel.finish()
         }
         for tunnel in tunnels { tunnel.ended(.failed) }
-        for device in devices { device.finish() }
+        for simulator in simulators { simulator.finish() }
         events?.yield(.disconnected(error))
         events?.finish()
         for handler in handlers {

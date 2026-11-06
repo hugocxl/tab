@@ -437,13 +437,13 @@ public enum SessionMessage: Hashable, Codable, Sendable {
     /// Server to client: the tunnel is gone, with why when it failed.
     case streamClosed(TunnelFailure?)
 
-    // Devices.
+    // Simulators.
     /// Client to server: touches, keys and buttons, in order.
-    case deviceInput([DeviceInput])
+    case simulatorInput([SimulatorInput])
     /// Client to server: the next frame must be a keyframe, such as after a decode error.
     case requestKeyframe
-    /// Server to client: the device shut down; the channel is closed.
-    case deviceStopped
+    /// Server to client: the simulator shut down; the channel is closed.
+    case simulatorStopped
 
     case unknown(String)
 
@@ -463,9 +463,9 @@ public enum SessionMessage: Hashable, Codable, Sendable {
         case "credit": self = .credit(try c("bytes"))
         case "streamEnd": self = .streamEnd
         case "streamClosed": self = .streamClosed(try c("failure"))
-        case "deviceInput": self = .deviceInput(try c("input"))
+        case "simulatorInput": self = .simulatorInput(try c("input"))
         case "requestKeyframe": self = .requestKeyframe
-        case "deviceStopped": self = .deviceStopped
+        case "simulatorStopped": self = .simulatorStopped
         default: self = .unknown(c.type)
         }
     }
@@ -505,11 +505,11 @@ public enum SessionMessage: Hashable, Codable, Sendable {
         case .streamClosed(let failure):
             var c = try TaggedEncoding(encoder, "streamClosed")
             try c(failure, "failure")
-        case .deviceInput(let input):
-            var c = try TaggedEncoding(encoder, "deviceInput")
+        case .simulatorInput(let input):
+            var c = try TaggedEncoding(encoder, "simulatorInput")
             try c(input, "input")
         case .requestKeyframe: try TaggedEncoding(encoder, "requestKeyframe")
-        case .deviceStopped: try TaggedEncoding(encoder, "deviceStopped")
+        case .simulatorStopped: try TaggedEncoding(encoder, "simulatorStopped")
         case .unknown(let type): try TaggedEncoding(encoder, type)
         }
     }

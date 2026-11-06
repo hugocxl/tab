@@ -3,7 +3,7 @@ import TabCore
 
 /// The split layout's geometry: an 8pt gutter
 /// between the two sides of each split, only the shared edge snapped to
-/// device pixels, and a ratio that follows the pointer.
+/// simulator pixels, and a ratio that follows the pointer.
 public enum SplitGeometry {
     public static let gutter: CGFloat = 8
     /// The grip under the pointer, centred in the gutter.

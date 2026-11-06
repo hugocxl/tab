@@ -3,7 +3,7 @@ import TabProtocol
 import XCTest
 @testable import TabServer
 
-/// A device channel sends at most one frame in flight, and a screen that
+/// A simulator channel sends at most one frame in flight, and a screen that
 /// drew meanwhile is encoded once, as it is when credit returns.
 final class VideoPumpTests: XCTestCase {
     private final class Counter: @unchecked Sendable {

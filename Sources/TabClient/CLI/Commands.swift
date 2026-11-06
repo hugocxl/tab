@@ -98,7 +98,7 @@ enum CLICommands {
     }
 
     static let groups: [CLIGroup] = [
-        session, agent, project, worktree, exec, git, files, activity, settings, mobile, server, device, forward,
+        session, agent, project, worktree, exec, git, files, activity, settings, mobile, server, simulator, forward,
         pane, tab, browser, integrations, stdio,
     ]
 
@@ -483,49 +483,49 @@ enum CLICommands {
         never do.
         """)
 
-    static let device = CLIGroup(
-        name: "device", summary: "The server's iOS simulators and Android emulators", section: .server,
+    static let simulator = CLIGroup(
+        name: "simulator", summary: "The server's iOS simulators and Android emulators", section: .server,
         commands: [
-            CLICommandSpec("device list", [""], "One line per device: its ID, platform, name, OS and state", json: true) { a in
-                manage(a, .device(.list))
+            CLICommandSpec("simulator list", [""], "One line per simulator: its ID, platform, name, OS and state", json: true) { a in
+                manage(a, .simulator(.list))
             },
-            CLICommandSpec("device boot", ["DEVICE"], "Start a device", words: 1 ... 1) { a in
-                manage(a, .device(.boot(device: a.word(0))))
+            CLICommandSpec("simulator boot", ["SIMULATOR"], "Start a simulator", words: 1 ... 1) { a in
+                manage(a, .simulator(.boot(simulator: a.word(0))))
             },
-            CLICommandSpec("device shutdown", ["[--device DEVICE]"], "Shut a device down", values: ["--device"]) { a in
-                manage(a, .device(.shutDown(device: a.value("--device"))))
+            CLICommandSpec("simulator shutdown", ["[--simulator SIMULATOR]"], "Shut a simulator down", values: ["--simulator"]) { a in
+                manage(a, .simulator(.shutDown(simulator: a.value("--simulator"))))
             },
-            CLICommandSpec("device screenshot", ["[--device DEVICE] [--output FILE]"],
-                           "Save the screen as a PNG, or write it to stdout", values: ["--device", "--output"]) { a in
-                manage(a, .device(.screenshot(device: a.value("--device"), output: a.value("--output"))))
+            CLICommandSpec("simulator screenshot", ["[--simulator SIMULATOR] [--output FILE]"],
+                           "Save the screen as a PNG, or write it to stdout", values: ["--simulator", "--output"]) { a in
+                manage(a, .simulator(.screenshot(simulator: a.value("--simulator"), output: a.value("--output"))))
             },
-            CLICommandSpec("device tap", ["[--device DEVICE] X Y"], "Tap a point, in the screenshot's pixels",
-                           words: 2 ... 2, values: ["--device"]) { a in
+            CLICommandSpec("simulator tap", ["[--simulator SIMULATOR] X Y"], "Tap a point, in the screenshot's pixels",
+                           words: 2 ... 2, values: ["--simulator"]) { a in
                 guard let x = Double(a.word(0)), let y = Double(a.word(1)), x >= 0, y >= 0 else {
                     throw CLIError("X and Y are pixels of the screenshot, from its top left")
                 }
-                return manage(a, .device(.tap(device: a.value("--device"), x: x, y: y)))
+                return manage(a, .simulator(.tap(simulator: a.value("--simulator"), x: x, y: y)))
             },
-            CLICommandSpec("device type", ["[--device DEVICE] TEXT"], "Type text on the device's keyboard",
-                           words: 1 ... 1, values: ["--device"]) { a in
-                manage(a, .device(.type(device: a.value("--device"), text: a.word(0))))
+            CLICommandSpec("simulator type", ["[--simulator SIMULATOR] TEXT"], "Type text on the simulator's keyboard",
+                           words: 1 ... 1, values: ["--simulator"]) { a in
+                manage(a, .simulator(.type(simulator: a.value("--simulator"), text: a.word(0))))
             },
-            CLICommandSpec("device press", ["[--device DEVICE] home|back|recents|lock"], "Press a button",
-                           words: 1 ... 1, values: ["--device"]) { a in
-                guard let button = DeviceButton(rawValue: a.word(0)) else {
+            CLICommandSpec("simulator press", ["[--simulator SIMULATOR] home|back|recents|lock"], "Press a button",
+                           words: 1 ... 1, values: ["--simulator"]) { a in
+                guard let button = SimulatorButton(rawValue: a.word(0)) else {
                     throw CLIError("buttons are home, back, recents and lock")
                 }
-                return manage(a, .device(.press(device: a.value("--device"), button: button)))
+                return manage(a, .simulator(.press(simulator: a.value("--simulator"), button: button)))
             },
-            CLICommandSpec("device open", ["[--device DEVICE] URL"], "Open a URL, such as an app's deep link",
-                           words: 1 ... 1, values: ["--device"]) { a in
-                manage(a, .device(.open(device: a.value("--device"), url: a.word(0))))
+            CLICommandSpec("simulator open", ["[--simulator SIMULATOR] URL"], "Open a URL, such as an app's deep link",
+                           words: 1 ... 1, values: ["--simulator"]) { a in
+                manage(a, .simulator(.open(simulator: a.value("--simulator"), url: a.word(0))))
             },
         ],
         notes: """
-        Devices belong to the server, so an agent in a terminal of another computer
-        sees that computer's devices. DEVICE is an ID or a name from list; without
-        --device, commands use the only running device. iOS simulators have the
+        Simulators belong to the server, so an agent in a terminal of another computer
+        sees that computer's simulators. SIMULATOR is an ID or a name from list; without
+        --simulator, commands use the only running simulator. iOS simulators have the
         home and lock buttons; Android emulators also have back and recents.
         """)
 
@@ -542,14 +542,14 @@ enum CLICommands {
         ],
         notes: """
         With --host, a physical phone or a Mac app on this computer reaches a server
-        on another one, such as its Metro bundler. Browser and device panes in a
+        on another one, such as its Metro bundler. Browser and simulator panes in a
         remote tab use the server's network already.
         """)
 
     // MARK: App
 
     static let pane = CLIGroup(
-        name: "pane", summary: "Add a terminal, agent, browser, device, editor or diff pane beside yours", section: .app,
+        name: "pane", summary: "Add a terminal, agent, browser, simulator, editor or diff pane beside yours", section: .app,
         commands: [
             CLICommandSpec("pane new terminal", ["[SESSION] [--project PROJECT] [--directory DIR] [-- COMMAND...]"],
                            "Show SESSION, or start a terminal, in a new pane; prints the session ID",
@@ -582,10 +582,10 @@ enum CLICommands {
                 .pane(CLIPane(placement: .pane, project: a.value("--project"),
                               content: .browser(url: a.optional(0), profile: a.value("--profile"))), json: a.json)
             },
-            CLICommandSpec("pane new device", ["[DEVICE] [--project PROJECT]"],
+            CLICommandSpec("pane new simulator", ["[SIMULATOR] [--project PROJECT]"],
                            "Show a simulator or emulator in a new pane", words: 0 ... 1, values: ["--project"],
                            place: .app) { a in
-                .pane(CLIPane(placement: .pane, project: a.value("--project"), content: .device(device: a.optional(0))),
+                .pane(CLIPane(placement: .pane, project: a.value("--project"), content: .simulator(simulator: a.optional(0))),
                       json: a.json)
             },
             CLICommandSpec("pane new editor", ["FILE [--line N] [--project PROJECT]"],
@@ -619,8 +619,8 @@ enum CLICommands {
         fork takes on; without it, the agent waits for the user. Read its replies
         with tab agent.
 
-        DEVICE is an ID or a name from tab device list; without it, the pane shows
-        the only running device, else the device picker. FILE is absolute or
+        SIMULATOR is an ID or a name from tab simulator list; without it, the pane shows
+        the only running simulator, else the simulator picker. FILE is absolute or
         relative to the current folder, and inside the project; --staged shows the
         changes staged for the next commit.
 
@@ -628,7 +628,7 @@ enum CLICommands {
         """)
 
     static let tab = CLIGroup(
-        name: "tab", summary: "Add a terminal, agent, browser or device tab to Home", section: .app,
+        name: "tab", summary: "Add a terminal, agent, browser or simulator tab to Home", section: .app,
         commands: [
             CLICommandSpec("tab new terminal", ["[--directory DIR] [-- COMMAND...]"],
                            "Start a terminal in a new tab; prints the session ID", values: ["--directory"],
@@ -646,9 +646,9 @@ enum CLICommands {
                 .pane(CLIPane(placement: .tab, project: nil,
                               content: .browser(url: a.optional(0), profile: a.value("--profile"))), json: a.json)
             },
-            CLICommandSpec("tab new device", ["[DEVICE]"], "Show a simulator or emulator in a new tab",
+            CLICommandSpec("tab new simulator", ["[SIMULATOR]"], "Show a simulator or emulator in a new tab",
                            words: 0 ... 1, place: .app) { a in
-                .pane(CLIPane(placement: .tab, project: nil, content: .device(device: a.optional(0))), json: a.json)
+                .pane(CLIPane(placement: .tab, project: nil, content: .simulator(simulator: a.optional(0))), json: a.json)
             },
         ],
         notes: """

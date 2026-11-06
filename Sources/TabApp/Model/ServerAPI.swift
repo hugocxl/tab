@@ -57,14 +57,14 @@ public protocol ServerAPI: AnyObject, Sendable {
 
     /// Connects to `host:port` on the server's network.
     func openTunnel(host: String, port: UInt16) async throws -> Tunnel
-    func listDevices() async throws -> [DeviceInfo]
-    func deviceAction(_ action: DeviceAction, on device: DeviceRef) async throws -> DeviceSettings
-    func deviceScreenshot(_ device: DeviceRef) async throws -> Data
-    func attachDevice(_ request: AttachDevice) async throws -> DeviceAttachment
-    func detachDevice(channel: ChannelId) async throws
-    func sendDeviceInput(channel: ChannelId, _ input: [DeviceInput]) throws
+    func listSimulators() async throws -> [SimulatorInfo]
+    func simulatorAction(_ action: SimulatorAction, on simulator: SimulatorRef) async throws -> SimulatorSettings
+    func simulatorScreenshot(_ simulator: SimulatorRef) async throws -> Data
+    func attachSimulator(_ request: AttachSimulator) async throws -> SimulatorAttachment
+    func detachSimulator(channel: ChannelId) async throws
+    func sendSimulatorInput(channel: ChannelId, _ input: [SimulatorInput]) throws
     func requestKeyframe(channel: ChannelId) throws
-    /// Acknowledges a drawn frame on a terminal or device channel.
+    /// Acknowledges a drawn frame on a terminal or simulator channel.
     func ack(channel: ChannelId, seq: UInt64) throws
 }
 
@@ -107,22 +107,22 @@ extension ServerAPI {
         throw ModelError("This server can't open connections for the browser.")
     }
 
-    public func listDevices() async throws -> [DeviceInfo] { [] }
+    public func listSimulators() async throws -> [SimulatorInfo] { [] }
 
-    public func deviceAction(_ action: DeviceAction, on device: DeviceRef) async throws -> DeviceSettings {
-        throw ModelError("This server doesn't show devices.")
+    public func simulatorAction(_ action: SimulatorAction, on simulator: SimulatorRef) async throws -> SimulatorSettings {
+        throw ModelError("This server doesn't show simulators.")
     }
 
-    public func deviceScreenshot(_ device: DeviceRef) async throws -> Data {
-        throw ModelError("This server doesn't show devices.")
+    public func simulatorScreenshot(_ simulator: SimulatorRef) async throws -> Data {
+        throw ModelError("This server doesn't show simulators.")
     }
 
-    public func attachDevice(_ request: AttachDevice) async throws -> DeviceAttachment {
-        throw ModelError("This server doesn't show devices.")
+    public func attachSimulator(_ request: AttachSimulator) async throws -> SimulatorAttachment {
+        throw ModelError("This server doesn't show simulators.")
     }
 
-    public func detachDevice(channel: ChannelId) async throws {}
-    public func sendDeviceInput(channel: ChannelId, _ input: [DeviceInput]) throws {}
+    public func detachSimulator(channel: ChannelId) async throws {}
+    public func sendSimulatorInput(channel: ChannelId, _ input: [SimulatorInput]) throws {}
     public func requestKeyframe(channel: ChannelId) throws {}
     public func ack(channel: ChannelId, seq: UInt64) throws {}
 

@@ -69,7 +69,7 @@ public enum TunnelPump {
 
 /// Exposes a port of the server's on this computer's loopback: each
 /// connection to `localPort` becomes a tunnel to `localhost:remotePort` on
-/// the server. It covers what pages and devices on the server can't reach,
+/// the server. It covers what pages and simulators on the server can't reach,
 /// such as a phone on the desk against the server's Metro.
 public final class PortForwarder: @unchecked Sendable {
     public let remotePort: UInt16

@@ -107,7 +107,7 @@ actor AgentComposerContextService {
         return URL(fileURLWithPath: String(cString: path), isDirectory: true)
     }
 
-    /// No pipes/devices, no final symlinks, and never allocate an unbounded file.
+    /// No pipes/simulators, no final symlinks, and never allocate an unbounded file.
     private func readRegularFile(_ url: URL, anchor: URL) -> String? {
         guard let base = canonicalAnchor(anchor) else { return nil }
         let components = Array(url.pathComponents.dropFirst(base.pathComponents.count))

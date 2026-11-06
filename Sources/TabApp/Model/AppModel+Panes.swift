@@ -83,7 +83,7 @@ extension AppModel {
             return activePane
         case .agent: return newAgent(in: home)
         case .browser: return openBrowser(project: home)
-        case .device: return openDevice(project: home)
+        case .simulator: return openSimulator(project: home)
         case .editor, .diff: return nil
         }
     }
@@ -105,7 +105,7 @@ extension AppModel {
                 return activePane
             case .agent: return newAgent(in: project)
             case .browser: return openBrowser(project: project)
-            case .device: return openDevice(project: project)
+            case .simulator: return openSimulator(project: project)
             case .editor, .diff: return nil
             }
         }
@@ -113,7 +113,7 @@ extension AppModel {
         switch kind {
         case .terminal: content = .terminal(session: nil)
         case .agent: content = .agent(session: SessionId(), provider: .claude)
-        case .device: content = .device(DevicePane())
+        case .simulator: content = .simulator(SimulatorPane())
         case .browser:
             do {
                 content = .browser(try newBrowserState(url: nil, profile: nil))
@@ -189,7 +189,7 @@ extension AppModel {
         return opened
     }
 
-    /// Opens a device, editor or diff pane for `tab pane new` and `tab tab new`:
+    /// Opens a simulator, editor or diff pane for `tab pane new` and `tab tab new`:
     /// focuses the editor or diff already showing its file, else opens one as a
     /// new tab of Home, or beside the pane showing `beside` on the same server,
     /// else in its project.
@@ -200,7 +200,7 @@ extension AppModel {
         var line: Int?
         do {
             switch request.content {
-            case .device(let device): content = .device(device)
+            case .simulator(let simulator): content = .simulator(simulator)
             case .editor(let path, let at):
                 content = .editor(path: try PaneContent.relativePath(Self.relative(path, in: project)))
                 line = at
@@ -210,7 +210,7 @@ extension AppModel {
         } catch {
             return nil
         }
-        let isFile = if case .device = content { false } else { true }
+        let isFile = if case .simulator = content { false } else { true }
         var opened = isFile ? project.tabs.flatMap(\.panes).first { $0.content == content }?.id : nil
         if let opened {
             focusPane(opened)
@@ -306,13 +306,13 @@ extension AppModel {
         return opened
     }
 
-    /// Opens a device pane in `project` (the current one by default),
+    /// Opens a simulator pane in `project` (the current one by default),
     /// showing the simulator picker.
     @discardableResult
-    public func openDevice(project: ProjectId? = nil, select: Bool = true) -> PaneId? {
+    public func openSimulator(project: ProjectId? = nil, select: Bool = true) -> PaneId? {
         let target = project ?? currentProject.id
         var opened: PaneId?
-        guard edit({ opened = try $0.openDevice(target, DevicePane(), select: select).1 }) else { return nil }
+        guard edit({ opened = try $0.openSimulator(target, SimulatorPane(), select: select).1 }) else { return nil }
         if select { focusActiveContent() }
         return opened
     }

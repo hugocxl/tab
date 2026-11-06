@@ -5,18 +5,18 @@ import ObjectiveC
 import TabCore
 
 /// Calls into Xcode's private CoreSimulator and SimulatorKit frameworks,
-/// loaded at runtime from the selected Xcode: the device's live screen as
+/// loaded at runtime from the selected Xcode: the simulator's live screen as
 /// IOSurfaces and its touch, button and keyboard input as Indigo HID
 /// messages. Listing, booting and settings go through `simctl` instead.
 /// Everything here runs on `queue`, except the notification and screen
 /// callbacks, which run on the queue their registration names.
-final class SimulatorBridge: @unchecked Sendable {
-    static let shared = SimulatorBridge()
+final class IOSSimulatorBridge: @unchecked Sendable {
+    static let shared = IOSSimulatorBridge()
 
     /// Serializes calls into CoreSimulator and the HID clients.
     let queue = DispatchQueue(label: "com.hugocorta.tab.simulator")
 
-    private var loaded: Result<Loaded, SimulatorError>?
+    private var loaded: Result<Loaded, IOSSimulatorError>?
 
     private struct Loaded {
         let deviceSet: AnyObject
@@ -27,13 +27,13 @@ final class SimulatorBridge: @unchecked Sendable {
     private func load() throws -> Loaded {
         dispatchPrecondition(condition: .onQueue(queue))
         if let loaded { return try loaded.get() }
-        let result = Result { try Self.loadFrameworks() }.mapError { $0 as? SimulatorError ?? .unavailable("\($0)") }
+        let result = Result { try Self.loadFrameworks() }.mapError { $0 as? IOSSimulatorError ?? .unavailable("\($0)") }
         loaded = result
         return try result.get()
     }
 
     private static func loadFrameworks() throws -> Loaded {
-        let developer = try SimulatorControl.developerDirectory()
+        let developer = try IOSSimulatorControl.developerDirectory()
         let coreSimulator = [
             "/Library/Developer/PrivateFrameworks/CoreSimulator.framework/CoreSimulator",
             "\(developer)/Library/PrivateFrameworks/CoreSimulator.framework/CoreSimulator",
@@ -43,75 +43,75 @@ final class SimulatorBridge: @unchecked Sendable {
             "\(developer)/Library/PrivateFrameworks/SimulatorKit.framework/SimulatorKit",
         ]
         guard coreSimulator.contains(where: { dlopen($0, RTLD_NOW) != nil }) else {
-            throw SimulatorError.unavailable("CoreSimulator could not be loaded")
+            throw IOSSimulatorError.unavailable("CoreSimulator could not be loaded")
         }
         guard let kit = simulatorKit.lazy.compactMap({ dlopen($0, RTLD_NOW) }).first else {
-            throw SimulatorError.unavailable("SimulatorKit could not be loaded from \(developer)")
+            throw IOSSimulatorError.unavailable("SimulatorKit could not be loaded from \(developer)")
         }
         guard let contextClass = NSClassFromString("SimServiceContext") else {
-            throw SimulatorError.unavailable("CoreSimulator has no service context")
+            throw IOSSimulatorError.unavailable("CoreSimulator has no service context")
         }
         typealias ContextFunction = @convention(c) (AnyClass, Selector, NSString, UnsafeMutablePointer<NSError?>?) -> AnyObject?
         let contextSelector = NSSelectorFromString("sharedServiceContextForDeveloperDir:error:")
         guard let contextMethod = class_getClassMethod(contextClass, contextSelector) else {
-            throw SimulatorError.unavailable("CoreSimulator changed its service context")
+            throw IOSSimulatorError.unavailable("CoreSimulator changed its service context")
         }
         var error: NSError?
         let shared = unsafeBitCast(method_getImplementation(contextMethod), to: ContextFunction.self)
         guard let context = shared(contextClass, contextSelector, developer as NSString, &error) else {
-            throw SimulatorError.unavailable(error?.localizedDescription ?? "no simulator service")
+            throw IOSSimulatorError.unavailable(error?.localizedDescription ?? "no simulator service")
         }
         typealias SetFunction = @convention(c) (AnyObject, Selector, UnsafeMutablePointer<NSError?>?) -> AnyObject?
         let setSelector = NSSelectorFromString("defaultDeviceSetWithError:")
         guard let setMethod = class_getMethodImplementation(type(of: context), setSelector),
               let deviceSet = unsafeBitCast(setMethod, to: SetFunction.self)(context, setSelector, &error) else {
-            throw SimulatorError.unavailable(error?.localizedDescription ?? "no simulator device set")
+            throw IOSSimulatorError.unavailable(error?.localizedDescription ?? "no simulator device set")
         }
         return Loaded(deviceSet: deviceSet, simulatorKit: kit)
     }
 
     /// The `SimDevice` with `udid`.
-    func device(_ udid: String) throws -> AnyObject {
-        guard let device = try devices().first(where: { Self.udid(of: $0) == udid }) else {
-            throw SimulatorError.notFound
+    func simulator(_ udid: String) throws -> AnyObject {
+        guard let simulator = try simulators().first(where: { Self.udid(of: $0) == udid }) else {
+            throw IOSSimulatorError.notFound
         }
-        return device
+        return simulator
     }
 
     /// Every `SimDevice` in the default set.
-    func devices() throws -> [AnyObject] {
+    func simulators() throws -> [AnyObject] {
         Self.call(try load().deviceSet, "devices") as? [AnyObject] ?? []
     }
 
-    /// The default device set, which notifies when devices come and go.
+    /// CoreSimulator's default device set, which notifies when simulators come and go.
     func deviceSet() throws -> AnyObject {
         try load().deviceSet
     }
 
-    static func udid(of device: AnyObject) -> String? {
-        (call(device, "UDID") as? NSUUID)?.uuidString
+    static func udid(of simulator: AnyObject) -> String? {
+        (call(simulator, "UDID") as? NSUUID)?.uuidString
     }
 
     // MARK: State
 
-    /// Calls `handler` on `queue` whenever `device` changes state.
+    /// Calls `handler` on `queue` whenever `simulator` changes state.
     /// Returns the registration to pass to `unregisterNotifications`.
-    func registerNotifications(_ device: AnyObject, queue: DispatchQueue, handler: @escaping () -> Void) -> UInt? {
+    func registerNotifications(_ simulator: AnyObject, queue: DispatchQueue, handler: @escaping () -> Void) -> UInt? {
         let selector = NSSelectorFromString("registerNotificationHandlerOnQueue:handler:")
-        guard device.responds(to: selector), let method = class_getMethodImplementation(type(of: device), selector) else { return nil }
+        guard simulator.responds(to: selector), let method = class_getMethodImplementation(type(of: simulator), selector) else { return nil }
         typealias Function = @convention(c) (AnyObject, Selector, DispatchQueue, @escaping @convention(block) (NSDictionary?) -> Void) -> UInt
-        return unsafeBitCast(method, to: Function.self)(device, selector, queue) { _ in handler() }
+        return unsafeBitCast(method, to: Function.self)(simulator, selector, queue) { _ in handler() }
     }
 
-    func unregisterNotifications(_ device: AnyObject, _ registration: UInt) {
+    func unregisterNotifications(_ simulator: AnyObject, _ registration: UInt) {
         let selector = NSSelectorFromString("unregisterNotificationHandler:error:")
-        guard device.responds(to: selector), let method = class_getMethodImplementation(type(of: device), selector) else { return }
+        guard simulator.responds(to: selector), let method = class_getMethodImplementation(type(of: simulator), selector) else { return }
         typealias Function = @convention(c) (AnyObject, Selector, UInt, UnsafeMutablePointer<NSError?>?) -> Bool
-        _ = unsafeBitCast(method, to: Function.self)(device, selector, registration, nil)
+        _ = unsafeBitCast(method, to: Function.self)(simulator, selector, registration, nil)
     }
 
-    static func isBooted(_ device: AnyObject) -> Bool {
-        call(device, "stateString") as? String == "Booted"
+    static func isBooted(_ simulator: AnyObject) -> Bool {
+        call(simulator, "stateString") as? String == "Booted"
     }
 
     // MARK: Screen
@@ -122,10 +122,10 @@ final class SimulatorBridge: @unchecked Sendable {
     private static let unregisterScreen = NSSelectorFromString("unregisterScreenCallbacksWithUUID:")
     private static let framebufferSurface = NSSelectorFromString("framebufferSurface")
 
-    /// The device's screens: IO port descriptors that render to IOSurfaces.
-    /// A device has several; only the one showing its display sends frames.
-    func screens(_ device: AnyObject) -> [AnyObject] {
-        guard let io = Self.call(device, "io") else { return [] }
+    /// The simulator's screens: IO port descriptors that render to IOSurfaces.
+    /// A simulator has several; only the one showing its display sends frames.
+    func screens(_ simulator: AnyObject) -> [AnyObject] {
+        guard let io = Self.call(simulator, "io") else { return [] }
         let ports = Self.call(io, "ioPorts") as? [AnyObject] ?? []
         return ports.compactMap { port in
             guard let descriptor = Self.call(port, "descriptor"), descriptor.responds(to: Self.registerScreen) else { return nil }
@@ -160,8 +160,8 @@ final class SimulatorBridge: @unchecked Sendable {
 
     /// The device type's screen size in pixels, to tell its display from the
     /// other surfaces it renders.
-    static func screenSize(_ device: AnyObject) -> CGSize? {
-        guard let type = call(device, "deviceType") else { return nil }
+    static func screenSize(_ simulator: AnyObject) -> CGSize? {
+        guard let type = call(simulator, "deviceType") else { return nil }
         let selector = NSSelectorFromString("mainScreenSize")
         guard type.responds(to: selector), let method = class_getMethodImplementation(Swift.type(of: type), selector) else { return nil }
         typealias Function = @convention(c) (AnyObject, Selector) -> CGSize
@@ -171,39 +171,39 @@ final class SimulatorBridge: @unchecked Sendable {
 
     // MARK: Input
 
-    /// A HID client sending input to `device`.
-    func hidClient(_ device: AnyObject) throws -> AnyObject {
+    /// A HID client sending input to `simulator`.
+    func hidClient(_ simulator: AnyObject) throws -> AnyObject {
         _ = try load()
         guard let hidClass = NSClassFromString("_TtC12SimulatorKit24SimDeviceLegacyHIDClient") else {
-            throw SimulatorError.unavailable("SimulatorKit has no HID client")
+            throw IOSSimulatorError.unavailable("SimulatorKit has no HID client")
         }
         let selector = NSSelectorFromString("initWithDevice:error:")
         guard let method = class_getMethodImplementation(hidClass, selector),
               let allocated = (hidClass as AnyObject).perform(NSSelectorFromString("alloc"))?.takeUnretainedValue() else {
-            throw SimulatorError.unavailable("SimulatorKit changed its HID client")
+            throw IOSSimulatorError.unavailable("SimulatorKit changed its HID client")
         }
         typealias Function = @convention(c) (AnyObject, Selector, AnyObject, UnsafeMutablePointer<NSError?>?) -> AnyObject?
         var error: NSError?
-        guard let client = unsafeBitCast(method, to: Function.self)(allocated, selector, device, &error) else {
-            throw SimulatorError.unavailable(error?.localizedDescription ?? "no HID client")
+        guard let client = unsafeBitCast(method, to: Function.self)(allocated, selector, simulator, &error) else {
+            throw IOSSimulatorError.unavailable(error?.localizedDescription ?? "no HID client")
         }
         return client
     }
 
-    /// Connects or disconnects `device`'s hardware keyboard. While it is
-    /// disconnected the device ignores keyboard input and shows its
+    /// Connects or disconnects `simulator`'s hardware keyboard. While it is
+    /// disconnected the simulator ignores keyboard input and shows its
     /// on-screen keyboard instead.
-    func setHardwareKeyboard(_ device: AnyObject, connected: Bool) throws {
+    func setHardwareKeyboard(_ simulator: AnyObject, connected: Bool) throws {
         dispatchPrecondition(condition: .onQueue(queue))
         let selector = NSSelectorFromString("setHardwareKeyboardEnabled:keyboardType:error:")
-        guard device.responds(to: selector), let method = class_getMethodImplementation(type(of: device), selector) else {
-            throw SimulatorError.unavailable("CoreSimulator can't connect a hardware keyboard")
+        guard simulator.responds(to: selector), let method = class_getMethodImplementation(type(of: simulator), selector) else {
+            throw IOSSimulatorError.unavailable("CoreSimulator can't connect a hardware keyboard")
         }
         typealias Function = @convention(c) (AnyObject, Selector, Bool, UInt8, UnsafeMutablePointer<NSError?>?) -> Bool
         var error: NSError?
-        // Keyboard type 0 is the device's default layout.
-        guard unsafeBitCast(method, to: Function.self)(device, selector, connected, 0, &error) else {
-            throw SimulatorError.unavailable(error?.localizedDescription ?? "the hardware keyboard didn't change")
+        // Keyboard type 0 is the simulator's default layout.
+        guard unsafeBitCast(method, to: Function.self)(simulator, selector, connected, 0, &error) else {
+            throw IOSSimulatorError.unavailable(error?.localizedDescription ?? "the hardware keyboard didn't change")
         }
     }
 
@@ -274,7 +274,7 @@ final class SimulatorBridge: @unchecked Sendable {
 }
 
 /// Why a simulator can't be shown.
-public enum SimulatorError: Error, Equatable, CustomStringConvertible {
+public enum IOSSimulatorError: Error, Equatable, CustomStringConvertible {
     /// Xcode or its simulator frameworks are missing or changed.
     case unavailable(String)
     /// No simulator has the pane's UDID any more.

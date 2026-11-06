@@ -102,7 +102,7 @@ final class ClientConnection: @unchecked Sendable {
         for channel in detached { channel.owner.detach(channel.attachment) }
         jobs.cancelAll()
         tunnels.closeAll()
-        server.devices?.disconnected(self)
+        server.simulators?.disconnected(self)
         outbox.close()
         frames.close()
         server.connectionClosed(self)
@@ -191,7 +191,7 @@ final class ClientConnection: @unchecked Sendable {
         return known
     }
 
-    /// Reserves the next channel, for a tunnel or a device.
+    /// Reserves the next channel, for a tunnel or a simulator.
     func reserveChannel() -> ChannelId {
         lock.withLock {
             lastChannel += 1
@@ -213,11 +213,11 @@ final class ClientConnection: @unchecked Sendable {
         case .streamEnd:
             if isKnown(channel) { tunnels.clientEnded(channel) }
             return
-        case .deviceInput(let input):
-            if isKnown(channel) { server.devices?.input(input, on: channel, from: self) }
+        case .simulatorInput(let input):
+            if isKnown(channel) { server.simulators?.input(input, on: channel, from: self) }
             return
         case .requestKeyframe:
-            if isKnown(channel) { server.devices?.requestKeyframe(on: channel, from: self) }
+            if isKnown(channel) { server.simulators?.requestKeyframe(on: channel, from: self) }
             return
         case .ack(let seq) where lock.withLock({ channels[channel] == nil }):
             if isKnown(channel) { outbox.ack(seq, on: channel) }
@@ -234,8 +234,8 @@ final class ClientConnection: @unchecked Sendable {
         case .cellSize(let cell): target.owner.setCellSize(cell)
         case .requestHistory: target.owner.requestHistory(target.attachment)
         case .clear: target.owner.clearScreen()
-        case .unknown, .credit, .streamEnd, .deviceInput, .requestKeyframe: break
-        case .metadata, .ended, .resized, .streamClosed, .deviceStopped: fatal("Misplaced session message")
+        case .unknown, .credit, .streamEnd, .simulatorInput, .requestKeyframe: break
+        case .metadata, .ended, .resized, .streamClosed, .simulatorStopped: fatal("Misplaced session message")
         }
     }
 

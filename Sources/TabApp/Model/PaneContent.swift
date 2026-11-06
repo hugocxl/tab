@@ -21,7 +21,7 @@ public struct PaneAction {
 }
 
 /// What a pane card shows below its header: a terminal, an editor, a diff,
-/// an agent, a browser or a device. The shell owns the card, its header
+/// an agent, a browser or a simulator. The shell owns the card, its header
 /// and focus; the controller owns its content view.
 @MainActor
 public protocol PaneContentController: AnyObject {
@@ -82,7 +82,7 @@ extension PaneContentController {
 
 /// The kinds of pane content, as `PaneContent` cases without their data.
 public enum PaneKind: Hashable, Sendable, CaseIterable {
-    case terminal, agent, editor, diff, browser, device
+    case terminal, agent, editor, diff, browser, simulator
 
     public init(_ content: PaneContent) {
         switch content {
@@ -91,12 +91,12 @@ public enum PaneKind: Hashable, Sendable, CaseIterable {
         case .editor: self = .editor
         case .diff: self = .diff
         case .browser: self = .browser
-        case .device: self = .device
+        case .simulator: self = .simulator
         }
     }
 
     /// The kinds people create from the New Tab and New Pane menus, in order.
-    public static let created: [PaneKind] = [.terminal, .agent, .browser, .device]
+    public static let created: [PaneKind] = [.terminal, .agent, .browser, .simulator]
 
     /// The glyph a card header draws for the kind.
     public var glyph: AppIcon {
@@ -106,7 +106,7 @@ public enum PaneKind: Hashable, Sendable, CaseIterable {
         case .editor: return .file
         case .diff: return .gitBranch
         case .browser: return .globe
-        case .device: return .phone
+        case .simulator: return .phone
         }
     }
 
@@ -117,7 +117,7 @@ public enum PaneKind: Hashable, Sendable, CaseIterable {
         case .editor: return "Editor"
         case .diff: return "Diff"
         case .browser: return "Browser"
-        case .device: return "Device"
+        case .simulator: return "Simulator"
         }
     }
 }
@@ -195,7 +195,7 @@ public final class PaneRegistry {
         guard let old else { return false }
         if old.isTerminal && new.isTerminal { return true }
         if case .browser = old, case .browser = new { return true }
-        if case .device = old, case .device = new { return true }
+        if case .simulator = old, case .simulator = new { return true }
         return old == new
     }
 }
@@ -213,7 +213,7 @@ final class PlaceholderPaneController: PaneContentController {
         switch context.pane.content {
         case .editor(let path), .diff(let path, _): detail = path
         case .browser(let browser): detail = browser.url ?? "New page"
-        case .device(let device): detail = device.name ?? "No device"
+        case .simulator(let simulator): detail = simulator.name ?? "No simulator"
         case .terminal, .agent: detail = context.project.directory.rawValue
         }
         title = context.pane.title.isEmpty ? kind.name : context.pane.title

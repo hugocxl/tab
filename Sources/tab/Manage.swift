@@ -164,12 +164,12 @@ enum Manage {
                 throw CLIError("exec failed: exit=\(result.exitCode), timedOut=\(result.timedOut), "
                     + "cancelled=\(result.cancelled), truncated=\(result.truncated)")
             }
-        case .device(let command):
-            try await Devices.run(command, client: client, json: json)
+        case .simulator(let command):
+            try await Simulators.run(command, client: client, json: json)
         case .agent(let command):
             try await Agents.run(command, client: client, json: json)
         case .forward(let remote, let local):
-            try await Devices.forward(remote: remote, local: local, client: client, target: target)
+            try await Simulators.forward(remote: remote, local: local, client: client, target: target)
         }
     }
 

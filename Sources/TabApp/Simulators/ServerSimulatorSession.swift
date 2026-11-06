@@ -3,16 +3,16 @@ import Foundation
 import IOSurface
 import TabClient
 import TabCore
-import TabDevices
+import TabSimulators
 import TabProtocol
 
-/// A device on another computer's server: its screen arrives as video,
+/// A simulator on another computer's server: its screen arrives as video,
 /// decoded into IOSurface-backed buffers the screen view shows like a local
-/// device's surface, and touches, keys and controls go back as requests. The
+/// simulator's surface, and touches, keys and controls go back as requests. The
 /// stream runs only between `startScreen` and `stopScreen`.
 @MainActor
-final class ServerDeviceSession: DeviceSession {
-    let device: DeviceRef
+final class ServerSimulatorSession: SimulatorSession {
+    let simulator: SimulatorRef
     var onStateChange: ((Bool) -> Void)?
     var onSurface: ((IOSurface) -> Void)?
     var onFrame: (() -> Void)?
@@ -20,7 +20,7 @@ final class ServerDeviceSession: DeviceSession {
 
     private(set) var isBooted = false
     private(set) var surface: IOSurface?
-    private(set) var buttons: [DeviceButton] = []
+    private(set) var buttons: [SimulatorButton] = []
     private(set) var hasHardwareKeyboardSwitch = false
     /// The most pixels the pane shows, so the stream never sends more.
     var maxPixels: UInt32 = 1920 * 1080
@@ -31,12 +31,12 @@ final class ServerDeviceSession: DeviceSession {
     private var streamTask: Task<Void, Never>?
     private var generation = 0
     private var closed = false
-    private let decoding = DispatchQueue(label: "com.hugocorta.tab.devices.decode", qos: .userInteractive)
+    private let decoding = DispatchQueue(label: "com.hugocorta.tab.simulators.decode", qos: .userInteractive)
     /// Holds the buffer behind `surface`, so its pool doesn't reuse it while shown.
     private var shownBuffer: CVPixelBuffer?
 
-    init(device: DeviceRef, api: @escaping () -> ServerAPI?) {
-        self.device = device
+    init(simulator: SimulatorRef, api: @escaping () -> ServerAPI?) {
+        self.simulator = simulator
         self.api = api
     }
 
@@ -49,12 +49,12 @@ final class ServerDeviceSession: DeviceSession {
         try await refresh()
     }
 
-    /// Reads the device's state again, such as after a `devices` change or a
+    /// Reads the simulator's state again, such as after a `simulators` change or a
     /// reconnect, and attaches when the pane is showing it.
     func refresh() async throws {
-        let devices = try await client().listDevices()
+        let simulators = try await client().listSimulators()
         guard !closed else { return }
-        guard let info = devices.first(where: { $0.device == device }) else { throw SimulatorError.notFound }
+        guard let info = simulators.first(where: { $0.simulator == simulator }) else { throw IOSSimulatorError.notFound }
         buttons = info.buttons
         hasHardwareKeyboardSwitch = info.hardwareKeyboardSwitch
         setBooted(info.booted)
@@ -88,17 +88,17 @@ final class ServerDeviceSession: DeviceSession {
         guard let api = api(), !closed else { return }
         generation += 1
         let generation = generation
-        let request = AttachDevice(device: device, maxPixels: maxPixels, codecs: [.hevc, .h264])
+        let request = AttachSimulator(simulator: simulator, maxPixels: maxPixels, codecs: [.hevc, .h264])
         streamTask = Task { [weak self] in
-            let attachment: DeviceAttachment
+            let attachment: SimulatorAttachment
             do {
-                attachment = try await api.attachDevice(request)
+                attachment = try await api.attachSimulator(request)
             } catch {
                 self?.streamFailed(generation, error)
                 return
             }
             guard let self, self.generation == generation, streaming else {
-                try? await api.detachDevice(channel: attachment.stream.channel)
+                try? await api.detachSimulator(channel: attachment.stream.channel)
                 return
             }
             stream = (api, attachment.stream.channel)
@@ -120,7 +120,7 @@ final class ServerDeviceSession: DeviceSession {
     private func streamFailed(_ generation: Int, _ error: Error) {
         guard generation == self.generation else { return }
         streamTask = nil
-        Log.devices.error("device stream failed: \(error.message, privacy: .public)")
+        Log.simulators.error("simulator stream failed: \(error.message, privacy: .public)")
     }
 
     private func detach() {
@@ -129,7 +129,7 @@ final class ServerDeviceSession: DeviceSession {
         streamTask = nil
         guard let (api, channel) = stream else { return }
         stream = nil
-        Task { try? await api.detachDevice(channel: channel) }
+        Task { try? await api.detachSimulator(channel: channel) }
     }
 
     /// Decodes off the main thread, acknowledges so the server sends the
@@ -171,11 +171,11 @@ final class ServerDeviceSession: DeviceSession {
 
     // MARK: Input and controls
 
-    func send(_ input: [DeviceInput]) {
+    func send(_ input: [SimulatorInput]) {
         guard !input.isEmpty else { return }
         if let (api, channel) = stream {
             do {
-                try api.sendDeviceInput(channel: channel, input)
+                try api.sendSimulatorInput(channel: channel, input)
             } catch {
                 onInputError?(error)
             }
@@ -184,11 +184,11 @@ final class ServerDeviceSession: DeviceSession {
         perform(.input(input))
     }
 
-    func press(_ button: DeviceButton) {
+    func press(_ button: SimulatorButton) {
         send([.button(button)])
     }
 
-    private func perform(_ action: DeviceAction) {
+    private func perform(_ action: SimulatorAction) {
         Task { [weak self] in
             do {
                 _ = try await self?.action(action)
@@ -199,8 +199,8 @@ final class ServerDeviceSession: DeviceSession {
     }
 
     @discardableResult
-    private func action(_ action: DeviceAction) async throws -> DeviceSettings {
-        try await client().deviceAction(action, on: device)
+    private func action(_ action: SimulatorAction) async throws -> SimulatorSettings {
+        try await client().simulatorAction(action, on: simulator)
     }
 
     func boot() async throws { try await action(.boot) }
@@ -208,8 +208,8 @@ final class ServerDeviceSession: DeviceSession {
     func isDark() async throws -> Bool { try await action(.readSettings).dark ?? false }
     func setDark(_ dark: Bool) async throws { try await action(.setDark(dark)) }
     func setHardwareKeyboard(_ connected: Bool) async throws { try await action(.setHardwareKeyboard(connected)) }
-    func orientation() async throws -> DeviceOrientation { try await action(.readSettings).orientation }
-    func rotate(by turns: Int) async throws -> DeviceOrientation { try await action(.rotate(turns: turns)).orientation }
+    func orientation() async throws -> SimulatorOrientation { try await action(.readSettings).orientation }
+    func rotate(by turns: Int) async throws -> SimulatorOrientation { try await action(.rotate(turns: turns)).orientation }
 
     func close() {
         closed = true

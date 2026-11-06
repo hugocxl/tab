@@ -3,7 +3,7 @@ import TabClient
 import TabCore
 import TabProtocol
 
-/// `pane new` and `tab new`: terminals, agents, browsers, devices, editors
+/// `pane new` and `tab new`: terminals, agents, browsers, simulators, editors
 /// and diffs shown in the app on this computer.
 enum Panes {
     static func run(_ pane: CLIPane, json: Bool) async throws {
@@ -76,7 +76,7 @@ enum Panes {
             record = agentRecord(snapshot)
             started = snapshot
             message = text
-        case .browser, .device, .editor, .diff:
+        case .browser, .simulator, .editor, .diff:
             return
         }
         do {
@@ -95,16 +95,16 @@ enum Panes {
         Output.record(record, columns: ["id"], json: json)
     }
 
-    /// A device, editor or diff pane's content, with its device found on the
+    /// A simulator, editor or diff pane's content, with its simulator found on the
     /// server; `nil` for other panes.
     static func content(_ pane: CLIPane, client: ServerClient) async throws -> AppNewPane.Content? {
         switch pane.content {
-        case .device(let name):
-            let running = try await client.listDevices().filter(\.booted)
-            let chosen = name == nil && running.count != 1 ? nil : try await Devices.resolve(name, client: client)
-            guard let device = chosen else { return .device(DevicePane()) }
-            return .device(device.device.platform == .iOS ? DevicePane(udid: device.device.id, name: device.name)
-                                                          : DevicePane(avd: device.device.id, name: device.name))
+        case .simulator(let name):
+            let running = try await client.listSimulators().filter(\.booted)
+            let chosen = name == nil && running.count != 1 ? nil : try await Simulators.resolve(name, client: client)
+            guard let simulator = chosen else { return .simulator(SimulatorPane()) }
+            return .simulator(simulator.simulator.platform == .iOS ? SimulatorPane(udid: simulator.simulator.id, name: simulator.name)
+                                                          : SimulatorPane(avd: simulator.simulator.id, name: simulator.name))
         case .editor(let path, let line): return .editor(path: path, line: line)
         case .diff(let path, let staged): return .diff(path: path, staged: staged)
         case .terminal, .agent, .fork, .browser: return nil
@@ -123,7 +123,7 @@ enum Panes {
             return absolute
         }
         switch content {
-        case .device: return content
+        case .simulator: return content
         case .editor(let path, let line):
             var isDirectory: ObjCBool = false
             guard FileManager.default.fileExists(atPath: Paths.absolute(path), isDirectory: &isDirectory),

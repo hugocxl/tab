@@ -1,25 +1,25 @@
 import Foundation
 import IOSurface
-import TabDevices
+import TabSimulators
 import TabProtocol
 
 /// The server's simulators and emulators: their listing, their controls,
-/// and their screens streamed to clients as video. Each attached device has
+/// and their screens streamed to clients as video. Each attached simulator has
 /// one source following its screen, shared by every channel showing it; each
 /// channel has its own encoder and credit, so a slow client never slows a
-/// fast one. Devices keep running when clients detach or the server stops.
+/// fast one. Simulators keep running when clients detach or the server stops.
 ///
-/// Device sessions live on the main actor; `tabd` serves the main queue,
+/// Simulator sessions live on the main actor; `tabd` serves the main queue,
 /// where CoreSimulator delivers its callbacks. Encoding runs on each
 /// channel's queue, `simctl` and `adb` off the request path.
-public final class DeviceService: @unchecked Sendable {
+public final class SimulatorService: @unchecked Sendable {
     private let events: ServiceEvents
     private let lock = NSLock()
     private var revision: UInt64 = 0
-    private lazy var catalog = DeviceCatalog { [weak self] in self?.devicesChanged() }
+    private lazy var catalog = SimulatorCatalog { [weak self] in self?.simulatorsChanged() }
 
     /// Main actor only.
-    private var sources: [DeviceRef: Source] = [:]
+    private var sources: [SimulatorRef: Source] = [:]
     /// Streams by connection and channel. Behind `lock`.
     private var streams: [StreamKey: Streamer] = [:]
 
@@ -32,55 +32,55 @@ public final class DeviceService: @unchecked Sendable {
         self.events = events
     }
 
-    private func devicesChanged() {
+    private func simulatorsChanged() {
         let revision = lock.withLock {
             self.revision += 1
             return self.revision
         }
-        events.broadcast(.changed(topic: .devices, revision: revision))
+        events.broadcast(.changed(topic: .simulators, revision: revision))
     }
 
     // MARK: Requests
 
-    func list() async -> [DeviceInfo] {
+    func list() async -> [SimulatorInfo] {
         catalog.watch()
         return await catalog.list()
     }
 
-    func perform(_ action: DeviceAction, on device: DeviceRef) async throws -> DeviceSettings {
+    func perform(_ action: SimulatorAction, on simulator: SimulatorRef) async throws -> SimulatorSettings {
         switch action {
         case .boot:
-            try await control(device) { try await $0.boot() }
+            try await control(simulator) { try await $0.boot() }
         case .shutDown:
-            try await control(device) { try await $0.shutDown() }
+            try await control(simulator) { try await $0.shutDown() }
         case .setDark(let dark):
-            try await control(device) { try await $0.setDark(dark) }
+            try await control(simulator) { try await $0.setDark(dark) }
         case .rotate(let turns):
-            _ = try await control(device) { try await $0.rotate(by: turns) }
+            _ = try await control(simulator) { try await $0.rotate(by: turns) }
         case .setHardwareKeyboard(let connected):
-            try await control(device) { try await $0.setHardwareKeyboard(connected) }
+            try await control(simulator) { try await $0.setHardwareKeyboard(connected) }
         case .input(let input):
-            try await send(input, to: device)
+            try await send(input, to: simulator)
         case .type(let text):
-            try await send(DeviceKeyboard.input(typing: text), to: device)
+            try await send(SimulatorKeyboard.input(typing: text), to: simulator)
         case .openURL(let url):
-            try await LocalDevices.openURL(url, on: device)
+            try await LocalSimulators.openURL(url, on: simulator)
         case .readSettings:
             break
         case .unknown:
             throw ServiceError.unsupportedRequest
         }
-        return await settings(device)
+        return await settings(simulator)
     }
 
-    func screenshot(_ device: DeviceRef) async throws -> Data {
-        let surface = try await withScreen(device) { _, surface in surface }
-        guard let png = LocalDevices.png(surface) else { throw ServiceError(.badRequest, "The screen couldn't be read") }
+    func screenshot(_ simulator: SimulatorRef) async throws -> Data {
+        let surface = try await withScreen(simulator) { _, surface in surface }
+        guard let png = LocalSimulators.png(surface) else { throw ServiceError(.badRequest, "The screen couldn't be read") }
         return png
     }
 
-    /// Starts streaming `request.device` on `channel`, once its screen has a surface.
-    func attach(_ request: AttachDevice, channel: ChannelId, connection: ClientConnection) async throws -> DeviceStream {
+    /// Starts streaming `request.simulator` on `channel`, once its screen has a surface.
+    func attach(_ request: AttachSimulator, channel: ChannelId, connection: ClientConnection) async throws -> SimulatorStream {
         guard let codec = request.codecs.first(where: { $0 == .h264 || $0 == .hevc }) else {
             throw ServiceError(.unsupported, "No video codec in common")
         }
@@ -88,10 +88,10 @@ public final class DeviceService: @unchecked Sendable {
                                 maxPixels: Int(request.maxPixels))
         lock.withLock { streams[StreamKey(connection: connection.number, channel: channel)] = streamer }
         do {
-            let surface = try await withScreen(request.device, keep: streamer) { _, surface in surface }
+            let surface = try await withScreen(request.simulator, keep: streamer) { _, surface in surface }
             let size = streamer.prepare(surface)
-            return DeviceStream(channel: channel, codec: codec, width: UInt16(clamping: size.width),
-                                height: UInt16(clamping: size.height))
+            return SimulatorStream(channel: channel, codec: codec, width: UInt16(clamping: size.width),
+                                   height: UInt16(clamping: size.height))
         } catch {
             detach(channel, connection: connection)
             throw error
@@ -106,7 +106,7 @@ public final class DeviceService: @unchecked Sendable {
         Task { @MainActor in self.release(streamer) }
     }
 
-    func input(_ input: [DeviceInput], on channel: ChannelId, from connection: ClientConnection) {
+    func input(_ input: [SimulatorInput], on channel: ChannelId, from connection: ClientConnection) {
         guard let streamer = streamer(channel, connection) else { return }
         Task { @MainActor in streamer.source?.session.send(input) }
     }
@@ -135,32 +135,32 @@ public final class DeviceService: @unchecked Sendable {
 
     // MARK: Sources
 
-    /// One device's live session, shared by its streams.
+    /// One simulator's live session, shared by its streams.
     @MainActor
     private final class Source {
-        let device: DeviceRef
-        let session: DeviceSession
+        let simulator: SimulatorRef
+        let session: SimulatorSession
         var streamers: [ObjectIdentifier: Streamer] = [:]
         /// Holds the screen for a request without a stream, such as a screenshot.
         var holds = 0
         var connecting: Task<Void, Error>?
 
-        init(device: DeviceRef) {
-            self.device = device
-            session = LocalDevices.session(for: device)
+        init(simulator: SimulatorRef) {
+            self.simulator = simulator
+            session = LocalSimulators.session(for: simulator)
         }
 
         var isIdle: Bool { streamers.isEmpty && holds == 0 }
     }
 
     @MainActor
-    private func source(_ device: DeviceRef) async throws -> Source {
-        if let existing = sources[device], let connecting = existing.connecting {
+    private func source(_ simulator: SimulatorRef) async throws -> Source {
+        if let existing = sources[simulator], let connecting = existing.connecting {
             try await connecting.value
             return existing
         }
-        let source = Source(device: device)
-        sources[device] = source
+        let source = Source(simulator: simulator)
+        sources[simulator] = source
         source.session.onSurface = { [weak source] surface in
             guard let source else { return }
             for streamer in source.streamers.values { streamer.surfaceChanged(surface) }
@@ -173,7 +173,7 @@ public final class DeviceService: @unchecked Sendable {
             guard let self, let source, !booted else { return }
             stopped(source)
         }
-        source.session.onInputError = { error in ServerLog.error("device input failed: \(error)") }
+        source.session.onInputError = { error in ServerLog.error("simulator input failed: \(error)") }
         let session = source.session
         let connecting = Task { @MainActor in try await session.connect() }
         source.connecting = connecting
@@ -186,15 +186,15 @@ public final class DeviceService: @unchecked Sendable {
         return source
     }
 
-    /// Runs `body` with the device's current surface, starting its screen
+    /// Runs `body` with the simulator's current surface, starting its screen
     /// for the call when nothing streams it. `keep` joins the source's streams.
     @MainActor
-    private func withScreen<T>(_ device: DeviceRef, keep streamer: Streamer? = nil,
+    private func withScreen<T>(_ simulator: SimulatorRef, keep streamer: Streamer? = nil,
                                _ body: (Source, IOSurface) async throws -> T) async throws -> T {
-        let source = try await source(device)
+        let source = try await source(simulator)
         guard source.session.isBooted else {
             if source.isIdle { close(source) }
-            throw ServiceError(.badRequest, "The device isn't running")
+            throw ServiceError(.badRequest, "The simulator isn't running")
         }
         source.holds += 1
         if let streamer {
@@ -211,15 +211,15 @@ public final class DeviceService: @unchecked Sendable {
             try await Task.sleep(nanoseconds: 20_000_000)
         }
         guard let surface = source.session.surface else {
-            throw ServiceError(.badRequest, "The device's screen didn't appear")
+            throw ServiceError(.badRequest, "The simulator's screen didn't appear")
         }
         return try await body(source, surface)
     }
 
-    /// Runs a control on the device's session, sharing a live one.
+    /// Runs a control on the simulator's session, sharing a live one.
     @MainActor
-    private func control<T>(_ device: DeviceRef, _ body: (DeviceSession) async throws -> T) async throws -> T {
-        let source = try await source(device)
+    private func control<T>(_ simulator: SimulatorRef, _ body: (SimulatorSession) async throws -> T) async throws -> T {
+        let source = try await source(simulator)
         source.holds += 1
         defer {
             source.holds -= 1
@@ -229,29 +229,29 @@ public final class DeviceService: @unchecked Sendable {
     }
 
     @MainActor
-    private func send(_ input: [DeviceInput], to device: DeviceRef) async throws {
-        try await withScreen(device) { source, _ in
+    private func send(_ input: [SimulatorInput], to simulator: SimulatorRef) async throws {
+        try await withScreen(simulator) { source, _ in
             source.session.send(input)
-            // Input goes out on the device's queue; let it leave before the screen stops.
+            // Input goes out on the simulator's queue; let it leave before the screen stops.
             try await Task.sleep(nanoseconds: 100_000_000)
         }
     }
 
     @MainActor
-    private func settings(_ device: DeviceRef) async -> DeviceSettings {
-        guard let source = try? await source(device) else { return DeviceSettings(booted: false) }
+    private func settings(_ simulator: SimulatorRef) async -> SimulatorSettings {
+        guard let source = try? await source(simulator) else { return SimulatorSettings(booted: false) }
         source.holds += 1
         defer {
             source.holds -= 1
             if source.isIdle { close(source) }
         }
-        guard source.session.isBooted else { return DeviceSettings(booted: false) }
+        guard source.session.isBooted else { return SimulatorSettings(booted: false) }
         let dark = try? await source.session.isDark()
         let orientation = (try? await source.session.orientation()) ?? .portrait
-        return DeviceSettings(booted: true, dark: dark, orientation: orientation)
+        return SimulatorSettings(booted: true, dark: dark, orientation: orientation)
     }
 
-    /// The device shut down: its streams end.
+    /// The simulator shut down: its streams end.
     @MainActor
     private func stopped(_ source: Source) {
         let ended = Array(source.streamers.values)
@@ -259,11 +259,11 @@ public final class DeviceService: @unchecked Sendable {
         for streamer in ended {
             lock.withLock { streams[streamer.key] = nil }
             streamer.stop()
-            streamer.connection?.outbox.push(.deviceStopped, on: streamer.channel)
+            streamer.connection?.outbox.push(.simulatorStopped, on: streamer.channel)
             streamer.connection?.outbox.closeVideo(streamer.channel, flush: true)
         }
         if source.isIdle { close(source) }
-        devicesChanged()
+        simulatorsChanged()
     }
 
     @MainActor
@@ -276,14 +276,14 @@ public final class DeviceService: @unchecked Sendable {
 
     @MainActor
     private func close(_ source: Source) {
-        guard sources[source.device] === source else { return }
-        sources[source.device] = nil
+        guard sources[source.simulator] === source else { return }
+        sources[source.simulator] = nil
         source.session.close()
     }
 
     // MARK: Streams
 
-    /// One channel's stream of a device's screen.
+    /// One channel's stream of a simulator's screen.
     private final class Streamer: @unchecked Sendable {
         let channel: ChannelId
         weak var connection: ClientConnection?
@@ -305,7 +305,7 @@ public final class DeviceService: @unchecked Sendable {
             key = StreamKey(connection: connection.number, channel: channel)
             self.codec = codec
             self.maxPixels = maxPixels
-            queue = DispatchQueue(label: "tab.device.\(connection.number).\(channel)", qos: .userInteractive)
+            queue = DispatchQueue(label: "tab.simulator.\(connection.number).\(channel)", qos: .userInteractive)
         }
 
         /// Sets up the encoder for `surface` and opens the channel; returns the stream's size.

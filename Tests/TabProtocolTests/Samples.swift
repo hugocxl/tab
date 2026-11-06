@@ -204,7 +204,7 @@ enum Samples {
         .setRatio(tabId, split: SplitAnchor(axis: .horizontal, first: pane, second: otherPane), ratio: 0.3),
         .equalize(tabId),
         .updatePane(pane, content: .browser(BrowserPane(url: "https://example.com", profile: "work"))),
-        .updatePane(pane, content: .device(DevicePane(udid: "UDID", name: "iPhone", hardwareKeyboard: false))),
+        .updatePane(pane, content: .simulator(SimulatorPane(udid: "UDID", name: "iPhone", hardwareKeyboard: false))),
         .adoptTabs(project: project, tabs: [tab]),
     ]
 

@@ -13,7 +13,7 @@ public struct FrameKind: RawRepresentable, Hashable, Sendable, CustomStringConve
     public static let input = FrameKind(rawValue: 2)
     /// Raw bytes on a tunnel's channel, both ways.
     public static let stream = FrameKind(rawValue: 3)
-    /// A `VideoFrame` on a device's channel.
+    /// A `VideoFrame` on a simulator's channel.
     public static let video = FrameKind(rawValue: 4)
 
     /// Kinds from here up are reserved; a reader treats them as corrupt

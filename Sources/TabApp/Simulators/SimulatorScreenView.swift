@@ -1,20 +1,20 @@
 import AppKit
 import IOSurface
-import TabDevices
+import TabSimulators
 import TabProtocol
 
-/// A device's screen, scaled to fit and centered with rounded corners, turned
-/// the way the device is held. The surface is the layer's contents, so the
-/// device draws straight to the window without copies; a frame only marks
+/// A simulator's screen, scaled to fit and centered with rounded corners, turned
+/// the way the simulator is held. The surface is the layer's contents, so the
+/// simulator draws straight to the window without copies; a frame only marks
 /// the contents changed. Clicks and drags are touches, trackpad scrolls are
-/// drags and keys go to the device's keyboard.
-final class DeviceScreenView: ThemedView {
-    /// Input for the device, in order.
-    var onInput: (([DeviceInput]) -> Void)?
+/// drags and keys go to the simulator's keyboard.
+final class SimulatorScreenView: ThemedView {
+    /// Input for the simulator, in order.
+    var onInput: (([SimulatorInput]) -> Void)?
     /// The view's size changed: the most pixels it can show now.
     var onResize: ((UInt32) -> Void)?
 
-    /// The most device pixels the view shows at its size, at least a small phone's.
+    /// The most simulator pixels the view shows at its size, at least a small phone's.
     var maxPixels: UInt32 {
         let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
         let pixels = bounds.width * scale * bounds.height * scale
@@ -23,8 +23,8 @@ final class DeviceScreenView: ThemedView {
 
     private var reportedPixels: UInt32 = 0
 
-    /// Which way up the device is; the surface keeps the panel's portrait.
-    var orientation = DeviceOrientation.portrait {
+    /// Which way up the simulator is; the surface keeps the panel's portrait.
+    var orientation = SimulatorOrientation.portrait {
         didSet { if orientation != oldValue { needsLayout = true } }
     }
 
@@ -44,7 +44,7 @@ final class DeviceScreenView: ThemedView {
                           "transform": NSNull()]
         layer?.addSublayer(screen)
         setAccessibilityRole(.image)
-        setAccessibilityLabel("Device screen")
+        setAccessibilityLabel("Simulator screen")
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -114,9 +114,9 @@ final class DeviceScreenView: ThemedView {
     }
 
     /// The layer rotation that shows the panel upright: the content is drawn
-    /// turned against the device, so the layer turns with it. A flipped
+    /// turned against the simulator, so the layer turns with it. A flipped
     /// layer's positive angles turn clockwise on screen.
-    static func rotation(_ orientation: DeviceOrientation, flipped: Bool) -> CGFloat {
+    static func rotation(_ orientation: SimulatorOrientation, flipped: Bool) -> CGFloat {
         let counterclockwise = CGFloat(orientation.quarterTurns) * .pi / 2
         return flipped ? -counterclockwise : counterclockwise
     }
@@ -162,7 +162,7 @@ final class DeviceScreenView: ThemedView {
         onInput?([.touch(panel, down: false)])
     }
 
-    /// A trackpad scroll drags a finger the same way; the device adds its
+    /// A trackpad scroll drags a finger the same way; the simulator adds its
     /// own momentum when it lifts. A mouse wheel notch is a short swipe.
     override func scrollWheel(with event: NSEvent) {
         let rect = screenRect
@@ -196,18 +196,18 @@ final class DeviceScreenView: ThemedView {
     // MARK: Keyboard
 
     override func keyDown(with event: NSEvent) {
-        guard !event.isARepeat, let usage = DeviceKeyboard.usage(keyCode: event.keyCode) else { return }
+        guard !event.isARepeat, let usage = SimulatorKeyboard.usage(keyCode: event.keyCode) else { return }
         onInput?([.key(usage: usage, down: true)])
     }
 
     override func keyUp(with event: NSEvent) {
-        guard let usage = DeviceKeyboard.usage(keyCode: event.keyCode) else { return }
+        guard let usage = SimulatorKeyboard.usage(keyCode: event.keyCode) else { return }
         onInput?([.key(usage: usage, down: false)])
     }
 
     override func flagsChanged(with event: NSEvent) {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        var input: [DeviceInput] = []
+        var input: [SimulatorInput] = []
         for (flag, usage) in Self.modifierUsages where flags.contains(flag) != modifiers.contains(flag) {
             input.append(.key(usage: usage, down: flags.contains(flag)))
         }
@@ -220,16 +220,16 @@ final class DeviceScreenView: ThemedView {
         return super.resignFirstResponder()
     }
 
-    /// Lifts held modifiers so none stays down on the device.
+    /// Lifts held modifiers so none stays down on the simulator.
     private func releaseModifiers() {
         let held = Self.modifierUsages.filter { modifiers.contains($0.0) }
         modifiers = []
         if !held.isEmpty { onInput?(held.map { .key(usage: $0.1, down: false) }) }
     }
 
-    /// Types `text` on the device's keyboard.
+    /// Types `text` on the simulator's keyboard.
     func type(_ text: String) {
-        let input = DeviceKeyboard.input(typing: text)
+        let input = SimulatorKeyboard.input(typing: text)
         if !input.isEmpty { onInput?(input) }
     }
 

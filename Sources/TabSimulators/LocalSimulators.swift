@@ -5,24 +5,24 @@ import IOSurface
 import TabProtocol
 import UniformTypeIdentifiers
 
-/// Devices on this Mac, reached directly.
-public enum LocalDevices {
-    /// A session for `device` on this Mac.
+/// Simulators on this Mac, reached directly.
+public enum LocalSimulators {
+    /// A session for `simulator` on this Mac.
     @MainActor
-    public static func session(for device: DeviceRef) -> DeviceSession {
-        switch device.platform {
-        case .iOS: SimulatorSession(udid: device.id)
-        case .android: AndroidSession(avd: device.id)
+    public static func session(for simulator: SimulatorRef) -> SimulatorSession {
+        switch simulator.platform {
+        case .iOS: IOSSimulatorSession(udid: simulator.id)
+        case .android: AndroidSession(avd: simulator.id)
         }
     }
 
-    /// Opens `url` on a running device.
-    public static func openURL(_ url: String, on device: DeviceRef) async throws {
-        switch device.platform {
+    /// Opens `url` on a running simulator.
+    public static func openURL(_ url: String, on simulator: SimulatorRef) async throws {
+        switch simulator.platform {
         case .iOS:
-            try await SimulatorControl.openURL(device.id, url)
+            try await IOSSimulatorControl.openURL(simulator.id, url)
         case .android:
-            guard let emulator = AndroidEmulators.running().first(where: { $0.avd == device.id }) else {
+            guard let emulator = AndroidEmulators.running().first(where: { $0.avd == simulator.id }) else {
                 throw AndroidError.failed("The emulator isn't running")
             }
             try await AndroidEmulators.openURL(emulator, url)

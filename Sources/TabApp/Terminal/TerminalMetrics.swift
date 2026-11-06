@@ -148,7 +148,7 @@ public struct TerminalMetrics: Equatable, Sendable {
     public var baseline: CGFloat
     /// Pixels per point.
     public var scale: CGFloat
-    /// One device pixel, in points; at least the font's underline thickness.
+    /// One simulator pixel, in points; at least the font's underline thickness.
     public var lineThickness: CGFloat
 
     public init(cellWidth: CGFloat, cellHeight: CGFloat, ascent: CGFloat, descent: CGFloat, leading: CGFloat = 0,

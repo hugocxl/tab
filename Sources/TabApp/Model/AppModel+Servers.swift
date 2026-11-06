@@ -343,8 +343,8 @@ extension AppModel {
                 }
             case .remoteAccess:
                 if server.isLocal { notify(.remoteAccess) }
-            case .devices:
-                devicesChanged(server)
+            case .simulators:
+                simulatorsChanged(server)
             case .tabs:
                 Task { await refreshTabs(server) }
             case .unknown: break

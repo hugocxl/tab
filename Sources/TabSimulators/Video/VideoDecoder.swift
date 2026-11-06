@@ -5,7 +5,7 @@ import IOSurface
 import TabProtocol
 import VideoToolbox
 
-/// Decodes a device's screen stream into IOSurface-backed BGRA buffers a
+/// Decodes a simulator's screen stream into IOSurface-backed BGRA buffers a
 /// layer shows directly. A keyframe's parameter sets start a new format;
 /// frames before the first keyframe, or after a failure until the next one,
 /// can't decode and throw. Decode on one serial queue.
