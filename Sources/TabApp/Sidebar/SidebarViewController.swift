@@ -161,10 +161,13 @@ final class SidebarViewController: NSViewController {
 
     private func buildHost(_ host: SidebarSnapshot.HostEntry, cardNumber: inout Int) {
         if let cards = host.openTabs { return buildOpenTabs(cards, creating: host.groups.flatMap(\.creating), cardNumber: &cardNumber) }
+        var terminals: [SidebarCardView] = []
         for card in host.terminals {
             let view = cardView(card, hint: hint(.tabs, &cardNumber))
             add(view)
+            terminals.append(view)
         }
+        divide(terminals, gap: list.spacing)
         for group in host.groups {
             let stack = NSStackView()
             stack.orientation = .vertical
@@ -175,12 +178,15 @@ final class SidebarViewController: NSViewController {
             stack.setCustomSpacing(2, after: header)
             header.translatesAutoresizingMaskIntoConstraints = false
             header.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+            var cards: [SidebarCardView] = []
             for card in collapsedProjects.contains(group.project) ? [] : group.cards {
                 let view = cardView(card, hint: hint(.tabs, &cardNumber))
                 view.translatesAutoresizingMaskIntoConstraints = false
                 stack.addArrangedSubview(view)
                 view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+                cards.append(view)
             }
+            divide(cards, gap: stack.spacing)
             for name in collapsedProjects.contains(group.project) ? [] : group.creating {
                 let row = CreatingRow(name: name)
                 row.translatesAutoresizingMaskIntoConstraints = false
@@ -194,11 +200,18 @@ final class SidebarViewController: NSViewController {
     /// Open Tabs: the host's open tabs in the listing's order, each card
     /// naming its project.
     private func buildOpenTabs(_ cards: [SidebarSnapshot.CardEntry], creating: [String], cardNumber: inout Int) {
-        for card in cards {
-            add(cardView(card, hint: hint(.tabs, &cardNumber)))
-        }
+        let views = cards.map { cardView($0, hint: hint(.tabs, &cardNumber)) }
+        views.forEach { add($0) }
+        divide(views, gap: list.spacing)
         for name in creating {
             add(CreatingRow(name: name))
+        }
+    }
+
+    /// Draws a hairline between consecutive cards, except beside a selected one.
+    private func divide(_ cards: [SidebarCardView], gap: CGFloat) {
+        for (card, next) in zip(cards, cards.dropFirst()) where !card.data.selected && !next.data.selected {
+            card.separatorGap = gap
         }
     }
 

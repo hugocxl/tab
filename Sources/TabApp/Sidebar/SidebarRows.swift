@@ -85,6 +85,17 @@ final class SidebarCardView: HoverView {
     private var elapsedTimer: Timer?
     private let glass = GlassView(style: .card)
     private let closeButton = ChromeButton(.check, label: "Close Tab", side: 18, glyph: 11)
+    private let separator = CALayer()
+    /// The gap to the next card, when a hairline divides them: centered in
+    /// the gap, inset like the text. Nil when the next row isn't a card, or
+    /// either card is selected.
+    var separatorGap: CGFloat? {
+        didSet {
+            guard oldValue != separatorGap else { return }
+            separator.isHidden = separatorGap == nil
+            needsLayout = true
+        }
+    }
 
     /// The project row the Open Tabs layout adds above the headline.
     struct Header {
@@ -162,6 +173,9 @@ final class SidebarCardView: HoverView {
         layer?.cornerCurve = .continuous
         layer?.borderWidth = 1
         addSubview(glass)
+        separator.isHidden = true
+        separator.actions = ["position": NSNull(), "bounds": NSNull(), "hidden": NSNull()]
+        layer?.addSublayer(separator)
         nameLabel.stringValue = data.name
         branchLabel.stringValue = data.branch ?? ""
         baseLabel.stringValue = data.base.map { "← \($0)" } ?? ""
@@ -280,6 +294,7 @@ final class SidebarCardView: HoverView {
         let hovered = !data.selected && isHovered && !data.unavailable
         layer?.backgroundColor = (data.selected ? theme.surface : hovered ? theme.hover : .clear).cgColor
         layer?.borderColor = (data.selected ? theme.fg(alpha: 0.08) : .clear).cgColor
+        separator.backgroundColor = theme.separator.cgColor
     }
 
     override func hoverDidChange() {
@@ -302,6 +317,12 @@ final class SidebarCardView: HoverView {
         let top = Metrics.border + 6
         let left = inset
         let right = bounds.width - inset
+        if let separatorGap {
+            let scale = window?.backingScaleFactor ?? 2
+            let height = 1 / scale
+            let y = ((bounds.maxY + separatorGap / 2 - height / 2) * scale).rounded() / scale
+            separator.frame = CGRect(x: left, y: y, width: max(right - left, 0), height: height)
+        }
         if let headerIcon, let headerLabel {
             let headerTop = top + 18 + 3 + 13 + 4
             headerIcon.frame = CGRect(x: left + 2, y: headerTop, width: 14, height: 14)

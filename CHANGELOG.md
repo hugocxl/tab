@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.69.0 - 2026-11-06
+
+### Changed
+
+- Sidebar cards are divided by a thin line, hidden beside the selected card.
+
 ## 0.68.1 - 2026-11-06
 
 ### Fixed
