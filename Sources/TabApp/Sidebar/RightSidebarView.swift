@@ -35,6 +35,8 @@ final class RightSidebarView: ThemedView {
         return (kind, button)
     }
     private let toggle = ChromeButton(.panelRight, label: "Hide Sidebar")
+    private let tabsGlass = GlassView(style: .chromeButton)
+    private let toggleGlass = GlassView(style: .chromeButton)
     private let card = RightSidebarCard()
     private let handle = PanelResizeHandle()
 
@@ -44,6 +46,8 @@ final class RightSidebarView: ThemedView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         addSubview(card)
+        addSubview(tabsGlass)
+        addSubview(toggleGlass)
         for (kind, button) in tabs {
             button.onPress = { [weak self] _ in self?.onSelect?(kind) }
             addSubview(button)
@@ -91,6 +95,8 @@ final class RightSidebarView: ThemedView {
             button.frame = CGRect(x: railX + gutter, y: y, width: side, height: side)
         }
         toggle.frame = CGRect(x: railX + gutter, y: max(bounds.height - gutter - side, gutter), width: side, height: side)
+        tabsGlass.frame = tabs.reduce(CGRect.null) { $0.union($1.1.frame) }.integral
+        toggleGlass.frame = toggle.frame.integral
         card.frame = surfaceFrame
         handle.frame = CGRect(x: 0, y: 0, width: 5, height: bounds.height)
     }
