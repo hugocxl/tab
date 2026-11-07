@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.73.0 - 2026-11-07
+
+### Changed
+
+- Folders show the Finder's folder icon, and the Files tree's chevrons are
+  sharper and quieter.
+
 ## 0.72.0 - 2026-11-07
 
 ### Changed

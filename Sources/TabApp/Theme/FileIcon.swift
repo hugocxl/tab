@@ -1,4 +1,5 @@
 import AppKit
+import UniformTypeIdentifiers
 
 /// Static bundled file icon data, resolved natively in the same rule order as the source.
 @MainActor
@@ -23,12 +24,18 @@ enum FileIcon {
     /// Resolves workspace paths without touching the local filesystem, including remote paths.
     static func image(for path: String, isDirectory: Bool = false, mimeType: String? = nil,
                       theme: AppTheme, size: CGFloat = 14) -> NSImage? {
-        if isDirectory {
-            let key = "folder-\(size)"
-            if images[key] == nil { images[key] = AppIcon.folder.image(size: size) }
-            return images[key]?.tinted(theme.fgMuted)
-        }
+        if isDirectory { return folderImage(size: size) }
         return image(for: path, mimeType: mimeType, dark: !theme.palette.isLight, size: size)
+    }
+
+    /// The Finder's folder icon, as macOS draws folders everywhere else.
+    private static func folderImage(size: CGFloat) -> NSImage {
+        let key = "folder-\(size)"
+        if let image = images[key] { return image }
+        let image = NSWorkspace.shared.icon(for: .folder)
+        image.size = NSSize(width: size, height: size)
+        images[key] = image
+        return image
     }
 
     static func syntheticFileName(language: String) -> String {

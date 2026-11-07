@@ -559,6 +559,7 @@ final class FilesCellView: HoverView {
     private var selected = false
     private weak var editor: InlineNameField?
     private var fileIcon: NSImage?
+    private var chevron: NSImage?
 
     static let indent: CGFloat = 12
 
@@ -576,6 +577,9 @@ final class FilesCellView: HoverView {
 
     override func themeDidChange() {
         fileIcon = FileIcon.image(for: node.path, isDirectory: node.isDirectory, theme: theme)
+        chevron = node.isDirectory
+            ? (expanded ? AppIcon.chevronDown : AppIcon.chevronRight).image(size: 11, weight: .semibold)?.tinted(theme.fgDim)
+            : nil
         needsDisplay = true
     }
 
@@ -613,9 +617,12 @@ final class FilesCellView: HoverView {
         }
         var x = 4 + CGFloat(depth) * Self.indent
         let midY = bounds.midY
-        if node.isDirectory, let chevron = (expanded ? AppIcon.chevronDown : AppIcon.chevronRight).image(size: 12) {
-            chevron.tinted(theme.fgMuted).draw(in: NSRect(x: x, y: midY - 6, width: 12, height: 12),
-                                                from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+        if let chevron {
+            // At its own proportions, centered in the chevron's 12pt column.
+            let size = chevron.size
+            let frame = NSRect(x: (x + (12 - size.width) / 2).rounded(), y: (midY - size.height / 2).rounded(),
+                               width: size.width, height: size.height)
+            chevron.draw(in: frame, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
         }
         x += 16
         let color = node.dimmed ? theme.fgMuted : theme.fg
