@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.0 - 2026-11-07
+
+### Changed
+
+- On iPhone, a tab with more than one pane switches between them with a
+  segmented control under the navigation bar, each pane named in a word or two.
+
 ## 0.7.1 - 2026-11-07
 
 ### Fixed

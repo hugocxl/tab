@@ -3,8 +3,8 @@ import TabProtocol
 import UIKit
 
 /// One tab's panes. With room (iPad), the tab's split layout as on the Mac,
-/// panes as rounded cards; on a phone, one pane at a time with the others a
-/// tap away in the title menu.
+/// panes as rounded cards; on a phone, one pane at a time, switched with a
+/// segmented control under the navigation bar.
 final class TabViewController: UIViewController {
     let server: ServerModel
     let tabId: TabId
@@ -13,6 +13,11 @@ final class TabViewController: UIViewController {
     private var shownLayout: [(PaneId, UnitRect)] = []
     private let paneGap: CGFloat = 8
     private let emptyView = UIContentUnavailableView(configuration: .empty())
+    private let paneSwitcher = UISegmentedControl()
+    /// Glass under the switcher, so content scrolling beneath stays out of its way.
+    private let switcherGlass = UIVisualEffectView(effect: UIGlassEffect())
+    /// The panes the switcher shows, in order, with their labels.
+    private var switcherPanes: [(id: PaneId, label: String)] = []
 
     init(server: ServerModel, tab: TabId, focus: PaneId? = nil) {
         self.server = server
@@ -35,6 +40,27 @@ final class TabViewController: UIViewController {
             emptyView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             emptyView.topAnchor.constraint(equalTo: view.topAnchor),
             emptyView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
+        switcherGlass.isHidden = true
+        switcherGlass.cornerConfiguration = .capsule()
+        switcherGlass.translatesAutoresizingMaskIntoConstraints = false
+        paneSwitcher.apportionsSegmentWidthsByContent = true
+        paneSwitcher.translatesAutoresizingMaskIntoConstraints = false
+        paneSwitcher.addAction(UIAction { [weak self] _ in self?.switcherChanged() }, for: .valueChanged)
+        switcherGlass.contentView.addSubview(paneSwitcher)
+        view.addSubview(switcherGlass)
+        NSLayoutConstraint.activate([
+            // Above the panes' own safe area, so their content scrolls under it.
+            switcherGlass.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor,
+                                               constant: -Self.switcherSpace + 4),
+            switcherGlass.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            switcherGlass.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: 16),
+            switcherGlass.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -16),
+            paneSwitcher.topAnchor.constraint(equalTo: switcherGlass.contentView.topAnchor, constant: 4),
+            paneSwitcher.bottomAnchor.constraint(equalTo: switcherGlass.contentView.bottomAnchor, constant: -4),
+            paneSwitcher.leadingAnchor.constraint(equalTo: switcherGlass.contentView.leadingAnchor, constant: 4),
+            paneSwitcher.trailingAnchor.constraint(equalTo: switcherGlass.contentView.trailingAnchor, constant: -4),
+            paneSwitcher.heightAnchor.constraint(equalToConstant: 34),
         ])
         registerForTraitChanges([UITraitHorizontalSizeClass.self]) { (self: Self, _) in
             self.setNeedsUpdateProperties()
@@ -62,7 +88,7 @@ final class TabViewController: UIViewController {
         for (id, controller) in panes {
             let shown = visible.contains { $0.0 == id }
             if shown, controller.view.superview == nil {
-                view.addSubview(controller.view)
+                view.insertSubview(controller.view, belowSubview: switcherGlass)
             } else if !shown, controller.view.superview != nil {
                 controller.view.removeFromSuperview()
             }
@@ -164,16 +190,7 @@ final class TabViewController: UIViewController {
         title = tab.customTitle ?? current?.title ?? projectName ?? "Tab"
         navigationItem.subtitle = summaries.count > 1 ? "\(summaries.count) panes" : projectName
 
-        if isCompact, summaries.count > 1 {
-            navigationItem.titleMenuProvider = { [weak self] _ in
-                UIMenu(title: "Panes", children: summaries.map { pane in
-                    UIAction(title: pane.title, image: UIImage(systemName: Self.symbol(pane.kind)),
-                             state: pane.id == self?.focused ? .on : .off) { _ in self?.focus(pane.id) }
-                })
-            }
-        } else {
-            navigationItem.titleMenuProvider = nil
-        }
+        updateSwitcher(isCompact && summaries.count > 1 ? summaries : [])
 
         let add = UIBarButtonItem(image: UIImage(systemName: "plus"), menu: UIMenu(title: "New Pane", children: [
             UIAction(title: "Terminal", image: UIImage(systemName: "apple.terminal")) { [weak self] _ in
@@ -196,6 +213,38 @@ final class TabViewController: UIViewController {
         let menu = UIBarButtonItem(image: UIImage(systemName: "ellipsis"), menu: UIMenu(children: more))
         menu.accessibilityLabel = "More"
         navigationItem.rightBarButtonItems = [menu, add]
+    }
+
+    // MARK: Pane switcher
+
+    /// Room the switcher takes above the panes' content.
+    private static let switcherSpace: CGFloat = 48
+
+    /// One segment per pane on a phone, rebuilt only when the panes or their
+    /// names change.
+    private func updateSwitcher(_ summaries: [PaneSummary]) {
+        let labels = PaneSummary.shortLabels(summaries)
+        let next = zip(summaries, labels).map { (id: $0.id, label: $1) }
+        if next.map(\.id) != switcherPanes.map(\.id) || next.map(\.label) != switcherPanes.map(\.label) {
+            switcherPanes = next
+            paneSwitcher.removeAllSegments()
+            for (index, label) in labels.enumerated() {
+                paneSwitcher.insertSegment(withTitle: label, at: index, animated: false)
+            }
+        }
+        paneSwitcher.selectedSegmentIndex = switcherPanes.firstIndex { $0.id == focused } ?? UISegmentedControl.noSegment
+        let shown = !switcherPanes.isEmpty
+        guard shown == switcherGlass.isHidden else { return }
+        switcherGlass.isHidden = !shown
+        // The panes' content starts under the switcher and scrolls beneath it.
+        additionalSafeAreaInsets.top = shown ? Self.switcherSpace : 0
+    }
+
+    private func switcherChanged() {
+        let index = paneSwitcher.selectedSegmentIndex
+        guard switcherPanes.indices.contains(index) else { return }
+        UISelectionFeedbackGenerator().selectionChanged()
+        focus(switcherPanes[index].id)
     }
 
     static func symbol(_ kind: PaneSummary.Kind) -> String {
