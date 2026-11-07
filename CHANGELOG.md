@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.71.1 - 2026-11-07
+
+### Fixed
+
+- A simulator pane on another computer shows its simulator again after the
+  connection comes back, instead of asking to reconnect.
+
 ## 0.71.0 - 2026-11-07
 
 ### Changed

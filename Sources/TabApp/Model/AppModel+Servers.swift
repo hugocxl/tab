@@ -62,6 +62,7 @@ extension AppModel {
             for (id, controller) in panes.all where state.paneServer(id) == connection.id {
                 (controller as? TerminalPane)?.connectionChanged()
                 (controller as? AgentPaneController)?.connectionChanged()
+                (controller as? SimulatorPaneController)?.serverDisconnected()
             }
             edit { $0.forgetRemoteStatuses(connection.id) }
         }

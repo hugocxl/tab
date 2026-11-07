@@ -21,6 +21,9 @@ final class SimulatorPaneController: PaneContentController {
         case live
         case off
         case failed(String)
+        /// The server is away; once it is back the pane attaches again, or
+        /// shows the picker when it was picking.
+        case offline(picking: Bool)
     }
 
     private weak var model: AppModel?
@@ -188,7 +191,7 @@ final class SimulatorPaneController: PaneContentController {
     private func loadPicker() {
         pickerLoad?.cancel()
         guard let api else {
-            phase = .failed("Reconnect to \(host ?? "this Mac's server") to choose a simulator.")
+            phase = .offline(picking: true)
             render()
             return
         }
@@ -204,6 +207,14 @@ final class SimulatorPaneController: PaneContentController {
         switch phase {
         case .picking:
             loadPicker()
+        case .offline(let picking):
+            // Another app may have chosen a different simulator meanwhile.
+            if let saved = model?.state.simulator(pane) { state = saved }
+            if picking || !state.isChosen {
+                showPicker()
+            } else {
+                attach(state)
+            }
         case .failed where session == nil:
             showPicker()
         default:
@@ -211,13 +222,49 @@ final class SimulatorPaneController: PaneContentController {
             Task { [weak self] in
                 do {
                     try await session.refresh()
+                    // A booted simulator only reports a change when it boots,
+                    // so a failure from before clears here.
+                    guard let self, self.session === session, case .failed = phase, session.isBooted else { return }
+                    stateChanged(true)
                 } catch {
                     guard let self, self.session === session else { return }
-                    phase = .failed("\(error)")
-                    render()
+                    fail(error)
                 }
             }
         }
+    }
+
+    /// The tab's server went away: a remote pane lets go of its simulator
+    /// and attaches again once `simulatorsChanged` says the server is back.
+    func serverDisconnected() {
+        guard !server.isLocal else { return }
+        goOffline()
+    }
+
+    private func goOffline() {
+        let picking: Bool
+        switch phase {
+        case .picking: picking = true
+        case .offline(let wasPicking): picking = wasPicking
+        default: picking = !state.isChosen
+        }
+        pickerLoad?.cancel()
+        session?.close()
+        session = nil
+        screen.show(nil)
+        phase = .offline(picking: picking)
+        render()
+    }
+
+    /// Shows `error`, or waits for the server when it is a remote one that
+    /// went away, since then the error only says so.
+    private func fail(_ error: Error) {
+        if api == nil, !server.isLocal {
+            goOffline()
+            return
+        }
+        phase = .failed("\(error)")
+        render()
     }
 
     private func choose(_ simulator: SimulatorChoice) {
@@ -262,8 +309,7 @@ final class SimulatorPaneController: PaneContentController {
                 stateChanged(session.isBooted)
             } catch {
                 guard let self, self.session === session else { return }
-                phase = .failed("\(error)")
-                render()
+                fail(error)
             }
         }
     }
@@ -310,8 +356,7 @@ final class SimulatorPaneController: PaneContentController {
                 try await session.boot()
             } catch {
                 guard let self, self.session === session else { return }
-                phase = .failed("\(error)")
-                render()
+                fail(error)
             }
         }
     }
@@ -423,9 +468,9 @@ final class SimulatorPaneController: PaneContentController {
             message.show(title: "Can't show the simulator", detail: reason, button: "Choose Another…") { [weak self] in
                 self?.showPicker()
             }
-            if api == nil, let host {
-                message.show(title: "Reconnect to \(host)", detail: "Its simulators show here once it is connected.")
-            }
+        case .offline:
+            message.show(title: "Reconnect to \(host ?? "this Mac's server")",
+                         detail: "Its simulators show here once it is connected.")
         case .live, .picking:
             break
         }
