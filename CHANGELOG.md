@@ -3,6 +3,14 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.72.0 - 2026-11-07
+
+### Changed
+
+- The right sidebar looks like the left one: its tabs and close button sit in
+  a row at the top, each tab's buttons sit in a row at the bottom, and it has
+  no card or button rail of its own.
+
 ## 0.71.1 - 2026-11-07
 
 ### Fixed

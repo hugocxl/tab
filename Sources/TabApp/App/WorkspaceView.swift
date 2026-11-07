@@ -68,7 +68,7 @@ final class WorkspaceView: ThemedView {
             guard let self else { return }
             self.livePanelWidth = width
             if width == nil, let kind = self.shownPanel {
-                self.model.setRightPanelWidth(kind, self.rightSidebar.cardWidth)
+                self.model.setRightPanelWidth(kind, self.rightSidebar.frame.width)
             }
             self.needsLayout = true
         }
@@ -197,12 +197,10 @@ final class WorkspaceView: ThemedView {
         model.appearance.sidebarExpanded ? (liveSidebarWidth ?? model.sidebarWidth) : 0
     }
 
-    /// The right sidebar's frame: the card's width plus the rail, leaving
-    /// the splits at least 240pt.
+    /// The right sidebar's frame, leaving the splits at least 240pt.
     private func rightSidebarFrame(_ kind: RightPanelKind) -> NSRect {
-        let rail = RightSidebarView.railWidth
-        let width = min(livePanelWidth ?? model.rightPanelWidth(kind), max(bounds.width - sidebarWidth - rail - 240, RightPanelKind.minimumWidth))
-        return NSRect(x: bounds.width - rail - width, y: 0, width: width + rail, height: bounds.height)
+        let width = min(livePanelWidth ?? model.rightPanelWidth(kind), max(bounds.width - sidebarWidth - 240, RightPanelKind.minimumWidth))
+        return NSRect(x: bounds.width - width, y: 0, width: width, height: bounds.height)
     }
 
     override func layout() {
@@ -256,8 +254,7 @@ final class WorkspaceView: ThemedView {
     /// animation when they move.
     private func cutVeil(animated: Bool) {
         guard theme.glassEnabled else { return }
-        var holes = splits.surfaceFrames.map { splits.convert($0, to: veil) }
-        if !rightSidebar.isHidden { holes.append(rightSidebar.convert(rightSidebar.surfaceFrame, to: veil)) }
+        let holes = splits.surfaceFrames.map { splits.convert($0, to: veil) }
         veil.cutOut(holes, radius: Metrics.cardRadius, duration: animated ? InterfaceMotion.duration(model.appearance.animationStyle) : 0)
     }
 

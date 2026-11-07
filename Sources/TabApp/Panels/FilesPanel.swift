@@ -37,7 +37,7 @@ public final class FilesPanelController: NSViewController, NSTableViewDataSource
         get { card.drawsCard }
         set { card.drawsCard = newValue }
     }
-    private let header = NativePanelHeader(icon: .folder, title: "Files")
+    private let footer = RightSidebarFooter()
     private let editArea = NSStackView()
     private let editLabel = makeLabel("", font: AppFont.footnote)
     private(set) var newItemField: InlineNameField?
@@ -56,7 +56,7 @@ public final class FilesPanelController: NSViewController, NSTableViewDataSource
     public override func loadView() {
         card.theme = host?.theme ?? .shared
         view = card
-        header.title = host?.nativeProject.name ?? "Files"
+        footer.title = host?.nativeProject.name ?? "Files"
         let buttons: [(AppIcon, String, () -> Void)] = [
             (.file, "New File", { [weak self] in self?.beginNewItem(folder: false) }),
             (.folder, "New Folder", { [weak self] in self?.beginNewItem(folder: true) }),
@@ -64,7 +64,7 @@ public final class FilesPanelController: NSViewController, NSTableViewDataSource
             (.refresh, "Refresh", { [weak self] in self?.refreshAll() }),
         ]
         for (icon, label, action) in buttons {
-            header.addTrailing(HeaderButton(icon, label: label, action: action))
+            _ = footer.addButton(icon, label: label, action: action)
         }
 
         editArea.orientation = .vertical
@@ -104,16 +104,16 @@ public final class FilesPanelController: NSViewController, NSTableViewDataSource
         stack.alignment = .leading
         stack.spacing = 4
         stack.translatesAutoresizingMaskIntoConstraints = false
-        card.addSubview(header)
         card.addSubview(stack)
+        card.addSubview(footer)
         NSLayoutConstraint.activate([
-            header.topAnchor.constraint(equalTo: card.topAnchor),
-            header.leadingAnchor.constraint(equalTo: card.leadingAnchor),
-            header.trailingAnchor.constraint(equalTo: card.trailingAnchor),
-            stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: Metrics.gutter),
-            stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -Metrics.gutter),
-            stack.topAnchor.constraint(equalTo: header.bottomAnchor, constant: Metrics.gutter),
-            stack.bottomAnchor.constraint(equalTo: card.bottomAnchor),
+            stack.leadingAnchor.constraint(equalTo: card.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -RightSidebarFooter.outerInset),
+            stack.topAnchor.constraint(equalTo: card.topAnchor),
+            stack.bottomAnchor.constraint(equalTo: footer.topAnchor),
+            footer.leadingAnchor.constraint(equalTo: card.leadingAnchor),
+            footer.trailingAnchor.constraint(equalTo: card.trailingAnchor),
+            footer.bottomAnchor.constraint(equalTo: card.bottomAnchor),
             editArea.widthAnchor.constraint(equalTo: stack.widthAnchor),
             statusLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
             scroll.widthAnchor.constraint(equalTo: stack.widthAnchor),
@@ -147,7 +147,7 @@ public final class FilesPanelController: NSViewController, NSTableViewDataSource
 
     /// The project was renamed.
     public func projectDidChange() {
-        header.title = host?.nativeProject.name ?? header.title
+        footer.title = host?.nativeProject.name ?? footer.title
     }
 
     /// The theme changed.

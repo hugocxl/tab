@@ -1,19 +1,19 @@
 import AppKit
 
-/// The right sidebar: a card holding the selected tab's content and, right
-/// of it on the window chrome, a rail with one button per tab stacked
-/// vertically and the close button at the bottom. Pressing the open tab's
-/// button closes it too. The card's left edge resizes it.
-final class RightSidebarView: ThemedView {
+/// The right sidebar, laid out like the left one on the window's chrome
+/// without a card: the top row with one button per tab on the left and the
+/// close button on the right, then the selected tab's content, whose footer
+/// row holds the tab's own buttons. Pressing the open tab's button closes
+/// it too. The left edge resizes it.
+final class RightSidebarView: NSView {
     var content: NSView? {
         didSet {
             guard content !== oldValue else { return }
             oldValue?.removeFromSuperview()
             guard let content else { return }
-            placeSubviews()
-            content.frame = card.bounds
+            content.frame = contentFrame
             content.autoresizingMask = [.width, .height]
-            card.addSubview(content)
+            addSubview(content, positioned: .below, relativeTo: handle)
         }
     }
 
@@ -35,15 +35,10 @@ final class RightSidebarView: ThemedView {
         return (kind, button)
     }
     private let toggle = ChromeButton(.panelRight, label: "Hide Sidebar")
-    private let card = RightSidebarCard()
     private let handle = PanelResizeHandle()
-
-    /// The rail's width: a button with the gutter on either side.
-    static let railWidth: CGFloat = Metrics.gutter * 2 + ChromeButton.side
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        addSubview(card)
         for (kind, button) in tabs {
             button.onPress = { [weak self] _ in self?.onSelect?(kind) }
             addSubview(button)
@@ -51,7 +46,7 @@ final class RightSidebarView: ThemedView {
         toggle.onPress = { [weak self] _ in self?.onToggle?() }
         addSubview(toggle)
         addSubview(handle)
-        handle.onBegin = { [weak self] in self?.handle.startWidth = self?.card.frame.width ?? 0 }
+        handle.onBegin = { [weak self] in self?.handle.startWidth = self?.frame.width ?? 0 }
         handle.onDrag = { [weak self] delta in
             guard let self else { return }
             guard let delta else {
@@ -65,67 +60,94 @@ final class RightSidebarView: ThemedView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    override var isFlipped: Bool { true }
     override var mouseDownCanMoveWindow: Bool { true }
 
-    /// The card's width, which the sidebar's width is measured by.
-    var cardWidth: CGFloat { card.frame.width }
-
-    /// The card's glass frame for the current bounds, in this view's
-    /// coordinates, known before the card itself is laid out.
-    var surfaceFrame: CGRect {
-        let gutter = Metrics.gutter
-        return CGRect(x: 0, y: gutter, width: max(bounds.width - Self.railWidth, 0), height: max(bounds.height - gutter * 2, 0))
+    /// Below the top row, to the bottom edge: the content draws its own
+    /// footer row there.
+    private var contentFrame: CGRect {
+        let top = ChromeButton.rowHeight
+        return CGRect(x: 0, y: top, width: bounds.width, height: max(bounds.height - top, 0))
     }
 
     override func layout() {
         super.layout()
-        placeSubviews()
-    }
-
-    private func placeSubviews() {
-        let gutter = Metrics.gutter
         let side = ChromeButton.side
-        let railX = max(bounds.width - Self.railWidth, 0)
-        for (index, (_, button)) in tabs.enumerated() {
-            let y = gutter + CGFloat(index) * (side + ChromeButton.gap)
-            button.frame = CGRect(x: railX + gutter, y: y, width: side, height: side)
-        }
-        toggle.frame = CGRect(x: railX + gutter, y: max(bounds.height - gutter - side, gutter), width: side, height: side)
-        card.frame = surfaceFrame
+        let y = Metrics.gutter
+        CircleButton.layOut(tabs.map(\.1), leadingAt: RightSidebarFooter.innerInset, y: y)
+        toggle.frame = CGRect(x: bounds.width - RightSidebarFooter.outerInset - side, y: y, width: side, height: side)
+        content?.frame = contentFrame
         handle.frame = CGRect(x: 0, y: 0, width: 5, height: bounds.height)
     }
 }
 
-/// The card the selected tab's content fills: the panes' background, a
-/// hairline border and the cards' corner radius.
-private final class RightSidebarCard: ThemedView {
-    private let glass = GlassView(style: .pane)
+/// A right sidebar tab's footer row, laid out like the left sidebar's: a
+/// muted title on the left and the tab's buttons on the right. The inner
+/// edge, beside the panes, keeps the button gap and the window edge the
+/// gutter, mirroring the left sidebar.
+final class RightSidebarFooter: ThemedView {
+    /// The space between the sidebar's inner edge and its first button.
+    static let innerInset = ChromeButton.gap
+    /// The space between the window's edge and the sidebar's last button.
+    static let outerInset = Metrics.gutter
+
+    private let titleLabel = makeLabel("", font: AppFont.body)
+    private(set) var buttons: [ChromeButton] = []
+    /// Shown over the last button while it is hidden, such as Refresh
+    /// while a change runs.
+    private var spinner: Spinner?
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        addSubview(glass)
-        wantsLayer = true
-        layer?.cornerRadius = Metrics.cardRadius
-        layer?.cornerCurve = .continuous
-        layer?.borderWidth = Metrics.border
-        layer?.masksToBounds = true
+        translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.translatesAutoresizingMaskIntoConstraints = true
+        addSubview(titleLabel)
+        heightAnchor.constraint(equalToConstant: ChromeButton.rowHeight).isActive = true
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    override var wantsUpdateLayer: Bool { true }
-    override var redrawsOnKeyChange: Bool { true }
+    override var mouseDownCanMoveWindow: Bool { true }
+
+    var title: String {
+        get { titleLabel.stringValue }
+        set { titleLabel.stringValue = newValue }
+    }
+
+    func addButton(_ icon: AppIcon, label: String, action: @escaping () -> Void) -> ChromeButton {
+        let button = ChromeButton(icon, label: label) { _ in action() }
+        buttons.append(button)
+        addSubview(button)
+        needsLayout = true
+        return button
+    }
+
+    /// Shows `spinner` where the last button is.
+    func setSpinner(_ spinner: Spinner) {
+        self.spinner = spinner
+        spinner.translatesAutoresizingMaskIntoConstraints = true
+        addSubview(spinner)
+        needsLayout = true
+    }
+
+    override func themeDidChange() {
+        titleLabel.textColor = theme.fgMuted
+    }
 
     override func layout() {
         super.layout()
-        glass.frame = bounds
-    }
-
-    override func updateLayer() {
-        glass.isHidden = !theme.glassPanes
-        glass.appearance = theme.nsAppearance
-        glass.apply(theme.paneGlass(isKey: window?.isKeyWindow ?? true, isActive: false))
-        layer?.backgroundColor = theme.paneBackground.cgColor
-        layer?.borderWidth = theme.glassPanes ? 0 : Metrics.border
-        layer?.borderColor = theme.cardBorder.cgColor
+        let y = Metrics.gutter
+        CircleButton.layOut(buttons, trailingAt: bounds.width - Self.outerInset, y: y)
+        if let spinner, let last = buttons.last {
+            let size = spinner.fittingSize
+            spinner.frame = CGRect(x: (last.frame.midX - size.width / 2).rounded(), y: (last.frame.midY - size.height / 2).rounded(),
+                                   width: size.width, height: size.height)
+        }
+        let leading = Self.innerInset + (ChromeButton.side - ChromeButton.glyph) / 2
+        let trailing = (buttons.first?.frame.minX ?? bounds.width - Self.outerInset) - ChromeButton.gap
+        let height = titleLabel.intrinsicContentSize.height
+        titleLabel.frame = CGRect(x: leading, y: (y + (ChromeButton.side - height) / 2).rounded(),
+                                  width: max(trailing - leading, 0), height: height)
     }
 }

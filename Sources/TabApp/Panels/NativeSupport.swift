@@ -194,57 +194,6 @@ public final class NativePanelCard: ThemedView {
     }
 }
 
-/// A panel header laid out like a pane's: 36pt tall at the card's top edge,
-/// a glyph and title inset by the gutter, and trailing header buttons.
-final class NativePanelHeader: ThemedView {
-    let titleLabel: NSTextField
-    private let iconView = NSImageView()
-    private let trailing = NSStackView()
-
-    init(icon: AppIcon, title: String) {
-        titleLabel = makeLabel(title, font: AppFont.header)
-        super.init(frame: .zero)
-        translatesAutoresizingMaskIntoConstraints = false
-        iconView.image = icon.image(size: Metrics.glyph)
-        iconView.translatesAutoresizingMaskIntoConstraints = false
-        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        trailing.orientation = .horizontal
-        trailing.spacing = 4
-        trailing.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(iconView)
-        addSubview(titleLabel)
-        addSubview(trailing)
-        NSLayoutConstraint.activate([
-            heightAnchor.constraint(equalToConstant: Metrics.headerHeight),
-            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Metrics.gutter),
-            iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
-            iconView.widthAnchor.constraint(equalToConstant: Metrics.glyph),
-            iconView.heightAnchor.constraint(equalToConstant: Metrics.glyph),
-            titleLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: Metrics.controlGap),
-            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailing.leadingAnchor, constant: -Metrics.controlGap),
-            trailing.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Metrics.gutter),
-            trailing.centerYAnchor.constraint(equalTo: centerYAnchor),
-        ])
-    }
-
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    var title: String {
-        get { titleLabel.stringValue }
-        set { titleLabel.stringValue = newValue }
-    }
-
-    func addTrailing(_ view: NSView) {
-        trailing.addArrangedSubview(view)
-    }
-
-    override func themeDidChange() {
-        titleLabel.textColor = theme.fg
-        iconView.contentTintColor = theme.fgMuted
-    }
-}
-
 /// A centered muted message filling a pane or panel, such as "Loading…".
 final class NativeMessageView: ThemedView {
     private let label: NSTextField

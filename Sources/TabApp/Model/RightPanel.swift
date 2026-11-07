@@ -41,8 +41,8 @@ public enum RightPanelKind: String, CaseIterable, Sendable {
     public static let maximumWidth: CGFloat = 640
 }
 
-/// A right panel's content. The shell draws the panel's frame, header-less
-/// card and resize handle; the content fills it.
+/// A right panel's content. The shell draws the sidebar's top row and
+/// resize handle; the content fills the rest, its footer row included.
 @MainActor
 public protocol RightPanelContent: AnyObject {
     var kind: RightPanelKind { get }

@@ -30,8 +30,8 @@ public final class SourceControlController: NSViewController, NSTableViewDataSou
         get { card.drawsCard }
         set { card.drawsCard = newValue }
     }
-    private let header = NativePanelHeader(icon: .gitBranch, title: "Source Control")
-    private let refreshButton = HeaderButton(.refresh, label: "Refresh")
+    private let footer = RightSidebarFooter()
+    private var refreshButton: ChromeButton?
     private let spinner = Spinner()
     let messageField = CommitMessageField(placeholder: "Message (⌘↩ to commit)")
     private let amendBox = NSButton(checkboxWithTitle: "Amend", target: nil, action: nil)
@@ -51,11 +51,10 @@ public final class SourceControlController: NSViewController, NSTableViewDataSou
         let theme = host?.theme ?? .shared
         card.theme = theme
         view = card
-        header.title = host?.nativeProject.name ?? "Source Control"
-        refreshButton.onPress = { [weak self] in self?.refresh() }
+        footer.title = host?.nativeProject.name ?? "Source Control"
+        refreshButton = footer.addButton(.refresh, label: "Refresh") { [weak self] in self?.refresh() }
         spinner.isHidden = true
-        header.addTrailing(spinner)
-        header.addTrailing(refreshButton)
+        footer.setSpinner(spinner)
 
         messageField.theme = theme
         messageField.onChange = { [weak self] in self?.updateCommitButton() }
@@ -99,16 +98,16 @@ public final class SourceControlController: NSViewController, NSTableViewDataSou
         stack.alignment = .leading
         stack.spacing = Metrics.controlGap
         stack.translatesAutoresizingMaskIntoConstraints = false
-        card.addSubview(header)
         card.addSubview(stack)
+        card.addSubview(footer)
         NSLayoutConstraint.activate([
-            header.topAnchor.constraint(equalTo: card.topAnchor),
-            header.leadingAnchor.constraint(equalTo: card.leadingAnchor),
-            header.trailingAnchor.constraint(equalTo: card.trailingAnchor),
-            stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: Metrics.gutter),
-            stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -Metrics.gutter),
-            stack.topAnchor.constraint(equalTo: header.bottomAnchor, constant: Metrics.gutter),
-            stack.bottomAnchor.constraint(equalTo: card.bottomAnchor),
+            stack.leadingAnchor.constraint(equalTo: card.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -RightSidebarFooter.outerInset),
+            stack.topAnchor.constraint(equalTo: card.topAnchor),
+            stack.bottomAnchor.constraint(equalTo: footer.topAnchor),
+            footer.leadingAnchor.constraint(equalTo: card.leadingAnchor),
+            footer.trailingAnchor.constraint(equalTo: card.trailingAnchor),
+            footer.bottomAnchor.constraint(equalTo: card.bottomAnchor),
             messageField.widthAnchor.constraint(equalTo: stack.widthAnchor),
             commitRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             message.widthAnchor.constraint(equalTo: stack.widthAnchor),
@@ -267,7 +266,7 @@ public final class SourceControlController: NSViewController, NSTableViewDataSou
     private func setBusy(_ busy: Bool) {
         isBusy = busy
         spinner.isHidden = !busy
-        refreshButton.isHidden = busy
+        refreshButton?.isHidden = busy
         amendBox.isEnabled = !busy
         updateCommitButton()
         table.reloadData()
@@ -278,9 +277,9 @@ public final class SourceControlController: NSViewController, NSTableViewDataSou
     private func render() {
         guard isViewLoaded else { return }
         if let branch = model.status?.summary.branch, !branch.isEmpty {
-            header.title = branch
+            footer.title = branch
         } else {
-            header.title = host?.nativeProject.name ?? header.title
+            footer.title = host?.nativeProject.name ?? footer.title
         }
         if let error {
             message.set(error)
