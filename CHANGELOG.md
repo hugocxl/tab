@@ -3,21 +3,18 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
-<<<<<<< Updated upstream
+## 0.74.1 - 2026-11-07
+
+### Fixed
+
+- Releases with Finder folder icons build and ship again.
+
 ## 0.74.0 - 2026-11-07
 
 ### Added
 
 - Settings → Interface → Agent response font sets agent replies in New York,
   Charter, Iowan Old Style, Georgia, Athelas or Palatino.
-||||||| Stash base
-=======
-## 0.73.1 - 2026-11-07
-
-### Fixed
-
-- The release with Finder folder icons builds and ships again.
->>>>>>> Stashed changes
 
 ## 0.73.0 - 2026-11-07
 
