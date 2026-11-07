@@ -46,8 +46,8 @@ final class FileIconTests: XCTestCase {
         XCTAssertFalse(swift === FileIcon.image(for: "main.swift", theme: light))
         XCTAssertNotNil(FileIcon.image(for: "unknown.xyz", theme: dark))
         let folder = try XCTUnwrap(FileIcon.image(for: "/remote/package.swift", isDirectory: true, theme: dark))
-        XCTAssertEqual(folder.tiffRepresentation, FileIcon.image(for: "/remote/src", isDirectory: true, theme: dark)?.tiffRepresentation)
-        XCTAssertNotEqual(folder.tiffRepresentation, swift.tiffRepresentation)
+        XCTAssertTrue(folder === FileIcon.image(for: "/remote/src", isDirectory: true, theme: dark))
+        XCTAssertFalse(folder === swift)
     }
 
     func testExplicitFileLinksKeepLabelsPositionsAndCopyText() throws {
@@ -78,7 +78,7 @@ final class FileIconTests: XCTestCase {
         AgentExternalLinkLayout.mark(canonical, fontSize: 14, color: theme.accent, theme: theme)
         AgentFileLinkTooltip.markIcons(canonical, theme: theme) { _ in .init(isDirectory: true, byteLength: 0, mimeType: nil) }
         let image = try XCTUnwrap(canonical.attribute(.agentFileLinkImage, at: 0, effectiveRange: nil) as? NSImage)
-        XCTAssertEqual(image.tiffRepresentation, FileIcon.image(for: "Sources", isDirectory: true, theme: theme)?.tiffRepresentation)
+        XCTAssertTrue(image === FileIcon.image(for: "Sources", isDirectory: true, theme: theme))
         XCTAssertEqual(canonical.string, "Sources")
         XCTAssertEqual(canonical.attribute(.link, at: 0, effectiveRange: nil) as? URL, directoryURL)
         AgentFileLinkTooltip.markIcons(text, theme: theme) { path in
