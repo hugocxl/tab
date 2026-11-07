@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1 - 2026-11-07
+
+### Fixed
+
+- The app tells your Mac its real version when it connects.
+
 ## 0.3.0 - 2026-11-07
 
 ### Changed
