@@ -185,6 +185,28 @@ final class TabListViewController: UICollectionViewController {
             server.isImage = { UIImage(data: $0) != nil }
         }
         apply(servers)
+        updateHeaders()
+    }
+
+    /// Headers aren't items, so a snapshot never reconfigures them; their Mac's
+    /// status is read here, where a change brings the next update.
+    private func updateHeaders() {
+        let kind = UICollectionView.elementKindSectionHeader
+        for path in collectionView.indexPathsForVisibleSupplementaryElements(ofKind: kind) {
+            guard let header = collectionView.supplementaryView(forElementKind: kind, at: path) as? UICollectionViewListCell,
+                  let id = dataSource.sectionIdentifier(for: path.section), let server = app.server(id) else { continue }
+            configure(header, for: server)
+        }
+        // Also for headers scrolled out of view, so they're right when they return.
+        for server in app.servers { _ = server.status }
+    }
+
+    private func configure(_ header: UICollectionViewListCell, for server: ServerModel) {
+        var content = UIListContentConfiguration.header()
+        content.text = server.server.name
+        content.secondaryText = Self.describe(server.status)
+        content.prefersSideBySideTextAndSecondaryText = true
+        header.contentConfiguration = content
     }
 
     static func describe(_ status: ServerModel.Status) -> String {
@@ -323,11 +345,7 @@ final class TabListViewController: UICollectionViewController {
         let header = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(
             elementKind: UICollectionView.elementKindSectionHeader) { [weak self] header, _, path in
             guard let self, let id = dataSource.sectionIdentifier(for: path.section), let server = app.server(id) else { return }
-            var content = UIListContentConfiguration.header()
-            content.text = server.server.name
-            content.secondaryText = Self.describe(server.status)
-            content.prefersSideBySideTextAndSecondaryText = true
-            header.contentConfiguration = content
+            configure(header, for: server)
         }
         dataSource = UICollectionViewDiffableDataSource(collectionView: collectionView) { view, path, id in
             view.dequeueConfiguredReusableCell(using: cell, for: path, item: id)

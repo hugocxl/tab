@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.1 - 2026-11-07
+
+### Fixed
+
+- With more than one Mac, each Mac's heading in the tab list now shows whether
+  it's connected instead of staying on "Connecting…".
+
 ## 0.7.0 - 2026-11-07
 
 ### Changed
