@@ -16,6 +16,9 @@ final class TabViewController: UIViewController {
     private let paneSwitcher = UISegmentedControl()
     /// Glass under the switcher, so content scrolling beneath stays out of its way.
     private let switcherGlass = UIVisualEffectView(effect: UIGlassEffect())
+    /// Extends the focused pane's top edge effect under the switcher, so it
+    /// reads as part of the navigation bar.
+    private let switcherEdge = UIScrollEdgeElementContainerInteraction()
     /// The panes the switcher shows, in order, with their labels.
     private var switcherPanes: [(id: PaneId, label: String)] = []
 
@@ -44,18 +47,19 @@ final class TabViewController: UIViewController {
         switcherGlass.isHidden = true
         switcherGlass.cornerConfiguration = .capsule()
         switcherGlass.translatesAutoresizingMaskIntoConstraints = false
-        paneSwitcher.apportionsSegmentWidthsByContent = true
         paneSwitcher.translatesAutoresizingMaskIntoConstraints = false
         paneSwitcher.addAction(UIAction { [weak self] _ in self?.switcherChanged() }, for: .valueChanged)
         switcherGlass.contentView.addSubview(paneSwitcher)
+        switcherEdge.edge = .top
+        switcherGlass.addInteraction(switcherEdge)
         view.addSubview(switcherGlass)
         NSLayoutConstraint.activate([
             // Above the panes' own safe area, so their content scrolls under it.
             switcherGlass.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor,
                                                constant: -Self.switcherSpace + 4),
-            switcherGlass.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            switcherGlass.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: 16),
-            switcherGlass.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -16),
+            // Full width, its panes sharing it equally.
+            switcherGlass.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 16),
+            switcherGlass.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16),
             paneSwitcher.topAnchor.constraint(equalTo: switcherGlass.contentView.topAnchor, constant: 4),
             paneSwitcher.bottomAnchor.constraint(equalTo: switcherGlass.contentView.bottomAnchor, constant: -4),
             paneSwitcher.leadingAnchor.constraint(equalTo: switcherGlass.contentView.leadingAnchor, constant: 4),
@@ -114,6 +118,25 @@ final class TabViewController: UIViewController {
             controller.view.layer.borderWidth = card && id == focused ? 2 : 0
             controller.view.layer.borderColor = UIColor.tintColor.withAlphaComponent(0.6).cgColor
         }
+        let edgeScrollView = switcherGlass.isHidden ? nil : focused.flatMap { panes[$0] }.flatMap(Self.topScrollView)
+        if switcherEdge.scrollView !== edgeScrollView { switcherEdge.scrollView = edgeScrollView }
+    }
+
+    /// The scroll view a pane shows its content in, such as an agent's
+    /// transcript: the largest one that isn't a text field.
+    private static func topScrollView(of pane: UIViewController) -> UIScrollView? {
+        if let declared = pane.contentScrollView(for: .top) { return declared }
+        var found: UIScrollView?
+        var queue: [UIView] = [pane.view]
+        while !queue.isEmpty {
+            let next = queue.removeFirst()
+            if let scrollView = next as? UIScrollView, !(scrollView is UITextView),
+               scrollView.bounds.height * scrollView.bounds.width > (found.map { $0.bounds.height * $0.bounds.width } ?? 0) {
+                found = scrollView
+            }
+            queue += next.subviews.filter { !$0.isHidden }
+        }
+        return found
     }
 
     // MARK: Panes

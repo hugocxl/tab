@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.10.0 - 2026-11-07
+
+### Changed
+
+- On iPhone, the pane switcher spans the full width of the screen, with each
+  pane given an equal share.
+
 ## 0.9.0 - 2026-11-07
 
 ### Added
