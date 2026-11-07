@@ -1,15 +1,13 @@
 // Renders packaging/AppIcon.icns from packaging/AppIcon.svg (128pt and up) and
-// packaging/AppIconSmall.svg (64pt and down). Usage: swift scripts/build-icon.swift
+// packaging/AppIconSmall.svg (64pt and down), and the dark variant
+// packaging/AppIconDark.icns from the matching *Dark.svg files.
+// Usage: swift scripts/build-icon.swift
 import AppKit
 
 let root = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().deletingLastPathComponent()
 let packaging = root.appendingPathComponent("packaging")
-let big = NSImage(contentsOf: packaging.appendingPathComponent("AppIcon.svg"))!
-let small = NSImage(contentsOf: packaging.appendingPathComponent("AppIconSmall.svg"))!
 let temporary = FileManager.default.temporaryDirectory.appendingPathComponent("tab-icon-\(UUID().uuidString)")
-let set = temporary.appendingPathComponent("AppIcon.iconset")
 defer { try? FileManager.default.removeItem(at: temporary) }
-try! FileManager.default.createDirectory(at: set, withIntermediateDirectories: true)
 
 func render(_ image: NSImage, _ px: Int, to url: URL) {
     let rep = NSBitmapImageRep(
@@ -26,10 +24,7 @@ func render(_ image: NSImage, _ px: Int, to url: URL) {
 
 let sizes = [("16x16", 16), ("16x16@2x", 32), ("32x32", 32), ("32x32@2x", 64), ("128x128", 128), ("128x128@2x", 256),
              ("256x256", 256), ("256x256@2x", 512), ("512x512", 512), ("512x512@2x", 1024)]
-for (name, px) in sizes {
-    render(px <= 64 ? small : big, px, to: set.appendingPathComponent("icon_\(name).png"))
-}
-render(big, 1024, to: packaging.appendingPathComponent("AppIcon.png"))
+let types = ["icp4", "ic11", "icp5", "ic12", "ic07", "ic13", "ic08", "ic14", "ic09", "ic10"]
 // ICNS accepts PNG representations directly. Writing the container here also
 // works where iconutil's image encoder service is unavailable in a sandbox.
 func chunk(_ type: String, _ payload: Data) -> Data {
@@ -39,9 +34,19 @@ func chunk(_ type: String, _ payload: Data) -> Data {
     data.append(payload)
     return data
 }
-let types = ["icp4", "ic11", "icp5", "ic12", "ic07", "ic13", "ic08", "ic14", "ic09", "ic10"]
-var representations = Data()
-for ((name, _), type) in zip(sizes, types) {
-    representations.append(chunk(type, try Data(contentsOf: set.appendingPathComponent("icon_\(name).png"))))
+
+for variant in ["", "Dark"] {
+    let big = NSImage(contentsOf: packaging.appendingPathComponent("AppIcon\(variant).svg"))!
+    let small = NSImage(contentsOf: packaging.appendingPathComponent("AppIconSmall\(variant).svg"))!
+    let set = temporary.appendingPathComponent("AppIcon\(variant).iconset")
+    try! FileManager.default.createDirectory(at: set, withIntermediateDirectories: true)
+    for (name, px) in sizes {
+        render(px <= 64 ? small : big, px, to: set.appendingPathComponent("icon_\(name).png"))
+    }
+    render(big, 1024, to: packaging.appendingPathComponent("AppIcon\(variant).png"))
+    var representations = Data()
+    for ((name, _), type) in zip(sizes, types) {
+        representations.append(chunk(type, try Data(contentsOf: set.appendingPathComponent("icon_\(name).png"))))
+    }
+    try chunk("icns", representations).write(to: packaging.appendingPathComponent("AppIcon\(variant).icns"), options: .atomic)
 }
-try chunk("icns", representations).write(to: packaging.appendingPathComponent("AppIcon.icns"), options: .atomic)

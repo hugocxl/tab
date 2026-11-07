@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.71.0 - 2026-11-07
+
+### Changed
+
+- The app icon has a new warm off-white background.
+
 ## 0.70.0 - 2026-11-07
 
 ### Added
