@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.0 - 2026-11-07
+
+### Added
+
+- A filter button at the top of the tab list shows only agents, terminals or
+  tabs that need attention, and with more than one Mac, one Mac's tabs.
+
+### Changed
+
+- The tab list has a small title instead of a large one, with Settings at the
+  top right.
+
 ## 0.5.0 - 2026-11-07
 
 ### Changed

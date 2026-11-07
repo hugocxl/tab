@@ -12,6 +12,52 @@ final class TabListViewController: UICollectionViewController {
     private var icons: [ProjectId: UIImage] = [:]
     private var filter = ""
     private let statusView = UIContentUnavailableView(configuration: .empty())
+    private let settingsButton = UIBarButtonItem()
+    private let filterButton = UIBarButtonItem()
+    /// Which tabs the filter button lets through.
+    private enum Shown: CaseIterable {
+        case all, agents, terminals, attention
+
+        var title: String {
+            switch self {
+            case .all: "All Tabs"
+            case .agents: "Agents"
+            case .terminals: "Terminals"
+            case .attention: "Needs Attention"
+            }
+        }
+
+        /// What the list says when nothing is left.
+        var emptyTitle: String {
+            switch self {
+            case .all: "No Open Tabs"
+            case .agents: "No Agents"
+            case .terminals: "No Terminals"
+            case .attention: "Nothing Needs Attention"
+            }
+        }
+
+        var image: String {
+            switch self {
+            case .all: "rectangle.stack"
+            case .agents: "sparkles"
+            case .terminals: "apple.terminal"
+            case .attention: "exclamationmark.bubble"
+            }
+        }
+
+        func admits(_ card: TabCard) -> Bool {
+            switch self {
+            case .all: true
+            case .agents: card.panes.contains { if case .agent = $0.kind { true } else { false } }
+            case .terminals: card.panes.contains { $0.kind == .terminal }
+            case .attention: card.status == .attention || card.status == .error
+            }
+        }
+    }
+    private var shown = Shown.all
+    /// The one Mac whose tabs show; nil for all of them.
+    private var shownServer: ServerId?
     /// Shows a tab in the detail column.
     var onOpen: ((ServerModel, TabCard) -> Void)?
     /// Starts a tab in a project that has none.
@@ -47,7 +93,7 @@ final class TabListViewController: UICollectionViewController {
         let layout = UICollectionViewCompositionalLayout { [weak self] _, environment in
             var configuration = UICollectionLayoutListConfiguration(appearance: .plain)
             configuration.backgroundColor = .clear
-            configuration.headerMode = (self?.app.servers.count ?? 0) > 1 ? .supplementary : .none
+            configuration.headerMode = (self?.visibleServers.count ?? 0) > 1 ? .supplementary : .none
             configuration.separatorConfiguration.bottomSeparatorInsets = NSDirectionalEdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20)
             configuration.trailingSwipeActionsConfigurationProvider = { path in self?.swipeActions(path) }
             // A hairline between cards, except beside the selected one.
@@ -69,7 +115,7 @@ final class TabListViewController: UICollectionViewController {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        navigationController?.navigationBar.prefersLargeTitles = true
+        navigationController?.navigationBar.prefersLargeTitles = false
         navigationController?.setToolbarHidden(!isPhone, animated: animated)
         if splitViewController?.isCollapsed ?? true, let selection = collectionView.indexPathsForSelectedItems {
             selection.forEach { collectionView.deselectItem(at: $0, animated: animated) }
@@ -86,7 +132,7 @@ final class TabListViewController: UICollectionViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        navigationItem.largeTitleDisplayMode = .always
+        navigationItem.largeTitleDisplayMode = .never
         // Clear, so an iPad's sidebar shows its own material.
         collectionView.backgroundColor = .clear
         configureDataSource()
@@ -99,11 +145,13 @@ final class TabListViewController: UICollectionViewController {
         // iPad's sidebar keeps its bar buttons free.
         navigationItem.preferredSearchBarPlacement = isPhone ? .integrated : .stacked
 
-        let settings = UIBarButtonItem(image: UIImage(systemName: "gearshape"), primaryAction: UIAction { [weak self] _ in
+        settingsButton.primaryAction = UIAction(image: UIImage(systemName: "gearshape")) { [weak self] _ in
             self?.onSettings?()
-        })
-        settings.accessibilityLabel = "Settings"
-        navigationItem.leftBarButtonItem = settings
+        }
+        settingsButton.accessibilityLabel = "Settings"
+        navigationItem.rightBarButtonItem = settingsButton
+        filterButton.accessibilityLabel = "Filter"
+        navigationItem.leftBarButtonItem = filterButton
 
         statusView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(statusView)
@@ -117,7 +165,7 @@ final class TabListViewController: UICollectionViewController {
 
     override func updateProperties() {
         super.updateProperties()
-        let servers = app.servers
+        let servers = visibleServers
         if servers.count == 1, let server = servers.first {
             title = server.server.name
             navigationItem.subtitle = Self.describe(server.status)
@@ -125,16 +173,15 @@ final class TabListViewController: UICollectionViewController {
             title = "Tabs"
             navigationItem.subtitle = nil
         }
-        // An iPad sidebar counts a title menu as a bar item and folds + away;
-        // there, pairing lives in Settings.
-        navigationItem.titleMenuProvider = traitCollection.userInterfaceIdiom == .phone
-            ? { [weak self] _ in self?.serverMenu() } : nil
+        let filtering = shown != .all || shownServer != nil
+        filterButton.image = UIImage(systemName: filtering ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease")
+        filterButton.menu = filterMenu()
         if isPhone {
             toolbarItems = [navigationItem.searchBarPlacementBarButtonItem, .flexibleSpace(), newTabButton()]
         } else {
-            navigationItem.rightBarButtonItem = newTabButton()
+            navigationItem.rightBarButtonItems = [newTabButton(), settingsButton]
         }
-        for server in servers {
+        for server in app.servers {
             server.isImage = { UIImage(data: $0) != nil }
         }
         apply(servers)
@@ -149,15 +196,46 @@ final class TabListViewController: UICollectionViewController {
         }
     }
 
-    private func serverMenu() -> UIMenu {
-        let servers = app.servers.map { model in
-            UIAction(title: model.server.name, subtitle: Self.describe(model.status),
-                     image: UIImage(systemName: "laptopcomputer")) { _ in model.retryNow() }
+    /// The paired Macs the list shows: the chosen one, else all of them.
+    private var visibleServers: [ServerModel] {
+        let servers = app.servers
+        guard let shownServer, let server = servers.first(where: { $0.id == shownServer }) else { return servers }
+        return [server]
+    }
+
+    private func show(server: ServerId?) {
+        shownServer = server
+        // Headings come and go with the number of Macs shown.
+        collectionView.collectionViewLayout.invalidateLayout()
+        setNeedsUpdateProperties()
+    }
+
+    /// Which tabs show: by what runs in them and, with more than one, by Mac.
+    private func filterMenu() -> UIMenu {
+        let kinds = Shown.allCases.map { kind in
+            UIAction(title: kind.title, image: UIImage(systemName: kind.image), state: shown == kind ? .on : .off) { [weak self] _ in
+                self?.shown = kind
+                self?.setNeedsUpdateProperties()
+            }
         }
-        let pair = UIAction(title: "Pair Another Mac", image: UIImage(systemName: "qrcode.viewfinder")) { [weak self] _ in
-            self?.onPair?()
+        var children: [UIMenuElement] = [UIMenu(options: .displayInline, children: kinds)]
+        let servers = app.servers
+        if servers.count > 1 {
+            let all = UIAction(title: "All Macs", image: UIImage(systemName: "laptopcomputer.and.iphone"),
+                               state: shownServer == nil ? .on : .off) { [weak self] _ in
+                self?.show(server: nil)
+            }
+            let macs = servers.map { model in
+                UIAction(title: model.server.name, subtitle: Self.describe(model.status),
+                         image: UIImage(systemName: "laptopcomputer"),
+                         state: shownServer == model.id ? .on : .off) { [weak self] _ in
+                    self?.show(server: model.id)
+                    model.retryNow()
+                }
+            }
+            children.append(UIMenu(options: .displayInline, children: [all] + macs))
         }
-        return UIMenu(children: [UIMenu(options: .displayInline, children: servers), pair])
+        return UIMenu(title: "Show", children: children)
     }
 
     // MARK: New tabs
@@ -277,6 +355,7 @@ final class TabListViewController: UICollectionViewController {
         let query = filter.lowercased()
         for server in servers {
             let cards = server.cards.filter { card in
+                guard shown.admits(card) else { return false }
                 guard !query.isEmpty else { return true }
                 return [card.name, card.header, card.branch ?? "", server.server.name, Self.headlineText(card.headline)]
                     .contains { $0.lowercased().contains(query) }
@@ -350,7 +429,19 @@ final class TabListViewController: UICollectionViewController {
             value.buttonProperties.primaryAction = UIAction { [weak self] _ in self?.onPair?() }
             configuration = value
         default:
-            if empty && filter.isEmpty {
+            if empty && filter.isEmpty && shown != .all {
+                var value = UIContentUnavailableConfiguration.empty()
+                value.image = UIImage(systemName: shown.image)
+                value.text = shown.emptyTitle
+                var button = UIButton.Configuration.glass()
+                button.title = "Show All Tabs"
+                value.button = button
+                value.buttonProperties.primaryAction = UIAction { [weak self] _ in
+                    self?.shown = .all
+                    self?.setNeedsUpdateProperties()
+                }
+                configuration = value
+            } else if empty && filter.isEmpty {
                 var value = UIContentUnavailableConfiguration.empty()
                 value.image = UIImage(systemName: "rectangle.stack.badge.plus")
                 value.text = "No Open Tabs"
