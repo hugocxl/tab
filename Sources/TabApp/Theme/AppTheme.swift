@@ -62,8 +62,7 @@ public final class AppTheme: ObservableObject {
 
     public func setInterface(_ appearance: Appearance) {
         guard interface.colorScheme != appearance.colorScheme || interface.interfaceStyle != appearance.interfaceStyle ||
-              interface.glassPanes != appearance.glassPanes || interface.animationStyle != appearance.animationStyle ||
-              interface.agentResponseFont != appearance.agentResponseFont else { return }
+              interface.glassPanes != appearance.glassPanes || interface.animationStyle != appearance.animationStyle else { return }
         interface = appearance
         apply()
     }

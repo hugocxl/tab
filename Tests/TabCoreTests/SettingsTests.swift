@@ -109,14 +109,6 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(try Appearance.load(path), saved)
     }
 
-    func testAgentResponseFontFromANewerBuildFallsBackToDefault() throws {
-        let directory = try TemporaryDirectory()
-        let path = try directory.write("settings.json", #"{"appearance": {"agentResponseFont": "someFutureFont", "sidebarProjectOrder": "name"}}"#)
-        let appearance = try Appearance.load(path)
-        XCTAssertEqual(appearance.agentResponseFont, .default)
-        XCTAssertEqual(appearance.sidebarProjectOrder, .name, "the rest of the section still loads")
-    }
-
     func testSidebarHostRoundTripsAndMatchesServers() throws {
         let first = ServerId()
         let second = ServerId()

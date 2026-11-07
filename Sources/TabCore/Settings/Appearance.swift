@@ -74,28 +74,6 @@ public enum SidebarGesture: String, Codable, Sendable, CaseIterable {
     case off, swipe
 }
 
-/// The typeface of agent responses: the interface font or a macOS serif.
-public enum AgentResponseFont: String, Codable, Sendable, CaseIterable {
-    case `default`, newYork, charter, iowanOldStyle, georgia, athelas, palatino
-
-    /// Unknown names from newer builds read as the default.
-    public init(from decoder: Decoder) throws {
-        self = Self(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .default
-    }
-
-    public var title: String {
-        switch self {
-        case .default: return "Default"
-        case .newYork: return "New York"
-        case .charter: return "Charter"
-        case .iowanOldStyle: return "Iowan Old Style"
-        case .georgia: return "Georgia"
-        case .athelas: return "Athelas"
-        case .palatino: return "Palatino"
-        }
-    }
-}
-
 /// How the app looks and what the sidebar and panels remember.
 public struct Appearance: Codable, Equatable, Sendable {
     /// The system appearance, or an explicit light or dark appearance.
@@ -110,7 +88,6 @@ public struct Appearance: Codable, Equatable, Sendable {
     public var preservePaneWidth: Bool
     /// The trackpad gesture used to toggle the sidebar.
     public var sidebarGesture: SidebarGesture
-    public var agentResponseFont: AgentResponseFont
     public var darkTheme: String
     public var lightTheme: String
     public var sidebarExpanded: Bool
@@ -137,7 +114,6 @@ public struct Appearance: Codable, Equatable, Sendable {
         case animationStyle
         case preservePaneWidth
         case sidebarGesture
-        case agentResponseFont
         case darkTheme, lightTheme, sidebarExpanded, sidebarLayout, sidebarHost, sidebarExpandedWidth
         case worktreeRecent, projectRecent, paletteRecent
         case sidebarFocus, sidebarProjectOrder, sidePanel, lastSidePanel, sidePanelWidth
@@ -150,7 +126,6 @@ public struct Appearance: Codable, Equatable, Sendable {
         animationStyle = .natural
         preservePaneWidth = false
         sidebarGesture = .off
-        agentResponseFont = .default
         darkTheme = ThemeCatalog.defaultDark
         lightTheme = ThemeCatalog.defaultLight
         sidebarExpanded = true
@@ -176,7 +151,6 @@ public struct Appearance: Codable, Equatable, Sendable {
         animationStyle = try container.value(.animationStyle, d.animationStyle)
         preservePaneWidth = try container.value(.preservePaneWidth, d.preservePaneWidth)
         sidebarGesture = try container.value(.sidebarGesture, d.sidebarGesture)
-        agentResponseFont = try container.value(.agentResponseFont, d.agentResponseFont)
         darkTheme = try container.value(.darkTheme, d.darkTheme)
         lightTheme = try container.value(.lightTheme, d.lightTheme)
         sidebarExpanded = try container.value(.sidebarExpanded, d.sidebarExpanded)
@@ -201,7 +175,6 @@ public struct Appearance: Codable, Equatable, Sendable {
         try container.encode(animationStyle, forKey: .animationStyle)
         try container.encode(preservePaneWidth, forKey: .preservePaneWidth)
         try container.encode(sidebarGesture, forKey: .sidebarGesture)
-        try container.encode(agentResponseFont, forKey: .agentResponseFont)
         try container.encode(darkTheme, forKey: .darkTheme)
         try container.encode(lightTheme, forKey: .lightTheme)
         try container.encode(sidebarExpanded, forKey: .sidebarExpanded)
