@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.7.0 - 2026-11-07
+
+### Changed
+
+- An agent's tool steps read as short sentences, such as "Ran git push" or
+  "Edited View.swift +12 −3", and steps in a row share one card.
+- Commands leave out the folder change in front of them, and a tapped step
+  shows the full command, its output and a failed exit code.
+
+### Fixed
+
+- A running step's spinner no longer covers its text.
+
 ## 0.6.0 - 2026-11-07
 
 ### Added

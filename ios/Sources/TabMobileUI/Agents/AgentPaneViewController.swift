@@ -14,6 +14,7 @@ final class AgentPaneViewController: UIViewController, UICollectionViewDelegate 
     private var order: [String] = []
     private var expandedTurns: Set<String> = []
     private var expandedItems: Set<String> = []
+    private var stepPositions: [String: StepPosition] = [:]
     /// Rendered Markdown by item id, redone only when the text changes.
     private var rendered: [String: (text: String, value: NSAttributedString)] = [:]
     private let composer = AgentComposerView()
@@ -181,7 +182,7 @@ final class AgentPaneViewController: UIViewController, UICollectionViewDelegate 
         }
         let tool = UICollectionView.CellRegistration<ToolCell, String> { [weak self] cell, _, id in
             guard let self, case .tool(let item)? = rows[id] else { return }
-            cell.configure(item, expanded: expandedItems.contains(id))
+            cell.configure(item, expanded: expandedItems.contains(id), position: stepPositions[id] ?? .only)
         }
         let thinking = UICollectionView.CellRegistration<ThinkingCell, String> { [weak self] cell, _, id in
             guard let self, case .thinking(let item)? = rows[id] else { return }
@@ -225,6 +226,19 @@ final class AgentPaneViewController: UIViewController, UICollectionViewDelegate 
         return value
     }
 
+    /// Where each tool step sits in its run of steps, which share one card.
+    private static func stepPositions(_ order: [String], rows: [String: TranscriptRow]) -> [String: StepPosition] {
+        let isStep = order.map { id -> Bool in
+            if case .tool? = rows[id] { true } else { false }
+        }
+        var positions: [String: StepPosition] = [:]
+        for (index, id) in order.enumerated() where isStep[index] {
+            positions[id] = StepPosition(joinsPrevious: index > 0 && isStep[index - 1],
+                                         joinsNext: index + 1 < order.count && isStep[index + 1])
+        }
+        return positions
+    }
+
     /// Applies new rows, reconfiguring only the ones whose content changed.
     private func apply(_ next: [TranscriptRow]) {
         let wasAtBottom = isNearBottom || !didInitialScroll
@@ -239,7 +253,13 @@ final class AgentPaneViewController: UIViewController, UICollectionViewDelegate 
         var snapshot = NSDiffableDataSourceSnapshot<Int, String>()
         snapshot.appendSections([0])
         snapshot.appendItems(nextOrder)
-        let changed = nextOrder.filter { id in previous[id].map { $0 != nextRows[id] } ?? false }
+        let previousPositions = stepPositions
+        stepPositions = Self.stepPositions(nextOrder, rows: nextRows)
+        // A step whose neighbors changed redraws its corners.
+        let changed = nextOrder.filter { id in
+            guard let old = previous[id] else { return false }
+            return old != nextRows[id] || previousPositions[id] != stepPositions[id]
+        }
         // Reconfiguring keeps the cell, so only rows that keep their kind may;
         // an answered approval becomes a notice and needs a new cell.
         let sameKind = changed.filter { previous[$0]?.kind == nextRows[$0]?.kind }
