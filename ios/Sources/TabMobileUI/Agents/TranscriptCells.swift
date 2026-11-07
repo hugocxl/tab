@@ -82,105 +82,171 @@ final class AssistantMessageCell: UICollectionViewCell {
     }
 }
 
-/// One tool step: what ran, on what, and how it ended; tap to see its output.
+/// Where a tool step sits among the steps around it: together they share
+/// one rounded card, like the rows of a grouped list.
+enum StepPosition: Hashable {
+    case only, first, middle, last
+
+    init(joinsPrevious: Bool, joinsNext: Bool) {
+        switch (joinsPrevious, joinsNext) {
+        case (false, false): self = .only
+        case (false, true): self = .first
+        case (true, true): self = .middle
+        case (true, false): self = .last
+        }
+    }
+
+    var roundsTop: Bool { self == .only || self == .first }
+    var roundsBottom: Bool { self == .only || self == .last }
+}
+
+/// One tool step as a sentence, "Ran git push", in a card it shares with the
+/// steps around it. A running step spins; a failed one says so. Tap to see
+/// the command and its output.
 final class ToolCell: UICollectionViewCell {
-    private let icon = UIImageView()
-    private let title = UILabel()
-    private let summary = UILabel()
-    private let status = UIImageView()
-    private let spinner = UIActivityIndicatorView(style: .medium)
-    private let output = UILabel()
     private let card = UIView()
+    private let separator = UIView()
+    private let icon = UIImageView()
+    private let line = UILabel()
+    private let spinner = UIActivityIndicatorView(style: .medium)
+    private let status = UIImageView()
+    private let detail = UILabel()
+    private let detailBox = UIView()
+    private var cardTop: NSLayoutConstraint!
+    private var cardBottom: NSLayoutConstraint!
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         let column = ReadableColumn.guide(in: contentView)
         card.backgroundColor = .secondarySystemBackground
-        card.layer.cornerRadius = 14
         card.layer.cornerCurve = .continuous
-        icon.tintColor = .secondaryLabel
-        icon.contentMode = .scaleAspectFit
-        icon.preferredSymbolConfiguration = UIImage.SymbolConfiguration(textStyle: .subheadline)
-        title.font = .preferredFont(forTextStyle: .subheadline).withTraits(.traitBold)
-        title.adjustsFontForContentSizeCategory = true
-        title.setContentHuggingPriority(.required, for: .horizontal)
-        title.setContentCompressionResistancePriority(.required, for: .horizontal)
-        summary.font = UIFontMetrics(forTextStyle: .footnote).scaledFont(for: .monospacedSystemFont(ofSize: 13, weight: .regular))
-        summary.textColor = .secondaryLabel
-        summary.lineBreakMode = .byTruncatingMiddle
-        summary.adjustsFontForContentSizeCategory = true
-        status.preferredSymbolConfiguration = UIImage.SymbolConfiguration(textStyle: .footnote)
-        output.font = UIFontMetrics(forTextStyle: .caption1).scaledFont(for: .monospacedSystemFont(ofSize: 12, weight: .regular))
-        output.numberOfLines = 40
-        output.textColor = .secondaryLabel
-        output.adjustsFontForContentSizeCategory = true
-
-        let header = UIStackView(arrangedSubviews: [icon, title, summary, spinner, status])
-        header.spacing = 8
-        header.alignment = .center
-        let stack = UIStackView(arrangedSubviews: [header, output])
-        stack.axis = .vertical
-        stack.spacing = 8
-        stack.translatesAutoresizingMaskIntoConstraints = false
         card.translatesAutoresizingMaskIntoConstraints = false
+        separator.backgroundColor = .separator
+        separator.translatesAutoresizingMaskIntoConstraints = false
+
+        icon.tintColor = .secondaryLabel
+        icon.contentMode = .center
+        icon.preferredSymbolConfiguration = UIImage.SymbolConfiguration(textStyle: .footnote, scale: .medium)
+        icon.setContentHuggingPriority(.required, for: .horizontal)
+        line.adjustsFontForContentSizeCategory = true
+        line.lineBreakMode = .byTruncatingTail
+        line.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        spinner.hidesWhenStopped = true
+        spinner.transform = CGAffineTransform(scaleX: 0.8, y: 0.8)
+        spinner.setContentHuggingPriority(.required, for: .horizontal)
+        status.preferredSymbolConfiguration = UIImage.SymbolConfiguration(textStyle: .footnote)
+        status.setContentHuggingPriority(.required, for: .horizontal)
+        status.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        detail.numberOfLines = 40
+        detail.adjustsFontForContentSizeCategory = true
+        detail.translatesAutoresizingMaskIntoConstraints = false
+        detailBox.backgroundColor = .tertiarySystemFill
+        detailBox.layer.cornerRadius = 10
+        detailBox.layer.cornerCurve = .continuous
+        detailBox.addSubview(detail)
+
+        let row = UIStackView(arrangedSubviews: [icon, line, spinner, status])
+        row.spacing = 10
+        row.alignment = .center
+        let stack = UIStackView(arrangedSubviews: [row, detailBox])
+        stack.axis = .vertical
+        stack.spacing = 10
+        stack.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(card)
         card.addSubview(stack)
+        card.addSubview(separator)
+
+        cardTop = card.topAnchor.constraint(equalTo: contentView.topAnchor)
+        cardBottom = card.bottomAnchor.constraint(equalTo: contentView.bottomAnchor)
         NSLayoutConstraint.activate([
-            card.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 3),
-            card.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -3),
+            cardTop, cardBottom,
             card.leadingAnchor.constraint(equalTo: column.leadingAnchor),
             card.trailingAnchor.constraint(equalTo: column.trailingAnchor),
-            stack.topAnchor.constraint(equalTo: card.topAnchor, constant: 10),
-            stack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -10),
-            stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 12),
-            stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -12),
+            stack.topAnchor.constraint(equalTo: card.topAnchor, constant: 11),
+            stack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -11),
+            stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 14),
+            stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -14),
             icon.widthAnchor.constraint(equalToConstant: 20),
+            // The hairline starts under the text, as in a grouped list.
+            separator.topAnchor.constraint(equalTo: card.topAnchor),
+            separator.leadingAnchor.constraint(equalTo: line.leadingAnchor),
+            separator.trailingAnchor.constraint(equalTo: card.trailingAnchor),
+            separator.heightAnchor.constraint(equalToConstant: 0.5),
+            detail.topAnchor.constraint(equalTo: detailBox.topAnchor, constant: 10),
+            detail.bottomAnchor.constraint(equalTo: detailBox.bottomAnchor, constant: -10),
+            detail.leadingAnchor.constraint(equalTo: detailBox.leadingAnchor, constant: 10),
+            detail.trailingAnchor.constraint(equalTo: detailBox.trailingAnchor, constant: -10),
         ])
     }
 
     required init?(coder: NSCoder) { fatalError("not used") }
 
-    func configure(_ item: AgentChatItem, expanded: Bool) {
+    func configure(_ item: AgentChatItem, expanded: Bool, position: StepPosition) {
         let tool = item.tool
+        let step = ToolStep(item)
         icon.image = UIImage(systemName: Self.symbol(tool?.category))
-        title.text = Self.name(tool)
-        summary.text = tool?.summary ?? item.text
+
+        let sentence = NSMutableAttributedString(string: step.verb, attributes: [
+            .font: UIFont.preferredFont(forTextStyle: .subheadline).withTraits(.traitBold), .foregroundColor: UIColor.label,
+        ])
+        if !step.subject.isEmpty {
+            let font = step.subjectIsCode
+                ? UIFontMetrics(forTextStyle: .subheadline).scaledFont(for: .monospacedSystemFont(ofSize: 14, weight: .regular))
+                : UIFont.preferredFont(forTextStyle: .subheadline)
+            sentence.append(NSAttributedString(string: " " + step.subject, attributes: [
+                .font: font, .foregroundColor: UIColor.secondaryLabel,
+            ]))
+        }
+        let counts = UIFont.preferredFont(forTextStyle: .footnote).withTraits(.traitBold)
+        if let additions = step.additions, additions > 0 {
+            sentence.append(NSAttributedString(string: "  +\(additions)", attributes: [.font: counts, .foregroundColor: UIColor.systemGreen]))
+        }
+        if let deletions = step.deletions, deletions > 0 {
+            sentence.append(NSAttributedString(string: " −\(deletions)", attributes: [.font: counts, .foregroundColor: UIColor.systemRed]))
+        }
+        line.attributedText = sentence
+
+        // Success is the usual case and goes unmarked; only what needs a look is flagged.
         switch tool?.status ?? (item.isComplete ? .completed : .running) {
         case .running:
             spinner.startAnimating()
             status.isHidden = true
         case .completed:
             spinner.stopAnimating()
-            status.isHidden = false
-            status.image = UIImage(systemName: "checkmark.circle.fill")
-            status.tintColor = .systemGreen
+            status.isHidden = !expanded
+            status.image = UIImage(systemName: "chevron.up")
+            status.tintColor = .tertiaryLabel
         case .failed:
             spinner.stopAnimating()
             status.isHidden = false
-            status.image = UIImage(systemName: "xmark.circle.fill")
+            status.image = UIImage(systemName: "exclamationmark.circle.fill")
             status.tintColor = .systemRed
         case .denied, .interrupted:
             spinner.stopAnimating()
             status.isHidden = false
-            status.image = UIImage(systemName: "minus.circle.fill")
+            status.image = UIImage(systemName: "minus.circle")
             status.tintColor = .secondaryLabel
         }
-        let detail = expanded ? Self.detail(item) : nil
-        output.isHidden = detail == nil
-        output.attributedText = detail
-        accessibilityLabel = "\(title.text ?? ""), \(summary.text ?? "")"
-    }
 
-    static func name(_ tool: AgentToolActivity?) -> String {
-        switch tool?.category {
-        case .command: "Run"
-        case .read: "Read"
-        case .search: "Search"
-        case .edit: "Edit"
-        case .web: "Web"
-        case .subagent: "Agent"
-        default: tool?.name ?? "Tool"
-        }
+        let shown = expanded ? Self.detail(item, step: step) : nil
+        detailBox.isHidden = shown == nil
+        detail.attributedText = shown
+
+        // Joined edges are square and flush, with a hairline between steps.
+        card.layer.cornerRadius = position == .middle ? 0 : 16
+        var corners: CACornerMask = []
+        if position.roundsTop { corners.formUnion([.layerMinXMinYCorner, .layerMaxXMinYCorner]) }
+        if position.roundsBottom { corners.formUnion([.layerMinXMaxYCorner, .layerMaxXMaxYCorner]) }
+        card.layer.maskedCorners = corners
+        separator.isHidden = position.roundsTop
+        cardTop.constant = position.roundsTop ? 4 : 0
+        cardBottom.constant = position.roundsBottom ? -4 : 0
+
+        isAccessibilityElement = true
+        accessibilityLabel = sentence.string
+        accessibilityValue = tool?.status == .failed ? "Failed" : nil
+        accessibilityHint = expanded ? "Hides the output" : "Shows the output"
     }
 
     static func symbol(_ category: AgentToolActivity.Category?) -> String {
@@ -195,19 +261,34 @@ final class ToolCell: UICollectionViewCell {
         }
     }
 
-    /// A diff with colored lines for edits; otherwise the output.
-    private static func detail(_ item: AgentChatItem) -> NSAttributedString? {
+    /// For a command, the command and then its output; a diff with colored
+    /// lines for edits; otherwise the output.
+    private static func detail(_ item: AgentChatItem, step: ToolStep) -> NSAttributedString? {
         let tool = item.tool
+        let mono = UIFontMetrics(forTextStyle: .caption1).scaledFont(for: .monospacedSystemFont(ofSize: 12, weight: .regular))
+        let result = NSMutableAttributedString()
         if let diff = tool?.fileChangeDetails?.diff ?? tool?.fileChanges?.compactMap(\.diff).first, !diff.isEmpty {
-            let result = NSMutableAttributedString()
             for line in diff.split(separator: "\n", omittingEmptySubsequences: false).prefix(80) {
                 let color: UIColor = line.hasPrefix("+") ? .systemGreen : line.hasPrefix("-") ? .systemRed : .secondaryLabel
-                result.append(NSAttributedString(string: line + "\n", attributes: [.foregroundColor: color]))
+                result.append(NSAttributedString(string: line + "\n", attributes: [.font: mono, .foregroundColor: color]))
             }
             return result
         }
-        let text = (tool?.output ?? item.detail ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        return text.isEmpty ? nil : NSAttributedString(string: String(text.prefix(6000)))
+        if let command = step.command {
+            result.append(NSAttributedString(string: "$ " + command, attributes: [.font: mono, .foregroundColor: UIColor.label]))
+        }
+        let output = (tool?.output ?? item.detail ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !output.isEmpty {
+            if result.length > 0 { result.append(NSAttributedString(string: "\n\n", attributes: [.font: mono])) }
+            result.append(NSAttributedString(string: String(output.prefix(6000)),
+                                             attributes: [.font: mono, .foregroundColor: UIColor.secondaryLabel]))
+        }
+        if let code = tool?.exitCode, code != 0 {
+            result.append(NSAttributedString(string: "\n\nExit code \(code)", attributes: [
+                .font: UIFont.preferredFont(forTextStyle: .caption1).withTraits(.traitBold), .foregroundColor: UIColor.systemRed,
+            ]))
+        }
+        return result.length == 0 ? nil : result
     }
 }
 
@@ -333,7 +414,7 @@ final class ApprovalCell: UICollectionViewCell {
     }
 }
 
-/// A notice or an answered approval, small and centered; errors as a red card.
+/// A notice, small and centered; errors as a red card.
 final class NoticeCell: UICollectionViewCell {
     private let label = UILabel()
     private let card = UIView()

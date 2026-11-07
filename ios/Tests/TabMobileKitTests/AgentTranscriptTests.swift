@@ -41,17 +41,16 @@ final class AgentTranscriptTests: XCTestCase {
         XCTAssertEqual(rows.last, .working(since: start))
     }
 
-    /// An answered approval keeps its id but needs a different cell; the
-    /// pane reloads it instead of reconfiguring, which used to crash.
-    func testAnsweredApprovalBecomesANoticeWithTheSameId() {
+    /// Answered approvals, "Automatically approved" ones above all, would
+    /// otherwise fill the transcript between messages.
+    func testAnsweredApprovalLeavesTheTranscript() {
         let pending = AgentChatItem(id: "p", kind: .approval, text: "Bash", isComplete: false)
         var answered = pending
         answered.isComplete = true
-        answered.text = "Approved"
-        let before = AgentTranscript.rows(snapshot([pending], turns: []), expanded: [])
-        let after = AgentTranscript.rows(snapshot([answered], turns: []), expanded: [])
-        XCTAssertEqual(before.first?.id, after.first?.id)
-        XCTAssertNotEqual(before.first?.kind, after.first?.kind)
+        answered.text = "Automatically approved"
+        let reply = AgentChatItem(id: "a", kind: .assistant, text: "Done")
+        XCTAssertEqual(AgentTranscript.rows(snapshot([pending], turns: []), expanded: []).map(\.id), ["p"])
+        XCTAssertEqual(AgentTranscript.rows(snapshot([answered, reply], turns: []), expanded: []).map(\.id), ["a"])
     }
 
     func testErrorsAreNeverFolded() {

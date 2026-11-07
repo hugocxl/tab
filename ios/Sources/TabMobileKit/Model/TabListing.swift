@@ -20,7 +20,9 @@ public enum CardHeadline: Hashable, Sendable {
     case shell(String, directory: String?)
     /// A command running, as its terminal titles it.
     case command(String)
-    /// A browser, simulator, editor or diff pane, which opens on the Mac.
+    /// A simulator pane: the simulator's name.
+    case simulator(String)
+    /// A browser, editor or diff pane, which opens on the Mac.
     case other(String)
     case empty
 }
@@ -55,7 +57,8 @@ public struct PaneSummary: Hashable, Sendable {
     public enum Kind: Hashable, Sendable {
         case terminal
         case agent(AgentChatProvider)
-        /// Browser, simulator, editor or diff: shown on the Mac only.
+        case simulator
+        /// Browser, editor or diff: shown on the Mac only.
         case other
     }
 
@@ -145,6 +148,8 @@ extension ServerModel {
                 return .shell(shell, directory: !project.home && directory != project.name ? directory : nil)
             }
             return .command(Self.withoutHost(title))
+        case .simulator:
+            return .simulator(pane.content.defaultTitle)
         default:
             return .other(pane.content.defaultTitle)
         }
@@ -157,6 +162,8 @@ extension ServerModel {
         case .agent(let session, let provider):
             let task = agentActivity(session)?.title ?? ""
             return PaneSummary(id: pane.id, kind: .agent(provider), title: task.isEmpty || task == "Agent" ? "Agent" : task)
+        case .simulator:
+            return PaneSummary(id: pane.id, kind: .simulator, title: pane.content.defaultTitle)
         default:
             return PaneSummary(id: pane.id, kind: .other, title: pane.content.defaultTitle)
         }

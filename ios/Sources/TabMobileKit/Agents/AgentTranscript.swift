@@ -9,7 +9,7 @@ public enum TranscriptRow: Hashable, Sendable, Identifiable {
     case thinking(AgentChatItem)
     /// An approval still waiting for an answer.
     case approval(AgentChatItem)
-    /// An answered approval, or a notice from the agent or the server.
+    /// A notice from the agent or the server.
     case notice(AgentChatItem, isError: Bool)
     /// A finished turn's tool steps, folded.
     case work(turn: String, steps: Int, duration: TimeInterval?, expanded: Bool)
@@ -97,7 +97,8 @@ public enum AgentTranscript {
         switch item.kind {
         case .user: return .user(item)
         case .assistant: return item.text.isEmpty ? nil : .assistant(item)
-        case .approval: return item.isComplete ? .notice(item, isError: false) : .approval(item)
+        // Answered approvals, automatic ones included, leave the transcript, as on the desktop.
+        case .approval: return item.isComplete ? nil : .approval(item)
         case .notice: return .notice(item, isError: item.workContext?.itemType == "error")
         case .tool:
             switch item.workContext?.itemType {

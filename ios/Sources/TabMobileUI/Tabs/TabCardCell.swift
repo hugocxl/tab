@@ -246,6 +246,12 @@ final class TabCardCell: UICollectionViewListCell {
             headline.text = command
             headline.textColor = .label
             headline.font = Self.font(.semibold)
+        case .simulator(let name):
+            showChip("iphone", color: .label)
+            shellLabel.isHidden = true
+            headline.text = name
+            headline.textColor = .label
+            headline.font = Self.font(.semibold)
         case .other(let title):
             showChip("macwindow", color: .label)
             shellLabel.isHidden = true

@@ -7,6 +7,12 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 DEVICE=$(iphone_simulator)
 STRICT="SWIFT_TREAT_WARNINGS_AS_ERRORS=YES GCC_TREAT_WARNINGS_AS_ERRORS=YES"
 
+echo "== Version"
+CHANGELOG=$(sed -n 's/^## \([0-9][0-9.]*\) .*/\1/p' "$ROOT/CHANGELOG.md" | head -1)
+for VERSION in $(sed -n 's/.*MARKETING_VERSION = \(.*\);/\1/p' "$ROOT/App/Tab.xcodeproj/project.pbxproj"); do
+    [ "$VERSION" = "$CHANGELOG" ] || { echo "MARKETING_VERSION $VERSION isn't the changelog's $CHANGELOG" >&2; exit 1; }
+done
+
 echo "== Tests"
 (cd "$ROOT" && xcodebuild test -scheme TabKit -destination "id=$DEVICE" -derivedDataPath "$ROOT/.build/xc" \
     -skip-testing:TabMobileKitTests/LiveServerTests -quiet $STRICT)

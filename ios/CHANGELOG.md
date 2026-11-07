@@ -1,5 +1,102 @@
 # Changelog
 
+## 0.10.1 - 2026-11-07
+
+### Changed
+
+- Tab declares its privacy details and encryption use for the App Store, ready
+  for TestFlight.
+
+## 0.10.0 - 2026-11-07
+
+### Changed
+
+- On iPhone, the pane switcher spans the full width of the screen, with each
+  pane given an equal share.
+
+## 0.9.0 - 2026-11-07
+
+### Added
+
+- Simulator tabs and panes show an iOS simulator or Android emulator running
+  on the Mac, live, to tap, swipe and type into with the phone's keyboard or a
+  hardware keyboard.
+- A simulator pane lists the Mac's simulators to choose from, starts one that
+  is shut down, and offers Home, Back, rotation, dark appearance, pasting text
+  and a screenshot to share.
+- Simulator panes opened on the Mac now show here instead of a placeholder.
+
+## 0.8.0 - 2026-11-07
+
+### Changed
+
+- On iPhone, a tab with more than one pane switches between them with a
+  segmented control under the navigation bar, each pane named in a word or two.
+
+## 0.7.1 - 2026-11-07
+
+### Fixed
+
+- With more than one Mac, each Mac's heading in the tab list now shows whether
+  it's connected instead of staying on "Connecting…".
+
+## 0.7.0 - 2026-11-07
+
+### Changed
+
+- An agent's tool steps read as short sentences, such as "Ran git push" or
+  "Edited View.swift +12 −3", and steps in a row share one card.
+- Commands leave out the folder change in front of them, and a tapped step
+  shows the full command, its output and a failed exit code.
+
+### Fixed
+
+- A running step's spinner no longer covers its text.
+
+## 0.6.0 - 2026-11-07
+
+### Added
+
+- A filter button at the top of the tab list shows only agents, terminals or
+  tabs that need attention, and with more than one Mac, one Mac's tabs.
+
+### Changed
+
+- The tab list has a small title instead of a large one, with Settings at the
+  top right.
+
+## 0.5.0 - 2026-11-07
+
+### Changed
+
+- On iPhone, the tab list has a search field at the bottom with New Tab
+  beside it, as in Notes.
+
+## 0.4.0 - 2026-11-07
+
+### Added
+
+- Attach photos, camera shots and files to a message in an agent pane with the
+  + button.
+
+### Changed
+
+- The agent pane's message field has two rows, with Attach, the model and its
+  effort, and Send below the text, as in the Claude app.
+
+### Fixed
+
+- Headings, paragraphs, lists and code in an agent's replies have space between
+  them.
+- Automatically approved and answered permission requests no longer fill the
+  transcript.
+
+## 0.3.1 - 2026-11-07
+
+### Fixed
+
+- The app tells your Mac its real version when it connects.
+
 ## 0.3.0 - 2026-11-07
 
 ### Changed
