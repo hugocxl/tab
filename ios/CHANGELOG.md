@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.0 - 2026-11-07
+
+### Changed
+
+- On iPhone, the tab list has a search field at the bottom with New Tab
+  beside it, as in Notes.
+
 ## 0.4.0 - 2026-11-07
 
 ### Added

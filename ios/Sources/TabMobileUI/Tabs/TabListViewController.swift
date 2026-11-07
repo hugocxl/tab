@@ -70,10 +70,19 @@ final class TabListViewController: UICollectionViewController {
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         navigationController?.navigationBar.prefersLargeTitles = true
+        navigationController?.setToolbarHidden(!isPhone, animated: animated)
         if splitViewController?.isCollapsed ?? true, let selection = collectionView.indexPathsForSelectedItems {
             selection.forEach { collectionView.deselectItem(at: $0, animated: animated) }
         }
     }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        // A phone's tab is pushed over the list; the bottom bar stays with the list.
+        if isPhone { navigationController?.setToolbarHidden(true, animated: animated) }
+    }
+
+    private var isPhone: Bool { traitCollection.userInterfaceIdiom == .phone }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -84,10 +93,11 @@ final class TabListViewController: UICollectionViewController {
         let search = UISearchController()
         search.searchResultsUpdater = self
         search.obscuresBackgroundDuringPresentation = false
-        search.searchBar.placeholder = "Filter"
+        search.searchBar.placeholder = "Search"
         navigationItem.searchController = search
-        // A phone searches from the bottom toolbar; an iPad's sidebar keeps its bar buttons free.
-        navigationItem.preferredSearchBarPlacement = traitCollection.userInterfaceIdiom == .phone ? .integratedButton : .stacked
+        // A phone searches from a field in the bottom bar, beside New Tab; an
+        // iPad's sidebar keeps its bar buttons free.
+        navigationItem.preferredSearchBarPlacement = isPhone ? .integrated : .stacked
 
         let settings = UIBarButtonItem(image: UIImage(systemName: "gearshape"), primaryAction: UIAction { [weak self] _ in
             self?.onSettings?()
@@ -119,7 +129,11 @@ final class TabListViewController: UICollectionViewController {
         // there, pairing lives in Settings.
         navigationItem.titleMenuProvider = traitCollection.userInterfaceIdiom == .phone
             ? { [weak self] _ in self?.serverMenu() } : nil
-        navigationItem.rightBarButtonItem = newTabButton()
+        if isPhone {
+            toolbarItems = [navigationItem.searchBarPlacementBarButtonItem, .flexibleSpace(), newTabButton()]
+        } else {
+            navigationItem.rightBarButtonItem = newTabButton()
+        }
         for server in servers {
             server.isImage = { UIImage(data: $0) != nil }
         }
