@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.71.0 - 2026-11-07
+
+### Changed
+
+- The sidebars' buttons sit on glass, with buttons side by side sharing one
+  chip.
+
 ## 0.70.0 - 2026-11-07
 
 ### Added

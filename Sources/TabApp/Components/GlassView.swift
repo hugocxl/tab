@@ -46,6 +46,8 @@ public final class GlassView: NSView {
 
         /// The selected sidebar card: a faint clear glass over the card fill.
         public static let card = Style(cornerRadius: 8, opacity: 0.4)
+        /// A capsule of clear glass behind sidebar chrome buttons side by side.
+        public static let chromeButton = Style(cornerRadius: ChromeButton.side / 2, fallbackMaterial: .popover)
         /// A floating notice: a capsule of diffused glass, so its message reads over busy panes.
         public static let chip = Style(cornerRadius: NoticeView.height / 2, fallbackMaterial: .popover, regular: true)
         /// A mode chip beside the command palette's search field.

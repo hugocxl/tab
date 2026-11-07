@@ -27,6 +27,8 @@ final class SidebarViewController: NSViewController {
     private let addButton = ChromeButton(.addProject, label: "Add Project")
     private let serversButton = ChromeButton(.globeBadgePlus, label: "Remote Servers")
     private let resizeHandle = SidebarResizeHandle()
+    /// Buttons side by side share one glass chip.
+    private var buttonGlass: [(buttons: [ChromeButton], glass: GlassView)] = []
     private var snapshot: SidebarSnapshot?
     private var collapsedProjects: Set<ProjectId> = []
     private var subscription: AnyCancellable?
@@ -71,6 +73,11 @@ final class SidebarViewController: NSViewController {
         root.addSubview(resizeHandle)
         for button in [toggle, commandPalette, newTab] { topRow.addSubview(button) }
         for view in [filter, addButton, serversButton] as [NSView] { footer.addSubview(view) }
+        for buttons in [[toggle], [commandPalette, newTab], [addButton, serversButton]] {
+            let glass = GlassView(style: .chromeButton)
+            buttons[0].superview?.addSubview(glass, positioned: .below, relativeTo: buttons[0])
+            buttonGlass.append((buttons, glass))
+        }
 
         toggle.shortcut = .toggleSidebar
         commandPalette.shortcut = .toggleCommandPalette
@@ -457,6 +464,10 @@ final class SidebarViewController: NSViewController {
         let scrollTop = Self.titleBarHeight
         scroll.frame = CGRect(x: 0, y: scrollTop, width: bounds.width, height: max(footer.frame.minY - scrollTop, 0))
         resizeHandle.frame = CGRect(x: bounds.width - 3, y: 0, width: 6, height: bounds.height)
+        for (buttons, glass) in buttonGlass {
+            let union = buttons.dropFirst().reduce(buttons[0].frame) { $0.union($1.frame) }
+            glass.frame = union.integral
+        }
     }
 }
 
