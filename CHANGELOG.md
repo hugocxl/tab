@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.75.1 - 2026-11-07
+
+### Fixed
+
+- The simulator picker's rows fill the list again instead of crowding to the right.
+
 ## 0.75.0 - 2026-11-07
 
 ### Removed

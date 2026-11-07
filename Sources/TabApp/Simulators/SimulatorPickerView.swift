@@ -89,6 +89,7 @@ final class SimulatorPickerView: ThemedView {
             row.theme = theme
             row.onClick = { [weak self] in self?.choose(index) }
             list.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: list.widthAnchor).isActive = true
             return row
         }
         titleLabel.stringValue = host.map { "Choose a Simulator on \($0)" } ?? "Choose a Simulator"
