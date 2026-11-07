@@ -13,7 +13,7 @@ final class ModelTestPresenter: AppPresenter {
     private(set) var messages: [String] = []
 
     func confirm(title: String, message: String, confirm: String, destructive: Bool) async -> Bool { true }
-    func showToast(_ message: String, error: Bool) { messages.append(message) }
+    func showToast(_ message: String, style: Toast.Style) { messages.append(message) }
     func showRemoteFolderBrowser(_ server: ServerId) {}
     func bringToFront() { broughtToFront += 1 }
 }

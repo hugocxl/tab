@@ -393,9 +393,9 @@ final class SimulatorPaneController: PaneContentController {
         guard let url = desktop?.appendingPathComponent(name) else { return }
         do {
             try png.write(to: url)
-            model?.presenter?.showToast("Screenshot copied and saved to the Desktop", error: false)
+            model?.presenter?.showToast("Screenshot copied and saved to the Desktop", style: .success)
         } catch {
-            model?.presenter?.showToast("Screenshot copied", error: false)
+            model?.presenter?.showToast("Screenshot copied", style: .success)
         }
     }
 

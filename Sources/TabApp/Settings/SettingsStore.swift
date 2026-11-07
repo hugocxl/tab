@@ -268,6 +268,16 @@ public final class SettingsStore {
         }
     }
 
+    public func updateNotifications(_ id: String, _ change: (inout NotificationSettings) -> Void) {
+        attempt(id) {
+            var next = settings
+            change(&next.notifications)
+            try next.saveNotifications(to: dirs.settings)
+            settings = next
+            applySettings()
+        }
+    }
+
     public func refreshBrowserProfiles() {
         browserProfiles = host?.browserProfiles() ?? []
         changed()

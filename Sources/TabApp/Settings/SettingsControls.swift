@@ -8,6 +8,8 @@ indirect enum SettingControl {
     case toggle(ToggleSpec)
     case choice(ChoiceSpec)
     case segmented(SegmentedSpec)
+    /// Where notifications stack, picked on a sketch of the window.
+    case position(PositionSpec)
     case stepper(StepperSpec)
     case text(TextSpec)
     case button(ButtonSpec)
@@ -72,6 +74,12 @@ struct ChoiceSpec {
     var selectedTitle: String {
         items.first { $0.id == selected }?.title ?? placeholder ?? ""
     }
+}
+
+struct PositionSpec {
+    var selected: NotificationPosition
+    var label: String
+    var change: (NotificationPosition) -> Void
 }
 
 struct SegmentedSpec {

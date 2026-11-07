@@ -3,6 +3,24 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.70.0 - 2026-11-07
+
+### Added
+
+- Settings → Notifications chooses where in-app notifications appear, and how
+  Working, Blocked, Error and Done are shown in tabs, system notifications, the
+  Dock badge and sounds.
+- Statuses can play soft synthesized bubble sounds, each picked and previewed
+  in its status page.
+- The Dock icon counts the panes that need you.
+- Several notifications at once stack in a pile that fans out into a list when
+  you point at it, and stay until you move away.
+
+### Changed
+
+- Every in-app notification, including copies, errors and an offline server,
+  now looks like the update notification and appears in the same corner.
+
 ## 0.69.0 - 2026-11-06
 
 ### Changed

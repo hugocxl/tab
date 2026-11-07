@@ -143,7 +143,8 @@ final class PaneCardView: HoverView {
         let (title, suffix) = Self.splitTitle(controller.title)
         if titleLabel.stringValue != title { titleLabel.stringValue = title }
         if suffixLabel.stringValue != suffix { suffixLabel.stringValue = suffix }
-        if let progress = controller.progress {
+        let notifications = model.settings.notifications
+        if let progress = controller.progress, notifications.showsInTabs(progress.state == .error ? .error : .working) {
             switch progress.state {
             case .error: progressGlyph.style = .dot(theme.danger, diameter: 7)
             case .paused: progressGlyph.style = .dot(theme.warning, diameter: 7)
@@ -158,8 +159,8 @@ final class PaneCardView: HoverView {
             // Terminal and native agents report the same activity, so both
             // headers show it the same way, as their sidebar card does.
             switch model.agent(in: pane)?.state {
-            case .working?: progressGlyph.style = .spinner(theme.accent)
-            case .blocked?: progressGlyph.style = .dot(theme.accent, diameter: 7)
+            case .working? where notifications.showsInTabs(.working): progressGlyph.style = .spinner(theme.accent)
+            case .blocked? where notifications.showsInTabs(.blocked): progressGlyph.style = .dot(theme.accent, diameter: 7)
             default: progressGlyph.style = .none
             }
         }

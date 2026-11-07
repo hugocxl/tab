@@ -167,6 +167,22 @@ final class NotificationParityTests: XCTestCase {
         XCTAssertNotEqual(Notifier.identifier(entry.id, 1), Notifier.identifier(.local, 1))
     }
 
+    func testNotificationSettingsDecideWhatIsDelivered() async throws {
+        let (model, server, sessions) = try await fixture()
+        var settings = model.settings
+        settings.notifications.blocked.systemNotifications = false
+        settings.notifications.terminalNotifications = false
+        model.apply(settings: settings)
+        server.claimResult = [1, 2, 3]
+        server.activitySnapshot = ActivitySnapshot(events: [event(1, session: sessions[0], model: model),
+                                                           event(2, session: sessions[1], model: model, kind: .notification),
+                                                           event(3, session: sessions[1], model: model, kind: .completed)])
+        await model.refreshActivity(.local)
+        XCTAssertEqual(delivered.map(\.event.id), [3], "blocked notifications are off and terminal notifications are ignored")
+        XCTAssertFalse(model.reports(event(2, session: sessions[1], model: model, kind: .notification)))
+        XCTAssertEqual(model.dockBadgeCount, 2, "the blocked pane and the finished pane, not the program's notification")
+    }
+
     func testInitialActivitySnapshotDoesNotNotifyAboutOldEvents() async throws {
         let (model, server, sessions) = try await fixture()
         model.connections[.local]?.activityLoaded = false
@@ -185,7 +201,7 @@ private final class ActivityPresenter: AppPresenter {
     var window: NSWindow? { nil }
     var terminalActivityObscured = true
     func confirm(title: String, message: String, confirm: String, destructive: Bool) async -> Bool { false }
-    func showToast(_ message: String, error: Bool) {}
+    func showToast(_ message: String, style: Toast.Style) {}
     func showRemoteFolderBrowser(_ server: ServerId) {}
     func bringToFront() {}
 }

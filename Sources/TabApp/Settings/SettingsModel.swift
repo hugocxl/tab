@@ -142,6 +142,7 @@ final class SettingsModel: ObservableObject {
         case .terminal: buildTerminal(builder)
         case .keyboard: buildKeyboard(builder)
         case .integrations: buildIntegrations(builder)
+        case .notifications: buildNotifications(builder)
         case .privacy: buildPrivacy(builder)
         case .browser: buildBrowser(builder)
         case .server: buildServer(builder)

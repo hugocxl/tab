@@ -109,18 +109,23 @@ struct ActivityCardData: Equatable {
         let panes = tabs.flatMap(\.panes)
         let sessions = panes.compactMap(\.content.activitySession)
         guard let connection = model.connections[server] else { return .idle }
+        let notifications = model.settings.notifications
         let agents = connection.activity.agents.filter { sessions.contains($0.session) }
-        if agents.contains(where: { $0.state == .blocked }) { return .attention }
+        if notifications.showsInTabs(.blocked) && agents.contains(where: { $0.state == .blocked }) { return .attention }
         for session in sessions {
             guard let progress = connection.progress[session]?.progress else { continue }
             switch progress.state {
-            case .error: return .error
-            case .paused: return .paused
-            default: return .working
+            case .error where notifications.showsInTabs(.error): return .error
+            case .error: continue
+            case .paused where notifications.showsInTabs(.working): return .paused
+            case _ where notifications.showsInTabs(.working): return .working
+            default: continue
             }
         }
-        if connection.activity.events.contains(where: { !$0.read && sessions.contains($0.session) }) { return .attention }
-        if agents.contains(where: { $0.state == .working }) { return .working }
+        if connection.activity.events.contains(where: {
+            !$0.read && sessions.contains($0.session) && model.reports($0) && notifications.showsInTabs($0.kind.status)
+        }) { return .attention }
+        if notifications.showsInTabs(.working) && agents.contains(where: { $0.state == .working }) { return .working }
         return .idle
     }
 

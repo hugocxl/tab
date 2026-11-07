@@ -1240,6 +1240,6 @@ final class PaletteSource: PaletteDataSource {
     private func copy(_ text: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
-        model.presenter?.showToast("Copied", error: false)
+        model.presenter?.showToast("Copied", style: .success)
     }
 }

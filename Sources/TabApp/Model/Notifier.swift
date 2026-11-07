@@ -4,7 +4,8 @@ import TabProtocol
 import UserNotifications
 
 /// Delivers macOS notifications when an agent needs attention or finishes,
-/// and opens the pane when one is clicked. Only a bundled app can use the
+/// or a program starts working or fails, and opens the pane when one is
+/// clicked. Sounds are Notifications settings' own, not the system's. Only a bundled app can use the
 /// notification center; elsewhere nothing is delivered.
 @MainActor
 public final class Notifier: NSObject {
@@ -53,10 +54,26 @@ public final class Notifier: NSObject {
         content.title = title
         content.body = event.kind == .notification ? event.body ?? event.title ?? event.kind.displayDescription
             : event.kind.displayDescription
-        content.sound = .default
         content.userInfo = ["server": server.description, "session": event.session.description]
         let request = UNNotificationRequest(identifier: Self.identifier(server, event.id), content: content, trigger: nil)
         center.add(request)
+    }
+
+    /// Posts a notification about a pane's status, replacing the last one
+    /// posted as `id`.
+    func post(id: String, title: String, body: String, server: ServerId, session: SessionId) {
+        guard delivery == nil, let center, authorized else { return }
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.userInfo = ["server": server.description, "session": session.description]
+        center.add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
+    }
+
+    /// Plays a status's sound; the in-memory sink plays nothing.
+    func play(_ sound: NotificationSound) {
+        guard delivery == nil else { return }
+        BubbleSounds.alert(sound)
     }
 
     func clear(_ ids: [UInt64], server: ServerId) {
@@ -89,6 +106,7 @@ extension Notifier: UNUserNotificationCenterDelegate {
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        completionHandler([.banner, .sound])
+        // Notifications settings play their own sounds.
+        completionHandler([.banner, .list])
     }
 }

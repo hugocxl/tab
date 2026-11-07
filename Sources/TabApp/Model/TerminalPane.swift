@@ -362,7 +362,7 @@ extension TerminalPane: TerminalViewDelegate {
         let copy = ClosureMenuItem("Copy Path") { [weak self] in
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(path, forType: .string)
-            self?.model?.presenter?.showToast("Copied the path", error: false)
+            self?.model?.presenter?.showToast("Copied the path", style: .success)
         }
         return NSMenu.make([open, copy])
     }

@@ -30,7 +30,7 @@ final class ProjectHost: FilesPanelHost, SourceControlHost, EditorHost, DiffHost
     var theme: AppTheme { model.theme }
 
     func showToast(_ message: String, style: Toast.Style) {
-        model.presenter?.showToast(message, error: style == .error)
+        model.presenter?.showToast(message, style: style)
     }
 
     func confirm(title: String, message: String, confirmTitle: String, destructive: Bool, completion: @escaping (Bool) -> Void) {

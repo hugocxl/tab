@@ -12,6 +12,7 @@ struct SettingRow: Identifiable {
     let error: String?
     /// Shown before the label, such as an agent's logo.
     var icon: NSImage?
+    var iconSide: CGFloat = 20
 }
 
 /// Collects a page's rows in order, keeping only those the current page or
@@ -71,7 +72,8 @@ final class SettingsPageBuilder {
     /// Adds a row for `id` with its catalog label; `label` replaces it, such
     /// as for a custom command's name.
     @discardableResult
-    func row(_ id: String, _ makeControl: @autoclosure () -> SettingControl?, stacked: Bool = false, label: String? = nil, description: String? = nil) -> SettingRow? {
+    func row(_ id: String, _ makeControl: @autoclosure () -> SettingControl?, stacked: Bool = false, label: String? = nil, description: String? = nil,
+             icon: NSImage? = nil, iconSide: CGFloat = 20) -> SettingRow? {
         guard shows(id), let item = items[id] else { return nil }
         let description = description ?? item.description
         let row = SettingRow(
@@ -80,7 +82,9 @@ final class SettingsPageBuilder {
             description: description.isEmpty ? nil : description,
             control: makeControl(),
             stacked: stacked,
-            error: store.errors[id]
+            error: store.errors[id],
+            icon: icon,
+            iconSide: iconSide
         )
         append(.row(row), item)
         rowIds.append(id)
@@ -130,8 +134,13 @@ final class SettingsPageBuilder {
     /// A subpage's own section has no title; the toolbar names it.
     func title(_ group: Group) -> String? {
         if isSearching { return "\(group.category.title) › \(group.section)" }
-        if group.section == subpage?.title { return nil }
+        if group.section == subpage?.title || SettingsCatalog.untitledSections.contains(group.section) { return nil }
         return group.section
+    }
+
+    /// The line under a section's title, off in search results.
+    func subtitle(_ group: Group) -> String? {
+        isSearching ? nil : SettingsCatalog.sectionSubtitles[group.section]
     }
 
     // MARK: Controls
@@ -174,6 +183,11 @@ final class SettingsPageBuilder {
     func stepper(_ id: String, _ value: Double, range: ClosedRange<Double>, step: Double = 1, unit: String? = nil,
                  _ commit: @escaping (Double) -> Void) -> SettingControl {
         .stepper(StepperSpec(value: value, range: range, step: step, unit: unit, label: items[id]?.label ?? id, commit: commit))
+    }
+
+    /// The six places in-app notifications can stack, as a window sketch.
+    func position(_ id: String, _ selected: NotificationPosition, _ change: @escaping (NotificationPosition) -> Void) -> SettingControl {
+        .position(PositionSpec(selected: selected, label: items[id]?.label ?? id, change: change))
     }
 
     func segmented(_ id: String, _ titles: [String], selected: Int, _ change: @escaping (Int) -> Void) -> SettingControl {

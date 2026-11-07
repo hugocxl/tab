@@ -352,7 +352,9 @@ extension AppModel {
         case .sessionMetadata(let session, let metadata):
             sessionMetadata(server, session, metadata)
         case .progress(let session, let progress):
+            let failed = progress.progress?.state == .error && connection.progress[session]?.progress?.state != .error
             connection.progress[session] = progress
+            if failed { announce(.error, server: server, session: session) }
             for pane in sessionPanes(server, session) { (panes.controller(for: pane) as? TerminalPane)?.progressChanged() }
             notify(.activity)
         case .sessionEnded(let session, _):
@@ -444,6 +446,7 @@ extension AppModel {
             connection.activityDirty = false
             guard let snapshot = try? await main.activity(), connection.main === main else { return }
             let previous = connection.activity
+            if connection.activityLoaded { announceStartedWork(server, before: previous.agents, after: snapshot.agents) }
             let latest = previous.events.map(\.id).max() ?? 0
             let unread = Set(snapshot.events.filter { !$0.read }.map(\.id))
             notifier.clear(previous.events.filter { !unread.contains($0.id) }.map(\.id), server: server)
@@ -456,12 +459,16 @@ extension AppModel {
                 $0.id > latest && !(deliveredNotifications[server]?.contains($0.id) ?? false)
             } : []
             acknowledgeFocusedActivity()
-            guard !fresh.isEmpty, notifier.available else { continue }
-            guard let claimed = try? await main.claimActivity(fresh.map(\.id)), connection.main === main else { continue }
+            let notifications = settings.notifications
+            let wanted = fresh.filter { notifications.notifies($0.kind.status) || notifications.sound($0.kind.status) != nil }
+            guard !wanted.isEmpty else { continue }
+            guard let claimed = try? await main.claimActivity(wanted.map(\.id)), connection.main === main else { continue }
             deliveredNotifications[server, default: []].formUnion(claimed)
-            for event in notificationEvents(server) where claimed.contains(event.id) {
+            let events = notificationEvents(server).filter { claimed.contains($0.id) }
+            for event in events where notifier.available && settings.notifications.notifies(event.kind.status) {
                 notifier.deliver(event, server: server, title: notificationTitle(server, event))
             }
+            playSound(events.map(\.kind.status))
         } while connection.activityDirty
     }
 
@@ -470,7 +477,7 @@ extension AppModel {
         let focused = focusedSession()
         let referenced = Set(state.projects.filter { $0.serverId == server }.flatMap(\.tabs).flatMap(\.panes).compactMap(\.content.activitySession))
         return connections[server]?.activity.events.filter { event in
-            !event.read && referenced.contains(event.session)
+            !event.read && reports(event) && referenced.contains(event.session)
                 && !(focused?.0 == server && focused?.1 == event.session)
         } ?? []
     }
@@ -484,7 +491,7 @@ extension AppModel {
         }
     }
 
-    private func notificationTitle(_ server: ServerId, _ event: AgentEvent) -> String {
+    func notificationTitle(_ server: ServerId, _ event: AgentEvent) -> String {
         let pane = sessionPanes(server, event.session).first
         let project = pane.flatMap { state.paneProject($0) }.flatMap { state.project($0) }
         let name = project?.name ?? "Tab"

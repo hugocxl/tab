@@ -3,7 +3,7 @@ import TabCore
 
 /// A page of the Settings window, in sidebar order.
 public enum SettingsCategory: String, CaseIterable, Sendable {
-    case general, interface, appearance, terminal, keyboard, integrations, privacy, browser, server, remoteServers, mobile, backup, changelog
+    case general, interface, appearance, terminal, keyboard, integrations, notifications, privacy, browser, server, remoteServers, mobile, backup, changelog
 
     public var title: String {
         switch self {
@@ -13,6 +13,7 @@ public enum SettingsCategory: String, CaseIterable, Sendable {
         case .terminal: return "Terminal"
         case .keyboard: return "Shortcuts"
         case .integrations: return "Integrations"
+        case .notifications: return "Notifications"
         case .privacy: return "Privacy"
         case .browser: return "Browser"
         case .remoteServers: return "Remote Servers"
@@ -33,6 +34,7 @@ public enum SettingsCategory: String, CaseIterable, Sendable {
         case .terminal: return ("apple.terminal", 0x3A3A3C, 0x151515, 0x5BE37A)
         case .keyboard: return ("command", 0xF7F7F8, 0xDCDCDF, 0x6E6E73)
         case .integrations: return ("puzzlepiece.extension.fill", 0xFF6FB5, 0x8E4BF2, 0xFFFFFF)
+        case .notifications: return ("bell.badge.fill", 0xFF8A65, 0xE5484D, 0xFFFFFF)
         case .privacy: return ("hand.raised.fill", 0x5BB2FF, 0x1F6FEB, 0xFFFFFF)
         case .browser: return ("globe", 0x5BB2FF, 0x1F6FEB, 0xFFFFFF)
         case .remoteServers: return ("network", 0x4FD1D5, 0x1E9AA0, 0xFFFFFF)
@@ -51,16 +53,39 @@ public enum SettingsCategory: String, CaseIterable, Sendable {
 /// Advanced Font Settings.
 public enum SettingsSubpage: String, CaseIterable, Sendable {
     case advancedFont
+    case working, blocked, error, done
+
+    public init(_ status: ActivityStatus) {
+        switch status {
+        case .working: self = .working
+        case .blocked: self = .blocked
+        case .error: self = .error
+        case .done: self = .done
+        }
+    }
 
     public var title: String {
         switch self {
         case .advancedFont: return "Advanced Font Settings"
+        case .working, .blocked, .error, .done: return status?.title ?? ""
         }
     }
 
     public var category: SettingsCategory {
         switch self {
         case .advancedFont: return .terminal
+        case .working, .blocked, .error, .done: return .notifications
+        }
+    }
+
+    /// The status a Notifications subpage is about.
+    public var status: ActivityStatus? {
+        switch self {
+        case .advancedFont: return nil
+        case .working: return .working
+        case .blocked: return .blocked
+        case .error: return .error
+        case .done: return .done
         }
     }
 }
@@ -152,6 +177,19 @@ public enum SettingsCatalog {
         SettingItem("agent-integration", "Integrate with available agents", "Installs a Tab skill and session hooks for supported agents.", .integrations, "Coding Agents"),
         SettingItem("agent-integration-agents", "Agents", "", .integrations, "Coding Agents"),
         SettingItem("terminal-migration", "Migrate from another terminal", "An agent reads that terminal's configuration and brings its shortcuts, font, cursor and colors into Tab.", .integrations, "Migration"),
+        // Notifications
+        SettingItem("notification-position", "Notification position", "Where the window shows updates, connection problems and confirmations.", .notifications, "In-App Notifications"),
+        SettingItem("activity-tabs", "Show activity in tabs", "Sidebar cards and pane headers show what programs and agents are doing.", .notifications, "Program Activity"),
+        SettingItem("activity-system", "Show system notifications", "Post a macOS notification when a pane you aren't looking at changes status.", .notifications, "Program Activity"),
+        SettingItem("activity-badge", "Badge Dock icon", "Count the panes that need you on Tab's Dock icon.", .notifications, "Program Activity"),
+        SettingItem("activity-sounds", "Play sounds", "Play a short sound when a pane changes status.", .notifications, "Program Activity"),
+    ] + ActivityStatus.allCases.map { status in
+        SettingItem("status-\(status.rawValue)", status.title, status.summary, .notifications, activityStatuses)
+    } + [
+        SettingItem("terminal-notifications", "Terminal notifications", "Programs can send notifications with OSC 9 or OSC 777", .notifications, "System Notifications"),
+    ] + ActivityStatus.allCases.flatMap { status in
+        statusItems(status)
+    } + [
         // Privacy
         SettingItem("privacy-camera", "Camera", "", .privacy, "Permissions"),
         SettingItem("privacy-microphone", "Microphone", "", .privacy, "Permissions"),
@@ -185,6 +223,32 @@ public enum SettingsCatalog {
         SettingItem("backup-restore", "Restore backup", "Choose a .tab backup. It is restored the next time Tab opens, with a recovery copy in the Backups folder.", .backup, "Backup & Restore"),
         SettingItem("backup-folder", "Backups folder", "Recovery copies made before a backup is restored.", .backup, "Configuration"),
     ]
+
+    /// The section of the status rows, shown without a title.
+    static let activityStatuses = "Activity Statuses"
+
+    /// A status page's rows: whether it shows, where, and its sound.
+    private static func statusItems(_ status: ActivityStatus) -> [SettingItem] {
+        let id = status.rawValue
+        let page = SettingsSubpage(status)
+        let title = status.title
+        return [
+            SettingItem("\(id)-enabled", "Enable status", status.summary, .notifications, title, subpage: page),
+            SettingItem("\(id)-tabs", "Show activity in tabs", "", .notifications, "\(title) Alerts", subpage: page),
+            SettingItem("\(id)-system", "Show system notifications", "", .notifications, "\(title) Alerts", subpage: page),
+            SettingItem("\(id)-badge", "Badge Dock icon", "", .notifications, "\(title) Alerts", subpage: page),
+            SettingItem("\(id)-play", "Play sound", "", .notifications, "\(title) Sound", subpage: page),
+            SettingItem("\(id)-sound", "Sound", "", .notifications, "\(title) Sound", subpage: page),
+        ]
+    }
+
+    /// Sections that group rows into their own card without a title.
+    static let untitledSections: Set<String> = Set([activityStatuses] + ActivityStatus.allCases.flatMap {
+        ["\($0.title) Alerts", "\($0.title) Sound"]
+    })
+
+    /// A line under a section's title.
+    static let sectionSubtitles = ["Program Activity": "How status from processes and agents is handled"]
 
     private static let byId: [String: SettingItem] = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0) })
 

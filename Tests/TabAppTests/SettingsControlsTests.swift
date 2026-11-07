@@ -69,7 +69,7 @@ final class SettingsControlsTests: XCTestCase {
     private func controls(in control: SettingControl) -> [SettingControl] {
         control.leaves.filter {
             switch $0 {
-            case .toggle, .segmented, .choice, .stepper, .text: return true
+            case .toggle, .segmented, .choice, .stepper, .text, .position: return true
             default: return false
             }
         }
@@ -83,6 +83,8 @@ final class SettingsControlsTests: XCTestCase {
             toggle.change(!toggle.isOn)
         case .segmented(let pill):
             pill.change(pill.selected == 0 ? 1 : 0)
+        case .position(let picker):
+            picker.change(picker.selected == .topLeft ? .bottomRight : .topLeft)
         case .choice(let popUp):
             guard let other = popUp.items.first(where: { $0.id != popUp.selected && !$0.id.hasPrefix("__") }) else { return false }
             popUp.change(other.id)

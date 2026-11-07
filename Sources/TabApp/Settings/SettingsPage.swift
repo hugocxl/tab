@@ -55,7 +55,8 @@ struct SettingsPage: View {
                 ForEach(build.groups.filter { model.isSearching || model.category != .server || $0.category != .server }) { group in
                     let parts = Self.parts(of: group)
                     ForEach(parts.indices, id: \.self) { index in
-                        section(parts[index], title: index == 0 ? build.title(group) : nil)
+                        section(parts[index], title: index == 0 ? build.title(group) : nil,
+                                subtitle: index == 0 ? build.subtitle(group) : nil)
                     }
                 }
             }
@@ -87,7 +88,19 @@ struct SettingsPage: View {
     }
 
     @ViewBuilder
-    private func section(_ part: Part, title: String?) -> some View {
+    private func header(_ title: String?, subtitle: String?) -> some View {
+        if let title {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                if let subtitle {
+                    Text(subtitle).font(.subheadline).fontWeight(.regular).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func section(_ part: Part, title: String?, subtitle: String?) -> some View {
         if part.rows.isEmpty {
             // Notes with no rows above them, such as the Commands page's heading.
             Section {
@@ -96,7 +109,7 @@ struct SettingsPage: View {
                         .listRowBackground(theme?.card)
                 }
             } header: {
-                if let title { Text(title) }
+                header(title, subtitle: subtitle)
             }
         } else {
             Section {
@@ -105,7 +118,7 @@ struct SettingsPage: View {
                         .listRowBackground(theme?.card)
                 }
             } header: {
-                if let title { Text(title) }
+                header(title, subtitle: subtitle)
             } footer: {
                 if !part.notes.isEmpty {
                     VStack(alignment: .leading, spacing: 4) {
@@ -130,7 +143,7 @@ private struct SettingLabel: View {
             HStack(spacing: 10) {
                 Image(nsImage: icon)
                     .resizable()
-                    .frame(width: 20, height: 20)
+                    .frame(width: row.iconSide, height: row.iconSide)
                     .accessibilityHidden(true)
                 text
             }
@@ -220,6 +233,8 @@ struct SettingControlView: View {
             .fixedSize()
         case .stepper(let spec):
             StepperView(spec: spec)
+        case .position(let spec):
+            PositionPicker(spec: spec)
         case .fontName(let family, let style):
             Text(family)
                 .font(Font(NSFont(descriptor: NSFontDescriptor(fontAttributes: [.family: family, .face: style]),
@@ -550,5 +565,51 @@ private struct QRCodeImage: View {
         .accessibilityElement()
         .accessibilityLabel("Pairing code")
         .accessibilityAddTraits(.isImage)
+    }
+}
+
+/// A sketch of the window with a slot at each place notifications can
+/// stack: three along the top, three along the bottom. The chosen slot is
+/// filled with the accent color and checked.
+private struct PositionPicker: View {
+    let spec: PositionSpec
+    @Environment(\.settingsTheme) private var theme
+
+    var body: some View {
+        let rows: [[NotificationPosition]] = [[.topLeft, .top, .topRight], [.bottomLeft, .bottom, .bottomRight]]
+        VStack(spacing: 0) {
+            ForEach(rows.indices, id: \.self) { row in
+                if row == 1 { Spacer(minLength: 0) }
+                HStack(spacing: 6) {
+                    ForEach(rows[row], id: \.self) { position in
+                        slot(position)
+                    }
+                }
+            }
+        }
+        .padding(6)
+        .frame(width: 136, height: 78)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.quaternary.opacity(0.5)))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.separator, lineWidth: 1))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(spec.label)
+    }
+
+    private func slot(_ position: NotificationPosition) -> some View {
+        let selected = position == spec.selected
+        return Button { spec.change(position) } label: {
+            Capsule()
+                .fill(selected ? AnyShapeStyle(theme?.accent ?? .accentColor) : AnyShapeStyle(.quaternary))
+                .overlay {
+                    if selected {
+                        Image(systemName: "checkmark").font(.system(size: 9, weight: .bold)).foregroundStyle(.white)
+                    }
+                }
+                .frame(height: 18)
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(position.title.prefix(1).uppercased() + position.title.dropFirst())
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
     }
 }

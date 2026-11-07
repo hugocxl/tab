@@ -223,9 +223,8 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, A
         }
     }
 
-    public func showToast(_ message: String, error: Bool) {
-        guard let view = window?.contentView else { return }
-        Toast.show(message, style: error ? .error : .info, in: view, duration: error ? 5 : 2.5)
+    public func showToast(_ message: String, style: Toast.Style) {
+        workspace.notices.show(Toast.notice(message, style: style), lifetime: Toast.lifetime(style))
     }
 
     public func bringToFront() {

@@ -44,16 +44,8 @@ public struct UpdateChip: Equatable, Sendable {
         "The server is still running \(Release.appName) \(version). Restart it to finish updating."
     }
 
-    public enum Tone: Equatable, Sendable { case neutral, info, success, warning, danger }
-
-    public enum Icon: Equatable, Sendable {
-        /// Work of unknown length.
-        case spinner
-        /// A download, from 0 to 1.
-        case progress(Double)
-        /// An SF Symbol, drawn in the tone's color.
-        case symbol(String)
-    }
+    public typealias Tone = Notice.Tone
+    public typealias Icon = Notice.Icon
 
     public enum Action: Equatable, Sendable {
         /// Downloads and verifies the available release in the background.
@@ -95,6 +87,11 @@ public struct UpdateChip: Equatable, Sendable {
     public var button: Button?
     /// `nil` while the chip can't be closed, such as while installing.
     public var dismissal: Dismissal?
+
+    /// The chip as the window's notifications show it.
+    public var notice: Notice {
+        Notice(tone: tone, icon: icon, message: message, button: button?.title, dismissible: dismissal != nil)
+    }
 
     /// A downloaded release, with whether it speaks the running server's protocol.
     public struct Ready: Equatable, Sendable {

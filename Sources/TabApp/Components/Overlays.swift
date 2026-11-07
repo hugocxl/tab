@@ -1,75 +1,28 @@
 import AppKit
 
-/// A short message that floats at the bottom of a view and fades away.
-public final class Toast: ThemedView {
+/// A short message among the window's notices that hides itself after a
+/// few seconds.
+public enum Toast {
     public enum Style: Sendable {
-        case info, error
+        case info, success, error
     }
 
-    private let label: NSTextField
-    public let style: Style
+    /// How long a toast of `style` stays.
+    static func lifetime(_ style: Style) -> TimeInterval { style == .error ? 6 : 4 }
 
-    init(_ message: String, style: Style) {
-        label = makeLabel(message, font: AppFont.body)
-        label.lineBreakMode = .byWordWrapping
-        label.maximumNumberOfLines = 3
-        self.style = style
-        super.init(frame: .zero)
-        translatesAutoresizingMaskIntoConstraints = false
-        addSubview(label)
-        label.pinEdges(to: self, insets: NSEdgeInsets(top: 8, left: 12, bottom: 8, right: 12))
-        setAccessibilityElement(true)
-        setAccessibilityRole(.staticText)
-        setAccessibilityLabel(message)
-    }
-
-    public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    public var message: String { label.stringValue }
-
-    public override func themeDidChange() {
-        label.textColor = style == .error ? theme.danger : theme.fg
-        needsDisplay = true
-    }
-
-    public override func draw(_ dirtyRect: NSRect) {
-        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: Metrics.cardRadius, yRadius: Metrics.cardRadius)
-        theme.raised.setFill()
-        path.fill()
-        theme.cardBorder.setStroke()
-        path.stroke()
-    }
-
-    /// Shows `message` at the bottom of `view` for `duration` seconds.
-    @discardableResult
-    public static func show(_ message: String, style: Style = .info, in view: NSView, duration: TimeInterval = 3) -> Toast {
-        view.subviews.compactMap { $0 as? Toast }.forEach { $0.removeFromSuperview() }
-        let toast = Toast(message, style: style)
-        view.addSubview(toast)
-        NSLayoutConstraint.activate([
-            toast.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            toast.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -16),
-            toast.widthAnchor.constraint(lessThanOrEqualToConstant: 420),
-        ])
-        NSAccessibility.post(
-            element: toast,
-            notification: .announcementRequested,
-            userInfo: [.announcement: message, .priority: NSAccessibilityPriorityLevel.high.rawValue]
-        )
-        DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak toast] in
-            guard let toast else { return }
-            if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
-                toast.removeFromSuperview()
-                return
-            }
-            NSAnimationContext.runAnimationGroup({ context in
-                context.duration = 0.2
-                toast.animator().alphaValue = 0
-            }, completionHandler: {
-                MainActor.assumeIsolated { toast.removeFromSuperview() }
-            })
+    static func notice(_ message: String, style: Style) -> Notice {
+        switch style {
+        case .info: return Notice(tone: .neutral, icon: .symbol("info.circle.fill"), message: message)
+        case .success: return Notice(tone: .success, icon: .symbol("checkmark.circle.fill"), message: message)
+        case .error: return Notice(tone: .danger, icon: .symbol("exclamationmark.circle.fill"), message: message)
         }
-        return toast
+    }
+
+    /// Shows `message` among the notices of `view`'s window.
+    @MainActor
+    public static func show(_ message: String, style: Style = .info, in view: NSView) {
+        guard let stack = view.window?.contentView?.subviews.lazy.compactMap({ $0 as? NoticeStack }).first else { return }
+        stack.show(notice(message, style: style), lifetime: lifetime(style))
     }
 }
 

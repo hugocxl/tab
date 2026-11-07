@@ -10,12 +10,12 @@ final class WorkspaceView: ThemedView {
     let sidebar: SidebarViewController
     let splits: SplitContainerView
     private let rightSidebar = RightSidebarView()
-    private let banner = BannerView()
     private let backdrop = GlassView(style: .window, behindWindow: true)
     private let veil = WindowVeilView()
     private let rim = WindowRimView()
     private var inWorkspaceTransition = false
-    private let updateChip = UpdateChipView()
+    /// The window's notices: updates, the connection, toasts.
+    let notices = NoticeStack()
     private var shownPanel: RightPanelKind?
     private var shownPanelProject: ProjectId?
     private var liveSidebarWidth: CGFloat?
@@ -43,14 +43,8 @@ final class WorkspaceView: ThemedView {
         addSubview(sidebar.view)
         addSubview(splits)
         addSubview(rightSidebar)
-        addSubview(banner)
-        updateChip.isHidden = true
-        addSubview(updateChip)
-        updateChip.onAction = { [weak model] action in
-            if action == .showChangelog { model?.showSettingsAction?(.changelog) }
-            model?.updater.handle(action)
-        }
-        updateChip.onDismiss = { [weak model] in model?.updater.dismissChip() }
+        notices.position = model.settings.notifications.position
+        addSubview(notices)
         sidebar.onResize = { [weak self] width in
             guard let self else { return }
             self.liveSidebarWidth = width
@@ -90,8 +84,8 @@ final class WorkspaceView: ThemedView {
         }
         splits.reload()
         syncPanel()
-        updateBanner()
-        updateUpdateChip()
+        updateConnectionNotice()
+        updateUpdateNotice()
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -141,11 +135,12 @@ final class WorkspaceView: ThemedView {
         if changes.contains(.state) || changes.contains(.settings) {
             splits.reload()
         }
-        if changes.contains(.activity) { updateUpdateChip() }
+        if changes.contains(.activity) { updateUpdateNotice() }
         if changes.contains(.activity) || changes.contains(.state) {
             splits.refreshHeaders()
-            updateBanner()
+            updateConnectionNotice()
         }
+        if changes.contains(.settings) { notices.position = model.settings.notifications.position }
         if !changes.isDisjoint(with: [.panel, .settings, .state]) { syncPanel() }
         needsLayout = true
     }
@@ -176,17 +171,26 @@ final class WorkspaceView: ThemedView {
         model.focusRightPanelIfRequested(kind)
     }
 
-    private func updateBanner() {
+    private static let connectionNotice = "connection"
+    private static let updateNotice = "update"
+
+    /// Says while the current project's server is offline, until it is back.
+    private func updateConnectionNotice() {
         let server = model.currentProject.serverId
+        let notice: Notice
         switch model.connectionState(server) {
         case .reconnecting:
-            banner.show("\(server.isLocal ? "This Mac's server" : model.serverName(server) ?? "The server") is offline. Reconnecting…",
-                        action: "Retry") { [weak self] in self?.model.connection(server)?.retryNow() }
+            let name = server.isLocal ? "This Mac’s server" : model.serverName(server) ?? "The server"
+            notice = Notice(tone: .warning, icon: .spinner, message: "\(name) is offline. Reconnecting…", button: "Retry",
+                            dismissible: false)
         case .needsUser(let message):
-            banner.show(message, action: "Try Again") { [weak self] in self?.model.connection(server)?.retryNow() }
+            notice = Notice(tone: .danger, icon: .symbol("exclamationmark.circle.fill"), message: UpdateChip.sentence(message),
+                            button: "Try Again", dismissible: false)
         case .ready, .connecting, .idle:
-            banner.hide()
+            notices.remove(Self.connectionNotice)
+            return
         }
+        notices.show(notice, id: Self.connectionNotice, action: { [weak self] in self?.model.connection(server)?.retryNow() })
     }
 
     var sidebarWidth: CGFloat {
@@ -245,14 +249,7 @@ final class WorkspaceView: ThemedView {
         }
         splits.rightSidebarToggle = shownPanel == nil ? rightSidebarToggle : nil
         splits.frame = NSRect(x: sidebarWidth, y: 0, width: max(right - sidebarWidth, 0), height: bounds.height)
-        let bannerWidth = min(splits.frame.width - 32, 520)
-        banner.frame = NSRect(x: splits.frame.midX - bannerWidth / 2, y: 40, width: bannerWidth, height: 32)
-        // Floats over everything at the window's bottom right, twice the
-        // terminal cards' gap from its edges.
-        let inset = SplitGeometry.gutter * 2
-        let chipWidth = min(updateChip.fittingWidth, UpdateChipView.maximumWidth, max(bounds.width - inset * 2, 0))
-        updateChip.frame = NSRect(x: bounds.width - inset - chipWidth, y: bounds.height - inset - UpdateChipView.height,
-                                  width: chipWidth, height: UpdateChipView.height)
+        notices.frame = bounds
     }
 
     /// Cuts the veil out under every glass surface, following the cards'
@@ -264,15 +261,17 @@ final class WorkspaceView: ThemedView {
         veil.cutOut(holes, radius: Metrics.cardRadius, duration: animated ? InterfaceMotion.duration(model.appearance.animationStyle) : 0)
     }
 
-    /// Shows the updater's chip, whether or not the sidebar is open.
-    private func updateUpdateChip() {
-        let chip = model.updater.chip
-        guard chip != updateChip.chip || updateChip.isHidden != (chip == nil) else { return }
-        let appearing = updateChip.isHidden && chip != nil
-        updateChip.chip = chip
-        updateChip.isHidden = chip == nil
-        needsLayout = true
-        if appearing { updateChip.animateIn() }
+    /// Shows the updater's chip among the notices.
+    private func updateUpdateNotice() {
+        guard let chip = model.updater.chip else {
+            notices.remove(Self.updateNotice)
+            return
+        }
+        notices.show(chip.notice, id: Self.updateNotice, action: { [weak model] in
+            guard let action = model?.updater.chip?.button?.action else { return }
+            if action == .showChangelog { model?.showSettingsAction?(.changelog) }
+            model?.updater.handle(action)
+        }, dismiss: { [weak model] in model?.updater.dismissChip() })
     }
 }
 
@@ -326,58 +325,6 @@ final class PanelResizeHandle: NSView {
             if next.type == .leftMouseUp { break }
         }
         onDrag?(nil)
-    }
-}
-
-/// A banner over the workspace, such as "server offline", with an action.
-final class BannerView: ThemedView {
-    private let label = makeLabel("", font: AppFont.system(12, weight: .medium))
-    private let button = PillButton("Retry")
-    private var action: (() -> Void)?
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        wantsLayer = true
-        layer?.cornerRadius = 8
-        layer?.borderWidth = 1
-        isHidden = true
-        label.translatesAutoresizingMaskIntoConstraints = true
-        button.translatesAutoresizingMaskIntoConstraints = true
-        addSubview(label)
-        addSubview(button)
-        button.onPress = { [weak self] in self?.action?() }
-    }
-
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    func show(_ message: String, action title: String, _ action: @escaping () -> Void) {
-        label.stringValue = message
-        button.title = title
-        self.action = action
-        isHidden = false
-        needsLayout = true
-    }
-
-    func hide() { isHidden = true }
-
-    override var wantsUpdateLayer: Bool { true }
-
-    override func updateLayer() {
-        layer?.backgroundColor = theme.raised.cgColor
-        layer?.borderColor = theme.cardBorder.cgColor
-    }
-
-    override func themeDidChange() {
-        label.textColor = theme.warning
-        needsDisplay = true
-    }
-
-    override func layout() {
-        super.layout()
-        let size = button.intrinsicContentSize
-        button.frame = NSRect(x: bounds.width - size.width - 4, y: (bounds.height - size.height) / 2, width: size.width, height: size.height)
-        let height = label.intrinsicContentSize.height
-        label.frame = NSRect(x: 12, y: (bounds.height - height) / 2, width: max(button.frame.minX - 20, 0), height: height)
     }
 }
 

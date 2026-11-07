@@ -26,7 +26,8 @@ public protocol AppPresenter: AnyObject {
     var terminalActivityObscured: Bool { get }
     /// Asks a question as a sheet; the answer is whether the user confirmed.
     func confirm(title: String, message: String, confirm: String, destructive: Bool) async -> Bool
-    func showToast(_ message: String, error: Bool)
+    /// Shows `message` among the window's notices for a few seconds.
+    func showToast(_ message: String, style: Toast.Style)
     /// Add Project on another computer: its folder browser.
     func showRemoteFolderBrowser(_ server: ServerId)
     func bringToFront()
@@ -34,6 +35,10 @@ public protocol AppPresenter: AnyObject {
 
 extension AppPresenter {
     public var terminalActivityObscured: Bool { false }
+
+    public func showToast(_ message: String, error: Bool) {
+        showToast(message, style: error ? .error : .info)
+    }
 }
 
 /// Git facts the sidebar cards show.
@@ -343,6 +348,7 @@ public final class AppModel {
         flushScheduled = false
         let changed = pending
         pending = []
+        if !changed.isDisjoint(with: [.activity, .state, .settings]) { updateDockBadge() }
         if !changed.isEmpty { changes.send(changed) }
     }
 

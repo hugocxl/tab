@@ -2,21 +2,58 @@ import AppKit
 import QuartzCore
 import TabCore
 
-/// The capsule floating at the window's bottom right that carries everything about
-/// updating: an icon, one line that scrolls when it doesn't fit, at most one
-/// button, and a close button. Diffused glass tinted with the chip's tone, as
-/// are its buttons.
-final class UpdateChipView: ThemedView {
-    var onAction: ((UpdateChip.Action) -> Void)?
+/// What an in-app notification says: a tone, an icon, one line, at most one
+/// button, and whether it can be closed. Every notice looks the same,
+/// whether it is about updating, the connection, or a copied path.
+public struct Notice: Equatable, Sendable {
+    public enum Tone: Equatable, Sendable { case neutral, info, success, warning, danger }
+
+    public enum Icon: Equatable, Sendable {
+        /// Work of unknown length.
+        case spinner
+        /// A download, from 0 to 1.
+        case progress(Double)
+        /// An SF Symbol, drawn in the tone's color.
+        case symbol(String)
+    }
+
+    public var tone: Tone
+    public var icon: Icon
+    public var message: String
+    public var button: String?
+    public var dismissible: Bool
+
+    public init(tone: Tone, icon: Icon, message: String, button: String? = nil, dismissible: Bool = true) {
+        self.tone = tone
+        self.icon = icon
+        self.message = message
+        self.button = button
+        self.dismissible = dismissible
+    }
+}
+
+/// A notice as a capsule: an icon, one line that scrolls when it doesn't
+/// fit, at most one button, and a close button. Diffused glass tinted with
+/// the notice's tone, as are its buttons.
+final class NoticeView: ThemedView {
+    var onAction: (() -> Void)?
     var onDismiss: (() -> Void)?
 
-    var chip: UpdateChip? {
-        didSet { if chip != oldValue { apply() } }
+    var notice: Notice? {
+        didSet { if notice != oldValue { apply() } }
+    }
+
+    /// Behind another notice in a collapsed stack, only the capsule shows.
+    var contentHidden = false {
+        didSet {
+            guard contentHidden != oldValue else { return }
+            for view in [icon, message, button, close] as [NSView] { view.animator().alphaValue = contentHidden ? 0 : 1 }
+        }
     }
 
     static let height: CGFloat = 40
-    /// Every chip's widest: the "available" chip's, with room for a two-digit
-    /// version. Longer messages scroll within it.
+    /// Every notice's widest: the "available" update's, with room for a
+    /// two-digit version. Longer messages scroll within it.
     static let maximumWidth = width(message: "\(Release.appName) 0.00.0 is available.", button: "Update", closes: true)
     private static let iconSide: CGFloat = 18
     private static let iconInset: CGFloat = 13
@@ -30,10 +67,10 @@ final class UpdateChipView: ThemedView {
     static let font = AppFont.system(13, weight: .medium)
 
     private let glass = GlassView(style: .chip)
-    private let icon = UpdateChipIcon()
+    private let icon = NoticeIcon()
     private let message = MarqueeLabel()
-    private let button = UpdateChipButton(kind: .text(""))
-    private let close = UpdateChipButton(kind: .close)
+    private let button = NoticeButton(kind: .text(""))
+    private let close = NoticeButton(kind: .close)
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -42,10 +79,7 @@ final class UpdateChipView: ThemedView {
         layer?.borderWidth = Metrics.border
         addSubview(glass)
         for view in [icon, message, button, close] as [NSView] { addSubview(view) }
-        button.onPress = { [weak self] in
-            guard let action = self?.chip?.button?.action else { return }
-            self?.onAction?(action)
-        }
+        button.onPress = { [weak self] in self?.onAction?() }
         close.onPress = { [weak self] in self?.onDismiss?() }
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
@@ -57,7 +91,7 @@ final class UpdateChipView: ThemedView {
     override var wantsUpdateLayer: Bool { true }
 
     private var toneColor: NSColor {
-        switch chip?.tone ?? .neutral {
+        switch notice?.tone ?? .neutral {
         case .neutral: return theme.fg
         case .info: return theme.info
         case .success: return theme.success
@@ -66,7 +100,7 @@ final class UpdateChipView: ThemedView {
         }
     }
 
-    private var tinted: Bool { (chip?.tone ?? .neutral) != .neutral }
+    private var tinted: Bool { (notice?.tone ?? .neutral) != .neutral }
 
     override func updateLayer() {
         guard let layer else { return }
@@ -80,14 +114,14 @@ final class UpdateChipView: ThemedView {
     }
 
     private func apply() {
-        guard let chip else { return }
-        icon.icon = chip.icon
-        message.text = chip.message
-        toolTip = chip.message
-        setAccessibilityLabel(chip.message)
-        button.isHidden = chip.button == nil
-        if let item = chip.button { button.kind = .text(item.title) }
-        close.isHidden = chip.dismissal == nil
+        guard let notice else { return }
+        icon.icon = notice.icon
+        message.text = notice.message
+        toolTip = notice.message
+        setAccessibilityLabel(notice.message)
+        button.isHidden = notice.button == nil
+        if let title = notice.button { button.kind = .text(title) }
+        close.isHidden = !notice.dismissible
         applyColors()
         needsLayout = true
     }
@@ -97,7 +131,7 @@ final class UpdateChipView: ThemedView {
         glass.tint = tinted ? tone.withAlphaComponent(0.2) : nil
         icon.color = tone
         message.color = tone
-        let controls = UpdateChipButton.Colors(fill: tone.withAlphaComponent(tinted ? 0.18 : 0.1), glyph: tone)
+        let controls = NoticeButton.Colors(fill: tone.withAlphaComponent(tinted ? 0.18 : 0.1), glyph: tone)
         button.colors = controls
         close.colors = controls
         needsDisplay = true
@@ -105,15 +139,15 @@ final class UpdateChipView: ThemedView {
 
     /// The width that shows the whole message on one line.
     var fittingWidth: CGFloat {
-        guard let chip else { return 0 }
-        return Self.width(message: chip.message, button: chip.button?.title, closes: chip.dismissal != nil)
+        guard let notice else { return 0 }
+        return Self.width(message: notice.message, button: notice.button, closes: notice.dismissible)
     }
 
-    /// The width of a chip showing all of `message`, laid out as `layout()` does.
+    /// The width of a notice showing all of `message`, laid out as `layout()` does.
     static func width(message: String, button: String?, closes: Bool) -> CGFloat {
         let text = ceil((message as NSString).size(withAttributes: [.font: font]).width)
         var width = iconInset + iconSide + iconTextGap + text
-        if let button { width += textButtonGap + UpdateChipButton.width(title: button) }
+        if let button { width += textButtonGap + NoticeButton.width(title: button) }
         switch (button != nil, closes) {
         case (true, true): width += controlGap + controlHeight + trailingInset
         case (false, true): width += textButtonGap + controlHeight + trailingInset
@@ -121,16 +155,6 @@ final class UpdateChipView: ThemedView {
         case (false, false): width += iconInset
         }
         return ceil(width)
-    }
-
-    /// Fades the chip in where it appears.
-    func animateIn() {
-        guard !theme.accessibility.reduceMotion else { return }
-        alphaValue = 0
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.2
-            animator().alphaValue = 1
-        }
     }
 
     override func layout() {
@@ -161,9 +185,9 @@ final class UpdateChipView: ThemedView {
     }
 }
 
-/// The chip's icon: a symbol, a download's progress ring, or a spinning ring.
-final class UpdateChipIcon: NSView {
-    var icon: UpdateChip.Icon = .spinner {
+/// A notice's icon: a symbol, a download's progress ring, or a spinning ring.
+final class NoticeIcon: NSView {
+    var icon: Notice.Icon = .spinner {
         didSet { if icon != oldValue { update() } }
     }
 
@@ -287,7 +311,7 @@ final class MarqueeLabel: NSView {
     private let content = CALayer()
     private let first = CALayer()
     private let second = CALayer()
-    private let truncated = makeLabel("", font: UpdateChipView.font)
+    private let truncated = makeLabel("", font: NoticeView.font)
     private let mask = CAGradientLayer()
     private var textSize = NSSize.zero
     private var distance: CGFloat = 0
@@ -321,7 +345,7 @@ final class MarqueeLabel: NSView {
     private func render() {
         truncated.stringValue = text
         truncated.textColor = color
-        let attributed = NSAttributedString(string: text, attributes: [.font: UpdateChipView.font, .foregroundColor: color])
+        let attributed = NSAttributedString(string: text, attributes: [.font: NoticeView.font, .foregroundColor: color])
         let size = attributed.size()
         textSize = NSSize(width: ceil(size.width), height: ceil(size.height))
         let scale = window?.backingScaleFactor ?? 2
@@ -394,8 +418,8 @@ final class MarqueeLabel: NSView {
     }
 }
 
-/// The chip's pill button or round close button.
-final class UpdateChipButton: HoverView {
+/// A notice's pill button or round close button.
+final class NoticeButton: HoverView {
     enum Kind: Equatable {
         case text(String)
         case close
@@ -443,7 +467,7 @@ final class UpdateChipButton: HoverView {
     }
 
     static func width(title: String) -> CGFloat {
-        ceil((title as NSString).size(withAttributes: [.font: UpdateChipView.font]).width) + padding * 2
+        ceil((title as NSString).size(withAttributes: [.font: NoticeView.font]).width) + padding * 2
     }
 
     override func hoverDidChange() { needsDisplay = true }
@@ -456,7 +480,7 @@ final class UpdateChipButton: HoverView {
         NSBezierPath(roundedRect: bounds, xRadius: radius, yRadius: radius).fill()
         switch kind {
         case .text(let title):
-            let attributes: [NSAttributedString.Key: Any] = [.font: UpdateChipView.font, .foregroundColor: colors.glyph]
+            let attributes: [NSAttributedString.Key: Any] = [.font: NoticeView.font, .foregroundColor: colors.glyph]
             let size = (title as NSString).size(withAttributes: attributes)
             (title as NSString).draw(at: NSPoint(x: ((bounds.width - size.width) / 2).rounded(),
                                                  y: ((bounds.height - size.height) / 2).rounded()),
