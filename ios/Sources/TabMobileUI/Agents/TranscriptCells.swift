@@ -333,7 +333,7 @@ final class ApprovalCell: UICollectionViewCell {
     }
 }
 
-/// A notice or an answered approval, small and centered; errors as a red card.
+/// A notice, small and centered; errors as a red card.
 final class NoticeCell: UICollectionViewCell {
     private let label = UILabel()
     private let card = UIView()

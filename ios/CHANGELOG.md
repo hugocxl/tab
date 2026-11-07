@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.4.0 - 2026-11-07
+
+### Added
+
+- Attach photos, camera shots and files to a message in an agent pane with the
+  + button.
+
+### Changed
+
+- The agent pane's message field has two rows, with Attach, the model and its
+  effort, and Send below the text, as in the Claude app.
+
+### Fixed
+
+- Headings, paragraphs, lists and code in an agent's replies have space between
+  them.
+- Automatically approved and answered permission requests no longer fill the
+  transcript.
+
 ## 0.3.1 - 2026-11-07
 
 ### Fixed

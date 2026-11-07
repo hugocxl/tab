@@ -11,17 +11,16 @@ enum MarkdownRenderer {
             return NSAttributedString(string: markdown, attributes: [.font: bodyFont, .foregroundColor: textColor])
         }
         let output = NSMutableAttributedString()
+        var gaps: [(location: Int, height: CGFloat)] = []
         var previousBlock: Int?
-        var previousWasCode = false
+        var previousComponents: [PresentationIntent.IntentType] = []
         for run in parsed.runs {
             let components = run.presentationIntent?.components ?? []
             let block = components.first?.identity
             let isCode = components.contains { if case .codeBlock = $0.kind { return true } else { return false } }
             if let previousBlock, block != previousBlock {
                 output.append(NSAttributedString(string: "\n", attributes: [.font: bodyFont]))
-                if previousWasCode != isCode || isCode {
-                    output.append(NSAttributedString(string: "\n", attributes: [.font: smallFont]))
-                }
+                gaps.append((output.length, gap(after: previousComponents, before: components)))
             }
             if block != previousBlock, let prefix = listPrefix(components) {
                 output.append(NSAttributedString(string: prefix, attributes: [
@@ -30,18 +29,54 @@ enum MarkdownRenderer {
                 ]))
             }
             previousBlock = block
-            previousWasCode = isCode
+            previousComponents = components
 
             var text = String(parsed[run.range].characters)
             if isCode, text.hasSuffix("\n") { text.removeLast() }
             output.append(NSAttributedString(string: text, attributes: attributes(run, components: components,
                                                                                   textColor: textColor)))
         }
+        for gap in gaps where gap.location < output.length {
+            space(output, paragraphAt: gap.location, before: gap.height)
+        }
         return output
     }
 
     private static var bodyFont: UIFont { UIFont.preferredFont(forTextStyle: .body) }
-    private static var smallFont: UIFont { UIFont.systemFont(ofSize: 6) }
+
+    /// The space above a block, in step with the desktop's: more above
+    /// headings, less between the items of one list, and none inside a block.
+    private static func gap(after previous: [PresentationIntent.IntentType],
+                            before next: [PresentationIntent.IntentType]) -> CGFloat {
+        let size = bodyFont.pointSize
+        if next.contains(where: { if case .header = $0.kind { return true } else { return false } }) {
+            return (size * 1.4).rounded()
+        }
+        if let list = outermostList(next), list == outermostList(previous) {
+            return (size * 0.3).rounded()
+        }
+        return (size * 0.75).rounded()
+    }
+
+    private static func outermostList(_ components: [PresentationIntent.IntentType]) -> Int? {
+        components.last {
+            switch $0.kind {
+            case .orderedList, .unorderedList: true
+            default: false
+            }
+        }?.identity
+    }
+
+    /// Sets the space above the paragraph at `location` only, so the lines
+    /// of a code block stay together.
+    private static func space(_ text: NSMutableAttributedString, paragraphAt location: Int, before height: CGFloat) {
+        let range = (text.string as NSString).paragraphRange(for: NSRange(location: location, length: 0))
+        text.enumerateAttribute(.paragraphStyle, in: range) { value, subrange, _ in
+            guard let style = (value as? NSParagraphStyle)?.mutableCopy() as? NSMutableParagraphStyle else { return }
+            style.paragraphSpacingBefore = height
+            text.addAttribute(.paragraphStyle, value: style, range: subrange)
+        }
+    }
 
     private static func attributes(_ run: AttributedString.Runs.Run, components: [PresentationIntent.IntentType],
                                    textColor: UIColor) -> [NSAttributedString.Key: Any] {
@@ -109,7 +144,6 @@ enum MarkdownRenderer {
         style.headIndent = text
         style.tabStops = [NSTextTab(textAlignment: .natural, location: text)]
         style.defaultTabInterval = 22
-        style.paragraphSpacing = 4
         style.lineHeightMultiple = 1.05
         return style
     }

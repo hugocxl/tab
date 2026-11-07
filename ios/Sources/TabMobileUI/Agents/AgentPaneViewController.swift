@@ -1,6 +1,9 @@
+import ImageIO
+import PhotosUI
 import TabMobileKit
 import TabProtocol
 import UIKit
+import UniformTypeIdentifiers
 
 /// An agent pane: the conversation, and a glass composer riding the keyboard.
 final class AgentPaneViewController: UIViewController, UICollectionViewDelegate {
@@ -46,8 +49,9 @@ final class AgentPaneViewController: UIViewController, UICollectionViewDelegate 
         view.addSubview(emptyView)
 
         composer.translatesAutoresizingMaskIntoConstraints = false
-        composer.onSend = { [weak self] text in self?.controller.send(text) }
+        composer.onSend = { [weak self] text, attachments in self?.controller.send(text, attachments: attachments) }
         composer.onStop = { [weak self] in self?.controller.interrupt() }
+        composer.onAttach = { [weak self] source in self?.pickAttachments(from: source) }
         view.addSubview(composer)
 
         // What went wrong with the last command, above the composer until the next reply.
@@ -305,182 +309,115 @@ final class AgentPaneViewController: UIViewController, UICollectionViewDelegate 
     }
 }
 
-/// The message field: Return sends from a hardware keyboard, Shift-Return
-/// starts a new line, as on the desktop; the on-screen keyboard's Return
-/// stays a line break with the Send button beside it.
-final class ComposerTextView: UITextView {
-    var onReturn: (() -> Void)?
+// MARK: Attachments
 
-    override var keyCommands: [UIKeyCommand]? {
-        let send = UIKeyCommand(title: "Send", action: #selector(returnPressed), input: "\r")
-        send.wantsPriorityOverSystemBehavior = true
-        let newline = UIKeyCommand(title: "New Line", action: #selector(newLine), input: "\r", modifierFlags: .shift)
-        newline.wantsPriorityOverSystemBehavior = true
-        return [send, newline]
-    }
-
-    @objc private func returnPressed() { onReturn?() }
-    @objc private func newLine() { insertText("\n") }
-}
-
-/// The message field in a glass capsule: settings, text, and Send that
-/// turns into Stop while the agent works.
-final class AgentComposerView: UIView, UITextViewDelegate {
-    private let glass = UIVisualEffectView(effect: UIGlassEffect())
-    private let text = ComposerTextView()
-    private let placeholder = UILabel()
-    private let send = UIButton(configuration: .prominentGlass())
-    private let options = UIButton(configuration: .plain())
-    private var heightConstraint: NSLayoutConstraint!
-    private var running = false
-    var onSend: ((String) -> Void)?
-    var onStop: (() -> Void)?
-
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        glass.cornerConfiguration = .uniformCorners(radius: .fixed(24))
-        glass.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(glass)
-
-        text.font = .preferredFont(forTextStyle: .body)
-        text.adjustsFontForContentSizeCategory = true
-        text.backgroundColor = .clear
-        text.delegate = self
-        text.textContainerInset = UIEdgeInsets(top: 11, left: 0, bottom: 11, right: 0)
-        text.translatesAutoresizingMaskIntoConstraints = false
-        text.accessibilityLabel = "Message"
-        text.onReturn = { [weak self] in self?.sendNow() }
-        placeholder.font = .preferredFont(forTextStyle: .body)
-        placeholder.textColor = .placeholderText
-        placeholder.translatesAutoresizingMaskIntoConstraints = false
-
-        options.configuration?.baseForegroundColor = .label
-        options.showsMenuAsPrimaryAction = true
-        options.accessibilityLabel = "Model and access"
-        options.translatesAutoresizingMaskIntoConstraints = false
-
-        send.configuration?.image = UIImage(systemName: "arrow.up",
-                                            withConfiguration: UIImage.SymbolConfiguration(weight: .bold))
-        send.configuration?.cornerStyle = .capsule
-        send.translatesAutoresizingMaskIntoConstraints = false
-        send.addAction(UIAction { [weak self] _ in self?.primary() }, for: .primaryActionTriggered)
-
-        for view in [options, text, placeholder, send] { glass.contentView.addSubview(view) }
-        heightConstraint = text.heightAnchor.constraint(equalToConstant: 44)
-        NSLayoutConstraint.activate([
-            glass.topAnchor.constraint(equalTo: topAnchor),
-            glass.bottomAnchor.constraint(equalTo: bottomAnchor),
-            glass.leadingAnchor.constraint(equalTo: leadingAnchor),
-            glass.trailingAnchor.constraint(equalTo: trailingAnchor),
-            options.leadingAnchor.constraint(equalTo: glass.contentView.leadingAnchor, constant: 4),
-            options.bottomAnchor.constraint(equalTo: glass.contentView.bottomAnchor, constant: -2),
-            options.widthAnchor.constraint(equalToConstant: 44),
-            options.heightAnchor.constraint(equalToConstant: 44),
-            text.leadingAnchor.constraint(equalTo: options.trailingAnchor),
-            text.topAnchor.constraint(equalTo: glass.contentView.topAnchor, constant: 2),
-            text.bottomAnchor.constraint(equalTo: glass.contentView.bottomAnchor, constant: -2),
-            text.trailingAnchor.constraint(equalTo: send.leadingAnchor, constant: -6),
-            heightConstraint,
-            placeholder.leadingAnchor.constraint(equalTo: text.leadingAnchor, constant: 5),
-            placeholder.centerYAnchor.constraint(equalTo: options.centerYAnchor),
-            send.trailingAnchor.constraint(equalTo: glass.contentView.trailingAnchor, constant: -6),
-            send.bottomAnchor.constraint(equalTo: glass.contentView.bottomAnchor, constant: -6),
-            send.widthAnchor.constraint(equalToConstant: 36),
-            send.heightAnchor.constraint(equalToConstant: 36),
-        ])
-        refreshSend()
-    }
-
-    required init?(coder: NSCoder) { fatalError("not used") }
-
-    func update(_ controller: AgentChatController) {
-        running = controller.isRunning
-        let provider = controller.selection.provider
-        placeholder.text = "Message \(provider.name)"
-        options.configuration?.image = AgentLogo.image(provider)?.preparingThumbnail(of: CGSize(width: 22, height: 22))
-        options.accessibilityLabel = "\(provider.name), \(controller.selectedModel?.title ?? "default model")"
-        options.menu = Self.menu(controller)
-        refreshSend()
-    }
-
-    /// Sends the typed message, if there is one.
-    func sendNow() {
-        guard !text.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        primary()
-    }
-
-    /// As the desktop's model menu: each agent with its models, locked to the
-    /// conversation's agent once it has started, then effort and access.
-    private static func menu(_ controller: AgentChatController) -> UIMenu {
-        let selection = controller.selection
-        let current = controller.effectiveModel
-        let providers = AgentChatProvider.allCases.map { provider -> UIMenuElement in
-            let models = controller.models[provider]
-            let locked = !controller.canChangeProvider && provider != controller.snapshot?.provider
-            var children: [UIMenuElement] = (models ?? []).map { model in
-                UIAction(title: model.title, attributes: locked ? .disabled : [],
-                         state: provider == selection.provider && model.id == current ? .on : .off) { _ in
-                    controller.select(provider: provider, model: model.id)
-                }
-            }
-            if children.isEmpty {
-                children = [UIAction(title: models == nil ? "Loading models…" : "No models reported", attributes: .disabled) { _ in }]
-            }
-            let menu = UIMenu(title: provider.name, subtitle: locked ? "Open a new agent pane to use it" : nil,
-                              image: AgentLogo.image(provider)?.preparingThumbnail(of: CGSize(width: 20, height: 20)),
-                              children: children)
-            return menu
-        }
-        let efforts = (controller.selectedModel?.reasoningEfforts ?? []).map { effort in
-            UIAction(title: effort.title, state: controller.effort == effort ? .on : .off) { _ in
-                controller.select(effort: effort)
-            }
-        }
-        let access = AgentAccessMode.allCases.map { mode in
-            UIAction(title: mode.title, state: (controller.snapshot?.accessMode ?? .standard) == mode ? .on : .off) { _ in
-                controller.setAccess(mode)
-            }
-        }
-        var children: [UIMenuElement] = [UIMenu(options: .displayInline, children: providers)]
-        if !efforts.isEmpty {
-            children.append(UIMenu(title: "Effort", image: UIImage(systemName: "gauge.with.dots.needle.50percent"),
-                                   children: [UIAction(title: "Auto", state: controller.effort == nil ? .on : .off) { _ in
-                                       controller.select(effort: nil)
-                                   }] + efforts))
-        }
-        children.append(UIMenu(title: "Access", image: UIImage(systemName: "lock.shield"), children: access))
-        return UIMenu(children: children)
-    }
-
-    private func primary() {
-        if running, text.text.isEmpty {
-            UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
-            onStop?()
+extension AgentPaneViewController: PHPickerViewControllerDelegate, UIDocumentPickerDelegate,
+    UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+    func pickAttachments(from source: AttachmentSource) {
+        let room = AgentChatAttachment.maxCount - composer.attachments.count
+        guard room > 0 else {
+            showAttachmentProblem("A message can carry up to \(AgentChatAttachment.maxCount) files.")
             return
         }
-        let message = text.text ?? ""
-        guard !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        onSend?(message)
-        text.text = ""
-        textViewDidChange(text)
+        switch source {
+        case .photos:
+            var configuration = PHPickerConfiguration()
+            configuration.filter = .images
+            configuration.selectionLimit = room
+            let picker = PHPickerViewController(configuration: configuration)
+            picker.delegate = self
+            present(picker, animated: true)
+        case .camera:
+            let picker = UIImagePickerController()
+            picker.sourceType = .camera
+            picker.delegate = self
+            present(picker, animated: true)
+        case .files:
+            let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.item], asCopy: true)
+            picker.allowsMultipleSelection = true
+            picker.delegate = self
+            present(picker, animated: true)
+        }
     }
 
-    private func refreshSend() {
-        let stop = running && text.text.isEmpty
-        send.configuration?.image = UIImage(systemName: stop ? "stop.fill" : "arrow.up",
-                                            withConfiguration: UIImage.SymbolConfiguration(weight: .bold))
-        send.accessibilityLabel = stop ? "Stop" : "Send"
-        send.isEnabled = stop || !text.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        placeholder.isHidden = !text.text.isEmpty
+    func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+        picker.dismiss(animated: true)
+        for result in results {
+            let name = (result.itemProvider.suggestedName ?? "Photo") + ".jpg"
+            result.itemProvider.loadDataRepresentation(forTypeIdentifier: UTType.image.identifier) { [weak self] data, _ in
+                let attachment = data.flatMap { AttachmentFiles.photo($0, name: name) }
+                Task { @MainActor in
+                    guard let attachment else {
+                        self?.showAttachmentProblem("Couldn't read \(name).")
+                        return
+                    }
+                    self?.addAttachment(attachment)
+                }
+            }
+        }
     }
 
-    func textViewDidChange(_ textView: UITextView) {
-        let fitting = textView.sizeThatFits(CGSize(width: textView.bounds.width, height: .greatestFiniteMagnitude)).height
-        let maximum = (textView.font?.lineHeight ?? 20) * 6 + 22
-        heightConstraint.constant = min(max(44, fitting), maximum)
-        textView.isScrollEnabled = fitting > maximum
-        refreshSend()
+    func imagePickerController(_ picker: UIImagePickerController,
+                               didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
+        picker.dismiss(animated: true)
+        guard let image = info[.originalImage] as? UIImage, let data = image.jpegData(compressionQuality: 1),
+              let attachment = AttachmentFiles.photo(data, name: "Photo.jpg") else { return }
+        addAttachment(attachment)
+    }
+
+    func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+        picker.dismiss(animated: true)
+    }
+
+    func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+        for url in urls {
+            guard let attachment = AttachmentFiles.file(at: url) else {
+                showAttachmentProblem("Couldn't read \(url.lastPathComponent).")
+                continue
+            }
+            addAttachment(attachment)
+        }
+    }
+
+    private func addAttachment(_ attachment: AgentChatAttachment) {
+        if let problem = AgentDraftAttachments.problem(adding: attachment, to: composer.attachments) {
+            showAttachmentProblem(problem)
+            return
+        }
+        composer.add(attachment)
+    }
+
+    private func showAttachmentProblem(_ message: String) {
+        guard presentedViewController == nil else { return }
+        let alert = UIAlertController(title: "Can't Attach", message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        present(alert, animated: true)
+    }
+}
+
+/// Turns picked photos and files into attachments the agent can read.
+enum AttachmentFiles {
+    /// Photos are sent as JPEG no larger than an agent reads, whatever their format.
+    static func photo(_ data: Data, name: String) -> AgentChatAttachment? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: 2048,
+        ]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary),
+              let jpeg = UIImage(cgImage: image).jpegData(compressionQuality: 0.85) else { return nil }
+        return AgentChatAttachment(name: name, mimeType: "image/jpeg", data: jpeg)
+    }
+
+    static func file(at url: URL) -> AgentChatAttachment? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        let name = url.lastPathComponent
+        let mimeType = AgentDraftAttachments.mimeType(forFilename: name)
+        if AgentDraftAttachments.needsConversion(mimeType: mimeType) {
+            return photo(data, name: url.deletingPathExtension().lastPathComponent + ".jpg")
+        }
+        return AgentChatAttachment(name: name, mimeType: mimeType, data: data)
     }
 }
 
