@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.12.0 - 2026-11-07
+
+### Added
+
+- A full set of terminal keys above the keyboard: symbols, arrows, Shift,
+  Control and Option on one page, and F1 to F12, Home, End, Page Up, Page Down,
+  Delete and Paste on a second.
+- Settings → Terminal → Keys chooses between the full keys and the compact
+  single row; iPhone starts with the full keys and iPad with the compact row.
+
+### Changed
+
+- Tapping Shift, Control or Option twice quickly locks it until you tap it
+  again.
+
 ## 0.11.0 - 2026-11-07
 
 ### Added

@@ -4,11 +4,11 @@ import UIKit
 /// The keys a phone keyboard lacks, floating above it in Liquid Glass:
 /// Escape, latching Control and Option, Tab, arrows that repeat while held,
 /// the symbols shells use most, paste and hide.
-final class TerminalAccessoryBar: UIInputView {
+final class TerminalAccessoryBar: UIInputView, TerminalKeysDisplay {
     private weak var terminal: TerminalView?
     private var controlButton: UIButton?
     private var optionButton: UIButton?
-    private var repeatTimer: Timer?
+    private let repeater = KeyRepeater()
 
     init(terminal: TerminalView) {
         self.terminal = terminal
@@ -34,8 +34,8 @@ final class TerminalAccessoryBar: UIInputView {
         scroll.alwaysBounceHorizontal = true
         container.addSubview(scroll)
 
-        let control = modifierButton("ctrl", accessibility: "Control") { [weak self] in self?.toggle(.control) }
-        let option = modifierButton("opt", accessibility: "Option") { [weak self] in self?.toggle(.alt) }
+        let control = modifierButton("ctrl", accessibility: "Control") { [weak self] in self?.terminal?.tap(.control) }
+        let option = modifierButton("opt", accessibility: "Option") { [weak self] in self?.terminal?.tap(.alt) }
         controlButton = control
         optionButton = option
 
@@ -171,36 +171,20 @@ final class TerminalAccessoryBar: UIInputView {
 
     // MARK: Modifiers and repeat
 
-    private func toggle(_ modifier: KeyModifiers) {
-        guard let terminal else { return }
-        if terminal.stickyModifiers.contains(modifier) {
-            terminal.stickyModifiers.remove(modifier)
-        } else {
-            terminal.stickyModifiers.insert(modifier)
+    func show(_ latch: TerminalKeyLatch) {
+        for (button, modifier) in [(controlButton, KeyModifiers.control), (optionButton, .alt)] {
+            button?.isSelected = latch.active.contains(modifier)
+            button?.accessibilityValue = latch.locked.contains(modifier) ? "Locked" : nil
         }
-    }
-
-    func showModifiers(_ modifiers: KeyModifiers) {
-        controlButton?.isSelected = modifiers.contains(.control)
-        optionButton?.isSelected = modifiers.contains(.alt)
     }
 
     private func startRepeating(_ key: String) {
         UIDevice.current.playInputClick()
-        terminal?.sendKey(key)
-        repeatTimer?.invalidate()
-        repeatTimer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: false) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.repeatTimer = Timer.scheduledTimer(withTimeInterval: 0.07, repeats: true) { [weak self] _ in
-                    MainActor.assumeIsolated { self?.terminal?.sendKey(key) }
-                }
-            }
-        }
+        repeater.start { [weak self] in self?.terminal?.sendKey(key) }
     }
 
     private func stopRepeating() {
-        repeatTimer?.invalidate()
-        repeatTimer = nil
+        repeater.stop()
     }
 }
 

@@ -47,6 +47,22 @@ final class Preferences {
         didSet { defaults.set(appearance.rawValue, forKey: "appearance") }
     }
 
+    /// The on-screen keys above the system keyboard: a full grid, or one row.
+    enum KeyboardLayout: String, CaseIterable {
+        case full, compact
+
+        var title: String {
+            switch self {
+            case .full: "Full"
+            case .compact: "Compact"
+            }
+        }
+    }
+
+    var keyboardLayout: KeyboardLayout {
+        didSet { defaults.set(keyboardLayout.rawValue, forKey: "terminal.keyboardLayout") }
+    }
+
     @ObservationIgnored private var schemes: [String: ColorScheme] = [:]
 
     private init() {
@@ -55,6 +71,8 @@ final class Preferences {
         darkTheme = defaults.string(forKey: "terminal.darkTheme") ?? ThemeCatalog.defaultDark
         lightTheme = defaults.string(forKey: "terminal.lightTheme") ?? ThemeCatalog.defaultLight
         appearance = defaults.string(forKey: "appearance").flatMap(Appearance.init) ?? .system
+        keyboardLayout = defaults.string(forKey: "terminal.keyboardLayout").flatMap(KeyboardLayout.init)
+            ?? (UIDevice.current.userInterfaceIdiom == .pad ? .compact : .full)
     }
 
     /// The terminal colors for the appearance, read from the bundled theme file.

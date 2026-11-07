@@ -46,6 +46,9 @@ struct SettingsView: View {
                             Text("\(Int(preferences.fontSize)) pt").monospacedDigit()
                         }
                     }
+                    Picker("Keys", selection: $preferences.keyboardLayout) {
+                        ForEach(Preferences.KeyboardLayout.allCases, id: \.self) { Text($0.title).tag($0) }
+                    }
                     ThemePicker(title: "Dark Theme", selection: $preferences.darkTheme)
                     ThemePicker(title: "Light Theme", selection: $preferences.lightTheme)
                     TerminalSample(preferences: preferences)

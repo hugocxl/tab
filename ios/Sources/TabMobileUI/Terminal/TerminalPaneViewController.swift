@@ -26,6 +26,7 @@ final class TerminalPaneViewController: UIViewController {
         let dark = traitCollection.userInterfaceStyle == .dark
         terminalView = TerminalView(controller: controller, fontSize: preferences.fontSize,
                                     scheme: preferences.scheme(dark: dark), dark: dark)
+        terminalView.keyboardLayout = preferences.keyboardLayout
         terminalView.onFontSizeChange = { size in Preferences.shared.fontSize = size }
         terminalView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(terminalView)
@@ -77,6 +78,7 @@ final class TerminalPaneViewController: UIViewController {
             terminalView.apply(fontSize: appearance.0, scheme: preferences.scheme(dark: dark), dark: dark)
         }
         lastAppearance = appearance
+        terminalView.keyboardLayout = preferences.keyboardLayout
         view.backgroundColor = terminalView.backgroundColor
         server.terminalColors = terminalView.terminalColors
 

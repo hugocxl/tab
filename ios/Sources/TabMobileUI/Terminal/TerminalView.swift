@@ -19,12 +19,21 @@ final class TerminalView: UIView, UIKeyInput, TerminalDisplay {
     private var gridSize = Size(cols: 0, rows: 0)
     private var dirty = GridChanges()
     private var frameWaiting = false
-    private lazy var accessoryBar = TerminalAccessoryBar(terminal: self)
+    private var keys: (any TerminalKeysDisplay)?
     private var editMenu: UIEditMenuInteraction?
 
-    /// Modifiers latched on the accessory bar for the next key.
-    var stickyModifiers: KeyModifiers = [] {
-        didSet { accessoryBar.showModifiers(stickyModifiers) }
+    /// Which on-screen keys sit above the system keyboard.
+    var keyboardLayout: Preferences.KeyboardLayout = .compact {
+        didSet {
+            guard keyboardLayout != oldValue else { return }
+            keys = nil
+            reloadInputViews()
+        }
+    }
+
+    /// Modifiers tapped on the on-screen keys, for the next key or until unlocked.
+    private var latch = TerminalKeyLatch() {
+        didSet { if latch != oldValue { keys?.show(latch) } }
     }
 
     // Scrolling and selection.
@@ -192,7 +201,21 @@ final class TerminalView: UIView, UIKeyInput, TerminalDisplay {
 
     override var canBecomeFirstResponder: Bool { true }
 
-    override var inputAccessoryView: UIView? { accessoryBar }
+    override var inputAccessoryView: UIView? {
+        if let keys { return keys }
+        let made: any TerminalKeysDisplay = switch keyboardLayout {
+        case .full: TerminalKeyboard(terminal: self)
+        case .compact: TerminalAccessoryBar(terminal: self)
+        }
+        made.show(latch)
+        keys = made
+        return made
+    }
+
+    /// Latches or locks a modifier for the keys that follow.
+    func tap(_ modifier: KeyModifiers) {
+        latch.tap(modifier)
+    }
 
     @discardableResult
     override func becomeFirstResponder() -> Bool {
@@ -218,13 +241,15 @@ final class TerminalView: UIView, UIKeyInput, TerminalDisplay {
 
     func insertText(_ text: String) {
         typed()
-        if !stickyModifiers.isEmpty {
-            let modifiers = stickyModifiers
-            stickyModifiers = []
-            if let event = TerminalKeys.event(for: text, modifiers: modifiers) {
-                controller.send(.key(event))
-                return
-            }
+        var modifiers = latch.consume()
+        var text = text
+        if modifiers.contains(.shift) {
+            modifiers.remove(.shift)
+            text = text.uppercased()
+        }
+        if !modifiers.isEmpty, let event = TerminalKeys.event(for: text, modifiers: modifiers) {
+            controller.send(.key(event))
+            return
         }
         if text == "\n" {
             controller.send(.key(KeyEvent(key: "enter")))
@@ -243,8 +268,7 @@ final class TerminalView: UIView, UIKeyInput, TerminalDisplay {
     /// Sends a named key, with any latched modifiers.
     func sendKey(_ name: String, modifiers: KeyModifiers = []) {
         typed()
-        let all = modifiers.union(stickyModifiers)
-        stickyModifiers = []
+        let all = modifiers.union(latch.consume())
         controller.send(.key(KeyEvent(key: name, modifiers: all, optionAsAlt: all.contains(.alt))))
     }
 
