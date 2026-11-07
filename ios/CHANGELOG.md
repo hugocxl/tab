@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0 - 2026-11-07
+
+### Changed
+
+- The app icon has the desktop's new warm off-white background, with a dark
+  variant for the dark Home Screen.
+
 ## 0.2.0 - 2026-11-06
 
 ### Added
