@@ -89,6 +89,9 @@ extension SettingsModel {
                 store.updateAppearance("glass-panes") { $0.glassPanes = value }
             })
         }
+        b.row("agent-response-font", b.popUp("agent-response-font", AgentResponseFont.allCases.map { Choice(id: $0.rawValue, title: $0.title) }, selected: appearance.agentResponseFont.rawValue) { [store] value in
+            store.updateAppearance("agent-response-font") { $0.agentResponseFont = AgentResponseFont(rawValue: value) ?? .default }
+        })
         b.row("sidebar", b.toggle("sidebar", appearance.sidebarExpanded) { [store] value in
             store.updateAppearance("sidebar") { $0.sidebarExpanded = value }
         })

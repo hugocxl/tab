@@ -1,4 +1,5 @@
 import AppKit
+import TabCore
 
 /// The desktop style's geometry: one
 /// 8pt gutter, 10pt card radius, 1pt border, 36pt headers and 8pt control
@@ -47,6 +48,28 @@ public enum AppFont {
 
     public static func system(_ size: CGFloat, weight: NSFont.Weight = .regular) -> NSFont {
         .systemFont(ofSize: size, weight: weight)
+    }
+
+    /// Agent response text in `typeface`. Fonts without the weight use their nearest:
+    /// light and medium read as regular, semibold as bold.
+    public static func agentResponse(_ typeface: AgentResponseFont, _ size: CGFloat, weight: NSFont.Weight = .regular) -> NSFont {
+        let system = system(size, weight: weight)
+        let family: String
+        switch typeface {
+        case .default:
+            return system
+        case .newYork:
+            guard let descriptor = system.fontDescriptor.withDesign(.serif) else { return system }
+            return NSFont(descriptor: descriptor, size: size) ?? system
+        case .charter: family = "Charter"
+        case .iowanOldStyle: family = "Iowan Old Style"
+        case .georgia: family = "Georgia"
+        case .athelas: family = "Athelas"
+        case .palatino: family = "Palatino"
+        }
+        let bold = weight >= .semibold
+        let font = NSFontManager.shared.font(withFamily: family, traits: bold ? .boldFontMask : [], weight: bold ? 9 : 5, size: size)
+        return font ?? system
     }
 
     public static func mono(_ size: CGFloat = 12, weight: NSFont.Weight = .regular) -> NSFont {

@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.74.0 - 2026-11-07
+
+### Added
+
+- Settings → Interface → Agent response font sets agent replies in New York,
+  Charter, Iowan Old Style, Georgia, Athelas or Palatino.
+
 ## 0.73.0 - 2026-11-07
 
 ### Changed

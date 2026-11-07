@@ -45,6 +45,7 @@ final class AgentResponseView: NSView, NSTextViewDelegate {
     private var source: String?
     private var palette: ChromePalette?
     private var scheme: ColorScheme?
+    private var typeface: AgentResponseFont?
     private var sections: [AgentResponseSection] = []
     private var sectionGaps: [CGFloat] = []
     private var leadingBlockMargin: CGFloat = 0
@@ -98,12 +99,13 @@ final class AgentResponseView: NSView, NSTextViewDelegate {
     var sectionMeasurementCount: Int { retiredMeasurementCount + sections.reduce(0) { $0 + $1.measurementCount } }
 
     func setContent(_ source: String, theme: AppTheme) {
-        let themeChanged = palette != theme.palette || scheme != theme.scheme
+        let themeChanged = palette != theme.palette || scheme != theme.scheme || typeface != theme.interface.agentResponseFont
         guard self.source != source || themeChanged || renderedCardHosts != cardHosts else { return }
         self.source = source
         preparedBlocks = nil
         palette = theme.palette
         scheme = theme.scheme
+        typeface = theme.interface.agentResponseFont
         var blocks = AgentResponseParser.parse(source, parseRawHTML: parseRawHTML)
         completedStreamingTail = false
         if isStreaming {
@@ -116,11 +118,12 @@ final class AgentResponseView: NSView, NSTextViewDelegate {
     }
 
     func setPreparedContent(_ blocks: [AgentMarkdown.Block], theme: AppTheme) {
-        guard preparedBlocks != blocks || palette != theme.palette || scheme != theme.scheme || source == nil || renderedCardHosts != cardHosts else { return }
+        guard preparedBlocks != blocks || palette != theme.palette || scheme != theme.scheme || typeface != theme.interface.agentResponseFont || source == nil || renderedCardHosts != cardHosts else { return }
         preparedBlocks = blocks
         source = ""
         palette = theme.palette
         scheme = theme.scheme
+        typeface = theme.interface.agentResponseFont
         applyBlocks(blocks, references: inheritedReferences, theme: theme)
     }
 
@@ -513,6 +516,7 @@ class AgentResponseSection: NSView {
     private var part: AgentResponsePart?
     private var palette: ChromePalette?
     private var scheme: ColorScheme?
+    private var typeface: AgentResponseFont?
     private var measurementWidth: CGFloat?
     private var measurementHeight: CGFloat = 0
     private var childLayoutDirty = true
@@ -522,7 +526,7 @@ class AgentResponseSection: NSView {
     var kind: Int { -1 }
 
     final func apply(_ part: AgentResponsePart, theme: AppTheme, delegate: NSTextViewDelegate, references: [String: String] = [:], compactProse: Bool = false, lineBreaks: Bool = false, rawHTML: Bool = false) {
-        guard self.part != part || palette != theme.palette || scheme != theme.scheme || self.references != references || self.compactProse != compactProse || self.lineBreaks != lineBreaks || self.rawHTML != rawHTML else { return }
+        guard self.part != part || palette != theme.palette || scheme != theme.scheme || typeface != theme.interface.agentResponseFont || self.references != references || self.compactProse != compactProse || self.lineBreaks != lineBreaks || self.rawHTML != rawHTML else { return }
         self.lineBreaks = lineBreaks
         self.rawHTML = rawHTML
         self.compactProse = compactProse
@@ -530,6 +534,7 @@ class AgentResponseSection: NSView {
         self.part = part
         palette = theme.palette
         scheme = theme.scheme
+        typeface = theme.interface.agentResponseFont
         updateCount += 1
         invalidateMeasurement()
         update(part, theme: theme, delegate: delegate)
