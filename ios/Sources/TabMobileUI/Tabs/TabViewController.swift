@@ -127,7 +127,7 @@ final class TabViewController: UIViewController {
             panes[id] = nil
         }
         for pane in tab.panes {
-            if let existing = panes[pane.id], matches(existing, pane.content) { continue }
+            if let existing = panes[pane.id], matches(existing, pane) { continue }
             if let stale = panes[pane.id] {
                 stale.willMove(toParent: nil)
                 stale.view.removeFromSuperview()
@@ -145,11 +145,12 @@ final class TabViewController: UIViewController {
         server.pruneControllers()
     }
 
-    private func matches(_ controller: UIViewController, _ content: PaneContent) -> Bool {
-        switch content {
+    private func matches(_ controller: UIViewController, _ pane: Pane) -> Bool {
+        switch pane.content {
         case .terminal(let session?): (controller as? TerminalPaneViewController)?.controller.session == session
         case .terminal(nil): controller is StartingPaneViewController
         case .agent(let session, _): (controller as? AgentPaneViewController)?.controller.session == session
+        case .simulator: (controller as? SimulatorPaneViewController)?.controller.pane == pane.id
         default: controller is UnsupportedPaneViewController
         }
     }
@@ -162,6 +163,8 @@ final class TabViewController: UIViewController {
             return StartingPaneViewController()
         case .agent(let session, let provider):
             return AgentPaneViewController(controller: server.agent(session, project: project, provider: provider))
+        case .simulator(let choice):
+            return SimulatorPaneViewController(controller: server.simulator(pane.id, choice: choice), server: server)
         default:
             return UnsupportedPaneViewController(title: pane.content.defaultTitle)
         }
@@ -192,14 +195,20 @@ final class TabViewController: UIViewController {
 
         updateSwitcher(isCompact && summaries.count > 1 ? summaries : [])
 
-        let add = UIBarButtonItem(image: UIImage(systemName: "plus"), menu: UIMenu(title: "New Pane", children: [
+        var kinds: [UIMenuElement] = [
             UIAction(title: "Terminal", image: UIImage(systemName: "apple.terminal")) { [weak self] _ in
                 self?.addPane(.terminal, project: project)
             },
             UIAction(title: "Agent", image: UIImage(systemName: "sparkles")) { [weak self] _ in
                 self?.addPane(.agent(.claude), project: project)
             },
-        ]))
+        ]
+        if server.sharesSimulators {
+            kinds.append(UIAction(title: "Simulator", image: UIImage(systemName: "iphone")) { [weak self] _ in
+                self?.addPane(.simulator, project: project)
+            })
+        }
+        let add = UIBarButtonItem(image: UIImage(systemName: "plus"), menu: UIMenu(title: "New Pane", children: kinds))
         add.accessibilityLabel = "New Pane"
         var more: [UIMenuElement] = []
         if let focused, tab.panes.count > 1 {
@@ -251,6 +260,7 @@ final class TabViewController: UIViewController {
         switch kind {
         case .terminal: "apple.terminal"
         case .agent: "sparkles"
+        case .simulator: "iphone"
         case .other: "macwindow"
         }
     }
@@ -368,7 +378,7 @@ final class StartingPaneViewController: UIViewController {
     }
 }
 
-/// Browser, simulator, editor and diff panes live on the Mac.
+/// Browser, editor and diff panes live on the Mac.
 final class UnsupportedPaneViewController: UIViewController {
     private let paneTitle: String
 

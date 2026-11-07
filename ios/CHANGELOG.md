@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.9.0 - 2026-11-07
+
+### Added
+
+- Simulator tabs and panes show an iOS simulator or Android emulator running
+  on the Mac, live, to tap, swipe and type into with the phone's keyboard or a
+  hardware keyboard.
+- A simulator pane lists the Mac's simulators to choose from, starts one that
+  is shut down, and offers Home, Back, rotation, dark appearance, pasting text
+  and a screenshot to share.
+- Simulator panes opened on the Mac now show here instead of a placeholder.
+
 ## 0.8.0 - 2026-11-07
 
 ### Changed

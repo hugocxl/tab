@@ -65,6 +65,9 @@ public final class ServerModel: Identifiable {
     @ObservationIgnored private var tabsDirty = false
     @ObservationIgnored private var active = false
     @ObservationIgnored private var terminals: [SessionId: TerminalController] = [:]
+    @ObservationIgnored private var simulators: [PaneId: SimulatorController] = [:]
+    @ObservationIgnored private var listingSimulators = false
+    @ObservationIgnored private var simulatorsDirty = false
     // Observed, so cards that read a pane's chosen agent follow it from the moment the pane opens.
     private var agents: [SessionId: AgentChatController] = [:]
     @ObservationIgnored private var gitRead: [ProjectId: Date] = [:]
@@ -102,6 +105,7 @@ public final class ServerModel: Identifiable {
         client?.close()
         client = nil
         for terminal in terminals.values { terminal.connectionLost() }
+        for simulator in simulators.values { simulator.connectionLost() }
     }
 
     /// Connects now instead of waiting out the backoff.
@@ -189,6 +193,7 @@ public final class ServerModel: Identifiable {
         sendIntents()
         for terminal in terminals.values { terminal.connectionRestored(client) }
         for agent in agents.values { agent.connectionRestored(client) }
+        for simulator in simulators.values { simulator.refresh() }
     }
 
     private func handle(_ event: ClientEvent, attempt: Int) {
@@ -198,6 +203,7 @@ public final class ServerModel: Identifiable {
             case .tabs: refreshTabs()
             case .catalog: Task { try? await readCatalog() }
             case .activity: Task { try? await readActivity() }
+            case .simulators: listSimulators()
             default: break
             }
         case .agentChatChanged(let session, let revision):
@@ -215,6 +221,7 @@ public final class ServerModel: Identifiable {
             guard attempt == generation else { return }
             client = nil
             for terminal in terminals.values { terminal.connectionLost() }
+            for simulator in simulators.values { simulator.connectionLost() }
             if active { scheduleRetry(error.description) }
         case .gitChanged(let project):
             refreshGit(force: [project])
@@ -281,6 +288,7 @@ public final class ServerModel: Identifiable {
             _ = try? TabReducer.apply(intent.mutation, to: &next) { known.contains($0) }
         }
         board = next
+        followSimulatorPanes()
     }
 
     // MARK: Changing tabs
@@ -292,6 +300,7 @@ public final class ServerModel: Identifiable {
         try TabReducer.apply(mutation, to: &next) { known.contains($0) }
         pending.append(TabIntent(mutation: mutation))
         board = next
+        followSimulatorPanes()
         sendIntents()
     }
 
@@ -355,6 +364,11 @@ public final class ServerModel: Identifiable {
         return pane.id
     }
 
+    /// Records the simulator a simulator pane shows, on every device.
+    public func setSimulator(_ pane: PaneId, _ simulator: SimulatorPane) throws {
+        try perform(.updatePane(pane, content: .simulator(simulator)))
+    }
+
     public func closePane(_ pane: PaneId) throws {
         try perform(.removePane(pane, keepSession: false))
     }
@@ -371,6 +385,8 @@ public final class ServerModel: Identifiable {
             return pane
         case .agent(let provider):
             return Pane(content: .agent(session: SessionId(), provider: provider))
+        case .simulator:
+            return Pane(content: .simulator(SimulatorPane()))
         }
     }
 
@@ -493,6 +509,53 @@ public final class ServerModel: Identifiable {
         return controller
     }
 
+    /// The controller for a simulator pane, shared by every view of it.
+    public func simulator(_ pane: PaneId, choice: SimulatorPane) -> SimulatorController {
+        if let existing = simulators[pane] { return existing }
+        let controller = SimulatorController(pane: pane, choice: choice, server: self)
+        simulators[pane] = controller
+        controller.refresh()
+        return controller
+    }
+
+    /// Lists the server's simulators for every simulator pane: one request
+    /// at a time, and a burst of changes costs one more.
+    func listSimulators() {
+        guard let client, !simulators.isEmpty else { return }
+        guard !listingSimulators else {
+            simulatorsDirty = true
+            return
+        }
+        listingSimulators = true
+        Task {
+            defer { listingSimulators = false }
+            repeat {
+                simulatorsDirty = false
+                do {
+                    let list = try await client.listSimulators()
+                    guard self.client === client else { return }
+                    for simulator in simulators.values { simulator.listed(list) }
+                } catch {
+                    guard self.client === client else { return }
+                    for simulator in simulators.values { simulator.fail(error) }
+                }
+            } while simulatorsDirty
+        }
+    }
+
+    /// Whether the server shares its simulators: always while offline, so
+    /// the choice stays put until it says otherwise.
+    public var sharesSimulators: Bool { client?.supports(.simulators) ?? true }
+
+    /// Tells simulator panes what the tabs now say they show.
+    private func followSimulatorPanes() {
+        guard !simulators.isEmpty, let board else { return }
+        for pane in board.projects.flatMap(\.tabs).flatMap(\.panes) {
+            guard case .simulator(let choice) = pane.content else { continue }
+            simulators[pane.id]?.paneChanged(choice)
+        }
+    }
+
     /// The open controller of an agent pane, if one is shown.
     func agentController(_ session: SessionId) -> AgentChatController? { agents[session] }
 
@@ -507,6 +570,14 @@ public final class ServerModel: Identifiable {
             terminals[session] = nil
         }
         for session in agents.keys where !liveAgents.contains(session) { agents[session] = nil }
+        let liveSimulators = Set(board.projects.flatMap(\.tabs).flatMap(\.panes).filter {
+            if case .simulator = $0.content { return true }
+            return false
+        }.map(\.id))
+        for (pane, simulator) in simulators where !liveSimulators.contains(pane) {
+            simulator.close()
+            simulators[pane] = nil
+        }
     }
 }
 
@@ -514,4 +585,6 @@ public final class ServerModel: Identifiable {
 public enum MobilePaneKind: Hashable, Sendable {
     case terminal
     case agent(AgentChatProvider)
+    /// A simulator pane, which then lists the server's simulators to choose one.
+    case simulator
 }

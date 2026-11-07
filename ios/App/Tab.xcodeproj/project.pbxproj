@@ -155,6 +155,7 @@
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Tab scans the pairing code your Mac shows, and takes photos you send to agents.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Tab connects to your Mac to show its tabs, terminals and agents.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Tab saves simulator screenshots you choose to keep.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -163,7 +164,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.8.0;
+				MARKETING_VERSION = 0.9.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.hugocorta.tabios;
 				PRODUCT_NAME = Tab;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -189,6 +190,7 @@
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Tab scans the pairing code your Mac shows, and takes photos you send to agents.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Tab connects to your Mac to show its tabs, terminals and agents.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Tab saves simulator screenshots you choose to keep.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -197,7 +199,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.8.0;
+				MARKETING_VERSION = 0.9.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.hugocorta.tabios;
 				PRODUCT_NAME = Tab;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";

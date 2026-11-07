@@ -283,6 +283,11 @@ final class TabListViewController: UICollectionViewController {
                 self?.newTab(.agent(.claude), on: server)
             },
         ]
+        if server.sharesSimulators {
+            items.append(UIAction(title: "Simulator Tab", image: UIImage(systemName: "iphone")) { [weak self] _ in
+                self?.newTab(.simulator, on: server)
+            })
+        }
         let projects = server.projectsWithoutTabs
         if !projects.isEmpty {
             items.append(UIMenu(title: "Open Project", image: UIImage(systemName: "folder"), children: projects.map { project in
@@ -413,7 +418,7 @@ final class TabListViewController: UICollectionViewController {
         switch headline {
         case let .agent(provider, task): task ?? provider.displayName
         case let .shell(name, directory): [name, directory ?? ""].joined(separator: " ")
-        case .command(let text), .other(let text): text
+        case .command(let text), .simulator(let text), .other(let text): text
         case .empty: ""
         }
     }
