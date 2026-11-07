@@ -100,12 +100,6 @@ extension ServerModel {
         }.map(\.element.0)
     }
 
-    /// Projects and worktrees with no tab open, for starting one.
-    public var projectsWithoutTabs: [ProjectDescriptor] {
-        let open = Set(board?.projects.filter { $0.tabs.contains { !$0.panes.isEmpty } }.map(\.project) ?? [])
-        return projects.filter { !$0.home && !open.contains($0.id) }
-    }
-
     private func card(_ tab: Tab, in project: ProjectDescriptor, root: ProjectDescriptor) -> TabCard {
         let shown = tab.panes.first { $0.content.isTerminal || $0.content.agentSession != nil } ?? tab.panes.first
         let git = project.home ? nil : gitSummaries[project.id] ?? nil

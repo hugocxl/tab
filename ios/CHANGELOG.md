@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.11.0 - 2026-11-07
+
+### Added
+
+- New Tab opens a sheet to choose a terminal, agent or simulator, the Mac, and
+  any project or worktree to open it in, searchable like the desktop's command
+  palette.
+- In a Git project, New Tab can open the tab in a new worktree: name its branch
+  or type a pull request number like #123, choose the branch it starts from,
+  and fetch that branch from its remote first.
+- On iPad, Command-Shift-N and Command-Shift-O open New Tab for a terminal or an
+  agent, as on the Mac.
+
+### Changed
+
+- New Tab remembers the kind, agent and checkout you chose last.
+
+### Removed
+
+- The Open Project list in the New Tab menu, now that New Tab opens in any
+  project.
+
 ## 0.10.1 - 2026-11-07
 
 ### Changed

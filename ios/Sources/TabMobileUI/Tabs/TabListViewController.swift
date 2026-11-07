@@ -14,6 +14,7 @@ final class TabListViewController: UICollectionViewController {
     private let statusView = UIContentUnavailableView(configuration: .empty())
     private let settingsButton = UIBarButtonItem()
     private let filterButton = UIBarButtonItem()
+    private lazy var newTabButton = makeNewTabButton()
     /// Which tabs the filter button lets through.
     private enum Shown: CaseIterable {
         case all, agents, terminals, attention
@@ -60,8 +61,6 @@ final class TabListViewController: UICollectionViewController {
     private var shownServer: ServerId?
     /// Shows a tab in the detail column.
     var onOpen: ((ServerModel, TabCard) -> Void)?
-    /// Starts a tab in a project that has none.
-    var onOpenProject: ((ServerModel, ProjectDescriptor) -> Void)?
     var onSettings: (() -> Void)?
     var onPair: (() -> Void)?
     private(set) var selected: TabId?
@@ -177,10 +176,11 @@ final class TabListViewController: UICollectionViewController {
         filterButton.image = UIImage(systemName: filtering ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease")
         filterButton.menu = filterMenu()
         if isPhone {
-            toolbarItems = [navigationItem.searchBarPlacementBarButtonItem, .flexibleSpace(), newTabButton()]
+            toolbarItems = [navigationItem.searchBarPlacementBarButtonItem, .flexibleSpace(), newTabButton]
         } else {
-            navigationItem.rightBarButtonItems = [newTabButton(), settingsButton]
+            navigationItem.rightBarButtonItems = [newTabButton, settingsButton]
         }
+        newTabButton.isEnabled = app.servers.contains { $0.board != nil }
         for server in app.servers {
             server.isImage = { UIImage(data: $0) != nil }
         }
@@ -262,56 +262,37 @@ final class TabListViewController: UICollectionViewController {
 
     // MARK: New tabs
 
-    /// The desktop's New Tab menu, for the kinds a phone opens, and a tab in
-    /// any project that has none.
-    private func newTabButton() -> UIBarButtonItem {
-        let menu = UIMenu(title: "New Tab", children: app.servers.count > 1
-            ? app.servers.map { server in UIMenu(title: server.server.name, children: newTabItems(server)) }
-            : app.servers.first.map(newTabItems) ?? [])
-        let item = UIBarButtonItem(image: UIImage(systemName: "plus"), menu: menu)
+    /// Opens the New Tab sheet: the desktop's New in Project page as a form.
+    private func makeNewTabButton() -> UIBarButtonItem {
+        let item = UIBarButtonItem(image: UIImage(systemName: "plus"))
+        item.primaryAction = UIAction(image: UIImage(systemName: "plus")) { [weak self, weak item] _ in
+            self?.showNewTab(kind: nil, source: item)
+        }
         item.accessibilityLabel = "New Tab"
-        item.isEnabled = app.servers.contains { $0.board != nil }
         return item
     }
 
-    private func newTabItems(_ server: ServerModel) -> [UIMenuElement] {
-        var items: [UIMenuElement] = [
-            UIAction(title: "Terminal Tab", image: UIImage(systemName: "apple.terminal")) { [weak self] _ in
-                self?.newTab(.terminal, on: server)
-            },
-            UIAction(title: "Agent Tab", image: UIImage(systemName: "sparkles")) { [weak self] _ in
-                self?.newTab(.agent(.claude), on: server)
-            },
-        ]
-        if server.sharesSimulators {
-            items.append(UIAction(title: "Simulator Tab", image: UIImage(systemName: "iphone")) { [weak self] _ in
-                self?.newTab(.simulator, on: server)
-            })
+    /// The New Tab sheet, on the chosen tab's Mac and in its project, else
+    /// the first connected Mac's Home. `kind` nil opens the kind used last.
+    func showNewTab(kind: MobilePaneKind?, source: UIBarButtonItem? = nil) {
+        let current = selected.flatMap { cards[$0] }
+        guard let server = current?.server ?? app.servers.first(where: { $0.board != nil }) else { return }
+        let presenter = splitViewController ?? self
+        guard presenter.presentedViewController == nil else { return }
+        NewTabViewController.present(over: presenter, app: app, server: server, kind: kind,
+                                     location: current?.card.project.id, source: source) { [weak self] server, tab in
+            guard let card = server.cards.first(where: { $0.id == tab }) else { return }
+            self?.open(card, on: server)
         }
-        let projects = server.projectsWithoutTabs
-        if !projects.isEmpty {
-            items.append(UIMenu(title: "Open Project", image: UIImage(systemName: "folder"), children: projects.map { project in
-                UIAction(title: project.name, subtitle: ServerModel.abbreviate(project.directory),
-                         image: UIImage(systemName: project.kind == .worktree ? "arrow.triangle.branch" : "folder")) { [weak self] _ in
-                    self?.onOpenProject?(server, project)
-                }
-            }))
-        }
-        return items
     }
 
-    private func newTab(_ kind: MobilePaneKind, on server: ServerModel) {
-        guard let tab = try? server.newTab(kind, size: Size(cols: 80, rows: 24)) else { return }
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        guard let card = server.cards.first(where: { $0.id == tab }) else { return }
-        open(card, on: server)
-    }
-
-    /// A new tab on the chosen tab's Mac, else the first connected one.
+    /// A terminal or agent tab in Home at once, for ⌘T and ⌥⌘A.
     func newTab(_ kind: MobilePaneKind) {
         let current = selected.flatMap { cards[$0]?.server }
-        guard let server = current ?? app.servers.first(where: { $0.board != nil }) else { return }
-        newTab(kind, on: server)
+        guard let server = current ?? app.servers.first(where: { $0.board != nil }),
+              let tab = try? server.newTab(kind, size: Size(cols: 80, rows: 24)),
+              let card = server.cards.first(where: { $0.id == tab }) else { return }
+        open(card, on: server)
     }
 
     // MARK: Keyboard navigation

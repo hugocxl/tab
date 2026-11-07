@@ -232,7 +232,7 @@ public final class ServerModel: Identifiable {
 
     // MARK: Reading shared state
 
-    private func readCatalog() async throws {
+    func readCatalog() async throws {
         guard let client else { return }
         let page = try await client.catalog()
         home = page.home
@@ -344,9 +344,26 @@ public final class ServerModel: Identifiable {
     @discardableResult
     public func newTab(_ kind: MobilePaneKind, size: Size) throws -> TabId {
         guard let home else { throw ConnectError.failed("Not connected to \(server.name) yet.") }
-        let pane = makePane(kind, project: home, size: size)
-        let tab = Tab(pane: pane)
-        try perform(.createTab(project: home, tab: tab, after: board?.projects.first { $0.project == home }?.tabs.last?.id))
+        return try newTab(kind, in: home, size: size)
+    }
+
+    /// A new tab after `project`'s last one, showing one pane of `kind`. With
+    /// `setup`, a terminal first types it, and an agent opens beside that
+    /// terminal, as the desktop opens a new worktree.
+    @discardableResult
+    public func newTab(_ kind: MobilePaneKind, in project: ProjectId, setup: String? = nil, size: Size) throws -> TabId {
+        let after = board?.projects.first { $0.project == project }?.tabs.last?.id
+        guard let setup else {
+            let tab = Tab(pane: makePane(kind, project: project, size: size))
+            try perform(.createTab(project: project, tab: tab, after: after))
+            return tab.id
+        }
+        let terminal = makePane(.terminal, project: project, size: size, launch: TerminalLaunch(command: setup))
+        let tab = Tab(pane: terminal)
+        try perform(.createTab(project: project, tab: tab, after: after))
+        if kind != .terminal {
+            try perform(.insertPane(makePane(kind, project: project, size: size), anchor: terminal.id, edge: .right))
+        }
         return tab.id
     }
 
@@ -377,10 +394,10 @@ public final class ServerModel: Identifiable {
         try perform(.closeTab(tab, keepSessions: false))
     }
 
-    private func makePane(_ kind: MobilePaneKind, project: ProjectId, size: Size) -> Pane {
+    private func makePane(_ kind: MobilePaneKind, project: ProjectId, size: Size, launch: TerminalLaunch? = nil) -> Pane {
         switch kind {
         case .terminal:
-            let pane = Pane(content: .terminal(session: nil))
+            let pane = Pane(content: .terminal(session: nil), launch: launch)
             panesToStart[pane.id] = TerminalStart(project: project, size: size)
             return pane
         case .agent(let provider):

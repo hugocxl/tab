@@ -54,6 +54,10 @@ public final class RootViewController: UIViewController {
         var commands = [
             UIKeyCommand(title: "New Terminal Tab", action: #selector(newTerminalTab), input: "t", modifierFlags: .command),
             UIKeyCommand(title: "New Agent Tab", action: #selector(newAgentTab), input: "a", modifierFlags: [.command, .alternate]),
+            UIKeyCommand(title: "New Terminal in Project…", action: #selector(newTerminalInProject), input: "n",
+                         modifierFlags: [.command, .shift]),
+            UIKeyCommand(title: "New Agent in Project…", action: #selector(newAgentInProject), input: "o",
+                         modifierFlags: [.command, .shift]),
             UIKeyCommand(title: "Next Tab", action: #selector(nextTab), input: "]", modifierFlags: .command),
             UIKeyCommand(title: "Previous Tab", action: #selector(previousTab), input: "[", modifierFlags: .command),
             UIKeyCommand(title: "Filter Tabs", action: #selector(filterTabs), input: "f", modifierFlags: .command),
@@ -70,6 +74,8 @@ public final class RootViewController: UIViewController {
 
     @objc private func newTerminalTab() { list?.newTab(.terminal) }
     @objc private func newAgentTab() { list?.newTab(.agent(.claude)) }
+    @objc private func newTerminalInProject() { list?.showNewTab(kind: .terminal) }
+    @objc private func newAgentInProject() { list?.showNewTab(kind: .agent(.claude)) }
     @objc private func nextTab() { list?.selectAdjacentTab(1) }
     @objc private func previousTab() { list?.selectAdjacentTab(-1) }
     @objc private func filterTabs() { list?.focusFilter() }
@@ -125,7 +131,6 @@ public final class RootViewController: UIViewController {
         guard split == nil else { return }
         let list = TabListViewController(app: app)
         list.onOpen = { [weak self] server, card in self?.show(card, on: server) }
-        list.onOpenProject = { [weak self] server, project in self?.open(project, on: server) }
         list.onSettings = { [weak self] in self?.showSettings() }
         list.onPair = { [weak self] in self?.pairing.scan() }
         let split = UISplitViewController(style: .doubleColumn)
@@ -171,13 +176,6 @@ public final class RootViewController: UIViewController {
         split.setViewController(UINavigationController(rootViewController: TabViewController(server: server, tab: card.tab.id)),
                                 for: .secondary)
         split.show(.secondary)
-    }
-
-    /// A project with no tab: start a terminal in it and show it.
-    private func open(_ project: ProjectDescriptor, on server: ServerModel) {
-        guard (try? server.newPane(.terminal, project: project.id, beside: nil, size: Size(cols: 80, rows: 24))) != nil,
-              let card = server.cards.first(where: { $0.project.id == project.id }) else { return }
-        list?.open(card, on: server)
     }
 
     private func showSettings() {
