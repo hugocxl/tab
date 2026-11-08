@@ -17,8 +17,8 @@ final class TerminalPalette {
 
     init(scheme: ColorScheme, dark: Bool) {
         self.dark = dark
-        let background = scheme.background ?? RGBColor(dark ? 0x111111 : 0xFFFFFF)
-        let foreground = scheme.foreground ?? RGBColor(dark ? 0xD5CEC7 : 0x1D1D1F)
+        let background = scheme.background ?? RGBColor(dark ? 0x1A1A19 : 0xF7F6F4)
+        let foreground = scheme.foreground ?? RGBColor(dark ? 0xCECDC8 : 0x312F27)
         var table = Self.xterm
         for (index, color) in scheme.palette where index >= 0 && index < 256 { table[index] = color }
         self.background = background
@@ -27,7 +27,7 @@ final class TerminalPalette {
         cursor = Self.resolve(scheme.cursorColor, foreground: foreground, background: background) ?? foreground
         cursorText = Self.resolve(scheme.cursorText, foreground: foreground, background: background) ?? background
         selection = Self.resolve(scheme.selectionBackground, foreground: foreground, background: background)
-            ?? RGBColor(dark ? 0x3A3F55 : 0xB4D5FE)
+            ?? RGBColor(dark ? 0x53362C : 0xEDD6CD)
     }
 
     private static func resolve(_ color: CellColor?, foreground: RGBColor, background: RGBColor) -> RGBColor? {

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.15.0 - 2026-11-08
+
+### Changed
+
+- The Tab and Tab Light themes and the app's accent pair Cursor's quiet neutral
+  grays with Claude's warm terracotta and softer colors.
+
 ## 0.14.1 - 2026-11-08
 
 ### Changed

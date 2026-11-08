@@ -238,6 +238,27 @@ public indirect enum Layout<Leaf: Hashable & Sendable>: Hashable, Sendable {
         return best?.0
     }
 
+    /// The split to change, and its new ratio, so `leaf` takes `share` (0 to 1)
+    /// of the whole layout along `axis`: the innermost split of that axis
+    /// holding it. `nil` when no split of that axis holds `leaf`. The ratio is
+    /// clamped like `setRatio(at:to:)`.
+    public func resize(_ leaf: Leaf, to share: Double, along axis: Axis) -> (path: [Branch], ratio: Double)? {
+        var found: (path: [Branch], ratio: Double)?
+        func walk(_ node: Layout, _ path: [Branch], _ extent: Double) {
+            guard case let .split(splitAxis, ratio, first, second) = node else { return }
+            let inFirst = first.contains(leaf)
+            guard inFirst || second.contains(leaf) else { return }
+            if splitAxis == axis, extent > 0 {
+                let side = min(max(share / extent, 0), 1)
+                found = (path, min(max(inFirst ? side : 1 - side, Self.minimumRatio), Self.maximumRatio))
+            }
+            let sideExtent = splitAxis == axis ? extent * (inFirst ? ratio : 1 - ratio) : extent
+            walk(inFirst ? first : second, path + [inFirst ? .first : .second], sideExtent)
+        }
+        walk(self, [], 1)
+        return found
+    }
+
     /// The layout after dropping `leaf` on `target`: on its `edge`, or in its
     /// place (swapping) without one. `nil` for a drop on itself or outside.
     public func moved(_ leaf: Leaf, onto target: Leaf, edge: Direction?) -> Layout? {
