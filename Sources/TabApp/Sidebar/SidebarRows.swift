@@ -59,134 +59,147 @@ final class HintBadge: ThemedView {
     }
 }
 
-/// A sidebar card: a Home terminal, a project's own checkout or a worktree.
-/// The first line is what runs there; the second its name, branch, PRIMARY
-/// badge, pull request and activity.
+/// A sidebar card: a Home tab, a project's own checkout or a worktree.
+/// Stacked: the project (in the Open Tabs layout), the title, the folder or
+/// branch with its pull request, then every pane and what it is doing when
+/// there are several.
 final class SidebarCardView: HoverView {
     let data: ActivityCardData
     var onClick: (() -> Void)?
+    /// Focuses a pane clicked in the card's list.
+    var onPaneClick: ((PaneId) -> Void)?
     var menuProvider: (() -> NSMenu?)?
-    /// Shows a check button in place of the status while hovered.
+    /// Shows a check button at the end of the title row while hovered.
     var onClose: (() -> Void)? {
         didSet { updateCloseButton() }
     }
 
-    private let lead: NSView
-    private let headline: NSTextField
-    private let shellLabel: NSTextField?
-    private let nameLabel = makeLabel("", font: AppFont.footnote)
-    private let branchLabel = makeLabel("", font: AppFont.footnote)
-    private let baseLabel = makeLabel("", font: AppFont.footnote)
-    private let aheadLabel = makeLabel("", font: AppFont.footnote)
-    private let primaryBadge = PrimaryBadge()
-    private let prLabel = makeLabel("", font: AppFont.footnote)
-    private let dot = ActivityGlyph()
-    private let elapsedLabel = makeLabel("", font: .monospacedDigitSystemFont(ofSize: 11, weight: .regular))
+    private let hintBadge: HintBadge?
+    private let titleLabel: NSTextField
+    /// A card's only pane shows as its title, drawn like a pane row.
+    private let titleRow: PaneRowView?
+    private let locationIcon = NSImageView()
+    private let locationLabel = makeLabel("", font: AppFont.small)
+    /// The location row's parts, colored when the theme changes.
+    private let location: [(text: String, tone: LocationTone)]
+    private enum LocationTone { case name, detail, link }
+    private let paneRows: [PaneRowView]
     private var elapsedTimer: Timer?
-    private let glass = GlassView(style: .card)
     private let closeButton = ChromeButton(.check, label: "Close Tab", side: 18, glyph: 11)
-    private let separator = CALayer()
-    /// The gap to the next card, when a hairline divides them: centered in
-    /// the gap, inset like the text. Nil when the next row isn't a card, or
-    /// either card is selected.
-    var separatorGap: CGFloat? {
-        didSet {
-            guard oldValue != separatorGap else { return }
-            separator.isHidden = separatorGap == nil
-            needsLayout = true
-        }
-    }
+    /// The hairlines above and below, which hide while this card is filled.
+    var dividers: [CardDivider] = []
+    /// Whether the card is filled: selected, or hovered.
+    var isHighlighted: Bool { data.selected || (isHovered && !data.unavailable) }
 
-    /// The project row the Open Tabs layout adds above the headline.
+    /// The project row the Open Tabs layout puts at the bottom.
     struct Header {
         var title: String
         var icon: NSImage?
     }
 
-    /// 1pt border, 6pt padding, the 18pt headline, a 3pt gap and the 13pt
-    /// second line.
-    static let height: CGFloat = 48
-    /// The project row's 14pt line and the 4pt gap above it, below the second line.
-    static let headerHeight: CGFloat = 18
+    /// Every leading icon's box: the panes' statuses and kinds, the
+    /// location's and the project's icons.
+    static let iconSide: CGFloat = 14
+    /// Where text after a leading icon starts, and the panes' second column.
+    static let textInset: CGFloat = iconSide + 8
+
+    private enum Line {
+        static let padding: CGFloat = Metrics.border + 8
+        static let title: CGFloat = 20
+        /// Between the title, the panes and the footer.
+        static let sectionGap: CGFloat = 5
+        /// A pane row, and a footer row: the location and the project.
+        static let row: CGFloat = PaneRowView.height
+    }
+
+    /// Lets a title label wrap to `maxTitleLines`, ending in an ellipsis.
+    static func wrap(_ label: NSTextField) {
+        label.lineBreakMode = .byWordWrapping
+        label.usesSingleLineMode = false
+        label.maximumNumberOfLines = maxTitleLines
+        label.cell?.wraps = true
+        label.cell?.truncatesLastVisibleLine = true
+    }
+
+    /// A title wraps to at most this many lines.
+    static let maxTitleLines = 2
+    static var titleLineHeight: CGFloat {
+        let font = AppFont.body
+        return ceil(font.ascender - font.descender + font.leading)
+    }
+
+    /// How many lines `title` takes in `width`, up to `maxTitleLines`.
+    static func titleLines(_ title: String, width: CGFloat) -> Int {
+        guard width > 0 else { return 1 }
+        let height = NSAttributedString(string: title, attributes: [.font: AppFont.body])
+            .boundingRect(with: NSSize(width: width, height: .greatestFiniteMagnitude), options: [.usesLineFragmentOrigin]).height
+        return min(max(Int((height / titleLineHeight).rounded(.up)), 1), maxTitleLines)
+    }
+
+    /// The card's height for its sections: the padding, the title's lines,
+    /// one row per listed pane, then the footer's location and project rows.
+    static func height(header: Bool, location: Bool, panes: Int, titleLines: Int = 1) -> CGFloat {
+        var height = Line.padding * 2 + Line.title + CGFloat(titleLines - 1) * titleLineHeight
+        if panes > 0 { height += Line.sectionGap + CGFloat(panes) * Line.row }
+        let footer = (location ? 1 : 0) + (header ? 1 : 0)
+        // Without panes the footer follows the title directly.
+        if footer > 0 { height += (panes > 0 ? Line.sectionGap : 0) + CGFloat(footer) * Line.row }
+        return height
+    }
 
     private let headerIcon: NSImageView?
     private let headerLabel: NSTextField?
+    /// Whether the location row has anything to say: a folder or name the
+    /// project row doesn't already show, a branch or a pull request.
+    private let showsLocation: Bool
 
     init(data: ActivityCardData, hint: String?, header: Header? = nil) {
         self.data = data
         if let header {
-            let icon = NSImageView(image: header.icon ?? AppIcon.folder.image(size: 12) ?? NSImage())
+            let icon = NSImageView(image: header.icon ?? AppIcon.pierreFolder.colorImage(size: Self.iconSide, theme: .shared) ?? NSImage())
             icon.imageScaling = .scaleProportionallyUpOrDown
             icon.wantsLayer = true
             icon.layer?.cornerRadius = 3
             icon.layer?.masksToBounds = true
             headerIcon = icon
-            headerLabel = makeLabel(header.title, font: AppFont.footnoteMedium)
+            headerLabel = makeLabel(header.title, font: AppFont.small)
         } else {
             headerIcon = nil
             headerLabel = nil
         }
-        var shell: NSTextField?
-        let text: String
-        let weight: NSFont.Weight
-        let icon: AppIcon
-        var logo: AgentProvider?
-        switch data.headline {
-        case .command(let command):
-            (text, weight, icon) = (command, .semibold, .terminal)
-        case .editor(let file):
-            (text, weight, icon) = (file, .semibold, .file)
-        case .diff(let file):
-            (text, weight, icon) = (file, .semibold, .gitBranch)
-        case .browser(let page):
-            (text, weight, icon) = (page, .semibold, .globe)
-        case .simulator(let name):
-            (text, weight, icon) = (name, .semibold, .phone)
-        case let .agent(provider, task):
-            (text, weight, icon) = (task ?? provider.displayName, task == nil ? .regular : .medium, .terminal)
-            logo = provider
-        case let .shell(name, directory):
-            shell = makeLabel(name, font: AppFont.system(13))
-            (text, weight, icon) = (directory ?? "", .regular, .terminal)
-        case .empty:
-            (text, weight, icon) = ("No terminal", .regular, .terminal)
+        hintBadge = hint.map { HintBadge($0) }
+        titleLabel = makeLabel(data.title, font: AppFont.body)
+        // A lone pane is what the title and status already describe.
+        paneRows = data.panes.count > 1 ? data.panes.map { PaneRowView(row: $0) } : []
+        // A lone pane's folder is left to the location row when it names it.
+        titleRow = data.panes.count == 1 ? data.panes.first.map {
+            PaneRowView(row: $0, title: data.title, detail: $0.detail != data.name)
+        } : nil
+        // Skip a name the title or the project row already shows.
+        let name = data.name.flatMap { $0 == header?.title || $0 == data.title ? nil : $0 }
+        showsLocation = name != nil || data.branch != nil || data.pullRequest != nil
+        var locationParts: [(text: String, tone: LocationTone)] = []
+        if let name { locationParts.append((name, .name)) }
+        if let branch = data.branch { locationParts.append((branch, .name)) }
+        if let base = data.base {
+            let ahead = data.baseAhead.flatMap { $0 > 0 ? " ↑\($0)" : nil } ?? ""
+            locationParts.append(("← \(base)\(ahead)", .detail))
         }
-        headline = makeLabel(text, font: AppFont.system(13, weight: weight))
-        shellLabel = shell
-        if let hint {
-            lead = HintBadge(hint)
-        } else if let logo, let image = AgentLogo.image(for: logo, lightBackground: AppTheme.shared.palette.isLight) {
-            let view = NSImageView(image: image)
-            view.imageScaling = .scaleProportionallyUpOrDown
-            lead = view
-        } else {
-            let fileName: String?
-            switch data.headline {
-            case .editor(let file), .diff(let file): fileName = file
-            default: fileName = nil
-            }
-            lead = HeadlineChip(icon: icon, tone: Self.tone(data.headline), fileName: fileName)
-        }
+        if data.primary { locationParts.append(("primary", .detail)) }
+        if let pullRequest = data.pullRequest { locationParts.append(("#\(pullRequest)", .link)) }
+        location = locationParts
         super.init(frame: .zero)
         wantsLayer = true
         layer?.cornerRadius = 8
         layer?.cornerCurve = .continuous
         layer?.borderWidth = 1
-        addSubview(glass)
-        separator.isHidden = true
-        separator.actions = ["position": NSNull(), "bounds": NSNull(), "hidden": NSNull()]
-        layer?.addSublayer(separator)
-        nameLabel.stringValue = data.name
-        branchLabel.stringValue = data.branch ?? ""
-        baseLabel.stringValue = data.base.map { "← \($0)" } ?? ""
-        aheadLabel.stringValue = (data.baseAhead ?? 0) > 0 ? "↑\(data.baseAhead ?? 0)" : ""
-        prLabel.stringValue = data.pullRequest.map { "#\($0)" } ?? ""
-        for view in [lead, headline, nameLabel, branchLabel, baseLabel, aheadLabel, primaryBadge, prLabel, elapsedLabel, dot] as [NSView] {
-            view.translatesAutoresizingMaskIntoConstraints = true
-            addSubview(view)
-        }
-        if let shell { shell.translatesAutoresizingMaskIntoConstraints = true; addSubview(shell) }
-        for view in [headerIcon, headerLabel].compactMap({ $0 }) as [NSView] {
+        locationIcon.imageScaling = .scaleProportionallyUpOrDown
+        locationIcon.isHidden = !showsLocation
+        locationLabel.isHidden = !showsLocation
+        titleLabel.isHidden = titleRow != nil
+        Self.wrap(titleLabel)
+        let views: [NSView?] = [headerIcon, headerLabel, hintBadge, titleLabel, titleRow, locationIcon, locationLabel]
+        for view in views.compactMap({ $0 }) + paneRows {
             view.translatesAutoresizingMaskIntoConstraints = true
             addSubview(view)
         }
@@ -194,19 +207,12 @@ final class SidebarCardView: HoverView {
         closeButton.isHidden = true
         closeButton.onPress = { [weak self] _ in self?.onClose?() }
         addSubview(closeButton)
-        primaryBadge.isHidden = !data.primary
-        branchLabel.isHidden = data.branch == nil
-        baseLabel.isHidden = data.base == nil
-        aheadLabel.isHidden = aheadLabel.stringValue.isEmpty
         toolTip = Self.baseDescription(data)
-        prLabel.isHidden = data.pullRequest == nil
-        elapsedLabel.isHidden = data.workingSince == nil
-        dot.isHidden = data.status == .idle
         alphaValue = data.unavailable || data.offline ? 0.5 : 1
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
-        let parts = [headerLabel?.stringValue, shell?.stringValue, text, data.name, data.branch, data.primary ? "primary" : nil,
-                     data.pullRequest.map { "pull request \($0)" }, data.offline ? "not connected" : nil]
+        let parts = [headerLabel?.stringValue, titleLabel.stringValue, data.name, data.branch, data.primary ? "primary" : nil,
+                     data.pullRequest.map { "pull request \($0)" }, data.offline ? "not connected" : nil] + data.panes.map(\.title)
         setAccessibilityLabel(parts.compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", "))
     }
 
@@ -215,7 +221,7 @@ final class SidebarCardView: HoverView {
     /// "Branch wt-5c85, started from release · 3 commits ahead, 1 behind".
     private static func baseDescription(_ data: ActivityCardData) -> String? {
         guard let base = data.base else { return nil }
-        var text = "Branch \(data.branch ?? data.name), started from \(base)"
+        var text = "Branch \(data.branch ?? data.name ?? ""), started from \(base)"
         if let ahead = data.baseAhead, let behind = data.baseBehind {
             func count(_ n: UInt64) -> String { n == 1 ? "1 commit" : "\(n) commits" }
             text += " · \(count(ahead)) ahead, \(behind) behind"
@@ -223,42 +229,47 @@ final class SidebarCardView: HoverView {
         return text
     }
 
-    private static func tone(_ headline: ActivityCardData.Headline) -> HeadlineChip.Tone {
-        switch headline {
-        case .shell: return .shell
-        case .empty: return .dim
-        default: return .normal
-        }
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric,
+               height: Self.height(header: headerLabel != nil, location: showsLocation, panes: paneRows.count, titleLines: titleLines))
     }
 
-    override var intrinsicContentSize: NSSize {
-        NSSize(width: NSView.noIntrinsicMetric, height: Self.height + (headerLabel == nil ? 0 : Self.headerHeight))
+    /// The title's lines at the card's current width.
+    private var titleLines: Int {
+        var width = bounds.width - 2 * (Metrics.border + 10)
+        if hintBadge != nil { width -= 18 + 6 }
+        if titleRow != nil { width -= SidebarCardView.textInset * 2 }
+        return Self.titleLines(data.title, width: width)
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        let widthChanged = newSize.width != frame.width
+        super.setFrameSize(newSize)
+        // The title wraps by width, so the height follows it.
+        if widthChanged { invalidateIntrinsicContentSize() }
     }
     override var mouseDownCanMoveWindow: Bool { false }
 
     override func themeDidChange() {
-        glass.appearance = theme.nsAppearance
-        switch data.headline {
-        case .agent(_, nil), .empty: headline.textColor = data.headline == .empty ? theme.fgDim : theme.fgMuted
-        case .shell: headline.textColor = theme.fgDim
-        default: headline.textColor = theme.fg
-        }
-        shellLabel?.textColor = theme.fgMuted
-        headerLabel?.textColor = theme.fgDim
+        headerLabel?.textColor = theme.fgMuted
+        titleLabel.textColor = theme.fg
         if headerIcon?.image?.isTemplate ?? false { headerIcon?.contentTintColor = theme.fgDim }
-        nameLabel.textColor = theme.fgMuted
-        branchLabel.textColor = theme.fgDim
-        baseLabel.textColor = theme.fgDim
-        aheadLabel.textColor = theme.fgMuted
-        prLabel.textColor = theme.accent
-        elapsedLabel.textColor = theme.accent
-        switch data.status {
-        case .attention: dot.style = .dot(theme.accent, diameter: 8)
-        case .error: dot.style = .dot(theme.danger, diameter: 8)
-        case .paused: dot.style = .dot(theme.warning, diameter: 8)
-        case .working: dot.style = .dots(theme.accent)
-        case .idle: dot.style = .none
+        // A branch, else the Home tab's folder.
+        let icon: AppIcon = data.branch != nil || data.base != nil || data.primary ? .pierreGit : .pierreFolder
+        locationIcon.image = icon.colorImage(size: Self.iconSide, theme: theme)
+        let text = NSMutableAttributedString()
+        for (index, part) in location.enumerated() {
+            if index > 0 { text.append(NSAttributedString(string: " · ", attributes: [.font: AppFont.small, .foregroundColor: theme.fgDim])) }
+            let color: NSColor
+            switch part.tone {
+            case .name: color = theme.fgMuted
+            case .detail: color = theme.fgDim
+            case .link: color = theme.accent
+            }
+            text.append(NSAttributedString(string: part.text, attributes: [.font: AppFont.small, .foregroundColor: color]))
         }
+        locationLabel.attributedStringValue = text
+        locationLabel.lineBreakMode = .byTruncatingTail
         needsDisplay = true
     }
 
@@ -267,19 +278,22 @@ final class SidebarCardView: HoverView {
         updateElapsed()
     }
 
-    /// Shows the turn's running time and schedules one timer for the moment
-    /// the text next changes, only while the card is on screen.
+    /// Shows each working pane's running time and schedules one timer for
+    /// the moment the next text changes, only while the card is on screen.
     private func updateElapsed() {
         elapsedTimer?.invalidate()
         elapsedTimer = nil
-        guard let since = data.workingSince, window != nil else { return }
-        let elapsed = Date().timeIntervalSince(since)
-        let text = ActivityCardData.elapsedText(elapsed)
-        if elapsedLabel.stringValue != text {
-            elapsedLabel.stringValue = text
-            needsLayout = true
+        guard window != nil else { return }
+        let now = Date()
+        var next: TimeInterval?
+        for row in paneRows + [titleRow].compactMap({ $0 }) {
+            guard let since = row.row.workingSince else { continue }
+            let elapsed = now.timeIntervalSince(since)
+            row.elapsed = ActivityCardData.elapsedText(elapsed)
+            next = min(next ?? .infinity, ActivityCardData.secondsUntilElapsedChanges(elapsed))
         }
-        let timer = Timer(timeInterval: ActivityCardData.secondsUntilElapsedChanges(elapsed) + 0.01, repeats: false) { [weak self] _ in
+        guard let next else { return }
+        let timer = Timer(timeInterval: next + 0.01, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated { self?.updateElapsed() }
         }
         timer.tolerance = 0.1
@@ -290,101 +304,84 @@ final class SidebarCardView: HoverView {
     override var wantsUpdateLayer: Bool { true }
 
     override func updateLayer() {
-        glass.isHidden = !data.selected
         let hovered = !data.selected && isHovered && !data.unavailable
-        layer?.backgroundColor = (data.selected ? theme.surface : hovered ? theme.hover : .clear).cgColor
+        // Cards look the same whether the interface is glass or classic.
+        layer?.backgroundColor = (data.selected ? theme.sidebarSelection : hovered ? theme.hover : .clear).cgColor
         layer?.borderColor = (data.selected ? theme.fg(alpha: 0.08) : .clear).cgColor
-        separator.backgroundColor = theme.separator.cgColor
     }
 
     override func hoverDidChange() {
         needsDisplay = true
         updateCloseButton()
+        dividers.forEach { $0.refresh() }
     }
 
     private func updateCloseButton() {
         let shown = isHovered && onClose != nil && !data.unavailable
         guard closeButton.isHidden == shown else { return }
         closeButton.isHidden = !shown
-        dot.isHidden = shown || data.status == .idle
         needsLayout = true
     }
 
     override func layout() {
         super.layout()
-        glass.frame = bounds
-        let inset = Metrics.border + 10
-        let top = Metrics.border + 6
-        let left = inset
-        let right = bounds.width - inset
-        if let separatorGap {
-            let scale = window?.backingScaleFactor ?? 2
-            let height = 1 / scale
-            let y = ((bounds.maxY + separatorGap / 2 - height / 2) * scale).rounded() / scale
-            separator.frame = CGRect(x: left, y: y, width: max(right - left, 0), height: height)
+        let left = Metrics.border + 10
+        let right = bounds.width - left
+        var top = Line.padding
+        var x = left
+        let center = top + Line.title / 2
+        let lines = titleLines
+        let titleBlock = Line.title + CGFloat(lines - 1) * Self.titleLineHeight
+        if let hintBadge {
+            hintBadge.frame = CGRect(x: x, y: center - 9, width: 18, height: 18)
+            x += 18 + 6
+        }
+        closeButton.frame = CGRect(x: right - 15, y: center - 9, width: 18, height: 18)
+        let titleRight = closeButton.isHidden ? right : right - 18 - 6
+        let titleHeight = CGFloat(lines) * Self.titleLineHeight
+        titleLabel.frame = CGRect(x: x, y: (center - Self.titleLineHeight / 2).rounded(), width: max(titleRight - x, 0), height: titleHeight)
+        titleRow?.frame = CGRect(x: x, y: top, width: max(titleRight - x, 0), height: titleBlock)
+        top += titleBlock
+        if !paneRows.isEmpty { top += Line.sectionGap }
+        for row in paneRows {
+            row.frame = CGRect(x: left, y: top, width: max(right - left, 0), height: Line.row)
+            top += Line.row
+        }
+        if !paneRows.isEmpty, showsLocation || headerLabel != nil { top += Line.sectionGap }
+        if showsLocation {
+            layoutFooterRow(icon: locationIcon, label: locationLabel, top: top, left: left, right: right)
+            top += Line.row
         }
         if let headerIcon, let headerLabel {
-            let headerTop = top + 18 + 3 + 13 + 4
-            headerIcon.frame = CGRect(x: left + 2, y: headerTop, width: 14, height: 14)
-            let height = headerLabel.intrinsicContentSize.height
-            headerLabel.frame = CGRect(x: left + 24, y: (headerTop + 7 - height / 2).rounded(), width: max(right - left - 24, 0), height: height)
+            layoutFooterRow(icon: headerIcon, label: headerLabel, top: top, left: left, right: right)
         }
-        let leadFrame = CGRect(x: left, y: top, width: 18, height: 18)
-        lead.frame = lead is NSImageView ? leadFrame.insetBy(dx: 2, dy: 2) : leadFrame
-        var x = left + 18 + 6
-        let headlineHeight = headline.intrinsicContentSize.height
-        let line1Y = (top + 9 - headlineHeight / 2).rounded()
-        if let shellLabel {
-            let width = min(shellLabel.textWidth, right - x)
-            shellLabel.frame = CGRect(x: x, y: line1Y, width: width, height: headlineHeight)
-            x += width + 6
-        }
-        headline.frame = CGRect(x: x, y: line1Y, width: max(right - x, 0), height: headlineHeight)
-        let line2Center: CGFloat = top + 18 + 3 + 6.5
-        let smallHeight = nameLabel.intrinsicContentSize.height
-        let y2 = (line2Center - smallHeight / 2).rounded()
-        dot.frame = CGRect(x: right - 12, y: line2Center - 6, width: 12, height: 12)
-        closeButton.frame = CGRect(x: right - 15, y: line2Center - 9, width: 18, height: 18)
-        let closing = !closeButton.isHidden
-        var trailing = closing ? right - 18 - 4 : dot.isHidden ? right : right - 12 - 6
-        if !elapsedLabel.isHidden {
-            // The dots glyph is narrower than its 12pt box, so hug it.
-            let width = elapsedLabel.textWidth
-            let labelTrailing = closing || dot.isHidden ? trailing : right - 12 - 1
-            elapsedLabel.frame = CGRect(x: labelTrailing - width, y: y2, width: width, height: smallHeight)
-            trailing = labelTrailing - width - 6
-        }
-        if !prLabel.isHidden {
-            let width = prLabel.textWidth
-            prLabel.frame = CGRect(x: trailing - width, y: y2, width: width, height: smallHeight)
-            trailing -= width + 6
-        }
-        var cursor = left
-        let nameWidth = min(nameLabel.textWidth, max(trailing - cursor, 0))
-        nameLabel.frame = CGRect(x: cursor, y: y2, width: nameWidth, height: smallHeight)
-        cursor += nameWidth + 6
-        if !branchLabel.isHidden {
-            let reserve = data.primary ? primaryBadge.intrinsicContentSize.width + 6 : 0
-            let width = max(min(branchLabel.textWidth, trailing - cursor - reserve), 0)
-            branchLabel.frame = CGRect(x: cursor, y: y2, width: width, height: smallHeight)
-            cursor += width + 6
-        }
-        for label in [baseLabel, aheadLabel] where !label.isHidden {
-            let width = max(min(label.textWidth, trailing - cursor), 0)
-            label.frame = CGRect(x: cursor, y: y2, width: width, height: smallHeight)
-            cursor += width + 6
-        }
-        if data.primary {
-            let size = primaryBadge.intrinsicContentSize
-            primaryBadge.frame = CGRect(x: cursor, y: (line2Center - size.height / 2).rounded(), width: size.width, height: size.height)
-        }
+    }
+
+    /// The box of a leading icon centered on a line.
+    static func iconBox(x: CGFloat, centerY: CGFloat) -> CGRect {
+        CGRect(x: x, y: (centerY - iconSide / 2).rounded(), width: iconSide, height: iconSide)
+    }
+
+    /// A footer row, the location or the project: its icon in the first
+    /// column, its text in the second.
+    private func layoutFooterRow(icon: NSView, label: NSTextField, top: CGFloat, left: CGFloat, right: CGFloat) {
+        let center = top + Line.row / 2
+        icon.frame = Self.iconBox(x: left, centerY: center)
+        let height = label.intrinsicContentSize.height
+        let x = left + Self.textInset
+        label.frame = CGRect(x: x, y: (center - height / 2).rounded(), width: max(right - x, 0), height: height)
     }
 
     override func mouseDown(with event: NSEvent) {}
 
     override func mouseUp(with event: NSEvent) {
-        guard !data.unavailable, bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
-        onClick?()
+        let point = convert(event.locationInWindow, from: nil)
+        guard !data.unavailable, bounds.contains(point) else { return }
+        if let row = paneRows.first(where: { $0.frame.contains(point) }), let onPaneClick {
+            onPaneClick(row.row.id)
+        } else {
+            onClick?()
+        }
     }
 
     override func menu(for event: NSEvent) -> NSMenu? { menuProvider?() }
@@ -395,69 +392,198 @@ final class SidebarCardView: HoverView {
     }
 }
 
-/// The 18pt rounded chip that leads a card without an agent.
-final class HeadlineChip: ThemedView {
-    enum Tone { case normal, shell, dim }
-    let icon: AppIcon
-    let tone: Tone
-    private let fileName: String?
-    private var fileIcon: NSImage?
+/// One pane in a card's list: what it is doing in a leading column that
+/// stays as an indent while it is idle, its kind or agent and title, then
+/// its folder and how long it has worked.
+final class PaneRowView: ThemedView {
+    static let height: CGFloat = 20
+    let row: ActivityCardData.PaneRow
+    /// The running time of the pane's turn, which the card keeps current.
+    var elapsed = "" {
+        didSet {
+            guard elapsed != oldValue else { return }
+            elapsedLabel.stringValue = elapsed
+            elapsedLabel.isHidden = elapsed.isEmpty
+            needsLayout = true
+        }
+    }
 
-    init(icon: AppIcon, tone: Tone, fileName: String? = nil) {
-        self.icon = icon
-        self.tone = tone
-        self.fileName = fileName
+    private let status = StatusSymbolView()
+    private let icon = NSImageView()
+    private let titleLabel: NSTextField
+    private let detailLabel: NSTextField
+    private let elapsedLabel = makeLabel("", font: .monospacedDigitSystemFont(ofSize: 11, weight: .regular))
+    /// Styled as a card's title, for a card's only pane.
+    private let isTitle: Bool
+
+    /// `title` replaces the row's text when the row is its card's title.
+    init(row: ActivityCardData.PaneRow, title: String? = nil, detail: Bool = true) {
+        self.row = row
+        isTitle = title != nil
+        titleLabel = makeLabel(title ?? row.title, font: title == nil ? AppFont.system(12) : AppFont.body)
+        detailLabel = makeLabel(detail ? row.detail ?? "" : "", font: AppFont.mono(11))
         super.init(frame: .zero)
-        themeDidChange()
+        icon.imageScaling = .scaleProportionallyUpOrDown
+        status.showsIdle = true
+        status.status = row.status
+        for view in [status, icon, titleLabel, detailLabel, elapsedLabel] as [NSView] {
+            view.translatesAutoresizingMaskIntoConstraints = true
+            addSubview(view)
+        }
+        detailLabel.isHidden = detailLabel.stringValue.isEmpty
+        elapsedLabel.isHidden = true
+        if isTitle { SidebarCardView.wrap(titleLabel) }
+        if case .image = row.icon {
+            // Favicons are square artwork; round them like app icons.
+            icon.wantsLayer = true
+            icon.layer?.cornerRadius = 3
+            icon.layer?.cornerCurve = .continuous
+            icon.layer?.masksToBounds = true
+        }
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     override func themeDidChange() {
-        fileIcon = fileName.flatMap { FileIcon.image(for: $0, theme: theme) }
-        needsDisplay = true
+        titleLabel.textColor = isTitle ? theme.fg : theme.fgMuted
+        detailLabel.textColor = theme.fgDim
+        elapsedLabel.textColor = theme.fgDim
+        switch row.icon {
+        case .agent(let provider): icon.image = AgentLogo.image(for: provider, lightBackground: theme.isLight)
+        case .file(let name): icon.image = FileIcon.image(for: name, theme: theme)
+        case .image(let image): icon.image = image
+        case .kind(let kind):
+            let glyph = Self.glyph(kind)
+            icon.image = glyph.colorImage(size: SidebarCardView.iconSide, theme: theme)
+                ?? glyph.image(size: SidebarCardView.iconSide)?.tinted(theme.fgMuted)
+        }
+        status.refresh()
     }
 
-    override func draw(_ dirtyRect: NSRect) {
-        if let fileIcon {
-            fileIcon.draw(in: NSRect(x: bounds.midX - 7, y: bounds.midY - 7, width: 14, height: 14),
-                          from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
-            return
+    /// Pierre's icon for a kind where it has one, else the kind's symbol.
+    private static func glyph(_ kind: PaneKind) -> AppIcon {
+        switch kind {
+        case .terminal: return .pierreBash
+        case .agent: return .pierreCode
+        default: return kind.glyph
         }
-        let rect = bounds.insetBy(dx: 0.5, dy: 0.5)
-        let path = NSBezierPath(roundedRect: rect, xRadius: 5, yRadius: 5)
-        theme.surface.setFill()
-        path.fill()
-        theme.cardBorder.setStroke()
-        path.stroke()
-        guard let image = icon.image(size: 11) else { return }
-        let color: NSColor
-        switch tone {
-        case .normal: color = theme.fg
-        case .shell: color = theme.diffAdd
-        case .dim: color = theme.fgDim
+    }
+
+    override func layout() {
+        super.layout()
+        // Everything lines up with the first line when a title wraps.
+        let center = Self.height / 2
+        status.frame = SidebarCardView.iconBox(x: 0, centerY: center)
+        icon.frame = SidebarCardView.iconBox(x: SidebarCardView.textInset, centerY: center)
+        var trailing = bounds.width
+        let height = isTitle ? SidebarCardView.titleLineHeight : titleLabel.intrinsicContentSize.height
+        let y = (center - height / 2).rounded()
+        if !elapsedLabel.isHidden {
+            let width = elapsedLabel.textWidth
+            elapsedLabel.frame = CGRect(x: trailing - width, y: y, width: width, height: height)
+            trailing -= width + 6
         }
-        let frame = NSRect(x: ((bounds.width - image.size.width) / 2).rounded(), y: ((bounds.height - image.size.height) / 2).rounded(),
-                           width: image.size.width, height: image.size.height)
-        image.tinted(color).draw(in: frame, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+        let x = SidebarCardView.textInset * 2
+        if !detailLabel.isHidden {
+            let width = min(detailLabel.textWidth, max((trailing - x) * 0.45, 0))
+            detailLabel.frame = CGRect(x: trailing - width, y: y, width: width, height: height)
+            trailing -= width + 6
+        }
+        let lines = isTitle ? max(Int(((bounds.height - Self.height) / height).rounded()) + 1, 1) : 1
+        titleLabel.frame = CGRect(x: x, y: y, width: max(trailing - x, 0), height: height * CGFloat(lines))
     }
 }
 
-/// The PRIMARY badge of a repository's own checkout.
-final class PrimaryBadge: ThemedView {
-    private let text = "PRIMARY"
-
-    override var intrinsicContentSize: NSSize {
-        let size = NSAttributedString(string: text, attributes: [.font: AppFont.micro, .kern: 0.6]).size()
-        return NSSize(width: ceil(size.width) + 12, height: 12)
+/// The hairline between two cards, as wide as a card. Beside a selected or
+/// hovered card it stays, clear, so the fill meets no line and nothing moves.
+final class CardDivider: ThemedView {
+    weak var above: SidebarCardView?
+    weak var below: SidebarCardView?
+    private var isVisible = true {
+        didSet { if isVisible != oldValue { needsDisplay = true } }
     }
 
-    override func draw(_ dirtyRect: NSRect) {
-        theme.surface.setFill()
-        NSBezierPath(roundedRect: bounds, xRadius: bounds.height / 2, yRadius: bounds.height / 2).fill()
-        let string = NSAttributedString(string: text, attributes: [.font: AppFont.micro, .kern: 0.6, .foregroundColor: theme.fgMuted])
-        let size = string.size()
-        string.draw(at: NSPoint(x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2))
+    func refresh() {
+        isVisible = !(above?.isHighlighted ?? false) && !(below?.isHighlighted ?? false)
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: 1 / (window?.backingScaleFactor ?? 2))
+    }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        invalidateIntrinsicContentSize()
+    }
+
+    override var wantsUpdateLayer: Bool { true }
+
+    override func updateLayer() {
+        layer?.backgroundColor = (isVisible ? theme.separator : .clear).cgColor
+    }
+}
+
+/// A status as an SF Symbol: a spinner while working, a filled circle when
+/// waiting for you, done, failed or paused, and an empty one while idle when
+/// `showsIdle`.
+final class StatusSymbolView: NSView {
+    var status: ActivityCardData.PaneRow.Status = .idle {
+        didSet { if status != oldValue { refresh() } }
+    }
+    var showsIdle = false {
+        didSet { if showsIdle != oldValue { refresh() } }
+    }
+
+    private let symbol = NSImageView()
+    /// The spinner on macOS 14, whose SF Symbols lack `progress.indicator`.
+    private var fallbackSpinner: ActivityGlyph?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        symbol.imageScaling = .scaleProportionallyUpOrDown
+        addSubview(symbol)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override var isFlipped: Bool { true }
+
+    override func layout() {
+        super.layout()
+        symbol.frame = bounds
+        fallbackSpinner?.frame = bounds.insetBy(dx: 1, dy: 1)
+    }
+
+    /// Draws the status in the current theme's colors.
+    func refresh() {
+        let theme = AppTheme.shared
+        let icon: AppIcon?
+        let color: NSColor
+        switch status {
+        case .working, .progress: (icon, color) = (.progressIndicator, theme.accent)
+        case .blocked: (icon, color) = (.exclamationCircleFill, theme.accent)
+        case .done: (icon, color) = (.circleCheckFill, theme.success)
+        case .error: (icon, color) = (.circleXFill, theme.danger)
+        case .paused: (icon, color) = (.pauseCircleFill, theme.warning)
+        case .idle: (icon, color) = (showsIdle ? .circle : nil, theme.fgDim)
+        }
+        symbol.removeAllSymbolEffects()
+        symbol.image = icon?.image(size: SidebarCardView.iconSide, weight: .semibold)
+        symbol.contentTintColor = color
+        let spins = icon == .progressIndicator
+        if spins, symbol.image != nil {
+            symbol.addSymbolEffect(.variableColor.iterative.dimInactiveLayers, options: .repeating)
+        }
+        if spins && symbol.image == nil {
+            let spinner = fallbackSpinner ?? ActivityGlyph()
+            spinner.style = .spinner(color)
+            if spinner.superview == nil { addSubview(spinner) }
+            fallbackSpinner = spinner
+            needsLayout = true
+        } else {
+            fallbackSpinner?.removeFromSuperview()
+            fallbackSpinner = nil
+        }
     }
 }
 

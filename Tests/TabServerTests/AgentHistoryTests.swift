@@ -85,6 +85,15 @@ final class AgentHistoryTests: XCTestCase {
         try? FileManager.default.removeItem(at: root)
     }
 
+
+    func testSessionTitlesAreTheProvidersLatest() {
+        XCTAssertEqual(history.sessionTitle(provider: .claude, session: claudeSession, directory: project.path), "Safari login",
+                       "a custom title wins over the generated one")
+        XCTAssertEqual(history.sessionTitle(provider: .codex, session: codexSession, directory: project.path), "Server header spacing",
+                       "the latest thread name counts")
+        XCTAssertNil(history.sessionTitle(provider: .claude, session: claudeSession, directory: root.appendingPathComponent("elsewhere").path))
+        XCTAssertNil(history.sessionTitle(provider: .claude, session: "../escape", directory: project.path))
+    }
     func testListsOnlyThisFoldersConversationsWithTheirTitles() {
         let reply = history.list(directory: project.path, excluding: [])
         XCTAssertEqual(Set(reply.entries.map(\.providerSession)), [claudeSession, codexSession])

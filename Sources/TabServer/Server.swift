@@ -44,6 +44,7 @@ public final class Server: @unchecked Sendable {
     let agentComposerContext: AgentComposerContextService
     let agentModelCatalog: AgentModelCatalogService
     let agentHistory: AgentHistory
+    let agentTitles: AgentTitles
     let shellIntegration: ShellIntegration?
     let lifecycle = DispatchQueue(label: "tab.server.lifecycle", qos: .utility)
     /// Ends the terminals of closed panes, which can take a while, away from
@@ -96,6 +97,7 @@ public final class Server: @unchecked Sendable {
                 return directory.url
             })
         agentHistory = AgentHistory(home: URL(fileURLWithPath: configuration.homeDirectory))
+        agentTitles = AgentTitles(history: agentHistory)
         agents = try AgentSessions(root: dirs.root.appendingPathComponent("agents"), projectDirectory: { project in
             let directory = try catalog.project(project).directory
             guard directory.isDirectory else { throw ServiceError(.badPath, "The agent's project folder is unavailable") }
@@ -125,7 +127,11 @@ public final class Server: @unchecked Sendable {
         catalog.onChange = { [weak self] revision in self?.catalogChanged(revision) }
         tabs.onChange = { [weak self] revision in self?.tabsChanged(revision) }
         activity.onChange = { [weak self] revision in self?.activityChanged(revision) }
-        agents.activityChanged = { [weak self] snapshot in self?.activity.updateChat(snapshot) }
+        agents.activityChanged = { [weak self] snapshot, directory in
+            guard let self else { return }
+            activity.updateChat(snapshot, title: agentTitles.title(for: snapshot, directory: directory))
+        }
+        agentTitles.onChange = { [weak self] in self?.agents.publishActivity() }
         agents.publishActivity()
         agents.changed = { [weak self] session, revision in
             self?.broadcast(.agentChatChanged(session: session, revision: revision))

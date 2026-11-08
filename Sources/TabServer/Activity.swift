@@ -27,7 +27,9 @@ final class Activity: @unchecked Sendable {
     var currentRevision: UInt64 { lock.withLock { revision } }
 
     /// Native chats share terminal agents' attention and completion tracking.
-    func updateChat(_ snapshot: AgentChatSnapshot) {
+    /// `title` is the provider's own title for the chat, else its first message
+    /// stands in.
+    func updateChat(_ snapshot: AgentChatSnapshot, title providerTitle: String? = nil) {
         guard snapshot.status != .closed else { remove(snapshot.session); return }
         let previous = lock.withLock { agents[snapshot.session]?.state }
         let state: AgentState
@@ -36,7 +38,7 @@ final class Activity: @unchecked Sendable {
         case .waiting, .failed: state = .blocked
         case .idle, .closed: state = .idle
         }
-        let title = snapshot.items.first { $0.kind == .user }?.text
+        let title = providerTitle ?? snapshot.items.first { $0.kind == .user }?.text
             .split(whereSeparator: \.isNewline).first.map { String($0.prefix(160)) }
         update(AgentActivity(session: snapshot.session, project: snapshot.project,
                              provider: snapshot.provider == .claude ? .claude : .codex, state: state, title: title),

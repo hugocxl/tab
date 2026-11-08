@@ -9,6 +9,24 @@ extension ChromeColor {
     }
 }
 
+extension AppTheme {
+    /// Hues from Pierre's icon palette, for its colorful icons.
+    public enum IconHue {
+        case blue, green, indigo, vermilion
+    }
+
+    /// `hue` as `#rrggbb`: Pierre's deeper shade on light themes, its
+    /// lighter one on dark themes.
+    public func iconHex(_ hue: IconHue) -> String {
+        switch hue {
+        case .blue: return isLight ? "#1a85d4" : "#69b1ff"
+        case .green: return isLight ? "#199f43" : "#5ecc71"
+        case .indigo: return isLight ? "#693acf" : "#9d6afb"
+        case .vermilion: return isLight ? "#d5512f" : "#ff8c5b"
+        }
+    }
+}
+
 extension TabCore.RGBColor {
     public var nsColor: NSColor {
         NSColor(srgbRed: red, green: green, blue: blue, alpha: 1)
@@ -268,6 +286,9 @@ public final class AppTheme: ObservableObject {
     public var pill: NSColor { surface }
     /// Pills and chips under the pointer.
     public var pillHover: NSColor { hover }
+    /// The selected sidebar card's fill: the classic surface, opaque in the
+    /// glass interface too.
+    public var sidebarSelection: NSColor { palette.surface.nsColor }
     /// The fill of rows in an inset settings card.
     public var rowFill: NSColor { fg(alpha: 0.065) }
     /// The edge of an inset settings card.

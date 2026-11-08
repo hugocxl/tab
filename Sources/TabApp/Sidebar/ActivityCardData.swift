@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 import TabCore
 import TabProtocol
 
@@ -30,10 +30,80 @@ struct ActivityCardData: Equatable {
         case idle
     }
 
+    /// One pane in the card's list: what it is, its title and what it is doing.
+    struct PaneRow: Equatable {
+        enum Icon: Equatable {
+            case kind(PaneKind)
+            case agent(AgentProvider)
+            /// An editor's or diff's file, drawn with its file type's icon.
+            case file(String)
+            /// A page's favicon.
+            case image(NSImage)
+        }
+
+        enum Status: Equatable {
+            case idle
+            case working
+            /// A terminal's progress report, 0...100.
+            case progress(Int)
+            /// Waiting for you.
+            case blocked
+            /// Finished with an unread event.
+            case done
+            case error
+            case paused
+        }
+
+        /// What a pane says its tab is about, for the card's title, in the
+        /// order the title prefers them.
+        enum Topic: Equatable {
+            case task(String)
+            case command(String)
+            case page(String)
+            case simulator(String)
+            case file(String)
+            case folder(String)
+
+            var rank: Int {
+                switch self {
+                case .task: return 0
+                case .command: return 1
+                case .page: return 2
+                case .simulator: return 3
+                case .file: return 4
+                case .folder: return 5
+                }
+            }
+
+            var text: String {
+                switch self {
+                case .task(let text), .command(let text), .page(let text), .simulator(let text), .file(let text): return text
+                // The location row shows the folder.
+                case .folder: return ActivityCardData.shellName
+                }
+            }
+        }
+
+        var id: PaneId
+        var icon: Icon
+        var title: String
+        /// The muted text after the title: an idle shell's folder.
+        var detail: String?
+        var status: Status
+        /// When the pane's agent started its turn, while it works.
+        var workingSince: Date?
+        /// The pane its tab shows focused.
+        var active: Bool
+        var topic: Topic?
+    }
+
     var headline: Headline
-    /// The second line's first word: the folder for Home terminals, the
-    /// project or worktree name otherwise.
-    var name: String
+    /// What the tab is about, whichever pane is focused; see `title(rows:customTitle:branch:)`.
+    var title: String
+    /// The location row's first word: the shown terminal's folder for a
+    /// Home tab, the project or worktree name otherwise. Nil when a Home
+    /// tab's folder isn't known.
+    var name: String?
     var branch: String?
     /// The branch this worktree's branch started from, and how far apart
     /// they are.
@@ -43,8 +113,8 @@ struct ActivityCardData: Equatable {
     var primary: Bool
     var pullRequest: UInt64?
     var status: Status
-    /// When the longest-running working agent started its turn.
-    var workingSince: Date?
+    /// Every pane in the card's tabs, in reading order.
+    var panes: [PaneRow]
     var selected: Bool
     var unavailable: Bool
     /// Another computer's card while its server isn't connected: dimmed,
@@ -64,7 +134,7 @@ struct ActivityCardData: Equatable {
         switch shownPane?.content {
         case .agent(_, let seed)?:
             let controller = shownPane.flatMap { model.panes.controller(for: $0.id) as? AgentPaneController }
-            let provider: AgentProvider = controller.map { $0.selection.provider == .claude ? .claude : .codex } ?? agent?.provider ?? (seed == .claude ? .claude : .codex)
+            let provider = chatProvider(controller: controller, agent: agent, seed: seed)
             let task = agent?.title ?? controller?.title
             headline = .agent(provider: provider, task: task == "Agent" ? nil : task)
         case .editor(let path)?:
@@ -88,9 +158,7 @@ struct ActivityCardData: Equatable {
         }
         let info = project.home ? nil : model.git[project.id]
         let branch = info?.summary?.branch.flatMap { $0 == project.name ? nil : $0 }
-        let homeLabel: String
-        if case .agent? = shownPane?.content { homeLabel = "Agent" } else { homeLabel = "Terminal" }
-        let name = tab != nil ? (shownPane.flatMap { idleDirectory($0.title) } ?? homeLabel) : project.name
+        let name = tab != nil ? shownPane.flatMap { idleDirectory($0.title) } : project.name
         let selected: Bool
         if let tab {
             selected = model.currentProject.id == project.id && model.activeTab?.id == tab.id
@@ -98,10 +166,16 @@ struct ActivityCardData: Equatable {
             selected = model.currentProject.id == project.id
         }
         let status = status(tabs: tabs, server: project.serverId, model: model)
+        let rows = paneRows(tabs: tabs, server: project.serverId, model: model)
+        // A Home tab's pane rows show each folder; only a lone pane's needs the row.
+        let location = tab != nil && rows.count > 1 ? nil : name
+        // A worktree's branch usually names the feature it is for.
+        let cardTitle = Self.title(rows: rows, customTitle: shownTab?.customTitle, branch: tab == nil && !primary ? branch : nil)
         return ActivityCardData(
-            headline: headline, name: name, branch: branch, base: info?.summary?.base, baseAhead: info?.summary?.baseAhead,
+            headline: headline, title: cardTitle, name: location, branch: branch, base: info?.summary?.base, baseAhead: info?.summary?.baseAhead,
             baseBehind: info?.summary?.baseBehind, primary: primary, pullRequest: info?.pullRequest,
-            status: status, workingSince: status == .working ? workingSince(tabs: tabs, server: project.serverId, model: model) : nil,
+            status: status,
+            panes: rows,
             selected: selected,
             unavailable: project.status == .missing || model.worktreeRemovals.contains(project.id),
             offline: !project.serverId.isLocal && model.connectionState(project.serverId).isOffline
@@ -133,12 +207,151 @@ struct ActivityCardData: Equatable {
         return .idle
     }
 
+    /// An agent chat's provider: the composer's choice, as the pane's header
+    /// shows it, else the activity's or the seed's.
     @MainActor
-    private static func workingSince(tabs: [Tab], server: ServerId, model: AppModel) -> Date? {
-        let sessions = tabs.flatMap(\.panes).compactMap(\.content.activitySession)
-        guard let agents = model.connections[server]?.activity.agents else { return nil }
-        let since = agents.filter { $0.state == .working && sessions.contains($0.session) }.compactMap(\.workingSince).min()
-        return since.map { Date(timeIntervalSince1970: TimeInterval($0) / 1000) }
+    private static func chatProvider(controller: AgentPaneController?, agent: AgentActivity?, seed: AgentChatProvider) -> AgentProvider {
+        if let controller { return controller.selection.provider == .claude ? .claude : .codex }
+        return agent?.provider ?? (seed == .claude ? .claude : .codex)
+    }
+
+    @MainActor
+    private static func paneRows(tabs: [Tab], server: ServerId, model: AppModel) -> [PaneRow] {
+        tabs.flatMap { tab -> [PaneRow] in
+            let active = model.state.shownPane(tab)
+            return tab.layout.leaves.compactMap { id in
+                tab.pane(id).map { paneRow($0, active: $0.id == active, server: server, model: model) }
+            }
+        }
+    }
+
+    @MainActor
+    private static func paneRow(_ pane: Pane, active: Bool, server: ServerId, model: AppModel) -> PaneRow {
+        let connection = model.connections[server]
+        let session = pane.content.activitySession
+        let agent = session.flatMap { connection?.agent($0) }
+        let title = pane.title.trimmingCharacters(in: .whitespaces)
+        var icon = PaneRow.Icon.kind(PaneKind(pane.content))
+        var text: String
+        var detail: String?
+        var topic: PaneRow.Topic?
+        switch pane.content {
+        case .agent(_, let seed):
+            let controller = model.panes.controller(for: pane.id) as? AgentPaneController
+            let provider = chatProvider(controller: controller, agent: agent, seed: seed)
+            icon = .agent(provider)
+            // A chat's task is its opening message, so tidy it into a title.
+            let task = (agent?.title ?? controller?.title).flatMap { $0 == "Agent" ? nil : chatTopic($0) }
+            text = task ?? provider.displayName
+            topic = task.map { .task($0) }
+        case .editor(let path), .diff(let path, _):
+            icon = .file(basename(path))
+            text = pane.content.nativeTitle ?? basename(path)
+            topic = .file(text)
+        case .browser:
+            if let favicon = model.panes.controller(for: pane.id)?.icon { icon = .image(favicon) }
+            text = title.isEmpty ? pane.content.defaultTitle : title
+            topic = title.isEmpty ? nil : .page(title)
+        case .simulator:
+            text = title.isEmpty ? pane.content.defaultTitle : title
+            topic = .simulator(text)
+        case .terminal:
+            if let agent {
+                icon = .agent(agent.provider)
+                // A terminal agent titles its terminal with a summary of its task.
+                let task = agent.title.flatMap { taskTitle($0, provider: agent.provider) } ?? taskTitle(title, provider: agent.provider)
+                text = task ?? agent.provider.displayName
+                topic = task.map { .task($0) }
+            } else if let directory = idleDirectory(title) {
+                text = shellName
+                detail = directory
+                topic = .folder(directory)
+            } else {
+                text = title.isEmpty ? pane.content.defaultTitle : command(title)
+                topic = title.isEmpty ? nil : .command(text)
+            }
+        }
+        let status = paneStatus(session: session, agent: agent, connection: connection, model: model)
+        let since = status == .working || status == .blocked ? agent?.workingSince.map { Date(timeIntervalSince1970: TimeInterval($0) / 1000) } : nil
+        return PaneRow(id: pane.id, icon: icon, title: text, detail: detail, status: status, workingSince: since, active: active, topic: topic)
+    }
+
+    /// What a tab is about, the same whichever pane is focused: its custom
+    /// title, else the task of its lead agent (the one waiting for you, else
+    /// working, else the first), its worktree's branch, then the first
+    /// command, page, simulator, file or folder its panes show.
+    static func title(rows: [PaneRow], customTitle: String?, branch: String?) -> String {
+        if let customTitle = customTitle?.trimmingCharacters(in: .whitespaces), !customTitle.isEmpty { return customTitle }
+        let agents = rows.filter { if case .task = $0.topic { return true } else { return false } }
+        let lead = agents.first { $0.status == .blocked } ?? agents.first { $0.status == .working } ?? agents.first
+        if let lead = lead?.topic { return lead.text }
+        if let branch { return branch }
+        let topics = rows.compactMap(\.topic)
+        if let best = topics.min(by: { $0.rank < $1.rank }) { return best.text }
+        return rows.first?.title ?? "Empty tab"
+    }
+
+    private static let leadIns = [
+        "hey", "hi", "hello", "ok", "okay", "so", "now", "also", "please", "pls",
+        "can you", "could you", "would you", "will you", "can we", "could we", "do you know",
+        "i want you to", "i want to", "i need you to", "i need to", "i'd like you to", "i would like you to",
+        "i'd like to", "let's", "lets", "help me",
+    ]
+
+    /// A chat's opening message as a title: its first sentence without the
+    /// greeting or request around it, capitalized. "can you write a lorem
+    /// ipsum? thanks" reads "Write a lorem ipsum". Nil when nothing is left,
+    /// as from "hi".
+    static func chatTopic(_ message: String) -> String? {
+        var text = message.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
+        // The first sentence ends at punctuation followed by a space or the end.
+        var index = text.startIndex
+        while index < text.endIndex {
+            let next = text.index(after: index)
+            if ".?!".contains(text[index]), next == text.endIndex || text[next] == " ", text.distance(from: text.startIndex, to: index) >= 8 {
+                text = String(text[..<index])
+                break
+            }
+            index = next
+        }
+        let trim = CharacterSet(charactersIn: " ,.?!:;").union(.whitespaces)
+        text = text.trimmingCharacters(in: trim)
+        var stripped = true
+        while stripped {
+            stripped = false
+            let lower = text.lowercased()
+            for lead in leadIns where lower == lead || lower.hasPrefix(lead + " ") || lower.hasPrefix(lead + ",") {
+                text = String(text.dropFirst(lead.count)).trimmingCharacters(in: trim)
+                stripped = true
+                break
+            }
+        }
+        guard text.count >= 3 else { return nil }
+        return text.prefix(1).uppercased() + text.dropFirst()
+    }
+
+    /// What one pane is doing, by the same rules and Notifications settings
+    /// as the card's status.
+    @MainActor
+    private static func paneStatus(session: SessionId?, agent: AgentActivity?, connection: ServerConnection?, model: AppModel) -> PaneRow.Status {
+        guard let session, let connection else { return .idle }
+        let notifications = model.settings.notifications
+        if agent?.state == .blocked && notifications.showsInTabs(.blocked) { return .blocked }
+        if let progress = connection.progress[session]?.progress {
+            switch progress.state {
+            case .error where notifications.showsInTabs(.error): return .error
+            case .error: break
+            case .paused where notifications.showsInTabs(.working): return .paused
+            case _ where notifications.showsInTabs(.working): return progress.percent.map { .progress(Int($0)) } ?? .working
+            default: break
+            }
+        }
+        if agent?.state == .working && notifications.showsInTabs(.working) { return .working }
+        let event = connection.activity.events.first {
+            !$0.read && $0.session == session && model.reports($0) && notifications.showsInTabs($0.kind.status)
+        }
+        guard let event else { return .idle }
+        return event.kind == .attention ? .blocked : .done
     }
 
     /// How long a turn has run: `43s` under a minute, `3m` under an hour,
@@ -161,6 +374,16 @@ struct ActivityCardData: Equatable {
 
     static func basename(_ path: String) -> String {
         path.split(separator: "/").last.map(String.init) ?? path
+    }
+
+    /// A running command's terminal title without the host before it or the
+    /// folder some shells append: "htop — ~/repos" reads "htop".
+    static func command(_ title: String) -> String {
+        let command = withoutHost(title)
+        guard let dash = command.range(of: " — ", options: .backwards) else { return command }
+        let folder = command[dash.upperBound...]
+        guard folder.hasPrefix("~") || folder.hasPrefix("/") else { return command }
+        return String(command[..<dash.lowerBound]).trimmingCharacters(in: .whitespaces)
     }
 
     /// Drops the `(host) ` prefix some prompts put before the folder or command.

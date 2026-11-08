@@ -47,9 +47,10 @@ struct SidebarSnapshot: Equatable {
         hints = model.shortcutHints
         query = model.nameFilter
         let listing = model.sidebarListing
-        func header(_ project: Project) -> CardHeader {
+        /// A real project's name; Home is no project worth naming on every card.
+        func header(_ project: Project) -> CardHeader? {
             let root = project.parentId.flatMap { model.state.project($0) } ?? project
-            return CardHeader(project: root.id, title: model.title(of: root))
+            return root.home ? nil : CardHeader(project: root.id, title: model.title(of: root))
         }
         let hosts = listing.hosts.map { host in
             let terminals = host.terminals.compactMap { entry -> CardEntry? in

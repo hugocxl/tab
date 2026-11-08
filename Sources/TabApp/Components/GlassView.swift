@@ -44,8 +44,6 @@ public final class GlassView: NSView {
         /// The command palette's nested actions menu.
         public static let paletteActions = Style(cornerRadius: 14, fallbackMaterial: .popover, regular: true)
 
-        /// The selected sidebar card: a faint clear glass over the card fill.
-        public static let card = Style(cornerRadius: 8, opacity: 0.4)
         /// A floating notice: a capsule of diffused glass, so its message reads over busy panes.
         public static let chip = Style(cornerRadius: NoticeView.height / 2, fallbackMaterial: .popover, regular: true)
         /// A mode chip beside the command palette's search field.

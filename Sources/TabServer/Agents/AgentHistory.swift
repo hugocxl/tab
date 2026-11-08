@@ -69,6 +69,36 @@ struct AgentHistory: Sendable {
         }
     }
 
+    /// The short title the provider gave `session`: Claude Code's custom or
+    /// generated title, or Codex's thread name. Nil until it writes one.
+    func sessionTitle(provider: AgentChatProvider, session: String, directory: String) -> String? {
+        guard (try? AgentHistoryEntry.validate(providerSession: session)) != nil else { return nil }
+        switch provider {
+        case .claude:
+            guard let file = claudeFiles(CwdMatcher(directory)).first(where: { $0.deletingPathExtension().lastPathComponent == session })
+            else { return nil }
+            // Claude Code appends titles as the conversation goes; the last one counts.
+            var customTitle: String?
+            var aiTitle: String?
+            for record in Self.lines(tail: Self.tail(of: file, bytes: Self.tailBytes)) {
+                switch record["type"] as? String {
+                case "custom-title": customTitle = (record["customTitle"] as? String) ?? customTitle
+                case "ai-title": aiTitle = (record["aiTitle"] as? String) ?? aiTitle
+                default: continue
+                }
+            }
+            return (customTitle ?? aiTitle).flatMap { $0.isEmpty ? nil : Self.title($0) }
+        case .codex:
+            let index = codex.appendingPathComponent("session_index.jsonl")
+            guard (Self.size(of: index) ?? .max) <= 16 << 20 else { return nil }
+            var name: String?
+            for record in Self.lines(Self.head(of: index, bytes: 16 << 20), whole: true) where record["id"] as? String == session {
+                if let threadName = record["thread_name"] as? String, !threadName.isEmpty { name = threadName }
+            }
+            return name.map(Self.title)
+        }
+    }
+
     // MARK: Claude Code
 
     /// Claude Code keeps a folder's conversations in `projects/<path>`, with

@@ -57,7 +57,12 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     private var selectionEdited = false
     private var submitting = false
     private var stopRequested = false
-    private(set) var selection: AgentModelSelection
+    private(set) var selection: AgentModelSelection {
+        didSet { if selection.provider != oldValue.provider { onProviderChange?() } }
+    }
+    /// Tells the sidebar, whose card shows the provider's logo, that the
+    /// composer switched providers.
+    var onProviderChange: (() -> Void)?
     private(set) var reasoningEffort: AgentReasoningEffort?
     private var menuState: PickerState?
     private struct PickerState: Equatable {
@@ -128,6 +133,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
                 destructive: true
             ) ?? true
         }
+        onProviderChange = { [weak model] in model?.notify(.activity) }
         restorePreferences(defaults: model.state.agentComposerDefaults, draft: model.state.agentComposerDrafts[pane]) { [weak model] preferences in
             model?.edit { $0.setAgentComposerDraft(preferences, for: pane) }
         }

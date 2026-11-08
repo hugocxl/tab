@@ -3,6 +3,20 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.79.0 - 2026-11-08
+
+### Changed
+
+- Sidebar cards list every pane in a tab with what it is doing, and show the folder or Git branch and the project
+  below them.
+- A card's title says what the tab is about whichever pane is focused, from its agent's task, a running command
+  or its shell, and wraps to two lines.
+- Native agent chats take the short title Claude Code or Codex gives the conversation.
+- Pane statuses use system symbols, with a spinner while an agent works, and terminals, folders and Git use
+  Pierre's colored icons.
+- Browser panes show the page's favicon in the sidebar.
+- Sidebar cards sit flush with hairlines between them, and look the same in the glass and classic interfaces.
+
 ## 0.78.1 - 2026-11-08
 
 ### Fixed

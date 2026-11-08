@@ -139,7 +139,7 @@ final class AgentEntryPointTests: XCTestCase {
         XCTAssertEqual(PaneKind.agent.name, "Agent")
         let card = ActivityCardData.make(project: model.currentProject, tab: model.activeTab, primary: false, model: model)
         XCTAssertEqual(card.headline, .agent(provider: .claude, task: nil))
-        XCTAssertEqual(card.name, "Agent")
+        XCTAssertNil(card.name, "A Home agent has no folder to show")
         model.saveNow()
         let restored = AppModel(dirs: model.dirs, connectorFactory: { _, _ in nil })
         XCTAssertEqual(restored.state.home.tabs, model.state.home.tabs)
@@ -198,7 +198,7 @@ final class AgentEntryPointTests: XCTestCase {
         XCTAssertEqual(model.state.pane(pane)?.title, "Agent")
         let card = ActivityCardData.make(project: model.currentProject, tab: model.activeTab, primary: false, model: model)
         XCTAssertEqual(card.headline, .agent(provider: .codex, task: nil))
-        XCTAssertEqual(card.name, "Agent")
+        XCTAssertNil(card.name, "A Home agent has no folder to show")
     }
 }
 

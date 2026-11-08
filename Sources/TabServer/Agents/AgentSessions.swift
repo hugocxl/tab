@@ -114,7 +114,8 @@ final class AgentSessions: @unchecked Sendable {
     private let projectDirectory: @Sendable (ProjectId) throws -> String
     private let submissionTimeout: TimeInterval
     private let interruptTimeout: TimeInterval
-    var activityChanged: @Sendable (AgentChatSnapshot) -> Void = { _ in }
+    /// Reports a chat's state with the folder it runs in.
+    var activityChanged: @Sendable (AgentChatSnapshot, String) -> Void = { _, _ in }
     var changed: @Sendable (SessionId, UInt64) -> Void
     var checkDirectory: @Sendable (String) throws -> Void = { _ in }
     /// Tab's variables for every agent; each also gets `TAB_AGENT_ID`.
@@ -184,7 +185,7 @@ final class AgentSessions: @unchecked Sendable {
     }
 
     func publishActivity() {
-        queue.sync { for entry in entries.values { activityChanged(entry.snapshot) } }
+        queue.sync { for entry in entries.values { activityChanged(entry.snapshot, entry.directory) } }
     }
 
     var hasSessions: Bool {
@@ -1043,7 +1044,7 @@ final class AgentSessions: @unchecked Sendable {
     }
 
     private func touch(_ entry: Entry) {
-        activityChanged(entry.snapshot)
+        activityChanged(entry.snapshot, entry.directory)
         bound(entry)
         entry.snapshot.revision &+= 1
         if !entry.notifying {

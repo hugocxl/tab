@@ -162,6 +162,28 @@ final class SidebarListingTests: XCTestCase {
         XCTAssertEqual(ActivityCardData.withoutHost("(mini) cargo test"), "cargo test")
         XCTAssertEqual(ActivityCardData.taskTitle("✳ Fix the merge errors", provider: .claude), "Fix the merge errors")
         XCTAssertNil(ActivityCardData.taskTitle("⠂ Claude Code", provider: .claude))
+        XCTAssertEqual(ActivityCardData.command("htop — ~/repos"), "htop")
+        XCTAssertEqual(ActivityCardData.command("npm run dev — build"), "npm run dev — build", "only a folder suffix goes")
+    }
+
+    func testChatOpenersBecomeTitles() {
+        XCTAssertEqual(ActivityCardData.chatTopic("can you write a lorem ipsum? thanks"), "Write a lorem ipsum")
+        XCTAssertEqual(ActivityCardData.chatTopic("Hey, please fix README.md formatting"), "Fix README.md formatting")
+        XCTAssertNil(ActivityCardData.chatTopic("hi"))
+    }
+
+    func testCardTitleFollowsTheLeadAgentWhicheverPaneIsFocused() {
+        func row(_ topic: ActivityCardData.PaneRow.Topic?, _ status: ActivityCardData.PaneRow.Status = .idle,
+                 active: Bool = false) -> ActivityCardData.PaneRow {
+            ActivityCardData.PaneRow(id: PaneId(), icon: .kind(.terminal), title: topic?.text ?? "", detail: nil,
+                                     status: status, workingSince: nil, active: active, topic: topic)
+        }
+        let rows = [row(.folder("repos"), active: true), row(.task("Fix the login bug")), row(.task("Ship it"), .blocked)]
+        XCTAssertEqual(ActivityCardData.title(rows: rows, customTitle: nil, branch: nil), "Ship it", "the agent waiting for you leads")
+        XCTAssertEqual(ActivityCardData.title(rows: rows, customTitle: "Release", branch: nil), "Release")
+        XCTAssertEqual(ActivityCardData.title(rows: [row(.folder("repos")), row(.command("htop"))], customTitle: nil, branch: "feature/x"),
+                       "feature/x")
+        XCTAssertEqual(ActivityCardData.title(rows: [row(.folder("repos")), row(.command("htop"))], customTitle: nil, branch: nil), "htop")
     }
 
     func testHostGroupsKeepTerminalsProjectsAndShortcutsTogether() async throws {

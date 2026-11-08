@@ -101,6 +101,8 @@ extension AppModel: BrowserHost {
         panes.controller(for: id)?.titleDidChange?()
         let title = title ?? "New Browser"
         if state.pane(id)?.title != title { edit { try $0.setPaneTitle(id, title) } }
+        // The sidebar shows the page's favicon, which can arrive after its title.
+        notify(.activity)
     }
 
     public func browserPaneRequestsClose(_ pane: BrowserPaneController) {

@@ -78,6 +78,14 @@ Source: https://github.com/pierrecomputer/pierre
 The Apache 2.0 license and upstream notices are bundled as
 `Sources/TabApp/Resources/Icons/PIERRE-LICENSE.txt` and `PIERRE-NOTICE.txt`.
 
+## Pierre icons
+
+The sidebar's terminal (bash duo), code, folder and Git icons are SVGs from Pierre's
+icon theme for VS Code and Cursor, unchanged.
+
+Source: https://github.com/pierrecomputer/vscode-icons
+The MIT license is bundled as `Sources/TabApp/Resources/Icons/PIERRE-ICONS-LICENSE.txt`.
+
 ## herdr
 
 Agent detection manifests and region extraction are adapted from herdr.

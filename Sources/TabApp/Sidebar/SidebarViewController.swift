@@ -161,17 +161,13 @@ final class SidebarViewController: NSViewController {
 
     private func buildHost(_ host: SidebarSnapshot.HostEntry, cardNumber: inout Int) {
         if let cards = host.openTabs { return buildOpenTabs(cards, creating: host.groups.flatMap(\.creating), cardNumber: &cardNumber) }
-        var terminals: [SidebarCardView] = []
-        for card in host.terminals {
-            let view = cardView(card, hint: hint(.tabs, &cardNumber))
-            add(view)
-            terminals.append(view)
-        }
-        divide(terminals, gap: list.spacing)
+        let terminals = host.terminals.map { cardView($0, hint: hint(.tabs, &cardNumber)) }
+        terminals.forEach { add($0) }
+        divide(terminals, in: list)
         for group in host.groups {
             let stack = NSStackView()
             stack.orientation = .vertical
-            stack.spacing = 2
+            stack.spacing = list.spacing
             stack.alignment = .leading
             let header = headerView(group)
             stack.addArrangedSubview(header)
@@ -186,7 +182,7 @@ final class SidebarViewController: NSViewController {
                 view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
                 cards.append(view)
             }
-            divide(cards, gap: stack.spacing)
+            divide(cards, in: stack)
             for name in collapsedProjects.contains(group.project) ? [] : group.creating {
                 let row = CreatingRow(name: name)
                 row.translatesAutoresizingMaskIntoConstraints = false
@@ -202,16 +198,28 @@ final class SidebarViewController: NSViewController {
     private func buildOpenTabs(_ cards: [SidebarSnapshot.CardEntry], creating: [String], cardNumber: inout Int) {
         let views = cards.map { cardView($0, hint: hint(.tabs, &cardNumber)) }
         views.forEach { add($0) }
-        divide(views, gap: list.spacing)
+        divide(views, in: list)
         for name in creating {
             add(CreatingRow(name: name))
         }
     }
 
-    /// Draws a hairline between consecutive cards, except beside a selected one.
-    private func divide(_ cards: [SidebarCardView], gap: CGFloat) {
-        for (card, next) in zip(cards, cards.dropFirst()) where !card.data.selected && !next.data.selected {
-            card.separatorGap = gap
+    /// Stacks consecutive cards with no gap and a hairline between them,
+    /// clear beside the selected or hovered card.
+    private func divide(_ cards: [SidebarCardView], in stack: NSStackView) {
+        for (card, next) in zip(cards, cards.dropFirst()) {
+            guard let index = stack.arrangedSubviews.firstIndex(of: next) else { continue }
+            let divider = CardDivider()
+            divider.above = card
+            divider.below = next
+            card.dividers.append(divider)
+            next.dividers.append(divider)
+            divider.refresh()
+            divider.translatesAutoresizingMaskIntoConstraints = false
+            stack.insertArrangedSubview(divider, at: index)
+            divider.widthAnchor.constraint(equalTo: card.widthAnchor).isActive = true
+            stack.setCustomSpacing(0, after: card)
+            stack.setCustomSpacing(0, after: divider)
         }
     }
 
@@ -236,6 +244,7 @@ final class SidebarViewController: NSViewController {
         let target = card.target
         view.onClick = { [weak self] in self?.model.select(target) }
         view.onClose = { [weak self] in self?.model.close(target) }
+        view.onPaneClick = { [weak self] pane in self?.model.focusPane(pane) }
         view.menuProvider = { [weak self, weak view] in self?.cardMenu(card, anchor: view) }
         return view
     }

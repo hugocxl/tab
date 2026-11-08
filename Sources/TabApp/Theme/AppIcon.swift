@@ -14,6 +14,9 @@ public enum AppIcon: String, CaseIterable, Sendable {
     case play, quote, stop, triangleAlert, phone, trash, minus, qrcode, arrowDown
     case plusCircle, filterCircleFill, addProject, layers, laptop, globeBadgePlus, clearField
     case home, appearance, camera, rotate
+    case circleCheckFill, exclamationCircleFill, circleXFill, pauseCircleFill, progressIndicator
+    /// Pierre's icons, drawn like the symbols.
+    case pierreBash, pierreCode, pierreFolder, pierreGit
 
     /// The SF Symbol drawn for the icon, or `nil` for the icons composed or
     /// bundled instead.
@@ -55,6 +58,7 @@ public enum AppIcon: String, CaseIterable, Sendable {
         case .settings: return "gearshape"
         case .terminal: return "terminal"
         case .terminalStack: return nil
+        case .pierreBash, .pierreCode, .pierreFolder, .pierreGit: return nil
         case .close: return "xmark"
         case .externalLink: return "arrow.up.forward.app"
         case .filter: return "line.3.horizontal.decrease"
@@ -93,6 +97,11 @@ public enum AppIcon: String, CaseIterable, Sendable {
         case .appearance: return "circle.lefthalf.filled"
         case .camera: return "camera"
         case .rotate: return "rotate.left"
+        case .circleCheckFill: return "checkmark.circle.fill"
+        case .exclamationCircleFill: return "exclamationmark.circle.fill"
+        case .circleXFill: return "xmark.circle.fill"
+        case .progressIndicator: return "progress.indicator"
+        case .pauseCircleFill: return "pause.circle.fill"
         }
     }
 
@@ -109,10 +118,47 @@ public enum AppIcon: String, CaseIterable, Sendable {
             bundled.size = NSSize(width: size, height: size)
             image = bundled
         }
+
+        if let pierre, let bundled = BundledImage.load(pierre.name, extension: "svg") {
+            bundled.size = NSSize(width: size * Self.pierreScale, height: size * Self.pierreScale)
+            image = bundled
+        }
         if image == nil {
             image = symbolImage(size: size, weight: weight)
         }
         image?.isTemplate = true
+        IconCache.images[key] = image
+        return image
+    }
+
+    /// Pierre draws on a 16pt grid with a 1pt margin, where symbols fill
+    /// about 80% of their size.
+    private static let pierreScale: CGFloat = 0.9
+
+    /// The bundled SVG and palette hue of a Pierre icon.
+    private var pierre: (name: String, hue: AppTheme.IconHue)? {
+        switch self {
+        case .pierreBash: return ("pierre-bash-duo", .green)
+        case .pierreCode: return ("pierre-code", .indigo)
+        case .pierreFolder: return ("pierre-folder", .blue)
+        case .pierreGit: return ("pierre-git", .vermilion)
+        default: return nil
+        }
+    }
+
+    /// A Pierre icon in its color for `theme`, `size` points tall; nil for
+    /// the other icons.
+    @MainActor
+    public func colorImage(size: CGFloat = Metrics.glyph, theme: AppTheme) -> NSImage? {
+        guard let pierre else { return nil }
+        let hex = theme.iconHex(pierre.hue)
+        let key = "\(rawValue)-\(size)-\(hex)"
+        if let cached = IconCache.images[key] { return cached }
+        guard let url = BundledImage.url(pierre.name, extension: "svg"),
+              let svg = try? String(contentsOf: url, encoding: .utf8),
+              let image = NSImage(data: Data(svg.replacingOccurrences(of: "currentColor", with: hex).utf8)) else { return nil }
+        image.size = NSSize(width: size * Self.pierreScale, height: size * Self.pierreScale)
+        image.isTemplate = false
         IconCache.images[key] = image
         return image
     }
