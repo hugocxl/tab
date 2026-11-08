@@ -269,6 +269,7 @@ final class AgentComposerView: UIView, UITextViewDelegate {
         text.text = ""
         clearAttachments()
         textViewDidChange(text)
+        text.resignFirstResponder()
     }
 
     private func refreshSend() {

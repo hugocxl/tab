@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.12.2 - 2026-11-08
+
+### Changed
+
+- Sending a message to an agent closes the keyboard, so you can read the
+  reply.
+
 ## 0.12.1 - 2026-11-08
 
 ### Changed
