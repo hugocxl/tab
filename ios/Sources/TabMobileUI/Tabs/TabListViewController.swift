@@ -134,6 +134,8 @@ final class TabListViewController: UICollectionViewController {
         navigationItem.largeTitleDisplayMode = .never
         // Clear, so an iPad's sidebar shows its own material.
         collectionView.backgroundColor = .clear
+        // Cards fade under the bar instead of meeting a hairline.
+        collectionView.topEdgeEffect.style = .soft
         configureDataSource()
         let search = UISearchController()
         search.searchResultsUpdater = self

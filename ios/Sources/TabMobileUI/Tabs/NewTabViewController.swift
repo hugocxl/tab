@@ -68,6 +68,7 @@ final class NewTabViewController: UICollectionViewController {
         // Clear, so the sheet's glass shows through.
         view.backgroundColor = .clear
         collectionView.backgroundColor = .clear
+        collectionView.topEdgeEffect.style = .soft
         collectionView.keyboardDismissMode = .interactive
         navigationItem.leftBarButtonItem = UIBarButtonItem(systemItem: .close, primaryAction: UIAction { [weak self] _ in
             self?.dismiss(animated: true)
@@ -472,6 +473,7 @@ private final class LocationPickerViewController: UICollectionViewController, UI
         title = "Location"
         view.backgroundColor = .clear
         collectionView.backgroundColor = .clear
+        collectionView.topEdgeEffect.style = .soft
         collectionView.keyboardDismissMode = .onDrag
         let search = UISearchController()
         search.searchResultsUpdater = self

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.14.1 - 2026-11-08
+
+### Changed
+
+- Lists and transcripts fade softly under the top bar as they scroll, with no
+  border line.
+
 ## 0.14.0 - 2026-11-08
 
 ### Changed

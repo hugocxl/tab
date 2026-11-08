@@ -41,6 +41,7 @@ final class AgentPaneViewController: UIViewController, UICollectionViewDelegate 
         collectionView.delegate = self
         collectionView.keyboardDismissMode = .interactive
         collectionView.alwaysBounceVertical = true
+        collectionView.topEdgeEffect.style = .soft
         collectionView.allowsSelection = true
         collectionView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(collectionView)

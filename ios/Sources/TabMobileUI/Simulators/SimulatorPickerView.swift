@@ -18,6 +18,7 @@ final class SimulatorPickerView: UIView, UICollectionViewDelegate {
         list.headerMode = .supplementary
         collectionView = UICollectionView(frame: bounds, collectionViewLayout: UICollectionViewCompositionalLayout.list(using: list))
         collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        collectionView.topEdgeEffect.style = .soft
         collectionView.delegate = self
         collectionView.refreshControl = UIRefreshControl(frame: .zero, primaryAction: UIAction { [weak self] _ in
             self?.onRefresh?()

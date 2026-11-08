@@ -60,6 +60,7 @@ struct SettingsView: View {
                     LabeledContent("Speaks Tab", value: "Protocol \(ProtocolVersion.supported.map { String($0.rawValue) }.joined(separator: ", "))")
                 }
             }
+            .scrollEdgeEffectStyle(.soft, for: .top)
             .navigationTitle("Settings")
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
@@ -122,6 +123,7 @@ private struct ThemePicker: View {
                     }
                 }
             }
+            .scrollEdgeEffectStyle(.soft, for: .top)
             .searchable(text: $query)
             .navigationTitle(title)
         } label: {
