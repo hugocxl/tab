@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.12.1 - 2026-11-08
+
+### Changed
+
+- Groups of tool calls in an agent's transcript have more space around them,
+  so the conversation is easier to read.
+
 ## 0.12.0 - 2026-11-07
 
 ### Added

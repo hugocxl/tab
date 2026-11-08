@@ -240,8 +240,8 @@ final class ToolCell: UICollectionViewCell {
         if position.roundsBottom { corners.formUnion([.layerMinXMaxYCorner, .layerMaxXMaxYCorner]) }
         card.layer.maskedCorners = corners
         separator.isHidden = position.roundsTop
-        cardTop.constant = position.roundsTop ? 4 : 0
-        cardBottom.constant = position.roundsBottom ? -4 : 0
+        cardTop.constant = position.roundsTop ? 8 : 0
+        cardBottom.constant = position.roundsBottom ? -16 : 0
 
         isAccessibilityElement = true
         accessibilityLabel = sentence.string
