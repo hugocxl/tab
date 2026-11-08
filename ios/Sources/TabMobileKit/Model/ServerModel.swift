@@ -367,10 +367,10 @@ public final class ServerModel: Identifiable {
         return tab.id
     }
 
-    /// A pane of `kind` beside `anchor` in `tab`, or the first tab of a
+    /// A pane of `kind` below `anchor` in `tab`, or the first tab of a
     /// project that has none.
     @discardableResult
-    public func newPane(_ kind: MobilePaneKind, project: ProjectId, beside anchor: PaneId?, edge: Direction = .right,
+    public func newPane(_ kind: MobilePaneKind, project: ProjectId, beside anchor: PaneId?, edge: Direction = .down,
                         size: Size) throws -> PaneId {
         let pane = makePane(kind, project: project, size: size)
         if let anchor {

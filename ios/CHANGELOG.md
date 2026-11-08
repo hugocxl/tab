@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.13.0 - 2026-11-08
+
+### Changed
+
+- New panes opened from the phone go below the current pane, stacked
+  vertically on the Mac, instead of beside it.
+
 ## 0.12.2 - 2026-11-08
 
 ### Changed

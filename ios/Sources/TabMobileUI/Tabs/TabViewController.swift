@@ -290,8 +290,7 @@ final class TabViewController: UIViewController {
 
     private func addPane(_ kind: MobilePaneKind, project: ProjectId) {
         let size = Size(cols: 80, rows: 24)
-        let edge: Direction = view.bounds.width > view.bounds.height ? .right : .down
-        guard let id = try? server.newPane(kind, project: project, beside: focused, edge: edge, size: size) else { return }
+        guard let id = try? server.newPane(kind, project: project, beside: focused, size: size) else { return }
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         focus(id)
     }
