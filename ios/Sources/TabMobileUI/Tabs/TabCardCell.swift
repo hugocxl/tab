@@ -125,6 +125,10 @@ final class TabCardCell: UICollectionViewListCell {
     private var workingSince: Date?
     private var elapsedTimer: Timer?
     private var shownIcon: Data?
+    /// In a phone's inset grouped list, where the card is a plain list row.
+    var isGrouped = false {
+        didSet { setNeedsUpdateConfiguration() }
+    }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -360,6 +364,10 @@ final class TabCardCell: UICollectionViewListCell {
 
     /// The selected card sits on glass, as on the desktop.
     override func updateConfiguration(using state: UICellConfigurationState) {
+        if isGrouped {
+            backgroundConfiguration = UIBackgroundConfiguration.listCell().updated(for: state)
+            return
+        }
         var background = UIBackgroundConfiguration.clear()
         background.cornerRadius = 18
         background.backgroundInsets = NSDirectionalEdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8)

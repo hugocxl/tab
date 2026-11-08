@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.16.0 - 2026-11-08
+
+### Changed
+
+- On iPhone, the tab list is an inset grouped list, with the tabs in one rounded
+  card.
+
 ## 0.15.0 - 2026-11-08
 
 ### Changed

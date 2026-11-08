@@ -90,8 +90,10 @@ final class TabListViewController: UICollectionViewController {
         self.app = app
         super.init(collectionViewLayout: UICollectionViewLayout())
         let layout = UICollectionViewCompositionalLayout { [weak self] _, environment in
-            var configuration = UICollectionLayoutListConfiguration(appearance: .plain)
-            configuration.backgroundColor = .clear
+            // A phone's home is an inset grouped list; an iPad's sidebar stays plain.
+            let isPhone = environment.traitCollection.userInterfaceIdiom == .phone
+            var configuration = UICollectionLayoutListConfiguration(appearance: isPhone ? .insetGrouped : .plain)
+            configuration.backgroundColor = isPhone ? .systemGroupedBackground : .clear
             configuration.headerMode = (self?.visibleServers.count ?? 0) > 1 ? .supplementary : .none
             configuration.separatorConfiguration.bottomSeparatorInsets = NSDirectionalEdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20)
             configuration.trailingSwipeActionsConfigurationProvider = { path in self?.swipeActions(path) }
@@ -133,7 +135,7 @@ final class TabListViewController: UICollectionViewController {
         super.viewDidLoad()
         navigationItem.largeTitleDisplayMode = .never
         // Clear, so an iPad's sidebar shows its own material.
-        collectionView.backgroundColor = .clear
+        collectionView.backgroundColor = isPhone ? .systemGroupedBackground : .clear
         // Cards fade under the bar instead of meeting a hairline.
         collectionView.topEdgeEffect.style = .soft
         configureDataSource()
@@ -327,6 +329,7 @@ final class TabListViewController: UICollectionViewController {
     private func configureDataSource() {
         let cell = UICollectionView.CellRegistration<TabCardCell, TabId> { [weak self] cell, _, id in
             guard let self, let entry = cards[id] else { return }
+            cell.isGrouped = isPhone
             cell.configure(entry.card, icon: icon(entry.card.iconProject, on: entry.server))
         }
         let header = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(
