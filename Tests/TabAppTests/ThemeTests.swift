@@ -37,15 +37,15 @@ final class ThemeTests: XCTestCase {
 
     func testUnknownThemeFallsBackToDefaults() {
         let theme = AppTheme(catalog: ThemeCatalog(entries: []), darkTheme: "Missing", lightTheme: "Missing", systemIsDark: true)
-        XCTAssertEqual(TabCore.RGBColor(theme.bg), TabCore.RGBColor(0x111111))
-        XCTAssertEqual(TabCore.RGBColor(theme.fg), TabCore.RGBColor(0xD5CEC7))
+        XCTAssertEqual(TabCore.RGBColor(theme.bg), TabCore.RGBColor(0x1A1A19))
+        XCTAssertEqual(TabCore.RGBColor(theme.fg), TabCore.RGBColor(0xCECDC8))
     }
 
     func testCardBlendsMatchStyleGuide() {
         let palette = AppTheme(catalog: ThemeCatalog(entries: []), systemIsDark: true).palette
         let card = AppTheme.card(palette)
-        // 2.5% of #d5cec7 over #111111 is about #161616.
-        XCTAssertEqual(card.red * 255, 22, accuracy: 1)
+        // 2.5% of #cecdc8 over #1a1a19 is about #1f1f1e.
+        XCTAssertEqual(card.red * 255, 31, accuracy: 1)
         XCTAssertEqual(card.alpha, 1)
         XCTAssertEqual(AppTheme.chrome(palette), palette.bg)
     }

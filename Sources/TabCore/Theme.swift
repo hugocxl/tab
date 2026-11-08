@@ -243,15 +243,15 @@ public struct ChromePalette: Equatable, Sendable {
     public var diffRemove: ChromeColor
     public var diffHunk: ChromeColor
 
-    private static let fallbackBackground = RGBColor(0x11_11_11)
-    private static let fallbackForeground = RGBColor(0xD5_CE_C7)
-    private static let fallbackAccent = RGBColor(0xC3_70_D3)
+    private static let fallbackBackground = RGBColor(0x1A_1A_19)
+    private static let fallbackForeground = RGBColor(0xCE_CD_C8)
+    private static let fallbackAccent = RGBColor(0xD9_77_57)
 
     public init(scheme: ColorScheme) {
         let background = ChromeColor(scheme.background ?? Self.fallbackBackground)
         let foreground = ChromeColor(scheme.foreground ?? Self.fallbackForeground)
         let accent = ChromeColor(scheme.paletteColor(4) ?? Self.fallbackAccent)
-        let danger = ChromeColor(scheme.paletteColor(1) ?? RGBColor(0xEC_48_99))
+        let danger = ChromeColor(scheme.paletteColor(1) ?? RGBColor(0xF0_64_6E))
         bg = background
         fg = foreground
         fgMuted = foreground.withAlpha(0.65)

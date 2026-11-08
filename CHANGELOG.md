@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.78.0 - 2026-11-08
+
+### Changed
+
+- The Tab and Tab Light themes pair Cursor's quiet neutral grays with Claude's warm terracotta accent and softer
+  colors.
+
 ## 0.77.0 - 2026-11-08
 
 ### Added
