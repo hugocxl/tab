@@ -148,9 +148,8 @@ final class TabListViewController: UICollectionViewController {
             self?.onSettings?()
         }
         settingsButton.accessibilityLabel = "Settings"
-        navigationItem.rightBarButtonItem = settingsButton
         filterButton.accessibilityLabel = "Filter"
-        navigationItem.leftBarButtonItem = filterButton
+        navigationItem.rightBarButtonItems = [settingsButton, filterButton]
 
         statusView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(statusView)
@@ -178,7 +177,7 @@ final class TabListViewController: UICollectionViewController {
         if isPhone {
             toolbarItems = [navigationItem.searchBarPlacementBarButtonItem, .flexibleSpace(), newTabButton]
         } else {
-            navigationItem.rightBarButtonItems = [newTabButton, settingsButton]
+            navigationItem.rightBarButtonItems = [newTabButton, .fixedSpace(0), settingsButton, filterButton]
         }
         newTabButton.isEnabled = app.servers.contains { $0.board != nil }
         for server in app.servers {
@@ -264,8 +263,8 @@ final class TabListViewController: UICollectionViewController {
 
     /// Opens the New Tab sheet: the desktop's New in Project page as a form.
     private func makeNewTabButton() -> UIBarButtonItem {
-        let item = UIBarButtonItem(image: UIImage(systemName: "plus"))
-        item.primaryAction = UIAction(image: UIImage(systemName: "plus")) { [weak self, weak item] _ in
+        let item = UIBarButtonItem(image: UIImage(systemName: "square.and.pencil"))
+        item.primaryAction = UIAction(image: UIImage(systemName: "square.and.pencil")) { [weak self, weak item] _ in
             self?.showNewTab(kind: nil, source: item)
         }
         item.accessibilityLabel = "New Tab"

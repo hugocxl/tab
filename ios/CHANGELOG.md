@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.14.0 - 2026-11-08
+
+### Changed
+
+- Filter and Settings sit together at the top right of the tab list, and New Tab
+  is a compose button.
+
 ## 0.13.0 - 2026-11-08
 
 ### Changed
