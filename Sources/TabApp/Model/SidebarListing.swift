@@ -31,15 +31,20 @@ public struct SidebarListing: Equatable {
         /// The Open Tabs layout's cards in order: the open tabs, oldest
         /// first. Nil when the sidebar groups by project.
         public var openTabs: [Target]?
+        /// The Projects layout's groups: each of `groups` with only its open
+        /// cards, in the Open Tabs order. Nil in the Open Tabs layout.
+        public var openGroups: [Group]?
 
         public static func == (left: Host, right: Host) -> Bool {
             left.server == right.server && left.groups == right.groups && left.openTabs == right.openTabs
+                && left.openGroups == right.openGroups
                 && left.terminals.map(\.tab) == right.terminals.map(\.tab)
                 && left.terminals.map(\.project) == right.terminals.map(\.project)
         }
 
         public var targets: [Target] {
-            openTabs ?? terminals.map { .tab($0.tab) } + groups.flatMap { $0.cards.map { .project($0.project) } }
+            if let openTabs { return openTabs }
+            return terminals.map { .tab($0.tab) } + (openGroups ?? groups).flatMap { $0.cards.map { .project($0.project) } }
         }
     }
 
@@ -112,7 +117,10 @@ public struct SidebarListingBuilder {
             let hostGroups = groups.filter { state.project($0.project)?.serverId == server }
             guard !hostTerminals.isEmpty || !hostGroups.isEmpty else { return nil }
             var host = SidebarListing.Host(server: server, terminals: hostTerminals, groups: hostGroups)
-            if appearance.sidebarLayout == .tabs { host.openTabs = openTabs(host) }
+            switch appearance.sidebarLayout {
+            case .tabs: host.openTabs = openTabs(host)
+            case .projects: host.openGroups = openGroups(host)
+            }
             return host
         }
         return SidebarListing(hosts: hosts)
@@ -139,6 +147,20 @@ public struct SidebarListingBuilder {
             default: return left.offset < right.offset
             }
         }.map(\.element.0)
+    }
+
+    /// `host`'s groups with only the cards that have a pane open, in the
+    /// Open Tabs order, so grouping by project shows the same tabs.
+    func openGroups(_ host: SidebarListing.Host) -> [SidebarListing.Group] {
+        let rank = Dictionary(openTabs(host).enumerated().map { ($1, $0) }, uniquingKeysWith: min)
+        return host.groups.map { group in
+            var open = group
+            open.cards = group.cards
+                .compactMap { card in rank[.project(card.project)].map { (card, $0) } }
+                .sorted { $0.1 < $1.1 }
+                .map(\.0)
+            return open
+        }
     }
 
     /// The name a project goes by: another computer's Home by its server.

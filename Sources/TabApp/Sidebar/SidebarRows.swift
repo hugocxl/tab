@@ -202,11 +202,11 @@ final class SidebarCardView: HoverView {
         prLabel.isHidden = data.pullRequest == nil
         elapsedLabel.isHidden = data.workingSince == nil
         dot.isHidden = data.status == .idle
-        alphaValue = data.unavailable ? 0.5 : 1
+        alphaValue = data.unavailable || data.offline ? 0.5 : 1
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
         let parts = [headerLabel?.stringValue, shell?.stringValue, text, data.name, data.branch, data.primary ? "primary" : nil,
-                     data.pullRequest.map { "pull request \($0)" }]
+                     data.pullRequest.map { "pull request \($0)" }, data.offline ? "not connected" : nil]
         setAccessibilityLabel(parts.compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", "))
     }
 

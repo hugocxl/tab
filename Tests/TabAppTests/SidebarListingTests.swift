@@ -72,6 +72,31 @@ final class SidebarListingTests: XCTestCase {
         XCTAssertEqual(model.sidebarListing.targets.first, .tab(home))
     }
 
+    /// Grouping by project shows the same open tabs as Open Tabs, under
+    /// their projects: no empty checkout or worktree, and no project
+    /// without a tab. Cmd-1–9 must select what it shows.
+    func testProjectsLayoutShowsOnlyOpenTabsUnderTheirProjects() async throws {
+        let (app, feature) = try await repository("app", worktree: "feature")
+        let lib = try XCTUnwrap(model.addProject(try ModelFixtures.folder("lib")))
+        model.newTerminal(in: feature)
+        model.newHomeTerminal()
+        model.newTerminal(in: app)
+        let home = try XCTUnwrap(model.state.home.tabs.first?.id)
+
+        let listing = model.sidebarListing
+        XCTAssertEqual(listing.projects, [app, lib], "project shortcuts still know every project")
+        XCTAssertEqual(listing.targets, [.tab(home), .project(feature), .project(app)])
+        model.selectCard(1)
+        XCTAssertEqual(model.currentProject.id, feature)
+
+        let snapshot = SidebarSnapshot(model: model)
+        XCTAssertEqual(snapshot.hosts.first?.groups.map(\.project), [app])
+        XCTAssertEqual(snapshot.hosts.first?.groups.first?.cards.map(\.target), [.project(feature), .project(app)])
+
+        model.newTerminal(in: lib)
+        XCTAssertEqual(SidebarSnapshot(model: model).hosts.first?.groups.map(\.project), [app, lib])
+    }
+
     func testProjectsListInOrderWithTheirWorktreesAndHomeTerminalsFirst() async throws {
         let (app, feature) = try await repository("app", worktree: "feature")
         let lib = try XCTUnwrap(model.addProject(try ModelFixtures.folder("lib")))
@@ -115,6 +140,8 @@ final class SidebarListingTests: XCTestCase {
         let first = try XCTUnwrap(model.addProject(try ModelFixtures.folder("first")))
         _ = model.addProject(try ModelFixtures.folder("second"))
         let last = try XCTUnwrap(model.addProject(try ModelFixtures.folder("last")))
+        model.newTerminal(in: first)
+        model.newTerminal(in: last)
         model.selectProject(model.state.home.id)
         model.cycleProject(forward: false)
         XCTAssertEqual(model.currentProject.id, first)
@@ -139,6 +166,7 @@ final class SidebarListingTests: XCTestCase {
 
     func testHostGroupsKeepTerminalsProjectsAndShortcutsTogether() async throws {
         let local = try XCTUnwrap(model.addProject(try ModelFixtures.folder("local")))
+        model.newTerminal(in: local)
         model.newHomeTerminal()
         XCTAssertFalse(SidebarSnapshot(model: model).showsHostHeaders)
 

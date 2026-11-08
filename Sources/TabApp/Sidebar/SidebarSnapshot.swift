@@ -58,7 +58,8 @@ struct SidebarSnapshot: Equatable {
                 return CardEntry(target: .tab(entry.tab),
                                  data: ActivityCardData.make(project: project, tab: tab, primary: false, model: model))
             }
-            let groups = host.groups.compactMap { group -> GroupEntry? in
+            // Grouping by project draws only the open cards, like Open Tabs does.
+            let groups = (host.openGroups ?? host.groups).compactMap { group -> GroupEntry? in
                 guard let project = model.state.project(group.project) else { return nil }
                 let cards = group.cards.compactMap { card -> CardEntry? in
                     guard let target = model.state.project(card.project) else { return nil }
@@ -86,13 +87,17 @@ struct SidebarSnapshot: Equatable {
             return HostEntry(server: host.server, title: host.server.isLocal ? "This Mac" : model.serverName(host.server) ?? "Remote",
                              terminals: terminals, groups: groups, openTabs: openTabs)
         }
-        if model.appearance.sidebarLayout == .tabs {
-            // A computer whose projects have no tab open shows nothing in Open Tabs.
+        // A project, or a computer, with no tab open shows nothing in either layout.
+        switch model.appearance.sidebarLayout {
+        case .tabs:
             self.hosts = hosts.filter { !($0.openTabs?.isEmpty ?? true) || $0.groups.contains { !$0.creating.isEmpty } }
-            showsHostHeaders = self.hosts.count > 1
-        } else {
-            self.hosts = hosts
-            showsHostHeaders = model.knownServers.count > 1
+        case .projects:
+            self.hosts = hosts.map { host in
+                var host = host
+                host.groups.removeAll { $0.cards.isEmpty && $0.creating.isEmpty }
+                return host
+            }.filter { !$0.terminals.isEmpty || !$0.groups.isEmpty }
         }
+        showsHostHeaders = self.hosts.count > 1
     }
 }

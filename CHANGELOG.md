@@ -3,6 +3,14 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.76.0 - 2026-11-08
+
+### Changed
+
+- The Projects sidebar layout shows the same open tabs as Open Tabs, grouped under their projects, and hides
+  checkouts, worktrees and projects with no tab open.
+- Tabs from another computer that isn't connected yet show dimmed in the sidebar until it connects.
+
 ## 0.75.1 - 2026-11-07
 
 ### Fixed

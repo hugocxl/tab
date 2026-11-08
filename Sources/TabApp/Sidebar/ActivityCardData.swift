@@ -47,6 +47,9 @@ struct ActivityCardData: Equatable {
     var workingSince: Date?
     var selected: Bool
     var unavailable: Bool
+    /// Another computer's card while its server isn't connected: dimmed,
+    /// but selecting it still connects.
+    var offline: Bool
 
     @MainActor
     static func make(project: Project, tab: Tab?, primary: Bool, model: AppModel) -> ActivityCardData {
@@ -100,7 +103,8 @@ struct ActivityCardData: Equatable {
             baseBehind: info?.summary?.baseBehind, primary: primary, pullRequest: info?.pullRequest,
             status: status, workingSince: status == .working ? workingSince(tabs: tabs, server: project.serverId, model: model) : nil,
             selected: selected,
-            unavailable: project.status == .missing || model.worktreeRemovals.contains(project.id)
+            unavailable: project.status == .missing || model.worktreeRemovals.contains(project.id),
+            offline: !project.serverId.isLocal && model.connectionState(project.serverId).isOffline
         )
     }
 
