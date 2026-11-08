@@ -31,6 +31,8 @@ public enum CLICommand: Hashable, Sendable {
     case manage(ManageInvocation)
     /// Adds a pane or a tab in the app on this computer.
     case pane(CLIPane, json: Bool)
+    /// Lists, focuses, closes, zooms, moves or resizes panes in the app on this computer.
+    case paneControl(AppPaneControl, json: Bool)
     case browser(BrowserInvocation)
     /// The skill and hooks of the coding agents on this computer.
     case integrations(CLIIntegrations, json: Bool)
@@ -156,6 +158,20 @@ public struct CLIPane: Hashable, Sendable {
     /// `nil`: the caller's project, else Home. Tabs always go to Home.
     public var project: String?
     public var content: Content
+    /// Which side of its neighbor a new pane opens on; right when missing.
+    public var edge: Direction?
+    /// The pane a new pane opens beside, as `tab pane` names one; the
+    /// caller's when missing.
+    public var beside: String?
+
+    public init(placement: AppPane.Placement, project: String?, content: Content, edge: Direction? = nil,
+                beside: String? = nil) {
+        self.placement = placement
+        self.project = project
+        self.content = content
+        self.edge = edge
+        self.beside = beside
+    }
 }
 
 public enum CLIWorktree: Hashable, Sendable {

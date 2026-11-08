@@ -23,7 +23,7 @@ public enum AgentSkill {
     public static let text = #"""
     ---
     name: tab-cli
-    description: How to drive Tab from a shell with the `tab` command — start terminals that keep running, type into them, read and wait on their output, open terminal, agent, browser, simulator, editor and diff panes in the app, branch your own conversation into agent panes and read their replies, check apps on iOS simulators and Android emulators, and manage projects and Git worktrees. Use this when you are an agent running inside a Tab terminal or Tab agent pane (or any script on the same computer) and want work to run in its own terminal instead of blocking yours, the user asks for a new pane or tab, of any kind, asks to branch or fork the conversation or split work into panes, or to drive the Tab app's built-in browser or a simulator.
+    description: How to drive Tab from a shell with the `tab` command — open terminal, agent, browser, simulator, editor and diff panes in the app, list the panes on screen and focus, close, zoom, move, swap and resize them, start terminals that keep running, type into them, read and wait on their output, branch your own conversation into agent panes and read their replies, check apps on iOS simulators and Android emulators, and manage projects and Git worktrees. Use this when you are an agent running inside a Tab terminal or Tab agent pane (or any script on the same computer) and the user asks for anything in the app, however loosely — "open a terminal here", "new tab", "split this", "show me the page", "close that pane", "make it bigger", "put the tests below" — asks to branch or fork the conversation or split work into panes, wants work to run in its own terminal instead of blocking yours, or to drive the Tab app's built-in browser or a simulator.
     ---
 
     # Tab CLI
@@ -34,11 +34,41 @@ public enum AgentSkill {
     - **On the server**: `session`, `agent`, `project`, `worktree`, `simulator` and
       the like. A session is a terminal that keeps running after your command
       returns, whether or not the app shows it. These never open anything in the app.
-    - **In the app**: `pane new` adds a pane beside yours, `tab new` adds a tab
-      (a card in the sidebar) to Home, and `browser` drives a browser pane.
+    - **In the app**: `pane new` adds a pane beside yours, `pane list` shows the
+      panes on screen, `pane focus|close|zoom|move|swap|resize|equalize` arrange
+      them, `tab new` adds a tab (a card in the sidebar) to Home, and `browser`
+      drives a browser pane.
 
     Run `tab --help` and `tab <command> --help` for every option. Commands that
     print data take `--json`.
+
+    ## What users mean
+
+    When the user asks for something in the app, run the command yourself instead
+    of explaining it. In Tab a **tab** is a card in the sidebar and a **pane** is one
+    terminal, agent, browser, simulator, editor or diff inside a tab. Users say
+    these loosely:
+
+    | The user says | Run |
+    | --- | --- |
+    | "open a terminal", "new tab", "split", "another shell here" | `tab pane new terminal` |
+    | "run the dev server in a new terminal" | `tab pane new terminal -- npm run dev` |
+    | "… below", "… on the left", "… above" | add `--edge down`, `--edge left`, `--edge up` |
+    | "… next to the browser" | add `--beside <pane>` |
+    | "open localhost:3000", "show me the page" | `tab pane new browser http://localhost:3000` |
+    | "open App.swift at line 42" | `tab pane new editor App.swift --line 42` |
+    | "show me the diff of App.swift" | `tab pane new diff App.swift` |
+    | "show the simulator" | `tab pane new simulator` |
+    | "start another agent on X" | `tab pane new agent -- "X"` |
+    | "branch this", "fork the conversation" | `tab pane new agent --fork -- "<the branch's part>"` |
+    | "a new tab in Home", "a new card in the sidebar" | `tab tab new terminal` (or agent, browser, simulator) |
+    | "this pane", "that one", "the one on the left" | `tab pane list`, then pick by position, kind and title |
+    | "close it", "focus the server", "maximize that" | `tab pane close`, `tab pane focus`, `tab pane zoom` |
+    | "move it below", "swap them", "make it bigger", "even them out" | `tab pane move`, `swap`, `resize`, `equalize` |
+
+    Only use `tab tab new` when the user asks for a new card in the sidebar; "a new
+    tab" said in passing almost always means a pane beside yours. Panes, splits and
+    tabs never mean your own subagents or task tools, which Tab doesn't show.
 
     ## When to use it
 
@@ -107,18 +137,61 @@ public enum AgentSkill {
     tab pane new simulator "iPhone 17"        # a simulator or emulator's screen
     tab pane new editor Sources/App.swift --line 42
     tab pane new diff Sources/App.swift       # its uncommitted changes; --staged for staged ones
+    tab pane new terminal --edge down -- npm test   # below yours
+    tab pane new browser http://localhost:3000 --beside "$EDITOR_PANE" --edge up
     tab tab new terminal                      # a new tab in Home instead
     tab tab new simulator
     ```
 
-    - Inside Tab, a pane always opens beside yours. With `--project` it works in
-      that project's folder, but it still opens beside you.
+    - Inside Tab, a pane opens beside yours, on its right unless `--edge` says
+      `left`, `up` or `down`. `--beside PANE` opens it beside another pane of the
+      same computer's tabs. With `--project` it works in that project's folder,
+      but it still opens beside you.
     - `editor` and `diff` take a file inside the project, absolute or relative to
       your current folder. A pane already showing that file is focused instead.
     - `simulator` without a name shows the only running simulator, else the picker.
     - Never start `claude` or `codex` in a terminal to give the user another agent:
       it is a separate program that asks its own questions, such as whether to trust
       the folder, regardless of the access mode chosen in Tab. Use `pane new agent`.
+
+    ## See and arrange the panes on screen
+
+    `pane list` prints the panes of your tab, one per line: id, kind, position,
+    flags, title, session and project. `--all` lists every tab; `--json` adds the
+    tab, folders, browser URLs and each pane's share of the tab.
+
+    ```bash
+    tab pane list
+    # 6f1c…  agent     left         self             Agent           …
+    # 9a2e…  terminal  top right    focused          npm run dev     …   wispy-cedar
+    # c47b…  browser   bottom right                  localhost:3000
+    ```
+
+    - position is `whole`, `left`, `right`, `top`, `bottom`, `top left`, … as the
+      user sees it. flags are `self` (the pane you run in), `focused`, `zoomed`
+      and `hidden` (not on screen now).
+    - Name a pane by its ID or a unique start of one, by its terminal's or
+      agent's ID or name (`wispy-cedar`), by its exact title, or with a word:
+      `self`, `focused`, or `left`, `right`, `up`, `down` for the pane on that side
+      of yours. A browser's ID is its pane's ID.
+    - Check `pane list` before acting on "this", "that" or "the other pane"; if
+      two panes fit, ask the user which.
+
+    ```bash
+    tab pane focus right                      # show it and give it the keyboard
+    tab pane zoom 9a2e                        # alone in the tab; --off shows them all
+    tab pane move c47b down --beside self     # dock it below yours
+    tab pane swap left right
+    tab pane resize self --width 60           # 60% of the tab's width
+    tab pane resize 9a2e --height 30
+    tab pane equalize
+    tab pane close c47b
+    ```
+
+    - `close` asks the user first when a program still runs in the pane; closing a
+      terminal ends it. Close only panes you opened unless the user asks, and you
+      can't close your own.
+    - `move` and `swap` work within one tab.
 
     ## Branch the conversation
 

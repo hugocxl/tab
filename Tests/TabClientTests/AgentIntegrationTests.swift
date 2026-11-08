@@ -118,6 +118,11 @@ final class AgentIntegrationTests: XCTestCase {
         let agent = AgentIntegrations.context(environment: ["TAB_AGENT_ID": "a1"], cli: nil)
         XCTAssertTrue(agent?.contains("agent a1") ?? false)
         XCTAssertTrue(agent?.contains("tab pane new agent --fork --") ?? false)
+        // Tab's own agent panes have it in their system prompt; the hook stays quiet.
+        XCTAssertNil(AgentIntegrations.context(environment: ["TAB_AGENT_ID": "a1", AgentContext.providedVariable: "1"],
+                                               cli: nil))
+        let named = AgentIntegrations.context(environment: ["TAB_SESSION_ID": SessionId().description], cli: nil)
+        XCTAssertTrue(named?.contains("tab pane list") ?? false, "a terminal's agent learns to look before acting")
     }
 
     func testOnlyTabsOwnHooksCount() {

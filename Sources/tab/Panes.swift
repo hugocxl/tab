@@ -13,7 +13,7 @@ enum Panes {
             let caller = (environment["TAB_AGENT_ID"] ?? environment["TAB_SESSION_ID"]).flatMap(SessionId.init(string:))
             var invocation = BrowserInvocation.open(url: url, profile: profile, project: pane.project,
                                                     beside: pane.placement == .pane ? caller : nil,
-                                                    placement: pane.placement)
+                                                    placement: pane.placement, edge: pane.edge, anchor: pane.beside)
             if json { invocation.output = .idJSON }
             return try BrowserCommandRunner.run(invocation)
         }
@@ -24,7 +24,7 @@ enum Panes {
         if let content = try await content(pane, client: client) {
             let project = try await project(pane, client: client, target: target)
             let request = AppNewPane(content: try file(content, in: project), project: project.id, beside: caller,
-                                     placement: pane.placement)
+                                     placement: pane.placement, edge: pane.edge, anchor: pane.beside)
             do {
                 _ = try App.call(.add(request), timeout: try App.replyTime(), startApp: true)
             } catch {
@@ -43,20 +43,21 @@ enum Panes {
                 throw CLIError("session \(session) isn't running")
             }
             shown = AppPane(kind: .terminal, session: session, project: info.project, beside: caller,
-                            placement: pane.placement)
+                            placement: pane.placement, edge: pane.edge, anchor: pane.beside)
             record = Sessions.record(info)
         case .terminal(nil, let directory, let command):
             let project = try await project(pane, client: client, target: target)
             let session = try await Sessions.start(in: project, directory: directory, command: command, client: client,
                                                    target: target)
             shown = AppPane(kind: .terminal, session: session.id, project: session.project, beside: caller,
-                            placement: pane.placement)
+                            placement: pane.placement, edge: pane.edge, anchor: pane.beside)
             record = Sessions.record(session)
         case .agent(let provider, let text):
             let project = try await project(pane, client: client, target: target).id
             let snapshot = try await client.agentChat(.create(session: SessionId(), project: project, provider: provider))
             shown = AppPane(kind: .agent, session: snapshot.session, project: snapshot.project,
-                            provider: snapshot.provider, beside: caller, placement: pane.placement)
+                            provider: snapshot.provider, beside: caller, placement: pane.placement,
+                            edge: pane.edge, anchor: pane.beside)
             record = agentRecord(snapshot)
             started = snapshot
             message = text
@@ -72,7 +73,8 @@ enum Panes {
                 throw CLIError("the server can't fork into another project; update Tab")
             }
             shown = AppPane(kind: .agent, session: snapshot.session, project: snapshot.project,
-                            provider: snapshot.provider, beside: caller, placement: pane.placement)
+                            provider: snapshot.provider, beside: caller, placement: pane.placement,
+                            edge: pane.edge, anchor: pane.beside)
             record = agentRecord(snapshot)
             started = snapshot
             message = text
@@ -152,4 +154,36 @@ enum Panes {
     static func caller(server: ServerId) -> SessionId? {
         Agents.hostingAgent(server: server) ?? Sessions.hostingSession(server: server)
     }
+}
+
+/// `pane list`, `focus`, `close`, `zoom`, `move`, `swap`, `resize` and
+/// `equalize`: one request to the app, which names panes against the one this
+/// command runs in.
+enum PaneControl {
+    /// How long the user has to answer the app's question before a pane closes.
+    static let closeTime: TimeInterval = 120
+
+    static func run(_ control: AppPaneControl, json: Bool) throws {
+        guard !App.overSSH else { throw CLIError("panes are in the app on this Mac, not over SSH") }
+        var control = control
+        let environment = ProcessInfo.processInfo.environment
+        control.caller = (environment["TAB_AGENT_ID"] ?? environment["TAB_SESSION_ID"]).flatMap(SessionId.init(string:))
+        let reply: JSONValue
+        do {
+            let extra = control.action == .close ? closeTime : 0
+            reply = try App.call(.pane(control), timeout: try App.replyTime() + extra, startApp: control.action == .list)
+        } catch AppSocketError.failed(let message) where message.hasPrefix("unknown command") {
+            throw CLIError("this Tab app doesn't know tab pane \(control.action.rawValue); update Tab")
+        }
+        guard control.action == .list else { return Output.ok(json: json) }
+        if json { return Output.json(reply) }
+        guard case .array(let tabs)? = reply["tabs"] else { throw CLIError("invalid reply from Tab") }
+        for tab in tabs {
+            guard case .array(let panes)? = tab["panes"] else { continue }
+            Output.list(panes, columns: columns, json: false)
+        }
+    }
+
+    /// The columns `pane list` prints.
+    static let columns = ["id", "kind", "position", "flags", "title", "session", "project"]
 }

@@ -495,6 +495,53 @@ final class AgentRuntimeTests: XCTestCase {
         XCTAssertEqual(Set(recorder.messages), ["reply-message"], "A subagent's messages aren't where the conversation is")
     }
 
+    /// Tab's agent panes know they're in Tab whatever the user installed.
+    func testInstructionsReachClaudesSystemPromptAndCodexsDeveloperInstructions() async throws {
+        let claudeFixture = try AgentRuntimeFixture(#"""
+        take
+        id=$(printf '%s' "$line" | /usr/bin/sed -E 's/.*"request_id":"([^"]+)".*/\1/')
+        emit "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"$id\",\"response\":{}}}"
+        take
+        emit '{"type":"system","subtype":"init","session_id":"s"}'
+        emit '{"type":"result","subtype":"success","is_error":false,"result":"Done"}'
+        hold
+        """#)
+        defer { claudeFixture.remove() }
+        let claudeRecorder = AgentRuntimeRecorder()
+        let claude = claudeFixture.runtime(.claude, recorder: claudeRecorder)
+        claude.prepare(AgentLaunch(instructions: "You are running inside Tab."))
+        defer { claude.stop() }
+        let answered = expectation(description: "claude turn")
+        claudeRecorder.observe = { event in if case .status(.idle) = event { answered.fulfill() } }
+        try await claude.send(text: "Hello", model: nil)
+        await fulfillment(of: [answered], timeout: 5)
+        XCTAssertTrue(try claudeFixture.launches().first?.contains("--append-system-prompt\nYou are running inside Tab.\n") ?? false)
+
+        let codexFixture = try AgentRuntimeFixture("""
+        take
+        emit '{"id":1,"result":{}}'
+        take
+        take
+        emit '{"id":2,"result":{"thread":{"id":"thread"}}}'
+        take
+        emit '{"id":3,"result":{"turn":{"id":"one"}}}'
+        emit '{"method":"turn/completed","params":{"turn":{"id":"one","status":"completed"}}}'
+        hold
+        """)
+        defer { codexFixture.remove() }
+        let codexRecorder = AgentRuntimeRecorder()
+        let codex = codexFixture.runtime(.codex, recorder: codexRecorder)
+        codex.prepare(AgentLaunch(instructions: "You are running inside Tab."))
+        defer { codex.stop() }
+        let completed = expectation(description: "codex turn")
+        codexRecorder.observe = { event in if case .status(.idle) = event { completed.fulfill() } }
+        try await codex.send(text: "Hello", model: "gpt-6.1-sol", reasoningEffort: .xhigh)
+        await fulfillment(of: [completed], timeout: 5)
+        let sent = try codexFixture.messages()
+        XCTAssertEqual(sent[2]["method"] as? String, "thread/start")
+        XCTAssertEqual((sent[2]["params"] as? [String: Any])?["developerInstructions"] as? String, "You are running inside Tab.")
+    }
+
     func testCodexForkStartsAThreadForkAndResumesTheNewThreadAfterwards() async throws {
         let recorder = AgentRuntimeRecorder()
         let idle = expectation(description: "turn completed")

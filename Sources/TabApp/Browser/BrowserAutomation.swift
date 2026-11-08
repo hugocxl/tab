@@ -104,7 +104,9 @@ public final class BrowserAutomation {
             profile: profileId,
             project: BrowserScripts.optionalString(args, "project"),
             beside: BrowserScripts.optionalString(args, "beside").flatMap(SessionId.init(string:)),
-            newTab: BrowserScripts.flag(args, "tab"))
+            newTab: BrowserScripts.flag(args, "tab"),
+            edge: BrowserScripts.optionalString(args, "edge").flatMap(Direction.init(rawValue:)),
+            anchor: BrowserScripts.optionalString(args, "anchor"))
         return pane.tabId
     }
 

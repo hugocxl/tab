@@ -268,8 +268,8 @@ final class TestBrowserHost: BrowserHost {
     func showToast(_ message: String, isError: Bool) {}
     func manageBrowserProfiles() {}
 
-    func openBrowserPane(url: String?, profile: String?, project: String?, beside: SessionId?, newTab: Bool) throws
-        -> BrowserPaneController {
+    func openBrowserPane(url: String?, profile: String?, project: String?, beside: SessionId?, newTab: Bool,
+                         edge: Direction?, anchor: String?) throws -> BrowserPaneController {
         if project == "missing" { throw BrowserScripts.Failure("no project named 'missing'") }
         let pane = BrowserPaneController(tabId: UUID().uuidString, state: BrowserPane(url: url, profile: profile), host: self)
         panes[pane.tabId] = pane

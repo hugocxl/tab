@@ -549,57 +549,98 @@ enum CLICommands {
     // MARK: App
 
     static let pane = CLIGroup(
-        name: "pane", summary: "Add a terminal, agent, browser, simulator, editor or diff pane beside yours", section: .app,
+        name: "pane", summary: "Add, list, focus, close, move and resize panes beside yours", section: .app,
         commands: [
-            CLICommandSpec("pane new terminal", ["[SESSION] [--project PROJECT] [--directory DIR] [-- COMMAND...]"],
+            CLICommandSpec("pane new terminal", ["[SESSION] [--project PROJECT] [--directory DIR] [--edge EDGE] [--beside PANE] [-- COMMAND...]"],
                            "Show SESSION, or start a terminal, in a new pane; prints the session ID",
-                           words: 0 ... 1, values: ["--project", "--directory"], json: true, literal: true,
-                           place: .app) { a in
-                .pane(CLIPane(placement: .pane, project: a.value("--project"),
-                              content: try terminal(a)), json: a.json)
-            },
-            CLICommandSpec("pane new agent", ["[--project PROJECT] [--provider claude|codex] [-- MESSAGE...]",
-                                              "--fork [AGENT] [--project PROJECT] [-- MESSAGE...]"],
-                           "Start an agent conversation in a new pane, or copy one with --fork; prints its ID",
-                           words: 0 ... 1, values: ["--project", "--provider"], flags: ["--fork"], json: true,
+                           words: 0 ... 1, values: ["--project", "--directory"] + placementOptions, json: true,
                            literal: true, place: .app) { a in
+                .pane(try placed(a, CLIPane(placement: .pane, project: a.value("--project"), content: try terminal(a))),
+                      json: a.json)
+            },
+            CLICommandSpec("pane new agent", ["[--project PROJECT] [--provider claude|codex] [--edge EDGE] [--beside PANE] [-- MESSAGE...]",
+                                              "--fork [AGENT] [--project PROJECT] [--edge EDGE] [--beside PANE] [-- MESSAGE...]"],
+                           "Start an agent conversation in a new pane, or copy one with --fork; prints its ID",
+                           words: 0 ... 1, values: ["--project", "--provider"] + placementOptions, flags: ["--fork"],
+                           json: true, literal: true, place: .app) { a in
                 guard a.flag("--fork") else {
                     guard a.words.isEmpty else { throw a.usage }
-                    return .pane(CLIPane(placement: .pane, project: a.value("--project"), content: try agent(a)),
-                                 json: a.json)
+                    return .pane(try placed(a, CLIPane(placement: .pane, project: a.value("--project"),
+                                                       content: try agent(a))), json: a.json)
                 }
                 guard a.value("--provider") == nil else {
                     throw CLIError("a fork keeps its provider; leave out --provider")
                 }
                 if let agent = a.optional(0), SessionId(string: agent) == nil { throw CLIError("an agent is named by its ID") }
-                return .pane(CLIPane(placement: .pane, project: a.value("--project"),
-                                     content: .fork(agent: a.optional(0), project: a.value("--project"),
-                                                    message: try message(a))), json: a.json)
+                return .pane(try placed(a, CLIPane(placement: .pane, project: a.value("--project"),
+                                                   content: .fork(agent: a.optional(0), project: a.value("--project"),
+                                                                  message: try message(a)))), json: a.json)
             },
-            CLICommandSpec("pane new browser", ["[URL] [--project PROJECT] [--profile PROFILE]"],
+            CLICommandSpec("pane new browser", ["[URL] [--project PROJECT] [--profile PROFILE] [--edge EDGE] [--beside PANE]"],
                            "Open a page in a new pane; prints the browser's ID", words: 0 ... 1,
-                           values: ["--project", "--profile"], json: true, place: .app) { a in
-                .pane(CLIPane(placement: .pane, project: a.value("--project"),
-                              content: .browser(url: a.optional(0), profile: a.value("--profile"))), json: a.json)
-            },
-            CLICommandSpec("pane new simulator", ["[SIMULATOR] [--project PROJECT]"],
-                           "Show a simulator or emulator in a new pane", words: 0 ... 1, values: ["--project"],
-                           place: .app) { a in
-                .pane(CLIPane(placement: .pane, project: a.value("--project"), content: .simulator(simulator: a.optional(0))),
+                           values: ["--project", "--profile"] + placementOptions, json: true, place: .app) { a in
+                .pane(try placed(a, CLIPane(placement: .pane, project: a.value("--project"),
+                                            content: .browser(url: a.optional(0), profile: a.value("--profile")))),
                       json: a.json)
             },
-            CLICommandSpec("pane new editor", ["FILE [--line N] [--project PROJECT]"],
-                           "Open a file in an editor pane", words: 1 ... 1, values: ["--line", "--project"],
-                           place: .app) { a in
-                let line: Int? = a.value("--line") == nil ? nil : try a.number("--line", default: 1, 1 ... Int(Int32.max))
-                return .pane(CLIPane(placement: .pane, project: a.value("--project"),
-                                     content: .editor(path: a.word(0), line: line)), json: a.json)
+            CLICommandSpec("pane new simulator", ["[SIMULATOR] [--project PROJECT] [--edge EDGE] [--beside PANE]"],
+                           "Show a simulator or emulator in a new pane", words: 0 ... 1,
+                           values: ["--project"] + placementOptions, place: .app) { a in
+                .pane(try placed(a, CLIPane(placement: .pane, project: a.value("--project"),
+                                            content: .simulator(simulator: a.optional(0)))), json: a.json)
             },
-            CLICommandSpec("pane new diff", ["FILE [--staged] [--project PROJECT]"],
-                           "Show a file's uncommitted changes in a diff pane", words: 1 ... 1, values: ["--project"],
-                           flags: ["--staged"], place: .app) { a in
-                .pane(CLIPane(placement: .pane, project: a.value("--project"),
-                              content: .diff(path: a.word(0), staged: a.flag("--staged"))), json: a.json)
+            CLICommandSpec("pane new editor", ["FILE [--line N] [--project PROJECT] [--edge EDGE] [--beside PANE]"],
+                           "Open a file in an editor pane", words: 1 ... 1,
+                           values: ["--line", "--project"] + placementOptions, place: .app) { a in
+                let line: Int? = a.value("--line") == nil ? nil : try a.number("--line", default: 1, 1 ... Int(Int32.max))
+                return .pane(try placed(a, CLIPane(placement: .pane, project: a.value("--project"),
+                                                   content: .editor(path: a.word(0), line: line))), json: a.json)
+            },
+            CLICommandSpec("pane new diff", ["FILE [--staged] [--project PROJECT] [--edge EDGE] [--beside PANE]"],
+                           "Show a file's uncommitted changes in a diff pane", words: 1 ... 1,
+                           values: ["--project"] + placementOptions, flags: ["--staged"], place: .app) { a in
+                .pane(try placed(a, CLIPane(placement: .pane, project: a.value("--project"),
+                                            content: .diff(path: a.word(0), staged: a.flag("--staged")))), json: a.json)
+            },
+            CLICommandSpec("pane list", ["[--all]"],
+                           "The panes of your tab, or of every tab: id, kind, position, flags, title, session, project",
+                           flags: ["--all"], json: true, place: .app) { a in
+                .paneControl(AppPaneControl(.list, all: a.flag("--all")), json: a.json)
+            },
+            CLICommandSpec("pane focus", ["PANE"], "Show a pane and give it the keyboard", words: 1 ... 1,
+                           place: .app) { a in
+                .paneControl(AppPaneControl(.focus, pane: a.word(0)), json: false)
+            },
+            CLICommandSpec("pane close", ["PANE"], "Close a pane, as Close Pane does", words: 1 ... 1,
+                           place: .app) { a in
+                .paneControl(AppPaneControl(.close, pane: a.word(0)), json: false)
+            },
+            CLICommandSpec("pane zoom", ["[PANE] [--off]"], "Show a pane alone in its tab; --off shows the whole tab",
+                           words: 0 ... 1, flags: ["--off"], place: .app) { a in
+                .paneControl(AppPaneControl(.zoom, pane: a.optional(0), zoomed: !a.flag("--off")), json: false)
+            },
+            CLICommandSpec("pane move", ["PANE EDGE [--beside PANE]"],
+                           "Move a pane to the EDGE side of yours, or of the --beside pane", words: 2 ... 2,
+                           values: ["--beside"], place: .app) { a in
+                .paneControl(AppPaneControl(.move, pane: a.word(0), other: a.value("--beside"),
+                                            edge: try edge(a.word(1))), json: false)
+            },
+            CLICommandSpec("pane swap", ["PANE OTHER"], "Exchange the places of two panes of a tab", words: 2 ... 2,
+                           place: .app) { a in
+                .paneControl(AppPaneControl(.swap, pane: a.word(0), other: a.word(1)), json: false)
+            },
+            CLICommandSpec("pane resize", ["PANE --width PERCENT", "PANE --height PERCENT"],
+                           "Give a pane a share of its tab's width or height", words: 1 ... 1,
+                           values: ["--width", "--height"], place: .app) { a in
+                let width = a.value("--width") != nil
+                guard width != (a.value("--height") != nil) else { throw CLIError("give --width or --height") }
+                let percent = try a.number(width ? "--width" : "--height", default: 50, 1 ... 100)
+                return .paneControl(AppPaneControl(.resize, pane: a.word(0), percent: percent,
+                                                   axis: width ? .horizontal : .vertical), json: false)
+            },
+            CLICommandSpec("pane equalize", ["[PANE]"], "Give every row and column of a tab equal shares",
+                           words: 0 ... 1, place: .app) { a in
+                .paneControl(AppPaneControl(.equalize, pane: a.optional(0)), json: false)
             },
         ],
         notes: """
@@ -607,7 +648,27 @@ enum CLICommands {
         pane goes beside the Tab terminal or agent this command runs in, working in
         PROJECT's folder when given. Elsewhere it goes into the tab of PROJECT, by
         default Home, where it becomes a new tab. To add a tab of its own, use
-        tab tab new.
+        tab tab new. EDGE is left, right (the default), up or down: the side of
+        your pane, or of the --beside pane, the new one opens on.
+
+        PANE names a pane the app shows: an ID or a unique start of one (at least
+        4 characters) from pane list, the ID or name of the terminal or agent it
+        shows, its exact title, or one of these words:
+          self      the pane this command runs in
+          focused   the pane the user last focused
+          left, right, up, down   the pane on that side of yours
+        A missing PANE means yours. A browser's ID is its pane's ID.
+
+        pane list prints one line per pane of the tab this command runs in (else
+        the tab on screen); --all lists every tab. position is where the pane sits
+        in its tab, such as left, top right or whole; flags are self, focused,
+        zoomed and hidden (its tab isn't on screen). --json adds each pane's tab,
+        project folder and its share of the tab (x, y, width and height, 0 to 100).
+
+        pane close asks the user first when a program still runs in the pane, as
+        closing it ends the program. A terminal ends unless Settings detaches
+        closed terminals. You can't close the pane you run in. move and swap work
+        within one tab.
 
         SESSION is a terminal started earlier, such as with tab session new.
 
@@ -656,6 +717,25 @@ enum CLICommands {
         which starts if it isn't running. To add a pane to an existing tab, use
         tab pane new.
         """)
+
+    /// The options that place a new pane.
+    private static let placementOptions = ["--edge", "--beside"]
+
+    /// `pane` with the `--edge` and `--beside` it was given.
+    private static func placed(_ a: CLIArguments, _ pane: CLIPane) throws -> CLIPane {
+        var pane = pane
+        pane.edge = try a.value("--edge").map(edge)
+        pane.beside = a.value("--beside")
+        return pane
+    }
+
+    /// A side of a pane: left, right, up or down.
+    static func edge(_ word: String) throws -> Direction {
+        guard let edge = Direction(rawValue: word.lowercased()) else {
+            throw CLIError("\(word) isn't a side of a pane; use left, right, up or down")
+        }
+        return edge
+    }
 
     private static func terminal(_ a: CLIArguments) throws -> CLIPane.Content {
         let session = try a.session(before: 0)

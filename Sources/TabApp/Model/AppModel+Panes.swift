@@ -164,7 +164,8 @@ extension AppModel {
         let provider = request.provider ?? .claude
         let content: PaneContent = request.kind == .agent
             ? .agent(session: request.session, provider: provider) : .terminal(session: request.session)
-        let anchor = request.beside.flatMap(state.paneShowing).flatMap { state.paneServer($0) == project.serverId ? $0 : nil }
+        let anchor = try? newPaneAnchor(request.anchor, beside: request.beside, in: project)
+        let edge = request.edge ?? .right
         var opened: PaneId?
         if request.placement == .tab, project.home {
             let pane = Pane(content: content)
@@ -173,7 +174,7 @@ extension AppModel {
         } else if let anchor {
             let pane = Pane(content: content)
             guard edit({ state in
-                try state.insertSplitPane(after: anchor, pane, edge: .right)
+                try state.insertSplitPane(after: anchor, pane, edge: edge)
                 try state.focusPane(pane.id)
                 state.revealCurrentProject()
             }) else { return nil }
@@ -216,13 +217,12 @@ extension AppModel {
             focusPane(opened)
         } else {
             let pane = Pane(content: content)
-            let anchor = request.beside.flatMap(state.paneShowing)
-                .flatMap { state.paneServer($0) == project.serverId ? $0 : nil }
+            let anchor = try? newPaneAnchor(request.anchor, beside: request.beside, in: project)
             if request.placement == .tab, project.home {
                 guard edit({ _ = try $0.openTab(project.id, pane) }) else { return nil }
             } else if let anchor {
                 guard edit({ state in
-                    try state.insertSplitPane(after: anchor, pane, edge: .right)
+                    try state.insertSplitPane(after: anchor, pane, edge: request.edge ?? .right)
                     try state.focusPane(pane.id)
                     state.revealCurrentProject()
                 }) else { return nil }
@@ -238,6 +238,19 @@ extension AppModel {
         }
         focusActiveContent()
         return opened
+    }
+
+    /// The pane a pane from the command line opens beside: the one `anchor`
+    /// names, else the pane showing `beside`, the terminal or agent that asked.
+    /// Either must be in a tab of `project`'s server, which runs the new pane.
+    func newPaneAnchor(_ anchor: String?, beside: SessionId?, in project: Project) throws -> PaneId? {
+        let caller = beside.flatMap(state.paneShowing)
+        guard let anchor else { return caller.flatMap { state.paneServer($0) == project.serverId ? $0 : nil } }
+        let named = try paneSelector(caller: caller).resolve(anchor)
+        guard state.paneServer(named) == project.serverId else {
+            throw ModelError("that pane is in a tab of another computer, so the new pane can't open beside it")
+        }
+        return named
     }
 
     /// Puts `prompt` in the composer of the agent pane `pane`, once the pane

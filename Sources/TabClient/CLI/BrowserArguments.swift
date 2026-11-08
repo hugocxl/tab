@@ -19,12 +19,15 @@ public struct BrowserInvocation: Hashable, Sendable {
         extraTime = 0
     }
 
-    /// Opens a page in a new pane beside the pane showing `beside`, else in
-    /// `project`'s tab, or in a new tab of Home.
+    /// Opens a page in a new pane on the `edge` of the pane `anchor` names, else
+    /// of the pane showing `beside`, else in `project`'s tab, or in a new tab
+    /// of Home.
     public static func open(url: String?, profile: String?, project: String?, beside: SessionId?,
-                            placement: AppPane.Placement) -> BrowserInvocation {
+                            placement: AppPane.Placement, edge: Direction? = nil,
+                            anchor: String? = nil) -> BrowserInvocation {
         BrowserInvocation(.open).optional("url", url).optional("profile", profile).optional("project", project)
-            .optional("beside", beside?.description).arg("tab", placement == .tab).output(.id)
+            .optional("beside", beside?.description).arg("tab", placement == .tab)
+            .optional("edge", edge?.rawValue).optional("anchor", anchor).output(.id)
     }
 
     fileprivate func arg(_ key: String, _ value: JSONValue) -> Self {

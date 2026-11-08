@@ -400,9 +400,10 @@ extension AppState {
 
     /// Splits `pane` with a browser on its right.
     @discardableResult
-    public mutating func splitBrowser(_ pane: PaneId, _ browser: BrowserPane, focus: Bool) throws -> PaneId {
+    public mutating func splitBrowser(_ pane: PaneId, _ browser: BrowserPane, focus: Bool,
+                                      edge: Direction = .right) throws -> PaneId {
         let new = Pane(content: .browser(browser))
-        try insertSplitPane(after: pane, new, edge: .right)
+        try insertSplitPane(after: pane, new, edge: edge)
         if focus { try focusPane(new.id) }
         return new.id
     }

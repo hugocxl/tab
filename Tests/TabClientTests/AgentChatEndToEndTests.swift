@@ -22,7 +22,9 @@ final class AgentChatEndToEndTests: XCTestCase {
             #!/bin/sh
             set -eu
             log="$TAB_DIR/\(name).jsonl"
-            printf '%s\\n' "$*" >> "$TAB_DIR/\(name).args"
+            # One line per launch, though an argument such as the system prompt spans several.
+            printf '%s\\n' "$*" | tr '\\n' ' ' >> "$TAB_DIR/\(name).args"
+            printf '\\n' >> "$TAB_DIR/\(name).args"
             take() { IFS= read -r line || exit 0; printf '%s\\n' "$line" >> "$log"; }
             emit() { printf '%s\\n' "$1"; }
             hold() { while IFS= read -r line; do :; done; }

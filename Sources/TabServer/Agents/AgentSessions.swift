@@ -1,4 +1,5 @@
 import Foundation
+import TabCore
 import TabProtocol
 
 /// Injectable boundary: tests never need a provider executable.
@@ -26,6 +27,8 @@ struct AgentLaunch: Sendable, Equatable {
     var forkSource: String?
     /// The message of `forkSource` to fork at, rather than its latest.
     var forkPoint: String?
+    /// Added to the provider's system prompt: where in Tab the agent runs.
+    var instructions: String?
 }
 
 extension AgentSessionRuntime {
@@ -118,6 +121,8 @@ final class AgentSessions: @unchecked Sendable {
     var launchEnvironment: [String: String] = [:]
     /// The folder holding this Tab's `tab`, put first on agents' `PATH`.
     var cliDirectory: String?
+    /// The project an agent works in, as its instructions describe it.
+    var projectContext: @Sendable (ProjectId) -> AgentContext.Project? = { _ in nil }
     var stageToolImages: @Sendable ([AgentChatAttachment], URL) throws -> Void = { images, directory in
         let staged = try AgentAttachments.stageToolImages(images, root: directory)
         try AgentAttachments.record(staged, root: directory)
@@ -455,8 +460,12 @@ final class AgentSessions: @unchecked Sendable {
             if let runtime = entry.runtime {
                 var environment = launchEnvironment
                 environment["TAB_AGENT_ID"] = id.description
+                environment[AgentContext.providedVariable] = "1"
+                let context = AgentContext(place: .agentPane(agent: id.description),
+                                           project: projectContext(entry.snapshot.project),
+                                           cli: cliDirectory.map { ($0 as NSString).appendingPathComponent(Executable.cli) })
                 runtime.prepare(AgentLaunch(environment: environment, path: cliDirectory, forkSource: entry.forkSource,
-                                            forkPoint: entry.forkPoint))
+                                            forkPoint: entry.forkPoint, instructions: context.text))
                 configureAccess(entry, runtime: runtime, mode: entry.snapshot.accessMode ?? .standard)
             }
         }

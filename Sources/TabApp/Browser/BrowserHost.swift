@@ -63,12 +63,13 @@ public protocol BrowserHost: AnyObject {
 
     // MARK: For automation (`tab browser`)
 
-    /// Opens a browser pane: as a new tab of Home with `newTab`; else beside
-    /// the pane showing the terminal or agent `beside`, else in the tab of
-    /// `project` (Home when `nil`), where Home gets a new tab. Throws a
-    /// message for an unknown project.
-    func openBrowserPane(url: String?, profile: String?, project: String?, beside: SessionId?, newTab: Bool) throws
-        -> BrowserPaneController
+    /// Opens a browser pane: as a new tab of Home with `newTab`; else on the
+    /// `edge` (right when `nil`) of the pane `anchor` names, as `tab pane`
+    /// names one, or of the pane showing the terminal or agent `beside`, else
+    /// in the tab of `project` (Home when `nil`), where Home gets a new tab.
+    /// Throws a message for an unknown project or pane.
+    func openBrowserPane(url: String?, profile: String?, project: String?, beside: SessionId?, newTab: Bool,
+                         edge: Direction?, anchor: String?) throws -> BrowserPaneController
     /// The browser panes of the named project, or of every project when both
     /// are `nil`.
     func browserTabs(project: String?, worktree: String?) throws -> [BrowserTab]
@@ -79,6 +80,12 @@ public protocol BrowserHost: AnyObject {
 }
 
 extension BrowserHost {
+    func openBrowserPane(url: String?, profile: String?, project: String?, beside: SessionId?, newTab: Bool) throws
+        -> BrowserPaneController {
+        try openBrowserPane(url: url, profile: profile, project: project, beside: beside, newTab: newTab,
+                            edge: nil, anchor: nil)
+    }
+
     public func browserNetwork(forTab tabId: String) -> BrowserNetwork { .local }
     public func browserServerConnected(_ server: ServerId) -> Bool { true }
 }

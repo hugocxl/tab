@@ -72,6 +72,7 @@ public enum JSONValue: Hashable, Sendable, Codable, CustomStringConvertible {
 ///
 ///     {"type":"open","path":"/Users/me/code/app"}
 ///     {"type":"show","pane":{"kind":"agent","session":"…","project":"…","beside":"…"}}
+///     {"type":"pane","control":{"action":"close","pane":"right","caller":"…"}}
 ///     {"verb":"browser.click","args":{"tabId":"…","selector":"#go"}}
 public enum AppRequest: Hashable, Sendable, Codable {
     /// Opens a folder as a project, selecting it if it is one already.
@@ -83,10 +84,13 @@ public enum AppRequest: Hashable, Sendable, Codable {
     case show(AppPane)
     /// Opens a simulator, editor or diff pane.
     case add(AppNewPane)
+    /// Lists the panes the app shows, or focuses, closes, zooms, moves or
+    /// resizes one.
+    case pane(AppPaneControl)
     /// A request from a newer `tab`; answer with an error.
     case unknown(String)
 
-    private enum Keys: String, CodingKey { case verb, args, type, path, pane }
+    private enum Keys: String, CodingKey { case verb, args, type, path, pane, control }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: Keys.self)
@@ -106,6 +110,13 @@ public enum AppRequest: Hashable, Sendable, Codable {
         case "open": self = .open(path: try container.decode(String.self, forKey: .path))
         case "show": self = .show(try container.decode(AppPane.self, forKey: .pane))
         case "add": self = .add(try container.decode(AppNewPane.self, forKey: .pane))
+        case "pane":
+            // An action from a newer `tab` is unknown, not an invalid request.
+            guard let control = try? container.decode(AppPaneControl.self, forKey: .control) else {
+                self = .unknown("pane")
+                return
+            }
+            self = .pane(control)
         default: self = .unknown(type)
         }
     }
@@ -126,6 +137,9 @@ public enum AppRequest: Hashable, Sendable, Codable {
         case .add(let pane):
             try container.encode("add", forKey: .type)
             try container.encode(pane, forKey: .pane)
+        case .pane(let control):
+            try container.encode("pane", forKey: .type)
+            try container.encode(control, forKey: .control)
         case .unknown(let type):
             try container.encode(type, forKey: .verb)
         }
@@ -134,8 +148,9 @@ public enum AppRequest: Hashable, Sendable, Codable {
 
 /// A pane without a session for the app to open: a simulator, an editor or a
 /// diff. An editor or diff already showing its file is focused. Otherwise, as
-/// a pane, it opens beside the pane showing `beside`, else in `project`; as a
-/// tab, it opens as a new tab of the Home `project`.
+/// a pane, it opens on the `edge` of the pane `anchor` names, else of the pane
+/// showing `beside`, else in `project`; as a tab, it opens as a new tab of the
+/// Home `project`.
 public struct AppNewPane: Hashable, Sendable, Codable {
     public enum Content: Hashable, Sendable, Codable {
         /// A simulator or emulator; one not chosen shows the simulator picker.
@@ -150,20 +165,27 @@ public struct AppNewPane: Hashable, Sendable, Codable {
     public var project: ProjectId
     public var beside: SessionId?
     public var placement: AppPane.Placement
+    /// Which side of its neighbor the pane opens on; right when missing.
+    public var edge: Direction?
+    /// The pane to open beside instead of `beside`'s, as `tab pane` names one.
+    public var anchor: String?
 
     public init(content: Content, project: ProjectId, beside: SessionId? = nil,
-                placement: AppPane.Placement = .pane) {
+                placement: AppPane.Placement = .pane, edge: Direction? = nil, anchor: String? = nil) {
         self.content = content
         self.project = project
         self.beside = beside
         self.placement = placement
+        self.edge = edge
+        self.anchor = anchor
     }
 }
 
 /// A terminal or agent conversation for the app to show. A pane already
-/// showing it is focused. Otherwise, as a pane, it opens beside the pane
-/// showing `beside`, such as the agent or terminal that asked, else in
-/// `project`; as a tab, it opens as a new tab of the Home `project`.
+/// showing it is focused. Otherwise, as a pane, it opens on the `edge` of the
+/// pane `anchor` names, else of the pane showing `beside`, such as the agent
+/// or terminal that asked, else in `project`; as a tab, it opens as a new tab
+/// of the Home `project`.
 public struct AppPane: Hashable, Sendable, Codable {
     public enum Kind: String, Hashable, Sendable, Codable {
         case terminal, agent
@@ -181,18 +203,25 @@ public struct AppPane: Hashable, Sendable, Codable {
     public var provider: AgentChatProvider?
     public var beside: SessionId?
     public var placement: Placement
+    /// Which side of its neighbor the pane opens on; right when missing.
+    public var edge: Direction?
+    /// The pane to open beside instead of `beside`'s, as `tab pane` names one.
+    public var anchor: String?
 
     public init(kind: Kind, session: SessionId, project: ProjectId, provider: AgentChatProvider? = nil,
-                beside: SessionId? = nil, placement: Placement = .pane) {
+                beside: SessionId? = nil, placement: Placement = .pane, edge: Direction? = nil,
+                anchor: String? = nil) {
         self.kind = kind
         self.session = session
         self.project = project
         self.provider = provider
         self.beside = beside
         self.placement = placement
+        self.edge = edge
+        self.anchor = anchor
     }
 
-    private enum Keys: String, CodingKey { case kind, session, project, provider, beside, placement }
+    private enum Keys: String, CodingKey { case kind, session, project, provider, beside, placement, edge, anchor }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: Keys.self)
@@ -202,6 +231,65 @@ public struct AppPane: Hashable, Sendable, Codable {
         provider = try container.decodeIfPresent(AgentChatProvider.self, forKey: .provider)
         beside = try container.decodeIfPresent(SessionId.self, forKey: .beside)
         placement = try container.decodeIfPresent(Placement.self, forKey: .placement) ?? .pane
+        edge = try container.decodeIfPresent(Direction.self, forKey: .edge)
+        anchor = try container.decodeIfPresent(String.self, forKey: .anchor)
+    }
+}
+
+/// A `tab pane` command for panes the app already shows. Panes are named as
+/// `PaneSelector` reads them, by the app, against the pane showing `caller`.
+///
+///     {"action":"list","all":true}
+///     {"action":"move","pane":"…","other":"left","edge":"down","caller":"…"}
+public struct AppPaneControl: Hashable, Sendable, Codable {
+    public enum Action: String, Hashable, Sendable, Codable, CaseIterable {
+        /// The panes of the caller's tab, or with `all` of every tab, as
+        /// `{"tabs":[{…,"panes":[…]}]}`.
+        case list
+        case focus
+        /// Closes the pane after its content agrees, as Close Pane does.
+        case close
+        /// Shows the pane alone in its tab, or with `zoomed` false the whole tab again.
+        case zoom
+        /// Docks the pane on `edge` of `other`, by default the caller's pane.
+        case move
+        /// Exchanges the places of the pane and `other`.
+        case swap
+        /// Gives the pane `percent` of its tab's width or height (`axis`).
+        case resize
+        /// Gives every row and column of the pane's tab equal shares.
+        case equalize
+    }
+
+    public var action: Action
+    /// The pane acted on; `nil` means the caller's.
+    public var pane: String?
+    /// The other pane of `move` and `swap`.
+    public var other: String?
+    public var edge: Direction?
+    /// The share of the tab `resize` gives the pane, 1 to 100.
+    public var percent: Int?
+    /// `horizontal` resizes the width, `vertical` the height.
+    public var axis: Axis?
+    /// `list`: every tab instead of the caller's.
+    public var all: Bool?
+    /// `zoom`: false shows the whole tab again.
+    public var zoomed: Bool?
+    /// The Tab terminal or agent the command runs in.
+    public var caller: SessionId?
+
+    public init(_ action: Action, pane: String? = nil, other: String? = nil, edge: Direction? = nil,
+                percent: Int? = nil, axis: Axis? = nil, all: Bool? = nil, zoomed: Bool? = nil,
+                caller: SessionId? = nil) {
+        self.action = action
+        self.pane = pane
+        self.other = other
+        self.edge = edge
+        self.percent = percent
+        self.axis = axis
+        self.all = all
+        self.zoomed = zoomed
+        self.caller = caller
     }
 }
 
@@ -398,7 +486,8 @@ public final class AppSocketServer: @unchecked Sendable {
 /// optional `"timeoutMs"` (capped at 60000).
 public enum BrowserCommand: String, Hashable, Sendable, CaseIterable {
     /// `url?`, `profile?`, `project?`, `beside?` (a terminal or agent's session),
-    /// `tab` (a new tab in Home) → the new browser's ID (string).
+    /// `tab` (a new tab in Home), `edge?` (left, right, up, down), `anchor?` (a
+    /// pane as `tab pane` names one) → the new browser's ID (string).
     case open
     /// `project?`, `worktree?` → `[{"id","title","url","profile","active"}]`.
     case list

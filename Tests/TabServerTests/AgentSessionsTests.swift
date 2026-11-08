@@ -1,4 +1,5 @@
 import Foundation
+import TabCore
 import TabProtocol
 import XCTest
 @testable import TabServer
@@ -386,6 +387,9 @@ final class AgentSessionsTests: XCTestCase {
         XCTAssertEqual(box.runtime?.launches.first?.forkSource, "source-conversation")
         XCTAssertEqual(box.runtime?.launches.first?.forkPoint, "message-1")
         XCTAssertEqual(box.runtime?.launches.first?.environment["TAB_AGENT_ID"], fork.description)
+        // The fork's system prompt names it, so `tab` commands find its pane.
+        XCTAssertTrue(box.runtime?.launches.first?.instructions?.contains("agent pane (agent \(fork))") ?? false)
+        XCTAssertEqual(box.runtime?.launches.first?.environment[AgentContext.providedVariable], "1")
         XCTAssertEqual(continued.providerSession, "forked-conversation")
         XCTAssertEqual(continued.items.filter { $0.kind == .user }.map(\.text), ["Start", "Next"])
         let unchanged = try await sessions.handle(.read(session: source))

@@ -116,18 +116,24 @@ extension AppModel: BrowserHost {
         showSettingsAction?(.browser)
     }
 
-    public func openBrowserPane(url: String?, profile: String?, project: String?, beside: SessionId?, newTab: Bool) throws
-        -> BrowserPaneController {
+    public func openBrowserPane(url: String?, profile: String?, project: String?, beside: SessionId?, newTab: Bool,
+                                edge: Direction?, anchor named: String?) throws -> BrowserPaneController {
         let browser = try newBrowserState(url: url, profile: profile)
         let target = newTab ? state.home.id : try project.map { try browserProject(project: $0, worktree: nil) } ?? state.home.id
         let select = project == nil
-        let anchor = newTab ? nil : beside.flatMap(state.paneShowing).flatMap { pane in
-            project == nil || state.paneProject(pane) == target ? pane : nil
+        let caller = beside.flatMap(state.paneShowing)
+        let anchor: PaneId?
+        if newTab {
+            anchor = nil
+        } else if let named {
+            anchor = try paneSelector(caller: caller).resolve(named)
+        } else {
+            anchor = caller.flatMap { pane in project == nil || state.paneProject(pane) == target ? pane : nil }
         }
         var opened: PaneId?
         guard edit({ state in
             if let anchor {
-                opened = try state.splitBrowser(anchor, browser, focus: select)
+                opened = try state.splitBrowser(anchor, browser, focus: select, edge: edge ?? .right)
             } else {
                 opened = try state.openBrowser(target, browser, select: select).1
             }

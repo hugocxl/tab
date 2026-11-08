@@ -19,6 +19,8 @@ enum CLI {
             try await OpenFolder.run(folder)
         case .pane(let pane, let json):
             try await Panes.run(pane, json: json)
+        case .paneControl(let control, let json):
+            try PaneControl.run(control, json: json)
         case .browser(let browser):
             try BrowserCommandRunner.run(browser)
         case .integrations(let action, let json):

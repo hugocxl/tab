@@ -316,6 +316,55 @@ final class ArgumentTests: XCTestCase {
         }
     }
 
+    /// "Put the tests below" and "close the one on the right" are commands of
+    /// their own, with panes named however the app reads them.
+    func testPanesOpenOnAnEdgeAndArePlacedListedAndClosed() throws {
+        func pane(_ words: [String]) throws -> CLIPane {
+            guard case .pane(let pane, _) = try command(words) else { throw CLIError("\(words) is not a pane") }
+            return pane
+        }
+        func control(_ words: [String]) throws -> AppPaneControl {
+            guard case .paneControl(let control, _) = try command(words) else { throw CLIError("\(words) is not a control") }
+            return control
+        }
+        XCTAssertEqual(try pane(["pane", "new", "terminal", "--edge", "down", "--", "npm", "test"]),
+                       CLIPane(placement: .pane, project: nil,
+                               content: .terminal(session: nil, directory: nil, command: "npm test"), edge: .down))
+        XCTAssertEqual(try pane(["pane", "new", "browser", "a.test", "--beside", "9a2e", "--edge", "Up"]),
+                       CLIPane(placement: .pane, project: nil, content: .browser(url: "a.test", profile: nil),
+                               edge: .up, beside: "9a2e"))
+        XCTAssertEqual(try pane(["pane", "new", "agent", "--fork", "--edge", "left", "--", "Try"]).edge, .left)
+        XCTAssertEqual(try pane(["pane", "new", "editor", "a.swift", "--beside", "left"]).beside, "left")
+        XCTAssertEqual(try pane(["pane", "new", "simulator", "--edge", "right"]).edge, .right)
+        XCTAssertEqual(try pane(["pane", "new", "diff", "a.swift", "--edge", "down"]).edge, .down)
+
+        XCTAssertEqual(try command(["pane", "list", "--all", "--json"]),
+                       .paneControl(AppPaneControl(.list, all: true), json: true))
+        XCTAssertEqual(try control(["pane", "list"]), AppPaneControl(.list, all: false))
+        XCTAssertEqual(try control(["pane", "focus", "right"]), AppPaneControl(.focus, pane: "right"))
+        XCTAssertEqual(try control(["pane", "close", "wispy-cedar"]), AppPaneControl(.close, pane: "wispy-cedar"))
+        XCTAssertEqual(try control(["pane", "zoom"]), AppPaneControl(.zoom, zoomed: true))
+        XCTAssertEqual(try control(["pane", "zoom", "9a2e", "--off"]), AppPaneControl(.zoom, pane: "9a2e", zoomed: false))
+        XCTAssertEqual(try control(["pane", "move", "9a2e", "down", "--beside", "self"]),
+                       AppPaneControl(.move, pane: "9a2e", other: "self", edge: .down))
+        XCTAssertEqual(try control(["pane", "swap", "left", "right"]), AppPaneControl(.swap, pane: "left", other: "right"))
+        XCTAssertEqual(try control(["pane", "resize", "self", "--width", "60"]),
+                       AppPaneControl(.resize, pane: "self", percent: 60, axis: .horizontal))
+        XCTAssertEqual(try control(["pane", "resize", "9a2e", "--height", "30"]),
+                       AppPaneControl(.resize, pane: "9a2e", percent: 30, axis: .vertical))
+        XCTAssertEqual(try control(["pane", "equalize"]), AppPaneControl(.equalize))
+        for words in [
+            ["pane", "new", "terminal", "--edge", "below"], ["tab", "new", "terminal", "--edge", "down"],
+            ["pane", "focus", "a", "b"], ["pane", "move", "a"], ["pane", "move", "a", "sideways"],
+            ["pane", "swap", "a"], ["pane", "resize", "a"], ["pane", "resize", "a", "--width", "50", "--height", "50"],
+            ["pane", "resize", "a", "--width", "0"], ["pane", "resize", "a", "--width", "101"],
+            ["pane", "zoom", "a", "b"], ["pane", "close", "a", "--json"],
+        ] {
+            assertRefused(words)
+        }
+        XCTAssertThrowsError(try parse(["--host", "box", "pane", "list"]))
+    }
+
     func testWorktreeCommands() throws {
         XCTAssertEqual(try action(["worktree", "new", "App", "login"]),
                        .worktree(.new(project: "App", name: "login", branch: "login", base: "HEAD", directory: nil,

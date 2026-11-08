@@ -224,6 +224,7 @@ internal final class AgentRuntime: @unchecked Sendable {
             }
             if let model { arguments += ["--model", model] }
             if let reasoningEffort { arguments += ["--effort", claudeWireEffort(reasoningEffort, model: model)] }
+            if let instructions = self.launch.instructions { arguments += ["--append-system-prompt", instructions] }
             self.model = model
             self.reasoningEffort = reasoningEffort
         }
@@ -256,6 +257,7 @@ internal final class AgentRuntime: @unchecked Sendable {
                         "approvalPolicy": self.accessMode == .fullAccess ? "never" : self.accessMode == .ask ? "untrusted" : "on-request",
                         "sandbox": self.accessMode == .fullAccess ? "danger-full-access" : self.accessMode == .ask ? "read-only" : "workspace-write"]
                     if let model { params["model"] = model }
+                    if let instructions = self.launch.instructions { params["developerInstructions"] = instructions }
                     if let resumeSession = self.resumeSession { params["threadId"] = resumeSession }
                     let method = self.resumeSession == nil ? "thread/start" : forking ? "thread/fork" : "thread/resume"
                     try self.request(method, params: params) { result in

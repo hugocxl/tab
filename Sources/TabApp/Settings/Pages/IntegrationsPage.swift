@@ -10,7 +10,8 @@ extension SettingsModel {
         b.row("agent-integration", b.toggle("agent-integration", enabled, enabled: statuses != nil && !store.agentIntegrationBusy) { [store] in
             store.setAgentIntegration($0)
         })
-        b.note("agent-integration", "Teach Claude Code, Codex, OpenCode and Pi how to use Tab.")
+        b.note("agent-integration", "Agent panes always know how to use Tab. This also teaches Claude Code, Codex, "
+               + "OpenCode and Pi started in Tab's terminals.")
         if let statuses {
             let light = AppTheme.shared.palette.isLight
             for status in statuses {

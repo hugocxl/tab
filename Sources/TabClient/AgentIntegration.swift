@@ -203,32 +203,16 @@ public struct AgentIntegrations: Sendable {
 
     // MARK: Context
 
-    /// What the hook prints for an agent: nothing outside a Tab terminal or agent pane.
+    /// What the hook prints for an agent: nothing outside a Tab terminal or
+    /// agent pane, nor in an agent pane whose system prompt Tab already gave it.
     public static func context(environment: [String: String], cli: URL?) -> String? {
-        let command = cli.map { "`tab` (\($0.path))" } ?? "`tab`"
         if let agent = environment["TAB_AGENT_ID"], !agent.isEmpty {
-            return """
-            You are running in a Tab agent pane, agent \(agent): the Tab app shows this conversation, and \
-            \(command) drives the app from a shell. When the user asks for panes, tabs or a split, or to \
-            branch or fork this conversation, they mean Tab's panes, not your own subagents, which Tab \
-            doesn't show. Open a terminal, agent, browser, simulator, editor or diff pane beside this one with \
-            `tab pane new`. To branch, run `tab pane new agent --fork -- "<what this branch does>"` once per \
-            branch: each pane continues this conversation and starts on its message, and the user talks to \
-            it there. Branches that change files need a worktree each (`tab worktree new`, then `--fork \
-            --project <worktree>`). `tab agent wait` and `tab agent read` give a branch's latest reply. Read \
-            the tab-cli skill, or run `tab --help`, before using it.
-            """
+            guard environment[AgentContext.providedVariable] == nil else { return nil }
+            return AgentContext(place: .agentPane(agent: agent), cli: cli?.path).text
         }
         guard let session = environment["TAB_SESSION_ID"], !session.isEmpty else { return nil }
-        let name = SessionId(string: session).map { " (\(SessionName.of($0)))" } ?? ""
-        return """
-        You are running in a Tab terminal, session \(session)\(name). Tab keeps terminals running in a \
-        background server, and \(command) drives them from a shell: start long-running work such as a \
-        dev server or test watcher in its own terminal, wait for its output instead of polling, read \
-        its screen, open terminal, agent, browser, simulator, editor and diff panes beside this one, and \
-        manage projects and Git worktrees. Inside this terminal, session commands default to it. Read \
-        the tab-cli skill, or run `tab --help`, before using it.
-        """
+        let name = SessionId(string: session).map(SessionName.of)
+        return AgentContext(place: .terminal(session: session, name: name), cli: cli?.path).text
     }
 }
 

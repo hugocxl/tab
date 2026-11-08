@@ -3,6 +3,20 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.77.0 - 2026-11-08
+
+### Added
+
+- Agents can list the panes on screen and focus, close, zoom, move, swap, resize and even them out, so requests such
+  as "close the one on the right" or "make this bigger" just work.
+- Agents can open a pane below, above or to the left of theirs, or beside another pane, when you ask for one there.
+
+### Changed
+
+- Agent panes always know they run in Tab and how to drive it, even without the integration in Settings, so loose
+  requests such as "open a terminal here" or "show me the page" no longer need exact instructions.
+- Agents read "a new tab" said in passing as a pane beside theirs, and add a sidebar card only when you ask for one.
+
 ## 0.76.0 - 2026-11-08
 
 ### Changed

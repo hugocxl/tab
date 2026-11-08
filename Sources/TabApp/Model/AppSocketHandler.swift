@@ -4,8 +4,8 @@ import TabClient
 import TabCore
 
 /// Answers `app.sock`: `tab <folder>`, a second launch handing its folder
-/// over, `tab browser`, showing terminals and agents in panes, and opening
-/// simulator, editor and diff panes.
+/// over, `tab browser`, showing terminals and agents in panes, opening
+/// simulator, editor and diff panes, and `tab pane`'s list and changes.
 
 @MainActor
 public final class AppSocketHandler {
@@ -42,14 +42,34 @@ public final class AppSocketHandler {
             }
         case .show(let pane):
             defer { model.presenter?.bringToFront() }
+            if let failure = anchorFailure(pane.anchor, beside: pane.beside, project: pane.project) { return failure }
             guard let shown = model.show(pane) else { return .failed("Could not show \(pane.session)") }
             return .ok(.string(shown.description))
         case .add(let pane):
             defer { model.presenter?.bringToFront() }
+            if let failure = anchorFailure(pane.anchor, beside: pane.beside, project: pane.project) { return failure }
             guard model.add(pane) != nil else { return .failed("Could not open the pane") }
             return .ok(.bool(true))
+        case .pane(let control):
+            do {
+                return .ok(try await model.control(control))
+            } catch {
+                return .failed(error.localizedDescription)
+            }
         case .unknown(let type):
             return .failed("unknown command \(type)")
+        }
+    }
+
+    /// Why a new pane can't open beside the pane `anchor` names; `nil` when
+    /// it can, or when no pane is named.
+    private func anchorFailure(_ anchor: String?, beside: SessionId?, project: ProjectId) -> AppReply? {
+        guard anchor != nil, let target = model.state.project(project) else { return nil }
+        do {
+            _ = try model.newPaneAnchor(anchor, beside: beside, in: target)
+            return nil
+        } catch {
+            return .failed(error.localizedDescription)
         }
     }
 

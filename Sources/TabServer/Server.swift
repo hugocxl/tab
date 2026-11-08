@@ -102,6 +102,12 @@ public final class Server: @unchecked Sendable {
             return directory.rawValue
         })
         agents.launchEnvironment = ["TAB_SERVER_ID": catalog.serverId.description]
+        agents.projectContext = { id in
+            guard let project = try? catalog.project(id) else { return nil }
+            let kind: AgentContext.Project.Kind = project.home ? .home : project.kind == .worktree
+                ? .worktree(of: project.parentId.flatMap { try? catalog.project($0).name }) : .project
+            return AgentContext.Project(name: project.name, directory: project.directory.rawValue, kind: kind)
+        }
         agents.cliDirectory = Executable.currentURL().map { $0.deletingLastPathComponent() }
             .flatMap { Executable.isExecutableFile($0.appendingPathComponent("tab")) ? $0.path : nil }
         uploads = Uploads(directory: configuration.uploads)

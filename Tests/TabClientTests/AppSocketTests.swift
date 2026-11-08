@@ -60,6 +60,35 @@ final class AppSocketTests: XCTestCase {
                        .ok(.array([.object(["tabId": .string("a"), "active": .bool(true)])])))
     }
 
+    func testPaneControlAndPlacementShapes() throws {
+        let caller = SessionId()
+        let move = AppRequest.pane(AppPaneControl(.move, pane: "9a2e", other: "self", edge: .down, caller: caller))
+        XCTAssertEqual(try json(move), #"{"control":{"action":"move","caller":"\#(caller)","edge":"down","#
+                       + #""other":"self","pane":"9a2e"},"type":"pane"}"#)
+        for control in AppPaneControl.Action.allCases.map({ AppPaneControl($0, percent: 40, axis: .vertical, all: true) }) {
+            let request = AppRequest.pane(control)
+            XCTAssertEqual(try JSONDecoder().decode(AppRequest.self, from: AppSocket.encode(request)), request)
+        }
+        let decode = { (text: String) in try JSONDecoder().decode(AppRequest.self, from: Data(text.utf8)) }
+        // A newer tab's action is unknown to this app, not a broken request.
+        XCTAssertEqual(try decode(#"{"type":"pane","control":{"action":"tile"}}"#), .unknown("pane"))
+        XCTAssertEqual(try decode(#"{"type":"pane","control":{"action":"list","later":1}}"#),
+                       .pane(AppPaneControl(.list)))
+
+        let session = SessionId(), project = ProjectId()
+        let placed = AppRequest.show(AppPane(kind: .terminal, session: session, project: project, beside: caller,
+                                             edge: .down, anchor: "left"))
+        XCTAssertEqual(try JSONDecoder().decode(AppRequest.self, from: AppSocket.encode(placed)), placed)
+        let added = AppRequest.add(AppNewPane(content: .diff(path: "a", staged: false), project: project, edge: .up,
+                                              anchor: "9a2e"))
+        XCTAssertEqual(try JSONDecoder().decode(AppRequest.self, from: AppSocket.encode(added)), added)
+        // An older app reads a placed pane as one beside the caller.
+        let older = try JSONDecoder().decode(AppNewPane.self, from: Data(
+            #"{"content":{"diff":{"path":"a","staged":false}},"project":"\#(project)","placement":"pane"}"#.utf8))
+        XCTAssertNil(older.edge)
+        XCTAssertNil(older.anchor)
+    }
+
     func testTheAppAnswersOverItsSocket() async throws {
         let socket = URL(fileURLWithPath: "/tmp/tab-app-\(UUID().uuidString.prefix(8)).sock")
         XCTAssertThrowsError(try AppSocket.call(socket: socket, .open(path: "/"), timeout: 1)) { error in
@@ -76,6 +105,7 @@ final class AppSocketTests: XCTestCase {
                 case .browser(let command, let args): return .failed("\(command) \(args["tabId"]?.string ?? "")")
                 case .show(let pane): return .ok(.string(pane.session.description))
                 case .add: return .ok(.bool(true))
+                case .pane(let control): return .ok(.string(control.action.rawValue))
                 case .unknown(let type): return .failed(type)
 
                 }

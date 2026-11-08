@@ -53,6 +53,31 @@ final class LayoutTests: XCTestCase {
         XCTAssertThrowsError(try invalid.validate())
     }
 
+    /// "Make it 60% wide" changes the innermost split of that axis holding the
+    /// pane, counting the share of the splits around it.
+    func testResizingGivesAPaneAShareOfTheWholeLayout() throws {
+        let (a, b, c) = (PaneId(), PaneId(), PaneId())
+        // a | (b over c), with the right column a quarter of the width.
+        var layout = split(.horizontal, 0.75, .leaf(a), split(.vertical, 0.5, .leaf(b), .leaf(c)))
+        let wider = try XCTUnwrap(layout.resize(b, to: 0.6, along: .horizontal))
+        XCTAssertEqual(wider.path, [])
+        XCTAssertEqual(wider.ratio, 0.4, accuracy: 1e-9, "b's column is the second side")
+        try layout.setRatio(at: wider.path, to: wider.ratio)
+        XCTAssertEqual(layout.rects.first { $0.0 == b }?.1.width ?? 0, 0.6, accuracy: 1e-9)
+        let shorter = try XCTUnwrap(layout.resize(c, to: 0.25, along: .vertical))
+        XCTAssertEqual(shorter.path, [.second])
+        XCTAssertEqual(shorter.ratio, 0.75, accuracy: 1e-9)
+        // Nested splits of the same axis: the share counts the outer split's.
+        let nested = split(.horizontal, 0.5, .leaf(a), split(.horizontal, 0.5, .leaf(b), .leaf(c)))
+        let half = try XCTUnwrap(nested.resize(c, to: 0.3, along: .horizontal))
+        XCTAssertEqual(half.path, [.second])
+        XCTAssertEqual(half.ratio, 0.4, accuracy: 1e-9)
+        XCTAssertEqual(nested.resize(a, to: 0.99, along: .horizontal)?.ratio, 0.85, "neither side disappears")
+        XCTAssertNil(nested.resize(a, to: 0.5, along: .vertical), "nothing is above or below a")
+        XCTAssertNil(PaneLayout.leaf(a).resize(a, to: 0.5, along: .horizontal))
+        XCTAssertNil(nested.resize(PaneId(), to: 0.5, along: .horizontal))
+    }
+
     func testNeighborsFollowGeometry() {
         let (layout, ids) = grid()
         let (a, b, c, d) = (ids[0], ids[1], ids[2], ids[3])
