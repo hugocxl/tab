@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.78.1 - 2026-11-08
+
+### Fixed
+
+- Validating a change before a commit no longer flashes test windows on screen.
+
 ## 0.78.0 - 2026-11-08
 
 ### Changed

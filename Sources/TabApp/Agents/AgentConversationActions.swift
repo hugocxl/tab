@@ -15,6 +15,8 @@ final class AgentConversationActions {
     /// Resolves a pending approval and returns once the server acknowledged it.
     var onApprove: ((String, Bool) async throws -> Void)?
     var onInterrupt: (() -> Void)?
+    /// Puts a preview window on screen; tests place it offscreen instead.
+    var presentWindow: (NSWindowController) -> Void = { $0.showWindow(nil) }
 
     private var snapshot: AgentChatSnapshot? { surface?.snapshot }
     /// The open HTML document preview, if any.
@@ -222,7 +224,7 @@ final class AgentConversationActions {
         }
         htmlPreview?.close()
         htmlPreview = next
-        next.showWindow(nil)
+        presentWindow(next)
     }
 
     /// Shows assistant Markdown images in the zoomable preview, loaded through the
@@ -261,7 +263,7 @@ final class AgentConversationActions {
         try Task.checkCancellation()
         markdownMediaPlayer?.close()
         markdownMediaPlayer = next
-        next.showWindow(nil)
+        presentWindow(next)
     }
 
     /// Copies the retained HTML document's source text.

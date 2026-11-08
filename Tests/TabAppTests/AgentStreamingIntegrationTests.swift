@@ -106,6 +106,7 @@ final class AgentStreamingIntegrationTests: XCTestCase {
                               styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = pane.view
+        window.setFrameOrigin(NSPoint(x: -20000, y: -20000))
         window.orderFront(nil)
         self.window = window
         try await wait("initial agent snapshot") { pane.snapshot?.status == .idle }

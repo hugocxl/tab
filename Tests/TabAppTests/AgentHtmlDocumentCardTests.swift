@@ -30,6 +30,8 @@ final class AgentHtmlDocumentCardTests: XCTestCase {
         let surface = AgentPaneView()
         surface.render(.init(session: SessionId(), project: ProjectId(), provider: .codex, status: .idle, revision: 1, items: items))
         surface.fetchAttachment = { _, _ in self.html }
+        // The web view loads without its window on screen, and macOS would pull a titled window into view.
+        surface.actions.presentWindow = { _ in }
         return surface
     }
 

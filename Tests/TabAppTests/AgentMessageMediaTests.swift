@@ -47,6 +47,7 @@ final class AgentMessageMediaTests: XCTestCase {
         tile.load({ image }, changed: {})
         try await wait { tile.image != nil }
         tile.layoutSubtreeIfNeeded()
+        window.setFrameOrigin(NSPoint(x: -20000, y: -20000))
         window.orderFront(nil)
         let player = try XCTUnwrap(tile.subviews.compactMap { $0 as? NSImageView }.first)
         XCTAssertTrue(player.animates)
