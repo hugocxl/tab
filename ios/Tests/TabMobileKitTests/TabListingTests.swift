@@ -19,6 +19,31 @@ final class TabListingTests: XCTestCase {
         XCTAssertNil(ServerModel.taskTitle("✳ Claude Code", provider: .claude))
     }
 
+    func testChatOpeningMessagesBecomeTitles() {
+        XCTAssertEqual(ServerModel.chatTopic("can you write a lorem ipsum? thanks"), "Write a lorem ipsum")
+        XCTAssertEqual(ServerModel.chatTopic("hey, please fix the login bug.\nmore"), "Fix the login bug")
+        XCTAssertNil(ServerModel.chatTopic("hi"))
+        XCTAssertEqual(ServerModel.command("htop — ~/repos"), "htop")
+    }
+
+    /// The card's title follows the desktop: a custom title, the lead agent's
+    /// task, a worktree's branch, then the best other topic.
+    func testCardTitlePrefersTheLeadAgent() {
+        func row(_ title: String, _ topic: CardPane.Topic?, _ status: CardPane.Status = .idle) -> CardPane {
+            CardPane(id: PaneId(), icon: .terminal, title: title, status: status, topic: topic)
+        }
+        let shell = row("zsh", .folder("tabios"))
+        let server = row("npm run dev", .command("npm run dev"))
+        let idle = row("Write docs", .task("Write docs"))
+        let waiting = row("Fix the build", .task("Fix the build"), .blocked)
+        XCTAssertEqual(ServerModel.title(rows: [shell, idle, waiting], customTitle: nil, branch: "wt-1"), "Fix the build")
+        XCTAssertEqual(ServerModel.title(rows: [shell, idle], customTitle: " Release ", branch: nil), "Release")
+        XCTAssertEqual(ServerModel.title(rows: [shell, server], customTitle: nil, branch: "feature"), "feature")
+        XCTAssertEqual(ServerModel.title(rows: [shell, server], customTitle: nil, branch: nil), "npm run dev")
+        XCTAssertEqual(ServerModel.title(rows: [shell], customTitle: nil, branch: nil), "zsh")
+        XCTAssertEqual(ServerModel.title(rows: [], customTitle: nil, branch: nil), "Empty tab")
+    }
+
     func testElapsedTimeReadsLikeTheDesktop() {
         XCTAssertEqual(ServerModel.elapsedText(43), "43s")
         XCTAssertEqual(ServerModel.elapsedText(185), "3m")

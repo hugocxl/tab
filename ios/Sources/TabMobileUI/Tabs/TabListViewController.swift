@@ -90,21 +90,22 @@ final class TabListViewController: UICollectionViewController {
         self.app = app
         super.init(collectionViewLayout: UICollectionViewLayout())
         let layout = UICollectionViewCompositionalLayout { [weak self] _, environment in
-            // A phone's home is an inset grouped list; an iPad's sidebar stays plain.
-            let isPhone = environment.traitCollection.userInterfaceIdiom == .phone
-            var configuration = UICollectionLayoutListConfiguration(appearance: isPhone ? .insetGrouped : .plain)
-            configuration.backgroundColor = isPhone ? .systemGroupedBackground : .clear
+            var configuration = UICollectionLayoutListConfiguration(appearance: .plain)
+            configuration.backgroundColor = .clear
             configuration.headerMode = (self?.visibleServers.count ?? 0) > 1 ? .supplementary : .none
-            configuration.separatorConfiguration.bottomSeparatorInsets = NSDirectionalEdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20)
             configuration.trailingSwipeActionsConfigurationProvider = { path in self?.swipeActions(path) }
-            // A hairline between cards, except beside the selected one.
+            // A hairline between cards, as wide as a card's fill, except beside
+            // the selected one and after the last.
             configuration.itemSeparatorHandler = { path, separators in
                 guard let self else { return separators }
                 var separators = separators
                 let next = IndexPath(item: path.item + 1, section: path.section)
                 let selected = Set(self.collectionView.indexPathsForSelectedItems ?? [])
-                if selected.contains(path) || selected.contains(next) { separators.bottomSeparatorVisibility = .hidden }
+                let isLast = path.item + 1 >= self.collectionView.numberOfItems(inSection: path.section)
+                if isLast || selected.contains(path) || selected.contains(next) { separators.bottomSeparatorVisibility = .hidden }
                 separators.topSeparatorVisibility = .hidden
+                let inset = TabCardCell.cardInset
+                separators.bottomSeparatorInsets = NSDirectionalEdgeInsets(top: 0, leading: inset, bottom: 0, trailing: inset)
                 return separators
             }
             return .list(using: configuration, layoutEnvironment: environment)
@@ -135,7 +136,7 @@ final class TabListViewController: UICollectionViewController {
         super.viewDidLoad()
         navigationItem.largeTitleDisplayMode = .never
         // Clear, so an iPad's sidebar shows its own material.
-        collectionView.backgroundColor = isPhone ? .systemGroupedBackground : .clear
+        collectionView.backgroundColor = isPhone ? .systemBackground : .clear
         // Cards fade under the bar instead of meeting a hairline.
         collectionView.topEdgeEffect.style = .soft
         configureDataSource()
@@ -329,7 +330,6 @@ final class TabListViewController: UICollectionViewController {
     private func configureDataSource() {
         let cell = UICollectionView.CellRegistration<TabCardCell, TabId> { [weak self] cell, _, id in
             guard let self, let entry = cards[id] else { return }
-            cell.isGrouped = isPhone
             cell.configure(entry.card, icon: icon(entry.card.iconProject, on: entry.server))
         }
         let header = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(
@@ -365,8 +365,8 @@ final class TabListViewController: UICollectionViewController {
             let cards = server.cards.filter { card in
                 guard shown.admits(card) else { return false }
                 guard !query.isEmpty else { return true }
-                return [card.name, card.header, card.branch ?? "", server.server.name, Self.headlineText(card.headline)]
-                    .contains { $0.lowercased().contains(query) }
+                let fields = [card.title, card.location, card.branch, card.projectName, server.server.name] + card.rows.map(\.title)
+                return fields.compactMap { $0 }.contains { $0.lowercased().contains(query) }
             }
             // Icons that arrived since: touching them registers the dependency.
             _ = server.projectIcons.count
@@ -396,15 +396,6 @@ final class TabListViewController: UICollectionViewController {
         } else if !server.cards.isEmpty {
             // The Mac reports its tabs and that one is gone.
             restoring = nil
-        }
-    }
-
-    private static func headlineText(_ headline: CardHeadline) -> String {
-        switch headline {
-        case let .agent(provider, task): task ?? provider.displayName
-        case let .shell(name, directory): [name, directory ?? ""].joined(separator: " ")
-        case .command(let text), .simulator(let text), .other(let text): text
-        case .empty: ""
         }
     }
 

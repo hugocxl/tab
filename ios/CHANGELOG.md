@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.17.0 - 2026-11-08
+
+### Changed
+
+- Tab cards follow the redesigned desktop sidebar: a title that says what the
+  tab is about, every pane with what it is doing, then the folder or Git branch
+  and the project below them.
+- Pane statuses use system symbols, with a spinner while an agent works, and
+  terminals, folders and Git use Pierre's colored icons.
+- On iPhone, the tab list is a plain list again, with cards flush and hairlines
+  between them, and a project's own checkout is marked primary as on the Mac.
+
 ## 0.16.0 - 2026-11-08
 
 ### Changed
