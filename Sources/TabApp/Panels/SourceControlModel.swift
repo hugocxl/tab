@@ -26,6 +26,7 @@ public struct SourceControlModel: Sendable {
         case header(Group)
         /// A file of a group, by its index in `status.files`.
         case file(Group, Int)
+        case folder(Group, String, Int)
     }
 
     public private(set) var status: GitStatus?
@@ -33,7 +34,30 @@ public struct SourceControlModel: Sendable {
     public private(set) var rows: [Row] = []
     public private(set) var collapsed: Set<Group> = []
 
+    public enum ViewMode: String, Sendable { case list, tree }
+
+    public private(set) var viewMode: ViewMode = .list
+    private var collapsedFolders: [Group: Set<String>] = [:]
+
     public init() {}
+
+    public mutating func setViewMode(_ mode: ViewMode) {
+        viewMode = mode
+        rebuild()
+    }
+
+    public func isExpanded(_ path: String, in group: Group) -> Bool {
+        !(collapsedFolders[group]?.contains(path) ?? false)
+    }
+
+    public mutating func toggleFolder(_ path: String, in group: Group) {
+        if isExpanded(path, in: group) {
+            collapsedFolders[group, default: []].insert(path)
+        } else {
+            collapsedFolders[group]?.remove(path)
+        }
+        rebuild()
+    }
 
     public mutating func setStatus(_ status: GitStatus) {
         self.status = status
@@ -82,9 +106,40 @@ public struct SourceControlModel: Sendable {
             guard !indices.isEmpty else { continue }
             rows.append(.header(group))
             if !collapsed.contains(group) {
-                rows.append(contentsOf: indices.map { .file(group, $0) })
+                if viewMode == .list {
+                    rows.append(contentsOf: indices.map { .file(group, $0) })
+                } else {
+                    appendTree(indices, group: group, parent: "", depth: 0)
+                }
             }
         }
+    }
+
+    private mutating func appendTree(_ indices: [Int], group: Group, parent: String, depth: Int) {
+        var folders: [String: [Int]] = [:]
+        var leaves: [Int] = []
+        for index in indices {
+            guard let path = file(index)?.file.path.rawValue else { continue }
+            let relative = parent.isEmpty ? path : String(path.dropFirst(parent.count + 1))
+            if let slash = relative.firstIndex(of: "/") {
+                let name = String(relative[..<slash])
+                folders[name, default: []].append(index)
+            } else {
+                leaves.append(index)
+            }
+        }
+        func ordered(_ a: String, _ b: String) -> Bool {
+            a.lowercased() == b.lowercased() ? a < b : a.lowercased() < b.lowercased()
+        }
+        for name in folders.keys.sorted(by: ordered) {
+            let path = parent.isEmpty ? name : parent + "/" + name
+            rows.append(.folder(group, path, depth))
+            if isExpanded(path, in: group) {
+                appendTree(folders[name] ?? [], group: group, parent: path, depth: depth + 1)
+            }
+        }
+        leaves.sort { ordered(file($0)?.file.path.rawValue ?? "", file($1)?.file.path.rawValue ?? "") }
+        rows.append(contentsOf: leaves.map { .file(group, $0) })
     }
 
     /// Whether Commit is enabled: no conflicts and not busy, and either

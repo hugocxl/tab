@@ -106,6 +106,8 @@ public struct Appearance: Codable, Equatable, Sendable {
     /// The tab the right sidebar opens on when it is shown again.
     public var lastSidePanel: SidePanel
     public var sidePanelWidth: Double?
+    /// Shows changed files as a folder tree in Source Control.
+    public var sourceControlTree: Bool
 
     enum CodingKeys: String, CodingKey {
         case colorScheme
@@ -116,7 +118,7 @@ public struct Appearance: Codable, Equatable, Sendable {
         case sidebarGesture
         case darkTheme, lightTheme, sidebarExpanded, sidebarLayout, sidebarHost, sidebarExpandedWidth
         case worktreeRecent, projectRecent, paletteRecent
-        case sidebarFocus, sidebarProjectOrder, sidePanel, lastSidePanel, sidePanelWidth
+        case sidebarFocus, sidebarProjectOrder, sidePanel, lastSidePanel, sidePanelWidth, sourceControlTree
     }
 
     public init() {
@@ -140,6 +142,7 @@ public struct Appearance: Codable, Equatable, Sendable {
         sidePanel = .none
         lastSidePanel = .files
         sidePanelWidth = nil
+        sourceControlTree = false
     }
 
     public init(from decoder: Decoder) throws {
@@ -164,6 +167,7 @@ public struct Appearance: Codable, Equatable, Sendable {
         sidebarProjectOrder = try container.value(.sidebarProjectOrder, d.sidebarProjectOrder)
         sidePanel = try container.value(.sidePanel, d.sidePanel)
         lastSidePanel = try container.value(.lastSidePanel, d.lastSidePanel)
+        sourceControlTree = try container.value(.sourceControlTree, d.sourceControlTree)
         sidePanelWidth = try container.decodeIfPresent(Double.self, forKey: .sidePanelWidth)
     }
 
@@ -188,6 +192,7 @@ public struct Appearance: Codable, Equatable, Sendable {
         try container.encode(sidebarProjectOrder, forKey: .sidebarProjectOrder)
         try container.encode(sidePanel, forKey: .sidePanel)
         try container.encode(lastSidePanel, forKey: .lastSidePanel)
+        try container.encode(sourceControlTree, forKey: .sourceControlTree)
         try container.encodeIfPresent(sidePanelWidth, forKey: .sidePanelWidth)
     }
 

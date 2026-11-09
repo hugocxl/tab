@@ -81,7 +81,7 @@ public final class FilesPanelController: NSViewController, NSTableViewDataSource
         table.controller = self
         table.headerView = nil
         table.backgroundColor = .clear
-        table.rowHeight = 24
+        table.rowHeight = FilesCellView.rowHeight
         table.intercellSpacing = .zero
         table.selectionHighlightStyle = .none
         table.focusRingType = .none
@@ -610,7 +610,7 @@ final class FilesTableView: NSTableView {
 
 /// One tree row, drawn directly: chevron, folder or file glyph and name,
 /// with hover and selection fills.
-final class FilesCellView: HoverView {
+class FilesCellView: HoverView {
     private var node = FilesTree.Node(path: "", name: "", isDirectory: false, dimmed: false)
     private var depth = 0
     private var expanded = false
@@ -620,6 +620,8 @@ final class FilesCellView: HoverView {
     private var chevron: NSImage?
 
     static let indent: CGFloat = 12
+    static let rowHeight: CGFloat = 24
+    static func iconX(depth: Int) -> CGFloat { 20 + CGFloat(depth) * indent }
 
     func configure(node: FilesTree.Node, depth: Int, expanded: Bool, selected: Bool) {
         self.node = node
@@ -641,7 +643,7 @@ final class FilesCellView: HoverView {
         needsDisplay = true
     }
 
-    private var textX: CGFloat { 4 + CGFloat(depth) * Self.indent + 12 + 4 + 14 + 6 }
+    private var textX: CGFloat { Self.iconX(depth: depth) + 14 + 6 }
 
     func showEditor(_ field: InlineNameField) {
         guard editor !== field else { return }
@@ -673,7 +675,7 @@ final class FilesCellView: HoverView {
             theme.hover.setFill()
             path.fill()
         }
-        var x = 4 + CGFloat(depth) * Self.indent
+        var x = Self.iconX(depth: depth) - 16
         let midY = bounds.midY
         if let chevron {
             // At its own proportions, centered in the chevron's 12pt column.

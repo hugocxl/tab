@@ -109,6 +109,13 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(try Appearance.load(path), saved)
     }
 
+    func testSourceControlViewPreferenceSurvivesEncodingAndOlderSettings() throws {
+        var appearance = try JSONDecoder().decode(Appearance.self, from: Data("{}".utf8))
+        appearance.sourceControlTree = true
+        let restored = try JSONDecoder().decode(Appearance.self, from: JSONEncoder().encode(appearance))
+        XCTAssertTrue(restored.sourceControlTree)
+    }
+
     func testSidebarHostRoundTripsAndMatchesServers() throws {
         let first = ServerId()
         let second = ServerId()

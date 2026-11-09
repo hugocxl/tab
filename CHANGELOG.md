@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.87.0 - 2026-11-09
+
+### Added
+
+- The Git sidebar footer switches changed files between a list and a collapsible
+  folder tree aligned with Explorer, and remembers your choice.
+
 ## 0.86.0 - 2026-11-09
 
 ### Added

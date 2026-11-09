@@ -52,6 +52,13 @@ final class ProjectHost: FilesPanelHost, SourceControlHost, EditorHost, DiffHost
 
     // MARK: Source Control
 
+    var sourceControlTree: Bool { model.appearance.sourceControlTree }
+
+    func setSourceControlTree(_ enabled: Bool) {
+        model.updateAppearance { $0.sourceControlTree = enabled }
+    }
+
+
     func openDiff(path: String, staged: Bool) {
         model.openDiff(project: project, path: path, staged: staged)
     }

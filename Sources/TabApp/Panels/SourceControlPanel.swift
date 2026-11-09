@@ -9,6 +9,15 @@ public protocol SourceControlHost: NativeHost {
     func openDiff(path: String, staged: Bool)
     /// The panel changed the repository: open diffs should refresh.
     func repositoryDidChange()
+    /// The saved source control presentation shared by projects.
+    var sourceControlTree: Bool { get }
+    /// Remembers the presentation for future panels and launches.
+    func setSourceControlTree(_ enabled: Bool)
+}
+
+extension SourceControlHost {
+    public var sourceControlTree: Bool { false }
+    public func setSourceControlTree(_ enabled: Bool) {}
 }
 
 /// The Source Control panel pinned on the right of a project: branch,
@@ -32,6 +41,7 @@ public final class SourceControlController: NSViewController, NSTableViewDataSou
     }
     private let footer = RightSidebarFooter()
     private var refreshButton: ChromeButton?
+    private var viewModeButton: ChromeButton?
     private let spinner = Spinner()
     let messageField = CommitMessageField(placeholder: "Message (⌘↩ to commit)")
     private let amendBox = NSButton(checkboxWithTitle: "Amend", target: nil, action: nil)
@@ -52,6 +62,10 @@ public final class SourceControlController: NSViewController, NSTableViewDataSou
         card.theme = theme
         view = card
         footer.title = host?.nativeProject.name ?? "Source Control"
+        viewModeButton = footer.addButton(.viewTree, label: "View as Tree") { [weak self] in
+            guard let self else { return }
+            self.setViewMode(self.model.viewMode == .list ? .tree : .list)
+        }
         refreshButton = footer.addButton(.refresh, label: "Refresh") { [weak self] in self?.refresh() }
         spinner.isHidden = true
         footer.setSpinner(spinner)
@@ -116,7 +130,7 @@ public final class SourceControlController: NSViewController, NSTableViewDataSou
         ])
         message.setContentHuggingPriority(.required, for: .vertical)
         themeDidChange()
-        render()
+        setViewMode(host?.sourceControlTree == true ? .tree : .list, persist: false)
     }
 
     public override func viewDidAppear() {
@@ -127,6 +141,7 @@ public final class SourceControlController: NSViewController, NSTableViewDataSou
     /// The panel is on screen again, or for the first time: watches the
     /// repository and reads its status.
     public func didShow() {
+        setViewMode(host?.sourceControlTree == true ? .tree : .list, persist: false)
         host?.watchRepository()
         refresh()
     }
@@ -295,6 +310,18 @@ public final class SourceControlController: NSViewController, NSTableViewDataSou
         updateCommitButton()
     }
 
+    func setViewMode(_ mode: SourceControlModel.ViewMode, persist: Bool = true) {
+        if persist { host?.setSourceControlTree(mode == .tree) }
+        model.setViewMode(mode)
+        viewModeButton?.setGlyph(.icon(mode == .tree ? .viewList : .viewTree))
+        footer.needsLayout = true
+        let label = mode == .tree ? "View as List" : "View as Tree"
+        viewModeButton?.toolTip = label
+        viewModeButton?.setAccessibilityLabel(label)
+        table.rowHeight = mode == .tree ? FilesCellView.rowHeight : 28
+        render()
+    }
+
     private func updateCommitButton() {
         commitButton.title = amend ? "Amend" : "Commit"
         commitButton.isEnabled = model.canCommit(message: messageField.string, amend: amend, busy: isBusy)
@@ -321,13 +348,25 @@ public final class SourceControlController: NSViewController, NSTableViewDataSou
                 if group == .staged { self.unstage(paths) } else { self.stage(paths) }
             }
             return cell
+        case .folder(let group, let path, let depth):
+            let identifier = NSUserInterfaceItemIdentifier("folder")
+            let cell = (tableView.makeView(withIdentifier: identifier, owner: nil) as? ChangeFolderCell) ?? ChangeFolderCell()
+            cell.identifier = identifier
+            cell.theme = card.theme
+            cell.configure(node: FilesTree.Node(path: path, name: NativePath.basename(path), isDirectory: true, dimmed: false),
+                           depth: depth, expanded: model.isExpanded(path, in: group), selected: false)
+            cell.onActivate = { [weak self] in
+                self?.model.toggleFolder(path, in: group)
+                self?.render()
+            }
+            return cell
         case .file(let group, let index):
             guard let entry = model.file(index) else { return nil }
             let identifier = NSUserInterfaceItemIdentifier("file")
             let cell = (tableView.makeView(withIdentifier: identifier, owner: nil) as? ChangeFileCell) ?? ChangeFileCell()
             cell.identifier = identifier
             cell.theme = card.theme
-            cell.configure(entry: entry, group: group, busy: isBusy)
+            cell.configure(entry: entry, group: group, busy: isBusy, tree: model.viewMode == .tree)
             let path = entry.file.path.rawValue
             cell.onOpen = { [weak self] in
                 guard let self, !self.isBusy else { return }
@@ -604,8 +643,24 @@ extension TextGlyphButton {
     }
 }
 
-/// A changed file: colored status letter, name, folder, line counts, and
-/// stage, unstage and discard buttons on hover.
+/// A collapsible Git folder using the Explorer row geometry and artwork.
+final class ChangeFolderCell: FilesCellView {
+    var onActivate: (() -> Void)?
+
+    override func mouseDown(with event: NSEvent) {}
+
+    override func mouseUp(with event: NSEvent) {
+        guard bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
+        onActivate?()
+    }
+
+    override func accessibilityPerformPress() -> Bool {
+        onActivate?()
+        return true
+    }
+}
+
+/// A changed file with status, line counts and actions on hover.
 final class ChangeFileCell: HoverView {
     private let fileIcon = NSImageView()
     private var filePath = ""
@@ -615,6 +670,9 @@ final class ChangeFileCell: HoverView {
     private let added = makeLabel("", font: AppFont.footnote)
     private let removed = makeLabel("", font: AppFont.footnote)
     private let actions = NSStackView()
+    private var rowLeading: NSLayoutConstraint?
+    private let row = NSStackView()
+    private var showsTree = false
     private let stageButton = TextGlyphButton("+", tooltip: "Stage")
     private let unstageButton = TextGlyphButton("−", tooltip: "Unstage")
     private let discardButton = TextGlyphButton("↺", tooltip: "Discard")
@@ -641,13 +699,19 @@ final class ChangeFileCell: HoverView {
         name.setContentCompressionResistancePriority(.defaultHigh - 1, for: .horizontal)
         folder.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         folder.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let row = NSStackView(views: [fileIcon, letter, name, folder, added, removed, actions])
+        for view in [fileIcon, letter, name, folder, added, removed, actions] { row.addArrangedSubview(view) }
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = 6
         row.setHuggingPriority(.defaultLow, for: .horizontal)
         addSubview(row)
-        row.pinEdges(to: self, insets: NSEdgeInsets(top: 0, left: 4, bottom: 0, right: 2))
+        row.translatesAutoresizingMaskIntoConstraints = false
+        let leading = row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4)
+        rowLeading = leading
+        NSLayoutConstraint.activate([
+            leading, row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -2),
+            row.topAnchor.constraint(equalTo: topAnchor), row.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
         letter.widthAnchor.constraint(equalToConstant: 14).isActive = true
         fileIcon.imageScaling = .scaleProportionallyDown
         fileIcon.setAccessibilityElement(false)
@@ -657,9 +721,19 @@ final class ChangeFileCell: HoverView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    func configure(entry: GitFileStatus, group: SourceControlModel.Group, busy: Bool) {
+    func configure(entry: GitFileStatus, group: SourceControlModel.Group, busy: Bool, tree: Bool = false) {
         let path = entry.file.path.rawValue
         filePath = path
+        if showsTree != tree {
+            row.removeArrangedSubview(letter)
+            letter.removeFromSuperview()
+            row.insertArrangedSubview(letter, at: tree ? 5 : 1)
+            showsTree = tree
+        }
+        let depth = path.split(separator: "/").count - 1
+        rowLeading?.constant = tree ? FilesCellView.iconX(depth: depth) : 4
+        folder.isHidden = tree
+        name.setContentHuggingPriority(tree ? .defaultLow : .defaultHigh, for: .horizontal)
         let code = SourceControlModel.letter(entry.file, in: group)
         tone = SourceControlModel.tone(code, in: group)
         letter.stringValue = String(code)

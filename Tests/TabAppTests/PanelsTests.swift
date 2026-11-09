@@ -238,6 +238,41 @@ final class PanelsSourceControlTests: XCTestCase {
         XCTAssertEqual(model.paths(in: .staged), ["staged.rs", "both.rs"])
     }
 
+    func testTreeKeepsGroupsAndFileIndicesAcrossCollapseAndRefresh() {
+        let status = GitStatus(summary: GitSummary(branch: "main"), files: [
+            ("Sources/UI/View.swift", "M", "M"),
+            ("README.md", " ", "M"),
+            ("Sources/App.swift", " ", "M"),
+            ("Tests/AppTests.swift", "?", "?"),
+        ].map { path, index, worktree in
+            GitFileStatus(file: GitFile(path: ServerPath(path),
+                                       index: GitStatusCode(porcelain: Character(index)),
+                                       worktree: GitStatusCode(porcelain: Character(worktree))))
+        })
+        var model = SourceControlModel()
+        model.setStatus(status)
+        let list = model.rows
+        model.setViewMode(.tree)
+        XCTAssertEqual(model.rows, [
+            .header(.staged), .folder(.staged, "Sources", 0), .folder(.staged, "Sources/UI", 1), .file(.staged, 0),
+            .header(.changes), .folder(.changes, "Sources", 0), .folder(.changes, "Sources/UI", 1),
+            .file(.changes, 0), .file(.changes, 2), .file(.changes, 1),
+            .header(.untracked), .folder(.untracked, "Tests", 0), .file(.untracked, 3),
+        ])
+        model.toggleFolder("Sources", in: .changes)
+        XCTAssertTrue(model.rows.contains(.file(.staged, 0)))
+        XCTAssertFalse(model.rows.contains(.file(.changes, 0)))
+        XCTAssertEqual(model.paths(in: .changes), ["Sources/UI/View.swift", "README.md", "Sources/App.swift"])
+        model.setStatus(status)
+        XCTAssertFalse(model.rows.contains(.file(.changes, 2)))
+        model.setViewMode(.list)
+        XCTAssertEqual(model.rows, list)
+        model.setViewMode(.tree)
+        XCTAssertFalse(model.rows.contains(.file(.changes, 0)))
+        model.toggleFolder("Sources", in: .changes)
+        XCTAssertTrue(model.rows.contains(.file(.changes, 0)))
+    }
+
     func testCommitEnablementProtectsIndexAndAllowsAmendWithoutStaging() {
         for amend in [false, true] {
             for staged in [0, 1, 4] {

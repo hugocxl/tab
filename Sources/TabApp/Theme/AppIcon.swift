@@ -192,6 +192,8 @@ public enum AppIcon: String, CaseIterable, Sendable {
     case triangleAlert = "triangle-alert"
     case triangleAlertFill = "triangle-alert-fill"
     case typescript
+    case viewList = "view-list"
+    case viewTree = "view-tree"
     case video
     case vim
     case vite

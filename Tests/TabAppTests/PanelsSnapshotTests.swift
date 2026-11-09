@@ -104,6 +104,8 @@ final class PanelsLiveSnapshotTests: LiveServerTestCase {
         try git("add", "staged.swift")
         try write("Sources/App.swift", "import Foundation\n\n/// The answer.\nlet answer = 43\nprint(answer)\n")
         try write("untracked.md", "new\n")
+        try write("Sources/Views/Sidebar.swift", "// New sidebar\n")
+        try write("Sources/Views/Footer.swift", "// New footer\n")
 
         let files = FilesPanelController(host: host)
         let filesWindow = show(files, size: NSSize(width: 300, height: 640))
@@ -118,6 +120,9 @@ final class PanelsLiveSnapshotTests: LiveServerTestCase {
         control.refresh()
         await settle { control.model.status != nil }
         try render(try XCTUnwrap(controlWindow.contentView), "source-control")
+
+        control.setViewMode(.tree)
+        try render(try XCTUnwrap(controlWindow.contentView), "source-control-tree")
 
         let diff = DiffPaneController(host: host, path: "Sources/App.swift", staged: false)
         let diffWindow = show(diff, size: NSSize(width: 760, height: 420))
