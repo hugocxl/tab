@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.81.1 - 2026-11-09
+
+### Fixed
+
+- Releases no longer fail now and then while checking conversation mentions in the agent composer.
+
 ## 0.81.0 - 2026-11-09
 
 ### Changed

@@ -91,8 +91,8 @@ final class AgentThreadLinkTests: XCTestCase {
         surface.composer.string = "Compare @rea with this"
         surface.composer.setSelectedRange(NSRange(location: 12, length: 0))
         coordinator.changed()
-        try await Task.sleep(for: .milliseconds(250))
-        XCTAssertEqual(surface.suggestions.items.first?.kind, .thread)
+        let suggested = await ModelFixtures.wait { surface.suggestions.items.first?.kind == .thread }
+        XCTAssertTrue(suggested, "The thread suggestion appears")
         surface.suggestions.moveSelection(-surface.suggestions.selectedIndex)
         XCTAssertTrue(coordinator.handle(#selector(NSResponder.insertTab(_:))))
         XCTAssertEqual(surface.composer.string, "Compare @Reader [review] with this")
