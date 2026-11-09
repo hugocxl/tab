@@ -397,6 +397,11 @@ extension AppModel {
         focusActiveContent()
     }
 
+    public func positionPane(_ pane: PaneId, edge: Direction, share: Double) {
+        edit { try $0.positionPane(pane, edge: edge, share: share) }
+        focusActiveContent()
+    }
+
     public func equalizeSplits() {
         guard let pane = activePane else { return }
         edit { try $0.equalizeSplits(pane) }

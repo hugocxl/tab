@@ -676,7 +676,7 @@ final class AgentResponseCode: AgentResponseSection {
     var isStreaming = false { didSet { if oldValue != isStreaming { refreshRunAction() } } }
     private var fenceLanguage = ""
     private var fenceClosed = false
-    private var copyReset: Task<Void, Never>?
+    private(set) var copyReset: Task<Void, Never>?
     private var controlColor: NSColor = .secondaryLabelColor
     private var wrapBackground: NSColor = .clear
     private let titleLabel = makeLabel("", font: AppFont.mono(11))

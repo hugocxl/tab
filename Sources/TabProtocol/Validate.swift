@@ -263,6 +263,10 @@ extension TabMutation {
             try pane.validateShape()
         case .dockPane(_, _, _, let level):
             if level < 0 || level > 64 { throw .badRequest }
+        case .positionPane(_, _, let share):
+            if !share.isFinite || !(Layout<PaneId>.minimumRatio...Layout<PaneId>.maximumRatio).contains(share) {
+                throw .badRequest
+            }
         case .setRatio(_, _, let ratio):
             if !ratio.isFinite { throw .badRequest }
         case .updatePane(_, let content):

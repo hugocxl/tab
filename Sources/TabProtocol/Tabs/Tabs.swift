@@ -441,6 +441,8 @@ public enum TabMutation: Hashable, Codable, Sendable {
     /// Docks a pane on `edge` of `anchor`, or of the row or column `level`
     /// picks, as `Layout.docked` does.
     case dockPane(PaneId, anchor: PaneId, edge: Direction, level: Int)
+    /// Places a pane at a whole-tab edge with the requested share.
+    case positionPane(PaneId, edge: Direction, share: Double)
     case setRatio(TabId, split: SplitAnchor<PaneId>, ratio: Double)
     /// Gives every row and column of a tab equal shares.
     case equalize(TabId)
@@ -462,6 +464,7 @@ public enum TabMutation: Hashable, Codable, Sendable {
         case "swapPanes": self = .swapPanes(try c("pane"), try c("other"))
         case "dockPane":
             self = .dockPane(try c("pane"), anchor: try c("anchor"), edge: try c("edge"), level: try c("level"))
+        case "positionPane": self = .positionPane(try c("pane"), edge: try c("edge"), share: try c("share"))
         case "setRatio": self = .setRatio(try c("tab"), split: try c("split"), ratio: try c("ratio"))
         case "equalize": self = .equalize(try c("tab"))
         case "updatePane": self = .updatePane(try c("pane"), content: try c("content"))
@@ -504,6 +507,11 @@ public enum TabMutation: Hashable, Codable, Sendable {
             try c(anchor, "anchor")
             try c(edge, "edge")
             try c(level, "level")
+        case let .positionPane(pane, edge, share):
+            var c = try TaggedEncoding(encoder, "positionPane")
+            try c(pane, "pane")
+            try c(edge, "edge")
+            try c(share, "share")
         case let .setRatio(tab, split, ratio):
             var c = try TaggedEncoding(encoder, "setRatio")
             try c(tab, "tab")

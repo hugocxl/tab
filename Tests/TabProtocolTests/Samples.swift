@@ -201,6 +201,7 @@ enum Samples {
         .replacePane(pane, with: Pane(id: PaneId(uuid: uuid(45)), content: .terminal(session: nil))),
         .swapPanes(pane, otherPane),
         .dockPane(pane, anchor: otherPane, edge: .left, level: 1),
+        .positionPane(pane, edge: .right, share: 2.0 / 3),
         .setRatio(tabId, split: SplitAnchor(axis: .horizontal, first: pane, second: otherPane), ratio: 0.3),
         .equalize(tabId),
         .updatePane(pane, content: .browser(BrowserPane(url: "https://example.com", profile: "work"))),

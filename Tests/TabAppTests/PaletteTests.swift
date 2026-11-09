@@ -77,6 +77,31 @@ final class PaletteTests: XCTestCase {
         XCTAssertEqual(sections.map(\.title), ["Suggestions", "Panes", "Files"])
     }
 
+    func testPanePresetsDisableWithoutSiblingsAndCaptureTheirTarget() throws {
+        let dirs = try ModelFixtures.profile()
+        let model = AppModel(dirs: dirs, theme: AppTheme(systemIsDark: true)) { _, _ in nil }
+        let source = PaletteSource(model: model)
+        func presets() -> [RootCommand] {
+            source.rootCommands().filter { $0.id.hasPrefix("pane_") }
+        }
+        XCTAssertEqual(presets().count, 12)
+        XCTAssertTrue(presets().allSatisfy(\.disabled))
+        try model.state.openTerminalTab(model.state.home.id)
+        let pane = try XCTUnwrap(model.state.window.activePane)
+        XCTAssertTrue(presets().allSatisfy(\.disabled))
+        let other = try model.state.splitPane(pane, edge: .right)
+        try model.state.focusPane(pane)
+        let command = try XCTUnwrap(presets().first { $0.id == "pane_left_two_thirds" })
+        XCTAssertFalse(command.disabled)
+        XCTAssertEqual(RootRanking.ranked(presets(), query: "2/3").count, 4)
+        try model.state.focusPane(other)
+        guard case .run(let run) = command.target else { return XCTFail("Expected command") }
+        run()
+        XCTAssertEqual(model.state.window.activePane, pane)
+        let rect = try XCTUnwrap(model.activeTab?.layout.rects.first { $0.0 == pane }?.1)
+        XCTAssertEqual(rect.width, 2.0 / 3, accuracy: 0.000001)
+    }
+
     /// Pushing a page keeps the root under it; Escape goes back, then closes.
     func testPageStackNavigation() throws {
         let dirs = try ModelFixtures.profile()

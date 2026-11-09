@@ -516,6 +516,18 @@ public struct AppState: Codable, Equatable, Sendable {
         }
     }
 
+    /// Applies an edge preset atomically and reveals the resulting layout.
+    public mutating func positionPane(_ pane: PaneId, edge: Direction, share: Double) throws {
+        let (p, t) = try availablePaneTab(pane)
+        let tab = projects[p].tabs[t]
+        guard tab.layout.positioned(pane, edge: edge, share: share) != nil else {
+            throw AppError.invalidState("pane positioning requires another pane and a valid share")
+        }
+        try perform(projects[p].serverId, .positionPane(pane, edge: edge, share: share))
+        setZoom(tab.id, nil)
+        try focusPane(pane)
+    }
+
     public mutating func setRatio(_ tab: TabId, path: [Branch], ratio: Double) throws {
         let (p, t) = try availableTab(tab)
         guard ratio.isFinite, let split = projects[p].tabs[t].layout.anchor(at: path) else {

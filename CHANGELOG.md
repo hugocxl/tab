@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.86.0 - 2026-11-09
+
+### Added
+
+- Position panes at the left, right, top or bottom of a tab in thirds, halves or two thirds
+  from the command palette, while keeping the other panes together.
+
 ## 0.85.0 - 2026-11-09
 
 ### Changed
@@ -328,6 +335,13 @@ Changelog.
   the worktree's name.
 - New worktree rows name the other computer a project is on, and palette rows
   show computer names in a heavier weight.
+
+## 0.60.1 - 2026-11-05
+
+### Fixed
+
+- Releases no longer fail now and then on tests of copy buttons and media
+  previews that depended on timing.
 
 ## 0.60.0 - 2026-11-05
 

@@ -218,6 +218,16 @@ public enum TabReducer {
             }
             return []
 
+        case let .positionPane(pane, edge, share):
+            guard let (_, tab) = board.locate(pane: pane) else { throw TabChangeError.gone("pane") }
+            try board.editTab(tab) { tab in
+                guard let layout = tab.layout.positioned(pane, edge: edge, share: share) else {
+                    throw TabChangeError.invalid("pane positioning requires another pane and a valid share")
+                }
+                tab.layout = layout
+            }
+            return []
+
         case let .setRatio(tab, split, ratio):
             try board.editTab(tab) { tab in
                 do {
