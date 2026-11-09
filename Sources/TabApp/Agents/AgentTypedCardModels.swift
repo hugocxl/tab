@@ -6,6 +6,8 @@ import TabProtocol
 /// then todo lists with valid steps, then notices and compaction boundaries.
 enum AgentTypedCardKind: Equatable {
     case plan, todo, compaction, error, notice
+    /// Another agent: a worker this conversation started, its report, or a message it sent.
+    case peer(AgentPeerCardRow.Mode)
 
     static func classify(_ item: AgentChatItem) -> AgentTypedCardKind? {
         classify(item) { AgentTodoList(detail: $0) != nil }
@@ -13,6 +15,14 @@ enum AgentTypedCardKind: Equatable {
 
     /// Classifies with `isValidTodoList` deciding whether a `todo_list` item's detail decodes.
     static func classify(_ item: AgentChatItem, isValidTodoList: (String?) -> Bool) -> AgentTypedCardKind? {
+        if item.peer != nil {
+            switch (item.kind, item.workContext?.itemType) {
+            case (.notice, AgentPeerItemType.workerStarted): return .peer(.worker)
+            case (.user, AgentPeerItemType.workerReport): return .peer(.report)
+            case (.user, _): return .peer(.message)
+            default: break
+            }
+        }
         guard item.kind == .tool || item.kind == .notice else { return nil }
         switch item.workContext?.itemType {
         case "error": return .error
@@ -24,8 +34,9 @@ enum AgentTypedCardKind: Equatable {
         return item.workContext?.itemType == "compaction" ? .compaction : nil
     }
 
-    /// Errors stay visible below a folded turn; every other card folds like a tool row.
-    var folds: Bool { self != .error }
+    /// Errors and started workers stay visible below a folded turn; every other card
+    /// folds like a tool row.
+    var folds: Bool { self != .error && self != .peer(.worker) }
 }
 
 /// Classifies transcript items for one document, remembering whether each todo list's

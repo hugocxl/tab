@@ -54,6 +54,11 @@ final class AgentPaneView: ThemedView {
     private let activity = NSView()
     private let activityLabel = makeLabel("", font: AppFont.small)
     private let activitySpinner = NSProgressIndicator()
+    /// Worker reports the agent holds because the user stopped it, it failed, or delivery paused.
+    private let reports = NSView()
+    private let reportsLabel = makeLabel("", font: AppFont.small)
+    let deliverReports = PillButton("Deliver", style: .plain)
+    var onDeliverReports: (() -> Void)?
     private var activityStatus: AgentChatStatus = .idle
     private var submitting = false
     private var renderedItems: [AgentChatItem] = []
@@ -172,11 +177,18 @@ final class AgentPaneView: ThemedView {
         activity.addSubview(activitySpinner)
         activity.addSubview(activityLabel)
         activity.isHidden = true
+        reportsLabel.lineBreakMode = .byTruncatingTail
+        deliverReports.translatesAutoresizingMaskIntoConstraints = true
+        deliverReports.toolTip = "Give the agent its workers' reports now"
+        deliverReports.onPress = { [weak self] in self?.onDeliverReports?() }
+        reports.addSubview(reportsLabel)
+        reports.addSubview(deliverReports)
+        reports.isHidden = true
         feedback.font = AppFont.footnote
         feedback.maximumNumberOfLines = 2
         feedback.lineBreakMode = .byTruncatingTail
         // Suggestions sit behind the composer card so their lower edge tucks under it.
-        for child in [transcriptScroll, activity, endButton, suggestions, composerCard, promptQueue, questions, feedback, retry] { addSubview(child) }
+        for child in [transcriptScroll, activity, reports, endButton, suggestions, composerCard, promptQueue, questions, feedback, retry] { addSubview(child) }
         suggestions.isHidden = true
         selectionToolbar.isHidden = true
         selectionToolbar.onCite = { [weak self] in self?.citeSelection() }
@@ -249,13 +261,19 @@ final class AgentPaneView: ThemedView {
         for separator in pickerSeparators { separator.isHidden = true }
 
         let activityHeight: CGFloat = activity.isHidden ? 0 : 30
-        let panelBudget = max(0, composerCard.frame.minY - activityHeight - 20)
+        let reportsHeight: CGFloat = reports.isHidden ? 0 : 30
+        let panelBudget = max(0, composerCard.frame.minY - activityHeight - reportsHeight - 20)
         let questionHeight = min(questions.preferredHeight, panelBudget)
         let queueHeight = min(promptQueue.preferredHeight, max(0, panelBudget - questionHeight))
         questions.frame = NSRect(x: left, y: max(0, composerCard.frame.minY - questionHeight - 8), width: width, height: questionHeight)
         promptQueue.frame = NSRect(x: left, y: max(0, composerCard.frame.minY - questionHeight - queueHeight - 12), width: width, height: queueHeight)
-        let transcriptBottom = max(0, composerCard.frame.minY - activityHeight - questionHeight - queueHeight - (questionHeight + queueHeight > 0 ? 16 : 0))
+        let transcriptBottom = max(0, composerCard.frame.minY - activityHeight - reportsHeight - questionHeight - queueHeight
+            - (questionHeight + queueHeight > 0 ? 16 : 0))
         activity.frame = NSRect(x: left + 4, y: transcriptBottom, width: max(0, width - 8), height: activityHeight)
+        reports.frame = NSRect(x: left + 4, y: transcriptBottom + activityHeight, width: max(0, width - 8), height: reportsHeight)
+        let deliverWidth = ceil(deliverReports.fittingSize.width)
+        deliverReports.frame = NSRect(x: max(0, reports.bounds.width - deliverWidth), y: 2, width: deliverWidth, height: 24)
+        reportsLabel.frame = NSRect(x: 0, y: 4, width: max(0, reports.bounds.width - deliverWidth - 8), height: 20)
         activitySpinner.frame = NSRect(x: 0, y: 5, width: 16, height: 16)
         activityLabel.frame = NSRect(x: activityStatus == .waiting ? 0 : 24, y: 4,
                                      width: max(0, activity.bounds.width - 24), height: 20)
@@ -330,6 +348,29 @@ final class AgentPaneView: ThemedView {
         needsLayout = true
     }
 
+    /// Shows the worker reports the agent won't take by itself: after the user
+    /// stopped it, when it failed or waits for approval, or once delivery paused.
+    func setReports(_ snapshot: AgentChatSnapshot) {
+        let queue = snapshot.reportQueue
+        let held = queue?.held ?? 0
+        let stopped = snapshot.status == .failed || snapshot.status == .waiting
+            || (snapshot.status == .idle && (snapshot.turns?.last?.outcome).map { $0 != .completed } == true)
+        let shown = held > 0 && (queue?.paused == true || stopped)
+        let text = held == 1 ? "1 worker report waiting" : "\(held) worker reports waiting"
+        let label = queue?.paused == true ? "Worker reports paused · " + text : text
+        guard reports.isHidden == shown || reportsLabel.stringValue != label else { return }
+        reports.isHidden = !shown
+        reportsLabel.stringValue = label
+        reportsLabel.setAccessibilityValue(label)
+        needsLayout = true
+    }
+
+    /// Other agents' states changed: worker cards show their new state.
+    func peerActivityDidChange() {
+        guard transcript.peerActivityDidChange() else { return }
+        preserveScroll { self.transcript.reflow(viewportWidth: self.transcriptScroll.contentSize.width) }
+    }
+
     /// Binds assistant link enrichments to this conversation's actions.
     private func configureLinkServices() {
         let actions = actions
@@ -401,6 +442,7 @@ final class AgentPaneView: ThemedView {
                 self.renderedTurns = turns
             }
             self.setActivity(status: snapshot.status, submitting: self.submitting)
+            self.setReports(snapshot)
             self.layoutSubtreeIfNeeded()
             self.transcript.reflow(viewportWidth: self.transcriptScroll.contentSize.width)
         }
@@ -560,6 +602,8 @@ final class AgentPaneView: ThemedView {
         attach.layer?.backgroundColor = theme.fg.withAlphaComponent(0.08).cgColor
         composer.selectedTextAttributes = [.backgroundColor: theme.accent.withAlphaComponent(0.25)]
         activityLabel.textColor = theme.fgMuted
+        reportsLabel.textColor = theme.fgMuted
+        deliverReports.setTitleColor(theme.accent)
         feedback.textColor = theme.fgDim
         for control in [model, effort] { control.chatTheme = theme }
         for separator in pickerSeparators { separator.layer?.backgroundColor = theme.fg.withAlphaComponent(0.18).cgColor }

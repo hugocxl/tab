@@ -23,7 +23,7 @@ public enum AgentSkill {
     public static let text = #"""
     ---
     name: tab-cli
-    description: How to drive Tab from a shell with the `tab` command — open terminal, agent, browser, simulator, editor and diff panes in the app, list the panes on screen and focus, close, zoom, move, swap and resize them, start terminals that keep running, type into them, read and wait on their output, branch your own conversation into agent panes and read their replies, check apps on iOS simulators and Android emulators, and manage projects and Git worktrees. Use this when you are an agent running inside a Tab terminal or Tab agent pane (or any script on the same computer) and the user asks for anything in the app, however loosely — "open a terminal here", "new tab", "split this", "show me the page", "close that pane", "make it bigger", "put the tests below" — asks to branch or fork the conversation or split work into panes, wants work to run in its own terminal instead of blocking yours, or to drive the Tab app's built-in browser or a simulator.
+    description: How to drive Tab from a shell with the `tab` command — open terminal, agent, browser, simulator, editor and diff panes in the app, list the panes on screen and focus, close, zoom, move, swap and resize them, start terminals that keep running, type into them, read and wait on their output, hand work to worker agents whose reports come back to you, branch your own conversation into agent panes and read their replies, check apps on iOS simulators and Android emulators, and manage projects and Git worktrees. Use this when you are an agent running inside a Tab terminal or Tab agent pane (or any script on the same computer) and the user asks for anything in the app, however loosely — "open a terminal here", "new tab", "split this", "show me the page", "close that pane", "make it bigger", "put the tests below" — asks to branch or fork the conversation or split work between agents or panes, wants work to run in its own terminal instead of blocking yours, or to drive the Tab app's built-in browser or a simulator.
     ---
 
     # Tab CLI
@@ -59,8 +59,9 @@ public enum AgentSkill {
     | "open App.swift at line 42" | `tab pane new editor App.swift --line 42` |
     | "show me the diff of App.swift" | `tab pane new diff App.swift` |
     | "show the simulator" | `tab pane new simulator` |
-    | "start another agent on X" | `tab pane new agent -- "X"` |
-    | "branch this", "fork the conversation" | `tab pane new agent --fork -- "<the branch's part>"` |
+    | "start another agent on X", "a new chat" | `tab pane new agent --no-report -- "X"` |
+    | "split this between agents", "have Codex do X and report back" | `tab pane new agent --name <part> [--provider codex] -- "<the part>"` |
+    | "branch this", "fork the conversation" | `tab pane new agent --fork --name <branch> -- "<the branch's part>"` |
     | "a new tab in Home", "a new card in the sidebar" | `tab tab new terminal` (or agent, browser, simulator) |
     | "this pane", "that one", "the one on the left" | `tab pane list`, then pick by position, kind and title |
     | "close it", "focus the server", "maximize that" | `tab pane close`, `tab pane focus`, `tab pane zoom` |
@@ -77,6 +78,7 @@ public enum AgentSkill {
       own terminal, then check on it later.
     - Wait until that process prints something, or exits, before going on.
     - Show the user a terminal, agent, browser, simulator, file or diff in a pane.
+    - Hand parts of the work to worker agents whose reports come back to you.
     - Branch this conversation into agent panes the user can talk to.
     - Create a Git worktree for a task.
 
@@ -199,15 +201,40 @@ public enum AgentSkill {
       returns, without asking: do it last, once your reply is written.
     - `move` and `swap` work within one tab.
 
-    ## Branch the conversation
+    ## Hand work to other agents
 
-    When the user asks to branch or fork this conversation, or to split work
-    into panes, fork once per branch and give each its part after `--`. Each
-    command prints the branch's agent ID:
+    When the user asks to split work between agents, start one worker per part,
+    give each a short `--name`, and keep working yourself. Each command prints the
+    worker's agent ID:
 
     ```bash
-    FIRST=$(tab pane new agent --fork -- "Show the first draft and edit it with me")
-    SECOND=$(tab pane new agent --fork -- "Show the second draft and edit it with me")
+    tab pane new agent --name tax-rules --provider codex -- "Move promo discounts after resolveRegionalTax"
+    tab pane new agent --name promo-tests -- "Cover EU10 and EU20 across DE, FR and NL tax rates"
+    ```
+
+    - A worker's final reply comes back to you by itself, as a message inside
+      `<tab-report from="tax-rules" agent="…" outcome="completed">` tags. It is the
+      worker's report, not the user's message: act on it, and tell the user what
+      came back once you have read it.
+    - Follow up with `tab agent send tax-rules "…"`; that reply comes back the
+      same way. Don't poll a worker, and use `tab agent wait` only when you can't go
+      on without its result. A reply you read that way isn't sent to you again.
+    - Your pane shows a card for each worker and its report, and the user can
+      talk to a worker in its own pane. Replies to the user's own messages there
+      stay there.
+    - Add `--no-report` when the user only wants another chat, not work for you.
+    - Workers that change files should each get a worktree, so they don't edit
+      the same ones: `--project "$WT"`, as below.
+
+    ## Branch the conversation
+
+    When the user asks to branch or fork this conversation, fork once per branch
+    and give each its part after `--`. A branch is a worker too, so its reply comes
+    back to you:
+
+    ```bash
+    FIRST=$(tab pane new agent --fork --name first-draft -- "Show the first draft and edit it with me")
+    SECOND=$(tab pane new agent --fork --name second-draft -- "Show the second draft and edit it with me")
     ```
 
     A branch knows everything said up to the fork, with your model, effort and
@@ -220,11 +247,11 @@ public enum AgentSkill {
 
     ```bash
     WT=$(tab worktree new MyProject try-cache | cut -f1)
-    tab pane new agent --fork --project "$WT" -- "Fix the slow query with a cache"
+    tab pane new agent --fork --name cache --project "$WT" -- "Fix the slow query with a cache"
     ```
 
-    To follow a branch, wait for its reply, then read it. Don't report what a
-    branch said before you've read it.
+    From a terminal, nothing reports back: wait for an agent's reply, then read
+    it. Don't report what an agent said before you've read it.
 
     ```bash
     tab agent wait "$FIRST" --timeout 600       # prints its latest reply once it's idle
@@ -232,7 +259,7 @@ public enum AgentSkill {
     tab agent send "$FIRST" "Make it shorter"   # a message, as the user would send it
     ```
 
-    `agent wait` fails when the branch needs the user to approve something, fails,
+    `agent wait` fails when the agent needs the user to approve something, fails,
     or the timeout passes.
 
     ## Wait instead of polling

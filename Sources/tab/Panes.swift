@@ -36,6 +36,8 @@ enum Panes {
         let record: JSONValue
         var started: AgentChatSnapshot?
         var message: String?
+        // An agent started from a Tab agent is that agent's worker.
+        let coordinator = client.supports(.agentReports) ? Agents.hostingAgent(server: client.server.server) : nil
         switch pane.content {
         case .terminal(let selector?, _, _):
             let session = try await Sessions.calling(selector, client: client)
@@ -54,7 +56,8 @@ enum Panes {
             record = Sessions.record(session)
         case .agent(let provider, let text):
             let project = try await project(pane, client: client, target: target).id
-            let snapshot = try await client.agentChat(.create(session: SessionId(), project: project, provider: provider))
+            let created = try await client.agentChat(.create(session: SessionId(), project: project, provider: provider))
+            let snapshot = try await delegate(created, pane: pane, coordinator: coordinator, client: client)
             shown = AppPane(kind: .agent, session: snapshot.session, project: snapshot.project,
                             provider: snapshot.provider, beside: caller, placement: pane.placement,
                             edge: pane.edge, anchor: pane.beside)
@@ -66,12 +69,13 @@ enum Panes {
             else { throw CLIError("give an agent ID; this isn't a Tab agent on that server") }
             var project: ProjectId?
             if let selector { project = try await Projects.resolve(selector, client: client, target: target).id }
-            let snapshot = try await client.agentChat(.fork(session: SessionId(), from: source, project: project))
-            if let project, snapshot.project != project {
+            let forked = try await client.agentChat(.fork(session: SessionId(), from: source, project: project))
+            if let project, forked.project != project {
                 // A server older than forking into another project forked in place.
-                _ = try? await client.agentChat(.close(session: snapshot.session))
+                _ = try? await client.agentChat(.close(session: forked.session))
                 throw CLIError("the server can't fork into another project; update Tab")
             }
+            let snapshot = try await delegate(forked, pane: pane, coordinator: coordinator, client: client)
             shown = AppPane(kind: .agent, session: snapshot.session, project: snapshot.project,
                             provider: snapshot.provider, beside: caller, placement: pane.placement,
                             edge: pane.edge, anchor: pane.beside)
@@ -88,8 +92,12 @@ enum Panes {
         }
         if let started, let message {
             do {
-                _ = try await client.agentChat(.send(session: started.session, text: message, model: started.model,
-                                                     reasoningEffort: started.reasoningEffort))
+                if let coordinator {
+                    _ = try await client.agentChat(.message(session: started.session, text: message, from: coordinator))
+                } else {
+                    _ = try await client.agentChat(.send(session: started.session, text: message, model: started.model,
+                                                         reasoningEffort: started.reasoningEffort))
+                }
             } catch {
                 throw CLIError("started \(started.session), but could not send it the message: \(CLI.message(error))")
             }
@@ -143,11 +151,32 @@ enum Panes {
     }
 
     static func agentRecord(_ snapshot: AgentChatSnapshot) -> JSONValue {
-        .object([
+        var record: [String: JSONValue] = [
             "id": .string(snapshot.session.description),
+            "name": .string(snapshot.name ?? SessionName.of(snapshot.session)),
             "projectId": .string(snapshot.project.description),
             "provider": .string(snapshot.provider.rawValue),
-        ])
+        ]
+        if snapshot.coordinator != nil { record["reports"] = .bool(snapshot.reportsToCoordinator ?? true) }
+        return .object(record)
+    }
+
+    /// `snapshot` named and made `coordinator`'s worker, as `pane` asks; a new
+    /// agent the server refuses that for is closed again.
+    static func delegate(_ snapshot: AgentChatSnapshot, pane: CLIPane, coordinator: SessionId?,
+                         client: ServerClient) async throws -> AgentChatSnapshot {
+        guard coordinator != nil || pane.name != nil else { return snapshot }
+        guard client.supports(.agentReports) else {
+            _ = try? await client.agentChat(.close(session: snapshot.session))
+            throw CLIError("the server can't name agents; update Tab")
+        }
+        do {
+            return try await client.agentChat(.delegate(session: snapshot.session, name: pane.name, coordinator: coordinator,
+                                                        reports: pane.reports))
+        } catch {
+            _ = try? await client.agentChat(.close(session: snapshot.session))
+            throw CLIError("could not start the agent: \(CLI.message(error))")
+        }
     }
 
     /// The Tab agent or terminal this command runs in, for a new pane to open beside.

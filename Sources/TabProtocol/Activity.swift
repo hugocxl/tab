@@ -82,15 +82,18 @@ public struct AgentActivity: Hashable, Codable, Sendable {
     /// starts working and kept while it works or waits for you. Older servers
     /// leave it out.
     public var workingSince: UInt64?
+    /// A Tab agent's name, such as a worker's `tax-rules`; older servers leave it out.
+    public var name: String?
 
     public init(session: SessionId, project: ProjectId, provider: AgentProvider, state: AgentState, title: String? = nil,
-                workingSince: UInt64? = nil) {
+                workingSince: UInt64? = nil, name: String? = nil) {
         self.session = session
         self.project = project
         self.provider = provider
         self.state = state
         self.title = title
         self.workingSince = workingSince
+        self.name = name
     }
 }
 

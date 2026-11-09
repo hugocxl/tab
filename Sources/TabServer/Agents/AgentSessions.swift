@@ -91,6 +91,17 @@ final class AgentSessions: @unchecked Sendable {
         var forkPoint: String?
         /// The latest message the provider wrote to this conversation.
         var lastProviderMessage: String?
+        /// Worker reports waiting for this coordinator, oldest first.
+        var heldReports: [AgentHeldReport] = []
+        var reportsPaused = false
+        var deliveringReport = false
+        /// The user asked for the held reports even though they stopped the agent.
+        var forceDelivery = false
+        /// Reports delivered since the user last sent a message.
+        var unattendedDeliveries = 0
+        var deliveryFailures = 0
+        /// This worker's coordinator shows the card for it.
+        var announced = false
 
         init(_ snapshot: AgentChatSnapshot, directory: String) {
             self.snapshot = snapshot
@@ -107,6 +118,24 @@ final class AgentSessions: @unchecked Sendable {
         var forkSource: String?
         var forkPoint: String?
         var lastProviderMessage: String?
+        var heldReports: [AgentHeldReport]?
+        var reportsPaused: Bool?
+        var announced: Bool?
+        var unattendedDeliveries: Int?
+    }
+
+    /// A message from another agent, or a worker's report, on its way into a conversation.
+    private struct Incoming {
+        /// What the provider reads; the transcript shows the request's text.
+        var modelText: String
+        var peer: AgentPeer
+        var itemType: String
+        var requestKind: String?
+        var sourceStatus: String?
+        var detail: String?
+        /// Who the reply of a turn this starts goes back to, and who asked them.
+        var requestedBy: SessionId?
+        var upstream: SessionId?
     }
 
     private final class PendingReply: @unchecked Sendable {
@@ -135,6 +164,8 @@ final class AgentSessions: @unchecked Sendable {
     var launchEnvironment: [String: String] = [:]
     /// The folder holding this Tab's `tab`, put first on agents' `PATH`.
     var cliDirectory: String?
+    /// How long a settled worker report waits before delivery; see `AgentReports.grace`.
+    var reportGrace = AgentReports.grace
     /// The project an agent works in, as its instructions describe it.
     var projectContext: @Sendable (ProjectId) -> AgentContext.Project? = { _ in nil }
     var stageToolImages: @Sendable ([AgentChatAttachment], URL) throws -> Void = { images, directory in
@@ -186,6 +217,10 @@ final class AgentSessions: @unchecked Sendable {
                 entry.forkSource = saved.forkSource
                 entry.forkPoint = saved.forkPoint
                 entry.lastProviderMessage = saved.lastProviderMessage
+                entry.heldReports = saved.heldReports ?? []
+                entry.reportsPaused = saved.reportsPaused ?? false
+                entry.announced = saved.announced ?? false
+                entry.unattendedDeliveries = saved.unattendedDeliveries ?? 0
                 bound(entry)
                 let checkpointDirectory = root.appendingPathComponent("checkpoints", isDirectory: true)
                     .appendingPathComponent(entry.snapshot.session.description, isDirectory: true)
@@ -207,6 +242,13 @@ final class AgentSessions: @unchecked Sendable {
             } catch {
                 ServerLog.error("agent snapshot unavailable: \(file.lastPathComponent): \(error)")
             }
+        }
+        // Turns that settled while the server stopped report now; held reports
+        // wait out their grace, so a returning coordinator can read them first.
+        let restored = Array(entries.values)
+        queue.asyncAfter(deadline: .now() + AgentReports.grace) { [self] in
+            for entry in restored { routeReports(entry) }
+            for entry in restored where !entry.heldReports.isEmpty { drainReports(entry) }
         }
     }
 
@@ -282,7 +324,44 @@ final class AgentSessions: @unchecked Sendable {
     }
 
     private func begin(_ request: AgentChatRequest,
-                       continuation: CheckedContinuation<AgentChatSnapshot, Error>, deliveryID: String? = nil) throws {
+                       continuation: CheckedContinuation<AgentChatSnapshot, Error>, deliveryID: String? = nil,
+                       incoming: Incoming? = nil) throws {
+        switch request {
+        case .delegate(let id, let name, let coordinator, let reports):
+            continuation.resume(returning: try delegate(id, name: name, coordinator: coordinator, reports: reports))
+            return
+        case .message(let id, let text, let from):
+            guard let entry = entries[id] else { throw ServiceError.unknownSession(id) }
+            guard let sender = entries[from], sender.snapshot.status != .closed else {
+                throw ServiceError(.badRequest, "The sending agent isn't open on this server")
+            }
+            let fromCoordinator = entry.snapshot.coordinator?.session == from
+            let message = incomingMessage(text, to: entry, from: sender, task: fromCoordinator && !entry.announced)
+            try begin(.send(session: id, text: text, model: entry.snapshot.model,
+                            reasoningEffort: entry.snapshot.reasoningEffort),
+                      continuation: continuation, incoming: message)
+            if fromCoordinator, !entry.announced { announce(entry, to: sender, task: text) }
+            return
+        case .acknowledge(let id, let turn, let by):
+            continuation.resume(returning: try acknowledge(id, turn: turn, by: by))
+            return
+        case .deliverReports(let id):
+            guard let entry = entries[id] else { throw ServiceError.unknownSession(id) }
+            guard !stopping, entry.snapshot.status != .closed else {
+                throw ServiceError(.badRequest, "The agent session is closed or the server is stopping")
+            }
+            entry.forceDelivery = !entry.heldReports.isEmpty
+            entry.reportsPaused = false
+            entry.unattendedDeliveries = 0
+            entry.deliveryFailures = 0
+            syncReportQueue(entry)
+            touch(entry)
+            persist(entry)
+            drainReports(entry)
+            continuation.resume(returning: entry.snapshot)
+            return
+        default: break
+        }
         if case .create(let id, let project, let provider) = request {
             if let entry = entries[id] {
                 guard entry.snapshot.project == project else {
@@ -311,7 +390,8 @@ final class AgentSessions: @unchecked Sendable {
              .interrupt(let session), .close(let session), .setAccess(let session, _), .setPlan(let session, _): id = session
         case .submit(let session, _), .editQueued(let session, _, _, _, _), .removeQueued(let session, _, _),
              .deliverQueued(let session, _, _), .moveQueued(let session, _, _, _), .resumeQueue(let session), .answer(let session, _, _, _): id = session
-        case .create, .fork: throw ServiceError(.badRequest, "Unexpected create")
+        case .create, .fork, .delegate, .message, .acknowledge, .deliverReports:
+            throw ServiceError(.badRequest, "Unexpected request")
         }
         guard let entry = entries[id] else { throw ServiceError.unknownSession(id) }
         if case .read = request {
@@ -400,7 +480,7 @@ final class AgentSessions: @unchecked Sendable {
                 }
                 pending.task = Task {
                     do {
-                        try await runtime.steer(text: text, attachments: staged)
+                        try await runtime.steer(text: incoming?.modelText ?? text, attachments: staged)
                         self.queue.async {
                             guard !pending.finished else { return }
                             pending.finished = true
@@ -410,11 +490,19 @@ final class AgentSessions: @unchecked Sendable {
                                 return
                             }
                             entry.submitting = false
-                            entry.snapshot.items.append(self.observedItem(.init(id: userID, kind: .user, text: text,
-                                attachments: attachments?.map(\.descriptor)), entry: entry))
+                            entry.snapshot.items.append(self.observedItem(Self.item(.init(id: userID, kind: .user, text: text,
+                                attachments: attachments?.map(\.descriptor)), incoming), entry: entry))
+                            // The running turn's reply also answers whoever asked in it.
+                            if let asker = incoming?.requestedBy, let last = entry.snapshot.turns?.indices.last,
+                               entry.snapshot.turns?[last].completedAt == nil, entry.snapshot.turns?[last].requestedBy == nil {
+                                entry.snapshot.turns?[last].requestedBy = asker
+                                entry.snapshot.turns?[last].upstream = incoming?.upstream
+                            }
+                            if incoming == nil { self.userSent(entry) }
                             self.touch(entry)
                             self.persist(entry)
                             continuation.resume(returning: entry.snapshot)
+                            self.queue.async { self.drainReports(entry) }
                         }
                     } catch {
                         self.queue.async {
@@ -430,7 +518,7 @@ final class AgentSessions: @unchecked Sendable {
                                 continuation.resume(throwing: error)
                                 return
                             }
-                            do { try self.begin(request, continuation: continuation, deliveryID: deliveryID) }
+                            do { try self.begin(request, continuation: continuation, deliveryID: deliveryID, incoming: incoming) }
                             catch { continuation.resume(throwing: error) }
                         }
                     }
@@ -478,10 +566,12 @@ final class AgentSessions: @unchecked Sendable {
                 entry.snapshot.resolvedModel = nil
             }
             entry.snapshot.provider = provider
-            let user = AgentChatItem(id: userID, kind: .user, text: text,
-                                     attachments: attachments?.map(\.descriptor))
+            let user = Self.item(AgentChatItem(id: userID, kind: .user, text: text,
+                                               attachments: attachments?.map(\.descriptor)), incoming)
             entry.snapshot.items.append(observedItem(user, entry: entry))
-            entry.snapshot.turns = (entry.snapshot.turns ?? []) + [AgentChatTurn(userItemID: user.id, startedAt: Date())]
+            entry.snapshot.turns = (entry.snapshot.turns ?? []) + [AgentChatTurn(userItemID: user.id, startedAt: Date(),
+                requestedBy: incoming?.requestedBy, upstream: incoming?.upstream)]
+            if incoming == nil { userSent(entry) }
             let priorCheckpoint = entry.checkpointTask
             let captureDirectory = entry.directory
             let pendingDirectory = root.appendingPathComponent("checkpoints", isDirectory: true)
@@ -542,9 +632,14 @@ final class AgentSessions: @unchecked Sendable {
                 var environment = launchEnvironment
                 environment["TAB_AGENT_ID"] = id.description
                 environment[AgentContext.providedVariable] = "1"
+                let coordinator = entry.snapshot.coordinator.map {
+                    AgentContext.Coordinator(name: $0.name, agent: $0.session.description,
+                                             reports: entry.snapshot.reportsToCoordinator ?? true)
+                }
                 let context = AgentContext(place: .agentPane(agent: id.description),
                                            project: projectContext(entry.snapshot.project),
-                                           cli: cliDirectory.map { ($0 as NSString).appendingPathComponent(Executable.cli) })
+                                           cli: cliDirectory.map { ($0 as NSString).appendingPathComponent(Executable.cli) },
+                                           coordinator: coordinator)
                 runtime.prepare(AgentLaunch(environment: environment, path: cliDirectory, forkSource: entry.forkSource,
                                             forkPoint: entry.forkPoint, instructions: context.text))
                 configureAccess(entry, runtime: runtime, mode: entry.snapshot.accessMode ?? .standard)
@@ -563,6 +658,7 @@ final class AgentSessions: @unchecked Sendable {
         }
         let pending = PendingReply(continuation)
         let turnAttachments = stagedAttachments
+        let modelText = incoming?.modelText
         if case .send = request { entry.pendingSubmission = pending }
         queue.asyncAfter(deadline: .now() + submissionTimeout) { [self] in
             guard !pending.finished else { return }
@@ -586,7 +682,8 @@ final class AgentSessions: @unchecked Sendable {
                     _ = await baselineTask?.value
                     try Task.checkCancellation()
                     try await runtime.setPlan(planMode)
-                    try await runtime.send(text: text, model: model, reasoningEffort: effort, attachments: turnAttachments)
+                    try await runtime.send(text: modelText ?? text, model: model, reasoningEffort: effort,
+                                           attachments: turnAttachments)
                 case .setAccess: try await accessTask?.value
                 case .approve(_, let request, let allow): try await runtime.approve(request: request, allow: allow)
                 case .answer(_, let request, let answers, let cancelled): try await runtime.answer(request: request, answers: answers, cancelled: cancelled)
@@ -644,6 +741,8 @@ final class AgentSessions: @unchecked Sendable {
                 persist(entry)
                 continuation.resume(returning: entry.snapshot)
                 self.drainInbox(entry)
+                // A started turn can now take the reports that waited for it.
+                if case .send = request, !entry.heldReports.isEmpty { queue.async { [self] in drainReports(entry) } }
             }
         }
     }
@@ -785,6 +884,11 @@ final class AgentSessions: @unchecked Sendable {
         }
         drainInbox(entry)
         if case .providerSession = event { persist(entry) }
+        switch event {
+        case .status, .failure:
+            if !entry.heldReports.isEmpty { queue.async { [self] in drainReports(entry) } }
+        default: break
+        }
     }
 
     /// A new conversation `id` holding `from`'s transcript and choices. Its
@@ -814,6 +918,11 @@ final class AgentSessions: @unchecked Sendable {
         snapshot.turns = nil
         snapshot.items = snapshot.items.filter { $0.kind != .approval || $0.isComplete }
         for index in snapshot.items.indices { snapshot.items[index].isComplete = true }
+        // A fork is nobody's worker and holds no reports until `delegate` says otherwise.
+        snapshot.name = nil
+        snapshot.coordinator = nil
+        snapshot.reportsToCoordinator = nil
+        snapshot.reportQueue = nil
         let entry = Entry(snapshot, directory: directory)
         entry.hasSuccessfulTurn = source.hasSuccessfulTurn
         if let pending = source.forkSource {
@@ -827,6 +936,291 @@ final class AgentSessions: @unchecked Sendable {
         touch(entry)
         persist(entry)
         return entry.snapshot
+    }
+
+    // MARK: Workers and reports
+
+    /// Names conversation `id` and makes it `coordinator`'s worker, before its first message.
+    private func delegate(_ id: SessionId, name: String?, coordinator: SessionId?, reports: Bool) throws -> AgentChatSnapshot {
+        guard let entry = entries[id] else { throw ServiceError.unknownSession(id) }
+        guard !stopping, entry.snapshot.status != .closed else {
+            throw ServiceError(.badRequest, "The agent session is closed or the server is stopping")
+        }
+        guard entry.snapshot.turns?.isEmpty ?? true, entry.runtime == nil, !entry.submitting else {
+            throw ServiceError(.badRequest, "Name an agent and give it a coordinator before its first message")
+        }
+        var normalized: String?
+        if let name {
+            guard let value = AgentChatSnapshot.normalizedName(name) else {
+                throw ServiceError(.badRequest, "A name needs a letter or digit")
+            }
+            normalized = value
+        }
+        var peer: AgentPeer?
+        var taken: Set<String> = []
+        if let coordinator {
+            guard let boss = entries[coordinator], boss.snapshot.status != .closed else {
+                throw ServiceError(.badRequest, "The coordinator isn't open on this server")
+            }
+            let chain = coordinators(of: boss)
+            guard !chain.contains(id) else { throw ServiceError(.badRequest, "An agent can't coordinate its own coordinator") }
+            guard chain.count < AgentReports.maximumDepth else {
+                throw ServiceError(.badRequest, "Workers can't be more than \(AgentReports.maximumDepth) levels deep")
+            }
+            let siblings = entries.values.filter {
+                $0 !== entry && $0.snapshot.coordinator?.session == coordinator && $0.snapshot.status != .closed
+            }
+            guard siblings.count < AgentReports.maximumWorkers else {
+                throw ServiceError(.badRequest,
+                                   "An agent can have at most \(AgentReports.maximumWorkers) open workers; close some first")
+            }
+            taken = Set(siblings.compactMap(\.snapshot.name))
+            peer = self.peer(boss)
+        }
+        entry.snapshot.name = normalized.map { AgentReports.unique($0, taken: taken) }
+        entry.snapshot.coordinator = peer
+        entry.snapshot.reportsToCoordinator = peer == nil ? nil : reports
+        touch(entry)
+        persist(entry)
+        return entry.snapshot
+    }
+
+    /// The coordinators above `entry`, nearest first.
+    private func coordinators(of entry: Entry) -> [SessionId] {
+        var chain: [SessionId] = []
+        var current = entry
+        while let next = current.snapshot.coordinator?.session, !chain.contains(next), chain.count <= 8 {
+            chain.append(next)
+            guard let found = entries[next] else { break }
+            current = found
+        }
+        return chain
+    }
+
+    private func peer(_ entry: Entry) -> AgentPeer {
+        AgentPeer(session: entry.snapshot.session, project: entry.snapshot.project, provider: entry.snapshot.provider,
+                  name: entry.snapshot.displayName)
+    }
+
+    /// `text` from `sender` to `entry`, whose reply goes back to `sender`.
+    private func incomingMessage(_ text: String, to entry: Entry, from sender: Entry, task: Bool) -> Incoming {
+        let fromCoordinator = entry.snapshot.coordinator?.session == sender.snapshot.session
+        let reports = fromCoordinator ? entry.snapshot.reportsToCoordinator ?? true : true
+        let peer = self.peer(sender)
+        // The sender's running turn may itself be work for another agent.
+        let upstream = sender.snapshot.turns?.last.flatMap { $0.completedAt == nil ? $0.requestedBy : nil }
+        return Incoming(modelText: AgentReports.message(text, from: peer, reports: reports), peer: peer,
+                        itemType: AgentPeerItemType.agentMessage, requestKind: task ? AgentPeerItemType.taskRequest : nil,
+                        requestedBy: reports ? sender.snapshot.session : nil, upstream: reports ? upstream : nil)
+    }
+
+    /// `item` marked as coming from another agent.
+    private static func item(_ item: AgentChatItem, _ incoming: Incoming?) -> AgentChatItem {
+        guard let incoming else { return item }
+        var item = item
+        item.peer = incoming.peer
+        item.detail = incoming.detail
+        item.workContext = AgentChatWorkContext(itemType: incoming.itemType, sourceStatus: incoming.sourceStatus,
+                                                requestKind: incoming.requestKind)
+        return item
+    }
+
+    /// Shows `worker` in its coordinator's conversation, once.
+    private func announce(_ worker: Entry, to coordinator: Entry, task: String) {
+        worker.announced = true
+        persist(worker)
+        let id = "worker:" + worker.snapshot.session.description
+        guard !coordinator.snapshot.items.contains(where: { $0.id == id }) else { return }
+        let peer = self.peer(worker)
+        coordinator.snapshot.items.append(observedItem(AgentChatItem(id: id, kind: .notice, text: "Started worker " + peer.name,
+            detail: AgentReports.clipped(task), workContext: AgentChatWorkContext(itemType: AgentPeerItemType.workerStarted),
+            peer: peer), entry: coordinator))
+        touch(coordinator)
+        persist(coordinator)
+    }
+
+    /// The user wrote to `entry` themselves: agent-driven delivery may go on.
+    private func userSent(_ entry: Entry) {
+        entry.unattendedDeliveries = 0
+        entry.deliveryFailures = 0
+        guard entry.reportsPaused else { return }
+        entry.reportsPaused = false
+        syncReportQueue(entry)
+    }
+
+    /// `by` read the reply of `id`'s turn `turn` itself; it isn't delivered again.
+    private func acknowledge(_ id: SessionId, turn: String, by: SessionId) throws -> AgentChatSnapshot {
+        guard let worker = entries[id] else { throw ServiceError.unknownSession(id) }
+        guard let index = worker.snapshot.turns?.firstIndex(where: { $0.userItemID == turn }),
+              worker.snapshot.turns?[index].requestedBy == by else { return worker.snapshot }
+        if let coordinator = entries[by] {
+            let held = coordinator.heldReports.count
+            coordinator.heldReports.removeAll { $0.worker.session == id && $0.turn == turn }
+            if coordinator.heldReports.count != held {
+                syncReportQueue(coordinator)
+                touch(coordinator)
+                persist(coordinator)
+            }
+        }
+        if worker.snapshot.turns?[index].report != .delivered {
+            worker.snapshot.turns?[index].report = .acknowledged
+            touch(worker)
+            persist(worker)
+        }
+        return worker.snapshot
+    }
+
+    /// Hands each settled turn that another agent asked for to that agent, once.
+    private func routeReports(_ worker: Entry) {
+        guard !stopping, var turns = worker.snapshot.turns else { return }
+        var changed = false
+        for index in turns.indices where turns[index].completedAt != nil && turns[index].report == nil {
+            guard let asker = turns[index].requestedBy else { continue }
+            changed = true
+            guard let coordinator = entries[asker], coordinator.snapshot.status != .closed else {
+                turns[index].report = .dropped
+                continue
+            }
+            let outcome = turns[index].outcome ?? .completed
+            let next = turns.indices.contains(index + 1) ? turns[index + 1].userItemID : nil
+            let report = AgentHeldReport(worker: peer(worker), turn: turns[index].userItemID, outcome: outcome,
+                reply: AgentReports.reply(turn: turns[index].userItemID, next: next, items: worker.snapshot.items, outcome: outcome),
+                upstream: turns[index].upstream, settledAt: turns[index].completedAt ?? Date())
+            if !coordinator.heldReports.contains(where: { $0.worker.session == report.worker.session && $0.turn == report.turn }) {
+                // A coordinator that never takes its reports keeps only the latest.
+                if coordinator.heldReports.count >= 64 { coordinator.heldReports.removeFirst() }
+                coordinator.heldReports.append(report)
+            }
+            turns[index].report = .held
+            syncReportQueue(coordinator)
+            touch(coordinator)
+            persist(coordinator)
+            queue.asyncAfter(deadline: .now() + reportGrace) { [self] in drainReports(coordinator) }
+        }
+        guard changed else { return }
+        worker.snapshot.turns = turns
+        touch(worker)
+        persist(worker)
+    }
+
+    /// Delivers `entry`'s next ready report, if it can take one now; each
+    /// delivery drains again when it lands.
+    private func drainReports(_ entry: Entry) {
+        guard !stopping, !entry.deliveringReport, !entry.heldReports.isEmpty else { return }
+        guard entry.snapshot.status != .closed else { return dropReports(entry) }
+        let now = Date()
+        let forced = entry.forceDelivery
+        guard let index = entry.heldReports.firstIndex(where: {
+            forced || $0.settledAt.addingTimeInterval(reportGrace) <= now
+        }) else {
+            if let ready = entry.heldReports.map({ $0.settledAt.addingTimeInterval(reportGrace) }).min() {
+                queue.asyncAfter(deadline: .now() + max(0.05, ready.timeIntervalSince(now))) { [self] in drainReports(entry) }
+            }
+            return
+        }
+        // The user's own queued prompts go first; reports join the turn they start.
+        let userQueued = !entry.inbox.paused && entry.inbox.records.contains { $0.display?.state == .queued }
+        let delivery = AgentReports.delivery(status: entry.snapshot.status,
+                                             submitting: entry.submitting || entry.deliveryID != nil
+                                                || (userQueued && entry.snapshot.status == .idle),
+                                             hasRuntime: entry.runtime != nil,
+                                             lastOutcome: entry.snapshot.turns?.last?.outcome,
+                                             paused: entry.reportsPaused, forced: forced)
+        guard delivery != .hold else { return }
+        let report = entry.heldReports.remove(at: index)
+        let files = changedFiles(report)
+        entry.deliveringReport = true
+        syncReportQueue(entry)
+        let incoming = Incoming(modelText: AgentReports.report(report, files: files), peer: report.worker,
+                                itemType: AgentPeerItemType.workerReport, sourceStatus: report.outcome.rawValue,
+                                detail: files.isEmpty ? nil : files.joined(separator: "\n"),
+                                requestedBy: report.upstream)
+        let request = AgentChatRequest.send(session: entry.snapshot.session, text: report.reply,
+                                            model: entry.snapshot.model, reasoningEffort: entry.snapshot.reasoningEffort)
+        Task { [self] in
+            do {
+                _ = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<AgentChatSnapshot, Error>) in
+                    queue.async { [self] in
+                        do { try begin(request, continuation: continuation, incoming: incoming) }
+                        catch { continuation.resume(throwing: error) }
+                    }
+                }
+                queue.async { [self] in delivered(report, to: entry) }
+            } catch {
+                queue.async { [self] in deliveryFailed(report, to: entry, error: error) }
+            }
+        }
+    }
+
+    /// The files the report's turn changed, once its checkpoint is ready.
+    private func changedFiles(_ report: AgentHeldReport) -> [String] {
+        entries[report.worker.session]?.snapshot.turns?.first { $0.userItemID == report.turn }?
+            .checkpoint?.files.map(\.path) ?? []
+    }
+
+    private func delivered(_ report: AgentHeldReport, to entry: Entry) {
+        entry.deliveringReport = false
+        entry.deliveryFailures = 0
+        if entry.heldReports.isEmpty { entry.forceDelivery = false }
+        entry.unattendedDeliveries += 1
+        if entry.unattendedDeliveries >= AgentReports.maximumUnattendedDeliveries, !entry.reportsPaused {
+            entry.reportsPaused = true
+            entry.snapshot.items.append(observedItem(AgentChatItem(kind: .notice, text: "Paused worker reports after "
+                + "\(AgentReports.maximumUnattendedDeliveries) in a row without you. Send a message, or deliver them, to go on."),
+                entry: entry))
+        }
+        setReport(.delivered, of: report)
+        syncReportQueue(entry)
+        touch(entry)
+        persist(entry)
+        drainReports(entry)
+    }
+
+    private func deliveryFailed(_ report: AgentHeldReport, to entry: Entry, error: Error) {
+        entry.deliveringReport = false
+        guard !stopping, entry.snapshot.status != .closed else {
+            setReport(.dropped, of: report)
+            return
+        }
+        entry.heldReports.insert(report, at: 0)
+        entry.deliveryFailures += 1
+        if entry.deliveryFailures >= AgentReports.maximumDeliveryFailures {
+            entry.reportsPaused = true
+            entry.deliveryFailures = 0
+            entry.snapshot.items.append(observedItem(AgentChatItem(kind: .notice, text: "Paused worker reports: "
+                + error.localizedDescription + " Send a message, or deliver them, to try again."), entry: entry))
+        } else {
+            queue.asyncAfter(deadline: .now() + AgentReports.retryDelay) { [self] in drainReports(entry) }
+        }
+        syncReportQueue(entry)
+        touch(entry)
+        persist(entry)
+    }
+
+    /// A closed coordinator takes no reports.
+    private func dropReports(_ entry: Entry) {
+        guard !entry.heldReports.isEmpty || entry.reportsPaused else { return }
+        for report in entry.heldReports { setReport(.dropped, of: report) }
+        entry.heldReports.removeAll()
+        entry.reportsPaused = false
+        entry.forceDelivery = false
+        syncReportQueue(entry)
+        persist(entry)
+    }
+
+    private func setReport(_ state: AgentChatTurn.Report, of report: AgentHeldReport) {
+        guard let worker = entries[report.worker.session],
+              let index = worker.snapshot.turns?.firstIndex(where: { $0.userItemID == report.turn }),
+              worker.snapshot.turns?[index].report != state else { return }
+        worker.snapshot.turns?[index].report = state
+        touch(worker)
+        persist(worker)
+    }
+
+    private func syncReportQueue(_ entry: Entry) {
+        let held = entry.heldReports.count
+        let queue = held == 0 && !entry.reportsPaused ? nil : AgentReportQueue(held: held, paused: entry.reportsPaused)
+        if entry.snapshot.reportQueue != queue { entry.snapshot.reportQueue = queue }
     }
 
     /// Provider conversations that open Tab conversations continue.
@@ -919,6 +1313,7 @@ final class AgentSessions: @unchecked Sendable {
         entry.snapshot.status = .closed
         updateTurn(entry, status: .closed, outcome: .cancelled)
         for index in entry.snapshot.items.indices { entry.snapshot.items[index].isComplete = true }
+        dropReports(entry)
         touch(entry)
         persist(entry)
         settleSubmission(entry)
@@ -1024,6 +1419,8 @@ final class AgentSessions: @unchecked Sendable {
             turns[index].completedAt = max(Date(), turns[index].startedAt)
             turns[index].outcome = outcome
             captureCompletedTurn(entry, turnID: turns[index].userItemID)
+            // After this event lands, so a failure's notice is part of the report.
+            if turns[index].requestedBy != nil { queue.async { [self] in routeReports(entry) } }
         }
         entry.snapshot.turns = turns
     }
@@ -1408,7 +1805,10 @@ final class AgentSessions: @unchecked Sendable {
     private func persist(_ entry: Entry) {
         let saved = Saved(snapshot: entry.snapshot, directory: entry.directory, hasSuccessfulTurn: entry.hasSuccessfulTurn,
                           forkSource: entry.forkSource, forkPoint: entry.forkPoint,
-                          lastProviderMessage: entry.lastProviderMessage)
+                          lastProviderMessage: entry.lastProviderMessage,
+                          heldReports: entry.heldReports.isEmpty ? nil : entry.heldReports,
+                          reportsPaused: entry.reportsPaused ? true : nil, announced: entry.announced ? true : nil,
+                          unattendedDeliveries: entry.unattendedDeliveries == 0 ? nil : entry.unattendedDeliveries)
         let file = root.appendingPathComponent(entry.snapshot.session.description + ".json")
         writer.async {
             do {

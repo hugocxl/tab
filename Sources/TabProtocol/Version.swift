@@ -56,9 +56,13 @@ public struct Feature: RawRepresentable, Hashable, Codable, Sendable {
     /// File requests and watches may name an absolute `root` folder.
     public static let fileRoots = Feature(rawValue: "fileRoots")
 
+    /// Agents start named workers whose replies come back to them: the
+    /// `delegate`, `message`, `acknowledge` and `deliverReports` agent requests.
+    public static let agentReports = Feature(rawValue: "agentReports")
+
     /// Features this build's server supports.
     public static let all: [Feature] = [.terminalInput, .sessionEnvironment, .fileSearch, .fileByteRanges, .pullRequestPreview,
-                                        .fileWriteParents, .agentStateReports, .tunnels, .simulators, .fileRoots]
+                                        .fileWriteParents, .agentStateReports, .tunnels, .simulators, .fileRoots, .agentReports]
 }
 
 /// What kind of program a client is.
