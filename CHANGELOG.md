@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.82.0 - 2026-11-09
+
+### Changed
+
+- The Files panel in a Home tab shows the focused terminal's folder and follows it as you change folders, instead of
+  staying empty.
+
 ## 0.81.1 - 2026-11-09
 
 ### Fixed

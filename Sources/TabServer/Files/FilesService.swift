@@ -11,7 +11,7 @@ public final class FilesService: FilesServiceProtocol, @unchecked Sendable {
     private let events: ServiceEvents
     private let search: ProjectSearch
     private let state = NSLock()
-    private var watches: [ClientId: [ProjectId: FileSystemWatcher]] = [:]
+    private var watches: [ClientId: [WatchKey: FileSystemWatcher]] = [:]
     private var locks: [String: WeakLock] = [:]
 
     public convenience init(projects: ProjectLocator, events: ServiceEvents) {
@@ -30,7 +30,7 @@ public final class FilesService: FilesServiceProtocol, @unchecked Sendable {
 
     public func handle(_ request: FilesRequest, client: ClientId) async throws -> FilesReply {
         try request.validate()
-        let directory = try projects.projectPath(request.project)
+        let directory = try request.root?.rawValue ?? projects.projectPath(request.project)
         let reply: FilesReply = try await runBlocking { [self] in
             try perform(request, directory: directory, client: client)
         }
@@ -52,11 +52,11 @@ public final class FilesService: FilesServiceProtocol, @unchecked Sendable {
     private func perform(_ request: FilesRequest, directory: String, client: ClientId) throws -> FilesReply {
         switch request.action {
         case .watch:
-            try watch(request.project, directory: directory, client: client)
+            try watch(WatchKey(project: request.project, root: request.root), directory: directory, client: client)
             return .done
         case .unwatch:
             state.lock()
-            let removed = watches[client]?.removeValue(forKey: request.project)
+            let removed = watches[client]?.removeValue(forKey: WatchKey(project: request.project, root: request.root))
             state.unlock()
             removed?.stop()
             return .done
@@ -102,11 +102,11 @@ public final class FilesService: FilesServiceProtocol, @unchecked Sendable {
         }
     }
 
-    private func watch(_ project: ProjectId, directory: String, client: ClientId) throws {
+    private func watch(_ key: WatchKey, directory: String, client: ClientId) throws {
         let root = try ProjectRoot(path: directory)
         state.lock()
         let count = watches[client]?.count ?? 0
-        let replacing = watches[client]?[project] != nil
+        let replacing = watches[client]?[key] != nil
         state.unlock()
         if count >= Self.maxWatchesPerClient, !replacing {
             throw ServiceError(.badRequest, "Too many file watches")
@@ -115,13 +115,14 @@ public final class FilesService: FilesServiceProtocol, @unchecked Sendable {
         let events = self.events
         let watcher = try FileSystemWatcher(roots: [root.path], debounce: Self.watchDebounce, label: "tab.files.watch") {
             batch in
-            let changes = Self.changes(batch, root: root.path, prefix: prefix)
+            var changes = Self.changes(batch, root: root.path, prefix: prefix)
             guard changes.rescan || !changes.paths.isEmpty else { return }
-            events.send(.filesChanged(project: project, changes: changes), to: client)
+            changes.root = key.root
+            events.send(.filesChanged(project: key.project, changes: changes), to: client)
         }
         state.lock()
-        let previous = watches[client]?.updateValue(watcher, forKey: project)
-        if previous == nil { watches[client, default: [:]][project] = watcher }
+        let previous = watches[client]?.updateValue(watcher, forKey: key)
+        if previous == nil { watches[client, default: [:]][key] = watcher }
         state.unlock()
         previous?.stop()
     }
@@ -160,6 +161,12 @@ public final class FilesService: FilesServiceProtocol, @unchecked Sendable {
         locks[path] = WeakLock(lock: lock)
         return lock
     }
+}
+
+/// One watch of a client: a project's folder, or a root standing in for it.
+private struct WatchKey: Hashable {
+    var project: ProjectId
+    var root: ServerPath?
 }
 
 private struct WeakLock {

@@ -166,8 +166,9 @@ final class WorkspaceView: ThemedView {
         let project = model.currentProject
         if shownPanelProject != project.id {
             shownPanelProject = project.id
-            content.projectDidChange(project.home ? nil : project)
+            content.projectDidChange(project)
         }
+        model.updateFilesRoot()
         model.focusRightPanelIfRequested(kind)
     }
 

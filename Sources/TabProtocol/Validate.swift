@@ -776,6 +776,7 @@ extension GitPullRequestAction {
 
 extension FilesRequest {
     public func validate() throws(ErrorCode) {
+        try root?.validateAbsolute()
         switch action {
         case .list(let path), .read(let path), .readBytes(let path), .stat(let path), .mkdir(let path):
             try path.validateRelative()
@@ -863,6 +864,7 @@ extension FilesReply {
 extension FileChanges {
     public func validate() throws(ErrorCode) {
         if paths.count > Limits.maxFileChanges || (rescan && !paths.isEmpty) { throw .badRequest }
+        try root?.validateAbsolute()
         for path in paths { try path.validateRelative() }
     }
 }

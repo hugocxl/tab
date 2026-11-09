@@ -53,9 +53,12 @@ public struct Feature: RawRepresentable, Hashable, Codable, Sendable {
     /// The server lists, controls and streams its simulators and emulators.
     public static let simulators = Feature(rawValue: "simulators")
 
+    /// File requests and watches may name an absolute `root` folder.
+    public static let fileRoots = Feature(rawValue: "fileRoots")
+
     /// Features this build's server supports.
     public static let all: [Feature] = [.terminalInput, .sessionEnvironment, .fileSearch, .fileByteRanges, .pullRequestPreview,
-                                        .fileWriteParents, .agentStateReports, .tunnels, .simulators]
+                                        .fileWriteParents, .agentStateReports, .tunnels, .simulators, .fileRoots]
 }
 
 /// What kind of program a client is.

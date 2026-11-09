@@ -18,6 +18,9 @@ public protocol FilesPanelHost: NativeHost {
 @MainActor
 public final class FilesPanelController: NSViewController, NSTableViewDataSource, NSTableViewDelegate {
     public weak var host: FilesPanelHost?
+    /// The server folder shown instead of the project's, such as the
+    /// focused Home terminal's; set with `show(root:)`.
+    public private(set) var root: ServerPath?
     public private(set) var tree = FilesTree()
     private(set) var rows: [FilesTree.Row] = []
     private var edit: Edit?
@@ -56,7 +59,7 @@ public final class FilesPanelController: NSViewController, NSTableViewDataSource
     public override func loadView() {
         card.theme = host?.theme ?? .shared
         view = card
-        footer.title = host?.nativeProject.name ?? "Files"
+        footer.title = shownProject?.name ?? "Files"
         let buttons: [(AppIcon, String, () -> Void)] = [
             (.file, "New File", { [weak self] in self?.beginNewItem(folder: false) }),
             (.folder, "New Folder", { [weak self] in self?.beginNewItem(folder: true) }),
@@ -124,14 +127,58 @@ public final class FilesPanelController: NSViewController, NSTableViewDataSource
 
     public override func viewDidAppear() {
         super.viewDidAppear()
-        host?.watchProjectFiles()
+        watch()
         ensureRoot()
+    }
+
+    /// The project, with `root` standing in for its folder.
+    private var shownProject: NativeProject? {
+        guard var project = host?.nativeProject else { return nil }
+        guard let root else { return project }
+        project.path = root.rawValue
+        let name = NativePath.basename(root.rawValue)
+        project.name = name.isEmpty ? root.rawValue : name
+        return project
+    }
+
+    private func watch() {
+        guard let root else {
+            host?.watchProjectFiles()
+            return
+        }
+        send(.watch, root: root)
+    }
+
+    /// Sends a request that only needs to arrive, such as a watch.
+    private func send(_ action: FilesAction, root: ServerPath?) {
+        guard let host, let transport = host.nativeTransport else { return }
+        let request = FilesRequest(project: host.nativeProject.id, root: root, action: action)
+        Task { _ = try? await transport.files(request) }
     }
 
     // MARK: Events from the app
 
+    /// Shows the server folder `root` instead of the project's, or the
+    /// project's again for `nil`, listing it from the top.
+    public func show(root: ServerPath?) {
+        guard root != self.root else { return }
+        if let old = self.root { send(.unwatch, root: old) }
+        self.root = root
+        tree = FilesTree()
+        rows = []
+        error = nil
+        cancelEdit()
+        footer.title = shownProject?.name ?? footer.title
+        table.reloadData()
+        updateStatus()
+        guard isViewLoaded, view.window != nil else { return }
+        watch()
+        ensureRoot()
+    }
+
     /// Files changed on the project's server: lists the affected folders again.
     public func filesChanged(_ changes: FileChanges) {
+        guard changes.root == root else { return }
         for path in tree.refresh(paths: changes.paths.map(\.rawValue), rescan: changes.rescan) {
             list(path)
         }
@@ -140,6 +187,7 @@ public final class FilesPanelController: NSViewController, NSTableViewDataSource
 
     /// The side connection opened again: lists everything shown again.
     public func reconnected() {
+        if root != nil { watch() }
         tree.retry()
         error = nil
         filesChanged(FileChanges(rescan: true))
@@ -147,7 +195,7 @@ public final class FilesPanelController: NSViewController, NSTableViewDataSource
 
     /// The project was renamed.
     public func projectDidChange() {
-        footer.title = host?.nativeProject.name ?? footer.title
+        footer.title = shownProject?.name ?? footer.title
     }
 
     /// The theme changed.
@@ -183,12 +231,15 @@ public final class FilesPanelController: NSViewController, NSTableViewDataSource
 
     private func list(_ path: String) {
         guard let host, let transport = host.nativeTransport else { return }
-        let request = FilesRequest(project: host.nativeProject.id, action: .list(ServerPath(path)))
+        let root = root
+        let request = FilesRequest(project: host.nativeProject.id, root: root, action: .list(ServerPath(path)))
         Task { [weak self] in
             do {
                 let reply = try await transport.files(request)
+                guard self?.root == root else { return }
                 self?.listed(path, reply)
             } catch {
+                guard self?.root == root else { return }
                 self?.failed(NativeErrors.describe(error))
             }
         }
@@ -217,11 +268,12 @@ public final class FilesPanelController: NSViewController, NSTableViewDataSource
             host.showToast("The project's server isn't connected.", style: .error)
             return
         }
-        let request = FilesRequest(project: host.nativeProject.id, action: action)
+        let root = root
+        let request = FilesRequest(project: host.nativeProject.id, root: root, action: action)
         Task { [weak self] in
             do {
                 _ = try await transport.files(request)
-                guard let self else { return }
+                guard let self, self.root == root else { return }
                 for path in self.tree.refresh(paths: touched, rescan: false) { self.list(path) }
                 self.changed()
                 then?()
@@ -237,7 +289,7 @@ public final class FilesPanelController: NSViewController, NSTableViewDataSource
     /// Opens a file in an editor, or expands or collapses a folder.
     func open(_ path: String) {
         guard tree.node(path)?.isDirectory == true else {
-            host?.openEditor(path: path, line: nil, column: nil)
+            openEditor(path)
             return
         }
         if tree.isExpanded(path) {
@@ -246,6 +298,13 @@ public final class FilesPanelController: NSViewController, NSTableViewDataSource
             list(path)
         }
         changed()
+    }
+
+    /// Opens a file in an editor: by its absolute path under `root`, which
+    /// the app makes relative to the project again.
+    private func openEditor(_ path: String) {
+        let path = root.map { NativePath.join($0.rawValue, path) } ?? path
+        host?.openEditor(path: path, line: nil, column: nil)
     }
 
     func click(row: Int) {
@@ -349,7 +408,7 @@ public final class FilesPanelController: NSViewController, NSTableViewDataSource
             break
         case .newFile:
             mutate(.write(path: ServerPath(path), content: ""), touched: [path]) { [weak self] in
-                self?.host?.openEditor(path: path, line: nil, column: nil)
+                self?.openEditor(path)
             }
         case .newFolder:
             mutate(.mkdir(ServerPath(path)), touched: [path])
@@ -395,7 +454,7 @@ public final class FilesPanelController: NSViewController, NSTableViewDataSource
     }
 
     func menu(forRow row: Int) -> NSMenu? {
-        guard rows.indices.contains(row), let host else { return nil }
+        guard rows.indices.contains(row), let project = shownProject else { return nil }
         let node = rows[row].node
         tree.selected = node.path
         table.reloadData()
@@ -410,7 +469,6 @@ public final class FilesPanelController: NSViewController, NSTableViewDataSource
         menu.addItem(ActionMenuItem("Rename…") { [weak self] in self?.beginRename(node.path) })
         menu.addItem(ActionMenuItem("Delete") { [weak self] in self?.confirmDelete(node.path) })
         menu.addItem(.separator())
-        let project = host.nativeProject
         menu.addItem(ActionMenuItem("Copy Path") { Self.copy(project.absolutePath(node.path)) })
         menu.addItem(ActionMenuItem("Copy Relative Path") { Self.copy(node.path) })
         if project.isLocal {

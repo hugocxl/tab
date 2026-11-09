@@ -47,7 +47,7 @@ public enum RightPanelKind: String, CaseIterable, Sendable {
 public protocol RightPanelContent: AnyObject {
     var kind: RightPanelKind { get }
     var view: NSView { get }
-    /// The current project changed while the panel shows; `nil` for Home.
+    /// The current project changed while the panel shows.
     func projectDidChange(_ project: Project?)
     func didShow()
     func didHide()

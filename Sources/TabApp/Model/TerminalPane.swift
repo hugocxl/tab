@@ -258,6 +258,7 @@ extension TerminalPane: TerminalSessionControllerDelegate {
 
     func terminalSession(_ session: TerminalSessionController, didChangeDirectory directory: ServerPath) {
         updateTitle()
+        if model?.activePane == pane { model?.updateFilesRoot() }
     }
 
     func terminalSession(_ session: TerminalSessionController, didChangeForegroundProcess process: ForegroundProcess) {

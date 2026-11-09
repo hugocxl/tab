@@ -112,7 +112,9 @@ extension AppModel {
             case .files:
                 return ProjectPanelContent.files { [weak model] project in model?.projectHost(project.id) }
             case .sourceControl:
-                return ProjectPanelContent.sourceControl { [weak model] project in model?.projectHost(project.id) }
+                return ProjectPanelContent.sourceControl { [weak model] project in
+                    project.home ? nil : model?.projectHost(project.id)
+                }
             }
         }
     }
@@ -122,7 +124,18 @@ extension AppModel {
         if let files = rightPanels[.files] as? ProjectPanelContent<FilesPanelController> {
             files.controller(for: project)?.filesChanged(changes)
         }
+        guard changes.root == nil else { return }
         for editor in editors(in: project) { editor.controller.filesChanged(changes) }
+    }
+
+    /// Home's Files panel shows the focused terminal's folder, since Home's
+    /// tabs belong to no project.
+    func updateFilesRoot() {
+        let project = currentProject
+        guard project.home, let files = rightPanels[.files] as? ProjectPanelContent<FilesPanelController>,
+              let controller = files.controller(for: project.id) else { return }
+        let supported = sideClient(for: project.id)?.supports(.fileRoots) ?? false
+        controller.show(root: supported ? newPaneDirectory(in: project) : nil)
     }
 
     /// The repository changed: Source Control, diffs and the cards follow.

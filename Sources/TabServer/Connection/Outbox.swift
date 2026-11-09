@@ -72,7 +72,7 @@ final class Outbox: @unchecked Sendable {
             case (.gitChanged(let project), .gitChanged(let newProject)) where project == newProject:
                 return true
             case (.filesChanged(let project, var changes), .filesChanged(let newProject, let newChanges))
-                where project == newProject:
+                where project == newProject && changes.root == newChanges.root:
                 changes.merge(newChanges)
                 control[index] = .event(.filesChanged(project: project, changes: changes))
                 return true

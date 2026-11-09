@@ -46,6 +46,35 @@ final class FilesWatchTests: XCTestCase {
         XCTAssertTrue(many.paths.isEmpty)
     }
 
+    /// A root watch, such as Home's Files panel on a terminal's folder, sits
+    /// beside the project's watch and reports paths relative to the root.
+    func testRootWatchesKeepTheProjectWatchAndReportTheirRoot() async throws {
+        let workspace = try FilesWorkspace()
+        try FileManager.default.createDirectory(at: workspace.url("sub"), withIntermediateDirectories: true)
+        try "x".write(to: workspace.url("sub/listed.txt"), atomically: false, encoding: .utf8)
+        let root = ServerPath(workspace.url("sub").path)
+        let list = try await workspace.service.handle(FilesRequest(project: workspace.project, root: root, action: .list("")),
+                                                      client: workspace.client)
+        guard case .entries(let entries) = list else { return XCTFail("\(list)") }
+        XCTAssertEqual(entries.map(\.name), ["listed.txt"])
+
+        let inRoot = expectation(description: "root change")
+        inRoot.assertForOverFulfill = false
+        let inProject = expectation(description: "project change")
+        inProject.assertForOverFulfill = false
+        workspace.events.onSend = { event, _ in
+            guard case .filesChanged(_, let changes) = event else { return }
+            if changes.root == root, changes.paths.contains("created.txt") { inRoot.fulfill() }
+            if changes.root == nil, changes.paths.contains("sub/created.txt") { inProject.fulfill() }
+        }
+        _ = try await workspace.files(.watch)
+        _ = try await workspace.service.handle(FilesRequest(project: workspace.project, root: root, action: .watch),
+                                               client: workspace.client)
+        try await Task.sleep(nanoseconds: 300_000_000)
+        try "hello".write(to: workspace.url("sub/created.txt"), atomically: false, encoding: .utf8)
+        await fulfillment(of: [inRoot, inProject], timeout: 10)
+    }
+
     func testClientDisconnectStopsItsWatches() async throws {
         let workspace = try FilesWorkspace()
         _ = try await workspace.files(.watch)
