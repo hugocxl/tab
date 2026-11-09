@@ -38,6 +38,8 @@ public final class GlassView: NSView {
         public static let window = Style(cornerRadius: 0, fallbackMaterial: .hudWindow, usesLiquidGlass: false)
         /// A pane's continuous glass surface, underneath its header and content.
         public static let pane = Style(cornerRadius: Metrics.cardRadius, regular: true)
+        /// The selected sidebar card's glass surface.
+        public static let card = Style(cornerRadius: 8, opacity: 0.4)
 
         /// Always-on, diffused material for the command palette.
         public static let commandPalette = Style(cornerRadius: PaletteLayout.radius, fallbackMaterial: .popover, regular: true)

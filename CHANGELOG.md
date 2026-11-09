@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.85.0 - 2026-11-09
+
+### Changed
+
+- Selected sidebar cards use a translucent glass surface again in both interface styles.
+
 ## 0.84.0 - 2026-11-09
 
 ### Changed

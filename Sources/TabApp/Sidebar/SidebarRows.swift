@@ -51,6 +51,7 @@ final class SidebarCardView: HoverView {
     private enum LocationTone { case name, detail, link }
     private let paneRows: [PaneRowView]
     private var elapsedTimer: Timer?
+    private let glass = GlassView(style: .card)
     private let closeButton = ChromeButton(AppIcon.check, label: "Close Tab", side: 18, glyph: 11)
     /// The hairlines above and below, which hide while this card is filled.
     var dividers: [CardDivider] = []
@@ -159,6 +160,7 @@ final class SidebarCardView: HoverView {
         layer?.cornerRadius = 8
         layer?.cornerCurve = .continuous
         layer?.borderWidth = 1
+        addSubview(glass)
         locationIcon.imageScaling = .scaleProportionallyUpOrDown
         locationIcon.isHidden = !showsLocation
         locationLabel.isHidden = !showsLocation
@@ -219,6 +221,7 @@ final class SidebarCardView: HoverView {
     override var mouseDownCanMoveWindow: Bool { false }
 
     override func themeDidChange() {
+        glass.appearance = theme.nsAppearance
         headerLabel?.textColor = theme.fgMuted
         titleLabel.textColor = theme.fg
         if usesDefaultHeaderIcon {
@@ -279,8 +282,8 @@ final class SidebarCardView: HoverView {
 
     override func updateLayer() {
         let hovered = !data.selected && isHovered && !data.unavailable
-        // Cards look the same whether the interface is glass or classic.
-        layer?.backgroundColor = (data.selected ? theme.sidebarSelection : hovered ? theme.hover : .clear).cgColor
+        glass.isHidden = !data.selected
+        layer?.backgroundColor = (data.selected ? theme.surface : hovered ? theme.hover : .clear).cgColor
         layer?.borderColor = (data.selected ? theme.fg(alpha: 0.08) : .clear).cgColor
     }
 
@@ -299,6 +302,7 @@ final class SidebarCardView: HoverView {
 
     override func layout() {
         super.layout()
+        glass.frame = bounds
         let left = Metrics.border + 10
         let right = bounds.width - left
         var top = Line.padding
