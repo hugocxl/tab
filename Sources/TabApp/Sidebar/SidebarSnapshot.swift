@@ -14,12 +14,14 @@ struct SidebarSnapshot: Equatable {
     struct CardHeader: Equatable {
         var project: ProjectId
         var title: String
+        /// Compared by identity, so a changed icon redraws the card.
+        var icon: NSImage?
     }
 
     struct GroupEntry: Equatable {
         var project: ProjectId
         var title: String
-        var hasIcon: Bool
+        var icon: NSImage?
         var canCreateWorktree: Bool
         var cards: [CardEntry]
         var creating: [String]
@@ -50,7 +52,7 @@ struct SidebarSnapshot: Equatable {
         /// A real project's name; Home is no project worth naming on every card.
         func header(_ project: Project) -> CardHeader? {
             let root = project.parentId.flatMap { model.state.project($0) } ?? project
-            return root.home ? nil : CardHeader(project: root.id, title: model.title(of: root))
+            return root.home ? nil : CardHeader(project: root.id, title: model.title(of: root), icon: model.projectIcon(root.id))
         }
         let hosts = listing.hosts.map { host in
             let terminals = host.terminals.compactMap { entry -> CardEntry? in
@@ -69,8 +71,8 @@ struct SidebarSnapshot: Equatable {
                 }
                 return GroupEntry(
                     project: project.id, title: model.title(of: project),
-                    hasIcon: model.projectIcon(project.id) != nil,
-                    canCreateWorktree: project.status == .available && (model.git[project.id]?.isRepository ?? false),
+                    icon: model.projectIcon(project.id),
+                    canCreateWorktree: project.status == .available && (model.shownGit(project.id)?.isRepository ?? false),
                     cards: cards, creating: model.worktreeCreations[project.id] ?? []
                 )
             }

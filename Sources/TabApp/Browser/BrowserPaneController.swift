@@ -65,6 +65,7 @@ public final class BrowserPaneController: NSViewController {
         profile = host.browserProfiles.profile(forSaved: state.profile)
         initialURL = state.url
         super.init(nibName: nil, bundle: nil)
+        favicon = state.url.flatMap { host.rememberedFavicon(for: $0) }
         profiles.panes.register(self)
     }
 
@@ -100,6 +101,7 @@ public final class BrowserPaneController: NSViewController {
         placeholder.pinEdges(to: content)
         view = root
         wireToolbar()
+        toolbar.address.favicon = favicon
         apply(settings: settings)
     }
 
@@ -664,8 +666,9 @@ public final class BrowserPaneController: NSViewController {
             guard let (data, _) = try? await URLSession.shared.data(from: url), let image = NSImage(data: data) else { return }
             image.size = NSSize(width: 16, height: 16)
             Self.favicons[href] = image
-            guard self?.webView === webView, self?.page.url == pageURL else { return }
-            self?.setFavicon(image)
+            guard let self, self.webView === webView, self.page.url == pageURL else { return }
+            self.setFavicon(image)
+            self.host?.browserPane(self, didLoadFavicon: image, for: pageURL)
         }
     }
 
@@ -760,7 +763,8 @@ extension BrowserPaneController: WKNavigationDelegate, WKUIDelegate, WKDownloadD
         page.loading = true
         page.error = nil
         page.title = ""
-        setFavicon(nil)
+        let url = webView.url.map { RemoteLoopback.unproxied($0.absoluteString) } ?? page.url
+        setFavicon(host?.rememberedFavicon(for: url))
         refreshChrome()
     }
 

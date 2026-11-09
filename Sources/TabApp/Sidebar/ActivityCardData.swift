@@ -156,7 +156,7 @@ struct ActivityCardData: Equatable {
                 headline = .command(withoutHost(title))
             }
         }
-        let info = project.home ? nil : model.git[project.id]
+        let info = project.home ? nil : model.shownGit(project.id)
         let branch = info?.summary?.branch.flatMap { $0 == project.name ? nil : $0 }
         let name = tab != nil ? shownPane.flatMap { idleDirectory($0.title) } : project.name
         let selected: Bool
@@ -248,8 +248,10 @@ struct ActivityCardData: Equatable {
             icon = .file(basename(path))
             text = pane.content.nativeTitle ?? basename(path)
             topic = .file(text)
-        case .browser:
-            if let favicon = model.panes.controller(for: pane.id)?.icon { icon = .image(favicon) }
+        case .browser(let browser):
+            // A pane not shown yet has no page; its site's last favicon stands in.
+            let favicon = model.panes.controller(for: pane.id).map(\.icon) ?? browser.url.flatMap { model.rememberedFavicon(for: $0) }
+            if let favicon { icon = .image(favicon) }
             text = title.isEmpty ? pane.content.defaultTitle : title
             topic = title.isEmpty ? nil : .page(title)
         case .simulator:

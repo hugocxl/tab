@@ -122,6 +122,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private func finish() {
         terminating = true
         model?.saveNow()
+        model?.sidebarMemory.saveNow()
         model?.browserProfiles.saveHistories()
         model?.updater.stop()
         socket?.close()

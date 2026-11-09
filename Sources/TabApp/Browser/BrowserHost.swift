@@ -54,6 +54,11 @@ public protocol BrowserHost: AnyObject {
     /// The pane's title (the page title, else its host; `nil` for the start
     /// page) or icon changed.
     func browserPane(_ pane: BrowserPaneController, didChangeTitle title: String?, favicon: NSImage?)
+    /// The favicon last shown for a page of `url`'s site, shown until the
+    /// page's own arrives.
+    func rememberedFavicon(for url: String) -> NSImage?
+    /// A page at `url` showed `favicon`, for the next pages of its site.
+    func browserPane(_ pane: BrowserPaneController, didLoadFavicon favicon: NSImage, for url: String)
     /// The page asked to close its window: close the pane if a page opened it.
     func browserPaneRequestsClose(_ pane: BrowserPaneController)
     /// Shows a short message, such as "Copied!" or a failed download.
@@ -87,5 +92,7 @@ extension BrowserHost {
     }
 
     public func browserNetwork(forTab tabId: String) -> BrowserNetwork { .local }
+    public func rememberedFavicon(for url: String) -> NSImage? { nil }
+    public func browserPane(_ pane: BrowserPaneController, didLoadFavicon favicon: NSImage, for url: String) {}
     public func browserServerConnected(_ server: ServerId) -> Bool { true }
 }

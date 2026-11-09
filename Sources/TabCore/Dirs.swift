@@ -66,6 +66,9 @@ public struct TabDirs: Sendable, Equatable {
     public var themes: URL { folder("themes") }
     /// Projects, layouts, workspaces and window state.
     public var state: URL { file("state.json") }
+    /// What the sidebar last showed: Git facts, project icons and favicons,
+    /// so the next launch draws them before the servers answer.
+    public var sidebarCache: URL { file("sidebar-cache.json") }
     /// Proxy settings, excluded from backups.
     public var proxy: URL { file("proxy.json") }
     /// Recovery copies made by restore.

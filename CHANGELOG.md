@@ -3,6 +3,19 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.80.0 - 2026-11-09
+
+### Changed
+
+- Sidebar icons, branches and favicons appear as soon as the app opens, from what it showed last time, and update once
+  the server answers.
+- A card's Git icon and branch no longer wait for GitHub to look up the pull request.
+- Project icons are found faster in large repositories.
+
+### Fixed
+
+- A project's icon now appears on its cards in the Open Tabs layout when it loads after the card is drawn.
+
 ## 0.79.0 - 2026-11-08
 
 ### Changed

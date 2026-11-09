@@ -239,7 +239,7 @@ final class SidebarViewController: NSViewController {
     }
 
     private func cardView(_ card: SidebarSnapshot.CardEntry, hint: String?) -> SidebarCardView {
-        let header = card.header.map { SidebarCardView.Header(title: $0.title, icon: model.projectIcon($0.project)) }
+        let header = card.header.map { SidebarCardView.Header(title: $0.title, icon: $0.icon) }
         let view = SidebarCardView(data: card.data, hint: hint, header: header)
         let target = card.target
         view.onClick = { [weak self] in self?.model.select(target) }
@@ -252,7 +252,7 @@ final class SidebarViewController: NSViewController {
     private func headerView(_ group: SidebarSnapshot.GroupEntry) -> NSView {
         guard let project = model.state.project(group.project) else { return NSView() }
         let header = ProjectHeaderRow(
-            project: project, title: group.title, icon: model.projectIcon(project.id),
+            project: project, title: group.title, icon: group.icon,
             remoteName: model.serverName(project.serverId), canCreateWorktree: group.canCreateWorktree,
             match: model.nameFilter
         )

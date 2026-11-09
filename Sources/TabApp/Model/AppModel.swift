@@ -108,8 +108,6 @@ public final class AppModel {
     /// The right panel to give the keyboard once the shell shows it.
     var rightPanelAwaitingFocus: RightPanelKind?
     var editorLocations: [PaneId: (line: Int, column: Int)] = [:]
-    var projectIcons: [ProjectId: NSImage?] = [:]
-    var iconSearches: Set<ProjectId> = []
     /// The modifiers held long enough to show shortcut numbers in the
     /// sidebar, or `nil`.
     public var shortcutHints: ChordModifiers? {
@@ -134,8 +132,15 @@ public final class AppModel {
     /// AI commit and pull request actions.
     /// Updates from GitHub Releases.
     public private(set) lazy var updater = UpdaterController(host: self, dirs: dirs, configuration: proxy.sessionConfiguration())
-    /// Icons of this computer's project folders.
+    /// Icons of this computer's project folders, by path.
     public let iconCache = ProjectIconCache()
+    /// Icons of other computers' projects, by project id.
+    public private(set) lazy var remoteIconCache = ProjectIconCache { [weak self] key in
+        guard let project = ProjectId(string: key), let side = await self?.sideClient(for: project) else { return .unavailable }
+        return await AppModel.findRemoteIcon(side: side, project: project)
+    }
+    /// What the sidebar showed last time, drawn until live values arrive.
+    let sidebarMemory: SidebarMemory
     /// Remote Homes asked for before their server's catalog arrived.
     var pendingRemoteHomes: Set<ServerId> = []
     /// Terminals on this computer's server, for the updater.
@@ -201,6 +206,7 @@ public final class AppModel {
         self.settings = settings
         savedAppearance = settings.appearance
         self.state = state
+        sidebarMemory = SidebarMemory(file: dirs.sidebarCache)
         if let data = try? Data(contentsOf: dirs.state),
            let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let sizes = root["terminalFontSizes"] as? [String: Double] {
@@ -221,8 +227,15 @@ public final class AppModel {
         browserProfiles.notify = { [weak self] message, isError in self?.presenter?.showToast(message, error: isError) }
         browserProfiles.proxy = { [weak self] server in self?.browserProxy(server)?.configuration }
         browserProfiles.remoteServers = { [weak self] in self?.settings.servers.map(\.id) ?? [] }
-        iconCache.onChange = { [weak self] _ in self?.notify(.activity) }
+        for cache in [iconCache, remoteIconCache] {
+            cache.onChange = { [weak self] _ in self?.notify(.activity) }
+            cache.remembered = { [weak self] key in self?.sidebarMemory.iconPNG(key) }
+            cache.onLookedUp = { [weak self] key, png in self?.sidebarMemory.setIcon(key, png: png) }
+        }
         recordNavigation()
+        let iconKeys = projectIconKeys()
+        sidebarMemory.retain(projects: Set(state.projects.map(\.id)))
+        sidebarMemory.retain(iconKeys: iconKeys.local.union(iconKeys.remote))
         Publishers.Merge3(theme.$palette.dropFirst().map { _ in () }, theme.$interface.dropFirst().map { _ in () }, theme.$accessibility.dropFirst().map { _ in () }).sink { [weak self] _ in
             DispatchQueue.main.async { [weak self] in self?.refreshTerminalAppearance() }
         }.store(in: &themeObservations)
@@ -295,8 +308,14 @@ public final class AppModel {
     func listingBuilder() -> SidebarListingBuilder {
         SidebarListingBuilder(
             state: state, appearance: appearance, servers: settings.servers, query: nameFilter,
-            repositories: Set(git.filter { $0.value.isRepository }.keys)
+            repositories: Set(state.projects.map(\.id).filter { shownGit($0)?.isRepository ?? false })
         )
+    }
+
+    /// The Git facts to show for `project`: the live ones once known, else
+    /// those remembered from the last launch. Decisions use `git`.
+    public func shownGit(_ project: ProjectId) -> GitInfo? {
+        git[project] ?? sidebarMemory.git(project)
     }
 
     /// What the sidebar lists now.

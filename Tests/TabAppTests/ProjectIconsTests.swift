@@ -106,10 +106,11 @@ final class ProjectIconsTests: XCTestCase {
     @MainActor
     func testCacheLooksUpOncePerProjectUntilInvalidated() async throws {
         let counter = Counter()
-        let image = try XCTUnwrap(NSImage(data: pngData(side: 64)))
+        let red = filled(.red)
+        let blue = filled(.blue)
         let cache = ProjectIconCache(lookup: { _ in
             counter.increment()
-            return image
+            return .found(counter.value == 1 ? red : blue)
         })
         let arrived = expectation(description: "icon arrived")
         cache.onChange = { _ in arrived.fulfill() }
@@ -123,11 +124,78 @@ final class ProjectIconsTests: XCTestCase {
         let again = expectation(description: "looked up again")
         cache.onChange = { _ in again.fulfill() }
         cache.invalidate("/p")
-        XCTAssertNil(cache.icon(for: "/p"))
+        XCTAssertNotNil(cache.icon(for: "/p"), "the old icon shows until the new one arrives")
         await fulfillment(of: [again], timeout: 5)
         XCTAssertEqual(counter.value, 2)
         cache.retain([])
         XCTAssertFalse(cache.isLoaded("/p"))
+        XCTAssertNil(cache.knownIcon(for: "/p"))
+    }
+
+    /// The icon remembered from the last launch shows in the first frame,
+    /// and a lookup finding the same icon doesn't redraw or rewrite it.
+    @MainActor
+    func testRememberedIconShowsAtOnceAndAnUnchangedLookupStaysQuiet() async throws {
+        let image = try XCTUnwrap(NSImage(data: pngData(side: 256)))
+        let remembered = try XCTUnwrap(SidebarMemory.thumbnail(image))
+        let looked = expectation(description: "looked up")
+        let cache = ProjectIconCache(lookup: { _ in
+            looked.fulfill()
+            return .found(image)
+        })
+        cache.remembered = { _ in remembered }
+        var changes = 0
+        var saved = 0
+        cache.onChange = { _ in changes += 1 }
+        cache.onLookedUp = { _, _ in saved += 1 }
+        XCTAssertNotNil(cache.icon(for: "/p"))
+        await fulfillment(of: [looked], timeout: 5)
+        for _ in 0..<50 where !cache.isLoaded("/p") { try await Task.sleep(nanoseconds: 10_000_000) }
+        XCTAssertTrue(cache.isLoaded("/p"))
+        XCTAssertEqual(changes, 0)
+        XCTAssertEqual(saved, 0)
+    }
+
+    /// A remote project whose server went away keeps its remembered icon
+    /// rather than losing it as if it had none.
+    @MainActor
+    func testUnavailableLookupKeepsTheRememberedIcon() async throws {
+        let remembered = try pngData(side: 64)
+        let cache = ProjectIconCache(lookup: { _ in .unavailable })
+        cache.remembered = { _ in remembered }
+        var saved: [Data?] = []
+        cache.onLookedUp = { _, png in saved.append(png) }
+        XCTAssertNotNil(cache.icon(for: "p"))
+        for _ in 0..<50 where !cache.isLoaded("p") { try await Task.sleep(nanoseconds: 10_000_000) }
+        XCTAssertNotNil(cache.icon(for: "p"))
+        XCTAssertTrue(saved.isEmpty)
+    }
+
+    func testIgnoredPathsOfAProjectInsideALargerRepository() throws {
+        let repository = URL(fileURLWithPath: "/tmp/tab-icons-sub").appendingPathComponent(UUID().uuidString)
+        let fm = FileManager.default
+        defer { try? fm.removeItem(at: repository) }
+        let project = repository.appendingPathComponent("apps/web")
+        for folder in ["apps/web/dist", "apps/web/public", "other"] {
+            try fm.createDirectory(at: repository.appendingPathComponent(folder), withIntermediateDirectories: true)
+        }
+        try git(["init", "-q"], in: repository)
+        try Data("dist/\n*.ico\n".utf8).write(to: repository.appendingPathComponent(".gitignore"))
+        for file in ["apps/web/dist/icon.png", "apps/web/public/favicon.ico", "apps/web/public/logo.png", "other/icon.png"] {
+            try pngData(side: 16).write(to: repository.appendingPathComponent(file))
+        }
+        XCTAssertEqual(LocalProjectLister.repositoryPrefix(project), "apps/web/")
+        let lister = LocalProjectLister(root: project)
+        XCTAssertEqual(lister.ignoredPaths(), ["dist/", "public/favicon.ico"])
+        XCTAssertNil(LocalProjectLister.repositoryPrefix(URL(fileURLWithPath: "/")))
+    }
+
+    private func filled(_ color: NSColor) -> NSImage {
+        NSImage(size: NSSize(width: 64, height: 64), flipped: false) { rect in
+            color.setFill()
+            rect.fill()
+            return true
+        }
     }
 
     private func pngData(side: Int) throws -> Data {

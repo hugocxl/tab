@@ -92,6 +92,9 @@ extension AppModel {
                 let catalog = try await main.catalog()
                 guard connection.main === main else { return }
                 applyCatalog(server, catalog)
+                // Icons and Git facts load while the rest of the server's state does.
+                refreshGit(server: server)
+                refreshProjectIcons(server: server)
                 await replayIntents(server)
                 guard connection.main === main else { return }
                 edit { $0.forgetTabAcknowledgements(server) }
@@ -105,7 +108,6 @@ extension AppModel {
                     (controller as? TerminalPane)?.connectionChanged()
                     (controller as? AgentPaneController)?.connectionChanged()
                 }
-                refreshGit(server: server)
                 syncGitWatch()
                 nativeReconnected(server)
                 if pendingRemoteHomes.remove(server) != nil { openRemoteHome(on: server) }
@@ -420,17 +422,24 @@ extension AppModel {
         gitRefreshing.insert(project)
         Task {
             defer { gitRefreshing.remove(project) }
+            // The local summary shows at once; the pull request, which asks
+            // GitHub, follows.
             let summary = try? await side.gitSummary(project)
-            var info = GitInfo(summary: summary ?? nil, pullRequest: git[project]?.pullRequest)
-            if summary != nil {
-                info.pullRequest = try? await side.pullRequestNumber(project)
-            }
-            if git[project] != info {
-                git[project] = info
-                notify(.activity)
-                notify(.state)
-            }
+            setGit(project, GitInfo(summary: summary ?? nil, pullRequest: shownGit(project)?.pullRequest))
+            guard summary != nil else { return }
+            let pullRequest = try? await side.pullRequestNumber(project)
+            guard var info = git[project], info.summary != nil else { return }
+            info.pullRequest = pullRequest
+            setGit(project, info)
         }
+    }
+
+    private func setGit(_ project: ProjectId, _ info: GitInfo) {
+        sidebarMemory.setGit(project, info)
+        guard git[project] != info else { return }
+        git[project] = info
+        notify(.activity)
+        notify(.state)
     }
 
     // MARK: Activity

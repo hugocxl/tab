@@ -105,6 +105,15 @@ extension AppModel: BrowserHost {
         notify(.activity)
     }
 
+    public func rememberedFavicon(for url: String) -> NSImage? {
+        sidebarMemory.favicon(for: url)
+    }
+
+    public func browserPane(_ pane: BrowserPaneController, didLoadFavicon favicon: NSImage, for url: String) {
+        guard let png = SidebarMemory.thumbnail(favicon, pixels: SidebarMemory.faviconPixels) else { return }
+        sidebarMemory.setFavicon(png, for: url)
+    }
+
     public func browserPaneRequestsClose(_ pane: BrowserPaneController) {
         guard let id = PaneId(pane.tabId) else { return }
         remove(id)

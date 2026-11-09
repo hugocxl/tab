@@ -168,37 +168,43 @@ public enum ProjectIconFinder {
     }
 }
 
-/// Lists a local project's folders, marking what Git ignores with
-/// `git check-ignore`.
-struct LocalProjectLister {
+/// Lists a local project's folders, marking what Git ignores. Asks Git once
+/// per search, on the first listing.
+final class LocalProjectLister {
     let root: URL
+    private var ignored: Set<String>?
+
+    init(root: URL) {
+        self.root = root
+    }
 
     func list(_ directory: String) -> [ProjectIconEntry] {
         let folder = directory.isEmpty ? root : root.appendingPathComponent(directory)
         guard let names = try? FileManager.default.contentsOfDirectory(atPath: folder.path) else { return [] }
-        var entries = names.sorted().map { name -> ProjectIconEntry in
+        let ignored = self.ignored ?? ignoredPaths()
+        self.ignored = ignored
+        return names.sorted().map { name -> ProjectIconEntry in
             let path = directory.isEmpty ? name : "\(directory)/\(name)"
             var isDirectory: ObjCBool = false
             FileManager.default.fileExists(atPath: folder.appendingPathComponent(name).path, isDirectory: &isDirectory)
-            return ProjectIconEntry(name: name, path: path, isDirectory: isDirectory.boolValue)
+            let isIgnored = ignored.contains(isDirectory.boolValue ? path + "/" : path)
+            return ProjectIconEntry(name: name, path: path, isDirectory: isDirectory.boolValue, isIgnored: isIgnored)
         }
-        let ignored = ignoredPaths(entries.map { $0.isDirectory ? $0.path + "/" : $0.path })
-        for index in entries.indices {
-            let entry = entries[index]
-            entries[index].isIgnored = ignored.contains(entry.path) || ignored.contains(entry.path + "/")
-        }
-        return entries
     }
 
-    /// The paths Git ignores among `paths`; none outside a repository.
-    func ignoredPaths(_ paths: [String]) -> Set<String> {
-        guard !paths.isEmpty else { return [] }
+    /// The paths Git ignores under the root, relative to it: folders with a
+    /// trailing slash, whose contents it doesn't list, and files. None
+    /// outside a repository.
+    func ignoredPaths() -> Set<String> {
+        guard let prefix = Self.repositoryPrefix(root) else { return [] }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["git", "-C", root.path, "--no-literal-pathspecs", "check-ignore", "-z", "--stdin"]
-        let input = Pipe()
+        process.arguments = ["git", "-C", root.path, "status", "--porcelain=v1", "-z", "--no-renames",
+                             "--ignored=matching", "--untracked-files=normal", "--", "."]
+        var environment = ProcessInfo.processInfo.environment
+        environment["GIT_OPTIONAL_LOCKS"] = "0"
+        process.environment = environment
         let output = Pipe()
-        process.standardInput = input
         process.standardOutput = output
         process.standardError = FileHandle.nullDevice
         do {
@@ -206,14 +212,33 @@ struct LocalProjectLister {
         } catch {
             return []
         }
-        let request = Data(paths.joined(separator: "\0").utf8) + Data([0])
-        let writer = input.fileHandleForWriting
-        DispatchQueue.global(qos: .utility).async {
-            writer.write(request)
-            try? writer.close()
-        }
         let data = output.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
-        return Set(data.split(separator: 0).map { String(decoding: $0, as: UTF8.self) })
+        guard process.terminationStatus == 0 else { return [] }
+        var ignored: Set<String> = []
+        for record in data.split(separator: 0) {
+            let line = String(decoding: record, as: UTF8.self)
+            guard line.hasPrefix("!! ") else { continue }
+            let path = line.dropFirst(3)
+            guard path.hasPrefix(prefix) else { continue }
+            ignored.insert(String(path.dropFirst(prefix.count)))
+        }
+        return ignored
+    }
+
+    /// `folder`'s path within its repository, such as `apps/web/`, as Git
+    /// status writes paths; "" at the repository's top and `nil` outside one.
+    static func repositoryPrefix(_ folder: URL) -> String? {
+        var parts: [String] = []
+        var current = folder.standardizedFileURL
+        while true {
+            if FileManager.default.fileExists(atPath: current.appendingPathComponent(".git").path) {
+                return parts.reversed().map { $0 + "/" }.joined()
+            }
+            let parent = current.deletingLastPathComponent()
+            guard parent.path != current.path else { return nil }
+            parts.append(current.lastPathComponent)
+            current = parent
+        }
     }
 }
