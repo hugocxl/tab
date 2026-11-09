@@ -105,17 +105,17 @@ final class AgentMessageMediaTests: XCTestCase {
         try await wait { media.images.first.flatMap { $0 } != nil }
         place(row, width: 600)
         let response = try XCTUnwrap(row.subviews.compactMap { $0 as? AgentResponseView }.first)
-        XCTAssertEqual(media.frame.height, 192)
-        XCTAssertEqual(media.frame.width, 384)
+        XCTAssertEqual(media.frame.height, 240)
+        XCTAssertEqual(media.frame.width, 480)
         XCTAssertGreaterThan(response.frame.minY, media.frame.maxY)
         row.update([AgentChatItem(id: "message", kind: .user, text: "", attachments: [image.descriptor])])
         place(row, width: 600)
         XCTAssertTrue(try XCTUnwrap(row.subviews.first { $0 is ThemedBackground }).isHidden)
-        XCTAssertEqual(row.frame.height, 220)
+        XCTAssertEqual(row.frame.height, 268)
         XCTAssertTrue(try XCTUnwrap(row.subviews.compactMap { $0 as? PillButton }.first { $0.toolTip == "Copy message" }).isHidden)
     }
 
-    func testCollageGeometryAndRetryAfterFetchFailure() async throws {
+    func testWholeImageStackGeometryAndRetryAfterFetchFailure() async throws {
         let files = try [fixture("One", color: .systemBlue), fixture("Two", color: .systemGreen), fixture("Three", color: .systemOrange)]
         let media = AgentMessageMediaView(frame: .zero)
         var fail = true
@@ -131,10 +131,11 @@ final class AgentMessageMediaTests: XCTestCase {
         try await wait { media.images.allSatisfy { $0 != nil } }
         media.frame = NSRect(origin: .zero, size: media.measuredSize(maxWidth: 400))
         media.layoutSubtreeIfNeeded()
-        XCTAssertEqual(media.frame.size, NSSize(width: 320, height: 192))
-        XCTAssertEqual(tiles[0].frame.height, 192)
-        XCTAssertEqual(tiles[1].frame.maxY + 1, tiles[2].frame.minY)
-        XCTAssertEqual(tiles[0].frame.maxX + 1, tiles[1].frame.minX)
+        XCTAssertEqual(media.frame.size, NSSize(width: 400, height: 736))
+        XCTAssertEqual(tiles[0].frame.height, 240)
+        XCTAssertTrue(tiles.allSatisfy(\.fitsWholeImage))
+        XCTAssertEqual(tiles[1].frame.maxY + 8, tiles[2].frame.minY)
+        XCTAssertEqual(tiles[0].frame.minX, tiles[1].frame.minX)
         var previewIndex: Int?
         media.onPreview = { _, _, index in previewIndex = index }
         XCTAssertTrue(tiles[2].accessibilityPerformPress())

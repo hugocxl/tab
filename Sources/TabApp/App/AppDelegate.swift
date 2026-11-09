@@ -99,22 +99,45 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
+    private var terminationPending = false
+
     public func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let model, let controller = windowController, !terminating else { return .terminateNow }
+        guard !terminationPending else { return .terminateLater }
+        terminationPending = true
         let editors = model.openEditors.filter(\.isDirty)
         guard !editors.isEmpty else {
-            finish()
-            return .terminateNow
+            finishAfterSavingDrafts()
+            return .terminateLater
         }
         EditorPaneController.confirmClose(editors, window: controller.window) { [weak self] proceed in
             guard proceed else {
+                self?.terminationPending = false
                 NSApp.reply(toApplicationShouldTerminate: false)
                 return
             }
-            self?.finish()
-            NSApp.reply(toApplicationShouldTerminate: true)
+            self?.finishAfterSavingDrafts()
         }
         return .terminateLater
+    }
+
+    private func finishAfterSavingDrafts() {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                try await self.model?.flushAgentDrafts()
+                self.finish()
+                NSApp.reply(toApplicationShouldTerminate: true)
+            } catch {
+                self.terminationPending = false
+                let alert = NSAlert()
+                alert.messageText = "Your agent drafts could not be saved"
+                alert.informativeText = error.localizedDescription
+                alert.addButton(withTitle: "Keep Tab open")
+                alert.runModal()
+                NSApp.reply(toApplicationShouldTerminate: false)
+            }
+        }
     }
 
     /// Quitting never ends terminals: the state is saved and the servers

@@ -7,18 +7,22 @@ import TabProtocol
 final class AgentPaneView: ThemedView {
     let model = AgentTextPopUp(label: "Model")
     let effort = AgentReasoningPopUp(label: "Reasoning effort")
-    let access = AgentTextPopUp(label: "Access mode")
+    let plan = AgentPlanButton(frame: .zero)
     let composer = AgentComposerTextView()
+    let promptQueue = AgentQueueView(frame: .zero)
+    let questions = AgentQuestionView(frame: .zero)
     var citationEnvironmentId: String?
     var citationThreadId: String?
     let send = AgentRoundButton(kind: .send)
     let stop = AgentRoundButton(kind: .stop)
     let contextIndicator = AgentContextIndicator(frame: .zero)
     private let pickerSeparators = [NSView(), NSView()]
+    let microphone = PillButton("", style: .plain)
+    let waveform = PillButton("", style: .plain)
     let attach = PillButton("", style: .plain)
     let attachmentStrip = AgentAttachmentStrip(frame: .zero)
     let suggestions = AgentComposerSuggestionsView(frame: .zero)
-    let retry = PillButton("Retry", style: .plain)
+    let retry = PillButton("Refresh", style: .plain)
     let feedback = NSTextField(wrappingLabelWithString: "")
     let transcriptScroll = NSScrollView()
     let composerScroll = NSScrollView()
@@ -126,7 +130,7 @@ final class AgentPaneView: ThemedView {
         composer.minSize = .zero
         composer.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         composer.setAccessibilityLabel("Message to agent")
-        composer.setAccessibilityHelp("Ask anything. Return sends; Shift-Return adds a new line.")
+        composer.setAccessibilityHelp("Ask anything. Return sends; Shift-Return adds a new line; Shift-Tab toggles plan mode.")
         composer.onEdit = { [weak self] in self?.refreshComposer() }
         composer.onOpenCitation = { [weak self] citation in self?.openCitation(citation) }
         composer.onPasteContext = { [weak self] pasteboard in self?.pasteContextFragment(from: pasteboard) ?? false }
@@ -135,14 +139,25 @@ final class AgentPaneView: ThemedView {
         composerScroll.hasVerticalScroller = true
         composerScroll.autohidesScrollers = true
         composerScroll.scrollerStyle = .overlay
-        composerCard.cornerRadius = 18
+        composerCard.cornerRadius = 24
+        composerCard.layer?.cornerCurve = .continuous
+        plan.isHidden = true
+        plan.setAccessibilityLabel("Disable plan mode")
+        plan.toolTip = "Plan mode · Shift-Tab to toggle"
         composerCard.layer?.borderWidth = Metrics.border
-        attach.image = AppIcon.paperclip.image(size: 16, scale: AppIcon.inlineScale)
+        microphone.image = AppIcon.microphone.image(size: 18, scale: AppIcon.inlineScale)
+        waveform.image = AppIcon.waveform.image(size: 18, scale: AppIcon.inlineScale)
+        for control in [microphone, waveform] { control.imagePosition = .imageOnly }
+        microphone.setAccessibilityLabel("Dictate message")
+        waveform.setAccessibilityLabel("Read latest response aloud")
+        attach.image = AppIcon.plus.image(size: 16, scale: AppIcon.inlineScale)
         attach.imagePosition = .imageOnly
+        attach.wantsLayer = true
+        attach.layer?.cornerRadius = 14
         attach.setAccessibilityLabel("Attach files")
         attach.toolTip = "Attach files or drop them into the message box"
         for separator in pickerSeparators { separator.wantsLayer = true; composerCard.addSubview(separator) }
-        for child in [composerScroll, attachmentStrip, attach, model, effort, access, contextIndicator, send, stop] {
+        for child in [composerScroll, attachmentStrip, attach, plan, model, effort, contextIndicator, microphone, waveform, send, stop] {
             composerCard.addSubview(child)
             // This surface uses measured frames: controls must not bring their own size constraints.
             child.translatesAutoresizingMaskIntoConstraints = true
@@ -150,7 +165,6 @@ final class AgentPaneView: ThemedView {
         stop.isHidden = true
         model.toolTip = "Choose the provider and model for the next message"
         effort.toolTip = "Choose the reasoning effort for the next message"
-        access.toolTip = "Choose which actions require approval"
         activitySpinner.style = .spinning
         activitySpinner.controlSize = .small
         activitySpinner.isDisplayedWhenStopped = false
@@ -162,7 +176,7 @@ final class AgentPaneView: ThemedView {
         feedback.maximumNumberOfLines = 2
         feedback.lineBreakMode = .byTruncatingTail
         // Suggestions sit behind the composer card so their lower edge tucks under it.
-        for child in [transcriptScroll, activity, endButton, suggestions, composerCard, feedback, retry] { addSubview(child) }
+        for child in [transcriptScroll, activity, endButton, suggestions, composerCard, promptQueue, questions, feedback, retry] { addSubview(child) }
         suggestions.isHidden = true
         selectionToolbar.isHidden = true
         selectionToolbar.onCite = { [weak self] in self?.citeSelection() }
@@ -188,7 +202,7 @@ final class AgentPaneView: ThemedView {
         defer { scrollMutationDepth -= 1 }
         let width = max(0, min(Self.readableWidth, bounds.width - 32))
         let left = floor((bounds.width - width) / 2)
-        let retryWidth = retry.isHidden ? 0 : min(56, retry.fittingSize.width)
+        let retryWidth = retry.isHidden ? 0 : min(72, retry.fittingSize.width)
         let feedbackWidth = max(1, width - retryWidth - (retryWidth > 0 ? 8 : 0))
         let footerTextHeight = (feedback.stringValue as NSString).boundingRect(
             with: NSSize(width: feedbackWidth, height: .greatestFiniteMagnitude),
@@ -206,37 +220,15 @@ final class AgentPaneView: ThemedView {
         let usedHeight = composer.layoutManager.flatMap { manager in
             composer.textContainer.map { manager.usedRect(for: $0).height }
         } ?? 0
-        let editorHeight = min(164, max(56, ceil(usedHeight) + 12))
-        // Pack intrinsic widths; wrap only when the next whole picker will not fit.
-        // The trailing usage/send buttons have reserved space on the first row.
-        var pickerFrames: [NSRect] = []
-        var separatorFrames: [NSRect?] = []
-        var x: CGFloat = 46
-        var row: CGFloat = 0
-        let fitsSingleRow = 46 + [model, effort, access].reduce(CGFloat(26)) { $0 + $1.intrinsicContentSize.width } <= width - 122
-        for (index, picker) in [model, effort, access].enumerated() {
-            var right = row == 0 ? width - 122 : width - 14
-            let desired = picker.intrinsicContentSize.width
-            let gap: CGFloat = index == 0 ? 0 : 13
-            var wraps = false
-            if index > 0 && ((index == 1 && !fitsSingleRow) || x + gap + desired > right) {
-                row += 1
-                x = 14
-                right = width - 14
-                wraps = true
-            }
-            if index > 0 {
-                separatorFrames.append(wraps ? nil : NSRect(x: x + 6, y: row * 32 + 8, width: 1, height: 12))
-                if !wraps { x += gap }
-            }
-            let measuredWidth = min(desired, max(0, right - x))
-            pickerFrames.append(NSRect(x: x, y: row * 32, width: measuredWidth, height: 28))
-            x += measuredWidth
-        }
-        let controlsHeight: CGFloat = 40 + row * 32
+        let editorHeight = min(questions.isHidden ? 164 : 80, max(56, ceil(usedHeight) + 12))
+        let modelWidth = min(model.intrinsicContentSize.width, max(60, width * 0.34))
+        let effortWidth = min(effort.intrinsicContentSize.width, max(45, width * 0.22))
+        let compact = width < 720
+        let narrowPlan = width < 380 && !plan.isHidden
+        let controlsHeight: CGFloat = (compact ? 72 : 40) + (narrowPlan ? 32 : 0)
         let attachmentHeight: CGFloat = attachmentStrip.hasAttachments ? 76 : 0
         let cardHeight = attachmentHeight + editorHeight + 14 + controlsHeight
-        composerCard.frame = NSRect(x: left, y: max(0, footerTop - 8 - cardHeight), width: width, height: cardHeight)
+        composerCard.frame = NSRect(x: left, y: max(0, (snapshot?.items.isEmpty ?? true) && (snapshot?.queuedPrompts?.isEmpty ?? true) && !submitting && activityStatus == .idle ? (bounds.height - cardHeight) / 2 : footerTop - 8 - cardHeight), width: width, height: cardHeight)
         attachmentStrip.frame = NSRect(x: 14, y: 8, width: editorWidth, height: attachmentHeight)
         attachmentStrip.isHidden = attachmentHeight == 0
         composerScroll.frame = NSRect(x: 14, y: 10 + attachmentHeight, width: editorWidth, height: editorHeight)
@@ -246,17 +238,23 @@ final class AgentPaneView: ThemedView {
         let actionFrame = NSRect(x: max(0, width - 44), y: controlsY, width: 30, height: 30)
         send.frame = actionFrame
         stop.frame = actionFrame.offsetBy(dx: -40, dy: 0)
-        contextIndicator.frame = NSRect(x: max(0, width - 118), y: controlsY + 1, width: 28, height: 28)
-        for (picker, frame) in zip([model, effort, access], pickerFrames) {
-            picker.frame = frame.offsetBy(dx: 0, dy: controlsY + 1)
-        }
-        for (separator, frame) in zip(pickerSeparators, separatorFrames) {
-            separator.isHidden = frame == nil
-            if let frame { separator.frame = frame.offsetBy(dx: 0, dy: controlsY + 1) }
-        }
+        plan.frame = NSRect(x: narrowPlan ? 12 : 48, y: controlsY + 1 + (narrowPlan ? 32 : 0), width: 88, height: 28)
+        let pickerY = controlsY + (compact ? 32 : 1) + (narrowPlan ? 32 : 0)
+        let pickerRight = compact ? width - 14 : width - 186
+        effort.frame = NSRect(x: max(14, pickerRight - effortWidth), y: pickerY, width: effortWidth, height: 28)
+        model.frame = NSRect(x: max(compact ? 14 : 140, effort.frame.minX - modelWidth - 4), y: pickerY, width: modelWidth, height: 28)
+        microphone.frame = NSRect(x: max(0, width - 112), y: controlsY, width: 28, height: 30)
+        waveform.frame = NSRect(x: max(0, width - 146), y: controlsY, width: 28, height: 30)
+        contextIndicator.frame = NSRect(x: max(0, width - 180), y: controlsY + 1, width: 28, height: 28)
+        for separator in pickerSeparators { separator.isHidden = true }
 
         let activityHeight: CGFloat = activity.isHidden ? 0 : 30
-        let transcriptBottom = max(0, composerCard.frame.minY - activityHeight)
+        let panelBudget = max(0, composerCard.frame.minY - activityHeight - 20)
+        let questionHeight = min(questions.preferredHeight, panelBudget)
+        let queueHeight = min(promptQueue.preferredHeight, max(0, panelBudget - questionHeight))
+        questions.frame = NSRect(x: left, y: max(0, composerCard.frame.minY - questionHeight - 8), width: width, height: questionHeight)
+        promptQueue.frame = NSRect(x: left, y: max(0, composerCard.frame.minY - questionHeight - queueHeight - 12), width: width, height: queueHeight)
+        let transcriptBottom = max(0, composerCard.frame.minY - activityHeight - questionHeight - queueHeight - (questionHeight + queueHeight > 0 ? 16 : 0))
         activity.frame = NSRect(x: left + 4, y: transcriptBottom, width: max(0, width - 8), height: activityHeight)
         activitySpinner.frame = NSRect(x: 0, y: 5, width: 16, height: 16)
         activityLabel.frame = NSRect(x: activityStatus == .waiting ? 0 : 24, y: 4,
@@ -283,7 +281,6 @@ final class AgentPaneView: ThemedView {
         needsLayout = true
         model.needsDisplay = true
         effort.needsDisplay = true
-        access.needsDisplay = true
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
@@ -319,14 +316,14 @@ final class AgentPaneView: ThemedView {
         let changed = activityStatus != status || self.submitting != submitting
         activityStatus = status
         self.submitting = submitting
-        let busy = submitting || status == .working || status == .waiting
+        let busy = submitting || status == .working || status == .waiting || (snapshot?.queuePaused != true && snapshot?.queuedPrompts?.isEmpty == false)
         send.isHidden = false
         stop.isHidden = !busy
         activity.isHidden = !submitting && status != .waiting
-        guard changed else { return }
-        let text = submitting ? "Sending…" : status == .waiting ? "Waiting for approval" : "Working…"
+        let text = submitting ? "Sending…" : status == .waiting ? (snapshot?.items.contains { $0.questionnaire != nil && !$0.isComplete } == true ? "Waiting for your answers" : "Waiting for approval") : "Working…"
         activityLabel.stringValue = busy ? text : ""
         activityLabel.setAccessibilityValue(activityLabel.stringValue)
+        guard changed else { return }
         activitySpinner.isHidden = !busy || status == .waiting
         if busy && status != .waiting { activitySpinner.startAnimation(nil) }
         else { activitySpinner.stopAnimation(nil) }
@@ -395,7 +392,7 @@ final class AgentPaneView: ThemedView {
         preserveScroll {
             // Keep every retained entry as lightweight data. Native row views are
             // limited by the viewport, not by dropping older conversation items.
-            let visible = snapshot.items.filter { $0.kind != .approval || !$0.isComplete }
+            let visible = snapshot.items
             let turns = snapshot.turns ?? []
             self.transcript.provider = snapshot.provider
             if visible != self.renderedItems || turns != self.renderedTurns {
@@ -546,6 +543,11 @@ final class AgentPaneView: ThemedView {
     }
 
     override func themeDidChange() {
+        appearance = theme.nsAppearance
+        for button in [attach, microphone, waveform] { button.contentTintColor = theme.fgMuted }
+        retry.setTitleColor(theme.fgMuted)
+        promptQueue.theme = theme
+        questions.theme = theme
         attachmentStrip.updateTheme(theme)
         suggestions.update(suggestions.items, theme: theme)
         needsDisplay = true
@@ -554,10 +556,12 @@ final class AgentPaneView: ThemedView {
         composer.textColor = theme.fg
         composer.insertionPointColor = theme.accent
         composer.placeholderColor = theme.fgDim
+        plan.chatTheme = theme
+        attach.layer?.backgroundColor = theme.fg.withAlphaComponent(0.08).cgColor
         composer.selectedTextAttributes = [.backgroundColor: theme.accent.withAlphaComponent(0.25)]
         activityLabel.textColor = theme.fgMuted
         feedback.textColor = theme.fgDim
-        for control in [model, effort, access] { control.chatTheme = theme }
+        for control in [model, effort] { control.chatTheme = theme }
         for separator in pickerSeparators { separator.layer?.backgroundColor = theme.fg.withAlphaComponent(0.18).cgColor }
         contextIndicator.chatTheme = theme
         send.chatTheme = theme

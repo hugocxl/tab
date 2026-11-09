@@ -5,6 +5,68 @@ import XCTest
 @testable import TabServer
 
 final class AgentRuntimeTests: XCTestCase {
+    func testClaudePlanModeWaitsForNativeAcknowledgementBeforeUserInput() async throws {
+        let recorder = AgentRuntimeRecorder()
+        let received = expectation(description: "provider consumed the planned prompt")
+        recorder.observe = { if case .status(.idle) = $0 { received.fulfill() } }
+        let fixture = try AgentRuntimeFixture("""
+        take
+        emit '{"type":"control_response","response":{"subtype":"success","request_id":"1","response":{}}}'
+        take
+        emit '{"type":"control_response","response":{"subtype":"success","request_id":"2","response":{}}}'
+        take
+        emit '{"type":"result","subtype":"success","is_error":false,"result":"Plan"}'
+        hold
+        """)
+        defer { fixture.remove() }
+        let runtime = fixture.runtime(.claude, recorder: recorder)
+        defer { runtime.stop() }
+        try await runtime.setPlan(true)
+        try await runtime.send(text: "Plan this change", model: nil)
+        await fulfillment(of: [received], timeout: 3)
+        let messages = try fixture.messages()
+        let request = try XCTUnwrap(messages[1]["request"] as? [String: Any])
+        XCTAssertEqual(request["subtype"] as? String, "set_permission_mode")
+        XCTAssertEqual(request["mode"] as? String, "plan")
+        XCTAssertEqual(messages.last?["type"] as? String, "user")
+    }
+
+    func testCodexPlanModeAndExplicitDefaultResetReachNativeTurns() async throws {
+        let recorder = AgentRuntimeRecorder()
+        let fixture = try AgentRuntimeFixture("""
+        take
+        emit '{"id":1,"result":{}}'
+        take
+        take
+        emit '{"id":2,"result":{"thread":{"id":"thread"}}}'
+        take
+        emit '{"id":3,"result":{"turn":{"id":"one"}}}'
+        emit '{"method":"turn/completed","params":{"turn":{"id":"one","status":"completed"}}}'
+        take
+        emit '{"id":4,"result":{"turn":{"id":"two"}}}'
+        hold
+        """)
+        defer { fixture.remove() }
+        let runtime = fixture.runtime(.codex, recorder: recorder)
+        defer { runtime.stop() }
+        try await runtime.setPlan(true)
+        try await runtime.send(text: "Plan", model: "test-model", reasoningEffort: .high)
+        // Flush the completed notification already written by the fixture.
+        try await Task.sleep(for: .milliseconds(50))
+        try await runtime.setPlan(false)
+        try await runtime.send(text: "Build", model: "test-model", reasoningEffort: .high)
+        let turns = try fixture.messages().filter { $0["method"] as? String == "turn/start" }
+        XCTAssertEqual(turns.count, 2)
+        for (index, turn) in turns.enumerated() {
+            let params = try XCTUnwrap(turn["params"] as? [String: Any])
+            let mode = try XCTUnwrap(params["collaborationMode"] as? [String: Any])
+            XCTAssertEqual(mode["mode"] as? String, index == 0 ? "plan" : "default")
+            let settings = try XCTUnwrap(mode["settings"] as? [String: Any])
+            XCTAssertEqual(settings["model"] as? String, "test-model")
+            XCTAssertTrue(settings["developer_instructions"] is NSNull)
+        }
+    }
+
     func testCodexResumedAutoEffortFindsSelectedModelOnLaterCatalogPage() async throws {
         let recorder = AgentRuntimeRecorder()
         let idle = expectation(description: "later-page selection completed")
@@ -660,7 +722,7 @@ final class AgentRuntimeTests: XCTestCase {
         emit '{"id":2,"result":{"thread":{"id":"thread"}}}'
         take
         emit '{"id":3,"result":{"turn":{"id":"turn"}}}'
-        emit '{"id":"question-1","method":"item/tool/requestUserInput","params":{"itemId":"not-the-rpc-id","questions":[]}}'
+        emit '{"id":"question-1","method":"future/unknownInteraction","params":{"itemId":"not-the-rpc-id","questions":[]}}'
         take
         emit '{"method":"turn/completed","params":{"turn":{"id":"turn","status":"completed"}}}'
         hold

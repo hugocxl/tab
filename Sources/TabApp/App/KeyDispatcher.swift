@@ -94,6 +94,13 @@ final class KeyDispatcher {
         guard event.window === window, let window else { return false }
         if let handled = paletteKeyDown?(event) { return handled }
         let pane = model.activePane.flatMap { model.panes.controller(for: $0) }
+        if let agent = pane as? AgentPaneController,
+           window.firstResponder === agent.surface.composer,
+           let chord = KeyChord(event: event),
+           model.settings.keymap.action(for: chord) == .toggleAgentPlan {
+            agent.togglePlanMode()
+            return true
+        }
         let editingText = window.firstResponder is NSTextView && !(pane?.hasFocus ?? false)
         let paneTakes = !editingText && (pane?.handleKeyFirst(event) ?? false)
         let resolution = Self.resolve(chord: KeyChord(event: event), paneTakes: paneTakes, editingText: editingText,

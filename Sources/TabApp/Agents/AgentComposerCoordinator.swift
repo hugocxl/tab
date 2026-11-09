@@ -36,7 +36,6 @@ final class AgentComposerCoordinator {
                   icon: .history, kind: .action),
             .init(id: "clear-conversation", title: "/clear", subtitle: "Start a new conversation with a fresh context",
                   icon: .conversationAdd, kind: .action),
-            .init(id: "access", title: "/permissions", subtitle: "Change tool access", icon: .shieldKeyhole, kind: .action),
             .init(id: "model", title: "/model", subtitle: "Choose the model for this conversation", icon: .cpu, kind: .action),
             .init(id: "effort", title: "/effort", subtitle: "Change reasoning effort", icon: .brain, kind: .action),
             .init(id: "attach", title: "/attach", subtitle: "Attach files or images", icon: .paperclip, kind: .action),

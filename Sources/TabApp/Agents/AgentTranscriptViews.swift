@@ -253,10 +253,10 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
         media.joinsTextBubble = !bubble.isHidden
         let pending = item.kind == .approval && !item.isComplete
         permissionTitle.isHidden = item.kind != .approval
-        permissionTitle.stringValue = pending ? "Approval needed" : "Approval resolved"
+        permissionTitle.stringValue = item.questionnaire != nil && pending ? "Answer in the form below" : pending ? "Approval needed" : "Decision recorded"
         permissionTitle.textColor = pending ? theme.accent : theme.fgDim
-        allow.isHidden = !pending
-        deny.isHidden = !pending
+        allow.isHidden = !pending || item.questionnaire != nil
+        deny.isHidden = !pending || item.questionnaire != nil
         detail.isHidden = item.kind != .approval || (item.detail ?? "").isEmpty
     }
 
@@ -282,7 +282,7 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
         bodyHeight = item.kind == .assistant ? response.height(for: width) : body.height(for: width)
         detailHeight = detail.isHidden ? 0 : detail.height(for: max(1, width - 24))
         if item.kind == .approval {
-            return 24 + bodyHeight + (detail.isHidden ? 0 : detailHeight + 14) + (item.isComplete ? 0 : 42)
+            return 24 + bodyHeight + (detail.isHidden ? 0 : detailHeight + 14) + (item.isComplete || item.questionnaire != nil ? 0 : 42)
         }
         changesHeight = item.kind == .assistant && !changes.isHidden ? changes.preferredHeight(for: width) : 0
         return bodyHeight + (changesHeight > 0 ? 16 + changesHeight : 0) + (copy.isHidden ? 0 : 28)

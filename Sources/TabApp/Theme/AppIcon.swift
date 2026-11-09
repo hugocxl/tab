@@ -4,6 +4,9 @@ import TabCore
 
 /// Tab Icons: signature marks carry their theme hue; UI templates inherit the caller's tint.
 public enum AppIcon: String, CaseIterable, Sendable {
+    case trash
+    case microphone
+    case waveform
     case agents
     case antigravity
     case appWindow = "app-window"

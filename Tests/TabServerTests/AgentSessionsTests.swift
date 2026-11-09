@@ -99,6 +99,25 @@ private actor AgentSubmissionGate {
 }
 
 final class AgentSessionsTests: XCTestCase {
+    func testPlanSelectionPersistsAndRejectsMidTurnChanges() async throws {
+        let root = try root()
+        let sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, callback in FakeAgentRuntime(callback) })
+        defer { sessions.shutdown() }
+        let id = SessionId()
+        _ = try await sessions.handle(.create(session: id, project: ProjectId(), provider: .codex))
+        let selected = try await sessions.handle(.setPlan(session: id, enabled: true))
+        let decoded = try WireJSON.decode(AgentChatSnapshot.self, from: WireJSON.encode(selected))
+        XCTAssertEqual(decoded.planMode, true)
+        _ = try await sessions.handle(.setPlan(session: id, enabled: false))
+        _ = try await sessions.handle(.send(session: id, text: "Start", model: nil))
+        do {
+            _ = try await sessions.handle(.setPlan(session: id, enabled: true))
+            XCTFail("Must not change a running turn's mode")
+        } catch {}
+        let active = try await sessions.handle(.read(session: id))
+        XCTAssertEqual(active.planMode, false)
+    }
+
     func testActiveFollowupIsPersistedWithoutReplacingTurnOrRestartingRuntime() async throws {
         let root = try root()
         let sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, callback in
@@ -1087,7 +1106,7 @@ final class AgentSessionsTests: XCTestCase {
         })
         let session = SessionId(), project = ProjectId()
         let initial = try await sessions.handle(.create(session: session, project: project, provider: .claude))
-        XCTAssertEqual(initial.accessMode, .standard)
+        XCTAssertEqual(initial.accessMode, .fullAccess)
         let ask = try await sessions.handle(.setAccess(session: session, mode: .ask))
         XCTAssertEqual(ask.accessMode, .ask)
         XCTAssertNil(box.runtime, "Changing access before the first send must not launch a provider")
@@ -1142,6 +1161,7 @@ final class AgentSessionsTests: XCTestCase {
         defer { sessions.shutdown() }
         let session = SessionId()
         _ = try await sessions.handle(.create(session: session, project: ProjectId(), provider: .claude))
+        _ = try await sessions.handle(.setAccess(session: session, mode: .standard))
         _ = try await sessions.handle(.send(session: session, text: "start", model: nil))
         let changing = Task { try await sessions.handle(.setAccess(session: session, mode: .fullAccess)) }
         await fulfillment(of: [entered], timeout: 2)
@@ -1394,5 +1414,139 @@ final class AgentSessionsTests: XCTestCase {
             return XCTFail("Expected closed snapshot")
         }
         XCTAssertEqual(closed.status, .closed)
+    }
+}
+
+extension AgentSessionsTests {
+    private func waitForQueue(_ sessions: AgentSessions, _ id: SessionId,
+                              until predicate: (AgentChatSnapshot) -> Bool) async throws -> AgentChatSnapshot {
+        for _ in 0..<300 {
+            let snapshot = try await sessions.handle(.read(session: id))
+            if predicate(snapshot) { return snapshot }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        throw AgentRuntimeError("Queue did not settle")
+    }
+
+    func testDurableQueueDeduplicationEditOrderingStopAndResume() async throws {
+        let root = try root()
+        let box = AgentRuntimeBox()
+        let sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, callback in
+            let runtime = FakeAgentRuntime(callback); runtime.onSteer = {}; box.install(runtime); return runtime
+        })
+        defer { sessions.shutdown() }
+        let id = SessionId()
+        _ = try await sessions.handle(.create(session: id, project: ProjectId(), provider: .codex))
+        let first = AgentPrompt(text: "First", model: nil, effort: nil, provider: .codex, planMode: false)
+        _ = try await sessions.handle(.submit(session: id, prompt: first))
+        _ = try await waitForQueue(sessions, id) { $0.status == .working && $0.queuedPrompts?.isEmpty == true }
+        _ = try await sessions.handle(.submit(session: id, prompt: first))
+        XCTAssertEqual(box.runtime?.models.count, 1)
+        let second = AgentPrompt(text: "Second", model: nil, effort: nil, provider: .codex, planMode: false)
+        let third = AgentPrompt(text: "Third", model: nil, effort: nil, provider: .codex, planMode: false)
+        _ = try await sessions.handle(.submit(session: id, prompt: second))
+        _ = try await sessions.handle(.submit(session: id, prompt: third))
+        let moved = try await sessions.handle(.moveQueued(session: id, id: third.id, beforeID: second.id, expectedRevision: 0))
+        XCTAssertEqual(moved.queuedPrompts?.map(\.id), [third.id, second.id])
+        let edited = try await sessions.handle(.editQueued(session: id, id: third.id, text: "Edited third", expectedRevision: 1))
+        XCTAssertEqual(edited.queuedPrompts?.first?.text, "Edited third")
+        do { _ = try await sessions.handle(.removeQueued(session: id, id: third.id, expectedRevision: 1)); XCTFail("Stale removal must fail") } catch {}
+        let stopped = try await sessions.handle(.interrupt(session: id))
+        XCTAssertEqual(stopped.queuePaused, true)
+        XCTAssertEqual(stopped.queuedPrompts?.count, 2)
+        XCTAssertEqual(box.runtime?.models.count, 1)
+        _ = try await sessions.handle(.resumeQueue(session: id))
+        let resumed = try await waitForQueue(sessions, id) { $0.status == .working && $0.queuedPrompts?.count == 1 }
+        XCTAssertEqual(resumed.items.last { $0.kind == .user }?.text, "Edited third")
+        box.runtime?.callback(.status(.idle))
+        let drained = try await waitForQueue(sessions, id) { $0.status == .working && $0.queuedPrompts?.isEmpty == true }
+        XCTAssertEqual(drained.items.filter { $0.kind == .user }.map(\.text), ["First", "Edited third", "Second"])
+        XCTAssertEqual(box.runtime?.models.count, 3)
+    }
+
+    func testQueueStorageFailureDoesNotDeliverAndRetainsPrompt() async throws {
+        let root = try root()
+        let sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, callback in
+            XCTFail("A queue that cannot be saved must never launch a provider")
+            return FakeAgentRuntime(callback)
+        })
+        defer { sessions.shutdown() }
+        let id = SessionId()
+        _ = try await sessions.handle(.create(session: id, project: ProjectId(), provider: .codex))
+        try Data("block directory creation".utf8).write(to: root.appendingPathComponent("inbox"))
+        let prompt = AgentPrompt(text: "Keep this", model: nil, effort: nil, provider: .codex, planMode: false)
+        do { _ = try await sessions.handle(.submit(session: id, prompt: prompt)); XCTFail("Must report storage failure") } catch {}
+        let state = try await sessions.handle(.read(session: id))
+        XCTAssertEqual(state.queuePaused, true)
+        XCTAssertEqual(state.queuedPrompts?.first?.text, "Keep this")
+    }
+
+    func testRestartPreservesQueueWithoutAutomaticallyExecutingIt() async throws {
+        let root = try root()
+        let sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, callback in FakeAgentRuntime(callback) })
+        let id = SessionId()
+        _ = try await sessions.handle(.create(session: id, project: ProjectId(), provider: .codex))
+        _ = try await sessions.handle(.send(session: id, text: "Busy", model: nil))
+        let prompt = AgentPrompt(text: "After restart", model: nil, effort: nil, provider: .codex, planMode: false)
+        _ = try await sessions.handle(.submit(session: id, prompt: prompt))
+        sessions.shutdown()
+        let restored = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, callback in
+            XCTFail("Recovery must not execute queued prompts")
+            return FakeAgentRuntime(callback)
+        })
+        defer { restored.shutdown() }
+        let snapshot = try await restored.handle(.read(session: id))
+        XCTAssertEqual(snapshot.queuePaused, true)
+        XCTAssertEqual(snapshot.queuedPrompts?.map(\.id), [prompt.id])
+        let duplicate = try await restored.handle(.submit(session: id, prompt: prompt))
+        XCTAssertEqual(duplicate.queuedPrompts?.count, 1)
+        let closed = try await restored.handle(.close(session: id))
+        XCTAssertTrue(closed.queuedPrompts?.isEmpty == true)
+    }
+}
+
+extension AgentSessionsTests {
+    func testSendNowSteersOnceAndStaleSecondClickCannotDeliverAgain() async throws {
+        let root = try root()
+        let steers = AgentEventCount()
+        let sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, callback in
+            let runtime = FakeAgentRuntime(callback); runtime.onSteer = { steers.increment() }; return runtime
+        })
+        defer { sessions.shutdown() }
+        let id = SessionId()
+        _ = try await sessions.handle(.create(session: id, project: ProjectId(), provider: .codex))
+        _ = try await sessions.handle(.send(session: id, text: "Work", model: nil))
+        let prompt = AgentPrompt(text: "Change direction", model: nil, effort: nil, provider: .codex, planMode: false)
+        _ = try await sessions.handle(.submit(session: id, prompt: prompt))
+        _ = try await sessions.handle(.deliverQueued(session: id, id: prompt.id, expectedRevision: 0))
+        do { _ = try await sessions.handle(.deliverQueued(session: id, id: prompt.id, expectedRevision: 0)); XCTFail("Duplicate delivery must be rejected") } catch {}
+        let final = try await waitForQueue(sessions, id) { $0.queuedPrompts?.isEmpty == true }
+        XCTAssertEqual(steers.count, 1)
+        XCTAssertEqual(final.items.filter { $0.kind == .user }.map(\.text), ["Work", "Change direction"])
+        _ = try await sessions.handle(.submit(session: id, prompt: prompt))
+        XCTAssertEqual(steers.count, 1)
+    }
+
+    func testLargePendingQuestionSurvivesTranscriptTrimmingAndAnswerRetryIsIdempotent() async throws {
+        let root = try root()
+        let box = AgentRuntimeBox()
+        let sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, callback in
+            let runtime = FakeAgentRuntime(callback); box.install(runtime); return runtime
+        })
+        defer { sessions.shutdown() }
+        let id = SessionId()
+        _ = try await sessions.handle(.create(session: id, project: ProjectId(), provider: .codex))
+        _ = try await sessions.handle(.send(session: id, text: "Start", model: nil))
+        let form = AgentQuestionnaire(questions: [.init(id: "choice", title: "Choose", options: [.init(label: "A", description: String(repeating: "details ", count: 700))])])
+        box.runtime?.callback(.item(.init(id: "questions", kind: .approval, text: "Questions", isComplete: false, questionnaire: form)))
+        box.runtime?.callback(.status(.waiting))
+        for i in 0..<600 { box.runtime?.callback(.item(.init(id: "overflow-\(i)", kind: .assistant, text: String(repeating: "x", count: 3000)))) }
+        let state = try await waitForQueue(sessions, id) { $0.items.contains { $0.id == "overflow-599" } }
+        XCTAssertEqual(state.items.first { $0.id == "questions" }?.questionnaire, form)
+        XCTAssertNoThrow(try state.validate())
+        box.runtime?.callback(.item(.init(id: "questions", kind: .approval, text: "Answered")))
+        _ = try await waitForQueue(sessions, id) { $0.items.first { $0.id == "questions" }?.isComplete == true }
+        let repeated = try await sessions.handle(.answer(session: id, request: "questions", answers: ["choice": ["A"]], cancelled: false))
+        XCTAssertEqual(repeated.items.first { $0.id == "questions" }?.text, "Answered")
     }
 }

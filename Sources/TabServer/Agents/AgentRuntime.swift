@@ -13,6 +13,7 @@ internal enum AgentRuntimeEvent: Sendable {
     case contextUsage(AgentContextUsage)
     case resolvedModel(String)
     case commands([String])
+    case planMode(Bool)
     case failure(String)
 }
 
@@ -53,6 +54,8 @@ internal final class AgentRuntime: @unchecked Sendable {
     private var sequence = 0
     private var pending: [String: (Result<[String: Any], Error>) -> Void] = [:]
     private var approvals: [String: [String: Any]] = [:]
+    private var questions: [String: (form: AgentQuestionnaire, wire: [String: Any])] = [:]
+    private var answeredQuestions: Set<String> = []
     private var completedApprovals: Set<String> = []
     private var completedApprovalOrder: [String] = []
     private var threadID: String?
@@ -217,6 +220,7 @@ internal final class AgentRuntime: @unchecked Sendable {
                "--include-partial-messages", "--replay-user-messages", "--permission-prompt-tool", "stdio", "--permission-mode", "default"]
             : ["app-server"]
         if provider == .claude {
+            appliedClaudePlanMode = false
             if let resumeSession { arguments += ["--resume", resumeSession] }
             if forking {
                 arguments.append("--fork-session")
@@ -249,7 +253,7 @@ internal final class AgentRuntime: @unchecked Sendable {
                 completion(result)
             })
         } else {
-            try request("initialize", params: ["clientInfo": ["name": "tab", "version": Release.version]], completion: { result in
+            try request("initialize", params: ["clientInfo": ["name": "tab", "version": Release.version], "capabilities": ["experimentalApi": true]], completion: { result in
                 do {
                     _ = try result.get()
                     try self.write(["method": "initialized"])
@@ -296,7 +300,12 @@ internal final class AgentRuntime: @unchecked Sendable {
                     continuation.resume(throwing: error)
                 }
             }
-            submitUser(.success([:]))
+            if planMode != appliedClaudePlanMode {
+                try request("set_permission_mode", params: ["mode": planMode ? "plan" : "default"]) { result in
+                    if case .success = result { self.appliedClaudePlanMode = self.planMode }
+                    submitUser(result)
+                }
+            } else { submitUser(.success([:])) }
         } else {
             guard let threadID else { throw AgentRuntimeError("Codex thread is not initialized.") }
             let command = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -321,6 +330,13 @@ internal final class AgentRuntime: @unchecked Sendable {
                     params["sandboxPolicy"] = ["type": self.accessMode == .fullAccess ? "dangerFullAccess" : self.accessMode == .ask ? "readOnly" : "workspaceWrite"]
                     if let wireModel { params["model"] = wireModel }
                     if let effort { params["effort"] = effort }
+                    if self.planModeConfigured, let collaborationModel = wireModel {
+                        params["collaborationMode"] = ["mode": self.planMode ? "plan" : "default",
+                            "settings": ["model": collaborationModel, "reasoning_effort": effort as Any? ?? NSNull(),
+                                         "developer_instructions": NSNull()]]
+                    } else if self.planMode {
+                        throw AgentRuntimeError("Choose an explicit model before starting plan mode.")
+                    }
                     try self.request("turn/start", params: params) { result in
                         do {
                             let response = try result.get()
@@ -354,7 +370,7 @@ internal final class AgentRuntime: @unchecked Sendable {
     private func codexSelection(model: String?, reasoningEffort: AgentReasoningEffort?,
                                 completion: @escaping (Result<(String?, String?), Error>) -> Void) throws {
         let resumedDefaults = !hasSubmittedTurn && resumeSession != nil
-        let resetModel = model == nil && (resumedDefaults || (hasSubmittedTurn && self.model != nil))
+        let resetModel = model == nil && (planModeConfigured || resumedDefaults || (hasSubmittedTurn && self.model != nil))
         let resetEffort = reasoningEffort == nil && (resumedDefaults
             || (hasSubmittedTurn && (self.reasoningEffort != nil || model != self.model)))
         guard resetModel || resetEffort else {
@@ -406,6 +422,14 @@ internal final class AgentRuntime: @unchecked Sendable {
         }
     }
 
+    private var planMode = false
+    private var planModeConfigured = false
+    private var appliedClaudePlanMode = false
+
+    func setPlan(_ enabled: Bool) async throws {
+        try await perform { self.planMode = enabled; self.planModeConfigured = true }
+    }
+
     func approve(request: String, allow: Bool) async throws {
         try await perform {
             // A mode change may have answered the same request while a manual
@@ -429,7 +453,7 @@ internal final class AgentRuntime: @unchecked Sendable {
 
     private func automaticallyAllows(_ approval: [String: Any]) -> Bool {
         let tool = approval["tool_name"] as? String
-        guard tool != "AskUserQuestion" else { return false }
+        guard tool != "AskUserQuestion", tool != "ExitPlanMode" else { return false }
         switch accessMode {
         case .ask: return false
         case .fullAccess: return true
@@ -455,6 +479,10 @@ internal final class AgentRuntime: @unchecked Sendable {
             }
             try write(["id": approval["wireID"] ?? id, "result": ["decision": decision]])
         }
+        if allow, approval["tool_name"] as? String == "ExitPlanMode" {
+            planMode = false; appliedClaudePlanMode = false
+            onEvent(.planMode(false))
+        }
         approvals.removeValue(forKey: id)
         if id.utf8.count <= 1024, completedApprovals.insert(id).inserted {
             completedApprovalOrder.append(id)
@@ -464,7 +492,7 @@ internal final class AgentRuntime: @unchecked Sendable {
         }
         let text = automatic ? "Automatically approved" : allow ? "Approved" : "Declined"
         onEvent(.item(AgentChatItem(id: id, kind: .approval, text: text)))
-        onEvent(.status(approvals.isEmpty ? (busy ? .working : .idle) : .waiting))
+        onEvent(.status(approvals.isEmpty && questions.isEmpty ? (busy ? .working : .idle) : .waiting))
     }
 
     func interrupt() async throws {
@@ -477,7 +505,9 @@ internal final class AgentRuntime: @unchecked Sendable {
                     self.process?.stop()
                     self.process = nil
                     self.ready = false
+                    let count = self.unconsumedClaudeInputs.count
                     self.unconsumedClaudeInputs.removeAll()
+                    self.onEvent(.item(AgentChatItem(kind: .notice, text: "Stopped Claude and cancelled \(count) unconsumed follow-up(s). Delivered prompts remain in the transcript; review them before retrying.")))
                     self.resolvePending(AgentRuntimeError("Interrupted"))
                     self.completeTurn()
                     return
@@ -572,9 +602,8 @@ internal final class AgentRuntime: @unchecked Sendable {
                 return
             }
             if request["tool_name"] as? String == "AskUserQuestion" {
-                try write(["type": "control_response", "response": ["subtype": "success", "request_id": id,
-                    "response": ["behavior": "deny", "message": "Tab does not yet support structured questions. Ask the user in chat instead."]]])
-                onEvent(.item(AgentChatItem(kind: .notice, text: "Claude requested a structured question. Ask it to use plain chat instead.")))
+                let input = request["input"] as? [String: Any] ?? [:]
+                try presentQuestions(id: id, form: AgentQuestionParser.parse(input, claude: true), wire: request)
                 return
             }
             if request["tool_name"] as? String == "ExitPlanMode" {
@@ -594,9 +623,9 @@ internal final class AgentRuntime: @unchecked Sendable {
             return
         }
         if type == "control_cancel_request", let id = message["request_id"] as? String {
-            if approvals.removeValue(forKey: id) != nil {
+            if questions.removeValue(forKey: id) != nil || approvals.removeValue(forKey: id) != nil {
                 onEvent(.item(AgentChatItem(id: id, kind: .approval, text: "Cancelled")))
-                onEvent(.status(approvals.isEmpty ? .working : .waiting))
+                onEvent(.status(approvals.isEmpty && questions.isEmpty ? .working : .waiting))
             }
             return
         }
@@ -622,6 +651,12 @@ internal final class AgentRuntime: @unchecked Sendable {
         }
         if let method, let wireID = message["id"] {
             let id = agentRuntimeID(wireID)
+            if method == "item/tool/requestUserInput" || method == "tool/requestUserInput" {
+                var wire = params
+                wire["wireID"] = wireID
+                try presentQuestions(id: id, form: AgentQuestionParser.parse(params, claude: false), wire: wire)
+                return
+            }
             if method == "item/commandExecution/requestApproval" || method == "item/fileChange/requestApproval" {
                 var approval = params
                 approval["wireID"] = wireID
@@ -640,6 +675,13 @@ internal final class AgentRuntime: @unchecked Sendable {
                 onEvent(.item(AgentChatItem(kind: .notice, text: "Unsupported Codex interaction: \(method)")))
             }
             return
+        }
+        if method == "serverRequest/resolved", let requestID = params["requestId"] {
+            let id = agentRuntimeID(requestID)
+            if questions.removeValue(forKey: id) != nil || approvals.removeValue(forKey: id) != nil {
+                onEvent(.item(AgentChatItem(id: id, kind: .approval, text: "Request resolved or cancelled by the provider")))
+                onEvent(.status(approvals.isEmpty && questions.isEmpty ? (busy ? .working : .idle) : .waiting))
+            }
         }
         if method == "thread/tokenUsage/updated", params["threadId"] as? String != threadID { return }
         codex.receive(message, source: source)
@@ -672,6 +714,8 @@ internal final class AgentRuntime: @unchecked Sendable {
     }
 
     private func finishApprovals() {
+        for id in questions.keys { onEvent(.item(AgentChatItem(id: id, kind: .approval, text: "Question cancelled — response ended"))) }
+        questions.removeAll()
         for id in approvals.keys { onEvent(.item(AgentChatItem(id: id, kind: .approval, text: "No longer pending"))) }
         approvals.removeAll()
     }
@@ -710,4 +754,48 @@ internal func agentRuntimeStructuredJSON(_ value: Any) -> String? {
     guard let data = try? JSONSerialization.data(withJSONObject: value, options: [.fragmentsAllowed, .sortedKeys]),
           let string = String(data: data, encoding: .utf8) else { return nil }
     return string
+}
+
+
+extension AgentRuntime {
+    private func presentQuestions(id: String, form: AgentQuestionnaire, wire: [String: Any]) throws {
+        guard questions.count < 12, questions.values.reduce(0, { $0 + $1.form.transcriptByteCount }) + form.transcriptByteCount <= 128 * 1024 else { throw AgentRuntimeError("Too many pending question forms.") }
+        questions[id] = (form, wire)
+        onEvent(.item(AgentChatItem(id: id, kind: .approval, text: "Questions for you", isComplete: false,
+                                   questionnaire: form)))
+        onEvent(.status(.waiting))
+    }
+
+    func answer(request id: String, answers: [String: [String]], cancelled: Bool) async throws {
+        try await perform {
+            guard let pending = self.questions[id] else {
+                if self.answeredQuestions.contains(id) { return }
+                throw AgentRuntimeError("This question is no longer pending.")
+            }
+            try pending.form.validate(answers: answers, cancelled: cancelled)
+            if self.provider == .claude {
+                var response: [String: Any] = ["behavior": cancelled ? "deny" : "allow"]
+                if cancelled { response["message"] = "The user cancelled the questions." }
+                else {
+                    var input = pending.wire["input"] as? [String: Any] ?? [:]
+                    input["answers"] = answers.mapValues { $0.joined(separator: ", ") }
+                    response["updatedInput"] = input
+                }
+                if let tool = pending.wire["tool_use_id"] { response["toolUseID"] = tool }
+                try self.write(["type": "control_response", "response": ["subtype": "success", "request_id": id, "response": response]])
+            } else {
+                let values: [String: Any] = cancelled ? [:] : answers.mapValues { ["answers": $0] }
+                try self.write(["id": pending.wire["wireID"] ?? id, "result": ["answers": values]])
+            }
+            self.questions.removeValue(forKey: id)
+            self.answeredQuestions.insert(id)
+            if self.answeredQuestions.count > 512 { self.answeredQuestions = [id] }
+            let summary = cancelled ? nil : pending.form.questions.map { question in
+                question.title + ": " + (question.secret ? "[Private answer provided]" : (answers[question.id] ?? []).joined(separator: ", "))
+            }.joined(separator: "\n")
+            self.onEvent(.item(AgentChatItem(id: id, kind: .approval,
+                text: cancelled ? "Questions cancelled" : "Answered \(pending.form.questions.count) question(s)", detail: summary)))
+            self.onEvent(.status(self.approvals.isEmpty && self.questions.isEmpty ? (self.busy ? .working : .idle) : .waiting))
+        }
+    }
 }

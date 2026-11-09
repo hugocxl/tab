@@ -74,28 +74,35 @@ final class AgentAccessTests: XCTestCase {
         take
         emit '{"type":"control_request","request_id":"write","request":{"subtype":"can_use_tool","tool_name":"Write","input":{"file_path":"/project/example","content":"hello"}}}'
         take
-        emit '{"type":"control_request","request_id":"question","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","input":{"questions":[]}}}'
+        emit '{"type":"control_request","request_id":"question","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","input":{"questions":[{"question":"Which color?","options":[{"label":"Blue"},{"label":"Red"}]}]}}}'
         take
         emit '{"type":"result","subtype":"success","is_error":false}'
         hold
         """#)
         defer { fixture.remove() }
         let recorder = AgentRuntimeRecorder()
-        let idle = expectation(description: "write allowed, question denied")
-        recorder.observe = { event in if case .status(.idle) = event { idle.fulfill() } }
+        let idle = expectation(description: "write allowed, question answered explicitly")
+        let waiting = expectation(description: "question requires explicit answer")
+        recorder.observe = { event in
+            if case .status(.idle) = event { idle.fulfill() }
+            if case .status(.waiting) = event { waiting.fulfill() }
+        }
         let runtime = fixture.runtime(.claude, recorder: recorder)
         defer { runtime.stop() }
         try await runtime.setAccess(.fullAccess)
         try await runtime.send(text: "Write", model: nil)
+        await fulfillment(of: [waiting], timeout: 5)
+        XCTAssertFalse(try fixture.messages().contains { ($0["response"] as? [String: Any])?["request_id"] as? String == "question" })
+        try await runtime.answer(request: "question", answers: ["Which color?": ["Blue"]], cancelled: false)
         await fulfillment(of: [idle], timeout: 5)
         let responses = try fixture.messages().compactMap { $0["response"] as? [String: Any] }
         let write = try XCTUnwrap(responses.first { $0["request_id"] as? String == "write" }?["response"] as? [String: Any])
         let question = try XCTUnwrap(responses.first { $0["request_id"] as? String == "question" }?["response"] as? [String: Any])
         XCTAssertEqual(write["behavior"] as? String, "allow")
         XCTAssertEqual((write["updatedInput"] as? [String: Any])?["content"] as? String, "hello")
-        XCTAssertEqual(question["behavior"] as? String, "deny")
-        XCTAssertFalse(recorder.statuses.contains(.waiting))
-        XCTAssertTrue(recorder.transcript.values.contains { $0.kind == .notice && $0.text.contains("structured question") })
+        XCTAssertEqual(question["behavior"] as? String, "allow")
+        XCTAssertEqual(((question["updatedInput"] as? [String: Any])?["answers"] as? [String: String])?["Which color?"], "Blue")
+        XCTAssertEqual(recorder.transcript["question"]?.isComplete, true)
     }
 
     func testChangingPendingAskToAutoResolvesSearchButLeavesCommandWaiting() async throws {

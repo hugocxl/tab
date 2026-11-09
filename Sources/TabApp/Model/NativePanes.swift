@@ -189,6 +189,13 @@ extension AppModel {
         }
     }
 
+    /// Waits for draft bytes before normal application termination.
+    func flushAgentDrafts() async throws {
+        for controller in panes.all.compactMap({ $0.1 as? AgentPaneController }) {
+            try await controller.flushDraft()
+        }
+    }
+
     /// Editors with unsaved changes, asked about before quitting.
     public var openEditors: [EditorPaneController] {
         panes.all.compactMap { ($0.1 as? EditorPaneContent)?.controller }

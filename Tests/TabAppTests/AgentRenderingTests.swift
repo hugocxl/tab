@@ -72,7 +72,6 @@ final class AgentRenderingTests: XCTestCase {
         let surface = AgentPaneView(frame: NSRect(x: 0, y: 0, width: width, height: height))
         surface.model.addItems(withTitles: ["Claude Sonnet", "Codex"])
         surface.effort.addItems(withTitles: ["High", "Medium", "Low"])
-        surface.access.addItem(withTitle: "Auto")
         surface.retry.isHidden = true
         surface.layoutSubtreeIfNeeded()
         return surface
@@ -119,7 +118,7 @@ final class AgentRenderingTests: XCTestCase {
         surface.layoutSubtreeIfNeeded()
         XCTAssertFalse(surface.send.frame.intersects(surface.stop.frame))
         XCTAssertFalse(surface.contextIndicator.frame.intersects(surface.stop.frame))
-        XCTAssertGreaterThan(surface.send.frame.minX, surface.effort.frame.maxX)
+        XCTAssertFalse(surface.send.frame.intersects(surface.effort.frame))
         XCTAssertLessThanOrEqual(surface.send.frame.maxX, composerParent.bounds.maxX)
     }
 

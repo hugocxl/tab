@@ -202,13 +202,14 @@ public enum ShortcutCatalog {
         .selectProject6, .selectProject7, .selectProject8, .selectProject9,
         .copy, .paste, .find, .findNext, .findPrevious, .scrollToBottom,
         .previousPrompt, .nextPrompt, .selectCommandOutput,
-        .increaseFontSize, .decreaseFontSize, .newAgentPane, .newBrowserPane, .newSimulatorPane,
+        .toggleAgentPlan, .increaseFontSize, .decreaseFontSize, .newAgentPane, .newBrowserPane, .newSimulatorPane,
         .newAgentPaneBelow, .newBrowserPaneBelow, .newSimulatorPaneBelow,
     ]
 
     /// Built-in defaults that give way to a key a user binding already has,
     /// so a newer default never takes a key someone bound before it existed.
     public static let yielding: [ShortcutId] = [
+        .toggleAgentPlan,
         .openSettings, .newHomeTab, .newTabInProject, .newAgentInProject, .newWorktree, .switchWorktree,
         .toggleSidebar, .toggleFiles, .toggleSourceControl, .goToFile,
         .findInFiles, .toggleFullScreen, .toggleThemePicker, .toggleCommandPalette,
@@ -643,6 +644,7 @@ public enum ShortcutId: String, CaseIterable, Codable, Sendable {
     case commandPaletteActions = "command_palette.actions"
     case newBrowserPane = "new_browser_tab"
     case newSimulatorPane = "new_simulator_pane"
+    case toggleAgentPlan = "toggle_agent_plan"
     case newAgentPane = "new_agent_pane"
     case newAgentPaneBelow = "new_agent_pane_below"
     case newBrowserPaneBelow = "new_browser_pane_below"
@@ -797,6 +799,7 @@ extension ShortcutCatalog {
         ShortcutDefinition(.commandPaletteActions, keys: ["cmd-k"], contexts: ["CommandPalette"], keyContexts: [["CommandPalette"]], group: .palette),
         ShortcutDefinition(.newBrowserPane, keys: ["cmd-alt-b"], contexts: ["WorkspaceTabs"], keyContexts: [["WorkspaceTabs"]], group: .browser),
         ShortcutDefinition(.newSimulatorPane, keys: ["cmd-alt-s"], contexts: ["WorkspaceTabs"], keyContexts: [["WorkspaceTabs"]], group: .panes),
+        ShortcutDefinition(.toggleAgentPlan, keys: ["shift-tab"], contexts: ["WorkspaceTabs"], keyContexts: [["WorkspaceTabs"]], group: .panes),
         ShortcutDefinition(.newAgentPane, keys: ["cmd-alt-a"], contexts: ["WorkspaceTabs"], keyContexts: [["WorkspaceTabs"]], group: .panes),
         ShortcutDefinition(.newAgentPaneBelow, keys: ["cmd-alt-shift-a"], contexts: ["WorkspaceTabs"], keyContexts: [["WorkspaceTabs"]], group: .panes),
         ShortcutDefinition(.newBrowserPaneBelow, keys: ["cmd-alt-shift-b"], contexts: ["WorkspaceTabs"], keyContexts: [["WorkspaceTabs"]], group: .browser),

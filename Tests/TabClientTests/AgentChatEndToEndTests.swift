@@ -129,6 +129,7 @@ final class AgentChatEndToEndTests: XCTestCase {
         let codex = SessionId()
         for (session, provider) in [(claude, AgentChatProvider.claude), (codex, .codex)] {
             _ = try await first.agentChat(.create(session: session, project: home, provider: provider))
+            _ = try await first.agentChat(.setAccess(session: session, mode: .ask))
         }
         XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("claude.args").path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("codex.args").path))

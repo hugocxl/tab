@@ -60,6 +60,7 @@ final class AgentMessageMediaView: NSView {
             tiles = []; self.item = item; descriptors = attachments
             for (index, attachment) in attachments.enumerated() {
                 let tile = AgentMediaTile(name: attachment.name)
+                tile.fitsWholeImage = true
                 tile.onPress = { [weak self, weak tile] in
                     guard let self, let tile else { return }
                     if tile.image != nil { self.onPreview?(item, attachments, index) }
@@ -69,7 +70,7 @@ final class AgentMessageMediaView: NSView {
                 load(tile, attachment: attachment)
             }
         }
-        layer?.backgroundColor = theme.border.cgColor
+        layer?.backgroundColor = NSColor.clear.cgColor
         for tile in tiles { tile.apply(theme) }
     }
 
@@ -92,41 +93,36 @@ final class AgentMessageMediaView: NSView {
         tile.imageActions.fetch = { try await fetch(item, attachment) }
         tile.load {
             let data = try await fetch(item, attachment)
-            guard let image = await AgentAttachmentImporter.previewImage(data: data, pixels: 600) else {
+            guard let image = await AgentAttachmentImporter.previewImage(data: data, pixels: 1200) else {
                 throw ModelError("This image could not be decoded.")
             }
             return image
         } changed: { [weak self] in self?.onHeightChanged?() }
     }
 
+    private func tileHeight(_ tile: AgentMediaTile, width: CGFloat) -> CGFloat {
+        let ratio = tile.image.map { $0.size.width / max(1, $0.size.height) } ?? (4.0 / 3.0)
+        return min(240, max(64, width / max(0.01, ratio)))
+    }
+
     func measuredSize(maxWidth: CGFloat) -> NSSize {
         guard !tiles.isEmpty else { return .zero }
-        if tiles.count == 1 {
-            let ratio = tiles[0].image.map { $0.size.width / max(1, $0.size.height) } ?? (4 / 3)
-            return NSSize(width: min(maxWidth, max(96, 192 * ratio)), height: 192)
-        }
-        let width = min(320, maxWidth)
-        return NSSize(width: width, height: tiles.count <= 3 ? 192 : CGFloat((tiles.count + 1) / 2) * 96 + CGFloat((tiles.count - 1) / 2))
+        let width = min(480, max(0, maxWidth))
+        return NSSize(width: width, height: tiles.reduce(CGFloat(0)) { $0 + tileHeight($1, width: width) } + CGFloat(tiles.count - 1) * 8)
     }
 
     override func layout() {
         super.layout()
-        AgentMessageShape.apply(to: self, bottomRight: joinsTextBubble ? AgentMessageShape.joinedRadius : AgentMessageShape.radius)
-        let count = tiles.count, width = bounds.width
-        for (index, tile) in tiles.enumerated() {
-            if count == 1 { tile.frame = bounds }
-            else if count == 2 { tile.frame = NSRect(x: CGFloat(index) * (width + 1) / 2, y: 0, width: (width - 1) / 2, height: 192) }
-            else if count == 3 {
-                let first = (width - 1) * 0.6
-                tile.frame = index == 0 ? NSRect(x: 0, y: 0, width: first, height: 192)
-                    : NSRect(x: first + 1, y: CGFloat(index - 1) * 96.5, width: width - first - 1, height: 95.5)
-            } else {
-                let full = count % 2 == 1 && index == count - 1
-                tile.frame = NSRect(x: CGFloat(index % 2) * (width + 1) / 2, y: CGFloat(index / 2) * 97,
-                                    width: full ? width : (width - 1) / 2, height: 96)
-            }
+        var y: CGFloat = 0
+        for tile in tiles {
+            let height = tileHeight(tile, width: bounds.width)
+            tile.frame = NSRect(x: 0, y: y, width: bounds.width, height: height)
+            tile.layer?.cornerRadius = 10
+            tile.layer?.cornerCurve = .continuous
+            y += height + 8
         }
     }
+
 }
 
 @MainActor
@@ -143,6 +139,7 @@ final class AgentMediaTile: NSControl {
     var keepsNameToolTip = false { didSet { updateToolPlaceholder() } }
     private var failureMessage: String?
     private var placeholderColor = NSColor.secondaryLabelColor
+    var fitsWholeImage = false
     var transparentBackground = false
     private var background = NSColor.windowBackgroundColor
     var onPress: (() -> Void)?
@@ -241,7 +238,8 @@ final class AgentMediaTile: NSControl {
         super.layout()
         label.frame = NSRect(x: 8, y: max(0, bounds.midY - 10), width: max(0, bounds.width - 16), height: 20)
         if let image, image.size.width > 0, image.size.height > 0 {
-            let scale = max(bounds.width / image.size.width, bounds.height / image.size.height)
+            let scale = fitsWholeImage ? min(bounds.width / image.size.width, bounds.height / image.size.height)
+                : max(bounds.width / image.size.width, bounds.height / image.size.height)
             let size = NSSize(width: image.size.width * scale, height: image.size.height * scale)
             animatedImage.frame = NSRect(x: bounds.midX - size.width / 2, y: bounds.midY - size.height / 2, width: size.width, height: size.height)
         }
@@ -249,7 +247,8 @@ final class AgentMediaTile: NSControl {
     override func draw(_ dirtyRect: NSRect) {
         if image == nil || !transparentBackground { background.setFill(); bounds.fill() }
         if let image, animatedImage.image == nil, image.size.width > 0, image.size.height > 0 {
-            let scale = max(bounds.width / image.size.width, bounds.height / image.size.height)
+            let scale = fitsWholeImage ? min(bounds.width / image.size.width, bounds.height / image.size.height)
+                : max(bounds.width / image.size.width, bounds.height / image.size.height)
             let size = NSSize(width: image.size.width * scale, height: image.size.height * scale)
             NSGraphicsContext.saveGraphicsState()
             bounds.clip()

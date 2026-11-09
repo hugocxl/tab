@@ -22,6 +22,14 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     /// Keeps the pane's saved title in step with the conversation, for the
     /// tab title, sidebar filter and palette.
     var onTitleChange: ((String) -> Void)?
+    private let voice = AgentVoice()
+    private var draftStore: AgentDraftStore?
+    private var draftRestoreTask: Task<Void, Never>?
+    private var draftSaveTask: Task<Void, Never>?
+    private var draftRevision: UInt64 = 0
+    private var restoringDraft = false
+    private var lastSubmission: AgentPrompt?
+    private var questionDrafts: [String: [String: [String]]] = [:]
     private var initialPreferences: AgentComposerPreferences?
     private var savePreferences: ((AgentComposerPreferences?) -> Void)?
     private func persistSelection(access: AgentAccessMode? = nil) {
@@ -127,12 +135,13 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         confirmClose = { [weak model] in
             guard let model, model.settings.window.confirmRunningProcess else { return true }
             return await model.presenter?.confirm(
-                title: "Close this agent tab?",
-                message: "The agent is still running. Closing the tab stops its current work.",
+                title: "Close this agent pane?",
+                message: "Closing this pane stops its current work and cancels any queued prompts.",
                 confirm: "Close",
                 destructive: true
             ) ?? true
         }
+        configureDraftStore(model.dirs.root.appendingPathComponent("agent-drafts/" + pane.description + ".json"))
         onProviderChange = { [weak model] in model?.notify(.activity) }
         restorePreferences(defaults: model.state.agentComposerDefaults, draft: model.state.agentComposerDrafts[pane]) { [weak model] preferences in
             model?.edit { $0.setAgentComposerDraft(preferences, for: pane) }
@@ -286,13 +295,23 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         surface.model.action = #selector(modelSelected(_:))
         surface.effort.target = self
         surface.effort.action = #selector(effortSelected)
-        surface.access.target = self
-        surface.access.action = #selector(accessSelected)
-        for mode in AgentAccessMode.allCases {
-            surface.access.addItem(withTitle: mode.title)
-            surface.access.lastItem?.representedObject = mode
-            surface.access.lastItem?.toolTip = mode.tooltip
+        surface.promptQueue.onEdit = { [weak self] prompt in self?.editQueued(prompt) }
+        surface.promptQueue.onRemove = { [weak self] prompt in self?.run(.removeQueued(session: self?.session ?? SessionId(), id: prompt.id, expectedRevision: prompt.revision)) }
+        surface.promptQueue.onDeliver = { [weak self] prompt in self?.deliverQueued(prompt) }
+        surface.promptQueue.onMove = { [weak self] prompt, before in
+            guard let self else { return }
+            self.run(.moveQueued(session: self.session, id: prompt.id, beforeID: before, expectedRevision: prompt.revision))
         }
+        surface.promptQueue.onResume = { [weak self] in
+            guard let self else { return }
+            self.run(.resumeQueue(session: self.session))
+        }
+        surface.questions.onAnswer = { [weak self] id, answers, cancelled in
+            guard let self, self.commandTask == nil else { return }
+            self.run(.answer(session: self.session, request: id, answers: answers, cancelled: cancelled))
+        }
+        surface.questions.onChange = { [weak self] in self?.saveDraft() }
+        surface.plan.onPress = { [weak self] in self?.togglePlanMode() }
         surface.send.onPress = { [weak self] in self?.send() }
         surface.stop.onPress = { [weak self] in try? self?.surface.actions.interrupt() }
         surface.retry.onPress = { [weak self] in self?.refresh() }
@@ -342,6 +361,19 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
             self?.addAttachments([AgentDraftAttachment(name: name, mimeType: "text/plain", data: Data(content.utf8))])
         }
         composerCoordinator.onError = { [weak self] in self?.showComposerError($0) }
+        voice.onChange = { [weak self] in self?.updateControls() }
+        voice.onError = { [weak self] in self?.showComposerError($0) }
+        voice.onText = { [weak self] text in
+            guard let self, !self.disposed else { return }
+            let separator = self.surface.composer.string.isEmpty ? "" : " "
+            self.surface.composer.insertText(separator + text, replacementRange: NSRange(location: self.surface.composer.textStorage?.length ?? 0, length: 0))
+            self.saveDraft(); self.updateControls()
+        }
+        surface.microphone.onPress = { [weak self] in self?.voice.toggleDictation() }
+        surface.waveform.onPress = { [weak self] in
+            guard let self else { return }
+            self.voice.toggleReading(self.snapshot?.items.last { $0.kind == .assistant && $0.isComplete }?.text ?? "")
+        }
         updateControls()
     }
 
@@ -349,10 +381,10 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         view.window?.makeFirstResponder(surface.composer)
     }
     func didShow() { refresh() }
-    func didHide() {} // Keep the draft, transcript and scroll position when switching projects.
+    func didHide() { voice.stop() } // Keep the draft and scroll position when switching projects.
 
     func willClose() async -> Bool {
-        guard submitting || snapshot?.status == .working || snapshot?.status == .waiting else { return true }
+        guard submitting || snapshot?.status == .working || snapshot?.status == .waiting || snapshot?.queuedPrompts?.isEmpty == false else { return true }
         return await confirmClose?() ?? true
     }
 
@@ -363,6 +395,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         while !created, let pending = refreshTask { await pending.value }
         guard created else { return true }
         do {
+            try await flushDraft()
             _ = try await request(.close(session: session))
             return true
         } catch {
@@ -375,6 +408,8 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     }
 
     func dispose() {
+        voice.stop()
+        saveDraft(immediate: true)
         attachmentCache.cancel()
         filePreview?.close()
         filePreview = nil
@@ -466,10 +501,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
                     }
                     self.created = true
                     self.accept(result, generation: generation, authoritative: true)
-                    if firstSnapshot, result.items.isEmpty, result.providerSession == nil, result.revision <= 1,
-                       let access = self.initialPreferences?.access, access != result.accessMode {
-                        self.run(.setAccess(session: self.session, mode: access))
-                    }
+
                 } catch is CancellationError { return }
                 catch {
                     guard !Task.isCancelled, !self.disposed, generation == self.connectionGeneration else { return }
@@ -480,10 +512,22 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         }
     }
 
+    func togglePlanMode() {
+        guard !surface.composer.hasMarkedText(), !disposed, created, commandTask == nil, !needsAuthoritativeSnapshot else { return }
+        guard snapshot?.status == .idle || snapshot?.status == .failed else {
+            showComposerError("Stop the current response before changing plan mode.")
+            return
+        }
+        run(.setPlan(session: session, enabled: snapshot?.planMode != true)) { [weak self] in
+            self?.lastSubmission = nil; self?.saveDraft()
+        }
+    }
+
     func send() {
         guard !approvalInFlight else { return }
         if composerCoordinator.performTypedAction() { return }
-        let text = AgentComposerCitation.prompt(from: surface.composer.attributedString())
+        let sentDraft = NSAttributedString(attributedString: surface.composer.attributedString())
+        let text = AgentComposerCitation.prompt(from: sentDraft)
         guard !disposed, commandTask == nil, created, canSend,
               preparingAttachments == 0,
               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !draftAttachments.isEmpty else { return }
@@ -503,17 +547,26 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         let sentIDs = Set(attachments.map(\.id))
         composerCoordinator.dismiss()
         surface.scrollToEnd()
-        run(.send(session: session, text: text, model: selection.model,
-                  reasoningEffort: reasoningEffort, provider: selection.provider,
-                  attachments: attachments.isEmpty ? nil : attachments)) { [weak self] in
+        var prompt = AgentPrompt(text: text, model: selection.model, effort: reasoningEffort,
+                                 provider: selection.provider, planMode: snapshot?.planMode == true, attachments: attachments)
+        // A reconnect may update the displayed model or mode after acceptance.
+        // Keep the original delivery identity until the user edits the payload or settings.
+        if let previous = lastSubmission, previous.text == text, previous.attachments == attachments {
+            prompt = previous
+        }
+        lastSubmission = prompt
+        run(.submit(session: session, prompt: prompt)) { [weak self] in
+            self?.lastSubmission = nil
+            self?.saveDraft()
             self?.selectionEdited = false
             self?.savePreferences?(nil)
             self?.draftAttachments.removeAll { sentIDs.contains($0.id) }
             self?.updateAttachments()
             // Don't lose edits typed while the request was in flight, or a failed send.
-            guard let self, self.surface.composer.string == text else { return }
+            guard let self, self.surface.composer.attributedString().isEqual(to: sentDraft) else { return }
             self.surface.composer.string = ""
             self.surface.refreshComposer()
+            self.saveDraft()
         }
     }
 
@@ -617,6 +670,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     }
 
     private func updateAttachments() {
+        saveDraft()
         surface.attachmentStrip.update(draftAttachments, theme: surface.theme)
         surface.needsLayout = true
         updateControls()
@@ -687,7 +741,6 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         case "resume": showHistory(); return
         case "model": control = surface.model
         case "effort": control = surface.effort
-        case "access": control = surface.access
         case "attach": chooseAttachments(); return
         case "stop": stop(); return
         case "clear":
@@ -796,8 +849,8 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
 
     func stop() {
         guard !disposed, !needsAuthoritativeSnapshot, stopTask == nil,
-              submitting || snapshot?.status == .working || snapshot?.status == .waiting else { return }
-        guard snapshot?.status == .working || snapshot?.status == .waiting else {
+              submitting || snapshot?.status == .working || snapshot?.status == .waiting || hasActiveQueue else { return }
+        guard snapshot?.status == .working || snapshot?.status == .waiting || hasActiveQueue else {
             // Do not interrupt ahead of the send's server acceptance. Revision events
             // expose acceptance even while provider initialization still holds the reply.
             stopRequested = true
@@ -828,9 +881,10 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     }
 
     private func run(_ command: AgentChatRequest, onSuccess: (() -> Void)? = nil) {
-        guard !approvalInFlight else { return }
+        guard !approvalInFlight, commandTask == nil, !disposed else { return }
         let generation = connectionGeneration
         if case .send = command { submitting = true }
+        if case .submit = command { submitting = true }
         commandTask = Task { [weak self] in
             guard let self else { return }
             defer {
@@ -844,9 +898,11 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
                 }
             }
             do {
+                if case .submit = command { try await self.flushDraft() }
                 let result = try await self.request(command)
                 guard !Task.isCancelled, !self.disposed, generation == self.connectionGeneration else { return }
-                if result.status != .failed { onSuccess?() }
+                if case .submit = command { onSuccess?() }
+                else if result.status != .failed { onSuccess?() }
                 self.accept(result, generation: generation)
             } catch {
                 guard !Task.isCancelled, !self.disposed, generation == self.connectionGeneration else { return }
@@ -879,43 +935,56 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         surface.render(result)
         if authoritative { surface.actions.project?.refreshProjectMetadata() }
         updateControls()
-        if stopRequested && (result.status == .working || result.status == .waiting) { stop() }
+        if stopRequested && (result.status == .working || result.status == .waiting || hasActiveQueue) { stop() }
         titleDidChange?()
         onTitleChange?(title)
     }
 
     private func showError(_ error: Error) {
-        errorMessage = "\(error.localizedDescription) Your draft is saved here. Retry to reconnect."
+        if (error as? ClientError)?.serverCode == .unsupported {
+            errorMessage = "This server does not support that action. Update Tab on the server, then reconnect. Your draft is retained."
+        } else { errorMessage = error.localizedDescription }
         updateControls()
+    }
+
+    private var hasActiveQueue: Bool {
+        snapshot?.queuePaused != true && snapshot?.queuedPrompts?.isEmpty == false
     }
 
     private var canSend: Bool {
         guard !needsAuthoritativeSnapshot, let snapshot else { return false }
-        return snapshot.status == .idle || snapshot.status == .failed || snapshot.status == .working
+        return !restoringDraft && (snapshot.status == .idle || snapshot.status == .failed || snapshot.status == .working || snapshot.status == .waiting)
     }
 
     private func updateControls() {
         composerCoordinator.providerCommands = selection.provider == .codex
             ? ["compact", "review"] : (snapshot?.provider == .claude ? (snapshot?.commands ?? []) : [])
-        surface.composer.isEditable = !disposed
-        surface.attach.isEnabled = !disposed
+        let interactionsEnabled = !disposed && !needsAuthoritativeSnapshot && commandTask == nil && !approvalInFlight
+        surface.promptQueue.update(snapshot?.queuedPrompts ?? [], paused: snapshot?.queuePaused == true, enabled: interactionsEnabled)
+        surface.questions.update(snapshot?.items.first { $0.questionnaire != nil && !$0.isComplete }, enabled: interactionsEnabled)
+        surface.questions.restore(questionDrafts)
+        surface.plan.isHidden = snapshot?.planMode != true
+        surface.composer.planning = snapshot?.planMode == true
+        surface.composer.isEditable = !disposed && !restoringDraft
+        surface.attach.isEnabled = !disposed && !restoringDraft
+        surface.microphone.isEnabled = !disposed && !restoringDraft && snapshot?.status != .closed
+        surface.microphone.toolTip = voice.state == .idle || voice.state == .speaking ? "Dictate a message on this Mac" : "Finish dictation"
+        surface.waveform.isEnabled = !disposed && (voice.state == .speaking || snapshot?.items.contains { $0.kind == .assistant && $0.isComplete } == true)
+        surface.waveform.toolTip = voice.state == .speaking ? "Stop reading aloud" : "Read latest response aloud"
+        surface.microphone.contentTintColor = voice.state == .listening || voice.state == .authorizing ? surface.theme.accent : surface.theme.fgMuted
+        surface.waveform.contentTintColor = voice.state == .speaking ? surface.theme.accent : surface.theme.fgMuted
         surface.send.isEnabled = !approvalInFlight && !disposed && created && commandTask == nil && canSend &&
             preparingAttachments == 0 && (!surface.composer.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !draftAttachments.isEmpty)
         surface.stop.isEnabled = !disposed && !needsAuthoritativeSnapshot && stopTask == nil && !stopRequested &&
-            (submitting || snapshot?.status == .working || snapshot?.status == .waiting)
-        let busy = submitting || snapshot?.status == .working || snapshot?.status == .waiting
+            (submitting || snapshot?.status == .working || snapshot?.status == .waiting || hasActiveQueue)
+        let busy = submitting || snapshot?.status == .working || snapshot?.status == .waiting || hasActiveQueue
         surface.send.isHidden = false
         surface.send.toolTip = busy
-            ? (selection.provider == .codex ? "Send instructions to the active response" : "Queue a follow-up message")
+            ? "Queue this prompt for the next response"
             : "Send message"
         surface.stop.isHidden = !busy
         surface.model.isEnabled = canEditSelection && !needsAuthoritativeSnapshot
         surface.effort.isEnabled = surface.model.isEnabled && !supportedEfforts.isEmpty
-        surface.access.isEnabled = !disposed && created && !needsAuthoritativeSnapshot && commandTask == nil && snapshot?.status != .closed
-        let mode = snapshot?.accessMode ?? .standard
-        surface.access.select(surface.access.itemArray.first { ($0.representedObject as? AgentAccessMode) == mode })
-        surface.access.icon = mode == .fullAccess ? .lockOpen : mode == .ask ? .hand : .shield
-        surface.access.toolTip = mode.tooltip
         surface.contextIndicator.update(usedTokens: snapshot?.contextUsage?.usedTokens,
                                         contextWindow: snapshot?.contextUsage?.contextWindow)
         surface.setActivity(status: snapshot?.status ?? .idle, submitting: submitting)
@@ -930,6 +999,9 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     }
 
     private var statusText: String {
+        if voice.state == .authorizing { return "Waiting for microphone and speech permission…" }
+        if voice.state == .listening { return "Listening… Click the microphone to finish and review your message." }
+        if voice.state == .speaking { return "Reading response aloud… Click the waveform to stop." }
         if preparingAttachments > 0 { return "Preparing attachments…" }
         if historyTask != nil { return "Looking through past conversations…" }
         if needsAuthoritativeSnapshot { return "Reconnecting… Your transcript and draft are kept here." }
@@ -944,6 +1016,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     }
 
     func textDidChange(_ notification: Notification) {
+        saveDraft()
         updateControls()
         composerCoordinator.changed()
     }
@@ -1015,6 +1088,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
               canChangeProvider || provider == snapshot?.provider else { return }
         let trimmed = model?.trimmingCharacters(in: .whitespacesAndNewlines)
         selection = AgentModelSelection(provider: provider, model: trimmed?.isEmpty == false ? trimmed : nil)
+        lastSubmission = nil; saveDraft()
         composerCoordinator.invalidate()
         if let effort = reasoningEffort, !supportedEfforts.contains(effort) { reasoningEffort = nil }
         selectionEdited = true
@@ -1027,6 +1101,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         guard surface.effort.isEnabled else { return }
         if let effort, !supportedEfforts.contains(effort) { return }
         reasoningEffort = effort
+        lastSubmission = nil; saveDraft()
         selectionEdited = true
         persistSelection()
         titleDidChange?()
@@ -1063,16 +1138,6 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
 
     @objc private func effortSelected() {
         selectEffort(surface.effort.selectedItem?.representedObject as? AgentReasoningEffort)
-    }
-
-    func selectAccess(_ mode: AgentAccessMode) {
-        guard surface.access.isEnabled else { return }
-        run(.setAccess(session: session, mode: mode)) { [weak self] in self?.persistSelection(access: mode) }
-    }
-
-    @objc private func accessSelected() {
-        guard let mode = surface.access.selectedItem?.representedObject as? AgentAccessMode else { return }
-        selectAccess(mode)
     }
 
     private func updateSelectionMenus() {
@@ -1162,4 +1227,98 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
 private enum AgentPaneError: LocalizedError {
     case offline
     var errorDescription: String? { "The project server is offline." }
+}
+
+extension AgentPaneController {
+    private func configureDraftStore(_ url: URL) {
+        let store = AgentDraftStore(url: url)
+        draftStore = store; restoringDraft = true
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.restoringDraft = false; self.updateControls() }
+            do {
+                guard let draft = try await store.read(), !self.disposed else { return }
+                self.surface.composer.textStorage?.setAttributedString(draft.attributed(theme: self.surface.theme))
+                self.lastSubmission = draft.submission
+                self.questionDrafts = draft.answers
+                var attachments: [AgentDraftAttachment] = []
+                for item in draft.attachments {
+                    let thumbnail = item.mimeType.hasPrefix("image/") ? await AgentAttachmentImporter.previewImage(data: item.data, pixels: 160) : nil
+                    attachments.append(.init(id: item.id, name: item.name, mimeType: item.mimeType, data: item.data, thumbnail: thumbnail))
+                }
+                guard !self.disposed else { return }
+                self.draftAttachments = attachments
+                self.updateAttachments()
+                self.surface.refreshComposer()
+            } catch { self.showComposerError(error.localizedDescription) }
+        }
+    }
+
+    private func captureDraft() -> AgentSavedDraft {
+        questionDrafts.merge(surface.questions.savedAnswers) { _, latest in latest }
+        if let snapshot {
+            let pending = Set(snapshot.items.filter { !$0.isComplete && $0.questionnaire != nil }.map(\.id))
+            questionDrafts = questionDrafts.filter { pending.contains($0.key) }
+        }
+        return AgentSavedDraft(text: surface.composer.attributedString(), attachments: draftAttachments,
+                               submission: lastSubmission, answers: questionDrafts)
+    }
+    private func saveDraft(immediate: Bool = false) {
+        guard !restoringDraft, let store = draftStore else { return }
+        draftSaveTask?.cancel()
+        let draft = captureDraft()
+        draftRevision &+= 1
+        let revision = draftRevision
+        draftSaveTask = Task { [weak self] in
+            do {
+                if !immediate { try await Task.sleep(for: .milliseconds(200)) }
+                try Task.checkCancellation()
+                try await store.write(draft, revision: revision)
+            } catch is CancellationError {} catch {
+                self?.showComposerError("Could not save this draft: " + error.localizedDescription)
+            }
+        }
+    }
+    func flushDraft() async throws {
+        voice.stop()
+        await draftRestoreTask?.value
+        guard let store = draftStore else { return }
+        draftSaveTask?.cancel()
+        draftRevision &+= 1
+        try await store.write(captureDraft(), revision: draftRevision)
+    }
+
+    private func editQueued(_ prompt: AgentQueuedPrompt) {
+        guard commandTask == nil else { return }
+        let alert = NSAlert()
+        alert.messageText = "Edit queued prompt"
+        alert.window.appearance = surface.theme.nsAppearance
+        alert.informativeText = prompt.state == .uncertain
+            ? "The earlier delivery may have reached the agent. Editing does not send it again. Attachments stay with the prompt."
+            : "Attachments stay with this prompt. Saving does not send it immediately."
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 440, height: 110))
+        let field = NSTextField(string: prompt.text)
+        field.frame = NSRect(x: 0, y: 38, width: 440, height: 72)
+        field.cell?.wraps = true; field.cell?.isScrollable = false
+        let settings = NSButton(checkboxWithTitle: "Use current model, reasoning effort and plan mode", target: nil, action: nil)
+        settings.frame = NSRect(x: 0, y: 0, width: 440, height: 28)
+        content.addSubview(field); content.addSubview(settings)
+        alert.accessoryView = content
+        alert.addButton(withTitle: "Save"); alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        run(.editQueued(session: session, id: prompt.id, text: field.stringValue, expectedRevision: prompt.revision,
+                        settings: settings.state == .on ? .init(model: effectiveModel, effort: reasoningEffort, planMode: snapshot?.planMode == true) : nil))
+    }
+    private func deliverQueued(_ prompt: AgentQueuedPrompt) {
+        guard commandTask == nil else { return }
+        if prompt.state == .uncertain || prompt.state == .failed {
+            let alert = NSAlert()
+            alert.window.appearance = surface.theme.nsAppearance
+            alert.messageText = "Send this prompt again?"
+            alert.informativeText = "The previous delivery may have reached the agent. Review the conversation first; sending again can repeat its actions."
+            alert.addButton(withTitle: "Send again"); alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+        }
+        run(.deliverQueued(session: session, id: prompt.id, expectedRevision: prompt.revision))
+    }
 }

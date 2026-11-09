@@ -8,7 +8,9 @@ protocol AgentSessionRuntime: Sendable {
     func send(text: String, model: String?, reasoningEffort: AgentReasoningEffort?,
               attachments: [StagedAgentAttachment]) async throws
     func steer(text: String, attachments: [StagedAgentAttachment]) async throws
+    func answer(request: String, answers: [String: [String]], cancelled: Bool) async throws
     func approve(request: String, allow: Bool) async throws
+    func setPlan(_ enabled: Bool) async throws
     func setAccess(_ mode: AgentAccessMode) async throws
     func interrupt() async throws
     func stop()
@@ -32,6 +34,13 @@ struct AgentLaunch: Sendable, Equatable {
 }
 
 extension AgentSessionRuntime {
+    func answer(request: String, answers: [String: [String]], cancelled: Bool) async throws {
+        throw AgentRuntimeError("This runtime does not support question forms.")
+    }
+    func setPlan(_ enabled: Bool) async throws {
+        if enabled { throw AgentRuntimeError("This runtime does not support plan mode.") }
+    }
+
     func steer(text: String, attachments: [StagedAgentAttachment]) async throws {
         throw AgentRuntimeError("This runtime does not support messages during an active response.")
     }
@@ -53,6 +62,10 @@ final class AgentSessions: @unchecked Sendable {
                                   @escaping @Sendable (AgentRuntimeEvent) -> Void) -> any AgentSessionRuntime
     /// All mutable fields are confined to `queue`, including completion callbacks.
     private final class Entry: @unchecked Sendable {
+        var inbox = AgentPromptInbox()
+        var inboxError: String?
+        var deliveryCancelled = false
+        var deliveryID: String?
         var snapshot: AgentChatSnapshot
         let directory: String
         var runtime: (any AgentSessionRuntime)?
@@ -156,6 +169,19 @@ final class AgentSessions: @unchecked Sendable {
                     continue
                 }
                 let entry = Entry(saved.snapshot, directory: saved.directory)
+                do {
+                    entry.inbox = try AgentPromptInbox.load(root.appendingPathComponent("inbox/" + entry.snapshot.session.description + ".json"))
+                    if !entry.inbox.records.isEmpty || entry.inbox.paused {
+                        entry.snapshot.queuedPrompts = entry.inbox.visible
+                        entry.snapshot.queuePaused = entry.inbox.paused
+                    } else if entry.snapshot.queuedPrompts?.isEmpty == false {
+                        throw AgentRuntimeError("The queue acceptance ledger is missing. Pending prompts have not been replayed.")
+                    }
+                } catch {
+                    entry.inboxError = error.localizedDescription
+                    entry.snapshot.queuePaused = true
+                    entry.snapshot.items.append(AgentChatItem(kind: .notice, text: "Queue recovery failed: " + error.localizedDescription))
+                }
                 entry.hasSuccessfulTurn = saved.hasSuccessfulTurn ?? entry.hasSuccessfulTurn
                 entry.forkSource = saved.forkSource
                 entry.forkPoint = saved.forkPoint
@@ -256,7 +282,7 @@ final class AgentSessions: @unchecked Sendable {
     }
 
     private func begin(_ request: AgentChatRequest,
-                       continuation: CheckedContinuation<AgentChatSnapshot, Error>) throws {
+                       continuation: CheckedContinuation<AgentChatSnapshot, Error>, deliveryID: String? = nil) throws {
         if case .create(let id, let project, let provider) = request {
             if let entry = entries[id] {
                 guard entry.snapshot.project == project else {
@@ -268,7 +294,7 @@ final class AgentSessions: @unchecked Sendable {
             guard !stopping else { throw ServiceError(.badRequest, "The server is stopping") }
             let directory = try projectDirectory(project)
             try checkDirectory(directory)
-            let entry = Entry(AgentChatSnapshot(session: id, project: project, provider: provider), directory: directory)
+            let entry = Entry(AgentChatSnapshot(session: id, project: project, provider: provider, accessMode: .fullAccess), directory: directory)
             entries[id] = entry
             touch(entry)
             persist(entry)
@@ -282,7 +308,9 @@ final class AgentSessions: @unchecked Sendable {
         let id: SessionId
         switch request {
         case .read(let session), .send(let session, _, _, _, _, _), .approve(let session, _, _),
-             .interrupt(let session), .close(let session), .setAccess(let session, _): id = session
+             .interrupt(let session), .close(let session), .setAccess(let session, _), .setPlan(let session, _): id = session
+        case .submit(let session, _), .editQueued(let session, _, _, _, _), .removeQueued(let session, _, _),
+             .deliverQueued(let session, _, _), .moveQueued(let session, _, _, _), .resumeQueue(let session), .answer(let session, _, _, _): id = session
         case .create, .fork: throw ServiceError(.badRequest, "Unexpected create")
         }
         guard let entry = entries[id] else { throw ServiceError.unknownSession(id) }
@@ -297,6 +325,29 @@ final class AgentSessions: @unchecked Sendable {
         }
         guard !stopping, entry.snapshot.status != .closed else {
             throw ServiceError(.badRequest, "The agent session is closed or the server is stopping")
+        }
+        if try handleInbox(request, entry: entry) {
+            writer.async { [self] in
+                queue.async {
+                    if let error = entry.inboxError { continuation.resume(throwing: AgentRuntimeError(error)) }
+                    else { continuation.resume(returning: entry.snapshot) }
+                }
+            }
+            return
+        }
+        if case .interrupt = request {
+            entry.deliveryCancelled = true
+            try mutateInbox(entry) { $0.paused = true }
+        }
+        if case .setPlan(_, let enabled) = request {
+            guard !entry.submitting, entry.snapshot.status != .working, entry.snapshot.status != .waiting else {
+                throw ServiceError(.badRequest, "Stop the current response before changing plan mode.")
+            }
+            entry.snapshot.planMode = enabled
+            touch(entry)
+            persist(entry)
+            continuation.resume(returning: entry.snapshot)
+            return
         }
         if case .setAccess(_, let mode) = request {
             entry.snapshot.accessMode = mode
@@ -322,6 +373,9 @@ final class AgentSessions: @unchecked Sendable {
         }
         var stagedAttachments: [StagedAgentAttachment] = []
         if case .send(_, let text, let model, let effort, let requestedProvider, let attachments) = request {
+            guard entry.deliveryID == nil || entry.deliveryID == deliveryID else {
+                throw ServiceError(.badRequest, "A queued prompt is being delivered.")
+            }
             _ = try projectDirectory(entry.snapshot.project)
             try checkDirectory(entry.directory)
             if !entry.submitting, entry.snapshot.status == .working, let runtime = entry.runtime {
@@ -329,17 +383,28 @@ final class AgentSessions: @unchecked Sendable {
                       model == entry.snapshot.model, effort == entry.snapshot.reasoningEffort else {
                     throw ServiceError(.badRequest, "Model and reasoning changes apply after the current response.")
                 }
-                let userID = UUID().uuidString
+                let userID = deliveryID ?? UUID().uuidString
                 let attachmentRoot = root.appendingPathComponent("attachments", isDirectory: true)
                     .appendingPathComponent(id.description).appendingPathComponent(userID)
                 let staged = try AgentAttachments.stage(attachments ?? [], root: attachmentRoot)
                 try AgentAttachments.record(staged, root: attachmentRoot)
                 let generation = entry.generation
                 entry.submitting = true
-                Task {
+                let pending = PendingReply(continuation)
+                entry.pendingSubmission = pending
+                queue.asyncAfter(deadline: .now() + submissionTimeout) { [self] in
+                    guard !pending.finished else { return }
+                    pending.task?.cancel()
+                    receive(.failure("Follow-up delivery timed out. It may have reached the agent; review the conversation before retrying."), session: id, generation: generation)
+                    settleSubmission(entry)
+                }
+                pending.task = Task {
                     do {
                         try await runtime.steer(text: text, attachments: staged)
                         self.queue.async {
+                            guard !pending.finished else { return }
+                            pending.finished = true
+                            if entry.pendingSubmission === pending { entry.pendingSubmission = nil }
                             guard entry.generation == generation else {
                                 continuation.resume(throwing: AgentRuntimeError("The conversation changed before the message was accepted."))
                                 return
@@ -353,6 +418,9 @@ final class AgentSessions: @unchecked Sendable {
                         }
                     } catch {
                         self.queue.async {
+                            guard !pending.finished else { return }
+                            pending.finished = true
+                            if entry.pendingSubmission === pending { entry.pendingSubmission = nil }
                             if entry.generation == generation { entry.submitting = false }
                             try? FileManager.default.removeItem(at: attachmentRoot)
                             // The turn ended while the follow-up was on its way; its idle
@@ -362,7 +430,7 @@ final class AgentSessions: @unchecked Sendable {
                                 continuation.resume(throwing: error)
                                 return
                             }
-                            do { try self.begin(request, continuation: continuation) }
+                            do { try self.begin(request, continuation: continuation, deliveryID: deliveryID) }
                             catch { continuation.resume(throwing: error) }
                         }
                     }
@@ -394,7 +462,7 @@ final class AgentSessions: @unchecked Sendable {
             if entry.runtime == nil, entry.hasSuccessfulTurn, entry.snapshot.providerSession == nil {
                 throw ServiceError(.badRequest, "The provider has not supplied a session ID to resume this conversation")
             }
-            let userID = UUID().uuidString
+            let userID = deliveryID ?? UUID().uuidString
             let attachmentRoot = root.appendingPathComponent("attachments", isDirectory: true)
                 .appendingPathComponent(id.description, isDirectory: true)
                 .appendingPathComponent(userID, isDirectory: true)
@@ -441,10 +509,22 @@ final class AgentSessions: @unchecked Sendable {
             touch(entry)
             persist(entry)
         }
+        if case .answer(_, let request, let answers, let cancelled) = request {
+            if entry.snapshot.items.contains(where: { $0.id == request && $0.questionnaire != nil && $0.isComplete }) {
+                continuation.resume(returning: entry.snapshot)
+                return
+            }
+            guard !entry.approving.contains(request), let item = entry.snapshot.items.first(where: { $0.id == request && !$0.isComplete }),
+                  let form = item.questionnaire, entry.runtime != nil else {
+                throw ServiceError(.badRequest, "This question is no longer pending.")
+            }
+            try form.validate(answers: answers, cancelled: cancelled)
+            entry.approving.insert(request)
+        }
         if case .approve(_, let request, _) = request {
             guard !entry.submitting, entry.snapshot.status == .waiting,
                   !entry.approving.contains(request),
-                  entry.snapshot.items.contains(where: { $0.id == request && $0.kind == .approval && !$0.isComplete }) else {
+                  entry.snapshot.items.contains(where: { $0.id == request && $0.kind == .approval && !$0.isComplete && $0.questionnaire == nil }) else {
                 throw ServiceError(.badRequest, "This approval is no longer pending")
             }
         }
@@ -495,6 +575,7 @@ final class AgentSessions: @unchecked Sendable {
             }
             continuation.resume(returning: entry.snapshot)
         }
+        let planMode = entry.snapshot.planMode == true
         pending.task = Task { [self] in
             guard !Task.isCancelled else { return }
             let failure: Error?
@@ -504,9 +585,11 @@ final class AgentSessions: @unchecked Sendable {
                     try await accessTask?.value
                     _ = await baselineTask?.value
                     try Task.checkCancellation()
+                    try await runtime.setPlan(planMode)
                     try await runtime.send(text: text, model: model, reasoningEffort: effort, attachments: turnAttachments)
                 case .setAccess: try await accessTask?.value
                 case .approve(_, let request, let allow): try await runtime.approve(request: request, allow: allow)
+                case .answer(_, let request, let answers, let cancelled): try await runtime.answer(request: request, answers: answers, cancelled: cancelled)
                 case .interrupt: try await runtime.interrupt()
                 default: break
                 }
@@ -520,6 +603,7 @@ final class AgentSessions: @unchecked Sendable {
                 if entry.generation == generation, entry.snapshot.status != .closed, !stopping {
                     if case .send = request { entry.submitting = false }
                     if case .approve(_, let request, _) = request { entry.approving.remove(request) }
+                    if case .answer(_, let request, _, _) = request { entry.approving.remove(request) }
                     if let failure {
                         if case .interrupt = request {
                             entry.interrupting = nil
@@ -559,6 +643,7 @@ final class AgentSessions: @unchecked Sendable {
                 }
                 persist(entry)
                 continuation.resume(returning: entry.snapshot)
+                self.drainInbox(entry)
             }
         }
     }
@@ -669,6 +754,9 @@ final class AgentSessions: @unchecked Sendable {
             guard usage.usedTokens >= 0, usage.contextWindow.map({ $0 > 0 }) ?? true,
                   entry.snapshot.contextUsage != usage else { return }
             entry.snapshot.contextUsage = usage
+        case .planMode(let enabled):
+            entry.snapshot.planMode = enabled
+            persist(entry)
         case .commands(let commands):
             entry.snapshot.commands = Array(commands.filter {
                 !$0.isEmpty && $0.utf8.count <= 128 &&
@@ -690,7 +778,12 @@ final class AgentSessions: @unchecked Sendable {
         if entry.snapshot.status == .idle || entry.snapshot.status == .failed || entry.snapshot.status == .closed {
             persist(entry)
         }
-        if entry.snapshot.status == .failed || entry.snapshot.status == .closed { settleSubmission(entry) }
+        if entry.snapshot.status == .failed || entry.snapshot.status == .closed {
+            settleSubmission(entry)
+            do { try mutateInbox(entry) { $0.paused = true } }
+            catch { entry.inboxError = error.localizedDescription }
+        }
+        drainInbox(entry)
         if case .providerSession = event { persist(entry) }
     }
 
@@ -813,6 +906,15 @@ final class AgentSessions: @unchecked Sendable {
 
     private func close(_ entry: Entry) {
         guard entry.snapshot.status != .closed else { return }
+        entry.deliveryCancelled = true
+        if !entry.inbox.visible.isEmpty {
+            do {
+                try mutateInbox(entry) { inbox in
+                    inbox.paused = true
+                    for index in inbox.records.indices { inbox.records[index].prompt = nil; inbox.records[index].display = nil }
+                }
+            } catch { entry.snapshot.items.append(AgentChatItem(kind: .notice, text: "Could not save queue cancellation: " + error.localizedDescription)) }
+        }
         retireRuntime(entry)
         entry.snapshot.status = .closed
         updateTurn(entry, status: .closed, outcome: .cancelled)
@@ -885,6 +987,7 @@ final class AgentSessions: @unchecked Sendable {
 
     private func observedItem(_ value: AgentChatItem, entry: Entry, previous: AgentChatItem? = nil) -> AgentChatItem {
         var item = value
+        item.questionnaire = item.questionnaire ?? previous?.questionnaire
         let now = Date()
         item.createdAt = item.createdAt ?? previous?.createdAt ?? item.tool?.startedAt ?? now
         item.updatedAt = item.updatedAt ?? now
@@ -1098,7 +1201,7 @@ final class AgentSessions: @unchecked Sendable {
             let item = entry.snapshot.items[index]
             let pending = item.kind == .approval && !item.isComplete
             guard pending || item.id == userID else { continue }
-            if let bounded = boundedItem(item, budget: pending ? 2048 : min(64 * 1024, remaining), pending: pending) {
+            if let bounded = boundedItem(item, budget: pending ? min(remaining, max(2048, (item.questionnaire?.transcriptByteCount ?? 0) + 1024)) : min(64 * 1024, remaining), pending: pending) {
                 entry.snapshot.items[index] = bounded
                 remaining -= bounded.transcriptByteCount
                 preserved.insert(item.id)
@@ -1312,6 +1415,161 @@ final class AgentSessions: @unchecked Sendable {
                 try JSONEncoder().encode(saved).write(to: file, options: .atomic)
                 self.cleanupCheckpoints(saved)
             } catch { ServerLog.error("agent checkpoint failed: \(error)") }
+        }
+    }
+}
+
+extension AgentSessions {
+    private func mutateInbox(_ entry: Entry, _ change: (inout AgentPromptInbox) throws -> Void) throws {
+        if let error = entry.inboxError { throw AgentRuntimeError("Queue storage is unavailable: " + error) }
+        var next = entry.inbox
+        try change(&next)
+        entry.inbox = next
+        entry.snapshot.queuedPrompts = next.visible
+        entry.snapshot.queuePaused = next.paused
+        touch(entry)
+        persist(entry)
+        let file = root.appendingPathComponent("inbox/" + entry.snapshot.session.description + ".json")
+        let savedInbox = next
+        writer.async { [self] in
+            do { try savedInbox.save(file) }
+            catch {
+                let message = "Queue could not be saved: " + error.localizedDescription
+                queue.async { [self] in
+                    entry.inboxError = message
+                    entry.inbox.paused = true
+                    entry.snapshot.queuePaused = true
+                    entry.snapshot.items.append(AgentChatItem(kind: .notice, text: message))
+                    touch(entry)
+                }
+            }
+        }
+    }
+
+    private func handleInbox(_ request: AgentChatRequest, entry: Entry) throws -> Bool {
+        switch request {
+        case .submit(_, let prompt):
+            guard prompt.provider == entry.snapshot.provider || entry.snapshot.providerSession == nil else {
+                throw AgentRuntimeError("An established conversation cannot switch providers.")
+            }
+            try mutateInbox(entry) { try $0.submit(prompt) }
+            drainInbox(entry)
+        case .editQueued(_, let id, let text, let revision, let settings):
+            try mutateInbox(entry) { inbox in
+                let index = try inbox.index(id, revision: revision)
+                if let settings {
+                    inbox.records[index].prompt?.model = settings.model
+                    inbox.records[index].prompt?.effort = settings.effort
+                    inbox.records[index].prompt?.planMode = settings.planMode
+                }
+                inbox.records[index].prompt?.text = text
+                if let prompt = inbox.records[index].prompt { try prompt.validate() }
+                inbox.records[index].display?.text = text
+                inbox.records[index].display?.revision += 1
+            }
+        case .moveQueued(_, let id, let before, let revision):
+            try mutateInbox(entry) { inbox in
+                let index = try inbox.index(id, revision: revision)
+                guard inbox.records[index].display?.state == .queued,
+                      let target = inbox.records.firstIndex(where: { $0.id == before && $0.display?.state == .queued }), index != target else {
+                    throw AgentRuntimeError("Only undelivered prompts can be reordered.")
+                }
+                let record = inbox.records.remove(at: index)
+                inbox.records.insert(record, at: target > index ? target - 1 : target)
+                for i in inbox.records.indices where inbox.records[i].display != nil { inbox.records[i].display?.revision += 1 }
+            }
+        case .removeQueued(_, let id, let revision):
+            try mutateInbox(entry) { inbox in
+                let index = try inbox.index(id, revision: revision)
+                inbox.records[index].prompt = nil
+                inbox.records[index].display = nil
+            }
+        case .resumeQueue:
+            guard entry.snapshot.status != .failed else {
+                throw AgentRuntimeError("Review the failed response and use Send now on the prompt you want to retry.")
+            }
+            try mutateInbox(entry) { $0.paused = false }
+            drainInbox(entry)
+        case .deliverQueued(_, let id, let revision):
+            let index = try entry.inbox.index(id, revision: revision)
+            try deliverInbox(entry, index: index)
+        default: return false
+        }
+        return true
+    }
+
+    private func drainInbox(_ entry: Entry) {
+        guard !stopping, entry.snapshot.status == .idle, !entry.submitting, entry.deliveryID == nil,
+              entry.interrupting == nil, !entry.inbox.paused,
+              let index = entry.inbox.records.firstIndex(where: { $0.display?.state == .queued }) else { return }
+        do { try deliverInbox(entry, index: index) }
+        catch {
+            try? mutateInbox(entry) { $0.paused = true }
+            entry.snapshot.items.append(AgentChatItem(kind: .notice, text: "Queue paused: " + error.localizedDescription))
+            touch(entry)
+        }
+    }
+
+    private func deliverInbox(_ entry: Entry, index: Int) throws {
+        guard !entry.submitting, entry.deliveryID == nil, entry.interrupting == nil,
+              entry.snapshot.status != .waiting, entry.snapshot.status != .closed,
+              let prompt = entry.inbox.records[index].prompt else {
+            throw AgentRuntimeError("Wait for the current interaction before delivering this prompt.")
+        }
+        if entry.snapshot.status == .working {
+            guard prompt.model == entry.snapshot.model, prompt.effort == entry.snapshot.reasoningEffort,
+                  prompt.provider == entry.snapshot.provider, prompt.planMode == (entry.snapshot.planMode == true) else {
+                throw AgentRuntimeError("This prompt uses different model or plan settings. It must wait for the next turn.")
+            }
+        } else { entry.snapshot.planMode = prompt.planMode }
+        try mutateInbox(entry) { inbox in
+            inbox.records[index].display?.state = .delivering
+            inbox.records[index].display?.error = nil
+            inbox.records[index].display?.revision += 1
+        }
+        let attemptID = UUID().uuidString
+        entry.deliveryID = attemptID
+        entry.deliveryCancelled = false
+        let id = entry.snapshot.session
+        Task { [self] in
+            let outcome: Result<AgentChatSnapshot, Error>
+            do {
+                let snapshot: AgentChatSnapshot = try await withCheckedThrowingContinuation { continuation in
+                    writer.async { [self] in
+                      queue.async { [self] in
+                        do {
+                            if let error = entry.inboxError { throw AgentRuntimeError(error) }
+                            guard !stopping, entry.snapshot.status != .closed, entry.deliveryID == attemptID, !entry.deliveryCancelled else {
+                                throw AgentRuntimeError("Delivery was cancelled before it began.")
+                            }
+                            try begin(.send(session: id, text: prompt.text, model: prompt.model, reasoningEffort: prompt.effort,
+                                            provider: prompt.provider, attachments: prompt.attachments),
+                                      continuation: continuation, deliveryID: attemptID)
+                        } catch { continuation.resume(throwing: error) }
+                      }
+                    }
+                }
+                outcome = .success(snapshot)
+            } catch { outcome = .failure(error) }
+            queue.async { [self] in
+                entry.deliveryID = nil
+                do {
+                    try mutateInbox(entry) { inbox in
+                        guard let index = inbox.records.firstIndex(where: { $0.id == prompt.id }) else { return }
+                        switch outcome {
+                        case .success(let snapshot) where snapshot.status != .failed && snapshot.status != .closed:
+                            inbox.records[index].prompt = nil
+                            inbox.records[index].display = nil
+                        default:
+                            inbox.paused = true
+                            inbox.records[index].display?.state = .uncertain
+                            inbox.records[index].display?.error = "Delivery did not finish cleanly. Review the conversation before sending again."
+                            inbox.records[index].display?.revision += 1
+                        }
+                    }
+                } catch { entry.inboxError = error.localizedDescription }
+                drainInbox(entry)
+            }
         }
     }
 }

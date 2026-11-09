@@ -19,6 +19,7 @@ extension AgentPaneController {
     /// Cmd-F, Cmd-G and Shift-Cmd-G in an agent pane; false lets the key go on.
     @MainActor
     func performConversationShortcut(_ id: ShortcutId) -> Bool {
+        if id == .toggleAgentPlan { togglePlanMode(); return true }
         guard let action = AgentConversationFindAction(shortcut: id) else { return false }
         return surface.performFind(action)
     }

@@ -34,6 +34,7 @@ final class AgentPaneTests: XCTestCase {
         let session = SessionId()
         let project = ProjectId()
         var requests: [AgentChatRequest] = []
+        var submissions: [AgentPrompt] = []
         var failSend = false
         var failSendSnapshot = false
         var failCreate = false
@@ -45,11 +46,19 @@ final class AgentPaneTests: XCTestCase {
         var approvalGate: CheckedContinuation<Void, Never>?
         var gateNextApproval = false
         var failApproval = false
-        lazy var snapshot = AgentChatSnapshot(session: session, project: project, provider: .claude)
+        lazy var snapshot = AgentChatSnapshot(session: session, project: project, provider: .claude, accessMode: .fullAccess)
 
         func request(_ request: AgentChatRequest) async throws -> AgentChatSnapshot {
-            requests.append(request)
-            switch request {
+            // Keep existing lifecycle fixtures shared by legacy send and durable submission.
+            let operation: AgentChatRequest
+            if case .submit(let session, let prompt) = request {
+                submissions.append(prompt)
+                operation = .send(session: session, text: prompt.text, model: prompt.model,
+                                  reasoningEffort: prompt.effort, provider: prompt.provider, attachments: prompt.attachments.isEmpty ? nil : prompt.attachments)
+            } else { operation = request }
+            requests.append(operation)
+            switch operation {
+            case .submit, .editQueued, .moveQueued, .removeQueued, .deliverQueued, .resumeQueue, .answer: break
             case .create, .fork:
                 if failCreate { throw NSError(domain: "Offline", code: 1) }
             case .send(_, let text, let model, let effort, let provider, _):
@@ -88,6 +97,10 @@ final class AgentPaneTests: XCTestCase {
             case .interrupt:
                 snapshot.status = .idle
                 snapshot.revision += 1
+            case .setPlan(_, let enabled):
+                snapshot.planMode = enabled
+                snapshot.revision += 1
+                return snapshot
             case .setAccess(_, let mode):
                 snapshot.accessMode = mode
                 snapshot.revision += 1
@@ -119,6 +132,31 @@ final class AgentPaneTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(10))
         }
         XCTFail("Agent pane did not settle")
+    }
+
+    func testAmbiguousRetryKeepsIdentityAcrossAuthoritativeSettingChanges() async throws {
+        let backend = Backend()
+        let pane = backend.controller()
+        defer { pane.dispose() }
+        pane.refresh()
+        try await wait { pane.snapshot != nil }
+        backend.failSend = true
+        pane.surface.composer.string = "Exactly once"
+        pane.send()
+        try await wait { backend.submissions.count == 1 && pane.surface.send.isEnabled }
+        let first = try XCTUnwrap(backend.submissions.first)
+        backend.snapshot.model = "server-selected-model"
+        backend.snapshot.planMode = true
+        backend.snapshot.revision += 1
+        pane.refresh()
+        try await wait { pane.snapshot?.planMode == true }
+        pane.send()
+        try await wait { backend.submissions.count == 2 && pane.surface.send.isEnabled }
+        XCTAssertEqual(backend.submissions[1], first, "Refreshing settings must not turn an ambiguous retry into a new execution")
+        pane.selectModel(provider: .claude, model: "explicit-new-choice")
+        pane.send()
+        try await wait { backend.submissions.count == 3 && pane.surface.send.isEnabled }
+        XCTAssertNotEqual(backend.submissions[2].id, first.id)
     }
 
     func testConversationTitleReachesThePaneTitleLikeATerminalsDoes() async throws {
@@ -215,7 +253,7 @@ final class AgentPaneTests: XCTestCase {
         })
         XCTAssertEqual(pane.surface.contextIndicator.fractionUsed ?? -1, 0.21, accuracy: 0.001)
         XCTAssertTrue(pane.surface.feedback.isHidden)
-        for control in [pane.surface.model, pane.surface.effort, pane.surface.access] {
+        for control in [pane.surface.model, pane.surface.effort] {
             XCTAssertEqual(control.frame.width, control.intrinsicContentSize.width)
         }
         backend.snapshot.contextUsage = .init(usedTokens: 123)
@@ -331,21 +369,6 @@ final class AgentPaneTests: XCTestCase {
         try await wait { pane.snapshot?.status == .idle }
     }
 
-    func testAccessCanChangeWhileWaitingAndSurvivesRefresh() async throws {
-        let backend = Backend()
-        backend.snapshot.status = .waiting
-        let pane = backend.controller()
-        defer { pane.dispose() }
-        pane.refresh()
-        try await wait { pane.snapshot != nil }
-        XCTAssertTrue(pane.surface.access.isEnabled)
-        pane.selectAccess(.fullAccess)
-        try await wait { pane.snapshot?.accessMode == .fullAccess }
-        pane.refresh()
-        try await wait { backend.requests.contains(.read(session: backend.session)) }
-        XCTAssertEqual(pane.surface.access.selectedItem?.representedObject as? AgentAccessMode, .fullAccess)
-    }
-
     func testStopInterruptsAcceptedStartupBeforeSendReplyArrives() async throws {
         let backend = Backend()
         let pane = backend.controller()
@@ -368,7 +391,7 @@ final class AgentPaneTests: XCTestCase {
         backend.sendGate = nil
     }
 
-    func testFailedSnapshotPreservesDraftAndAllowsStableModelCorrectionBeforeRetry() async throws {
+    func testDurableAcceptanceClearsDraftEvenWhenEarlierTurnFailedAndAllowsModelCorrection() async throws {
         let backend = Backend()
         let pane = backend.controller()
         defer { pane.dispose() }
@@ -379,7 +402,7 @@ final class AgentPaneTests: XCTestCase {
         pane.selectModel(provider: .claude, model: "invalid-model")
         pane.send()
         try await wait { pane.snapshot?.status == .failed }
-        XCTAssertEqual(pane.surface.composer.string, "Fix the tests")
+        XCTAssertTrue(pane.surface.composer.string.isEmpty, "The accepted queue now owns the prompt")
         XCTAssertTrue(pane.surface.model.isEnabled)
         pane.selectModel(provider: .claude, model: "corrected-model")
         pane.refresh()
@@ -388,6 +411,7 @@ final class AgentPaneTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(30))
         XCTAssertEqual(pane.selection.model, "corrected-model")
         backend.failSendSnapshot = false
+        pane.surface.composer.string = "Retry with the corrected model"
         pane.send()
         try await wait { pane.snapshot?.status == .working }
         XCTAssertEqual(backend.snapshot.model, "corrected-model")
@@ -757,12 +781,12 @@ final class AgentPaneTests: XCTestCase {
         pane.surface.render(backend.snapshot)
         pane.view.layoutSubtreeIfNeeded()
         let after = pane.surface.composerScroll.convert(pane.surface.composerScroll.bounds, to: pane.view)
-        XCTAssertEqual(before.minY, after.minY, accuracy: 1)
+        XCTAssertGreaterThan(after.minY, before.minY, "Empty composer moves from center to bottom on the first message")
         XCTAssertEqual(after.height, before.height, accuracy: 1)
         XCTAssertGreaterThanOrEqual(after.height, 56)
         XCTAssertLessThanOrEqual(after.height, 164)
-        // Only the action row and compact footer may sit below the message editor.
-        XCTAssertLessThan(pane.view.bounds.maxY - after.maxY, 100)
+        // Narrow panes place model controls on a second row below the voice and send actions.
+        XCTAssertLessThan(pane.view.bounds.maxY - after.maxY, 140)
         let document = pane.surface.transcriptScroll.documentView as? AgentTranscriptDocument
         XCTAssertEqual(document?.entryCount, backend.snapshot.items.count)
         XCTAssertLessThan(document?.mountedRowCount ?? .max, 50)

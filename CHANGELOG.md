@@ -3,6 +3,28 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.88.0 - 2026-11-09
+
+### Added
+
+- Queue follow-up prompts with controls to edit, reorder, remove or send them immediately,
+  and recover pending work after reconnecting or restarting.
+- Answer agent question forms with choices, custom text and private answers directly in the conversation.
+- Toggle plan mode with Shift-Tab or its removable chip.
+- Dictate messages on your Mac and read completed agent responses aloud.
+
+### Changed
+
+- Agent composers use a continuous rounded border, center in empty conversations and adapt their controls to narrow panes.
+- New agent conversations default to full access without an access selector in the composer.
+- Completed approvals and question answers remain visible in the conversation, with private answers hidden.
+
+### Fixed
+
+- Drafts retain text, attachments and citations across app restarts, and sending clears only the draft that was accepted.
+- Retrying an interrupted submission does not duplicate accepted work, and stopping pauses pending prompts.
+- Screenshot attachments show the complete image instead of cropping it into narrow tiles.
+
 ## 0.87.0 - 2026-11-09
 
 ### Added

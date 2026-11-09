@@ -13,6 +13,7 @@ final class AgentComposerTextView: NSTextView {
     var onOpenCitation: ((AgentAssistantCitation) -> Void)?
     /// Copied assistant text of this conversation pastes as a quotation when this returns true.
     var onPasteContext: ((NSPasteboard) -> Bool)?
+    var planning = false { didSet { needsDisplay = true } }
     var placeholderColor = NSColor.secondaryLabelColor
     private var acceptingAttachmentDrop = false { didSet { needsDisplay = true } }
     private let ownedStorage: NSTextStorage?
@@ -120,7 +121,7 @@ final class AgentComposerTextView: NSTextView {
             outline.stroke()
         }
         guard string.isEmpty, !hasMarkedText() else { return }
-        ("Ask to make changes, @mention files, run /commands" as NSString).draw(at: textContainerOrigin, withAttributes: [
+        ((planning ? "Plan changes" : "Plan, Build, / for skills, @ for context") as NSString).draw(at: textContainerOrigin, withAttributes: [
             .font: font ?? AppFont.system(14, weight: .light), .foregroundColor: placeholderColor,
         ])
     }
@@ -266,14 +267,14 @@ final class AgentRoundButton: AgentComposerButton {
     override var isEnabled: Bool { didSet { needsDisplay = true } }
 
     override func draw(_ dirtyRect: NSRect) {
-        let fill = isEnabled ? (kind == .stop ? chatTheme.danger : chatTheme.accent) : chatTheme.fg.withAlphaComponent(0.10)
+        let fill = isEnabled ? (kind == .stop ? chatTheme.danger : chatTheme.fg) : chatTheme.fg.withAlphaComponent(0.10)
         fill.setFill()
         NSBezierPath(ovalIn: bounds.insetBy(dx: 1, dy: 1)).fill()
         if isEnabled && (hovered || isHighlighted) {
             chatTheme.fg.withAlphaComponent(isHighlighted ? 0.16 : 0.08).setFill()
             NSBezierPath(ovalIn: bounds.insetBy(dx: 1, dy: 1)).fill()
         }
-        let ink = isEnabled ? chatTheme.accentForeground : chatTheme.fgDim
+        let ink = isEnabled ? (kind == .stop ? chatTheme.accentForeground : chatTheme.paneBackground) : chatTheme.fgDim
         let icon: AppIcon = kind == .stop ? .stop : .arrowUp
         let size: CGFloat = kind == .stop ? 10 : 14
         icon.image(size: size, color: ink)?.draw(
@@ -322,4 +323,32 @@ final class AgentEndButton: AgentComposerButton {
     }
 
     @objc private func pressed() { if isEnabled { onPress?() } }
+}
+
+/// A removable, theme-tinted collaboration-mode chip.
+@MainActor
+final class AgentPlanButton: AgentComposerButton {
+    var onPress: (() -> Void)?
+    var chatTheme: AppTheme = .shared { didSet { needsDisplay = true } }
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        title = "Plan"
+        isBordered = false
+        setButtonType(.momentaryPushIn)
+        target = self
+        action = #selector(pressed)
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    override var isFlipped: Bool { true }
+    override func draw(_ dirtyRect: NSRect) {
+        let color = chatTheme.warning
+        color.withAlphaComponent(hovered ? 0.22 : 0.12).setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: bounds.height / 2, yRadius: bounds.height / 2).fill()
+        AppIcon.listTodo.image(size: 14, color: color)?.draw(in: NSRect(x: 9, y: 7, width: 14, height: 14),
+            from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+        ("Plan" as NSString).draw(at: NSPoint(x: 29, y: 5), withAttributes: [.font: AppFont.small, .foregroundColor: color])
+        AppIcon.close.image(size: 10, color: color)?.draw(in: NSRect(x: bounds.width - 19, y: 9, width: 10, height: 10),
+            from: .zero, operation: .sourceOver, fraction: 0.7, respectFlipped: true, hints: nil)
+    }
+    @objc private func pressed() { onPress?() }
 }

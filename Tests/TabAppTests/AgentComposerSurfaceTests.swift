@@ -6,6 +6,34 @@ import XCTest
 
 @MainActor
 final class AgentComposerSurfaceTests: XCTestCase {
+    func testEmptyComposerCentersAndPlanChipFitsWithoutOverlappingControls() throws {
+        for width in [CGFloat(360), 680, 1000] {
+            let view = surface(width: width)
+            let card = view.composerScroll.superview
+            XCTAssertEqual(card?.frame.midY ?? 0, view.bounds.midY, accuracy: 1)
+            view.plan.isHidden = false
+            view.needsLayout = true
+            view.layoutSubtreeIfNeeded()
+            if let output = ProcessInfo.processInfo.environment["TAB_SNAPSHOT_DIR"] {
+                let window = NSWindow(contentRect: view.bounds, styleMask: [.borderless], backing: .buffered, defer: false)
+                window.isReleasedWhenClosed = false
+                window.contentView = view
+                view.composer.planning = true
+                view.theme = AppTheme(systemIsDark: true)
+                view.themeDidChange()
+                view.layoutSubtreeIfNeeded()
+                let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+                view.cacheDisplay(in: view.bounds, to: bitmap)
+                try FileManager.default.createDirectory(atPath: output, withIntermediateDirectories: true)
+                try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: URL(fileURLWithPath: output + "/empty-plan-\(Int(width)).png"))
+                window.close()
+            }
+            for other in [view.attach, view.model, view.effort, view.send, view.stop] {
+                XCTAssertFalse(view.plan.frame.intersects(other.frame))
+            }
+        }
+    }
+
     func testComposerElevationPreservesDarkModeAndBrightensLightMode() {
         for dark in [false, true] {
             let scheme = ColorScheme(background: RGBColor(dark ? 0x102030 : 0xF0E0D0),
@@ -21,15 +49,14 @@ final class AgentComposerSurfaceTests: XCTestCase {
         let surface = AgentPaneView(frame: NSRect(x: 0, y: 0, width: width, height: 700))
         surface.model.addItem(withTitle: "A custom model with a very long name")
         surface.effort.addItem(withTitle: "Extra high")
-        surface.access.addItem(withTitle: "Full access")
         surface.layoutSubtreeIfNeeded()
         return surface
     }
 
-    func testAllThreeNativePickersRemainAccessibleInNarrowAndWideSplits() {
+    func testModelAndEffortRemainAccessibleWithoutAccessSelector() {
         for width in [CGFloat(360), 560, 680, 1000] {
             let surface = surface(width: width)
-            let controls = [surface.model, surface.effort, surface.access]
+            let controls = [surface.model, surface.effort]
             for control in controls {
                 XCTAssertFalse(control.isHiddenOrHasHiddenAncestor)
                 XCTAssertGreaterThanOrEqual(control.frame.width, 70)
@@ -42,9 +69,6 @@ final class AgentComposerSurfaceTests: XCTestCase {
                 for other in controls.indices where other > index {
                     XCTAssertFalse(controls[index].frame.intersects(controls[other].frame))
                 }
-            }
-            if width == 360 {
-                XCTAssertGreaterThan(surface.access.frame.minY, surface.model.frame.minY)
             }
         }
     }
@@ -127,7 +151,6 @@ final class AgentComposerSurfaceTests: XCTestCase {
         surface.layoutSubtreeIfNeeded()
         XCTAssertEqual(surface.composer.string, draft)
         XCTAssertEqual(surface.composerScroll.frame.height, 164, accuracy: 1)
-        XCTAssertFalse(surface.access.isHiddenOrHasHiddenAncestor)
     }
 
     func testBackdropUsesCurrentPaletteAfterPublishedThemeChange() async throws {
