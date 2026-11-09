@@ -359,4 +359,24 @@ final class DetectionTrackerTests: XCTestCase {
             XCTAssertEqual(tracker.state, expected, screen, file: file, line: line)
         }
     }
+
+    func testClaudeTurnEndingWithBackgroundWorkKeepsWorking() {
+        let prompt = "\n────────────\n❯ \n────────────\n  [Opus] │ tab\n"
+        let running = "● Both agents are still running.\n\n✻ Baked for 1s · done 9:14 AM · 2 shells still running" + prompt
+        let wrapped = "✻ Crunched for 2m 57s · done 9:14 AM · 1\n  agent still running" + prompt
+        let finished = "✻ Crunched for 2m 57s · done 9:14 AM · 2 shells still running\n\n● Done.\n\n✻ Baked for 1s"
+            + prompt
+
+        XCTAssertFalse(update(.claude, running, at: 0))
+        XCTAssertEqual(tracker.state, .working)
+        XCTAssertTrue(tracker.backgroundWork)
+        XCTAssertFalse(update(.claude, wrapped, at: 100))
+        XCTAssertTrue(tracker.backgroundWork)
+        XCTAssertFalse(update(.claude, finished, at: 200))
+        XCTAssertTrue(update(.claude, finished, at: 600))
+        XCTAssertFalse(tracker.backgroundWork)
+        XCTAssertFalse(update(.claude, "✻ Working… (3s · esc to interrupt)" + prompt, at: 700))
+        XCTAssertEqual(tracker.state, .working)
+        XCTAssertFalse(tracker.backgroundWork)
+    }
 }

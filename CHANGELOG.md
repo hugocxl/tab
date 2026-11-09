@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.83.1 - 2026-11-09
+
+### Fixed
+
+- A Claude Code card keeps showing that it's working after a turn ends while its shells or agents still run in the
+  background.
+
 ## 0.83.0 - 2026-11-09
 
 ### Added

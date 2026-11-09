@@ -55,6 +55,8 @@ public final class AgentDetector: AgentDetectorProtocol, @unchecked Sendable {
         var state: AgentState
         /// The rule saw an explicit idle prompt, so idle confirms sooner.
         var explicitIdle: Bool
+        /// Work the agent started still runs after its turn ended.
+        var backgroundWork = false
     }
 
     /// The first matching rule by priority; `nil` when it asks to keep the
@@ -70,7 +72,8 @@ public final class AgentDetector: AgentDetectorProtocol, @unchecked Sendable {
                 regions[rule.region] = text
             }
             if rule.matcher.matches(text) {
-                return rule.skipStateUpdate ? nil : Classification(state: rule.state, explicitIdle: rule.visibleIdle)
+                return rule.skipStateUpdate ? nil : Classification(state: rule.state, explicitIdle: rule.visibleIdle,
+                                                                         backgroundWork: rule.backgroundWork)
             }
         }
         return Classification(state: .idle, explicitIdle: false)
@@ -143,6 +146,9 @@ public final class AgentDetector: AgentDetectorProtocol, @unchecked Sendable {
 public struct AgentStateTracker: Sendable {
     public private(set) var provider: AgentProvider?
     public private(set) var state: AgentState = .unknown
+    /// The agent works only in the background: its turn ended, so its hooks
+    /// reported idle, but the screen shows work it started still running.
+    public private(set) var backgroundWork = false
     private var pending: ContinuousClock.Instant?
     private var lastInput: (screen: String, title: String, progress: String)?
     private var cycle = false
@@ -181,6 +187,7 @@ public struct AgentStateTracker: Sendable {
         if next == .working { cycle = true }
         if next == .idle || next == .unknown { cycle = false }
         state = next
+        backgroundWork = result.backgroundWork
         return completed
     }
 

@@ -439,7 +439,8 @@ final class SessionOwner: @unchecked Sendable {
                                        progress: detectionProgress, now: .now)
         if let reported = reportedAgent, reported.provider == agent {
             let interrupted = tracker.state == .idle && reported.state != .idle && now - reported.at > Self.reportedAgentTrust
-            guard interrupted else { return }
+            let workingInBackground = tracker.backgroundWork && reported.state == .idle
+            guard interrupted || workingInBackground else { return }
             reportedAgent = nil
         }
         guard let provider = tracker.provider else { return }

@@ -14,12 +14,14 @@ struct DetectionManifest: Decodable {
         var region: String
         var visibleIdle: Bool
         var skipStateUpdate: Bool
+        var backgroundWork: Bool
         var gate: Gate
 
         enum CodingKeys: String, CodingKey {
             case id, state, priority, region
             case visibleIdle = "visible_idle"
             case skipStateUpdate = "skip_state_update"
+            case backgroundWork = "background_work"
         }
 
         init(from decoder: Decoder) throws {
@@ -30,6 +32,7 @@ struct DetectionManifest: Decodable {
             region = try container.decode(String.self, forKey: .region)
             visibleIdle = try container.decodeIfPresent(Bool.self, forKey: .visibleIdle) ?? false
             skipStateUpdate = try container.decodeIfPresent(Bool.self, forKey: .skipStateUpdate) ?? false
+            backgroundWork = try container.decodeIfPresent(Bool.self, forKey: .backgroundWork) ?? false
             gate = try Gate(from: decoder)
         }
     }
@@ -114,6 +117,9 @@ struct DetectionRule {
     var region: String
     var visibleIdle: Bool
     var skipStateUpdate: Bool
+    /// The agent's turn ended but work it started still runs in the
+    /// background, which its hooks don't report.
+    var backgroundWork: Bool
     var matcher: DetectionMatcher
 }
 
@@ -146,7 +152,7 @@ extension DetectionManifest {
             do {
                 return DetectionRule(id: rule.id, state: state, priority: rule.priority, region: rule.region,
                                      visibleIdle: rule.visibleIdle, skipStateUpdate: rule.skipStateUpdate,
-                                     matcher: try DetectionMatcher(rule.gate))
+                                     backgroundWork: rule.backgroundWork, matcher: try DetectionMatcher(rule.gate))
             } catch {
                 throw DetectionManifestError.invalid("\(rule.id): \(error.localizedDescription)")
             }
