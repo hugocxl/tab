@@ -53,6 +53,19 @@ final class RightSidebarTests: XCTestCase {
         XCTAssertTrue(model.sidebarExpanded)
     }
 
+    /// Turning the sidebar on in Settings shows it even over an expanded pane.
+    func testShowingTheSidebarFromSettingsExitsPaneZoom() throws {
+        let model = try model()
+        model.newHomeTerminal()
+        model.updateAppearance { $0.sidebarExpanded = false }
+        model.toggleZoom()
+        var settings = model.settings
+        settings.appearance.sidebarExpanded = true
+        model.apply(settings: settings)
+        XCTAssertNil(model.activeTab?.zoomed)
+        XCTAssertTrue(model.sidebarExpanded)
+    }
+
     func testCollapsingAndShowingAgainReopensTheLastTab() throws {
         let model = try model()
         model.toggleRightSidebar()

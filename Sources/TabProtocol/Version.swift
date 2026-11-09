@@ -56,9 +56,13 @@ public struct Feature: RawRepresentable, Hashable, Codable, Sendable {
     /// File requests and watches may name an absolute `root` folder.
     public static let fileRoots = Feature(rawValue: "fileRoots")
 
+    /// Tab changes may place a pane along a whole tab edge with `positionPane`.
+    public static let panePositioning = Feature(rawValue: "panePositioning")
+
     /// Features this build's server supports.
     public static let all: [Feature] = [.terminalInput, .sessionEnvironment, .fileSearch, .fileByteRanges, .pullRequestPreview,
-                                        .fileWriteParents, .agentStateReports, .tunnels, .simulators, .fileRoots]
+                                        .fileWriteParents, .agentStateReports, .tunnels, .simulators, .fileRoots,
+                                        .panePositioning]
 }
 
 /// What kind of program a client is.

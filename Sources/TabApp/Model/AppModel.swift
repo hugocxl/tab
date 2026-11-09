@@ -430,7 +430,10 @@ public final class AppModel {
     /// Settings changed elsewhere, such as in the Settings window.
     public func apply(settings: Settings) {
         let servers = self.settings.servers
+        let showsSidebar = !appearance.sidebarExpanded && settings.appearance.sidebarExpanded
         self.settings = settings
+        // Showing the sidebar restores an expanded pane, as toggling it does.
+        if showsSidebar, activeTab?.zoomed != nil { toggleZoom() }
         browserProfiles.defaultProfileId = settings.browser.defaultProfile
         for controller in browserProfiles.panes.all { controller.apply(settings: settings.browser) }
         savedAppearance = settings.appearance

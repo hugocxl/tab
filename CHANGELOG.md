@@ -3,6 +3,15 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.89.2 - 2026-11-09
+
+### Fixed
+
+- Turning the sidebar on in Settings shows it even while a pane is expanded.
+- The command palette's pane position commands are unavailable for servers too old to apply them.
+- VoiceOver reads folders in the Git panel's tree view as buttons and says whether they're expanded.
+- The sidebar does less work each time it redraws its cards.
+
 ## 0.89.1 - 2026-11-09
 
 ### Fixed

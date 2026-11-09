@@ -244,13 +244,16 @@ final class PaletteSource: PaletteDataSource {
                             (.focusPaneRight, "Focus Pane Right"), (.focusPaneUp, "Focus Pane Up"), (.focusPaneDown, "Focus Pane Down")] {
             command(id, title, .panes, disabled: missing || paneCount < 2)
         }
+        // Older servers reject the change, so only a connected one that offers it is checked.
+        let positioningUnsupported = model.client(for: project).map { !$0.supports(.panePositioning) } ?? false
+        let positioningOff = missing || paneCount < 2 || positioningUnsupported || !model.state.canEditTabs(current.serverId)
         for (edge, label) in [(Direction.left, "Left"), (.right, "Right"), (.up, "Top"), (.down, "Bottom")] {
             for (name, fraction, share) in [("Third", "1/3", 1.0 / 3), ("Half", "1/2", 0.5), ("Two Thirds", "2/3", 2.0 / 3)] {
                 let pane = model.activePane
                 commands.append(RootCommand(
                     id: "pane_\(edge.rawValue)_\(name.lowercased().replacingOccurrences(of: " ", with: "_"))",
                     title: "Pane \(label) \(name)", keywords: "resize move size window management \(fraction)",
-                    category: .panes, disabled: missing || paneCount < 2 || pane == nil || !model.state.canEditTabs(current.serverId),
+                    category: .panes, disabled: positioningOff || pane == nil,
                     target: .run { [weak self] in
                         guard let pane else { return }
                         self?.model.positionPane(pane, edge: edge, share: share)

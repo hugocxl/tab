@@ -355,6 +355,7 @@ public final class SourceControlController: NSViewController, NSTableViewDataSou
             cell.theme = card.theme
             cell.configure(node: FilesTree.Node(path: path, name: NativePath.basename(path), isDirectory: true, dimmed: false),
                            depth: depth, expanded: model.isExpanded(path, in: group), selected: false)
+            cell.setAccessibilityLabel("\(path), folder, \(model.isExpanded(path, in: group) ? "expanded" : "collapsed")")
             cell.onActivate = { [weak self] in
                 self?.model.toggleFolder(path, in: group)
                 self?.render()
@@ -646,6 +647,14 @@ extension TextGlyphButton {
 /// A collapsible Git folder using the Explorer row geometry and artwork.
 final class ChangeFolderCell: FilesCellView {
     var onActivate: (() -> Void)?
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     override func mouseDown(with event: NSEvent) {}
 
