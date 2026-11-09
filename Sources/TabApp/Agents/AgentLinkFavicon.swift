@@ -9,7 +9,6 @@ final class AgentLinkFavicon {
     private var waiting: [String: [Observer]] = [:]
     private var images: [String: NSImage] = [:]
     private var failed: Set<String> = []
-    private var brands: [String: NSImage] = [:]
     private let fetch: Fetch
 
     init(fetch: Fetch? = nil) {
@@ -22,10 +21,15 @@ final class AgentLinkFavicon {
         }
     }
 
+    nonisolated static let hostMarks: [String: AppIcon] = [
+        "github.com": .github, "gitlab.com": .gitlab, "bitbucket.org": .bitbucket,
+        "codeberg.org": .forgejo, "git.cafe": .gitcafe,
+    ]
+
     nonisolated static func brand(for host: String) -> String? {
         let host = host.lowercased()
-        for (domain, brand) in [("github.com", "github"), ("gitlab.com", "gitlab"), ("bitbucket.org", "bitbucket"), ("codeberg.org", "forgejo"), ("git.cafe", "gitcafe")] {
-            if host == domain || host.hasSuffix("." + domain) { return brand }
+        for (domain, icon) in hostMarks {
+            if host == domain || host.hasSuffix("." + domain) { return icon.rawValue }
         }
         return nil
     }
@@ -62,21 +66,10 @@ final class AgentLinkFavicon {
     func image(for url: URL, color: NSColor, manager: NSLayoutManager? = nil) -> NSImage? {
         guard let host = Self.host(for: url) else { return nil }
         if let brand = Self.brand(for: host) {
-            let key = brand == "github" ? "\(brand)-\(color)" : brand
-            if let image = brands[key] { return image }
-            guard let source = BundledImage.load("agent-host-\(brand)", extension: "svg") else { return nil }
-            source.size = NSSize(width: 14, height: 14)
-            let image: NSImage
-            if brand == "github" {
-                image = NSImage(size: source.size, flipped: false) { rect in
-                    source.draw(in: rect); color.setFill(); rect.fill(using: .sourceIn); return true
-                }
-            } else { image = source }
-            brands[key] = image
-            return image
+            return AppIcon(rawValue: brand)?.image(size: 14, theme: AppTheme.shared)
         }
         guard let request = Self.requestURL(host: host), !failed.contains(host) else {
-            return AgentConversationIcon.globe.image(size: 14, color: color)
+            return AppIcon.globe.image(size: 14, scale: AppIcon.inlineScale, color: color)
         }
         if let image = images[host] { return image }
         if var observers = waiting[host] {

@@ -129,7 +129,7 @@ extension SettingsModel {
         func adjustment(_ value: Double, percent: Bool) -> CellAdjustment {
             percent ? .percent(value) : value == 0 ? .natural : .pixels(Int(value))
         }
-        let reset = b.button("Reset Character Spacing", enabled: spacing != .natural, symbol: "arrow.counterclockwise") { [store] in
+        let reset = b.button("Reset Character Spacing", enabled: spacing != .natural, icon: .reset) { [store] in
             store.updateTerminal(id) { $0.characterSpacing = .natural }
         }
         let stepper = b.stepper(id, amount, range: range) { [store] value in
@@ -153,7 +153,7 @@ extension SettingsModel {
         var rows: [SettingControl] = fonts.enumerated().map { index, name in
             .row([
                 .fontName(family: name, style: "Regular"),
-                b.button("Remove \(name)", symbol: "minus.circle") { [store] in
+                b.button("Remove \(name)", icon: .minusCircle) { [store] in
                     store.updateTerminal(id) { $0.fallbackFonts.remove(at: index) }
                 },
             ])

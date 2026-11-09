@@ -634,9 +634,9 @@ final class FilesCellView: HoverView {
     }
 
     override func themeDidChange() {
-        fileIcon = FileIcon.image(for: node.path, isDirectory: node.isDirectory, theme: theme)
+        fileIcon = FileIcon.image(for: node.path, isDirectory: node.isDirectory, isExpanded: expanded, theme: theme)
         chevron = node.isDirectory
-            ? (expanded ? AppIcon.chevronDown : AppIcon.chevronRight).image(size: 11, weight: .semibold)?.tinted(theme.fgDim)
+            ? (expanded ? AppIcon.chevronDown : AppIcon.chevronRight).image(size: 11)?.tinted(theme.fgDim)
             : nil
         needsDisplay = true
     }

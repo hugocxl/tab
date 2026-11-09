@@ -259,7 +259,7 @@ final class HostMenuView: ThemedView {
     }
 
     private func action(_ icon: AppIcon, _ title: String, _ perform: @escaping () -> Void) -> ListRow {
-        let row = ListRow(title: title, icon: icon.image())
+        let row = ListRow(title: title, icon: icon.image(theme: theme))
         row.onClick = perform
         return row
     }

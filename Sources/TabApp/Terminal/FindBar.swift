@@ -94,9 +94,9 @@ public final class FindBar: NSView, NSTextFieldDelegate {
         field.lineBreakMode = .byClipping
         counterLabel.lineBreakMode = .byTruncatingTail
         counterLabel.alignment = .right
-        configure(previousButton, symbol: "chevron.left", label: "Previous match", action: #selector(previous))
-        configure(nextButton, symbol: "chevron.right", label: "Next match", action: #selector(next))
-        configure(closeButton, symbol: "xmark", label: "Close search", action: #selector(close))
+        configure(previousButton, icon: .chevronLeft, label: "Previous match", action: #selector(previous))
+        configure(nextButton, icon: .chevronRight, label: "Next match", action: #selector(next))
+        configure(closeButton, icon: .close, label: "Close search", action: #selector(close))
         caseButton.isBordered = false
         caseButton.title = "Aa"
         caseButton.target = self
@@ -182,9 +182,9 @@ public final class FindBar: NSView, NSTextFieldDelegate {
         delegate?.findBarDidToggleCase(self)
     }
 
-    private func configure(_ button: NSButton, symbol: String, label: String, action: Selector) {
+    private func configure(_ button: NSButton, icon: AppIcon, label: String, action: Selector) {
         button.isBordered = false
-        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
+        button.image = icon.image(size: 16)
         button.imageScaling = .scaleProportionallyDown
         button.target = self
         button.action = action

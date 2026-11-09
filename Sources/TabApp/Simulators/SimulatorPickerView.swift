@@ -102,10 +102,8 @@ final class SimulatorPickerView: ThemedView {
     }
 
     private static func row(for simulator: SimulatorChoice) -> ListRow {
-        let symbol = simulator.isTablet ? "ipad" : simulator.platform == .android ? "candybarphone" : "iphone"
-        let icon = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
-            .withSymbolConfiguration(.init(pointSize: 13, weight: .regular))
-        let row = ListRow(title: simulator.name, subtitle: simulator.runtime, icon: icon,
+        let icon: AppIcon = simulator.isTablet ? .tablet : simulator.platform == .android ? .phoneAndroid : .phone
+        let row = ListRow(title: simulator.name, subtitle: simulator.runtime, icon: icon.image(size: 13),
                           accessory: simulator.isRunning ? RunningBadge() : nil)
         row.heightAnchor.constraint(greaterThanOrEqualToConstant: 40).isActive = true
         row.setAccessibilityLabel(simulator.isRunning ? "\(simulator.name), \(simulator.runtime), Running" : "\(simulator.name), \(simulator.runtime)")

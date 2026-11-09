@@ -17,7 +17,7 @@ final class AgentResponseTable: AgentResponseSection {
     private var gridWidth: CGFloat = 0
     private var gridHeight: CGFloat = 0
     private var copyReset: Task<Void, Never>?
-    private var copyIcon: AgentConversationIcon = .copy
+    private var copyIcon: AppIcon = .copy
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -48,7 +48,7 @@ final class AgentResponseTable: AgentResponseSection {
         self.alignments = alignments
         tableTheme = theme
         copy.contentTintColor = AgentMarkdownPalette(theme: theme).muted
-        copy.image = copyIcon.image(size: 12, color: AgentMarkdownPalette(theme: theme).muted)
+        copy.image = copyIcon.image(size: 12, scale: AppIcon.inlineScale, color: AgentMarkdownPalette(theme: theme).muted)
         measuredWidth = nil
         cellContents = ([headers] + rows).enumerated().flatMap { row, values in
             headers.indices.map { column in
@@ -182,8 +182,8 @@ final class AgentResponseTable: AgentResponseSection {
     func copyToPasteboard(_ format: CopyFormat) {
         NSPasteboard.general.clearContents()
         let copied = NSPasteboard.general.setString(copyText(format), forType: .string)
-        copyIcon = copied ? .check : .warning
-        copy.image = copyIcon.image(size: 12, color: AgentMarkdownPalette(theme: tableTheme).muted)
+        copyIcon = copied ? .check : .triangleAlert
+        copy.image = copyIcon.image(size: 12, scale: AppIcon.inlineScale, color: AgentMarkdownPalette(theme: tableTheme).muted)
         copy.toolTip = copied ? "Copied" : "Copy failed"
         copy.setAccessibilityLabel(copy.toolTip)
         copyReset?.cancel()
@@ -196,7 +196,7 @@ final class AgentResponseTable: AgentResponseSection {
 
     private func resetCopyAction() {
         copyIcon = .copy
-        copy.image = copyIcon.image(size: 12, color: AgentMarkdownPalette(theme: tableTheme).muted)
+        copy.image = copyIcon.image(size: 12, scale: AppIcon.inlineScale, color: AgentMarkdownPalette(theme: tableTheme).muted)
         copy.toolTip = "Copy table"
         copy.setAccessibilityLabel("Copy table")
     }

@@ -10,19 +10,29 @@ extension ChromeColor {
 }
 
 extension AppTheme {
-    /// Hues from Pierre's icon palette, for its colorful icons.
-    public enum IconHue {
-        case blue, green, indigo, vermilion
+    /// Hues for the app's colorful Tab Icons.
+    public enum IconHue: String, CaseIterable, Sendable {
+        case gray, red, vermilion, orange, yellow, green, mint, teal, cyan, blue, indigo, purple, pink, brown
     }
 
-    /// `hue` as `#rrggbb`: Pierre's deeper shade on light themes, its
-    /// lighter one on dark themes.
+    /// `hue` as `#rrggbb`: shade 400 on dark themes, 600 on light
+    /// themes, with neutral gray using shade 800 on light themes.
     public func iconHex(_ hue: IconHue) -> String {
         switch hue {
-        case .blue: return isLight ? "#1a85d4" : "#69b1ff"
-        case .green: return isLight ? "#199f43" : "#5ecc71"
-        case .indigo: return isLight ? "#693acf" : "#9d6afb"
+        case .gray: return isLight ? "#6c6c71" : "#adadb1"
+        case .red: return isLight ? "#d52c36" : "#ff6762"
         case .vermilion: return isLight ? "#d5512f" : "#ff8c5b"
+        case .orange: return isLight ? "#d47628" : "#ffa359"
+        case .yellow: return isLight ? "#d5a910" : "#ffd452"
+        case .green: return isLight ? "#199f43" : "#5ecc71"
+        case .mint: return isLight ? "#16a994" : "#61d5c0"
+        case .teal: return isLight ? "#17a5af" : "#64d1db"
+        case .cyan: return isLight ? "#1ca1c7" : "#68cdf2"
+        case .blue: return isLight ? "#1a85d4" : "#69b1ff"
+        case .indigo: return isLight ? "#693acf" : "#9d6afb"
+        case .purple: return isLight ? "#a631be" : "#d568ea"
+        case .pink: return isLight ? "#d32a61" : "#ff678d"
+        case .brown: return isLight ? "#956b4f" : "#c3987b"
         }
     }
 }

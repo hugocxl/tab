@@ -1,93 +1,681 @@
 import AppKit
-import UniformTypeIdentifiers
 
-/// Static bundled file icon data, resolved natively in the same rule order as the source.
+/// File-type rules resolve remote paths without consulting the local filesystem.
 @MainActor
 enum FileIcon {
-    private struct Catalog: Decodable {
-        var fileNames: [String: String]
-        var extensions: [String: String]
-        var completeExtensions: [String: String]
-        var overrideNames: [String: String]
-        var overrideExtensions: [String: String]
-        var aliases: [String: String]
-        var languageNames: [String: String]
-        var icons: [String: [String]]
+    typealias Resolution = (icon: AppIcon, hue: AppTheme.IconHue)
+
+    /// Exact basenames precede suffix rules; overrides win within each group.
+    static func resolve(_ path: String, mimeType: String? = nil) -> Resolution {
+        let icon = icon(for: path)
+        if icon == .file, let mimeType, let ext = mimeExtensions[mimeType] {
+            return style(for: self.icon(for: "file." + ext))
+        }
+        return style(for: icon)
     }
 
-    private static let catalog: Catalog? = {
-        guard let url = BundledImage.url("agent-file-icons", extension: "json"), let data = try? Data(contentsOf: url) else { return nil }
-        return try? JSONDecoder().decode(Catalog.self, from: data)
-    }()
-    private static var images: [String: NSImage] = [:]
-
-    /// Resolves workspace paths without touching the local filesystem, including remote paths.
-    static func image(for path: String, isDirectory: Bool = false, mimeType: String? = nil,
-                      theme: AppTheme, size: CGFloat = 14) -> NSImage? {
-        if isDirectory { return folderImage(size: size) }
-        return image(for: path, mimeType: mimeType, dark: !theme.palette.isLight, size: size)
+    private static func style(for icon: AppIcon) -> Resolution {
+        (icon, icon.signatureHue ?? .gray)
     }
 
-    /// The Finder's folder icon, as macOS draws folders everywhere else.
-    private static func folderImage(size: CGFloat) -> NSImage {
-        let key = "folder-\(size)"
-        if let image = images[key] { return image }
-        let image = NSWorkspace.shared.icon(for: .folder)
-        image.size = NSSize(width: size, height: size)
-        images[key] = image
-        return image
+    private static func icon(for path: String) -> AppIcon {
+        let name = String(path.split(separator: "/", omittingEmptySubsequences: false).last ?? "").lowercased()
+        if let icon = overrideNames[name] ?? fileNames[name] { return icon }
+        let components = name.split(separator: ".", omittingEmptySubsequences: false)
+        // Each suffix starts one component later, so multi-part extensions win.
+        let suffixes = components.indices.dropFirst().map { components[$0...].joined(separator: ".") }
+        for suffix in suffixes {
+            if let icon = overrideExtensions[suffix] { return icon }
+        }
+        for suffix in suffixes {
+            if let icon = extensions[suffix] { return icon }
+        }
+        return .file
     }
 
     static func syntheticFileName(language: String) -> String {
         let language = language.lowercased()
-        return catalog?.languageNames[language] ?? "file." + (catalog?.aliases[language] ?? language)
+        if let name = languageNames[language] { return name }
+        if let alias = aliases[language] { return "file." + alias }
+        if extensions[language] != nil { return "file." + language }
+        if let icon = languages[language], let ext = languageExtensions[icon] { return "file." + ext }
+        return "file." + language
     }
 
     static func name(for path: String, mimeType: String? = nil) -> String {
-        resolve(path, mimeType: mimeType).name
+        resolve(path, mimeType: mimeType).icon.rawValue
     }
 
-    private static func resolve(_ path: String, mimeType: String?) -> (name: String, overridden: Bool) {
-        let resolved = resolve(path)
-        guard resolved.name == "file-tree-builtin-default", let mimeType else { return resolved }
-        let extensions = [
-            "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp",
-            "application/pdf": "pdf", "application/zip": "zip", "application/vnd.sqlite3": "sqlite",
-            "text/x-python": "py", "text/javascript": "js", "text/x-ruby": "rb", "text/x-shellscript": "sh",
-        ]
-        guard let ext = extensions[mimeType] else { return resolved }
-        return resolve("file." + ext)
-    }
+    static func hasSpecificIcon(for path: String) -> Bool { resolve(path).icon != .file }
 
-    private static func resolve(_ path: String) -> (name: String, overridden: Bool) {
-        guard let catalog else { return ("file-tree-builtin-default", false) }
-        let name = String(path.split(separator: "/", omittingEmptySubsequences: false).last ?? "").lowercased()
-        let components = name.split(separator: ".", omittingEmptySubsequences: false)
-        let extensions = components.indices.dropFirst().map { components[$0...].joined(separator: ".") }
-        if let override = catalog.overrideNames[name] { return (override, true) }
-        for ext in extensions { if let override = catalog.overrideExtensions[ext] { return (override, true) } }
-        if let token = catalog.fileNames[name] { return ("file-tree-builtin-" + token, false) }
-        for ext in extensions {
-            if let token = catalog.completeExtensions[ext] ?? catalog.extensions[ext] { return ("file-tree-builtin-" + token, false) }
-        }
-        return ("file-tree-builtin-default", false)
+    /// Resolves and draws file or folder glyphs in the supplied theme.
+    static func image(for path: String, isDirectory: Bool = false, isExpanded: Bool = false,
+                      mimeType: String? = nil, theme: AppTheme, size: CGFloat = 14) -> NSImage? {
+        let resolved: Resolution = isDirectory ? style(for: isExpanded ? .folderOpen : .folder)
+            : resolve(path, mimeType: mimeType)
+        return resolved.icon.image(size: size, theme: theme)
     }
-
-    static func hasSpecificIcon(for path: String) -> Bool { name(for: path) != "file-tree-builtin-default" }
 
     static func image(for path: String, mimeType: String? = nil, dark: Bool, size: CGFloat = 14) -> NSImage? {
-        let resolved = resolve(path, mimeType: mimeType)
-        let name = resolved.overridden && resolved.name.hasPrefix("file-tree-builtin-") && resolved.name != "file-tree-builtin-image"
-            ? resolved.name + "-neutral" : resolved.name
-        let key = "\(name)-\(dark)-\(size)"
-        if let image = images[key] { return image }
-        guard let variants = catalog?.icons[name], variants.count == 2,
-              let image = NSImage(data: Data(variants[dark ? 1 : 0].utf8)) else { return nil }
-        image.size = NSSize(width: size, height: size)
-        image.isTemplate = false
-        images[key] = image
-        return image
+        image(for: path, mimeType: mimeType, theme: dark ? darkTheme : lightTheme, size: size)
     }
+
+    private static let darkTheme = AppTheme(systemIsDark: true)
+    private static let lightTheme = AppTheme(systemIsDark: false)
+
+    private static let mimeExtensions = [
+        "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp",
+        "application/pdf": "pdf", "application/zip": "zip", "application/vnd.sqlite3": "sqlite",
+        "text/x-python": "py", "text/javascript": "js", "text/x-ruby": "rb", "text/x-shellscript": "sh",
+    ]
+
+    static let fileNames: [String: AppIcon] = [
+        ".babelrc": .babel,
+        ".babelrc.json": .babel,
+        ".bash_profile": .bash,
+        ".bashrc": .bash,
+        ".browserslistrc": .browserslist,
+        ".dockerignore": .docker,
+        ".eslintignore": .eslint,
+        ".eslintrc": .eslint,
+        ".eslintrc.cjs": .eslint,
+        ".eslintrc.js": .eslint,
+        ".eslintrc.json": .eslint,
+        ".eslintrc.yaml": .eslint,
+        ".eslintrc.yml": .eslint,
+        ".gitattributes": .git,
+        ".gitignore": .git,
+        ".gitkeep": .git,
+        ".gitmodules": .git,
+        ".npmignore": .npm,
+        ".npmrc": .npm,
+        ".oxlintrc.json": .oxc,
+        ".postcssrc": .postcss,
+        ".postcssrc.json": .postcss,
+        ".postcssrc.yaml": .postcss,
+        ".postcssrc.yml": .postcss,
+        ".prettierignore": .prettier,
+        ".prettierrc": .prettier,
+        ".prettierrc.cjs": .prettier,
+        ".prettierrc.js": .prettier,
+        ".prettierrc.json": .prettier,
+        ".prettierrc.mjs": .prettier,
+        ".prettierrc.toml": .prettier,
+        ".prettierrc.yaml": .prettier,
+        ".prettierrc.yml": .prettier,
+        ".stylelintignore": .stylelint,
+        ".stylelintrc": .stylelint,
+        ".stylelintrc.cjs": .stylelint,
+        ".stylelintrc.js": .stylelint,
+        ".stylelintrc.json": .stylelint,
+        ".stylelintrc.mjs": .stylelint,
+        ".stylelintrc.yaml": .stylelint,
+        ".stylelintrc.yml": .stylelint,
+        ".terraform.lock.hcl": .terraform,
+        ".yarnrc": .yarn,
+        ".yarnrc.yml": .yarn,
+        ".zprofile": .bash,
+        ".zshenv": .bash,
+        ".zshrc": .bash,
+        "agents.md": .agents,
+        "babel.config.cjs": .babel,
+        "babel.config.js": .babel,
+        "babel.config.json": .babel,
+        "babel.config.mjs": .babel,
+        "biome.json": .biome,
+        "biome.jsonc": .biome,
+        "bootstrap.bundle.js": .bootstrap,
+        "bootstrap.bundle.min.js": .bootstrap,
+        "bootstrap.css": .bootstrap,
+        "bootstrap.js": .bootstrap,
+        "bootstrap.min.css": .bootstrap,
+        "bootstrap.min.js": .bootstrap,
+        "bun.lock": .bun,
+        "bun.lockb": .bun,
+        "bunfig.toml": .bun,
+        "claude.md": .claude,
+        "compose.yaml": .docker,
+        "compose.yml": .docker,
+        "docker-compose.override.yml": .docker,
+        "docker-compose.yaml": .docker,
+        "docker-compose.yml": .docker,
+        "dockerfile": .docker,
+        "eslint.config.cjs": .eslint,
+        "eslint.config.js": .eslint,
+        "eslint.config.mjs": .eslint,
+        "eslint.config.mts": .eslint,
+        "eslint.config.ts": .eslint,
+        "gemfile": .ruby,
+        "next.config.js": .nextjs,
+        "next.config.mjs": .nextjs,
+        "next.config.mts": .nextjs,
+        "next.config.ts": .nextjs,
+        "package-lock.json": .npm,
+        "package.json": .npm,
+        "pnpm-lock.yaml": .pnpm,
+        "pnpm-workspace.yaml": .pnpm,
+        "postcss.config.cjs": .postcss,
+        "postcss.config.js": .postcss,
+        "postcss.config.mjs": .postcss,
+        "postcss.config.ts": .postcss,
+        "prettier.config.cjs": .prettier,
+        "prettier.config.js": .prettier,
+        "prettier.config.mjs": .prettier,
+        "rakefile": .ruby,
+        "readme.md": .markdown,
+        "stylelint.config.cjs": .stylelint,
+        "stylelint.config.js": .stylelint,
+        "stylelint.config.mjs": .stylelint,
+        "svgo.config.cjs": .svgo,
+        "svgo.config.js": .svgo,
+        "svgo.config.mjs": .svgo,
+        "svgo.config.ts": .svgo,
+        "tailwind.config.cjs": .tailwind,
+        "tailwind.config.js": .tailwind,
+        "tailwind.config.mjs": .tailwind,
+        "tailwind.config.ts": .tailwind,
+        "tsconfig.json": .typescript,
+        "vite.config.js": .vite,
+        "vite.config.mjs": .vite,
+        "vite.config.mts": .vite,
+        "vite.config.ts": .vite,
+        "webpack.config.babel.js": .webpack,
+        "webpack.config.cjs": .webpack,
+        "webpack.config.js": .webpack,
+        "webpack.config.mjs": .webpack,
+        "webpack.config.ts": .webpack,
+        "yarn.lock": .yarn,
+    ]
+
+    static let extensions: [String: AppIcon] = [
+        "7z": .zip,
+        "astro": .astro,
+        "authors": .fileText,
+        "avi": .video,
+        "avif": .image,
+        "bash": .bash,
+        "bmp": .image,
+        "bz2": .zip,
+        "c": .c,
+        "cc": .cpp,
+        "cfg": .fileText,
+        "changelog": .fileText,
+        "cjs": .javascript,
+        "code-workspace": .vscode,
+        "conf": .fileText,
+        "contributors": .fileText,
+        "cpp": .cpp,
+        "cs": .csharp,
+        "csh": .bash,
+        "css": .css,
+        "csv": .fileTable,
+        "csx": .csharp,
+        "cts": .typescript,
+        "cxx": .cpp,
+        "dart": .dart,
+        "db": .database,
+        "diff": .diff,
+        "doc": .word,
+        "docx": .word,
+        "editorconfig": .fileText,
+        "env": .fileText,
+        "env.development": .fileText,
+        "env.local": .fileText,
+        "env.production": .fileText,
+        "eot": .font,
+        "epub": .epub,
+        "erb": .ruby,
+        "ex": .elixir,
+        "exs": .elixir,
+        "fish": .bash,
+        "gemspec": .ruby,
+        "gif": .image,
+        "go": .go,
+        "gql": .graphql,
+        "graphql": .graphql,
+        "gz": .zip,
+        "h": .c,
+        "heic": .image,
+        "heif": .image,
+        "hh": .cpp,
+        "hpp": .cpp,
+        "hs": .haskell,
+        "htm": .html,
+        "html": .html,
+        "hxx": .cpp,
+        "icns": .image,
+        "ico": .image,
+        "ini": .fileText,
+        "inl": .cpp,
+        "jar": .zip,
+        "java": .java,
+        "jpeg": .image,
+        "jpg": .image,
+        "js": .javascript,
+        "json": .braces,
+        "json5": .braces,
+        "jsonc": .braces,
+        "jsonl": .braces,
+        "jsx": .react,
+        "ksh": .bash,
+        "kt": .kotlin,
+        "kts": .kotlin,
+        "less": .css,
+        "lhs": .haskell,
+        "license": .fileText,
+        "log": .fileText,
+        "lua": .lua,
+        "luau": .lua,
+        "m": .objc,
+        "m4v": .video,
+        "markdown": .markdown,
+        "mcp": .mcp,
+        "md": .markdown,
+        "mdx": .markdown,
+        "mdx.tsx": .markdown,
+        "mjs": .javascript,
+        "mkv": .video,
+        "mm": .objc,
+        "mov": .video,
+        "mp4": .video,
+        "mts": .typescript,
+        "odp": .slides,
+        "ods": .fileTable,
+        "odt": .word,
+        "ogv": .video,
+        "otf": .font,
+        "patch": .diff,
+        "pdf": .pdf,
+        "php": .php,
+        "png": .image,
+        "postcss": .css,
+        "ppt": .slides,
+        "pptx": .slides,
+        "ps1": .powershell,
+        "psd1": .powershell,
+        "psm1": .powershell,
+        "py": .python,
+        "pyi": .python,
+        "pyw": .python,
+        "pyx": .python,
+        "r": .r,
+        "rake": .ruby,
+        "rar": .zip,
+        "rb": .ruby,
+        "rs": .rust,
+        "rst": .fileText,
+        "rtf": .fileText,
+        "sass": .sass,
+        "scala": .scala,
+        "scss": .sass,
+        "sh": .bash,
+        "sql": .database,
+        "sqlite": .database,
+        "sqlite3": .database,
+        "styl": .css,
+        "svelte": .svelte,
+        "svg": .svg,
+        "swift": .swift,
+        "tar": .zip,
+        "tf": .terraform,
+        "tfstate": .terraform,
+        "tfvars": .terraform,
+        "tgz": .zip,
+        "tif": .image,
+        "tiff": .image,
+        "toml": .toml,
+        "ts": .typescript,
+        "tsv": .fileTable,
+        "tsx": .react,
+        "ttf": .font,
+        "txt": .fileText,
+        "vue": .vue,
+        "war": .zip,
+        "wasm": .wasm,
+        "wast": .wasm,
+        "wat": .wasm,
+        "webm": .video,
+        "webp": .image,
+        "woff": .font,
+        "woff2": .font,
+        "xhtml": .html,
+        "xls": .fileTable,
+        "xlsx": .fileTable,
+        "xml": .xml,
+        "xsd": .xml,
+        "xsl": .xml,
+        "xslt": .xml,
+        "xz": .zip,
+        "yaml": .yml,
+        "yml": .yml,
+        "zig": .zig,
+        "zip": .zip,
+        "zsh": .bash,
+    ]
+
+    static let overrideNames: [String: AppIcon] = [
+        "agents.md": .agents,
+        "package.json": .npm,
+        "pnpm-lock.yaml": .pnpm,
+        "pnpm-workspace.yaml": .pnpm,
+        "tsconfig.json": .typescript,
+    ]
+
+    static let overrideExtensions: [String: AppIcon] = [
+        "avi": .video,
+        "cs": .csharp,
+        "csx": .csharp,
+        "dart": .dart,
+        "diff": .diff,
+        "doc": .word,
+        "docx": .word,
+        "epub": .epub,
+        "ex": .elixir,
+        "exs": .elixir,
+        "heic": .image,
+        "heif": .image,
+        "hs": .haskell,
+        "java": .java,
+        "kt": .kotlin,
+        "kts": .kotlin,
+        "lhs": .haskell,
+        "lua": .lua,
+        "luau": .lua,
+        "m4v": .video,
+        "mkv": .video,
+        "mov": .video,
+        "mp4": .video,
+        "odp": .slides,
+        "odt": .word,
+        "ogv": .video,
+        "patch": .diff,
+        "pdf": .pdf,
+        "php": .php,
+        "ppt": .slides,
+        "pptx": .slides,
+        "ps1": .powershell,
+        "psd1": .powershell,
+        "psm1": .powershell,
+        "r": .r,
+        "scala": .scala,
+        "toml": .toml,
+        "webm": .video,
+        "xml": .xml,
+        "xsd": .xml,
+        "xsl": .xml,
+        "xslt": .xml,
+    ]
+
+    static let languages: [String: AppIcon] = [
+        "7z": .zip,
+        "astro": .astro,
+        "authors": .fileText,
+        "avi": .video,
+        "avif": .image,
+        "bash": .bash,
+        "bmp": .image,
+        "bz2": .zip,
+        "c": .c,
+        "c#": .csharp,
+        "c++": .cpp,
+        "cc": .cpp,
+        "cfg": .fileText,
+        "changelog": .fileText,
+        "cjs": .javascript,
+        "code-workspace": .vscode,
+        "conf": .fileText,
+        "contributors": .fileText,
+        "cpp": .cpp,
+        "cs": .csharp,
+        "csh": .bash,
+        "csharp": .csharp,
+        "css": .css,
+        "csv": .fileTable,
+        "csx": .csharp,
+        "cts": .typescript,
+        "cxx": .cpp,
+        "dart": .dart,
+        "db": .database,
+        "diff": .diff,
+        "doc": .word,
+        "dockerfile": .docker,
+        "docx": .word,
+        "editorconfig": .fileText,
+        "elixir": .elixir,
+        "env": .fileText,
+        "env.development": .fileText,
+        "env.local": .fileText,
+        "env.production": .fileText,
+        "eot": .font,
+        "epub": .epub,
+        "erb": .ruby,
+        "ex": .elixir,
+        "exs": .elixir,
+        "fish": .bash,
+        "gemspec": .ruby,
+        "gif": .image,
+        "go": .go,
+        "gql": .graphql,
+        "graphql": .graphql,
+        "gz": .zip,
+        "h": .c,
+        "haskell": .haskell,
+        "heic": .image,
+        "heif": .image,
+        "hh": .cpp,
+        "hpp": .cpp,
+        "hs": .haskell,
+        "htm": .html,
+        "html": .html,
+        "hxx": .cpp,
+        "icns": .image,
+        "ico": .image,
+        "ini": .fileText,
+        "inl": .cpp,
+        "jar": .zip,
+        "java": .java,
+        "javascript": .javascript,
+        "jpeg": .image,
+        "jpg": .image,
+        "js": .javascript,
+        "json": .braces,
+        "json5": .braces,
+        "jsonc": .braces,
+        "jsonl": .braces,
+        "jsx": .react,
+        "kotlin": .kotlin,
+        "ksh": .bash,
+        "kt": .kotlin,
+        "kts": .kotlin,
+        "less": .css,
+        "lhs": .haskell,
+        "license": .fileText,
+        "log": .fileText,
+        "lua": .lua,
+        "luau": .lua,
+        "m": .objc,
+        "m4v": .video,
+        "markdown": .markdown,
+        "mcp": .mcp,
+        "md": .markdown,
+        "mdx": .markdown,
+        "mdx.tsx": .markdown,
+        "mjs": .javascript,
+        "mkv": .video,
+        "mm": .objc,
+        "mov": .video,
+        "mp4": .video,
+        "mts": .typescript,
+        "objc": .objc,
+        "objective-c": .objc,
+        "objective-cpp": .objc,
+        "odp": .slides,
+        "ods": .fileTable,
+        "odt": .word,
+        "ogv": .video,
+        "otf": .font,
+        "patch": .diff,
+        "pdf": .pdf,
+        "php": .php,
+        "plaintext": .fileText,
+        "png": .image,
+        "postcss": .css,
+        "powershell": .powershell,
+        "ppt": .slides,
+        "pptx": .slides,
+        "ps1": .powershell,
+        "psd1": .powershell,
+        "psm1": .powershell,
+        "py": .python,
+        "pyi": .python,
+        "python": .python,
+        "pyw": .python,
+        "pyx": .python,
+        "r": .r,
+        "rake": .ruby,
+        "rar": .zip,
+        "rb": .ruby,
+        "rs": .rust,
+        "rst": .fileText,
+        "rtf": .fileText,
+        "ruby": .ruby,
+        "rust": .rust,
+        "sass": .sass,
+        "scala": .scala,
+        "scss": .sass,
+        "sh": .bash,
+        "shell": .bash,
+        "shellscript": .bash,
+        "sql": .database,
+        "sqlite": .database,
+        "sqlite3": .database,
+        "styl": .css,
+        "svelte": .svelte,
+        "svg": .svg,
+        "swift": .swift,
+        "tar": .zip,
+        "tf": .terraform,
+        "tfstate": .terraform,
+        "tfvars": .terraform,
+        "tgz": .zip,
+        "tif": .image,
+        "tiff": .image,
+        "toml": .toml,
+        "ts": .typescript,
+        "tsv": .fileTable,
+        "tsx": .react,
+        "ttf": .font,
+        "txt": .fileText,
+        "typescript": .typescript,
+        "vue": .vue,
+        "war": .zip,
+        "wasm": .wasm,
+        "wast": .wasm,
+        "wat": .wasm,
+        "webm": .video,
+        "webp": .image,
+        "woff": .font,
+        "woff2": .font,
+        "xhtml": .html,
+        "xls": .fileTable,
+        "xlsx": .fileTable,
+        "xml": .xml,
+        "xsd": .xml,
+        "xsl": .xml,
+        "xslt": .xml,
+        "xz": .zip,
+        "yaml": .yml,
+        "yml": .yml,
+        "zig": .zig,
+        "zip": .zip,
+        "zsh": .bash,
+    ]
+
+    private static let aliases: [String: String] = [
+        "bash": "sh",
+        "csharp": "cs",
+        "elixir": "ex",
+        "haskell": "hs",
+        "javascript": "js",
+        "jsx": "jsx",
+        "kotlin": "kt",
+        "markdown": "md",
+        "mdx": "mdx",
+        "plaintext": "txt",
+        "powershell": "ps1",
+        "python": "py",
+        "ruby": "rb",
+        "rust": "rs",
+        "shell": "sh",
+        "shellscript": "sh",
+        "swift": "swift",
+        "tsx": "tsx",
+        "typescript": "ts",
+        "yaml": "yml",
+    ]
+
+    private static let languageNames: [String: String] = [
+        "dockerfile": "Dockerfile",
+    ]
+
+    private static let languageExtensions: [AppIcon: String] = [
+        .astro: "astro",
+        .bash: "bash",
+        .braces: "json",
+        .c: "c",
+        .cpp: "cpp",
+        .csharp: "cs",
+        .css: "css",
+        .dart: "dart",
+        .database: "db",
+        .diff: "diff",
+        .elixir: "ex",
+        .epub: "epub",
+        .fileTable: "csv",
+        .fileText: "cfg",
+        .font: "eot",
+        .go: "go",
+        .graphql: "graphql",
+        .haskell: "hs",
+        .html: "html",
+        .image: "bmp",
+        .java: "java",
+        .javascript: "js",
+        .kotlin: "kt",
+        .lua: "lua",
+        .markdown: "markdown",
+        .mcp: "mcp",
+        .objc: "m",
+        .pdf: "pdf",
+        .php: "php",
+        .powershell: "ps1",
+        .python: "py",
+        .r: "r",
+        .react: "jsx",
+        .ruby: "rb",
+        .rust: "rs",
+        .sass: "sass",
+        .scala: "scala",
+        .slides: "odp",
+        .svelte: "svelte",
+        .svg: "svg",
+        .swift: "swift",
+        .terraform: "tf",
+        .toml: "toml",
+        .typescript: "ts",
+        .video: "avi",
+        .vscode: "code-workspace",
+        .vue: "vue",
+        .wasm: "wasm",
+        .word: "doc",
+        .xml: "xml",
+        .yml: "yml",
+        .zig: "zig",
+        .zip: "zip",
+    ]
+
+    /// Compatibility view of the shared icon signature palette.
+    static var hues: [AppIcon: AppTheme.IconHue] { AppIcon.signatureHues }
 }
 
 /// A file glyph that updates with the app theme, independent of the file's location.

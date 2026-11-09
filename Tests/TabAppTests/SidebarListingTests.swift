@@ -166,6 +166,56 @@ final class SidebarListingTests: XCTestCase {
         XCTAssertEqual(ActivityCardData.command("npm run dev — build"), "npm run dev — build", "only a folder suffix goes")
     }
 
+    func testTerminalRowAndLeadIconFollowProcessWithAnUnchangedTitle() async throws {
+        model.newHomeTerminal()
+        let pane = try XCTUnwrap(model.activePane)
+        let bound = await ModelFixtures.wait { self.model.state.pane(pane)?.content.session != nil }
+        XCTAssertTrue(bound)
+        let controller = try XCTUnwrap(model.controller(for: pane) as? TerminalPane)
+        let session = try XCTUnwrap(controller.session)
+        var settings = model.terminalSettings
+        settings.preferGeneratedTitles = false
+        controller.apply(settings: settings)
+        session.handle(.metadata(.title("Pinned title")))
+
+        // Drain the title notification before testing process-only changes.
+        let initial = expectation(description: "initial title notification")
+        var subscription = model.changes.sink { _ in initial.fulfill() }
+        model.notify(.state)
+        await fulfillment(of: [initial], timeout: 2)
+        subscription.cancel()
+
+        func card() throws -> ActivityCardData {
+            try XCTUnwrap(SidebarSnapshot(model: model).hosts.first?.terminals.first?.data)
+        }
+        var previous = try card()
+        XCTAssertEqual(previous.panes.first?.icon, .command(.bash))
+        for (name, isShell, expected) in [("node", false, AppIcon.node), ("python3.12", false, .python),
+                                          ("custom-program", false, .terminal), ("zsh", true, .bash)] {
+            let refreshed = expectation(description: "sidebar notification for \(name)")
+            subscription = model.changes.sink { changes in
+                if changes.contains(.state) { refreshed.fulfill() }
+            }
+            session.handle(.metadata(.foregroundProcess(ForegroundProcess(name: name, isShell: isShell))))
+            await fulfillment(of: [refreshed], timeout: 2)
+            subscription.cancel()
+            let current = try card()
+            XCTAssertEqual(model.state.pane(pane)?.title, "Pinned title")
+            XCTAssertEqual(current.panes.first?.icon, .command(expected))
+            XCTAssertEqual(current.lead?.icon, .command(expected))
+            XCTAssertNotEqual(current, previous, "the sidebar's equality check must see process-only changes")
+            previous = current
+        }
+
+        let connection = try XCTUnwrap(model.connection(.local))
+        connection.activity.agents = [AgentActivity(session: session.session, project: model.state.home.id,
+                                                   provider: .claude, state: .idle)]
+        session.handle(.metadata(.foregroundProcess(ForegroundProcess(name: "node", isShell: false))))
+        let agent = try card()
+        XCTAssertEqual(agent.panes.first?.icon, .agent(.claude))
+        XCTAssertEqual(agent.lead?.icon, .agent(.claude))
+    }
+
     func testChatOpenersBecomeTitles() {
         XCTAssertEqual(ActivityCardData.chatTopic("can you write a lorem ipsum? thanks"), "Write a lorem ipsum")
         XCTAssertEqual(ActivityCardData.chatTopic("Hey, please fix README.md formatting"), "Fix README.md formatting")

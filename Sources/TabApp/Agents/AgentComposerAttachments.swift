@@ -310,7 +310,7 @@ private final class AgentAttachmentChip: NSView {
         name.lineBreakMode = .byTruncatingMiddle
         size.stringValue = ByteCountFormatter.string(fromByteCount: Int64(attachment.data.count), countStyle: .file)
         size.font = AppFont.system(10)
-        remove.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Remove attachment")
+        remove.image = AppIcon.close.image(size: 12, scale: AppIcon.inlineScale)
         remove.isBordered = false
         remove.target = self
         remove.action = #selector(removePressed)

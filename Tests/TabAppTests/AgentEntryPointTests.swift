@@ -135,7 +135,7 @@ final class AgentEntryPointTests: XCTestCase {
         XCTAssertEqual(panes.map(\.title), ["Agent", "Agent"])
         XCTAssertEqual(model.activePane, panes[1].id)
         XCTAssertEqual(PaneKind(panes[0].content), .agent)
-        XCTAssertEqual(PaneKind.agent.glyph, .code)
+        XCTAssertEqual(PaneKind.agent.glyph, .codeBlock)
         XCTAssertEqual(PaneKind.agent.name, "Agent")
         let card = ActivityCardData.make(project: model.currentProject, tab: model.activeTab, primary: false, model: model)
         XCTAssertEqual(card.headline, .agent(provider: .claude, task: nil))

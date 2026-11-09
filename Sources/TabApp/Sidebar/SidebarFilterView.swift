@@ -10,9 +10,9 @@ final class SidebarFilterView: ThemedView, NSTextFieldDelegate {
     /// The glyph's right-click menu.
     var contextMenu: (() -> NSMenu?)?
 
-    private let glyph = ChromeButton(.filterCircleFill, label: "Filter by Host")
+    private let glyph = ChromeButton(SystemSymbol.filterCircleFill, label: "Filter by Host")
     private let field = FilterTextField()
-    private let clear = ChromeButton(.clearField, label: "Clear Filter", side: 20, glyph: 15)
+    private let clear = ChromeButton(SystemSymbol.clearField, label: "Clear Filter", side: 20, glyph: 15)
     private var trackingArea: NSTrackingArea?
     private var hovering = false { didSet { if hovering != oldValue { update() } } }
     private var editing = false { didSet { if editing != oldValue { update() } } }

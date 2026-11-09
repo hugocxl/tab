@@ -22,7 +22,7 @@ final class AgentChangedFilesRow: AgentTimelineRow {
             addSubview(view)
         }
         openDiff.font = AppFont.small
-        openDiff.image = NSImage(systemSymbolName: "doc.badge.plus", accessibilityDescription: nil)
+        openDiff.image = AppIcon.diff.image(size: 12, theme: theme)
         openDiff.imagePosition = .imageLeading
         openDiff.onPress = { [weak self] in self?.open(nil) }
         toggleAll.onPress = { [weak self] in
@@ -38,11 +38,6 @@ final class AgentChangedFilesRow: AgentTimelineRow {
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    private func symbol(_ name: String) -> NSImage? {
-        guard let image = NSImage(systemSymbolName: name, accessibilityDescription: nil) else { return nil }
-        image.isTemplate = true
-        return image.tinted(theme.fgDim)
-    }
     private func directoryPaths(_ nodes: [AgentChangedFilesTree.Node]) -> Set<String> {
         Set(nodes.filter(\.isDirectory).map(\.path)).union(nodes.reduce(into: Set<String>()) { $0.formUnion(directoryPaths($1.children)) })
     }
@@ -69,10 +64,18 @@ final class AgentChangedFilesRow: AgentTimelineRow {
                 button.font = AppFont.mono(12)
                 button.alignment = .left
                 button.lineBreakMode = .byTruncatingMiddle
-                button.image = FileIcon.image(for: node.path, isDirectory: node.isDirectory, theme: theme)
+                button.image = FileIcon.image(for: node.path, isDirectory: node.isDirectory, isExpanded: expandedDirectories.contains(node.path), theme: theme)
                 button.imagePosition = .imageLeading
-                button.title = node.isDirectory ? (expandedDirectories.contains(node.path) ? "⌄  " : "›  ") + node.name : node.name
                 button.setTitleColor(theme.fgMuted)
+                if node.isDirectory {
+                    let chevron: AppIcon = expandedDirectories.contains(node.path) ? .chevronDown : .chevronRight
+                    let attachment = NSTextAttachment()
+                    attachment.image = chevron.image(size: 12, color: theme.fgDim)
+                    attachment.bounds = NSRect(x: 0, y: -2, width: 12, height: 12)
+                    let title = NSMutableAttributedString(attachment: attachment)
+                    title.append(NSAttributedString(string: "  " + node.name, attributes: [.font: AppFont.mono(12), .foregroundColor: theme.fgMuted]))
+                    button.attributedTitle = title
+                }
                 button.contentTintColor = node.isDirectory ? theme.fgDim : nil
                 button.toolTip = node.path
                 button.setAccessibilityLabel(node.name + (node.isDirectory ? ", folder" : ", open diff"))
@@ -107,7 +110,7 @@ final class AgentChangedFilesRow: AgentTimelineRow {
         let paths = directoryPaths(nodes)
         toggleAll.isHidden = paths.isEmpty
         let all = !paths.isEmpty && paths.isSubset(of: expandedDirectories)
-        toggleAll.image = symbol(all ? "chevron.up.chevron.down" : "arrow.up.and.down")
+        toggleAll.image = (all ? AppIcon.chevronsIn : .chevronsUpDown).image(size: 12, color: theme.fgDim)
         toggleAll.setAccessibilityLabel(all ? "Collapse all folders" : "Expand all folders")
         toggleAll.toolTip = all ? "Collapse all folders" : "Expand all folders"
         needsLayout = true
@@ -136,7 +139,7 @@ final class AgentChangedFilesRow: AgentTimelineRow {
         openDiff.title = narrow ? "" : "Open diff"
         openDiff.setTitleColor(theme.fgDim)
         openDiff.contentTintColor = theme.fgDim
-        openDiff.image = symbol("doc.badge.plus")
+        openDiff.image = AppIcon.diff.image(size: 12, theme: theme)
         toggleAll.contentTintColor = theme.fgDim
         openDiff.frame = NSRect(x: width - (narrow ? 40 : 104), y: 6, width: narrow ? 28 : 92, height: 28)
         toggleAll.frame = NSRect(x: openDiff.frame.minX - 30, y: 6, width: 28, height: 28)

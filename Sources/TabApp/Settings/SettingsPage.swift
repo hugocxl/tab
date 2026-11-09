@@ -32,7 +32,11 @@ struct SettingsPage: View {
                 if let message = model.store.errors[id] {
                     Section {
                         HStack(alignment: .firstTextBaseline) {
-                            Label(message, systemImage: "exclamationmark.triangle.fill")
+                            Label {
+                                Text(message)
+                            } icon: {
+                                Image(.triangleAlertFill, size: 13)
+                            }
                                 .foregroundStyle(theme?.danger ?? .red)
                             Spacer()
                             Button("Dismiss") { model.store.dismissError(id) }
@@ -183,7 +187,7 @@ struct SettingRowView: View {
         } else if case .disclosure(let open)? = row.control {
             Button(action: open) {
                 LabeledContent {
-                    Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                    Image(.chevronRight, size: 13).foregroundStyle(.tertiary)
                 } label: {
                     SettingLabel(row: row)
                 }
@@ -242,7 +246,7 @@ struct SettingControlView: View {
         case .preview(let spec):
             TerminalPreviewView(spec: spec)
         case .disclosure:
-            Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+            Image(.chevronRight, size: 13).foregroundStyle(.tertiary)
         case .actions(let label, let actions):
             Menu {
                 ForEach(actions.indices, id: \.self) { index in
@@ -251,7 +255,7 @@ struct SettingControlView: View {
                         .disabled(!action.enabled)
                 }
             } label: {
-                Image(systemName: "ellipsis.circle")
+                Image(.ellipsisCircle, size: 13)
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
@@ -500,15 +504,15 @@ private struct ButtonView: View {
 
     var body: some View {
         let button = Button(role: spec.style == .destructive ? .destructive : nil, action: spec.action) {
-            if let symbol = spec.symbol {
-                Image(systemName: symbol).accessibilityLabel(spec.title)
+            if let icon = spec.icon {
+                Image(icon, size: 13).accessibilityLabel(spec.title)
             } else {
                 Text(spec.title)
             }
         }
         .disabled(!spec.enabled)
-        .help(spec.help ?? (spec.symbol == nil ? "" : spec.title))
-        if spec.symbol != nil {
+        .help(spec.help ?? (spec.icon == nil ? "" : spec.title))
+        if spec.icon != nil {
             button.buttonStyle(.borderless)
         } else if spec.style == .primary {
             button.buttonStyle(.borderedProminent)
@@ -602,7 +606,7 @@ private struct PositionPicker: View {
                 .fill(selected ? AnyShapeStyle(theme?.accent ?? .accentColor) : AnyShapeStyle(.quaternary))
                 .overlay {
                     if selected {
-                        Image(systemName: "checkmark").font(.system(size: 9, weight: .bold)).foregroundStyle(.white)
+                        Image(.check, size: 9).foregroundStyle(.white)
                     }
                 }
                 .frame(height: 18)

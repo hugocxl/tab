@@ -19,7 +19,11 @@ struct ThemesPage: View {
                 if let message = model.store.errors[id] {
                     Section {
                         HStack(alignment: .firstTextBaseline) {
-                            Label(message, systemImage: "exclamationmark.triangle.fill")
+                            Label {
+                                Text(message)
+                            } icon: {
+                                Image(.triangleAlertFill, size: 13)
+                            }
                                 .foregroundStyle(theme?.danger ?? .red)
                             Spacer()
                             Button("Dismiss") { model.store.dismissError(id) }

@@ -14,7 +14,7 @@ struct AgentComposerSuggestion: Equatable, Identifiable {
     let id: String
     let title: String
     var subtitle: String = ""
-    var symbol: String = "doc"
+    var icon: AppIcon = .file
     let kind: Kind
     /// The caller resolves real file/thread identities and executes actions, not the menu.
     var insertionText: String? = nil
@@ -366,7 +366,7 @@ private final class AgentComposerSuggestionCell: NSTableCellView {
             icon.image = FileIcon.image(for: item.id, theme: theme, size: 16)
             icon.contentTintColor = nil
         } else {
-            icon.image = NSImage(systemSymbolName: item.symbol, accessibilityDescription: nil)
+            icon.image = item.icon.image(size: 14, scale: AppIcon.inlineScale, theme: theme)
             icon.contentTintColor = theme.fgMuted
         }
         toolTip = [item.title, item.subtitle].filter { !$0.isEmpty }.joined(separator: " — ")

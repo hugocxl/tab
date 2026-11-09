@@ -77,7 +77,7 @@ final class AgentComposerSuggestionsViewTests: XCTestCase {
     func testFileIconsKeepTheirColorWhenCellsAreReconfigured() throws {
         let view = AgentComposerSuggestionsView()
         let file = AgentComposerSuggestion(id: "Sources/main.swift", title: "main.swift", kind: .file)
-        let thread = AgentComposerSuggestion(id: "thread", title: "Thread", symbol: "bubble.left", kind: .thread)
+        let thread = AgentComposerSuggestion(id: "thread", title: "Thread", icon: .conversation, kind: .thread)
         for dark in [false, true] {
             let theme = AppTheme(systemIsDark: dark)
             view.update([file], theme: theme)
@@ -117,7 +117,7 @@ final class AgentComposerSuggestionsViewTests: XCTestCase {
 
     private func suggestions(_ count: Int) -> [AgentComposerSuggestion] {
         (0..<count).map { AgentComposerSuggestion(id: "file:\($0)", title: "File \($0)",
-            subtitle: "Sources/\($0).swift", symbol: "doc", kind: .file) }
+            subtitle: "Sources/\($0).swift", icon: .file, kind: .file) }
     }
 
     func testKeyboardWrapsPreservesIdentityAndAcceptsExactlyOnce() {

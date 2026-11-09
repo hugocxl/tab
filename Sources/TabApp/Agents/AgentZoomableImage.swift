@@ -117,20 +117,11 @@ final class AgentZoomImageView: AgentActionImageView {
     override func resetCursorRects() {
         let cursor: NSCursor
         if (owner?.zoom ?? 1) > 1 { cursor = .openHand }
-        else if #available(macOS 15, *) { cursor = .zoomIn }
         else { cursor = Self.zoomCursor }
         addCursorRect(bounds, cursor: cursor)
     }
     private static let zoomCursor: NSCursor = {
-        let image = NSImage(size: NSSize(width: 24, height: 24), flipped: false) { _ in
-            let path = NSBezierPath(ovalIn: NSRect(x: 3, y: 9, width: 12, height: 12))
-            path.move(to: NSPoint(x: 13, y: 11)); path.line(to: NSPoint(x: 21, y: 3))
-            path.move(to: NSPoint(x: 6, y: 15)); path.line(to: NSPoint(x: 12, y: 15))
-            path.move(to: NSPoint(x: 9, y: 12)); path.line(to: NSPoint(x: 9, y: 18))
-            NSColor.white.setStroke(); path.lineWidth = 4; path.stroke()
-            NSColor.black.setStroke(); path.lineWidth = 2; path.stroke()
-            return true
-        }
+        let image = AppIcon.zoomIn.image(size: 24, color: .labelColor) ?? NSImage()
         return NSCursor(image: image, hotSpot: NSPoint(x: 9, y: 9))
     }()
     override func mouseDown(with event: NSEvent) {

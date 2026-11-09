@@ -33,7 +33,7 @@ final class PaneCardView: HoverView {
     var isZoomed = false {
         didSet {
             guard isZoomed != oldValue else { return }
-            zoomButton.icon = isZoomed ? .restore : .maximize
+            zoomButton.show(isZoomed ? .restore : .maximize)
             zoomButton.toolTip = isZoomed ? "Restore Pane" : "Zoom Pane"
         }
     }
@@ -63,7 +63,7 @@ final class PaneCardView: HoverView {
     init(pane: PaneId, model: AppModel) {
         self.pane = pane
         self.model = model
-        zoomButton = HeaderButton(.maximize, label: "Zoom Pane")
+        zoomButton = HeaderButton(control: .maximize, label: "Zoom Pane")
         super.init(frame: .zero)
         wantsLayer = true
         layer?.cornerRadius = Metrics.cardRadius
@@ -83,13 +83,13 @@ final class PaneCardView: HoverView {
         addSubview(header)
         for view in [glyph, titleLabel, suffixLabel, progressGlyph] as [NSView] { header.addSubview(view) }
 
-        let split = HeaderButton(.columns, label: "Split Right") { [weak self] in self?.run { $0.split(.right) } }
-        let down = HeaderButton(.rows, label: "Split Down") { [weak self] in self?.run { $0.split(.down) } }
+        let split = HeaderButton(control: .columns, label: "Split Right") { [weak self] in self?.run { $0.split(.right) } }
+        let down = HeaderButton(control: .rows, label: "Split Down") { [weak self] in self?.run { $0.split(.down) } }
         zoomButton.onPress = { [weak self] in
             guard let self else { return }
             self.model?.toggleZoom(self.pane)
         }
-        let close = HeaderButton(.close, label: "Close Pane") { [weak self] in
+        let close = HeaderButton(control: .close, label: "Close Pane") { [weak self] in
             guard let self else { return }
             self.model?.closePane(self.pane)
         }
@@ -137,7 +137,7 @@ final class PaneCardView: HoverView {
             glyph.image = icon
             glyph.contentTintColor = nil
         } else {
-            glyph.image = kind.glyph.image(size: Metrics.glyph)
+            glyph.image = kind.symbol.image(size: Metrics.glyph)
             glyph.contentTintColor = theme.fgMuted
         }
         let (title, suffix) = Self.splitTitle(controller.title)

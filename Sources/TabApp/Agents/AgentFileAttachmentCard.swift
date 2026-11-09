@@ -25,7 +25,8 @@ final class AgentFileAttachmentCard: ThemedView {
         preview.onPress = { [weak self] in self?.onOpen?(false) }
         download.onPress = { [weak self] in self?.onOpen?(true) }
         download.imagePosition = .imageOnly
-        download.image = NSImage(systemSymbolName: "arrow.down.to.line", accessibilityDescription: nil)?.withSymbolConfiguration(.init(pointSize: 12, weight: .regular))
+        // Preserve the former explicit 12pt symbol's height without a second inset.
+        download.image = AppIcon.download.image(size: 12, scale: 1)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
     func update(_ attachment: AgentChatAttachmentDescriptor, standalone: Bool, theme: AppTheme) {

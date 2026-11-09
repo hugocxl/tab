@@ -11,7 +11,7 @@ struct ShortcutsPage: View {
         Form {
             Section {
                 HStack(spacing: 6) {
-                    Image(systemName: "magnifyingglass")
+                    Image(.search, size: 13)
                         .foregroundStyle(.secondary)
                     TextField("Filter Shortcuts", text: $query, prompt: Text("Filter Shortcuts"))
                         .textFieldStyle(.plain)
@@ -20,7 +20,7 @@ struct ShortcutsPage: View {
                         Button {
                             query = ""
                         } label: {
-                            Image(systemName: "xmark.circle.fill")
+                            Image(.circleXFill, size: 13)
                         }
                         .buttonStyle(.borderless)
                         .foregroundStyle(.secondary)

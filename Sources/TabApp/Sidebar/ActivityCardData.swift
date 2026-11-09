@@ -35,6 +35,7 @@ struct ActivityCardData: Equatable {
         enum Icon: Equatable {
             case kind(PaneKind)
             case agent(AgentProvider)
+            case command(AppIcon)
             /// An editor's or diff's file, drawn with its file type's icon.
             case file(String)
             /// A page's favicon.
@@ -284,6 +285,8 @@ struct ActivityCardData: Equatable {
             text = title.isEmpty ? pane.content.defaultTitle : title
             topic = .simulator(text)
         case .terminal:
+            let controller = model.panes.controller(for: pane.id) as? TerminalPane
+            icon = .command(TerminalCommandIcon.icon(for: controller?.session?.process))
             if let agent {
                 icon = .agent(agent.provider)
                 // A terminal agent titles its terminal with a summary of its task.

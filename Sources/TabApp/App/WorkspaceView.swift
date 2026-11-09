@@ -185,7 +185,7 @@ final class WorkspaceView: ThemedView {
             notice = Notice(tone: .warning, icon: .spinner, message: "\(name) is offline. Reconnecting…", button: "Retry",
                             dismissible: false)
         case .needsUser(let message):
-            notice = Notice(tone: .danger, icon: .symbol("exclamationmark.circle.fill"), message: UpdateChip.sentence(message),
+            notice = Notice(tone: .danger, icon: .icon(.exclamationCircleFill), message: UpdateChip.sentence(message),
                             button: "Try Again", dismissible: false)
         case .ready, .connecting, .idle:
             notices.remove(Self.connectionNotice)

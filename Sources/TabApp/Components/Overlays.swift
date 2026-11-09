@@ -12,9 +12,9 @@ public enum Toast {
 
     static func notice(_ message: String, style: Style) -> Notice {
         switch style {
-        case .info: return Notice(tone: .neutral, icon: .symbol("info.circle.fill"), message: message)
-        case .success: return Notice(tone: .success, icon: .symbol("checkmark.circle.fill"), message: message)
-        case .error: return Notice(tone: .danger, icon: .symbol("exclamationmark.circle.fill"), message: message)
+        case .info: return Notice(tone: .neutral, icon: .icon(.infoFill), message: message)
+        case .success: return Notice(tone: .success, icon: .icon(.circleCheckFill), message: message)
+        case .error: return Notice(tone: .danger, icon: .icon(.exclamationCircleFill), message: message)
         }
     }
 

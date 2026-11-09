@@ -49,10 +49,14 @@ final class PaletteTileView: ThemedView {
         }
         switch tile.glyph {
         case .icon(let icon):
-            guard let image = icon.image(size: PaletteLayout.tile * 0.6) else { return }
+            // Colored tiles retain their contrasting glyph treatment pending design review.
+            let image = background == nil
+                ? icon.image(size: PaletteLayout.tile * 0.6, theme: theme, tint: foreground)
+                : icon.image(size: PaletteLayout.tile * 0.6, color: foreground)
+            guard let image else { return }
             let frame = NSRect(x: ((rect.width - image.size.width) / 2).rounded(), y: ((rect.height - image.size.height) / 2).rounded(),
                                width: image.size.width, height: image.size.height)
-            image.tinted(foreground).draw(in: frame, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+            image.draw(in: frame, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
         case .monogram(let text):
             let string = NSAttributedString(string: text, attributes: [.font: AppFont.system(12, weight: .semibold), .foregroundColor: foreground])
             let size = string.size()
@@ -443,15 +447,17 @@ final class ModeChip: HoverView {
     private let glyph = NSImageView()
     private let label: NSTextField
     private let keycap = KeycapsView()
+    private let icon: AppIcon
 
     init(title: String, icon: AppIcon, key: KeyChord?) {
+        self.icon = icon
         label = makeLabel(title, font: AppFont.system(12, weight: .medium))
         super.init(frame: .zero)
         wantsLayer = true
         layer?.cornerRadius = Self.height / 2
         layer?.cornerCurve = .continuous
         layer?.borderWidth = Metrics.border
-        glyph.image = icon.image(size: 14)
+        glyph.image = icon.image(size: 14, theme: theme)
         keycap.symbols = KeycapsView.symbols(key)
         for view in [glass, glyph, label, keycap] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = true
@@ -482,6 +488,7 @@ final class ModeChip: HoverView {
 
     override func themeDidChange() {
         glass.appearance = theme.nsAppearance
+        glyph.image = icon.image(size: 14, theme: theme)
         glyph.contentTintColor = theme.accent
         label.textColor = theme.fg
         needsDisplay = true

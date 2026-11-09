@@ -225,7 +225,7 @@ final class AgentResponseDiagram: AgentResponseSection {
             button.wantsLayer = true
             button.layer?.cornerRadius = 5
         }
-        expand.image = AgentConversationIcon.maximize.image()
+        expand.image = AppIcon.maximize.image(size: 12, scale: AppIcon.inlineScale)
         expand.toolTip = "Expand diagram"
         expand.setAccessibilityLabel("Expand diagram")
         expand.onPress = { [weak self] in self?.expandDiagram() }
@@ -360,7 +360,7 @@ final class AgentResponseDiagram: AgentResponseSection {
     // MARK: Actions
 
     private func resetCopyAction() {
-        copy.image = AgentConversationIcon.copy.image()
+        copy.image = AppIcon.copy.image(size: 12, scale: AppIcon.inlineScale)
         copy.toolTip = "Copy diagram source"
         copy.setAccessibilityLabel("Copy diagram source")
     }
@@ -372,7 +372,7 @@ final class AgentResponseDiagram: AgentResponseSection {
             NSPasteboard.general.clearContents()
             copied = NSPasteboard.general.setString(source, forType: .string)
         }
-        copy.image = (copied ? AgentConversationIcon.check : .warning).image()
+        copy.image = (copied ? AppIcon.check : .triangleAlert).image(size: 12, scale: AppIcon.inlineScale)
         copy.toolTip = copied ? "Copied" : "Copy failed"
         copy.setAccessibilityLabel(copy.toolTip)
         copyReset?.cancel()

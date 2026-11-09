@@ -7,7 +7,7 @@ extension SettingsModel {
             let access = store.host?.privacyAccess(permission) ?? .notAsked
             var controls: [SettingControl] = [.label(access.title, access == .denied ? .error : .secondary)]
             if access == .denied || access == .limited {
-                controls.append(b.button("Open \(permission.title) Settings", symbol: "arrow.up.forward.app") {
+                controls.append(b.button("Open \(permission.title) Settings", icon: .externalLink) {
                     PrivacyPermission.openSettings(permission.settingsPane)
                 })
             }

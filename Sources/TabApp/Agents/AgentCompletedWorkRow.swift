@@ -28,12 +28,12 @@ final class AgentCompletedWorkRow: AgentTimelineRow {
     var duration: TimeInterval?
     private var toolCount = 0
     private var messageCount = 0
-    private var icons: [AgentConversationIcon] = []
+    private var icons: [AppIcon] = []
 
     override func update(_ items: [AgentChatItem]) {
         toolCount = items.filter { $0.kind == .tool }.count
         messageCount = items.filter { $0.kind == .assistant }.count
-        var icons: [AgentConversationIcon] = []
+        var icons: [AppIcon] = []
         for item in items where item.kind == .tool {
             let icon = Self.icon(item.tool?.category)
             if !icons.contains(icon) { icons.append(icon) }
@@ -53,14 +53,14 @@ final class AgentCompletedWorkRow: AgentTimelineRow {
         return label
     }
 
-    static func icon(_ category: AgentToolActivity.Category?) -> AgentConversationIcon {
+    static func icon(_ category: AgentToolActivity.Category?) -> AppIcon {
         switch category {
         case .command: return .terminal
         case .read: return .eye
         case .search: return .search
-        case .edit: return .edit
+        case .edit: return .pencil
         case .web: return .globe
-        case .subagent: return .bot
+        case .subagent: return .cpu
         default: return .wrench
         }
     }
@@ -68,9 +68,9 @@ final class AgentCompletedWorkRow: AgentTimelineRow {
     private func updateDisclosure() {
         let label = summary
         let title = NSMutableAttributedString()
-        func append(_ icon: AgentConversationIcon, size: CGFloat, gap: CGFloat) {
+        func append(_ icon: AppIcon, size: CGFloat, gap: CGFloat) {
             let attachment = NSTextAttachment()
-            attachment.image = icon.image(size: size, color: theme.fgDim)?.tiffRepresentation.flatMap(NSImage.init(data:))
+            attachment.image = icon.image(size: size, scale: AppIcon.inlineScale, color: theme.fgDim)?.tiffRepresentation.flatMap(NSImage.init(data:))
             attachment.bounds = NSRect(x: 0, y: -2, width: size, height: size)
             title.append(NSAttributedString(attachment: attachment))
             let space = NSTextAttachment()

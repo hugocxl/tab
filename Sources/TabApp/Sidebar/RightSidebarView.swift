@@ -34,7 +34,7 @@ final class RightSidebarView: NSView {
         button.shortcut = kind.shortcut
         return (kind, button)
     }
-    private let toggle = ChromeButton(.panelRight, label: "Hide Sidebar")
+    private let toggle = ChromeButton(SystemSymbol.panelRight, label: "Hide Sidebar")
     private let handle = PanelResizeHandle()
 
     override init(frame frameRect: NSRect) {

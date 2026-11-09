@@ -148,12 +148,12 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
             guard let text = self?.item?.text else { return }
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(text, forType: .string)
-            self?.copy.image = AgentConversationIcon.check.image()
+            self?.copy.image = AppIcon.check.image(size: 12, scale: AppIcon.inlineScale)
             self?.copyReset?.cancel()
             self?.copyReset = Task { [weak self] in
                 try? await Task.sleep(for: .seconds(2))
                 guard !Task.isCancelled else { return }
-                self?.copy.image = AgentConversationIcon.copy.image()
+                self?.copy.image = AppIcon.copy.image(size: 12, scale: AppIcon.inlineScale)
             }
         }
         response.onOpenFile = { [weak self] path, line in self?.onOpenFile?(path, line) }
@@ -234,7 +234,7 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
         copy.toolTip = item.kind == .user ? "Copy message" : "Copy response as Markdown"
         copy.setAccessibilityLabel(item.kind == .user ? "Copy message" : "Copy response")
         copy.title = ""
-        copy.image = AgentConversationIcon.copy.image()
+        copy.image = AppIcon.copy.image(size: 12, scale: AppIcon.inlineScale)
         copy.imagePosition = .imageOnly
         updateActionVisibility()
         copy.setTitleColor(theme.fgDim)

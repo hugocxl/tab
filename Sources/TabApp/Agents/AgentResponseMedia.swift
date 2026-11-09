@@ -221,7 +221,7 @@ final class AgentMediaPlayTile: NSControl {
         background = theme.card
         title.textColor = theme.fg
         detail.textColor = theme.fgMuted
-        icon.image = AgentConversationIcon.play.image(size: 16, color: theme.fgMuted)
+        icon.image = AppIcon.play.image(size: 16, scale: AppIcon.inlineScale, color: theme.fgMuted)
         needsDisplay = true
     }
 
@@ -304,7 +304,7 @@ final class AgentInlineMediaCell: NSTextAttachmentCell {
                        from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
         } else if failed {
             let side = min(12, rect.height - 4)
-            AgentConversationIcon.warning.image(size: side, color: muted)?.draw(
+            AppIcon.triangleAlert.image(size: side, scale: AppIcon.inlineScale, color: muted)?.draw(
                 in: NSRect(x: rect.midX - side / 2, y: rect.midY - side / 2, width: side, height: side),
                 from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
         }

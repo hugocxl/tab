@@ -88,18 +88,18 @@ final class AgentResponseContainer: AgentResponseSection {
         case .quote: leading = AgentMarkdownLayout.units(14.8); border = AgentMarkdownPalette(theme: theme).quoteRule
         case .alert(let title):
             leading = 12; top = 28
-            let icon: String
+            let icon: AppIcon
             switch title {
-            case "Tip": border = .systemGreen; icon = "lightbulb"
-            case "Important": border = .systemPurple; icon = "text.bubble"
-            case "Warning": border = .systemOrange; icon = "exclamationmark.triangle"
-            case "Caution": border = .systemRed; icon = "exclamationmark.octagon"
-            default: border = .systemBlue; icon = "info.circle"
+            case "Tip": border = .systemGreen; icon = .lightbulb
+            case "Important": border = .systemPurple; icon = .commentText
+            case "Warning": border = .systemOrange; icon = .triangleAlert
+            case "Caution": border = .systemRed; icon = .octagonAlert
+            default: border = .systemBlue; icon = .info
             }
             marker.stringValue = title; marker.textColor = border
             marker.font = AppFont.system(14, weight: .medium)
             marker.isHidden = false; alertIcon.isHidden = false
-            alertIcon.image = NSImage(systemSymbolName: icon, accessibilityDescription: nil)
+            alertIcon.image = icon.image(size: 14, scale: AppIcon.inlineScale)
             alertIcon.contentTintColor = border
         case .list(let text, let depth, let indent, let structure):
             leading = indent ?? CGFloat(depth + 1) * 20
@@ -136,7 +136,10 @@ final class AgentResponseContainer: AgentResponseSection {
     }
     private func refreshDisclosure() {
         guard case .details(let title, _) = container else { return }
-        disclosure.title = (expanded ? "⌄  " : "›  ") + title
+        disclosure.title = title
+        disclosure.image = (expanded ? AppIcon.chevronDown : .chevronRight).image(size: 12, scale: AppIcon.inlineScale)
+        disclosure.imagePosition = .imageLeading
+        disclosure.contentTintColor = titleColor
         disclosure.setTitleColor(titleColor)
         disclosure.setAccessibilityLabel((expanded ? "Collapse " : "Expand ") + title)
         response.isHidden = !expanded

@@ -19,9 +19,13 @@ struct SettingsRootView: View {
                 .toolbar {
                     ToolbarItem(placement: .navigation) {
                         ControlGroup {
-                            Button("Back", systemImage: "chevron.left", action: model.goBack)
+                            Button(action: model.goBack) {
+                                Label { Text("Back") } icon: { Image(.chevronLeft, size: 13) }
+                            }
                                 .disabled(!model.canGoBack)
-                            Button("Forward", systemImage: "chevron.right", action: model.goForward)
+                            Button(action: model.goForward) {
+                                Label { Text("Forward") } icon: { Image(.chevronRight, size: 13) }
+                            }
                                 .disabled(!model.canGoForward)
                         }
                         .controlGroupStyle(.navigation)

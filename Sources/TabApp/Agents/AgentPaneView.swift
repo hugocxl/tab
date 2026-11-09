@@ -137,7 +137,7 @@ final class AgentPaneView: ThemedView {
         composerScroll.scrollerStyle = .overlay
         composerCard.cornerRadius = 18
         composerCard.layer?.borderWidth = Metrics.border
-        attach.image = NSImage(systemSymbolName: "paperclip", accessibilityDescription: "Attach files")
+        attach.image = AppIcon.paperclip.image(size: 16, scale: AppIcon.inlineScale)
         attach.imagePosition = .imageOnly
         attach.setAccessibilityLabel("Attach files")
         attach.toolTip = "Attach files or drop them into the message box"

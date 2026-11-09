@@ -2,40 +2,6 @@ import AppKit
 import TabCore
 import TabProtocol
 
-/// A glyph button for the sidebars' chrome rows: a 30pt circle that fills
-/// while hovered, and stays filled while its panel is open (`isOn`).
-final class ChromeButton: CircleButton {
-    var onPress: ((ChromeButton) -> Void)?
-    var menuProvider: (() -> NSMenu?)?
-    var isOn = false { didSet { if isOn != oldValue { updateAppearance() } } }
-
-    init(_ icon: AppIcon, label: String, side: CGFloat = ChromeButton.side, glyph: CGFloat = ChromeButton.glyph, action: ((ChromeButton) -> Void)? = nil) {
-        onPress = action
-        super.init(icon: icon, label: label, side: side, glyph: glyph)
-    }
-
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    /// The sidebar chrome's button circle.
-    static let side: CGFloat = 30
-    /// The sidebar chrome's glyph.
-    static let glyph: CGFloat = 17
-    /// The space between buttons side by side anywhere in the sidebars.
-    static let gap: CGFloat = 4
-    /// A sidebar chrome row: the button with the gutter between cards above
-    /// and below it.
-    static let rowHeight: CGFloat = Metrics.gutter * 2 + side
-
-    override var isFilled: Bool { isOn }
-    override var mouseDownCanMoveWindow: Bool { false }
-
-    override func pressed() {
-        onPress?(self)
-    }
-
-    override func menu(for event: NSEvent) -> NSMenu? { menuProvider?() }
-}
-
 /// A shortcut number shown while its modifiers are held: the accent with
 /// the background's color for the digit.
 final class HintBadge: ThemedView {
@@ -85,7 +51,7 @@ final class SidebarCardView: HoverView {
     private enum LocationTone { case name, detail, link }
     private let paneRows: [PaneRowView]
     private var elapsedTimer: Timer?
-    private let closeButton = ChromeButton(.check, label: "Close Tab", side: 18, glyph: 11)
+    private let closeButton = ChromeButton(AppIcon.check, label: "Close Tab", side: 18, glyph: 11)
     /// The hairlines above and below, which hide while this card is filled.
     var dividers: [CardDivider] = []
     /// Whether the card is filled: selected, or hovered.
@@ -148,6 +114,7 @@ final class SidebarCardView: HoverView {
     }
 
     private let headerIcon: NSImageView?
+    private let usesDefaultHeaderIcon: Bool
     private let headerLabel: NSTextField?
     /// Whether the location row has anything to say: a folder or name the
     /// project row doesn't already show, a branch or a pull request.
@@ -155,8 +122,9 @@ final class SidebarCardView: HoverView {
 
     init(data: ActivityCardData, hint: String?, header: Header? = nil) {
         self.data = data
+        usesDefaultHeaderIcon = header != nil && header?.icon == nil
         if let header {
-            let icon = NSImageView(image: header.icon ?? AppIcon.pierreFolder.colorImage(size: Self.iconSide, theme: .shared) ?? NSImage())
+            let icon = NSImageView(image: header.icon ?? AppIcon.folder.image(size: Self.iconSide, theme: .shared) ?? NSImage())
             icon.imageScaling = .scaleProportionallyUpOrDown
             icon.wantsLayer = true
             icon.layer?.cornerRadius = 3
@@ -253,10 +221,16 @@ final class SidebarCardView: HoverView {
     override func themeDidChange() {
         headerLabel?.textColor = theme.fgMuted
         titleLabel.textColor = theme.fg
+        if usesDefaultHeaderIcon {
+            headerIcon?.image = AppIcon.folder.image(size: Self.iconSide, theme: theme)
+        }
         if headerIcon?.image?.isTemplate ?? false { headerIcon?.contentTintColor = theme.fgDim }
-        // A branch, else the Home tab's folder.
-        let icon: AppIcon = data.branch != nil || data.base != nil || data.primary ? .pierreGit : .pierreFolder
-        locationIcon.image = icon.colorImage(size: Self.iconSide, theme: theme)
+        // A plain branch line, else the Home tab's folder.
+        if data.branch != nil || data.base != nil || data.primary {
+            locationIcon.image = AppIcon.gitBranch.image(size: Self.iconSide, color: theme.fgDim)
+        } else {
+            locationIcon.image = AppIcon.folder.image(size: Self.iconSide, theme: theme)
+        }
         let text = NSMutableAttributedString()
         for (index, part) in location.enumerated() {
             if index > 0 { text.append(NSAttributedString(string: " · ", attributes: [.font: AppFont.small, .foregroundColor: theme.fgDim])) }
@@ -410,7 +384,7 @@ final class PaneRowView: ThemedView {
         }
     }
 
-    private let status = StatusSymbolView()
+    private let status = PaneStatusView()
     private let icon = NSImageView()
     private let titleLabel: NSTextField
     private let detailLabel: NSTextField
@@ -460,11 +434,13 @@ final class PaneRowView: ThemedView {
         let image: NSImage?
         switch row.icon {
         case .agent(let provider): image = AgentLogo.image(for: provider, lightBackground: theme.isLight)
+        // Command brands share their file-type hue; UI tools keep the terminal tint.
+        case .command(let command): image = command.image(size: iconSide, hue: command.signatureHue ?? .green, theme: theme)
         case .file(let name): image = FileIcon.image(for: name, theme: theme, size: iconSide)
         case .image(let favicon): image = favicon
-        case .kind(let kind):
-            let glyph = Self.glyph(kind)
-            image = glyph.colorImage(size: iconSide, theme: theme) ?? glyph.image(size: iconSide)
+        // Each kind's mark carries its own hue: terminal green, agent indigo,
+        // browser blue, simulator purple.
+        case .kind(let kind): image = kind.glyph.image(size: iconSide, theme: theme)
         }
         icon.image = image
         // Template glyphs take the tint.
@@ -473,15 +449,6 @@ final class PaneRowView: ThemedView {
     }
 
     private var iconSide: CGFloat { isTitle ? Self.titleIconSide : SidebarCardView.iconSide }
-
-    /// Pierre's icon for a kind where it has one, else the kind's symbol.
-    private static func glyph(_ kind: PaneKind) -> AppIcon {
-        switch kind {
-        case .terminal: return .pierreBash
-        case .agent: return .pierreCode
-        default: return kind.glyph
-        }
-    }
 
     override func layout() {
         super.layout()
@@ -551,10 +518,9 @@ final class CardDivider: ThemedView {
     }
 }
 
-/// A status as an SF Symbol: a spinner while working, a filled circle when
-/// waiting for you, done, failed or paused, and an empty one while idle when
-/// `showsIdle`.
-final class StatusSymbolView: NSView {
+/// Tab Icons for waiting, done, failed, paused and idle states, and a native
+/// spinner while working. The idle circle appears only with `showsIdle`.
+final class PaneStatusView: NSView {
     var status: ActivityCardData.PaneRow.Status = .idle {
         didSet { if status != oldValue { refresh() } }
     }
@@ -570,8 +536,7 @@ final class StatusSymbolView: NSView {
     }
 
     private let symbol = NSImageView()
-    /// The spinner on macOS 14, whose SF Symbols lack `progress.indicator`.
-    private var fallbackSpinner: ActivityGlyph?
+    private var spinner: ActivityGlyph?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -586,7 +551,7 @@ final class StatusSymbolView: NSView {
     override func layout() {
         super.layout()
         symbol.frame = bounds
-        fallbackSpinner?.frame = bounds.insetBy(dx: 1, dy: 1)
+        spinner?.frame = bounds.insetBy(dx: 1, dy: 1)
     }
 
     /// Draws the status in the current theme's colors.
@@ -594,30 +559,30 @@ final class StatusSymbolView: NSView {
         let theme = AppTheme.shared
         let icon: AppIcon?
         let color: NSColor
+        let spins: Bool
         switch status {
-        case .working, .progress: (icon, color) = (.progressIndicator, grayWorking ? theme.fgMuted : theme.accent)
+        case .working, .progress: spins = true
+        default: spins = false
+        }
+        switch status {
+        case .working, .progress: (icon, color) = (nil, grayWorking ? theme.fgMuted : theme.accent)
         case .blocked: (icon, color) = (.exclamationCircleFill, theme.accent)
         case .done: (icon, color) = (.circleCheckFill, theme.success)
         case .error: (icon, color) = (.circleXFill, theme.danger)
         case .paused: (icon, color) = (.pauseCircleFill, theme.warning)
         case .idle: (icon, color) = (showsIdle ? .circle : nil, theme.fgDim)
         }
-        symbol.removeAllSymbolEffects()
-        symbol.image = icon?.image(size: side, weight: .semibold)
+        symbol.image = icon?.image(size: side)
         symbol.contentTintColor = color
-        let spins = icon == .progressIndicator
-        if spins, symbol.image != nil {
-            symbol.addSymbolEffect(.variableColor.iterative.dimInactiveLayers, options: .repeating)
-        }
-        if spins && symbol.image == nil {
-            let spinner = fallbackSpinner ?? ActivityGlyph()
-            spinner.style = .spinner(color)
-            if spinner.superview == nil { addSubview(spinner) }
-            fallbackSpinner = spinner
+        if spins {
+            let activity = spinner ?? ActivityGlyph()
+            activity.style = .spinner(color)
+            if activity.superview == nil { addSubview(activity) }
+            spinner = activity
             needsLayout = true
         } else {
-            fallbackSpinner?.removeFromSuperview()
-            fallbackSpinner = nil
+            spinner?.removeFromSuperview()
+            spinner = nil
         }
     }
 }
@@ -668,7 +633,7 @@ final class ProjectHeaderRow: HoverView {
 
     private let iconView = NSImageView()
     private let titleLabel: NSTextField
-    private let gear = ChromeButton(.settings, label: "Project Settings", side: 24, glyph: 14)
+    private let gear = ChromeButton(AppIcon.settings, label: "Project Settings", side: 24, glyph: 14)
     private let plus: ChromeButton?
     private let missing: Bool
     private let match: String
@@ -680,7 +645,7 @@ final class ProjectHeaderRow: HoverView {
         self.match = match
         missing = project.status == .missing
         titleLabel = makeLabel(title, font: AppFont.header)
-        plus = canCreateWorktree ? ChromeButton(.plus, label: "New Worktree", side: 24, glyph: 14) : nil
+        plus = canCreateWorktree ? ChromeButton(AppIcon.plus, label: "New Worktree", side: 24, glyph: 14) : nil
         plus?.shortcut = .newWorktree
         super.init(frame: .zero)
         if let remoteName { toolTip = "\(remoteName) · \(project.directory.rawValue)" }

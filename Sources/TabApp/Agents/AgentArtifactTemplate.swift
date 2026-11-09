@@ -26,15 +26,15 @@ struct AgentArtifactTemplate: Equatable {
             }
         }
 
-        var symbol: String {
+        var icon: AppIcon {
             switch self {
-            case .document, .googleDocs: return "doc.text"
-            case .presentation, .googleSlides: return "rectangle.on.rectangle"
-            case .spreadsheet, .googleSheets: return "tablecells"
-            case .site: return "globe"
-            case .image: return "photo"
-            case .email: return "envelope"
-            case .slack: return "number"
+            case .document, .googleDocs: return .fileText
+            case .presentation, .googleSlides: return .slides
+            case .spreadsheet, .googleSheets: return .fileTable
+            case .site: return .globe
+            case .image: return .image
+            case .email: return .envelope
+            case .slack: return .hash
             }
         }
 
@@ -177,7 +177,7 @@ final class AgentResponseTemplate: AgentResponseSection {
         title.textColor = theme.fg
         subtitle.stringValue = template.kind.label
         subtitle.textColor = theme.fgMuted
-        icon.image = NSImage(systemSymbolName: template.kind.symbol, accessibilityDescription: nil)
+        icon.image = template.kind.icon.image(size: 20, theme: theme)
         icon.contentTintColor = theme.fgMuted
         iconBox.layer?.backgroundColor = theme.bg.cgColor
         iconBox.layer?.borderColor = theme.border.withAlphaComponent(0.7).cgColor

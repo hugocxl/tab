@@ -51,7 +51,7 @@ public final class IconButton: NSButton {
     /// out a template image in an inactive window, unlike the theme's chrome.
     private func updateTint() {
         let theme = AppTheme.shared
-        image = icon.image(size: Metrics.glyph)?.tinted(isActive ? theme.accent : theme.fgMuted)
+        image = icon.image(size: Metrics.glyph, theme: theme, tint: isActive ? theme.accent : theme.fgMuted)
     }
 
     @objc private func pressed() {
@@ -63,7 +63,34 @@ public final class IconButton: NSButton {
 /// button in the sidebars and pane headers, with a glass tooltip showing its
 /// label and `shortcut`. Subclasses handle `pressed()`.
 class CircleButton: NSButton {
-    var icon: AppIcon { didSet { updateAppearance() } }
+    enum Glyph {
+        case icon(AppIcon)
+        case symbol(SystemSymbol)
+        case headerControl(HeaderControl)
+
+        @MainActor
+        func image(size: CGFloat) -> NSImage? {
+            switch self {
+            case .icon(let icon): return icon.image(size: size, theme: .shared)
+            case .symbol(let symbol): return symbol.image(size: size)
+            case .headerControl(let control): return SystemSymbol.image(named: control.rawValue, size: size)
+            }
+        }
+
+        @MainActor
+        func image(size: CGFloat, color: NSColor) -> NSImage? {
+            switch self {
+            case .icon(let icon): return icon.image(size: size, theme: .shared, tint: color)
+            case .symbol, .headerControl: return image(size: size)?.tinted(color)
+            }
+        }
+    }
+    private var glyph: Glyph
+
+    func setGlyph(_ glyph: Glyph) {
+        self.glyph = glyph
+        updateAppearance()
+    }
     /// The action's shortcut, shown in the tooltip from the current keymap.
     var shortcut: ShortcutId?
     private var tooltipText: String?
@@ -75,8 +102,8 @@ class CircleButton: NSButton {
     private var hoverArea: NSTrackingArea?
     private let palette = PaletteObserver()
 
-    init(icon: AppIcon, label: String, side: CGFloat, glyph: CGFloat) {
-        self.icon = icon
+    init(glyph source: Glyph, label: String, side: CGFloat, glyph: CGFloat) {
+        self.glyph = source
         self.side = side
         glyphSize = glyph
         super.init(frame: NSRect(x: 0, y: 0, width: side, height: side))
@@ -108,7 +135,7 @@ class CircleButton: NSButton {
 
     /// How far the drawn glyph reaches left and right of the button's center.
     var glyphExtent: (left: CGFloat, right: CGFloat) {
-        guard let image = icon.image(size: glyphSize) else { return (0, 0) }
+        guard let image = glyph.image(size: glyphSize) else { return (0, 0) }
         let ink = image.inkBounds
         let origin = -(image.size.width / 2)
         return (-(origin + ink.minX), origin + ink.maxX)
@@ -205,10 +232,58 @@ class CircleButton: NSButton {
         }
         layer?.backgroundColor = showsFill ? fill?.cgColor : nil
         let tint = isActive ? theme.accent : isFilled || isHovered ? theme.fg : theme.fgMuted
-        image = icon.image(size: glyphSize)?.tinted(tint)
+        image = glyph.image(size: glyphSize, color: tint)
     }
 
     @objc func pressed() {}
+}
+
+/// Fixed pane-header controls keep their original SF artwork.
+enum HeaderControl: String {
+    case columns = "square.split.2x1"
+    case rows = "square.split.1x2"
+    case maximize = "arrow.up.left.and.arrow.down.right"
+    case restore = "arrow.down.right.and.arrow.up.left"
+    case close = "xmark"
+}
+
+/// A glyph button for the sidebars' chrome rows: a 30pt circle that fills
+/// while hovered, and stays filled while its panel is open (`isOn`).
+final class ChromeButton: CircleButton {
+    var onPress: ((ChromeButton) -> Void)?
+    var menuProvider: (() -> NSMenu?)?
+    var isOn = false { didSet { if isOn != oldValue { updateAppearance() } } }
+
+    init(_ icon: AppIcon, label: String, side: CGFloat = ChromeButton.side, glyph: CGFloat = ChromeButton.glyph, action: ((ChromeButton) -> Void)? = nil) {
+        onPress = action
+        super.init(glyph: .icon(icon), label: label, side: side, glyph: glyph)
+    }
+
+    init(_ symbol: SystemSymbol, label: String, side: CGFloat = ChromeButton.side, glyph: CGFloat = ChromeButton.glyph, action: ((ChromeButton) -> Void)? = nil) {
+        onPress = action
+        super.init(glyph: .symbol(symbol), label: label, side: side, glyph: glyph)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// The sidebar chrome's button circle.
+    static let side: CGFloat = 30
+    /// The sidebar chrome's glyph.
+    static let glyph: CGFloat = 17
+    /// The space between buttons side by side anywhere in the sidebars.
+    static let gap: CGFloat = 4
+    /// A sidebar chrome row: the button with the gutter between cards above
+    /// and below it.
+    static let rowHeight: CGFloat = Metrics.gutter * 2 + side
+
+    override var isFilled: Bool { isOn }
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    override func pressed() {
+        onPress?(self)
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? { menuProvider?() }
 }
 
 /// A pane header's glyph button: a 22pt circle, smaller than the sidebars'.
@@ -219,9 +294,18 @@ final class HeaderButton: CircleButton {
     /// The header button's circle.
     static let side: CGFloat = 22
 
-    init(_ icon: AppIcon, label: String, action: (() -> Void)? = nil) {
+    init(_ symbol: SystemSymbol, label: String, action: (() -> Void)? = nil) {
         onPress = action
-        super.init(icon: icon, label: label, side: Self.side, glyph: Metrics.glyph)
+        super.init(glyph: .symbol(symbol), label: label, side: Self.side, glyph: Metrics.glyph)
+    }
+
+    init(control: HeaderControl, label: String, action: (() -> Void)? = nil) {
+        onPress = action
+        super.init(glyph: .headerControl(control), label: label, side: Self.side, glyph: Metrics.glyph)
+    }
+
+    func show(_ control: HeaderControl) {
+        setGlyph(.headerControl(control))
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }

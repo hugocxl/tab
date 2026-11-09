@@ -147,8 +147,8 @@ struct ButtonSpec {
     var title: String
     var style: Style = .normal
     var enabled = true
-    /// Shows an SF Symbol instead of the title; the title stays its label.
-    var symbol: String?
+    /// Shows a Tab Icon instead of the title; the title stays its label.
+    var icon: AppIcon?
     var help: String?
     var action: () -> Void
 }

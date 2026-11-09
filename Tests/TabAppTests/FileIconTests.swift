@@ -7,20 +7,20 @@ import TabCore
 final class FileIconTests: XCTestCase {
     func testResolutionMatchesSourceBrowserExamples() {
         let cases: [(String, String)] = [
-            ("main.swift", "file-tree-builtin-swift"),
-            ("src/Widget.test.tsx", "file-tree-builtin-react"),
-            ("types/window.d.ts", "file-tree-builtin-typescript"),
-            (".gitignore", "file-tree-builtin-git"),
-            ("Dockerfile", "file-tree-builtin-docker"),
-            ("AGENTS.md", "tab-file-icon-agents"),
-            ("package.json", "file-tree-builtin-npm"),
-            ("PNPM-LOCK.YAML", "tab-file-icon-pnpm"),
-            ("run.ps1", "tab-file-icon-powershell"),
-            ("unknown.xyz", "file-tree-builtin-default"),
-            ("notes.txt", "file-tree-builtin-text"),
-            ("schema.xml", "tab-file-icon-xml"),
-            ("value.toml", "tab-file-icon-toml"),
-            ("report.csv", "tab-file-icon-spreadsheet"),
+            ("main.swift", "swift"),
+            ("src/Widget.test.tsx", "react"),
+            ("types/window.d.ts", "typescript"),
+            (".gitignore", "git"),
+            ("Dockerfile", "docker"),
+            ("AGENTS.md", "agents"),
+            ("package.json", "npm"),
+            ("PNPM-LOCK.YAML", "pnpm"),
+            ("run.ps1", "powershell"),
+            ("unknown.xyz", "file"),
+            ("notes.txt", "file-text"),
+            ("schema.xml", "xml"),
+            ("value.toml", "toml"),
+            ("report.csv", "file-table"),
         ]
         for (path, expected) in cases { XCTAssertEqual(FileIcon.name(for: path), expected, path) }
         XCTAssertEqual(FileIcon.syntheticFileName(language: "TYPESCRIPT"), "file.ts")
@@ -30,11 +30,11 @@ final class FileIconTests: XCTestCase {
     }
 
     func testMimeFallbackOnlyReplacesUnknownFilenameIcons() {
-        XCTAssertEqual(FileIcon.name(for: "download", mimeType: "application/pdf"), "tab-file-icon-pdf")
-        XCTAssertEqual(FileIcon.name(for: "unknown.xyz", mimeType: "image/png"), "file-tree-builtin-image")
-        XCTAssertEqual(FileIcon.name(for: "main.swift", mimeType: "application/pdf"), "file-tree-builtin-swift")
-        XCTAssertEqual(FileIcon.name(for: "download", mimeType: "APPLICATION/PDF"), "file-tree-builtin-default")
-        XCTAssertEqual(FileIcon.name(for: "download", mimeType: "text/javascript; charset=utf-8"), "file-tree-builtin-default")
+        XCTAssertEqual(FileIcon.name(for: "download", mimeType: "application/pdf"), "pdf")
+        XCTAssertEqual(FileIcon.name(for: "unknown.xyz", mimeType: "image/png"), "image")
+        XCTAssertEqual(FileIcon.name(for: "main.swift", mimeType: "application/pdf"), "swift")
+        XCTAssertEqual(FileIcon.name(for: "download", mimeType: "APPLICATION/PDF"), "file")
+        XCTAssertEqual(FileIcon.name(for: "download", mimeType: "text/javascript; charset=utf-8"), "file")
     }
 
     func testRemotePathsCachingAndDirectoriesWithFileExtensions() throws {
@@ -48,6 +48,11 @@ final class FileIconTests: XCTestCase {
         let folder = try XCTUnwrap(FileIcon.image(for: "/remote/package.swift", isDirectory: true, theme: dark))
         XCTAssertTrue(folder === FileIcon.image(for: "/remote/src", isDirectory: true, theme: dark))
         XCTAssertFalse(folder === swift)
+        XCTAssertTrue(folder === AppIcon.folder.image(size: 14, hue: .gray, theme: dark))
+        let openFolder = try XCTUnwrap(FileIcon.image(for: "/remote/package.swift", isDirectory: true, isExpanded: true, theme: dark))
+        XCTAssertTrue(openFolder === AppIcon.folderOpen.image(size: 14, hue: .gray, theme: dark))
+        XCTAssertFalse(openFolder === folder)
+        XCTAssertTrue(swift === FileIcon.image(for: "main.swift", dark: true))
     }
 
     func testExplicitFileLinksKeepLabelsPositionsAndCopyText() throws {
@@ -89,18 +94,52 @@ final class FileIconTests: XCTestCase {
         XCTAssertTrue(pdf === FileIcon.image(for: "report.pdf", theme: theme))
     }
 
-    func testEveryBundledIconVariantRendersNativePixels() throws {
-        let url = try XCTUnwrap(BundledImage.url("agent-file-icons", extension: "json"))
-        let catalog = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
-        let icons = try XCTUnwrap(catalog["icons"] as? [String: [String]])
-        for (name, variants) in icons {
-            for svg in variants {
-                let image = try XCTUnwrap(NSImage(data: Data(svg.utf8)), name)
-                let bitmap = try XCTUnwrap(image.tiffRepresentation.flatMap(NSBitmapImageRep.init(data:)), name)
+    func testExactNamesOverridesAndLongestSuffixes() {
+        let cases: [(String, AppIcon, AppTheme.IconHue)] = [
+            (".prettierrc.toml", .prettier, .teal),
+            ("package.json", .npm, .red),
+            ("tsconfig.json", .typescript, .blue),
+            ("PNPM-LOCK.YAML", .pnpm, .orange),
+            ("types/window.d.ts", .typescript, .blue),
+            ("src/Widget.test.ts", .typescript, .blue),
+            ("src/Widget.test.tsx", .react, .cyan),
+            ("content.mdx.tsx", .markdown, .gray),
+            ("archive.env.local", .fileText, .gray),
+            ("run.ps1", .powershell, .blue),
+            ("implementation.mm", .objc, .vermilion),
+            ("report.xlsx", .fileTable, .gray),
+            ("document.rtf", .fileText, .gray),
+        ]
+        for (path, icon, hue) in cases {
+            let resolved = FileIcon.resolve(path)
+            XCTAssertEqual(resolved.icon, icon, path)
+            XCTAssertEqual(resolved.hue, hue, path)
+        }
+    }
+
+    func testEveryRuleUsesAnAppIconWithAnExplicitHue() throws {
+        let tables = [FileIcon.fileNames, FileIcon.extensions, FileIcon.overrideNames,
+                      FileIcon.overrideExtensions, FileIcon.languages]
+        let icons = Set(tables.flatMap { $0.values }).union([.file, .folder, .folderOpen])
+        for icon in icons {
+            XCTAssertEqual(AppIcon(rawValue: icon.rawValue), icon)
+            _ = try XCTUnwrap(FileIcon.hues[icon], "Missing hue for \(icon.rawValue)")
+        }
+        for (language, icon) in FileIcon.languages {
+            XCTAssertEqual(FileIcon.resolve(FileIcon.syntheticFileName(language: language)).icon, icon, language)
+        }
+    }
+
+    func testEveryFileRuleIconRendersNativePixelsInBothAppearances() throws {
+        for dark in [false, true] {
+            let theme = AppTheme(systemIsDark: dark)
+            for (icon, hue) in FileIcon.hues {
+                let image = try XCTUnwrap(icon.image(size: 16, hue: hue, theme: theme), icon.rawValue)
+                let bitmap = try XCTUnwrap(image.tiffRepresentation.flatMap(NSBitmapImageRep.init(data:)), icon.rawValue)
                 let visible = (0..<bitmap.pixelsHigh).contains { y in
                     (0..<bitmap.pixelsWide).contains { x in (bitmap.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0 }
                 }
-                XCTAssertTrue(visible, name)
+                XCTAssertTrue(visible, icon.rawValue)
             }
         }
     }

@@ -3,6 +3,16 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.84.0 - 2026-11-09
+
+### Changed
+
+- Tab draws every icon from its own two-tone icon set, including file types, agent logos and Git hosts, so
+  icons share one size and style across the app.
+- Terminal rows in the sidebar show an icon for the running command, such as node, npm, pnpm or python.
+- Browser and simulator panes have colored marks in the sidebar that match terminal and agent panes.
+- Sidebar cards show a plain branch icon beside their Git location.
+
 ## 0.83.1 - 2026-11-09
 
 ### Fixed
@@ -32,6 +42,7 @@ Changelog.
 ### Fixed
 
 - Releases no longer fail now and then while checking conversation mentions in the agent composer.
+||||||| parent of e69d4b5 (0.82.0: Draw every icon from Tab's own two-tone set)
 
 ## 0.81.0 - 2026-11-09
 

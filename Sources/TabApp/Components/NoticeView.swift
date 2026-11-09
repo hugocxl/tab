@@ -13,8 +13,8 @@ public struct Notice: Equatable, Sendable {
         case spinner
         /// A download, from 0 to 1.
         case progress(Double)
-        /// An SF Symbol, drawn in the tone's color.
-        case symbol(String)
+        /// A Tab Icon, using its signature hue or the tone's color for UI glyphs.
+        case icon(AppIcon)
     }
 
     public var tone: Tone
@@ -185,8 +185,8 @@ final class NoticeView: ThemedView {
     }
 }
 
-/// A notice's icon: a symbol, a download's progress ring, or a spinning ring.
-final class NoticeIcon: NSView {
+/// A notice's icon: a Tab Icon, a download's progress ring, or a spinning ring.
+final class NoticeIcon: ThemedView {
     var icon: Notice.Icon = .spinner {
         didSet { if icon != oldValue { update() } }
     }
@@ -241,18 +241,19 @@ final class NoticeIcon: NSView {
         update()
     }
 
+    override func themeDidChange() { update() }
+
     private func update() {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         defer { CATransaction.commit() }
         switch icon {
-        case .symbol(let name):
+        case .icon(let icon):
             symbol.isHidden = false
             track.isHidden = true
             ring.isHidden = true
             ring.removeAnimation(forKey: Self.spinKey)
-            symbol.image = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
-                .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 17, weight: .regular))
+            symbol.image = icon.image(size: 17, theme: theme)
             symbol.contentTintColor = color
         case .progress(let fraction):
             symbol.isHidden = true
@@ -486,9 +487,7 @@ final class NoticeButton: HoverView {
                                                  y: ((bounds.height - size.height) / 2).rounded()),
                                      withAttributes: attributes)
         case .close:
-            guard let glyph = NSImage(systemSymbolName: "xmark", accessibilityDescription: nil)?
-                .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 10, weight: .semibold))?
-                .tinted(colors.glyph) else { return }
+            guard let glyph = AppIcon.close.image(size: 10, color: colors.glyph) else { return }
             let size = glyph.size
             glyph.draw(in: NSRect(x: ((bounds.width - size.width) / 2).rounded(), y: ((bounds.height - size.height) / 2).rounded(),
                                   width: size.width, height: size.height))

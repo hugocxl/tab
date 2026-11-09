@@ -191,7 +191,7 @@ private final class AgentReasoningRow: NSButton {
             NSBezierPath(roundedRect: rect, xRadius: 7, yRadius: 7).fill()
         }
         let ink = selected ? theme.fg : theme.fgMuted
-        drawSymbol(symbolName, in: NSRect(x: 10, y: 9, width: 16, height: 16), color: ink)
+        drawIcon(icon, in: NSRect(x: 10, y: 9, width: 16, height: 16), color: ink)
         let font = NSFont.systemFont(ofSize: 13, weight: selected ? .medium : .regular)
         let titleWidth = (title as NSString).size(withAttributes: [.font: font]).width
         let paragraph = NSMutableParagraphStyle()
@@ -206,26 +206,23 @@ private final class AgentReasoningRow: NSButton {
                                        withAttributes: [.font: NSFont.systemFont(ofSize: 10, weight: .medium), .foregroundColor: theme.fgMuted])
         }
         if selected {
-            drawSymbol("checkmark", in: NSRect(x: bounds.width - 25, y: 10, width: 14, height: 14), color: theme.accent)
+            drawIcon(.check, in: NSRect(x: bounds.width - 25, y: 10, width: 14, height: 14), color: theme.accent)
         }
     }
 
-    private var symbolName: String {
+    private var icon: AppIcon {
         switch item.title.lowercased().replacingOccurrences(of: " ", with: "") {
-        case "auto", "automatic": return "sparkles"
-        case "low", "minimal", "none": return "gauge.with.dots.needle.0percent"
-        case "medium": return "gauge.with.dots.needle.33percent"
-        case "high": return "gauge.with.dots.needle.67percent"
-        case "extrahigh", "xhigh", "max", "ultra": return "gauge.with.dots.needle.100percent"
-        default: return "brain"
+        case "auto", "automatic": return .sparkles
+        case "low", "minimal", "none": return .gaugeLow
+        case "medium": return .gaugeMedium
+        case "high": return .gaugeHigh
+        case "extrahigh", "xhigh", "max", "ultra": return .gaugeMax
+        default: return .brain
         }
     }
 
-    private func drawSymbol(_ name: String, in rect: NSRect, color: NSColor) {
-        let configuration = NSImage.SymbolConfiguration(pointSize: 14, weight: .medium)
-            .applying(NSImage.SymbolConfiguration(paletteColors: [color]))
-        let image = NSImage(systemSymbolName: name, accessibilityDescription: nil)
-            ?? NSImage(systemSymbolName: "brain", accessibilityDescription: nil)
-        image?.withSymbolConfiguration(configuration)?.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+    private func drawIcon(_ icon: AppIcon, in rect: NSRect, color: NSColor) {
+        // These symbols were fitted directly into the row's 14pt/16pt boxes.
+        icon.image(size: rect.height, scale: 1, theme: theme, tint: color)?.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
     }
 }

@@ -44,25 +44,25 @@ extension SettingsModel {
                     store.updateNotifications("\(id)-sound") { $0[status].sound = sound }
                     BubbleSounds.play(sound)
                 },
-                b.button("Play \(current.sound.title)", symbol: "play.fill") { BubbleSounds.play(current.sound) },
+                b.button("Play \(current.sound.title)", icon: .play) { BubbleSounds.play(current.sound) },
             ]))
         }
     }
 }
 
-/// A status's icon: a white symbol on a colored disc, like Settings' page icons.
+/// A status's icon: a white Tab Icon on a colored disc, like Settings' page icons.
 enum StatusIcon {
     private static var cache: [ActivityStatus: NSImage] = [:]
 
     @MainActor
     static func image(_ status: ActivityStatus) -> NSImage {
         if let image = cache[status] { return image }
-        let (symbol, top, bottom): (String, UInt32, UInt32)
+        let (icon, top, bottom): (AppIcon, UInt32, UInt32)
         switch status {
-        case .working: (symbol, top, bottom) = ("ellipsis", 0x5BB2FF, 0x1F6FEB)
-        case .blocked: (symbol, top, bottom) = ("nosign", 0xFFC94A, 0xF29D1B)
-        case .error: (symbol, top, bottom) = ("exclamationmark.triangle", 0xFF8A65, 0xE5484D)
-        case .done: (symbol, top, bottom) = ("checkmark.circle", 0x8EDB6B, 0x3FA84A)
+        case .working: (icon, top, bottom) = (.ellipsis, 0x5BB2FF, 0x1F6FEB)
+        case .blocked: (icon, top, bottom) = (.ban, 0xFFC94A, 0xF29D1B)
+        case .error: (icon, top, bottom) = (.triangleAlert, 0xFF8A65, 0xE5484D)
+        case .done: (icon, top, bottom) = (.circleCheck, 0x8EDB6B, 0x3FA84A)
         }
         let side: CGFloat = 28
         let image = NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
@@ -71,9 +71,7 @@ enum StatusIcon {
             NSColor.black.withAlphaComponent(0.12).setStroke()
             disc.lineWidth = 0.5
             disc.stroke()
-            let configuration = NSImage.SymbolConfiguration(pointSize: 14, weight: .bold)
-            guard let glyph = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
-                .withSymbolConfiguration(configuration)?.tinted(.white) else { return true }
+            guard let glyph = icon.image(size: 14, color: .white) else { return true }
             let size = glyph.size
             glyph.draw(in: NSRect(x: rect.midX - size.width / 2, y: rect.midY - size.height / 2, width: size.width, height: size.height))
             return true

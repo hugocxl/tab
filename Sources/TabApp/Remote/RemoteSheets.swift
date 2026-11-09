@@ -18,7 +18,7 @@ struct MenuBuilder {
     @MainActor
     mutating func add(_ title: String, icon: AppIcon, checked: Bool = false, _ handler: @escaping () -> Void) {
         let item = ClosureMenuItem(title, checked: checked, handler: handler)
-        item.image = icon.image()
+        item.image = icon.image(theme: .shared)
         addItem(item)
     }
 

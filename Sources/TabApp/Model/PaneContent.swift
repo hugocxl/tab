@@ -5,13 +5,13 @@ import TabCore
 /// buttons every card has.
 public struct PaneAction {
     public var id: String
-    public var icon: AppIcon
+    public var icon: SystemSymbol
     public var label: String
     /// Draws the icon in the accent color, for a toggle that is on.
     public var isActive: Bool
     public var perform: @MainActor () -> Void
 
-    public init(id: String, icon: AppIcon, label: String, isActive: Bool = false, perform: @escaping @MainActor () -> Void) {
+    public init(id: String, icon: SystemSymbol, label: String, isActive: Bool = false, perform: @escaping @MainActor () -> Void) {
         self.id = id
         self.icon = icon
         self.label = label
@@ -98,8 +98,20 @@ public enum PaneKind: Hashable, Sendable, CaseIterable {
     /// The kinds people create from the New Tab and New Pane menus, in order.
     public static let created: [PaneKind] = [.terminal, .agent, .browser, .simulator]
 
-    /// The glyph a card header draws for the kind.
+    /// The Tab Icon used by sidebar rows and the palette.
     public var glyph: AppIcon {
+        switch self {
+        case .terminal: return .bash
+        case .agent: return .codeBlock
+        case .editor: return .file
+        case .diff: return .gitBranch
+        case .browser: return .browser
+        case .simulator: return .simulator
+        }
+    }
+
+    /// The original SF glyph used by the pane header.
+    public var symbol: SystemSymbol {
         switch self {
         case .terminal: return .terminal
         case .agent: return .code

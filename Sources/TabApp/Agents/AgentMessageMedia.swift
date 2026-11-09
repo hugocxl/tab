@@ -275,7 +275,7 @@ final class AgentMediaTile: NSControl {
         let measured = value.boundingRect(with: NSSize(width: width, height: .greatestFiniteMagnitude), options: [.usesLineFragmentOrigin], attributes: attributes).height
         let height = max(16, ceil(measured))
         let origin = NSPoint(x: (bounds.width - width - 20) / 2, y: (bounds.height - height) / 2)
-        AgentConversationIcon.warning.image(size: 14, color: placeholderColor)?.draw(
+        AppIcon.triangleAlert.image(size: 14, scale: AppIcon.inlineScale, color: placeholderColor)?.draw(
             in: NSRect(x: origin.x, y: bounds.midY - 7, width: 14, height: 14), from: .zero,
             operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
         value.draw(in: NSRect(x: origin.x + 20, y: origin.y, width: width, height: height), withAttributes: attributes)

@@ -159,9 +159,9 @@ final class AgentToolDisclosure: NSView, NSTextViewDelegate {
         case .command: header.activityIcon = .terminal
         case .read: header.activityIcon = .eye
         case .search: header.activityIcon = .search
-        case .edit: header.activityIcon = .edit
+        case .edit: header.activityIcon = .pencil
         case .web: header.activityIcon = .globe
-        case .subagent: header.activityIcon = .bot
+        case .subagent: header.activityIcon = .cpu
         default: header.activityIcon = .wrench
         }
         let hasText = [item.detail, activity?.input, activity?.output].contains { $0?.isEmpty == false }

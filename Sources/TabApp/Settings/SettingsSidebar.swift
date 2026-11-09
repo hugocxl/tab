@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// A category's icon: an SF Symbol on a gradient rounded square, like the
+/// A category's icon: a Tab Icon on a gradient rounded square, like the
 /// icons in System Settings.
 struct SettingsIcon: View {
     let category: SettingsCategory
@@ -15,8 +15,9 @@ struct SettingsIcon: View {
             .overlay(shape.strokeBorder(.black.opacity(0.12), lineWidth: 0.5))
             .overlay(shape.inset(by: 0.5).strokeBorder(.white.opacity(0.25), lineWidth: 0.5))
             .overlay(
-                Image(systemName: icon.symbol)
-                    .font(.system(size: side * 0.56, weight: .semibold))
+                // Category tiles keep their contrasting glyph colors pending design review.
+                Image(nsImage: icon.icon.image(size: side * 0.56) ?? NSImage())
+                    .renderingMode(.template)
                     .foregroundStyle(SwiftUI.Color(hex: icon.glyph))
             )
             .frame(width: side, height: side)

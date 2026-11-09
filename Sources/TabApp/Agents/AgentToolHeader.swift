@@ -11,7 +11,7 @@ final class AgentToolHeader: NSButton {
     var focusColor = NSColor.controlAccentColor
     var chipColor = NSColor.secondaryLabelColor
     var plateColor = NSColor.quaternaryLabelColor
-    var activityIcon: AgentConversationIcon = .wrench
+    var activityIcon: AppIcon = .wrench
     /// The operation, such as a command or a path; drawn in a code chip while closed.
     var operation: String? { didSet { if oldValue != operation { needsDisplay = true } } }
     /// A muted note after the operation, such as why a tool did not run.
@@ -70,8 +70,8 @@ final class AgentToolHeader: NSButton {
             plateColor.setFill()
             NSBezierPath(roundedRect: bounds, xRadius: 7, yRadius: 7).fill()
         }
-        let icon: AgentConversationIcon = !isEnabled ? activityIcon : expanded ? .minus : hovered || focused ? .plus : activityIcon
-        icon.image(size: 15, color: iconColor)?.draw(
+        let icon: AppIcon = !isEnabled ? activityIcon : expanded ? .minus : hovered || focused ? .plus : activityIcon
+        icon.image(size: 15, scale: AppIcon.inlineScale, theme: .shared, tint: iconColor)?.draw(
             in: NSRect(x: 9, y: (bounds.height - 15) / 2, width: 15, height: 15), from: .zero,
             operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
         let attributes = titleAttributes

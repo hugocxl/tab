@@ -1,194 +1,409 @@
 import AppKit
+import SwiftUI
 import TabCore
 
-/// The icons the chrome uses, drawn with SF Symbols, except the terminal
-/// stack, which is a bundled SVG. Images are templates, so they tint with
-/// `contentTintColor` or the drawing color.
+/// Tab Icons: signature marks carry their theme hue; UI templates inherit the caller's tint.
 public enum AppIcon: String, CaseIterable, Sendable {
-    case appWindow, arrowUpDown, chevronDown, chevronLeft, chevronRight, chevronUp, check, circleX, command
-    case code, circleUser, columns, ellipsis, folder, gitBranch, globe, eye, keyboard, lightbulb
-    case maximize, network, palette, panelBottom, panelLeft, panelRight, pin, pinOff, plus, puzzle
-    case restore, refresh, rows, search, settings, terminal, terminalStack, close, externalLink
-    case filter, filterCircle, history, arrowDownCircle, arrowUpCircle, chevronsUpDown
-    case circle, circleCheck, clock, file, gitMerge, gitPullRequest, octagonX, copy, pause, pencil
-    case play, quote, stop, triangleAlert, phone, trash, minus, qrcode, arrowDown
-    case plusCircle, filterCircleFill, addProject, layers, laptop, globeBadgePlus, clearField
-    case home, appearance, camera, rotate
-    case circleCheckFill, exclamationCircleFill, circleXFill, pauseCircleFill, progressIndicator
-    /// Pierre's icons, drawn like the symbols.
-    case pierreBash, pierreCode, pierreFolder, pierreGit
+    case agents
+    case antigravity
+    case appWindow = "app-window"
+    case arrowDown = "arrow-down"
+    case arrowUp = "arrow-up"
+    case astro
+    case babel
+    case ban
+    case bash
+    case bellUnread = "bell-unread"
+    case biome
+    case bitbucket
+    case bootstrap
+    case braces
+    case brain
+    case browserslist
+    case bun
+    case c
+    case check
+    case checkbox
+    case checkboxFill = "checkbox-fill"
+    case chevronDown = "chevron-down"
+    case chevronLeft = "chevron-left"
+    case chevronRight = "chevron-right"
+    case chevronUp = "chevron-up"
+    case chevronsIn = "chevrons-in"
+    case chevronsUpDown = "chevrons-up-down"
+    case circle
+    case circleCheck = "circle-check"
+    case circleCheckFill = "circle-check-fill"
+    case circleUser = "circle-user"
+    case circleXFill = "circle-x-fill"
+    case claude
+    case close
+    case code
+    case codeBlock = "code-block"
+    case codex
+    case columns
+    case command
+    case commentText = "comment-text"
+    case conversation
+    case conversationAdd = "conversation-add"
+    case copilot
+    case copy
+    case cpp
+    case cpu
+    case csharp
+    case css
+    case cursor
+    case dart
+    case database
+    case deno
+    case diff
+    case docker
+    case dot
+    case download
+    case downloadCircleFill = "download-circle-fill"
+    case droid
+    case elixir
+    case ellipsis
+    case ellipsisCircle = "ellipsis-circle"
+    case envelope
+    case epub
+    case eraser
+    case eslint
+    case exclamationCircleFill = "exclamation-circle-fill"
+    case extensions = "extension"
+    case externalLink = "external-link"
+    case eye
+    case file
+    case filePlus = "file-plus"
+    case fileSymlink = "file-symlink"
+    case fileTable = "file-table"
+    case fileText = "file-text"
+    case foldVertical = "fold-vertical"
+    case folder
+    case folderOpen = "folder-open"
+    case folderPlus = "folder-plus"
+    case folderZip = "folder-zip"
+    case folders
+    case font
+    case forgejo
+    case gaugeHigh = "gauge-high"
+    case gaugeLow = "gauge-low"
+    case gaugeMax = "gauge-max"
+    case gaugeMedium = "gauge-medium"
+    case git
+    case gitBranch = "git-branch"
+    case gitcafe
+    case github
+    case gitlab
+    case globe
+    case go
+    case graphql
+    case grok
+    case hand
+    case hash
+    case haskell
+    case history
+    case homebrew
+    case html
+    case image
+    case info
+    case infoFill = "info-fill"
+    case java
+    case javascript
+    case kiro
+    case kotlin
+    case kubernetes
+    case laptop
+    case layers
+    case lightbulb
+    case listTodo = "list-todo"
+    case lock
+    case lockOpen = "lock-open"
+    case logs
+    case lua
+    case markdown
+    case maximize
+    case mcp
+    case minus
+    case minusCircle = "minus-circle"
+    case monitor
+    case multiplexer
+    case network
+    case nextjs
+    case node
+    case npm
+    case objc
+    case octagonAlert = "octagon-alert"
+    case ohMyPi = "oh-my-pi"
+    case opencode
+    case oxc
+    case panelLeft = "panel-left"
+    case panelRight = "panel-right"
+    case paperclip
+    case pauseCircleFill = "pause-circle-fill"
+    case pdf
+    case pencil
+    case phone
+    case phoneAndroid = "phone-android"
+    case php
+    case pi
+    case play
+    case plus
+    case pnpm
+    case postcss
+    case powershell
+    case prettier
+    case python
+    case quote
+    case r
+    case react
+    case refresh
+    case refreshCircleFill = "refresh-circle-fill"
+    case reset
+    case rows
+    case rss
+    case ruby
+    case rust
+    case sass
+    case scala
+    case search
+    case serverRack = "server-rack"
+    case settings
+    case shield
+    case shieldKeyhole = "shield-keyhole"
+    case slides
+    case sparkles
+    case spinner
+    case spreadsheet
+    case ssh
+    case stop
+    case stylelint
+    case svelte
+    case svg
+    case svgo
+    case swift
+    case tablet
+    case tailwind
+    case terminal
+    case terminalStack = "terminal-stack"
+    case terraform
+    case themes
+    case toml
+    case triangleAlert = "triangle-alert"
+    case triangleAlertFill = "triangle-alert-fill"
+    case typescript
+    case video
+    case vim
+    case vite
+    case vscode
+    case vue
+    case wasm
+    case webpack
+    case word
+    case wrap
+    case wrench
+    case xal
+    case xml
+    case yarn
+    case yml
+    case zig
+    case zip
+    case zoomIn = "zoom-in"
+    /// The browser and simulator pane kinds' two-tone marks, beside `bash`
+    /// and `codeBlock` in the sidebar.
+    case browser, simulator
 
-    /// The SF Symbol drawn for the icon, or `nil` for the icons composed or
-    /// bundled instead.
-    public var symbolName: String? {
-        switch self {
-        case .appWindow: return "macwindow"
-        case .arrowUpDown: return "arrow.up.arrow.down"
-        case .chevronDown: return "chevron.down"
-        case .chevronLeft: return "chevron.left"
-        case .chevronRight: return "chevron.right"
-        case .chevronUp: return "chevron.up"
-        case .check: return "checkmark"
-        case .circleX: return "xmark.circle"
-        case .command: return "command"
-        case .code: return "chevron.left.forwardslash.chevron.right"
-        case .circleUser: return "person.crop.circle"
-        case .columns: return "square.split.2x1"
-        case .ellipsis: return "ellipsis"
-        case .folder: return "folder"
-        case .gitBranch: return "arrow.triangle.branch"
-        case .globe: return "globe"
-        case .eye: return "eye"
-        case .keyboard: return "keyboard"
-        case .lightbulb: return "lightbulb"
-        case .maximize: return "arrow.up.left.and.arrow.down.right"
-        case .network: return "network"
-        case .palette: return "paintpalette"
-        case .panelBottom: return "rectangle.bottomhalf.inset.filled"
-        case .panelLeft: return "sidebar.left"
-        case .panelRight: return "sidebar.right"
-        case .pin: return "pin"
-        case .pinOff: return "pin.slash"
-        case .plus: return "plus"
-        case .puzzle: return "puzzlepiece.extension"
-        case .restore: return "arrow.down.right.and.arrow.up.left"
-        case .refresh: return "arrow.clockwise"
-        case .rows: return "square.split.1x2"
-        case .search: return "magnifyingglass"
-        case .settings: return "gearshape"
-        case .terminal: return "terminal"
-        case .terminalStack: return nil
-        case .pierreBash, .pierreCode, .pierreFolder, .pierreGit: return nil
-        case .close: return "xmark"
-        case .externalLink: return "arrow.up.forward.app"
-        case .filter: return "line.3.horizontal.decrease"
-        case .filterCircle: return "line.3.horizontal.decrease.circle"
-        case .history: return "clock.arrow.circlepath"
-        case .arrowDownCircle: return "arrow.down.circle"
-        case .arrowUpCircle: return "arrow.up.circle"
-        case .chevronsUpDown: return "chevron.up.chevron.down"
-        case .circle: return "circle"
-        case .circleCheck: return "checkmark.circle"
-        case .clock: return "clock"
-        case .file: return "doc"
-        case .gitMerge: return "arrow.triangle.merge"
-        case .gitPullRequest: return "arrow.triangle.pull"
-        case .octagonX: return "xmark.octagon"
-        case .copy: return "rectangle.on.rectangle"
-        case .pause: return "pause"
-        case .pencil: return "pencil"
-        case .play: return "play"
-        case .quote: return "text.quote"
-        case .stop: return "stop"
-        case .triangleAlert: return "exclamationmark.triangle"
-        case .phone: return "iphone"
-        case .trash: return "trash"
-        case .minus: return "minus"
-        case .qrcode: return "qrcode"
-        case .arrowDown: return "arrow.down"
-        case .plusCircle: return "plus.circle"
-        case .filterCircleFill: return "line.3.horizontal.decrease.circle.fill"
-        case .addProject: return "rectangle.stack.badge.plus"
-        case .layers: return "square.3.layers.3d"
-        case .laptop: return "laptopcomputer"
-        case .globeBadgePlus: return nil
-        case .clearField: return "xmark.circle.fill"
-        case .home: return "house"
-        case .appearance: return "circle.lefthalf.filled"
-        case .camera: return "camera"
-        case .rotate: return "rotate.left"
-        case .circleCheckFill: return "checkmark.circle.fill"
-        case .exclamationCircleFill: return "exclamationmark.circle.fill"
-        case .circleXFill: return "xmark.circle.fill"
-        case .progressIndicator: return "progress.indicator"
-        case .pauseCircleFill: return "pause.circle.fill"
-        }
-    }
+    /// The signature palette for file types, providers, Git hosts and command brands.
+    /// UI glyphs are absent so their surroundings can choose the tint.
+    static let signatureHues: [AppIcon: AppTheme.IconHue] = [
+        .agents: .orange,
+        .browser: .blue,
+        .codeBlock: .indigo,
+        .simulator: .purple,
+        .antigravity: .blue,
+        .astro: .purple,
+        .babel: .yellow,
+        .bash: .green,
+        .biome: .blue,
+        .bitbucket: .blue,
+        .bootstrap: .indigo,
+        .braces: .gray,
+        .brain: .gray,
+        .browserslist: .yellow,
+        .bun: .brown,
+        .c: .blue,
+        .claude: .orange,
+        .codex: .gray,
+        .copilot: .gray,
+        .cpp: .blue,
+        .csharp: .purple,
+        .css: .indigo,
+        .cursor: .gray,
+        .dart: .cyan,
+        .database: .gray,
+        .deno: .gray,
+        .diff: .green,
+        .docker: .blue,
+        .dot: .gray,
+        .droid: .orange,
+        .elixir: .purple,
+        .epub: .orange,
+        .eslint: .indigo,
+        .file: .gray,
+        .fileSymlink: .gray,
+        .fileTable: .gray,
+        .fileText: .gray,
+        .folder: .gray,
+        .folderOpen: .gray,
+        .font: .gray,
+        .forgejo: .orange,
+        .git: .vermilion,
+        .gitcafe: .brown,
+        .github: .gray,
+        .gitlab: .orange,
+        .go: .cyan,
+        .graphql: .pink,
+        .grok: .gray,
+        .haskell: .indigo,
+        .homebrew: .yellow,
+        .html: .orange,
+        .image: .gray,
+        .java: .orange,
+        .javascript: .yellow,
+        .kiro: .purple,
+        .kotlin: .purple,
+        .kubernetes: .blue,
+        .lock: .gray,
+        .lua: .blue,
+        .markdown: .gray,
+        .mcp: .gray,
+        .nextjs: .gray,
+        .node: .green,
+        .npm: .red,
+        .objc: .vermilion,
+        .ohMyPi: .purple,
+        .opencode: .gray,
+        .oxc: .cyan,
+        .pdf: .red,
+        .php: .indigo,
+        .pi: .purple,
+        .pnpm: .orange,
+        .postcss: .red,
+        .powershell: .blue,
+        .prettier: .teal,
+        .python: .blue,
+        .r: .blue,
+        .react: .cyan,
+        .ruby: .red,
+        .rust: .orange,
+        .sass: .pink,
+        .scala: .red,
+        .slides: .orange,
+        .spreadsheet: .green,
+        .stylelint: .gray,
+        .svelte: .red,
+        .svg: .orange,
+        .svgo: .green,
+        .swift: .orange,
+        .tailwind: .cyan,
+        .terraform: .indigo,
+        .toml: .gray,
+        .typescript: .blue,
+        .video: .pink,
+        .vim: .green,
+        .vite: .purple,
+        .vscode: .blue,
+        .vue: .green,
+        .wasm: .indigo,
+        .webpack: .blue,
+        .word: .blue,
+        .xal: .blue,
+        .xml: .orange,
+        .yarn: .blue,
+        .yml: .red,
+        .zig: .orange,
+        .zip: .gray,
+    ]
 
-    /// A template image `size` points tall.
+    /// The theme hue this mark always uses, or nil for a contextual UI glyph.
+    public var signatureHue: AppTheme.IconHue? { Self.signatureHues[self] }
+
+    /// Optical scale for small agent conversation glyphs beside text and in controls,
+    /// matching the visible size of the SF Symbols they replaced on the same canvas.
+    public static let inlineScale: CGFloat = 0.78
+
+    /// Draws signature marks in their theme hue; UI glyphs remain templates.
     @MainActor
-    public func image(size: CGFloat = Metrics.glyph, weight: NSFont.Weight = .regular) -> NSImage? {
-        let key = "\(rawValue)-\(size)-\(weight.rawValue)"
-        if let cached = IconCache.images[key] { return cached }
-        var image: NSImage?
-        if self == .globeBadgePlus {
-            image = Self.badged(AppIcon.globe.symbolImage(size: size, weight: weight))
-        }
-        if self == .terminalStack, let bundled = BundledImage.load("terminal-stack", extension: "svg") {
-            bundled.size = NSSize(width: size, height: size)
-            image = bundled
-        }
-
-        if let pierre, let bundled = BundledImage.load(pierre.name, extension: "svg") {
-            bundled.size = NSSize(width: size * Self.pierreScale, height: size * Self.pierreScale)
-            image = bundled
-        }
-        if image == nil {
-            image = symbolImage(size: size, weight: weight)
-        }
-        image?.isTemplate = true
-        IconCache.images[key] = image
-        return image
+    public func image(size: CGFloat = Metrics.glyph, scale: CGFloat = 1, theme: AppTheme) -> NSImage? {
+        if let hue = signatureHue { return image(size: size, scale: scale, hue: hue, theme: theme) }
+        return image(size: size, scale: scale)
     }
 
-    /// Pierre draws on a 16pt grid with a 1pt margin, where symbols fill
-    /// about 80% of their size.
-    private static let pierreScale: CGFloat = 0.9
-
-    /// The bundled SVG and palette hue of a Pierre icon.
-    private var pierre: (name: String, hue: AppTheme.IconHue)? {
-        switch self {
-        case .pierreBash: return ("pierre-bash-duo", .green)
-        case .pierreCode: return ("pierre-code", .indigo)
-        case .pierreFolder: return ("pierre-folder", .blue)
-        case .pierreGit: return ("pierre-git", .vermilion)
-        default: return nil
-        }
-    }
-
-    /// A Pierre icon in its color for `theme`, `size` points tall; nil for
-    /// the other icons.
+    /// Applies a contextual tint only to UI glyphs, preserving signature colors.
     @MainActor
-    public func colorImage(size: CGFloat = Metrics.glyph, theme: AppTheme) -> NSImage? {
-        guard let pierre else { return nil }
-        let hex = theme.iconHex(pierre.hue)
-        let key = "\(rawValue)-\(size)-\(hex)"
+    public func image(size: CGFloat, scale: CGFloat = 1, theme: AppTheme, tint: NSColor) -> NSImage? {
+        if signatureHue != nil { return image(size: size, scale: scale, theme: theme) }
+        return image(size: size, scale: scale, color: tint)
+    }
+
+    /// A template image on a square canvas `size` points on a side, with the
+    /// glyph fitted to `size * scale` and centered, so wide and narrow icons
+    /// lay out like the square ones.
+    @MainActor
+    public func image(size: CGFloat = Metrics.glyph, scale: CGFloat = 1) -> NSImage? {
+        let key = "template-\(rawValue)-\(size)-\(scale)"
         if let cached = IconCache.images[key] { return cached }
-        guard let url = BundledImage.url(pierre.name, extension: "svg"),
-              let svg = try? String(contentsOf: url, encoding: .utf8),
-              let image = NSImage(data: Data(svg.replacingOccurrences(of: "currentColor", with: hex).utf8)) else { return nil }
-        image.size = NSSize(width: size * Self.pierreScale, height: size * Self.pierreScale)
-        image.isTemplate = false
-        IconCache.images[key] = image
-        return image
-    }
-
-    private func symbolImage(size: CGFloat, weight: NSFont.Weight) -> NSImage? {
-        guard let symbolName, let symbol = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil) else { return nil }
-        return symbol.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: size * 0.8, weight: weight, scale: .medium))
-    }
-
-    /// `base` with a filled plus badge sticking out at its bottom left and
-    /// cut out of the glyph, like the system's `.badge.plus` symbols, so the
-    /// glyph keeps its full size.
-    private static func badged(_ base: NSImage?) -> NSImage? {
-        guard let base else { return nil }
-        let glyph = base.size
-        let diameter = (glyph.height * 0.5).rounded()
-        let overhang = (diameter * 0.4).rounded()
-        let gap: CGFloat = 1.5
-        let badge = NSImage(systemSymbolName: "plus.circle.fill", accessibilityDescription: nil)?
-            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: diameter * 0.85, weight: .semibold))
-        let size = NSSize(width: glyph.width + overhang, height: glyph.height + overhang)
-        return NSImage(size: size, flipped: false) { _ in
-            base.draw(in: NSRect(x: overhang, y: overhang, width: glyph.width, height: glyph.height))
-            let badgeRect = NSRect(x: 0, y: 0, width: diameter, height: diameter)
-            NSGraphicsContext.current?.compositingOperation = .destinationOut
-            NSBezierPath(ovalIn: badgeRect.insetBy(dx: -gap, dy: -gap)).fill()
-            NSGraphicsContext.current?.compositingOperation = .sourceOver
-            badge?.draw(in: badgeRect)
+        guard let source = BundledImage.loadTabIcon(rawValue), source.size.width > 0, source.size.height > 0 else { return nil }
+        let fit = min(size * scale / source.size.width, size * scale / source.size.height)
+        let fitted = NSSize(width: source.size.width * fit, height: source.size.height * fit)
+        let image = NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
+            source.draw(in: NSRect(x: (rect.width - fitted.width) / 2, y: (rect.height - fitted.height) / 2,
+                                   width: fitted.width, height: fitted.height))
             return true
         }
+        image.isTemplate = true
+        IconCache.images[key] = image
+        return image
+    }
+
+    /// A non-template image filled with `color`, preserving the SVG's opacity.
+    @MainActor
+    public func image(size: CGFloat, scale: CGFloat = 1, color: NSColor) -> NSImage? {
+        let resolved = color.usingColorSpace(.sRGB) ?? color
+        let key = "tinted-\(rawValue)-\(size)-\(scale)-\(resolved)"
+        if let cached = IconCache.images[key] { return cached }
+        guard let source = image(size: size, scale: scale) else { return nil }
+        let tinted = NSImage(size: source.size, flipped: false) { rect in
+            source.draw(in: rect)
+            resolved.setFill()
+            rect.fill(using: .sourceIn)
+            return true
+        }
+        tinted.isTemplate = false
+        IconCache.images[key] = tinted
+        return tinted
+    }
+
+    /// A non-template image in the chosen theme hue.
+    @MainActor
+    public func image(size: CGFloat, scale: CGFloat = 1, hue: AppTheme.IconHue, theme: AppTheme) -> NSImage? {
+        guard let hex = UInt32(theme.iconHex(hue).dropFirst(), radix: 16) else { return nil }
+        return image(size: size, scale: scale, color: NSColor(hex: hex))
+    }
+}
+
+extension SwiftUI.Image {
+    /// Signature marks keep their theme color; UI glyphs accept foreground styling.
+    @MainActor
+    public init(_ icon: AppIcon, size: CGFloat = 16) {
+        self.init(icon, size: size, theme: .shared)
+    }
+
+    /// A Tab Icon drawn with an explicitly supplied app theme.
+    @MainActor
+    public init(_ icon: AppIcon, size: CGFloat = 16, theme: AppTheme) {
+        self = Image(nsImage: icon.image(size: size, theme: theme) ?? NSImage())
+            .renderingMode(icon.signatureHue == nil ? .template : .original)
     }
 }
 
@@ -234,91 +449,43 @@ extension NSImage {
     }
 }
 
-/// Images shipped in `Resources/Icons`.
+/// Images shipped with the app.
 public enum BundledImage {
-    public static func url(_ name: String, extension fileExtension: String) -> URL? {
-        Bundle.module.url(forResource: name, withExtension: fileExtension, subdirectory: "Icons")
+    /// The URL of an SVG in the Tab Icons set.
+    public static func tabIconURL(_ name: String) -> URL? {
+        Bundle.module.url(forResource: name, withExtension: "svg", subdirectory: "TabIcons")
     }
 
-    public static func load(_ name: String, extension fileExtension: String) -> NSImage? {
-        url(name, extension: fileExtension).flatMap(NSImage.init(contentsOf:))
+    /// Loads an SVG from the Tab Icons set at its intrinsic aspect ratio.
+    public static func loadTabIcon(_ name: String) -> NSImage? {
+        tabIconURL(name).flatMap(NSImage.init(contentsOf:))
     }
 }
 
-/// Agent logos, colored, with dark-on-light variants where the logo needs
-/// one. Every logo comes back on the same square canvas with the same optical
-/// weight: tile logos fill it with rounded corners and a hairline edge that
-/// keeps a tile matching the background in shape, bare glyphs sit inset.
+/// Provider marks from Tab Icons, colored in the provider's theme hue.
 public enum AgentLogo {
-    private enum Shape { case tile, glyph }
-
-    /// How much of the canvas a bare glyph covers, so it reads as large as a
-    /// filled tile.
-    private static let glyphScale: CGFloat = 0.88
-    /// The corner radius of tile logos, relative to the canvas side.
-    private static let tileRadius: CGFloat = 0.22
-    /// The width of a tile's inner edge, relative to the canvas side: about
-    /// 1pt at sidebar size.
-    private static let tileEdge: CGFloat = 1.0 / 16
-
-    /// The logo for `provider`, or `nil` for an unknown provider.
+    /// The provider's mark on a 64-point square canvas, including a generic
+    /// agent mark for unknown providers.
     @MainActor
     public static func image(for provider: AgentProvider, lightBackground: Bool) -> NSImage? {
-        guard let (name, hasLightVariant, shape) = resource(provider) else { return nil }
-        if name == "provider-xal" {
-            guard let image = BundledImage.load(name, extension: "svg") else { return nil }
-            let normalized = normalize(image, shape: shape, lightBackground: lightBackground)
-            normalized.isTemplate = true
-            return normalized
-        }
-        let source = lightBackground && hasLightVariant
-            ? BundledImage.load("\(name)-light", extension: "png") ?? BundledImage.load(name, extension: "png")
-            : BundledImage.load(name, extension: "png")
-        return source.map { normalize($0, shape: shape, lightBackground: lightBackground) }
+        mark(provider).image(size: 64, theme: AppTheme.shared)
     }
 
-    /// Redraws `image` on a square canvas: aspect-fit and inset for glyphs,
-    /// clipped to a rounded square with a contrasting inner edge for tiles.
-    private static func normalize(_ image: NSImage, shape: Shape, lightBackground: Bool) -> NSImage {
-        let side: CGFloat = 64
-        let canvas = NSRect(x: 0, y: 0, width: side, height: side)
-        return NSImage(size: canvas.size, flipped: false) { _ in
-            switch shape {
-            case .tile:
-                let radius = side * tileRadius
-                let path = NSBezierPath(roundedRect: canvas, xRadius: radius, yRadius: radius)
-                path.addClip()
-                image.draw(in: canvas)
-                // Twice the width, since the clip hides the outer half.
-                path.lineWidth = side * tileEdge * 2
-                (lightBackground ? NSColor(white: 0, alpha: 0.12) : NSColor(white: 1, alpha: 0.16)).setStroke()
-                path.stroke()
-            case .glyph:
-                let box = side * glyphScale
-                let scale = min(box / max(image.size.width, 1), box / max(image.size.height, 1))
-                let size = NSSize(width: image.size.width * scale, height: image.size.height * scale)
-                image.draw(in: NSRect(x: (side - size.width) / 2, y: (side - size.height) / 2,
-                                      width: size.width, height: size.height))
-            }
-            return true
-        }
-    }
-
-    private static func resource(_ provider: AgentProvider) -> (String, Bool, Shape)? {
+    static func mark(_ provider: AgentProvider) -> AppIcon {
         switch provider {
-        case .claude: return ("agent-claude", false, .glyph)
-        case .codex: return ("agent-codex", true, .glyph)
-        case .openCode: return ("agent-opencode", false, .tile)
-        case .cursor: return ("agent-cursor", false, .tile)
-        case .copilot: return ("agent-copilot", false, .tile)
-        case .droid: return ("agent-droid", false, .tile)
-        case .pi: return ("agent-pi", false, .tile)
-        case .grok: return ("agent-grok", true, .tile)
-        case .kiro: return ("agent-kiro", false, .tile)
-        case .xal: return ("provider-xal", false, .glyph)
-        case .antigravity: return ("agent-antigravity", false, .glyph)
-        case .ohMyPi: return ("agent-omp", false, .tile)
-        case .unknown: return nil
+        case .claude: return .claude
+        case .codex: return .codex
+        case .openCode: return .opencode
+        case .cursor: return .cursor
+        case .copilot: return .copilot
+        case .droid: return .droid
+        case .pi: return .pi
+        case .grok: return .grok
+        case .kiro: return .kiro
+        case .xal: return .xal
+        case .antigravity: return .antigravity
+        case .ohMyPi: return .ohMyPi
+        case .unknown: return .brain
         }
     }
 }

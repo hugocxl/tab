@@ -153,7 +153,7 @@ final class AgentResponsePullRequest: AgentResponseSection {
         detail.textColor = theme.fgMuted
         detail.isHidden = failed
         linkIcon.isHidden = !failed
-        linkIcon.image = AgentConversationIcon.externalLink.image(size: 12, color: palette.link)
+        linkIcon.image = AppIcon.externalLink.image(size: 12, scale: AppIcon.inlineScale, color: palette.link)
         if let status = next.status, let label = next.statusLabel {
             let color = Self.color(status, theme: theme)
             pill.stringValue = label

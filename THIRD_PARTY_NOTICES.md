@@ -34,11 +34,9 @@ SOFTWARE.
 
 ## T3 Code
 
-Tab bundles artwork and rules adapted from T3 Code:
+Tab includes rules and rendering adapted from T3 Code:
 
-- Git host icons (`agent-host-*.svg`), with their view boxes, paths and gradients
-  preserved.
-- The file-icon overrides in `agent-file-icons.json` (see Pierre below).
+- The file-name override rules used by the file-icon resolver.
 - The terminal-output rendering of tool results: SGR contrast correction and the
   64-line live window with a bounded scrollback tail.
 
@@ -67,24 +65,27 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-## Pierre file icons
+## Tab Icons
 
-The file-icon catalog uses SVG artwork and filename/extension rules from
-`@pierre/trees` 1.0.0-beta.6, with sprite symbols expanded into standalone SVGs
-and theme colors resolved into light and dark variants. The resolver is written
-in Swift; no JavaScript runs.
+Tab Icons is Tab's own icon set, adapted and extended from two foundations:
 
-Source: https://github.com/pierrecomputer/pierre
-The Apache 2.0 license and upstream notices are bundled as
-`Sources/TabApp/Resources/Icons/PIERRE-LICENSE.txt` and `PIERRE-NOTICE.txt`.
+- `@pierre/icons` 0.9.0, under Apache 2.0:
+  https://github.com/pierrecomputer/icons
+- Pierre's file icon library, `pierrecomputer/vscode-icons`, under MIT:
+  https://github.com/pierrecomputer/vscode-icons
 
-## Pierre icons
+Both license texts are bundled in `Sources/TabApp/Resources/TabIcons/LICENSE`.
 
-The sidebar's terminal (bash duo), code, folder and Git icons are SVGs from Pierre's
-icon theme for VS Code and Cursor, unchanged.
+The set's brand marks (agent providers, Git hosts, runtimes, languages and
+tools) are simplified adaptations of the brands' own marks, taken from:
 
-Source: https://github.com/pierrecomputer/vscode-icons
-The MIT license is bundled as `Sources/TabApp/Resources/Icons/PIERRE-ICONS-LICENSE.txt`.
+- Simple Icons 16.37.0 (CC0 1.0): https://github.com/simple-icons/simple-icons.
+  Brand marks remain the trademarks of their owners; see its DISCLAIMER.
+- LobeHub Icons 1.102.0, `@lobehub/icons-static-svg`, under MIT:
+  https://github.com/lobehub/lobe-icons
+- Devicon 2.18.0, under MIT: https://github.com/devicons/devicon
+
+Their license texts are bundled in `Sources/TabApp/Resources/TabIcons/LICENSE`.
 
 ## herdr
 

@@ -24,24 +24,24 @@ public enum SettingsCategory: String, CaseIterable, Sendable {
         }
     }
 
-    /// The SF Symbol and colors of the category's icon tile: a gradient from
-    /// `top` to `bottom` under a `glyph`-colored symbol.
-    var icon: (symbol: String, top: UInt32, bottom: UInt32, glyph: UInt32) {
+    /// The Tab Icon and colors of the category's icon tile: a gradient from
+    /// `top` to `bottom` under a `glyph`-colored icon.
+    var icon: (icon: AppIcon, top: UInt32, bottom: UInt32, glyph: UInt32) {
         switch self {
-        case .general: return ("gearshape.fill", 0xA2A2A7, 0x76767B, 0xFFFFFF)
-        case .interface: return ("macwindow", 0x5BB2FF, 0x1F6FEB, 0xFFFFFF)
-        case .appearance: return ("paintpalette.fill", 0x3FA2FF, 0xC04BF2, 0xFFFFFF)
-        case .terminal: return ("apple.terminal", 0x3A3A3C, 0x151515, 0x5BE37A)
-        case .keyboard: return ("command", 0xF7F7F8, 0xDCDCDF, 0x6E6E73)
-        case .integrations: return ("puzzlepiece.extension.fill", 0xFF6FB5, 0x8E4BF2, 0xFFFFFF)
-        case .notifications: return ("bell.badge.fill", 0xFF8A65, 0xE5484D, 0xFFFFFF)
-        case .privacy: return ("hand.raised.fill", 0x5BB2FF, 0x1F6FEB, 0xFFFFFF)
-        case .browser: return ("globe", 0x5BB2FF, 0x1F6FEB, 0xFFFFFF)
-        case .remoteServers: return ("network", 0x4FD1D5, 0x1E9AA0, 0xFFFFFF)
-        case .server: return ("server.rack", 0x4FD1D5, 0x1E9AA0, 0xFFFFFF)
-        case .mobile: return ("iphone", 0x6BDB7E, 0x2FA84A, 0xFFFFFF)
-        case .backup: return ("clock.arrow.circlepath", 0x9B9BA0, 0x5F5F64, 0xFFFFFF)
-        case .changelog: return ("list.bullet.rectangle.portrait.fill", 0xFFC94A, 0xF29D1B, 0xFFFFFF)
+        case .general: return (.settings, 0xA2A2A7, 0x76767B, 0xFFFFFF)
+        case .interface: return (.appWindow, 0x5BB2FF, 0x1F6FEB, 0xFFFFFF)
+        case .appearance: return (.themes, 0x3FA2FF, 0xC04BF2, 0xFFFFFF)
+        case .terminal: return (.bash, 0x3A3A3C, 0x151515, 0x5BE37A)
+        case .keyboard: return (.command, 0xF7F7F8, 0xDCDCDF, 0x6E6E73)
+        case .integrations: return (.extensions, 0xFF6FB5, 0x8E4BF2, 0xFFFFFF)
+        case .notifications: return (.bellUnread, 0xFF8A65, 0xE5484D, 0xFFFFFF)
+        case .privacy: return (.hand, 0x5BB2FF, 0x1F6FEB, 0xFFFFFF)
+        case .browser: return (.globe, 0x5BB2FF, 0x1F6FEB, 0xFFFFFF)
+        case .remoteServers: return (.network, 0x4FD1D5, 0x1E9AA0, 0xFFFFFF)
+        case .server: return (.serverRack, 0x4FD1D5, 0x1E9AA0, 0xFFFFFF)
+        case .mobile: return (.phone, 0x6BDB7E, 0x2FA84A, 0xFFFFFF)
+        case .backup: return (.history, 0x9B9BA0, 0x5F5F64, 0xFFFFFF)
+        case .changelog: return (.logs, 0xFFC94A, 0xF29D1B, 0xFFFFFF)
         }
     }
 

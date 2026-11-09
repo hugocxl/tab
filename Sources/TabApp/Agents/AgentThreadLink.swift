@@ -83,6 +83,7 @@ struct AgentThreadLink: Equatable {
 
     /// A chip: the conversation icon and the title, linked to the conversation. The
     /// pill is drawn by the rich-text layout manager's inline-code background.
+    @MainActor
     static func chip(_ link: AgentThreadLink, title: String, font: NSFont, color: NSColor, background: NSColor, identity: String) -> NSAttributedString {
         var attributes: [NSAttributedString.Key: Any] = [
             .font: font, .foregroundColor: color, .link: URL(string: link.href) as Any,
@@ -105,11 +106,9 @@ struct AgentThreadLink: Equatable {
         return result
     }
 
+    @MainActor
     private static func icon(size: CGFloat, color: NSColor) -> NSImage? {
-        let configuration = NSImage.SymbolConfiguration(pointSize: size * 0.85, weight: .regular)
-            .applying(NSImage.SymbolConfiguration(paletteColors: [color]))
-        return NSImage(systemSymbolName: "bubble.left.and.bubble.right", accessibilityDescription: "Conversation")?
-            .withSymbolConfiguration(configuration)
+        AppIcon.conversation.image(size: size * 0.85, color: color)
     }
 
     /// Replaces the titles of rendered chips whose conversation has a known title.

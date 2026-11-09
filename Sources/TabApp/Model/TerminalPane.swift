@@ -263,6 +263,7 @@ extension TerminalPane: TerminalSessionControllerDelegate {
 
     func terminalSession(_ session: TerminalSessionController, didChangeForegroundProcess process: ForegroundProcess) {
         updateTitle()
+        model?.notify(.state)
     }
 
     func terminalSession(_ session: TerminalSessionController, didChangeFontSize size: Double) {

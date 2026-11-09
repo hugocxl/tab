@@ -914,7 +914,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         surface.access.isEnabled = !disposed && created && !needsAuthoritativeSnapshot && commandTask == nil && snapshot?.status != .closed
         let mode = snapshot?.accessMode ?? .standard
         surface.access.select(surface.access.itemArray.first { ($0.representedObject as? AgentAccessMode) == mode })
-        surface.access.symbol = mode == .fullAccess ? "lock.open" : mode == .ask ? "hand.raised" : "shield.lefthalf.filled"
+        surface.access.icon = mode == .fullAccess ? .lockOpen : mode == .ask ? .hand : .shield
         surface.access.toolTip = mode.tooltip
         surface.contextIndicator.update(usedTokens: snapshot?.contextUsage?.usedTokens,
                                         contextWindow: snapshot?.contextUsage?.contextWindow)
@@ -1129,7 +1129,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         surface.model.providerLogo = selection.provider == .claude ? .claude : .codex
         surface.model.select(nil)
         surface.model.displayedTitle = modelTitle(displayedSelection)
-        surface.model.symbol = selection.provider == .claude ? "sparkle" : "cpu"
+        surface.model.icon = selection.provider == .claude ? .sparkles : .cpu
         surface.model.toolTip = "Model · \(selection.provider.name). Changes apply to the next message."
 
         surface.effort.removeAllItems()
@@ -1144,7 +1144,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
                 ($0.representedObject as? AgentReasoningEffort) == reasoningEffort
             })
         } else { surface.effort.selectItem(at: 0) }
-        surface.effort.symbol = "brain"
+        surface.effort.icon = .brain
         surface.effort.defaultValueTitle = selectedModelDescriptor?.defaultReasoningEffort?.title
         surface.effort.toolTip = "Reasoning effort for the next message"
     }

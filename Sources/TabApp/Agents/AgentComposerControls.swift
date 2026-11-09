@@ -130,7 +130,7 @@ final class AgentComposerTextView: NSTextView {
 @MainActor
 class AgentTextPopUp: NSPopUpButton {
     var chatTheme: AppTheme = .shared { didSet { refreshLogos(); needsDisplay = true } }
-    var symbol = "cpu" { didSet { needsDisplay = true } }
+    var icon: AppIcon = .cpu { didSet { needsDisplay = true } }
     var providerLogo: AgentProvider? { didSet { refreshLogos(); needsDisplay = true } }
     var menuLogos: [Int: AgentProvider] = [:] { didSet { refreshLogos() } }
     private var brandImage: NSImage?
@@ -196,29 +196,22 @@ class AgentTextPopUp: NSPopUpButton {
         let color = isEnabled ? chatTheme.fgMuted : chatTheme.fgDim
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = .byTruncatingTail
-        let configuration = NSImage.SymbolConfiguration(pointSize: 12, weight: .regular)
-            .applying(NSImage.SymbolConfiguration(paletteColors: [color]))
         if let brandImage {
             brandImage.draw(in: NSRect(x: 4, y: floor((bounds.height - 16) / 2), width: 16, height: 16),
                             from: .zero, operation: .sourceOver, fraction: isEnabled ? 1 : 0.5,
                             respectFlipped: true, hints: [.interpolation: NSImageInterpolation.high])
         } else {
-            NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
-            .withSymbolConfiguration(configuration)?
+            // The former 12pt symbol was drawn directly into this 14pt box.
+            // Keep that fitted size instead of applying the conversation inset twice.
+            icon.image(size: 14, scale: 1, theme: chatTheme, tint: color)?
             .draw(in: NSRect(x: 5, y: floor((bounds.height - 14) / 2), width: 14, height: 14),
                   from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
         }
         (labelText as NSString).draw(in: NSRect(x: 25, y: floor((bounds.height - 16) / 2), width: max(0, bounds.width - 44), height: 18),
             withAttributes: [.font: AppFont.small, .foregroundColor: color, .paragraphStyle: paragraph])
-        color.setStroke()
-        let path = NSBezierPath()
-        let x = max(0, bounds.width - 11)
-        let y = bounds.midY
-        path.move(to: NSPoint(x: x - 3, y: y - 1.5))
-        path.line(to: NSPoint(x: x, y: y + 1.5))
-        path.line(to: NSPoint(x: x + 3, y: y - 1.5))
-        path.lineWidth = 1.2
-        path.stroke()
+        AppIcon.chevronDown.image(size: 8, color: color)?.draw(
+            in: NSRect(x: max(0, bounds.width - 15), y: bounds.midY - 4, width: 8, height: 8),
+            from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
     }
 }
 
@@ -281,22 +274,11 @@ final class AgentRoundButton: AgentComposerButton {
             NSBezierPath(ovalIn: bounds.insetBy(dx: 1, dy: 1)).fill()
         }
         let ink = isEnabled ? chatTheme.accentForeground : chatTheme.fgDim
-        ink.setStroke()
-        ink.setFill()
-        if kind == .stop {
-            NSBezierPath(roundedRect: NSRect(x: bounds.midX - 4, y: bounds.midY - 4, width: 8, height: 8), xRadius: 1.5, yRadius: 1.5).fill()
-        } else {
-            let path = NSBezierPath()
-            path.lineWidth = 1.8
-            path.lineCapStyle = .round
-            path.lineJoinStyle = .round
-            path.move(to: NSPoint(x: bounds.midX, y: bounds.midY + 6))
-            path.line(to: NSPoint(x: bounds.midX, y: bounds.midY - 5))
-            path.move(to: NSPoint(x: bounds.midX - 4, y: bounds.midY + 1))
-            path.line(to: NSPoint(x: bounds.midX, y: bounds.midY - 4))
-            path.line(to: NSPoint(x: bounds.midX + 4, y: bounds.midY + 1))
-            path.stroke()
-        }
+        let icon: AppIcon = kind == .stop ? .stop : .arrowUp
+        let size: CGFloat = kind == .stop ? 10 : 14
+        icon.image(size: size, color: ink)?.draw(
+            in: NSRect(x: bounds.midX - size / 2, y: bounds.midY - size / 2, width: size, height: size),
+            from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
     }
 
     @objc private func pressed() { perform() }
@@ -332,7 +314,10 @@ final class AgentEndButton: AgentComposerButton {
         chatTheme.border.setStroke()
         capsule.lineWidth = 1
         capsule.stroke()
-        ("↓  Scroll to end" as NSString).draw(at: NSPoint(x: 14, y: 6),
+        AppIcon.arrowDown.image(size: 12, color: chatTheme.fgMuted)?.draw(
+            in: NSRect(x: 14, y: 7, width: 12, height: 12), from: .zero,
+            operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+        ("Scroll to end" as NSString).draw(at: NSPoint(x: 30, y: 6),
             withAttributes: [.font: AppFont.small, .foregroundColor: chatTheme.fgMuted])
     }
 

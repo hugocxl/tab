@@ -25,7 +25,7 @@ final class AgentSelectionToolbar: ThemedView {
             button.setAccessibilityLabel(label)
             addSubview(button)
         }
-        cite.image = NSImage(systemSymbolName: "quote.opening", accessibilityDescription: nil)
+        cite.image = AppIcon.quote.image(size: 14, scale: AppIcon.inlineScale)
         cite.imagePosition = .imageLeading
         cite.onPress = { [weak self] in self?.onCite?() }
         copy.onPress = { [weak self] in self?.onCopy?() }

@@ -17,15 +17,15 @@ final class SidebarViewController: NSViewController {
 
     private let root = SidebarRootView()
     private let topRow = FlippedView()
-    private let toggle = ChromeButton(.panelLeft, label: "Toggle Sidebar")
-    private let commandPalette = ChromeButton(.command, label: "Command Palette")
-    private let newTab = ChromeButton(.plusCircle, label: "New Tab")
+    private let toggle = ChromeButton(SystemSymbol.panelLeft, label: "Toggle Sidebar")
+    private let commandPalette = ChromeButton(SystemSymbol.command, label: "Command Palette")
+    private let newTab = ChromeButton(SystemSymbol.plusCircle, label: "New Tab")
     private let scroll = ScrollView()
     private let list = NSStackView()
     private let footer = FlippedView()
     private let filter = SidebarFilterView()
-    private let addButton = ChromeButton(.addProject, label: "Add Project")
-    private let serversButton = ChromeButton(.globeBadgePlus, label: "Remote Servers")
+    private let addButton = ChromeButton(SystemSymbol.addProject, label: "Add Project")
+    private let serversButton = ChromeButton(SystemSymbol.globeBadgePlus, label: "Remote Servers")
     private let resizeHandle = SidebarResizeHandle()
     private var snapshot: SidebarSnapshot?
     private var collapsedProjects: Set<ProjectId> = []

@@ -487,9 +487,11 @@ private final class AgentTextLayoutManager: NSLayoutManager, NSLayoutManagerDele
             let fragment = self.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
             let location = self.location(forGlyphAt: glyph)
             let style = textStorage.attribute(.paragraphStyle, at: range.location, effectiveRange: nil) as? NSParagraphStyle
-            AgentTaskCheckbox.draw(state: state, in: NSRect(x: origin.x + fragment.minX + location.x,
-                y: origin.y + fragment.minY + (style?.paragraphSpacingBefore ?? 0) + AgentTaskCheckbox.top,
-                width: AgentTaskCheckbox.size, height: AgentTaskCheckbox.size))
+            MainActor.assumeIsolated {
+                AgentTaskCheckbox.draw(state: state, in: NSRect(x: origin.x + fragment.minX + location.x,
+                    y: origin.y + fragment.minY + (style?.paragraphSpacingBefore ?? 0) + AgentTaskCheckbox.top,
+                    width: AgentTaskCheckbox.size, height: AgentTaskCheckbox.size))
+            }
         }
     }
 

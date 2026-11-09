@@ -7,7 +7,7 @@ import XCTest
 @MainActor
 final class AgentToolDetailTests: XCTestCase {
     func testConversationIconTintRetainsTranslucentAlpha() throws {
-        let icon = try XCTUnwrap(AgentConversationIcon.wrench.image(size: 24, color: .black.withAlphaComponent(0.4)))
+        let icon = try XCTUnwrap(AppIcon.wrench.image(size: 24, color: .black.withAlphaComponent(0.4)))
         let bitmap = try XCTUnwrap(icon.tiffRepresentation.flatMap(NSBitmapImageRep.init(data:)))
         var maximumAlpha: CGFloat = 0
         for y in 0..<bitmap.pixelsHigh {

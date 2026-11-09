@@ -131,11 +131,11 @@ final class AgentPlanCardRow: AgentCardRow {
         addSubview(body)
         feedback.isHidden = true
         feedback.lineBreakMode = .byTruncatingMiddle
-        for (button, glyph, label) in [(copyButton, AgentConversationIcon.copy, "Copy plan as Markdown"),
+        for (button, glyph, label) in [(copyButton, AppIcon.copy, "Copy plan as Markdown"),
                                        (downloadButton, .download, "Download plan"),
-                                       (saveButton, .folderDown, "Save plan to workspace")] {
+                                       (saveButton, .folderPlus, "Save plan to workspace")] {
             button.translatesAutoresizingMaskIntoConstraints = true
-            button.image = glyph.image()
+            button.image = glyph.image(size: 12, scale: AppIcon.inlineScale)
             button.imagePosition = .imageOnly
             button.toolTip = label
             button.setAccessibilityLabel(label)
@@ -153,7 +153,7 @@ final class AgentPlanCardRow: AgentCardRow {
 
     override func render() {
         guard let item else { return }
-        icon.image = AgentConversationIcon.fileText.image(size: 15, color: theme.fgDim)
+        icon.image = AppIcon.fileText.image(size: 15, scale: AppIcon.inlineScale, theme: theme)
         title.textColor = theme.fg
         status.text = planStatus.title
         status.color = switch planStatus {
@@ -195,12 +195,12 @@ final class AgentPlanCardRow: AgentCardRow {
     func copyPlan() {
         do {
             try AgentConversationClipboard.write(flavors: ["text/plain": markdown], to: services.pasteboard)
-            copyButton.image = AgentConversationIcon.check.image()
+            copyButton.image = AppIcon.check.image(size: 12, scale: AppIcon.inlineScale)
             copyReset?.cancel()
             copyReset = Task { [weak self] in
                 try? await Task.sleep(for: .seconds(2))
                 guard !Task.isCancelled else { return }
-                self?.copyButton.image = AgentConversationIcon.copy.image()
+                self?.copyButton.image = AppIcon.copy.image(size: 12, scale: AppIcon.inlineScale)
             }
         } catch { show(error.message, failure: true) }
     }
@@ -291,7 +291,7 @@ final class AgentTodoCardRow: AgentCardRow {
     override func render() {
         guard let item else { return }
         list = AgentTodoList(detail: item.detail)
-        icon.image = AgentConversationIcon.listTodo.image(size: 15, color: theme.fgDim)
+        icon.image = AppIcon.listTodo.image(size: 15, scale: AppIcon.inlineScale, color: theme.fgDim)
         title.textColor = theme.fg
         progress.textColor = theme.fgDim
         progress.stringValue = list?.progress ?? ""
@@ -313,14 +313,14 @@ final class AgentTodoCardRow: AgentCardRow {
         paragraph.paragraphSpacing = 6
         paragraph.lineSpacing = 3
         for (index, step) in list.steps.enumerated() {
-            let glyph: AgentConversationIcon, color: NSColor, accessibility: String
+            let glyph: AppIcon, color: NSColor, accessibility: String
             switch step.status {
             case .pending: (glyph, color, accessibility) = (.circle, theme.fgDim, "Pending")
-            case .running: (glyph, color, accessibility) = (.loader, theme.accent, "In progress")
+            case .running: (glyph, color, accessibility) = (.spinner, theme.accent, "In progress")
             case .completed: (glyph, color, accessibility) = (.circleCheck, theme.diffAdd, "Completed")
             }
             let attachment = NSTextAttachment()
-            attachment.image = glyph.image(size: 14, color: color)?.tiffRepresentation.flatMap(NSImage.init(data:))
+            attachment.image = glyph.image(size: 14, scale: AppIcon.inlineScale, color: color)?.tiffRepresentation.flatMap(NSImage.init(data:))
             attachment.image?.accessibilityDescription = accessibility
             attachment.bounds = NSRect(x: 0, y: -2, width: 14, height: 14)
             let line = NSMutableAttributedString(attachment: attachment)
@@ -477,7 +477,7 @@ final class AgentErrorCardRow: AgentCardRow {
 
     override func render() {
         guard item != nil else { return }
-        icon.image = AgentConversationIcon.warning.image(size: 15, color: theme.danger)
+        icon.image = AppIcon.triangleAlert.image(size: 15, scale: AppIcon.inlineScale, color: theme.danger)
         title.textColor = theme.danger
         body.setContent(AgentMarkdown.plain(message, theme: theme, monospaced: isMonospaced))
         body.selectedTextAttributes = [.backgroundColor: theme.accent.withAlphaComponent(0.22)]
@@ -518,7 +518,7 @@ final class AgentNoticeRow: AgentCardRow {
 
     override func render() {
         guard let item else { return }
-        icon.image = AgentConversationIcon.info.image(size: 16, color: theme.fgDim)
+        icon.image = AppIcon.info.image(size: 16, scale: AppIcon.inlineScale, color: theme.fgDim)
         body.setContent(AgentMarkdown.plain(item.text, theme: theme, muted: true))
         body.selectedTextAttributes = [.backgroundColor: theme.accent.withAlphaComponent(0.22)]
     }

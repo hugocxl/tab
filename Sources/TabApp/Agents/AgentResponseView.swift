@@ -717,8 +717,8 @@ final class AgentResponseCode: AgentResponseSection {
             button.wantsLayer = true
             button.layer?.cornerRadius = 5
         }
-        wrap.image = AgentConversationIcon.wrap.image()
-        run.image = AgentConversationIcon.play.image()
+        wrap.image = AppIcon.wrap.image(size: 12, scale: AppIcon.inlineScale)
+        run.image = AppIcon.play.image(size: 12, scale: AppIcon.inlineScale)
         run.toolTip = "Run in terminal"
         run.setAccessibilityLabel("Run in terminal")
         run.isHidden = true
@@ -861,7 +861,7 @@ final class AgentResponseCode: AgentResponseSection {
     }
 
     private func resetCopyAction() {
-        copy.image = AgentConversationIcon.copy.image()
+        copy.image = AppIcon.copy.image(size: 12, scale: AppIcon.inlineScale)
         copy.toolTip = "Copy code"
         copy.setAccessibilityLabel("Copy code")
     }
@@ -873,7 +873,7 @@ final class AgentResponseCode: AgentResponseSection {
 
     func copyCode() {
         let copied = services?.copy(code) ?? Self.copyToGeneralPasteboard(code)
-        copy.image = (copied ? AgentConversationIcon.check : .warning).image()
+        copy.image = (copied ? AppIcon.check : .triangleAlert).image(size: 12, scale: AppIcon.inlineScale)
         copy.toolTip = copied ? "Copied" : "Copy failed"
         copy.setAccessibilityLabel(copy.toolTip)
         copyReset?.cancel()

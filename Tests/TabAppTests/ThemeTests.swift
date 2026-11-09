@@ -57,10 +57,67 @@ final class ThemeTests: XCTestCase {
         XCTAssertLessThan(AppTheme.chrome(palette).lightness, AppTheme.card(palette).lightness)
     }
 
+    func testIconHuesFollowThemeBrightness() {
+        let theme = AppTheme(catalog: catalog(), darkTheme: "Night", lightTheme: "Day", systemIsDark: true)
+        let hues: [(AppTheme.IconHue, String, String)] = [
+            (.gray, "#adadb1", "#6c6c71"),
+            (.red, "#ff6762", "#d52c36"),
+            (.vermilion, "#ff8c5b", "#d5512f"),
+            (.orange, "#ffa359", "#d47628"),
+            (.yellow, "#ffd452", "#d5a910"),
+            (.green, "#5ecc71", "#199f43"),
+            (.mint, "#61d5c0", "#16a994"),
+            (.teal, "#64d1db", "#17a5af"),
+            (.cyan, "#68cdf2", "#1ca1c7"),
+            (.blue, "#69b1ff", "#1a85d4"),
+            (.indigo, "#9d6afb", "#693acf"),
+            (.purple, "#d568ea", "#a631be"),
+            (.pink, "#ff678d", "#d32a61"),
+            (.brown, "#c3987b", "#956b4f"),
+        ]
+        XCTAssertEqual(Set(hues.map { $0.0 }), Set(AppTheme.IconHue.allCases))
+        for (hue, dark, light) in hues {
+            theme.setSystemDark(true)
+            XCTAssertEqual(theme.iconHex(hue), dark)
+            theme.setSystemDark(false)
+            XCTAssertEqual(theme.iconHex(hue), light)
+        }
+        // Palette brightness, rather than system appearance, chooses the shade.
+        theme.setThemes(dark: "Day", light: "Day")
+        theme.setSystemDark(true)
+        XCTAssertEqual(theme.iconHex(.gray), "#6c6c71")
+    }
+
     func testEveryIconHasAnImage() {
         for icon in AppIcon.allCases {
-            XCTAssertNotNil(icon.image(), "\(icon) has neither a symbol nor a bundled image")
+            XCTAssertNotNil(icon.image(), "\(icon.rawValue).svg did not load")
         }
+    }
+
+    func testEveryBundledSVGHasAnIconCase() throws {
+        let folder = try XCTUnwrap(BundledImage.tabIconURL("folder")).deletingLastPathComponent()
+        let files = try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
+        let names = Set(files.filter { $0.pathExtension == "svg" }.map { $0.deletingPathExtension().lastPathComponent })
+        XCTAssertEqual(names, Set(AppIcon.allCases.map(\.rawValue)))
+    }
+
+    /// Wide and narrow icons come back on the same square canvas as the rest,
+    /// so rows and buttons lay them out alike; the glyph is centered in it.
+    func testIconsShareASquareCanvas() throws {
+        for icon in [AppIcon.folder, .foldVertical, .history, .check] {
+            let image = try XCTUnwrap(icon.image(size: 16))
+            XCTAssertEqual(image.size, NSSize(width: 16, height: 16), "\(icon.rawValue)")
+            let ink = image.inkBounds
+            XCTAssertEqual(ink.midX, 8, accuracy: 1, "\(icon.rawValue) is off center")
+            XCTAssertEqual(ink.midY, 8, accuracy: 1, "\(icon.rawValue) is off center")
+        }
+        let folder = try XCTUnwrap(AppIcon.folder.image(size: 16))
+        XCTAssertTrue(folder.isTemplate)
+        XCTAssertTrue(folder === AppIcon.folder.image(size: 16))
+        let tinted = try XCTUnwrap(AppIcon.folder.image(size: 16, color: .systemBlue))
+        XCTAssertEqual(tinted.size, folder.size)
+        XCTAssertFalse(tinted.isTemplate)
+        XCTAssertTrue(tinted === AppIcon.folder.image(size: 16, color: .systemBlue))
     }
 }
 

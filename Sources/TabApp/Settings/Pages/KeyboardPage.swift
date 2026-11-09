@@ -13,7 +13,7 @@ extension SettingsModel {
                 if !keymap.isDefault(name) {
                     controls.append(b.button(
                         "Reset \(shortcut.label)",
-                        symbol: "arrow.uturn.backward",
+                        icon: .reset,
                         help: "Reset to \(shortcut.defaultChord?.display ?? "no shortcut")"
                     ) { [store] in
                         let error = store.setBinding(name, nil)

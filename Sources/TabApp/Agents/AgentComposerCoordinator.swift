@@ -29,19 +29,19 @@ final class AgentComposerCoordinator {
     private var loadedAt = Date.distantPast
     private var actions: [AgentComposerSuggestion] {
         [
-            .init(id: "skills", title: "/skills", subtitle: "Browse installed skills", symbol: "sparkles", kind: .action),
-            .init(id: "status", title: "/status", subtitle: "Show current conversation settings", symbol: "info.circle", kind: .action),
-            .init(id: "new", title: "/new", subtitle: "Start a new conversation", symbol: "plus.bubble", kind: .action),
+            .init(id: "skills", title: "/skills", subtitle: "Browse installed skills", icon: .sparkles, kind: .action),
+            .init(id: "status", title: "/status", subtitle: "Show current conversation settings", icon: .info, kind: .action),
+            .init(id: "new", title: "/new", subtitle: "Start a new conversation", icon: .conversationAdd, kind: .action),
             .init(id: "resume", title: "/resume", subtitle: "Continue a Claude Code or Codex conversation from this folder",
-                  symbol: "clock.arrow.circlepath", kind: .action),
+                  icon: .history, kind: .action),
             .init(id: "clear-conversation", title: "/clear", subtitle: "Start a new conversation with a fresh context",
-                  symbol: "plus.bubble", kind: .action),
-            .init(id: "access", title: "/permissions", subtitle: "Change tool access", symbol: "lock.shield", kind: .action),
-            .init(id: "model", title: "/model", subtitle: "Choose the model for this conversation", symbol: "cpu", kind: .action),
-            .init(id: "effort", title: "/effort", subtitle: "Change reasoning effort", symbol: "dial.low", kind: .action),
-            .init(id: "attach", title: "/attach", subtitle: "Attach files or images", symbol: "paperclip", kind: .action),
-            .init(id: "stop", title: "/stop", subtitle: "Stop the current response", symbol: "stop.circle", kind: .action),
-            .init(id: "clear", title: "/clear-draft", subtitle: "Clear the current draft and attachments", symbol: "eraser", kind: .action)
+                  icon: .conversationAdd, kind: .action),
+            .init(id: "access", title: "/permissions", subtitle: "Change tool access", icon: .shieldKeyhole, kind: .action),
+            .init(id: "model", title: "/model", subtitle: "Choose the model for this conversation", icon: .cpu, kind: .action),
+            .init(id: "effort", title: "/effort", subtitle: "Change reasoning effort", icon: .brain, kind: .action),
+            .init(id: "attach", title: "/attach", subtitle: "Attach files or images", icon: .paperclip, kind: .action),
+            .init(id: "stop", title: "/stop", subtitle: "Stop the current response", icon: .stop, kind: .action),
+            .init(id: "clear", title: "/clear-draft", subtitle: "Clear the current draft and attachments", icon: .eraser, kind: .action)
         ]
     }
 
@@ -187,7 +187,7 @@ final class AgentComposerCoordinator {
         if trigger.kind == .command {
             let provided = visibleProviderCommands
             let native = provided.map {
-                AgentComposerSuggestion(id: "provider:" + $0, title: "/" + $0, subtitle: "Provider command", symbol: "terminal",
+                AgentComposerSuggestion(id: "provider:" + $0, title: "/" + $0, subtitle: "Provider command", icon: .terminal,
                                         kind: .providerCommand)
             }
             // The provider already runs its own skills by name; list a file skill once unless
@@ -197,7 +197,7 @@ final class AgentComposerCoordinator {
             let fileSkills = (skills ?? []).filter { browsingSkills || !providedNames.contains($0.name.lowercased()) }
             let candidates = actions + native + fileSkills.map {
                 AgentComposerSuggestion(id: $0.id, title: "/skill:\($0.name)", subtitle: $0.description,
-                                        symbol: "sparkles", kind: .skill)
+                                        icon: .sparkles, kind: .skill)
             }
             return query.isEmpty ? Array(candidates.prefix(40))
                 : Fuzzy.rank(candidates, key: { $0.title }, query: query, limit: 40).map(\.item)
@@ -208,10 +208,10 @@ final class AgentComposerCoordinator {
         let fileMatches = query.isEmpty ? Array(paths.prefix(30))
             : Fuzzy.rank(paths, key: { $0 }, query: query, limit: 30).map(\.item)
         return threadMatches.map {
-            .init(id: $0.id, title: $0.title, subtitle: "Thread", symbol: "bubble.left.and.bubble.right", kind: .thread)
+            .init(id: $0.id, title: $0.title, subtitle: "Thread", icon: .conversation, kind: .thread)
         } + fileMatches.map {
             .init(id: $0, title: ($0 as NSString).lastPathComponent,
-                  subtitle: ($0 as NSString).deletingLastPathComponent, symbol: "doc", kind: .file)
+                  subtitle: ($0 as NSString).deletingLastPathComponent, icon: .file, kind: .file)
         }
     }
 

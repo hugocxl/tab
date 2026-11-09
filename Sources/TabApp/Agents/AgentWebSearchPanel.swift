@@ -77,7 +77,7 @@ final class AgentWebSearchPanel: NSView, NSTextViewDelegate {
             spacer.bounds = NSRect(x: 0, y: 0, width: 4, height: 1)
             result.append(NSAttributedString(attachment: spacer))
             let attachment = NSTextAttachment()
-            attachment.image = AgentConversationIcon.externalLink.image(size: 12, color: theme.fg)?.tiffRepresentation.flatMap(NSImage.init(data:))
+            attachment.image = AppIcon.externalLink.image(size: 12, scale: AppIcon.inlineScale, color: theme.fg)?.tiffRepresentation.flatMap(NSImage.init(data:))
             attachment.bounds = NSRect(x: 0, y: -2, width: 12, height: 12)
             result.append(NSAttributedString(attachment: attachment))
             result.addAttribute(.font, value: font, range: NSRange(location: 0, length: result.length))
