@@ -123,8 +123,8 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, A
         if changes.contains(.state) { updateTitle() }
         if changes.contains(.settings) {
             palette.actionsChord = model.settings.keymap.chord(.commandPaletteActions)
-            placeWindowButtons()
         }
+        if changes.contains(.state) || changes.contains(.settings) { placeWindowButtons() }
         if changes.contains(.state) || changes.contains(.activity) {
             if palette.isOpen, palette.page == .root { palette.refresh() }
         }

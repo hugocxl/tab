@@ -81,6 +81,7 @@ final class PlaceholderPanel: RightPanelContent {
 extension AppModel {
     /// The panel open on the right, if any.
     public var rightPanel: RightPanelKind? {
+        guard activeTab?.zoomed == nil else { return nil }
         switch appearance.sidePanel {
         case .files: return .files
         case .sourceControl: return .sourceControl
@@ -100,6 +101,7 @@ extension AppModel {
     /// Shows `kind` in the right sidebar, opening it when it is closed.
     public func selectRightPanel(_ kind: RightPanelKind) {
         guard rightPanel != kind else { return }
+        if activeTab?.zoomed != nil { toggleZoom() }
         updateAppearance { appearance in
             appearance.sidePanel = kind.sidePanel
             appearance.lastSidePanel = kind.sidePanel

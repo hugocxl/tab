@@ -12,6 +12,47 @@ final class RightSidebarTests: XCTestCase {
         return model
     }
 
+    func testPaneZoomTemporarilyHidesBothSidebars() throws {
+        let model = try model()
+        model.newHomeTerminal()
+        XCTAssertNotNil(model.activePane)
+        model.updateAppearance { $0.sidebarExpanded = true }
+        model.selectRightPanel(.sourceControl)
+
+        model.toggleZoom()
+        XCTAssertNotNil(model.activeTab?.zoomed)
+        XCTAssertFalse(model.sidebarExpanded)
+        XCTAssertNil(model.rightPanel)
+        XCTAssertTrue(model.appearance.sidebarExpanded)
+        XCTAssertEqual(model.appearance.sidePanel, .sourceControl)
+
+        model.toggleZoom()
+        XCTAssertTrue(model.sidebarExpanded)
+        XCTAssertEqual(model.rightPanel, .sourceControl)
+
+        model.toggleSidebar()
+        model.toggleRightSidebar()
+        model.toggleZoom()
+        model.toggleZoom()
+        XCTAssertFalse(model.sidebarExpanded)
+        XCTAssertNil(model.rightPanel)
+    }
+
+    func testOpeningEitherSidebarExitsPaneZoom() throws {
+        let model = try model()
+        model.newHomeTerminal()
+        model.selectRightPanel(.files)
+        model.toggleZoom()
+        model.toggleRightPanel(.files)
+        XCTAssertNil(model.activeTab?.zoomed)
+        XCTAssertEqual(model.rightPanel, .files)
+
+        model.toggleZoom()
+        model.toggleSidebar()
+        XCTAssertNil(model.activeTab?.zoomed)
+        XCTAssertTrue(model.sidebarExpanded)
+    }
+
     func testCollapsingAndShowingAgainReopensTheLastTab() throws {
         let model = try model()
         model.toggleRightSidebar()

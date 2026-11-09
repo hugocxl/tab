@@ -105,7 +105,7 @@ final class WorkspaceView: ThemedView {
             if !self.swipeHandled, abs(self.swipeDistance) > 65 {
                 self.swipeHandled = true
                 let expanded = self.swipeDistance > 0
-                if self.model.appearance.sidebarExpanded != expanded { self.model.toggleSidebar() }
+                if self.model.sidebarExpanded != expanded { self.model.toggleSidebar() }
             }
             return nil
         }
@@ -195,7 +195,7 @@ final class WorkspaceView: ThemedView {
     }
 
     var sidebarWidth: CGFloat {
-        model.appearance.sidebarExpanded ? (liveSidebarWidth ?? model.sidebarWidth) : 0
+        model.sidebarExpanded ? (liveSidebarWidth ?? model.sidebarWidth) : 0
     }
 
     /// The right sidebar's frame, leaving the splits at least 240pt.
@@ -213,7 +213,7 @@ final class WorkspaceView: ThemedView {
         let oldSidebarFrame = InterfaceMotion.frame(sidebar.view)
         let oldPanelFrame = InterfaceMotion.frame(rightSidebar)
         let changed = previousSidebarExpanded != nil &&
-            (previousSidebarExpanded != model.appearance.sidebarExpanded || previousPanel != shownPanel)
+            (previousSidebarExpanded != model.sidebarExpanded || previousPanel != shownPanel)
         let style = model.appearance.animationStyle
         defer {
             if changed {
@@ -221,7 +221,7 @@ final class WorkspaceView: ThemedView {
                 splits.layoutForWorkspaceTransition()
                 inWorkspaceTransition = false
                 InterfaceMotion.animate(splits, from: oldSplitFrame, style: style)
-                if model.appearance.sidebarExpanded {
+                if model.sidebarExpanded {
                     InterfaceMotion.animate(sidebar.view, from: previousSidebarExpanded == true ? oldSidebarFrame : nil, style: style)
                 }
                 if shownPanel != nil { InterfaceMotion.animate(rightSidebar, from: previousPanel == nil ? nil : oldPanelFrame, style: style) }
@@ -229,11 +229,11 @@ final class WorkspaceView: ThemedView {
             } else {
                 cutVeil(animated: false)
             }
-            previousSidebarExpanded = model.appearance.sidebarExpanded
+            previousSidebarExpanded = model.sidebarExpanded
             previousPanel = shownPanel
         }
         let sidebarWidth = self.sidebarWidth
-        let expanded = model.appearance.sidebarExpanded
+        let expanded = model.sidebarExpanded
         sidebar.view.isHidden = !expanded
         sidebar.view.frame = NSRect(x: 0, y: 0, width: sidebarWidth, height: bounds.height)
         sidebarToggle.reserve = max(sidebar.trafficLightsEnd - 2 * Metrics.gutter, 0)

@@ -45,7 +45,7 @@ struct SidebarSnapshot: Equatable {
 
     @MainActor
     init(model: AppModel) {
-        expanded = model.appearance.sidebarExpanded
+        expanded = model.sidebarExpanded
         hints = model.shortcutHints
         query = model.nameFilter
         let listing = model.sidebarListing

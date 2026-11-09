@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.89.0 - 2026-11-09
+
+### Changed
+
+- Expanding a pane hides both sidebars and restores their previous visibility when
+  you restore the pane.
+
 ## 0.88.0 - 2026-11-09
 
 ### Added

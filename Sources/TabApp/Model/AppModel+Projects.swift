@@ -129,8 +129,15 @@ extension AppModel {
 
     // MARK: Sidebar
 
+    /// Whether the left sidebar is visible in the current tab.
+    public var sidebarExpanded: Bool {
+        activeTab?.zoomed == nil && appearance.sidebarExpanded
+    }
+
     public func toggleSidebar() {
-        updateAppearance { $0.sidebarExpanded.toggle() }
+        let expanded = !sidebarExpanded
+        if activeTab?.zoomed != nil { toggleZoom() }
+        updateAppearance { $0.sidebarExpanded = expanded }
     }
 
     public func setSidebarWidth(_ width: CGFloat) {

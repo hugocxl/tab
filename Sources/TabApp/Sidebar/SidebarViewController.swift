@@ -96,7 +96,7 @@ final class SidebarViewController: NSViewController {
         reload()
     }
 
-    var isExpanded: Bool { model.appearance.sidebarExpanded }
+    var isExpanded: Bool { model.sidebarExpanded }
 
     /// Clears the name filter, as Escape does in the sidebar.
     func clearFilter() {
