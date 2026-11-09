@@ -14,6 +14,32 @@ final class TabListingTests: XCTestCase {
         XCTAssertNil(ServerModel.idleDirectory("~/a b"))
     }
 
+    func testIdleShellsKeepTheirFullFolder() {
+        XCTAssertEqual(ServerModel.idlePath("hugo@mac:~/code/app/"), "~/code/app")
+        XCTAssertEqual(ServerModel.idlePath("(mac) /usr/local"), "/usr/local")
+        XCTAssertNil(ServerModel.idlePath("npm run dev"))
+    }
+
+    /// The title row stands for a lone pane, else the most pressing one, else
+    /// the one the title names, without the folders and times its rows show.
+    func testCardLeadIsTheMostPressingPane() {
+        func row(_ title: String, _ status: CardPane.Status = .idle) -> CardPane {
+            CardPane(id: PaneId(), icon: .terminal, title: title, detail: "~/repos", status: status,
+                     workingSince: status == .idle ? nil : Date(), topic: .command(title))
+        }
+        let lone = row("htop")
+        XCTAssertEqual(TabCard.lead(rows: [lone], title: "htop"), lone)
+        let working = row("build", .working)
+        let blocked = row("deploy", .blocked)
+        let lead = TabCard.lead(rows: [row("vim"), working, blocked], title: "vim")
+        XCTAssertEqual(lead?.id, blocked.id)
+        XCTAssertNil(lead?.detail)
+        XCTAssertNil(lead?.workingSince)
+        let named = row("tests")
+        XCTAssertEqual(TabCard.lead(rows: [row("vim"), named], title: "tests")?.id, named.id)
+        XCTAssertNil(TabCard.lead(rows: [], title: "Empty tab"))
+    }
+
     func testAgentTaskDropsSpinnersAndBareNames() {
         XCTAssertEqual(ServerModel.taskTitle("✳ Fix the login bug", provider: .claude), "Fix the login bug")
         XCTAssertNil(ServerModel.taskTitle("✳ Claude Code", provider: .claude))

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.18.0 - 2026-11-09
+
+### Changed
+
+- Pane rows on a tab card show each pane's icon while it is idle and its status
+  while it works, in place of an empty circle.
+- A card's title shows its pane's icon, or an empty circle while several panes
+  are idle, and the most pressing status among its panes.
+- A shell's full folder follows its name in a card's title and pane rows, and
+  Home cards no longer add a folder line.
+
 ## 0.17.0 - 2026-11-08
 
 ### Changed

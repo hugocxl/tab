@@ -35,6 +35,19 @@ public struct CardPane: Hashable, Sendable {
         case done
         case error
         case paused
+
+        /// How much the status asks for the user's eye, for the card's title
+        /// row to show the most pressing of its panes'.
+        var urgency: Int {
+            switch self {
+            case .idle: 0
+            case .done: 1
+            case .paused: 2
+            case .working, .progress: 3
+            case .error: 4
+            case .blocked: 5
+            }
+        }
     }
 
     /// What a pane says its tab is about, for the card's title, in the order
@@ -62,15 +75,15 @@ public struct CardPane: Hashable, Sendable {
     public var id: PaneId
     public var icon: Icon
     public var title: String
-    /// The muted text after the title: an idle shell's folder.
+    /// The muted text after the title: an idle shell's folder, as `~/repos/tab`.
     public var detail: String?
     public var status: Status
     /// When the pane's agent started its turn, while it works or waits.
     public var workingSince: Date?
     public var topic: Topic?
 
-    /// The topic as a card title; a folder reads as its shell, since the
-    /// location row shows the folder.
+    /// The topic as a card title; a folder reads as its shell, which the
+    /// folder follows.
     var topicText: String {
         switch topic {
         case .task(let text)?, .command(let text)?, .page(let text)?, .simulator(let text)?, .file(let text)?: text
@@ -91,8 +104,8 @@ public struct TabCard: Identifiable, Hashable, Sendable {
     public var title: String
     /// Every pane, in reading order.
     public var rows: [CardPane]
-    /// The location row's first word: a Home tab's folder, else the project
-    /// or worktree name. Nil when a Home tab's panes each show their own.
+    /// The location row's first word: the project or worktree name. Nil for
+    /// a Home tab, whose shells show their folders after their names.
     public var location: String?
     public var branch: String?
     public var base: String?
@@ -105,6 +118,21 @@ public struct TabCard: Identifiable, Hashable, Sendable {
     /// Whose icon the project row shows.
     public var iconProject: ProjectId?
     public var panes: [PaneSummary]
+
+    /// The pane the card's title row stands for: a lone pane, else the most
+    /// pressing one, else the one the title names, else the first. Several
+    /// panes list their own folders and running times, so the title row
+    /// leaves them out.
+    public var lead: CardPane? { Self.lead(rows: rows, title: title) }
+
+    static func lead(rows: [CardPane], title: String) -> CardPane? {
+        guard rows.count > 1 else { return rows.first }
+        let pressing = rows.filter { $0.status != .idle }.max { $0.status.urgency < $1.status.urgency }
+        guard var lead = pressing ?? rows.first(where: { $0.topicText == title }) ?? rows.first else { return nil }
+        lead.detail = nil
+        lead.workingSince = nil
+        return lead
+    }
 }
 
 /// A pane as a tab view lists it.
@@ -156,20 +184,18 @@ extension ServerModel {
     }
 
     private func card(_ tab: Tab, in project: ProjectDescriptor, root: ProjectDescriptor) -> TabCard {
-        let shown = tab.panes.first { $0.content.isTerminal || $0.content.agentSession != nil } ?? tab.panes.first
         let git = project.home ? nil : gitSummaries[project.id] ?? nil
         let branch = git?.branch.flatMap { $0 == project.name ? nil : $0 }
         // A repository's own checkout, as the desktop marks it.
         let primary = !project.home && project.parentId == nil && git != nil
         let rows = tab.layout.leaves.compactMap { tab.pane($0).map(row) }
-        let folder = shown.flatMap(\.content.session).flatMap { metadata[$0] }.flatMap { Self.idleDirectory($0.title) }
         return TabCard(
             server: id, project: project, tab: tab,
             // A worktree's branch usually names the feature it is for.
             title: Self.title(rows: rows, customTitle: tab.customTitle, branch: project.home || primary ? nil : branch),
             rows: rows,
-            // A Home tab's pane rows show each folder; only a lone pane's needs the row.
-            location: project.home ? (rows.count > 1 ? nil : folder) : project.name,
+            // A Home tab's folder follows its shell's name in the title or pane rows.
+            location: project.home ? nil : project.name,
             branch: branch, base: git?.base, baseAhead: git?.baseAhead, primary: primary,
             status: status(of: tab),
             projectName: project.home ? nil : root.name, iconProject: project.home ? nil : root.id,
@@ -217,7 +243,7 @@ extension ServerModel {
                 topic = task.map { .task($0) }
             } else if let directory = Self.idleDirectory(text) {
                 title = shell
-                detail = directory
+                detail = Self.idlePath(text)
                 topic = .folder(directory)
             } else if text.isEmpty {
                 title = value == nil ? "Terminal" : shell
@@ -325,6 +351,16 @@ extension ServerModel {
     /// An idle shell titles its terminal with its folder, as `user@host:dir`,
     /// `(host) dir` or a bare path; returns the folder's last component.
     static func idleDirectory(_ title: String) -> String? {
+        guard let path = idlePath(title) else { return nil }
+        if path == "/" { return "/" }
+        if let slash = path.lastIndex(of: "/"), path.index(after: slash) < path.endIndex {
+            return String(path[path.index(after: slash)...])
+        }
+        return path
+    }
+
+    /// An idle shell's folder as its title gives it, such as `~/repos/tab`.
+    static func idlePath(_ title: String) -> String? {
         let title = withoutHost(title.trimmingCharacters(in: .whitespaces))
         var directory: Substring
         if title.hasPrefix("~") || title.hasPrefix("/") {
@@ -343,10 +379,6 @@ extension ServerModel {
         }
         guard !directory.isEmpty else { return nil }
         while directory.count > 1, directory.hasSuffix("/") { directory = directory.dropLast() }
-        if directory == "/" { return "/" }
-        if let slash = directory.lastIndex(of: "/"), directory.index(after: slash) < directory.endIndex {
-            return String(directory[directory.index(after: slash)...])
-        }
         return String(directory)
     }
 
