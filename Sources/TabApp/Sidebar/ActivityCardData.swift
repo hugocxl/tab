@@ -52,6 +52,19 @@ struct ActivityCardData: Equatable {
             case done
             case error
             case paused
+
+            /// How much the status asks for the user's eye, for the card's
+            /// title row to show the most pressing of its panes'.
+            var urgency: Int {
+                switch self {
+                case .idle: return 0
+                case .done: return 1
+                case .paused: return 2
+                case .working, .progress: return 3
+                case .error: return 4
+                case .blocked: return 5
+                }
+            }
         }
 
         /// What a pane says its tab is about, for the card's title, in the
@@ -121,6 +134,19 @@ struct ActivityCardData: Equatable {
     /// but selecting it still connects.
     var offline: Bool
 
+    /// The pane the card's title row stands for: a lone pane, else the most
+    /// pressing one, else the one the title names, else the focused one.
+    /// Several panes list their own folders and running times, so the title
+    /// row leaves them out.
+    var lead: PaneRow? {
+        guard panes.count > 1 else { return panes.first }
+        let pressing = panes.filter { $0.status != .idle }.max { $0.status.urgency < $1.status.urgency }
+        guard var lead = pressing ?? panes.first(where: { $0.topic?.text == title }) ?? panes.first(where: \.active) ?? panes.first else { return nil }
+        lead.detail = nil
+        lead.workingSince = nil
+        return lead
+    }
+
     @MainActor
     static func make(project: Project, tab: Tab?, primary: Bool, model: AppModel) -> ActivityCardData {
         let tabs = tab.map { [$0] } ?? project.tabs
@@ -167,8 +193,8 @@ struct ActivityCardData: Equatable {
         }
         let status = status(tabs: tabs, server: project.serverId, model: model)
         let rows = paneRows(tabs: tabs, server: project.serverId, model: model)
-        // A Home tab's pane rows show each folder; only a lone pane's needs the row.
-        let location = tab != nil && rows.count > 1 ? nil : name
+        // A Home tab's folder follows its shell's name in the title or pane rows.
+        let location = tab != nil ? nil : name
         // A worktree's branch usually names the feature it is for.
         let cardTitle = Self.title(rows: rows, customTitle: shownTab?.customTitle, branch: tab == nil && !primary ? branch : nil)
         return ActivityCardData(
@@ -266,7 +292,7 @@ struct ActivityCardData: Equatable {
                 topic = task.map { .task($0) }
             } else if let directory = idleDirectory(title) {
                 text = shellName
-                detail = directory
+                detail = idlePath(title)
                 topic = .folder(directory)
             } else {
                 text = title.isEmpty ? pane.content.defaultTitle : command(title)
@@ -399,6 +425,16 @@ struct ActivityCardData: Equatable {
     /// An idle shell titles its terminal with its folder, as `user@host:dir`,
     /// `(host) dir` or a bare path; returns the folder's last component.
     static func idleDirectory(_ title: String) -> String? {
+        guard let path = idlePath(title) else { return nil }
+        if path == "/" { return "/" }
+        if let slash = path.lastIndex(of: "/"), path.index(after: slash) < path.endIndex {
+            return String(path[path.index(after: slash)...])
+        }
+        return path
+    }
+
+    /// An idle shell's folder as its title gives it, such as `~/repos/tab`.
+    static func idlePath(_ title: String) -> String? {
         let title = withoutHost(title.trimmingCharacters(in: .whitespaces))
         var directory: Substring
         if title.hasPrefix("~") || title.hasPrefix("/") {
@@ -417,10 +453,6 @@ struct ActivityCardData: Equatable {
         }
         guard !directory.isEmpty else { return nil }
         while directory.count > 1, directory.hasSuffix("/") { directory = directory.dropLast() }
-        if directory == "/" { return "/" }
-        if let slash = directory.lastIndex(of: "/"), directory.index(after: slash) < directory.endIndex {
-            return String(directory[directory.index(after: slash)...])
-        }
         return String(directory)
     }
 

@@ -76,7 +76,7 @@ final class SidebarCardView: HoverView {
 
     private let hintBadge: HintBadge?
     private let titleLabel: NSTextField
-    /// A card's only pane shows as its title, drawn like a pane row.
+    /// The title, drawn like a pane row led by the card's lead pane.
     private let titleRow: PaneRowView?
     private let locationIcon = NSImageView()
     private let locationLabel = makeLabel("", font: AppFont.small)
@@ -100,7 +100,7 @@ final class SidebarCardView: HoverView {
     /// Every leading icon's box: the panes' statuses and kinds, the
     /// location's and the project's icons.
     static let iconSide: CGFloat = 14
-    /// Where text after a leading icon starts, and the panes' second column.
+    /// Where text after a leading icon starts.
     static let textInset: CGFloat = iconSide + 8
 
     private enum Line {
@@ -171,10 +171,8 @@ final class SidebarCardView: HoverView {
         titleLabel = makeLabel(data.title, font: AppFont.body)
         // A lone pane is what the title and status already describe.
         paneRows = data.panes.count > 1 ? data.panes.map { PaneRowView(row: $0) } : []
-        // A lone pane's folder is left to the location row when it names it.
-        titleRow = data.panes.count == 1 ? data.panes.first.map {
-            PaneRowView(row: $0, title: data.title, detail: $0.detail != data.name)
-        } : nil
+        // With several panes no one pane stands for the card while they idle.
+        titleRow = data.lead.map { PaneRowView(row: $0, title: data.title, idleCircle: data.panes.count > 1) }
         // Skip a name the title or the project row already shows.
         let name = data.name.flatMap { $0 == header?.title || $0 == data.title ? nil : $0 }
         showsLocation = name != nil || data.branch != nil || data.pullRequest != nil
@@ -204,6 +202,7 @@ final class SidebarCardView: HoverView {
             addSubview(view)
         }
         closeButton.shortcut = .closeTab
+        closeButton.restsFilled = true
         closeButton.isHidden = true
         closeButton.onPress = { [weak self] _ in self?.onClose?() }
         addSubview(closeButton)
@@ -237,8 +236,9 @@ final class SidebarCardView: HoverView {
     /// The title's lines at the card's current width.
     private var titleLines: Int {
         var width = bounds.width - 2 * (Metrics.border + 10)
+        if let titleRow, !titleRow.wrapsTitle { return 1 }
         if hintBadge != nil { width -= 18 + 6 }
-        if titleRow != nil { width -= SidebarCardView.textInset * 2 }
+        if titleRow != nil { width -= SidebarCardView.textInset }
         return Self.titleLines(data.title, width: width)
     }
 
@@ -392,11 +392,13 @@ final class SidebarCardView: HoverView {
     }
 }
 
-/// One pane in a card's list: what it is doing in a leading column that
-/// stays as an indent while it is idle, its kind or agent and title, then
-/// its folder and how long it has worked.
+/// One pane in a card's list: what it is doing, or its kind or agent while
+/// it is idle, then its title, folder and how long it has worked. As a
+/// card's title its icon is larger.
 final class PaneRowView: ThemedView {
     static let height: CGFloat = 20
+    /// The title's icon box, as tall as the title's text.
+    static let titleIconSide: CGFloat = 18
     let row: ActivityCardData.PaneRow
     /// The running time of the pane's turn, which the card keeps current.
     var elapsed = "" {
@@ -417,26 +419,33 @@ final class PaneRowView: ThemedView {
     private let isTitle: Bool
 
     /// `title` replaces the row's text when the row is its card's title.
-    init(row: ActivityCardData.PaneRow, title: String? = nil, detail: Bool = true) {
+    /// `idleCircle` shows an empty circle instead of the pane's icon while idle.
+    init(row: ActivityCardData.PaneRow, title: String? = nil, idleCircle: Bool = false) {
         self.row = row
         isTitle = title != nil
-        titleLabel = makeLabel(title ?? row.title, font: title == nil ? AppFont.system(12) : AppFont.body)
-        detailLabel = makeLabel(detail ? row.detail ?? "" : "", font: AppFont.mono(11))
+        let font = title == nil ? AppFont.system(12) : AppFont.body
+        titleLabel = makeLabel(title ?? row.title, font: font)
+        detailLabel = makeLabel(row.detail ?? "", font: font)
         super.init(frame: .zero)
         icon.imageScaling = .scaleProportionallyUpOrDown
-        status.showsIdle = true
+        status.side = iconSide
+        status.showsIdle = idleCircle
+        // The list's spinners stay gray beside its colored icons.
+        status.grayWorking = !isTitle
         status.status = row.status
+        // A status takes the icon's place.
+        icon.isHidden = row.status != .idle || idleCircle
         for view in [status, icon, titleLabel, detailLabel, elapsedLabel] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = true
             addSubview(view)
         }
         detailLabel.isHidden = detailLabel.stringValue.isEmpty
         elapsedLabel.isHidden = true
-        if isTitle { SidebarCardView.wrap(titleLabel) }
+        if wrapsTitle { SidebarCardView.wrap(titleLabel) }
         if case .image = row.icon {
             // Favicons are square artwork; round them like app icons.
             icon.wantsLayer = true
-            icon.layer?.cornerRadius = 3
+            icon.layer?.cornerRadius = iconSide * 3 / 14
             icon.layer?.cornerCurve = .continuous
             icon.layer?.masksToBounds = true
         }
@@ -448,17 +457,22 @@ final class PaneRowView: ThemedView {
         titleLabel.textColor = isTitle ? theme.fg : theme.fgMuted
         detailLabel.textColor = theme.fgDim
         elapsedLabel.textColor = theme.fgDim
+        let image: NSImage?
         switch row.icon {
-        case .agent(let provider): icon.image = AgentLogo.image(for: provider, lightBackground: theme.isLight)
-        case .file(let name): icon.image = FileIcon.image(for: name, theme: theme)
-        case .image(let image): icon.image = image
+        case .agent(let provider): image = AgentLogo.image(for: provider, lightBackground: theme.isLight)
+        case .file(let name): image = FileIcon.image(for: name, theme: theme, size: iconSide)
+        case .image(let favicon): image = favicon
         case .kind(let kind):
             let glyph = Self.glyph(kind)
-            icon.image = glyph.colorImage(size: SidebarCardView.iconSide, theme: theme)
-                ?? glyph.image(size: SidebarCardView.iconSide)?.tinted(theme.fgMuted)
+            image = glyph.colorImage(size: iconSide, theme: theme) ?? glyph.image(size: iconSide)
         }
+        icon.image = image
+        // Template glyphs take the tint.
+        icon.contentTintColor = theme.fgMuted
         status.refresh()
     }
+
+    private var iconSide: CGFloat { isTitle ? Self.titleIconSide : SidebarCardView.iconSide }
 
     /// Pierre's icon for a kind where it has one, else the kind's symbol.
     private static func glyph(_ kind: PaneKind) -> AppIcon {
@@ -473,8 +487,11 @@ final class PaneRowView: ThemedView {
         super.layout()
         // Everything lines up with the first line when a title wraps.
         let center = Self.height / 2
-        status.frame = SidebarCardView.iconBox(x: 0, centerY: center)
-        icon.frame = SidebarCardView.iconBox(x: SidebarCardView.textInset, centerY: center)
+        // Centered on the list's icon column, so a larger title icon reaches
+        // into the card's padding and the text still lines up.
+        let iconBox = CGRect(x: (SidebarCardView.iconSide - iconSide) / 2, y: (center - iconSide / 2).rounded(), width: iconSide, height: iconSide)
+        status.frame = iconBox
+        icon.frame = iconBox
         var trailing = bounds.width
         let height = isTitle ? SidebarCardView.titleLineHeight : titleLabel.intrinsicContentSize.height
         let y = (center - height / 2).rounded()
@@ -483,15 +500,26 @@ final class PaneRowView: ThemedView {
             elapsedLabel.frame = CGRect(x: trailing - width, y: y, width: width, height: height)
             trailing -= width + 6
         }
-        let x = SidebarCardView.textInset * 2
+        let x = SidebarCardView.textInset
         if !detailLabel.isHidden {
-            let width = min(detailLabel.textWidth, max((trailing - x) * 0.45, 0))
-            detailLabel.frame = CGRect(x: trailing - width, y: y, width: width, height: height)
-            trailing -= width + 6
+            // The folder follows the title, which gives up space first while
+            // the folder keeps at least its share.
+            let room = max(trailing - x, 0)
+            let detailWidth = detailLabel.textWidth
+            let titleWidth = min(titleLabel.textWidth, max(room - min(detailWidth, room * 0.45) - Self.detailGap, 0))
+            titleLabel.frame = CGRect(x: x, y: y, width: titleWidth, height: height)
+            let detailX = x + titleWidth + Self.detailGap
+            detailLabel.frame = CGRect(x: detailX, y: y, width: max(min(detailWidth, trailing - detailX), 0), height: height)
+            return
         }
         let lines = isTitle ? max(Int(((bounds.height - Self.height) / height).rounded()) + 1, 1) : 1
         titleLabel.frame = CGRect(x: x, y: y, width: max(trailing - x, 0), height: height * CGFloat(lines))
     }
+
+    private static let detailGap: CGFloat = 5
+
+    /// Whether the title may wrap: a folder after it keeps it to one line.
+    var wrapsTitle: Bool { isTitle && detailLabel.isHidden }
 }
 
 /// The hairline between two cards, as wide as a card. Beside a selected or
@@ -533,6 +561,13 @@ final class StatusSymbolView: NSView {
     var showsIdle = false {
         didSet { if showsIdle != oldValue { refresh() } }
     }
+    /// Draws the spinner in muted gray rather than the accent.
+    var grayWorking = false {
+        didSet { if grayWorking != oldValue { refresh() } }
+    }
+    var side = SidebarCardView.iconSide {
+        didSet { if side != oldValue { refresh() } }
+    }
 
     private let symbol = NSImageView()
     /// The spinner on macOS 14, whose SF Symbols lack `progress.indicator`.
@@ -560,7 +595,7 @@ final class StatusSymbolView: NSView {
         let icon: AppIcon?
         let color: NSColor
         switch status {
-        case .working, .progress: (icon, color) = (.progressIndicator, theme.accent)
+        case .working, .progress: (icon, color) = (.progressIndicator, grayWorking ? theme.fgMuted : theme.accent)
         case .blocked: (icon, color) = (.exclamationCircleFill, theme.accent)
         case .done: (icon, color) = (.circleCheckFill, theme.success)
         case .error: (icon, color) = (.circleXFill, theme.danger)
@@ -568,7 +603,7 @@ final class StatusSymbolView: NSView {
         case .idle: (icon, color) = (showsIdle ? .circle : nil, theme.fgDim)
         }
         symbol.removeAllSymbolEffects()
-        symbol.image = icon?.image(size: SidebarCardView.iconSide, weight: .semibold)
+        symbol.image = icon?.image(size: side, weight: .semibold)
         symbol.contentTintColor = color
         let spins = icon == .progressIndicator
         if spins, symbol.image != nil {

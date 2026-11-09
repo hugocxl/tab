@@ -3,6 +3,16 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.81.0 - 2026-11-09
+
+### Changed
+
+- Sidebar pane rows show each pane's icon while it is idle and its status while it works, in place of an empty circle.
+- A card's title shows its pane's icon in color, or an empty circle while several panes are idle, and the most
+  pressing status among its panes.
+- A shell's full folder follows its name in a card's title and pane rows, and Home cards no longer add a folder line.
+- The close button on a hovered card always shows its circle.
+
 ## 0.80.0 - 2026-11-09
 
 ### Changed

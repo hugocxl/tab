@@ -101,6 +101,8 @@ class CircleButton: NSButton {
     /// Whether hovering and pressing fill the circle; a glyph that is a
     /// circle itself only brightens.
     var showsFill = true { didSet { updateAppearance() } }
+    /// Fills the circle at rest too, deepening it while hovered.
+    var restsFilled = false { didSet { updateAppearance() } }
 
     override var intrinsicContentSize: NSSize { NSSize(width: side, height: side) }
 
@@ -195,7 +197,12 @@ class CircleButton: NSButton {
     /// a template image in an inactive window, unlike the theme's chrome.
     func updateAppearance() {
         let theme = AppTheme.shared
-        let fill: NSColor? = isHighlighted || isFilled ? theme.selection : isHovered ? theme.hover : nil
+        let fill: NSColor?
+        if isHighlighted || isFilled || (restsFilled && isHovered) {
+            fill = theme.selection
+        } else {
+            fill = isHovered || restsFilled ? theme.hover : nil
+        }
         layer?.backgroundColor = showsFill ? fill?.cgColor : nil
         let tint = isActive ? theme.accent : isFilled || isHovered ? theme.fg : theme.fgMuted
         image = icon.image(size: glyphSize)?.tinted(tint)
