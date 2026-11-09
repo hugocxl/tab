@@ -13,36 +13,11 @@ enum CardStyle {
     static func font(_ style: UIFont.TextStyle, size: CGFloat, weight: UIFont.Weight = .regular) -> UIFont {
         UIFontMetrics(forTextStyle: style).scaledFont(for: .systemFont(ofSize: size, weight: weight))
     }
-
-    /// One of Pierre's icons in its palette color: the deeper shade on light
-    /// backgrounds, the lighter one on dark.
-    enum Pierre: String {
-        case bash = "PierreBash"
-        case folder = "PierreFolder"
-        case git = "PierreGit"
-
-        var color: UIColor {
-            let (light, dark): (UInt32, UInt32) = switch self {
-            case .bash: (0x199f43, 0x5ecc71)
-            case .folder: (0x1a85d4, 0x69b1ff)
-            case .git: (0xd5512f, 0xff8c5b)
-            }
-            return UIColor { $0.userInterfaceStyle == .dark ? UIColor(hex: dark) : UIColor(hex: light) }
-        }
-
-        var image: UIImage? { UIImage(named: rawValue)?.withTintColor(color, renderingMode: .alwaysOriginal) }
-    }
 }
 
-private extension UIColor {
-    convenience init(hex: UInt32) {
-        self.init(red: CGFloat(hex >> 16 & 0xff) / 255, green: CGFloat(hex >> 8 & 0xff) / 255, blue: CGFloat(hex & 0xff) / 255, alpha: 1)
-    }
-}
-
-/// A pane's status as an SF Symbol, as the desktop draws it: a spinner while
-/// working, a filled circle when waiting for you, done, failed or paused, and
-/// an empty one, or nothing, while idle.
+/// A pane's status as the desktop draws it: a native spinner while working,
+/// and Tab Icons for waiting, done, failed, paused and, with `showsIdle`,
+/// idle.
 final class PaneStatusView: UIImageView {
     var status: CardPane.Status = .idle {
         didSet { if status != oldValue { apply() } }
@@ -61,7 +36,6 @@ final class PaneStatusView: UIImageView {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        contentMode = .center
         isAccessibilityElement = false
         apply()
     }
@@ -74,19 +48,31 @@ final class PaneStatusView: UIImageView {
     }
 
     private func apply() {
-        let (name, color): (String?, UIColor) = switch status {
-        case .working, .progress: ("progress.indicator", grayWorking ? .secondaryLabel : .tintColor)
-        case .blocked: ("exclamationmark.circle.fill", .tintColor)
-        case .done: ("checkmark.circle.fill", .systemGreen)
-        case .error: ("xmark.circle.fill", .systemRed)
-        case .paused: ("pause.circle.fill", .systemOrange)
-        case .idle: (showsIdle ? "circle" : nil, .tertiaryLabel)
-        }
         removeAllSymbolEffects()
-        preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: side * 0.8, weight: .semibold)
-        image = name.flatMap { UIImage(systemName: $0) }
+        let (icon, color): (TabIcon?, UIColor) = switch status {
+        case .working, .progress: (nil, grayWorking ? .secondaryLabel : .tintColor)
+        case .blocked: (.exclamationCircleFill, .tintColor)
+        case .done: (.circleCheckFill, .systemGreen)
+        case .error: (.circleXFill, .systemRed)
+        case .paused: (.pauseCircleFill, .systemOrange)
+        case .idle: (showsIdle ? .circle : nil, .tertiaryLabel)
+        }
         tintColor = color
-        guard name == "progress.indicator", window != nil, !UIAccessibility.isReduceMotionEnabled else { return }
+        if let icon {
+            contentMode = .scaleAspectFit
+            preferredSymbolConfiguration = nil
+            image = icon.template
+            return
+        }
+        guard status != .idle else {
+            image = nil
+            return
+        }
+        // The system's spinner, as the desktop draws its own while working.
+        contentMode = .center
+        preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: side * 0.8, weight: .semibold)
+        image = UIImage(systemName: "progress.indicator")
+        guard window != nil, !UIAccessibility.isReduceMotionEnabled else { return }
         addSymbolEffect(.variableColor.iterative.dimInactiveLayers, options: .repeating)
     }
 }
@@ -118,8 +104,6 @@ final class PaneRowView: UIView {
     override init(frame: CGRect) {
         super.init(frame: frame)
         icon.contentMode = .scaleAspectFit
-        icon.layer.cornerCurve = .continuous
-        icon.clipsToBounds = true
         detailLabel.textColor = .tertiaryLabel
         elapsedLabel.font = UIFontMetrics(forTextStyle: .footnote).scaledFont(for: .monospacedDigitSystemFont(ofSize: 13, weight: .regular))
         elapsedLabel.textColor = .tertiaryLabel
@@ -193,23 +177,13 @@ final class PaneRowView: UIView {
         status.status = row.status
         // A status takes the icon's place.
         icon.isHidden = row.status != .idle || idleCircle
-        icon.image = Self.image(row.icon)
-        icon.tintColor = .secondaryLabel
-        icon.layer.cornerRadius = side * 3 / 14
+        // Each mark carries its hue: a kind's, an agent's, a command's or a file's.
+        icon.image = row.icon.template
+        icon.tintColor = row.hue.color
         // Everything lines up with the first line when a title wraps.
         lineCenter?.isActive = false
         lineCenter = status.centerYAnchor.constraint(equalTo: titleLabel.topAnchor, constant: (font.lineHeight / 2).rounded())
         lineCenter?.isActive = true
-    }
-
-    private static func image(_ icon: CardPane.Icon) -> UIImage? {
-        switch icon {
-        case .terminal: CardStyle.Pierre.bash.image
-        case .agent(let provider): AgentLogo.image(provider) ?? UIImage(systemName: "sparkles")
-        case .simulator: UIImage(systemName: "iphone")
-        case .browser: UIImage(systemName: "globe")
-        case .file: UIImage(systemName: "doc.text")
-        }
     }
 }
 
@@ -329,13 +303,16 @@ final class TabCardCell: UICollectionViewListCell {
         let parts = locationParts(card, name: name)
         location.setShown(parts.length > 0)
         location.label.attributedText = parts
+        // A plain branch line, else the Home tab's folder.
         let git = card.branch != nil || card.base != nil || card.primary
-        location.icon.image = (git ? CardStyle.Pierre.git : CardStyle.Pierre.folder).image
+        location.icon.image = (git ? TabIcon.gitBranch : .folder).template
+        location.icon.tintColor = git ? .tertiaryLabel : TabIcon.folder.color()
 
         project.setShown(card.projectName != nil)
         project.label.text = card.projectName
         project.label.textColor = .secondaryLabel
-        project.icon.image = icon ?? CardStyle.Pierre.folder.image
+        project.icon.image = icon ?? TabIcon.folder.template
+        project.icon.tintColor = TabIcon.folder.color()
 
         updateElapsed()
         let statuses = card.rows.map { "\($0.title) \(Self.describe($0.status))" }
@@ -440,16 +417,5 @@ private extension UIView {
     /// collapsed.
     func setShown(_ shown: Bool) {
         if isHidden == shown { isHidden = !shown }
-    }
-}
-
-extension AgentLogo {
-    /// The logo of an agent the activity reports, where the app has one.
-    static func image(_ provider: AgentProvider) -> UIImage? {
-        switch provider {
-        case .claude: image(AgentChatProvider.claude)
-        case .codex: image(AgentChatProvider.codex)
-        default: nil
-        }
     }
 }

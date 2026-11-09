@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.20.0 - 2026-11-09
+
+### Changed
+
+- Tab cards and agent panes draw their icons from Tab's own two-tone icon set,
+  with agent, file and tool marks in their own colors, as on the Mac.
+- A terminal's row shows an icon for the command running in it, such as node,
+  npm, pnpm or python.
+- Browser and simulator panes have colored marks that match terminal and agent
+  panes.
+- A card's Git line shows a plain branch icon.
+
 ## 0.19.1 - 2026-11-09
 
 ### Fixed

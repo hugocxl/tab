@@ -24,7 +24,7 @@ final class TabListingTests: XCTestCase {
     /// the one the title names, without the folders and times its rows show.
     func testCardLeadIsTheMostPressingPane() {
         func row(_ title: String, _ status: CardPane.Status = .idle) -> CardPane {
-            CardPane(id: PaneId(), icon: .terminal, title: title, detail: "~/repos", status: status,
+            CardPane(id: PaneId(), icon: .bash, hue: .green, title: title, detail: "~/repos", status: status,
                      workingSince: status == .idle ? nil : Date(), topic: .command(title))
         }
         let lone = row("htop")
@@ -56,7 +56,7 @@ final class TabListingTests: XCTestCase {
     /// task, a worktree's branch, then the best other topic.
     func testCardTitlePrefersTheLeadAgent() {
         func row(_ title: String, _ topic: CardPane.Topic?, _ status: CardPane.Status = .idle) -> CardPane {
-            CardPane(id: PaneId(), icon: .terminal, title: title, status: status, topic: topic)
+            CardPane(id: PaneId(), icon: .bash, hue: .green, title: title, status: status, topic: topic)
         }
         let shell = row("zsh", .folder("tabios"))
         let server = row("npm run dev", .command("npm run dev"))

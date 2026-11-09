@@ -15,15 +15,6 @@ public enum CardStatus: Hashable, Sendable {
 /// One pane in a card's list, as the desktop sidebar lists it: what it is,
 /// its title and what it is doing.
 public struct CardPane: Hashable, Sendable {
-    public enum Icon: Hashable, Sendable {
-        case terminal
-        case agent(AgentProvider)
-        case simulator
-        case browser
-        /// An editor's or diff's file.
-        case file(String)
-    }
-
     public enum Status: Hashable, Sendable {
         case idle
         case working
@@ -73,7 +64,11 @@ public struct CardPane: Hashable, Sendable {
     }
 
     public var id: PaneId
-    public var icon: Icon
+    /// The pane's mark: its kind's, its agent's, its terminal's command's
+    /// or its file's.
+    public var icon: TabIcon
+    /// The mark's color; a command's tool glyph takes the terminal's green.
+    public var hue: TabIcon.Hue
     public var title: String
     /// The muted text after the title: an idle shell's folder, as `~/repos/tab`.
     public var detail: String?
@@ -206,7 +201,9 @@ extension ServerModel {
     private func row(_ pane: Pane) -> CardPane {
         let session = pane.content.activitySession
         let agent = session.flatMap(agentActivity)
-        var icon = CardPane.Icon.terminal
+        var icon = TabIcon.bash
+        // A command's tool glyph takes the terminal's green, a file's the gray.
+        var plainHue = TabIcon.Hue.green
         var title: String
         var detail: String?
         var topic: CardPane.Topic?
@@ -222,6 +219,7 @@ extension ServerModel {
         case .editor(let path), .diff(let path, _):
             let file = Self.basename(path)
             icon = .file(file)
+            plainHue = .gray
             title = pane.content.nativeTitle ?? file
             topic = .file(title)
         case .browser:
@@ -235,6 +233,7 @@ extension ServerModel {
             let value = session.flatMap { metadata[$0] }
             let text = value?.title.trimmingCharacters(in: .whitespaces) ?? ""
             let shell = value?.process.flatMap { $0.isShell ? $0.name : nil } ?? "shell"
+            icon = .command(value?.process)
             if let agent {
                 icon = .agent(agent.provider)
                 // A terminal agent titles its terminal with a summary of its task.
@@ -255,7 +254,7 @@ extension ServerModel {
         let status = paneStatus(session: session, agent: agent)
         let working = status == .working || status == .blocked
         let since = working ? agent?.workingSince.map { Date(timeIntervalSince1970: TimeInterval($0) / 1000) } : nil
-        return CardPane(id: pane.id, icon: icon, title: title, detail: detail, status: status, workingSince: since, topic: topic)
+        return CardPane(id: pane.id, icon: icon, hue: icon.signatureHue ?? plainHue, title: title, detail: detail, status: status, workingSince: since, topic: topic)
     }
 
     /// What a tab is about, the same whichever pane is focused: its custom

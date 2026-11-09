@@ -163,7 +163,7 @@ final class AgentPaneViewController: UIViewController, UICollectionViewDelegate 
     /// A new conversation: which agent it starts with, and that the menu changes it.
     private func showEmpty(_ provider: AgentChatProvider) {
         var empty = UIContentUnavailableConfiguration.empty()
-        empty.image = AgentLogo.image(provider)
+        empty.image = AgentLogo.image(provider, side: 44)
         empty.imageProperties.maximumSize = CGSize(width: 44, height: 44)
         empty.text = "New Agent"
         empty.secondaryText = "\(provider.name) runs on your Mac, in this project. Choose another agent or model from the menu beside the message."
@@ -453,9 +453,10 @@ enum AttachmentFiles {
     }
 }
 
-/// The Claude and Codex logos the desktop shows beside an agent.
+/// The agents' marks from Tab Icons, in their hues, as the desktop shows them.
 enum AgentLogo {
-    static func image(_ provider: AgentChatProvider) -> UIImage? {
-        UIImage(named: provider == .claude ? "AgentClaude" : "AgentCodex")
+    @MainActor
+    static func image(_ provider: AgentChatProvider, side: CGFloat, scale: CGFloat = 1) -> UIImage? {
+        TabIcon.agent(provider == .claude ? .claude : .codex).image(side: side, scale: scale)
     }
 }

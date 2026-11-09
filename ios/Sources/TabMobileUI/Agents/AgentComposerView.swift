@@ -155,7 +155,7 @@ final class AgentComposerView: UIView, UITextViewDelegate {
         if model.configuration?.attributedTitle != title { model.configuration?.attributedTitle = title }
         if provider != shownProvider {
             shownProvider = provider
-            model.configuration?.image = AgentLogo.image(provider)?.preparingThumbnail(of: CGSize(width: 20, height: 20))
+            model.configuration?.image = AgentLogo.image(provider, side: 22, scale: TabIcon.inlineScale)
         }
         model.accessibilityLabel = [provider.name, name, effort].compactMap { $0 }.joined(separator: ", ")
         model.menu = Self.menu(controller)
@@ -232,7 +232,7 @@ final class AgentComposerView: UIView, UITextViewDelegate {
                 children = [UIAction(title: models == nil ? "Loading models…" : "No models reported", attributes: .disabled) { _ in }]
             }
             let menu = UIMenu(title: provider.name, subtitle: locked ? "Open a new agent pane to use it" : nil,
-                              image: AgentLogo.image(provider)?.preparingThumbnail(of: CGSize(width: 20, height: 20)),
+                              image: AgentLogo.image(provider, side: 22, scale: TabIcon.inlineScale),
                               children: children)
             return menu
         }
