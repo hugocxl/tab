@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.19.0 - 2026-11-09
+
+### Changed
+
+- Long pressing a message's text in an agent pane selects it, so you can copy
+  part of the message; tool output and thoughts still copy whole.
+
 ## 0.18.0 - 2026-11-09
 
 ### Changed

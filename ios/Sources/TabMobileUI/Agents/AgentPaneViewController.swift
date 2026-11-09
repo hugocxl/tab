@@ -304,9 +304,11 @@ final class AgentPaneViewController: UIViewController, UICollectionViewDelegate 
         return false
     }
 
-    /// Long press copies a message, a tool's output or a thought.
+    /// Long press copies a tool's output or a thought. On a message's text it
+    /// selects instead, so part of the message can be copied.
     func collectionView(_ collectionView: UICollectionView, contextMenuConfigurationForItemsAt indexPaths: [IndexPath],
                         point: CGPoint) -> UIContextMenuConfiguration? {
+        if isOnMessageText(point, in: collectionView) { return nil }
         guard let path = indexPaths.first, let id = dataSource.itemIdentifier(for: path), let text = copyText(rows[id]) else {
             return nil
         }
@@ -315,6 +317,15 @@ final class AgentPaneViewController: UIViewController, UICollectionViewDelegate 
                 UIPasteboard.general.string = text
             }])
         })
+    }
+
+    private func isOnMessageText(_ point: CGPoint, in collectionView: UICollectionView) -> Bool {
+        var view = collectionView.hitTest(point, with: nil)
+        while let current = view, current !== collectionView {
+            if current is TranscriptTextView { return true }
+            view = current.superview
+        }
+        return false
     }
 
     private func copyText(_ row: TranscriptRow?) -> String? {
