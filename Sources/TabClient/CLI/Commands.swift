@@ -667,7 +667,8 @@ enum CLICommands {
 
         pane close asks the user first when a program still runs in the pane, as
         closing it ends the program. A terminal ends unless Settings detaches
-        closed terminals. You can't close the pane you run in. move and swap work
+        closed terminals. Closing the pane you run in (self) asks no one and
+        happens just after the command returns, ending you. move and swap work
         within one tab.
 
         SESSION is a terminal started earlier, such as with tab session new.
@@ -689,7 +690,7 @@ enum CLICommands {
         """)
 
     static let tab = CLIGroup(
-        name: "tab", summary: "Add a terminal, agent, browser or simulator tab to Home", section: .app,
+        name: "tab", summary: "Add a terminal, agent, browser or simulator tab to Home, or close a tab", section: .app,
         commands: [
             CLICommandSpec("tab new terminal", ["[--directory DIR] [-- COMMAND...]"],
                            "Start a terminal in a new tab; prints the session ID", values: ["--directory"],
@@ -711,11 +712,22 @@ enum CLICommands {
                            words: 0 ... 1, place: .app) { a in
                 .pane(CLIPane(placement: .tab, project: nil, content: .simulator(simulator: a.optional(0))), json: a.json)
             },
+            CLICommandSpec("tab close", ["TAB"], "Close a tab and its panes, as Close Tab does", words: 1 ... 1,
+                           place: .app) { a in
+                .paneControl(AppPaneControl(.closeTab, pane: a.word(0)), json: false)
+            },
         ],
         notes: """
         A tab is a card in the sidebar. Tabs open in Home in the app on this Mac,
         which starts if it isn't running. To add a pane to an existing tab, use
         tab pane new.
+
+        TAB is a tab's ID or a unique start of one from tab pane list --all, or
+        any PANE in it as tab pane names panes, such as self for the tab you run
+        in. Its panes ask the user first as tab pane close does, except your own.
+        Closing a worktree's tab removes the worktree, asking the user when
+        anything would be lost; its branch stays. Closing your own tab happens
+        just after the command returns, ending you.
         """)
 
     /// The options that place a new pane.

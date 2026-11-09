@@ -64,6 +64,7 @@ public enum AgentSkill {
     | "a new tab in Home", "a new card in the sidebar" | `tab tab new terminal` (or agent, browser, simulator) |
     | "this pane", "that one", "the one on the left" | `tab pane list`, then pick by position, kind and title |
     | "close it", "focus the server", "maximize that" | `tab pane close`, `tab pane focus`, `tab pane zoom` |
+    | "close this tab", "close that card" | `tab tab close self`, `tab tab close <tab or pane>` |
     | "move it below", "swap them", "make it bigger", "even them out" | `tab pane move`, `swap`, `resize`, `equalize` |
 
     Only use `tab tab new` when the user asks for a new card in the sidebar; "a new
@@ -186,11 +187,16 @@ public enum AgentSkill {
     tab pane resize 9a2e --height 30
     tab pane equalize
     tab pane close c47b
+    tab tab close self                        # the whole tab you run in
     ```
 
     - `close` asks the user first when a program still runs in the pane; closing a
-      terminal ends it. Close only panes you opened unless the user asks, and you
-      can't close your own.
+      terminal ends it. Close only panes and tabs you opened unless the user asks.
+    - `tab tab close` takes a tab ID from `tab pane list --all --json` or any pane
+      in the tab, and closes all its panes. A worktree's card closes by removing
+      the worktree, asking the user when anything would be lost.
+    - Closing your own pane or card (`self`) ends you just after the command
+      returns, without asking: do it last, once your reply is written.
     - `move` and `swap` work within one tab.
 
     ## Branch the conversation

@@ -247,7 +247,8 @@ public struct AppPaneControl: Hashable, Sendable, Codable {
         /// `{"tabs":[{…,"panes":[…]}]}`.
         case list
         case focus
-        /// Closes the pane after its content agrees, as Close Pane does.
+        /// Closes the pane after its content agrees, as Close Pane does. The
+        /// caller's own pane closes just after the reply.
         case close
         /// Shows the pane alone in its tab, or with `zoomed` false the whole tab again.
         case zoom
@@ -259,6 +260,9 @@ public struct AppPaneControl: Hashable, Sendable, Codable {
         case resize
         /// Gives every row and column of the pane's tab equal shares.
         case equalize
+        /// Closes a tab as Close Tab does: `pane` names the tab by its ID or by
+        /// one of its panes. A worktree's tab removes the worktree.
+        case closeTab
     }
 
     public var action: Action

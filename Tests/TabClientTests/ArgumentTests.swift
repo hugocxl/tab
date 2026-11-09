@@ -343,6 +343,7 @@ final class ArgumentTests: XCTestCase {
         XCTAssertEqual(try control(["pane", "list"]), AppPaneControl(.list, all: false))
         XCTAssertEqual(try control(["pane", "focus", "right"]), AppPaneControl(.focus, pane: "right"))
         XCTAssertEqual(try control(["pane", "close", "wispy-cedar"]), AppPaneControl(.close, pane: "wispy-cedar"))
+        XCTAssertEqual(try control(["tab", "close", "self"]), AppPaneControl(.closeTab, pane: "self"))
         XCTAssertEqual(try control(["pane", "zoom"]), AppPaneControl(.zoom, zoomed: true))
         XCTAssertEqual(try control(["pane", "zoom", "9a2e", "--off"]), AppPaneControl(.zoom, pane: "9a2e", zoomed: false))
         XCTAssertEqual(try control(["pane", "move", "9a2e", "down", "--beside", "self"]),

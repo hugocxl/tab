@@ -6,7 +6,8 @@ import XCTest
 @testable import TabApp
 
 /// What an agent's `tab pane` commands do to the window: they act on the pane
-/// they name and no other, and the agent's own pane is never closed.
+/// they name and no other, and the agent's own pane or tab closes only after
+/// the agent hears back.
 @MainActor
 final class PaneControlTests: XCTestCase {
     private func model(projects: [ProjectDescriptor] = []) async throws -> AppModel {
@@ -70,8 +71,7 @@ final class PaneControlTests: XCTestCase {
         XCTAssertEqual(swapped, .ok(.bool(true)))
         XCTAssertEqual(model.state.neighbor(of: agent, .down)?.description, right.tabId)
 
-        // The agent's own pane stays; the one it names closes, and only that one.
-        guard case .failed = await control(.close, pane: "self") else { return XCTFail("closed its own pane") }
+        // The pane the agent names closes, and only that one.
         guard case .failed = await control(.move, pane: "self", other: "self", edge: .left) else {
             return XCTFail("moved a pane beside itself")
         }
@@ -89,5 +89,19 @@ final class PaneControlTests: XCTestCase {
         guard case .ok(let all) = await handler.handle(.pane(AppPaneControl(.list, all: true))),
               case .array(let tabs)? = all["tabs"] else { return XCTFail("no tabs") }
         XCTAssertEqual(tabs.count, model.state.projects.flatMap(\.tabs).count)
+
+        // "Close yourself": the reply comes first, then the agent's pane goes.
+        let tab = try XCTUnwrap(model.tab(holding: agent))
+        let own = await control(.close, pane: "self")
+        XCTAssertEqual(own, .ok(.bool(true)))
+        let ownGone = await ModelFixtures.wait { model.state.pane(agent) == nil }
+        XCTAssertTrue(ownGone)
+        XCTAssertNotNil(model.state.pane(try XCTUnwrap(PaneId(right.tabId))))
+
+        // "Close that tab", by the start of its ID: the rest of its panes go.
+        guard case .failed = await control(.closeTab, pane: "nowhere") else { return XCTFail("closed an unnamed tab") }
+        let closedTab = await handler.handle(.pane(AppPaneControl(.closeTab, pane: String(tab.id.description.prefix(8)))))
+        XCTAssertEqual(closedTab, .ok(.bool(true)))
+        XCTAssertNil(model.state.pane(try XCTUnwrap(PaneId(right.tabId))))
     }
 }

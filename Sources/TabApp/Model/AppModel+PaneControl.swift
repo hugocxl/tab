@@ -4,8 +4,11 @@ import TabCore
 import TabProtocol
 
 /// `tab pane list`, `focus`, `close`, `zoom`, `move`, `swap`, `resize` and
-/// `equalize`: what agents and scripts do to the panes the window shows, by the
-/// same paths the user's own actions take.
+/// `equalize`, and `tab tab close`: what agents and scripts do to the panes
+/// and tabs the window shows, by the same paths the user's own actions take.
+/// A caller may close its own pane or tab: it asked, so its own pane doesn't
+/// ask the user, and it closes just after the reply, which it couldn't hear
+/// once its pane is gone.
 extension AppModel {
     /// Carries out `request`. Thrown errors are messages for the command line.
     func control(_ request: AppPaneControl) async throws -> JSONValue {
@@ -19,11 +22,28 @@ extension AppModel {
             presenter?.bringToFront()
         case .close:
             let pane = try selector.resolve(request.pane)
-            guard pane != caller else { throw ModelError("that is the pane you run in; only the user closes it") }
+            guard pane != caller else {
+                Task { await commitClose([pane]) }
+                return .bool(true)
+            }
             guard await controller(for: pane)?.willClose() ?? true else { throw ModelError("the user kept the pane open") }
             guard await controller(for: pane)?.commitClose() ?? true else { throw ModelError("the pane couldn't close") }
             remove(pane)
             focusActiveContent()
+        case .closeTab:
+            let (project, tab) = try resolveTab(request.pane, selector: selector)
+            let panes = tab.panes.map(\.id)
+            let own = caller.map(panes.contains) ?? false
+            if project.kind == .worktree {
+                closeWorktree(project.id, approved: caller.map { [$0] } ?? [])
+                return .bool(true)
+            }
+            guard await panesWillClose(panes.filter { $0 != caller }) else { throw ModelError("the user kept the tab open") }
+            guard !own else {
+                Task { await commitClose(panes) }
+                return .bool(true)
+            }
+            guard await commitClose(panes) else { throw ModelError("a pane of the tab couldn't close") }
         case .zoom:
             let pane = try selector.resolve(request.pane)
             let zoomed = tab(holding: pane)?.zoomed == pane
@@ -66,6 +86,22 @@ extension AppModel {
         }
         return PaneSelector(candidates: candidates, caller: caller, focused: state.window.activePane,
                             neighbor: { [state] pane, direction in state.neighbor(of: pane, direction) })
+    }
+
+    /// The tab `name` gives by its ID or a unique start of one, else the tab
+    /// holding the pane it names, with its project.
+    func resolveTab(_ name: String?, selector: PaneSelector) throws -> (Project, Tab) {
+        let tabs = state.projects.flatMap { project in project.tabs.map { (project, $0) } }
+        let word = name?.trimmingCharacters(in: .whitespaces).lowercased() ?? ""
+        if let uuid = UUID(uuidString: word), let found = tabs.first(where: { $0.1.id.uuid == uuid }) { return found }
+        if PaneSelector.isPrefix(word) {
+            let started = tabs.filter { $0.1.id.description.hasPrefix(word) }
+            if started.count > 1 { throw ModelError("\(word) names more than one tab; use its ID from tab pane list --all") }
+            if let found = started.first { return found }
+        }
+        let pane = try selector.resolve(name)
+        guard let found = tabs.first(where: { $0.1.layout.contains(pane) }) else { throw ModelError("that pane is in no tab") }
+        return found
     }
 
     /// The tab holding `pane`.

@@ -170,10 +170,11 @@ enum PaneControl {
         control.caller = (environment["TAB_AGENT_ID"] ?? environment["TAB_SESSION_ID"]).flatMap(SessionId.init(string:))
         let reply: JSONValue
         do {
-            let extra = control.action == .close ? closeTime : 0
+            let extra = [.close, .closeTab].contains(control.action) ? closeTime : 0
             reply = try App.call(.pane(control), timeout: try App.replyTime() + extra, startApp: control.action == .list)
         } catch AppSocketError.failed(let message) where message.hasPrefix("unknown command") {
-            throw CLIError("this Tab app doesn't know tab pane \(control.action.rawValue); update Tab")
+            let command = control.action == .closeTab ? "tab close" : "pane \(control.action.rawValue)"
+            throw CLIError("this Tab app doesn't know tab \(command); update Tab")
         }
         guard control.action == .list else { return Output.ok(json: json) }
         if json { return Output.json(reply) }

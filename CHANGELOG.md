@@ -3,6 +3,16 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.83.0 - 2026-11-09
+
+### Added
+
+- `tab tab close` closes a tab and its panes from the command line or an agent, as Close Tab does.
+
+### Changed
+
+- Agents and scripts can close the pane or tab they run in with `tab pane close self` or `tab tab close self`.
+
 ## 0.82.0 - 2026-11-09
 
 ### Changed

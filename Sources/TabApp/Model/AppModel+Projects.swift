@@ -420,14 +420,15 @@ extension AppModel {
     /// branch stays. Each pane is asked first, as closing it would, and the
     /// user too unless Tab made the worktree and nothing would be lost: no
     /// changes, no ignored files, a branch, no teardown commands. When the
-    /// worktree can't be removed, its panes still close.
-    public func closeWorktree(_ project: ProjectId) {
+    /// worktree can't be removed, its panes still close. Panes in `approved`
+    /// already agreed to close.
+    public func closeWorktree(_ project: ProjectId, approved: Set<PaneId> = []) {
         guard let target = state.project(project), target.kind == .worktree,
               pendingWorktreeRemovals.insert(project).inserted else { return }
         let panes = target.tabs.flatMap(\.panes).map(\.id)
         Task {
             defer { pendingWorktreeRemovals.remove(project) }
-            guard await panesWillClose(panes) else { return }
+            guard await panesWillClose(panes.filter { !approved.contains($0) }) else { return }
             guard target.status == .available, sideClient(for: project) != nil else {
                 await commitClose(panes)
                 return
