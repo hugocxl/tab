@@ -104,6 +104,26 @@ final class AgentTranscriptDocument: ThemedView {
     }
     var onOpenCitation: ((AgentAssistantCitation) -> Void)?
     var onOpenThread: ((AgentThreadLink) -> Void)?
+    /// The live state of other agents, for worker cards.
+    var peerActivity: AgentPeerActivity? {
+        didSet { for cached in cache.values { (cached.row as? AgentPeerCardRow)?.peerActivity = peerActivity } }
+    }
+
+    /// Other agents' states changed: worker cards show their new state. False
+    /// when no worker card is mounted, so nothing needs laying out again.
+    @discardableResult
+    func peerActivityDidChange() -> Bool {
+        var changed = false
+        for (id, cached) in cache {
+            guard let row = cached.row as? AgentPeerCardRow, row.mode == .worker else { continue }
+            row.render()
+            heights[id]?.valid = false
+            cache[id]?.needsMeasurement = true
+            cache[id]?.needsLayout = true
+            changed = true
+        }
+        return changed
+    }
     var linkServices: AgentConversationLinkServices?
     var isNested = false
     /// Capture live state before returning; evicted rows retain only these value records.
@@ -482,6 +502,7 @@ final class AgentTranscriptDocument: ThemedView {
             row.onOpenCitation = { [weak self] citation in self?.onOpenCitation?(citation) }
             row.onOpenThread = { [weak self] link in self?.onOpenThread?(link) }
             row.linkServices = linkServices
+            if let peer = row as? AgentPeerCardRow { peer.peerActivity = peerActivity }
         }
         let row = cached.row
         if cached.epoch != themeEpoch || row.theme !== theme {
@@ -578,7 +599,14 @@ final class AgentTranscriptDocument: ThemedView {
 
     private func estimate(_ entry: Entry) -> CGFloat {
         if entry.kind == .activity { return entry.groupedWork ? 24 : 28 }
-        if case .card(let card) = entry.kind { return card == .compaction || card == .notice ? 28 : 120 }
+        if case .card(let card) = entry.kind {
+            switch card {
+            case .compaction, .notice: return 28
+            case .peer(.report): return 160
+            case .peer: return 44
+            default: return 120
+            }
+        }
         if entry.kind != .message { return 24 }
         guard let item = entry.items.first else { return 40 }
         let lines = min(40, max(1, item.text.utf16.count / 70 + item.text.reduce(0) { $0 + ($1 == "\n" ? 1 : 0) }))

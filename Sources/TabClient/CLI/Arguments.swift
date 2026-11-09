@@ -163,14 +163,20 @@ public struct CLIPane: Hashable, Sendable {
     /// The pane a new pane opens beside, as `tab pane` names one; the
     /// caller's when missing.
     public var beside: String?
+    /// A new agent's name, such as `tax-rules`.
+    public var name: String?
+    /// Whether a new agent started by another agent reports back to it.
+    public var reports: Bool
 
     public init(placement: AppPane.Placement, project: String?, content: Content, edge: Direction? = nil,
-                beside: String? = nil) {
+                beside: String? = nil, name: String? = nil, reports: Bool = true) {
         self.placement = placement
         self.project = project
         self.content = content
         self.edge = edge
         self.beside = beside
+        self.name = name
+        self.reports = reports
     }
 }
 

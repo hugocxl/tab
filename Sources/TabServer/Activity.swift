@@ -40,9 +40,12 @@ final class Activity: @unchecked Sendable {
         }
         let title = providerTitle ?? snapshot.items.first { $0.kind == .user }?.text
             .split(whereSeparator: \.isNewline).first.map { String($0.prefix(160)) }
+        // A turn another agent asked for reports back to it, which speaks for the worker.
+        let reported = snapshot.turns?.last?.requestedBy != nil
         update(AgentActivity(session: snapshot.session, project: snapshot.project,
-                             provider: snapshot.provider == .claude ? .claude : .codex, state: state, title: title),
-               completed: previous == .working && state == .idle)
+                             provider: snapshot.provider == .claude ? .claude : .codex, state: state, title: title,
+                             name: snapshot.name),
+               completed: previous == .working && state == .idle && !reported)
     }
 
     /// Records an agent's state. A newly blocked agent gets an attention event;

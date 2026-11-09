@@ -36,9 +36,39 @@ extension AgentChatRequest {
             try Validation.message(request, limit: 1024)
         case .fork(let session, let from, _):
             guard session != from else { throw .badRequest }
-        case .create, .read, .interrupt, .close, .setAccess, .setPlan:
+        case .delegate(let session, let name, let coordinator, _):
+            guard session != coordinator else { throw .badRequest }
+            if let name { guard AgentChatSnapshot.normalizedName(name) != nil else { throw .badRequest } }
+        case .message(let session, let text, let from):
+            guard session != from else { throw .badRequest }
+            try Validation.message(text, limit: 64 * 1024)
+        case .acknowledge(let session, let turn, let by):
+            guard session != by, !turn.isEmpty, turn.utf8.count <= 1024 else { throw .badRequest }
+        case .create, .read, .interrupt, .close, .setAccess, .setPlan, .deliverReports:
             break
         }
+    }
+}
+
+extension AgentChatSnapshot {
+    /// The longest name, in characters.
+    public static let maximumNameLength = 48
+
+    /// `name` as a conversation keeps it: lowercase letters, digits and single
+    /// hyphens, such as `tax-rules`; nil when nothing of it remains.
+    public static func normalizedName(_ name: String) -> String? {
+        var result = ""
+        for scalar in name.lowercased().unicodeScalars {
+            if scalar.isASCII, CharacterSet.alphanumerics.contains(scalar) {
+                result.unicodeScalars.append(scalar)
+            } else if !result.isEmpty, !result.hasSuffix("-"),
+                      CharacterSet.whitespaces.contains(scalar) || "-_./:".unicodeScalars.contains(scalar) {
+                result.append("-")
+            }
+            if result.count >= maximumNameLength { break }
+        }
+        while result.hasSuffix("-") { result.removeLast() }
+        return result.isEmpty ? nil : result
     }
 }
 
@@ -50,7 +80,11 @@ extension AgentChatSnapshot {
               items.allSatisfy({ $0.id.utf8.count <= 1024 }),
               (providerSession?.utf8.count ?? 0) <= 4096,
               (model?.utf8.count ?? 0) <= 256,
-              (resolvedModel?.utf8.count ?? 0) <= 256 else { throw .badRequest }
+              (resolvedModel?.utf8.count ?? 0) <= 256,
+              (name?.utf8.count ?? 0) <= 256,
+              (reportQueue?.held ?? 0) >= 0 else { throw .badRequest }
+        try coordinator?.validate()
+        for item in items { try item.peer?.validate() }
         if let contextUsage {
             guard contextUsage.usedTokens >= 0,
                   contextUsage.contextWindow.map({ $0 > 0 }) ?? true else { throw .badRequest }
@@ -100,6 +134,7 @@ extension AgentChatItem {
             + (attachments ?? []).reduce(0) { $0 + $1.transcriptByteCount }
             + (questionnaire?.transcriptByteCount ?? 0)
             + (createdAt == nil ? 0 : 48) + (updatedAt == nil ? 0 : 48)
+            + (peer.map { 160 + $0.name.utf8.count } ?? 0)
             + (workContext.map { context in
                 400 + [context.runID, context.providerTurnID, context.itemType, context.sourceStatus, context.toolNonExecutionKind, context.requestKind, context.planStatus]
                     .reduce(0) { $0 + ($1?.utf8.count ?? 0) }

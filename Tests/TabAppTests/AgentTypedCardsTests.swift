@@ -75,6 +75,79 @@ final class AgentTypedCardsTests: XCTestCase {
         XCTAssertTrue([AgentTypedCardKind.plan, .todo, .compaction, .notice].allSatisfy(\.folds))
     }
 
+    // MARK: Other agents
+
+    private let peer = AgentPeer(session: SessionId(), project: ProjectId(), provider: .codex, name: "tax-rules")
+
+    func testItemsAboutOtherAgentsBecomePeerCards() {
+        let started = AgentChatItem(id: "worker", kind: .notice, text: "Started worker tax-rules", detail: "Fix the tax",
+                                    workContext: .init(itemType: AgentPeerItemType.workerStarted), peer: peer)
+        let report = AgentChatItem(kind: .user, text: "Done.",
+                                   workContext: .init(itemType: AgentPeerItemType.workerReport, sourceStatus: "completed"), peer: peer)
+        let task = AgentChatItem(kind: .user, text: "Fix the tax",
+                                 workContext: .init(itemType: AgentPeerItemType.agentMessage, requestKind: "task"), peer: peer)
+        XCTAssertEqual(AgentTypedCardKind.classify(started), .peer(.worker))
+        XCTAssertEqual(AgentTypedCardKind.classify(report), .peer(.report))
+        XCTAssertEqual(AgentTypedCardKind.classify(task), .peer(.message))
+        XCTAssertNil(AgentTypedCardKind.classify(AgentChatItem(kind: .user, text: "From the user")))
+        XCTAssertEqual(AgentTypedCardKind.classify(AgentChatItem(kind: .notice, text: "Started worker x",
+                                                                 workContext: .init(itemType: AgentPeerItemType.workerStarted))),
+                       .notice, "Without its peer it is a plain notice")
+        XCTAssertFalse(AgentTypedCardKind.peer(.worker).folds, "Workers stay visible below a folded turn")
+    }
+
+    func testAWorkerCardShowsTheWorkersLiveStateAndOpensIt() throws {
+        let row = AgentPeerCardRow(mode: .worker)
+        var state: AgentState? = .working
+        row.peerActivity = { [peer] session in
+            state.map { AgentActivity(session: session, project: peer.project ?? ProjectId(), provider: .codex, state: $0) }
+        }
+        var opened: AgentThreadLink?
+        row.onOpenThread = { opened = $0 }
+        row.update([AgentChatItem(id: "worker", kind: .notice, text: "Started worker tax-rules", detail: "Fix the tax",
+                                  createdAt: Date(), workContext: .init(itemType: AgentPeerItemType.workerStarted), peer: peer)])
+        place(row)
+        XCTAssertEqual(row.captionText, "Started worker")
+        XCTAssertEqual(row.statusText, "Working")
+        XCTAssertEqual(row.nameButton.title, "tax-rules")
+        XCTAssertFalse(row.expanded, "The task folds away")
+        state = .blocked
+        row.render()
+        XCTAssertEqual(row.statusText, "Needs you")
+        state = nil
+        row.render()
+        XCTAssertEqual(row.statusText, "Closed")
+        row.nameButton.perform()
+        XCTAssertEqual(opened, AgentThreadLink(session: peer.session, project: peer.project))
+        row.disclosure.perform()
+        XCTAssertTrue(row.expanded)
+        XCTAssertTrue(descendants(row).compactMap { $0 as? NSTextView }.contains { $0.string.contains("Fix the tax") })
+    }
+
+    func testAReportCardShowsTheOutcomeReplyAndFiles() throws {
+        let row = AgentPeerCardRow(mode: .report)
+        row.update([AgentChatItem(kind: .user, text: "Moved the discount.", detail: "src/tax.ts\nsrc/promo.ts",
+                                  workContext: .init(itemType: AgentPeerItemType.workerReport, sourceStatus: "failed"), peer: peer)])
+        place(row)
+        XCTAssertEqual(row.captionText, "Report from")
+        XCTAssertEqual(row.statusText, "Failed")
+        XCTAssertTrue(row.expanded, "A report reads open")
+        let text = descendants(row).compactMap { $0 as? NSTextView }.map(\.string).joined()
+        XCTAssertTrue(text.contains("Moved the discount."))
+        XCTAssertTrue(text.contains("src/promo.ts"))
+    }
+
+    func testAMessageCardNamesTheTaskFromTheCoordinator() {
+        let row = AgentPeerCardRow(mode: .message)
+        row.update([AgentChatItem(kind: .user, text: "Fix the tax",
+                                  workContext: .init(itemType: AgentPeerItemType.agentMessage, requestKind: "task"), peer: peer)])
+        XCTAssertEqual(row.captionText, "Task from coordinator")
+        XCTAssertNil(row.statusText)
+        row.update([AgentChatItem(kind: .user, text: "Shorter, please",
+                                  workContext: .init(itemType: AgentPeerItemType.agentMessage), peer: peer)])
+        XCTAssertEqual(row.captionText, "Message from")
+    }
+
     func testTodoListDecodesStepsExplanationAndProgress() throws {
         let item = todo([step("a", "Inspect", "completed"), step("b", "Fix", "running"), step("c", "Verify", "pending")],
                         explanation: "  Three steps.  ")

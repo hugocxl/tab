@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import TabClient
 import TabCore
 import TabProtocol
@@ -12,7 +13,8 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     let surface = AgentPaneView()
     var view: NSView { surface }
     var title: String {
-        snapshot?.items.first(where: { $0.kind == .user })?.text
+        if let name = snapshot?.name, !name.isEmpty { return name }
+        return snapshot?.items.first(where: { $0.kind == .user })?.text
             .split(whereSeparator: \.isNewline).first.map { String($0.prefix(160)) } ?? "Agent"
     }
     /// The provider's logo, as a terminal running the same agent shows it.
@@ -55,6 +57,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     private var checkpointWindows: [String: AgentCheckpointDiffWindow] = [:]
     var loadCheckpoint: AgentCheckpointDiffWindow.Fetch?
     private var refreshTask: Task<Void, Never>?
+    private var activitySubscription: AnyCancellable?
     private var commandTask: Task<Void, Never>?
     private var approvalToken: UUID?
     private var approvalInFlight: Bool { approvalToken != nil }
@@ -176,6 +179,20 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         }
         surface.workspaceRoot = context.project.directory.rawValue
         AgentConversationProjectActions.install(surface: surface, model: model, pane: pane, session: session)
+        surface.transcript.peerActivity = { [weak model] peer in
+            guard let model, let project = owningProject(), let server = model.state.projectServer(project),
+                  let connection = model.connections[server] else { return nil }
+            // Before the first activity arrives nothing is known, which isn't the same as closed.
+            guard connection.activityLoaded else {
+                return AgentActivity(session: peer, project: project, provider: .claude, state: .unknown)
+            }
+            return connection.agent(peer)
+        }
+        activitySubscription = model.changes.sink { [weak self] changes in
+            guard changes.contains(.activity) else { return }
+            self?.surface.peerActivityDidChange()
+        }
+        surface.onDeliverReports = { [weak self] in self?.deliverReports() }
         loadCheckpoint = { [weak model] request in
             guard let model, let project = owningProject(), let client = model.sideClient(for: project) else {
                 throw AgentPaneError.offline
@@ -844,6 +861,22 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
             showComposerError("This server can't \(action). Update Tab on it first.")
         } else {
             showComposerError("Couldn't \(action): \(error.localizedDescription)")
+        }
+    }
+
+    /// Hands the worker reports the agent holds to it now, even after the user stopped it.
+    func deliverReports() {
+        guard !disposed, !needsAuthoritativeSnapshot else { return }
+        let generation = connectionGeneration
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let result = try await self.request(.deliverReports(session: self.session))
+                guard !Task.isCancelled, !self.disposed, generation == self.connectionGeneration else { return }
+                self.accept(result, generation: generation)
+            } catch {
+                if !self.disposed, generation == self.connectionGeneration { self.showError(error) }
+            }
         }
     }
 

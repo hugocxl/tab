@@ -90,11 +90,15 @@ public struct AgentChatItem: Codable, Hashable, Sendable, Identifiable {
     public var createdAt: Date?
     public var updatedAt: Date?
     public var workContext: AgentChatWorkContext?
+    /// The other agent this item is about: the sender of a message, or the worker
+    /// of a `worker_started` notice or `worker_report` message.
+    public var peer: AgentPeer?
 
     public init(id: String = UUID().uuidString, kind: Kind, text: String,
                 detail: String? = nil, isComplete: Bool = true, tool: AgentToolActivity? = nil,
                 attachments: [AgentChatAttachmentDescriptor]? = nil, createdAt: Date? = nil,
-                updatedAt: Date? = nil, workContext: AgentChatWorkContext? = nil, questionnaire: AgentQuestionnaire? = nil) {
+                updatedAt: Date? = nil, workContext: AgentChatWorkContext? = nil, questionnaire: AgentQuestionnaire? = nil,
+                peer: AgentPeer? = nil) {
         self.questionnaire = questionnaire
         self.id = id
         self.kind = kind
@@ -104,6 +108,7 @@ public struct AgentChatItem: Codable, Hashable, Sendable, Identifiable {
         self.tool = tool
         self.attachments = attachments
         self.createdAt = createdAt; self.updatedAt = updatedAt; self.workContext = workContext
+        self.peer = peer
     }
 }
 
@@ -127,6 +132,14 @@ public struct AgentChatSnapshot: Codable, Hashable, Sendable {
     public var status: AgentChatStatus
     public var revision: UInt64
     public var items: [AgentChatItem]
+    /// A short name, such as `tax-rules`, that the agent which started this one gave it.
+    public var name: String?
+    /// The agent that started this one as its worker.
+    public var coordinator: AgentPeer?
+    /// Whether this worker's replies to its coordinator go back to it by themselves.
+    public var reportsToCoordinator: Bool?
+    /// Worker reports this conversation hasn't taken yet; nil when there are none.
+    public var reportQueue: AgentReportQueue?
 
     public init(session: SessionId, project: ProjectId, provider: AgentChatProvider,
                 providerSession: String? = nil, model: String? = nil,
@@ -135,7 +148,9 @@ public struct AgentChatSnapshot: Codable, Hashable, Sendable {
                 contextUsage: AgentContextUsage? = nil,
                 resolvedModel: String? = nil,
                 turns: [AgentChatTurn]? = nil,
-                status: AgentChatStatus = .idle, revision: UInt64 = 0, items: [AgentChatItem] = []) {
+                status: AgentChatStatus = .idle, revision: UInt64 = 0, items: [AgentChatItem] = [],
+                name: String? = nil, coordinator: AgentPeer? = nil, reportsToCoordinator: Bool? = nil,
+                reportQueue: AgentReportQueue? = nil) {
         self.session = session
         self.project = project
         self.provider = provider
@@ -149,10 +164,15 @@ public struct AgentChatSnapshot: Codable, Hashable, Sendable {
         self.status = status
         self.revision = revision
         self.items = items
+        self.name = name
+        self.coordinator = coordinator
+        self.reportsToCoordinator = reportsToCoordinator
+        self.reportQueue = reportQueue
     }
 
     private enum CodingKeys: String, CodingKey {
         case session, project, provider, providerSession, model, resolvedModel, contextUsage, reasoningEffort, accessMode, planMode, queuedPrompts, queuePaused, turns, status, revision, items
+        case name, coordinator, reportsToCoordinator, reportQueue
     }
 
     public init(from decoder: Decoder) throws {
@@ -173,6 +193,21 @@ public struct AgentChatSnapshot: Codable, Hashable, Sendable {
         status = try c.decode(AgentChatStatus.self, forKey: .status)
         revision = try c.decode(UInt64.self, forKey: .revision)
         items = try c.decode([AgentChatItem].self, forKey: .items)
+        name = try c.decodeIfPresent(String.self, forKey: .name)
+        coordinator = try c.decodeIfPresent(AgentPeer.self, forKey: .coordinator)
+        reportsToCoordinator = try c.decodeIfPresent(Bool.self, forKey: .reportsToCoordinator)
+        reportQueue = try c.decodeIfPresent(AgentReportQueue.self, forKey: .reportQueue)
+    }
+
+    /// What people call this conversation: its name, else the start of its first
+    /// message, else its session's readable name.
+    public var displayName: String {
+        if let name, !name.isEmpty { return name }
+        let first = items.first { $0.kind == .user }?.text
+            .split(whereSeparator: \.isNewline).first
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+        guard let first, !first.isEmpty else { return SessionName.of(session) }
+        return first.count > 60 ? String(first.prefix(59)) + "…" : first
     }
 }
 
@@ -206,4 +241,18 @@ public enum AgentChatRequest: Codable, Hashable, Sendable {
     /// `from`'s, or else in `from`'s project; a server that predates `project`
     /// ignores it.
     case fork(session: SessionId, from: SessionId, project: ProjectId? = nil)
+    /// Names a new conversation and makes it a worker of `coordinator`, before its
+    /// first message. With `reports`, its replies to the coordinator's messages go
+    /// back to the coordinator by themselves. Needs `Feature.agentReports`.
+    case delegate(session: SessionId, name: String?, coordinator: SessionId?, reports: Bool)
+    /// Sends a message from the agent `from`, with the conversation's current model
+    /// and effort. The reply to it goes back to `from` when the turn ends. Needs
+    /// `Feature.agentReports`.
+    case message(session: SessionId, text: String, from: SessionId)
+    /// `by` read the reply of `session`'s turn `turn` itself, so the report of that
+    /// turn isn't delivered to it again. Needs `Feature.agentReports`.
+    case acknowledge(session: SessionId, turn: String, by: SessionId)
+    /// Delivers the reports `session` holds now, even after the user stopped it.
+    /// Needs `Feature.agentReports`.
+    case deliverReports(session: SessionId)
 }

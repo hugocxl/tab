@@ -33,15 +33,31 @@ public struct AgentContext: Hashable, Sendable {
         }
     }
 
+    /// The agent that started this one as its worker.
+    public struct Coordinator: Hashable, Sendable {
+        public var name: String
+        public var agent: String
+        /// Whether the worker's replies go back to the coordinator by themselves.
+        public var reports: Bool
+
+        public init(name: String, agent: String, reports: Bool) {
+            self.name = name
+            self.agent = agent
+            self.reports = reports
+        }
+    }
+
     public var place: Place
     public var project: Project?
     /// The `tab` program, when known.
     public var cli: String?
+    public var coordinator: Coordinator?
 
-    public init(place: Place, project: Project? = nil, cli: String? = nil) {
+    public init(place: Place, project: Project? = nil, cli: String? = nil, coordinator: Coordinator? = nil) {
         self.place = place
         self.project = project
         self.cli = cli
+        self.coordinator = coordinator
     }
 
     /// Set in an agent pane's environment when its system prompt already
@@ -50,7 +66,38 @@ public struct AgentContext: Hashable, Sendable {
 
     /// The instructions, in Markdown.
     public var text: String {
-        [location, vocabulary, rules].joined(separator: "\n\n")
+        ([location, worker, vocabulary, workers, rules] as [String?]).compactMap { $0 }.joined(separator: "\n\n")
+    }
+
+    /// What a worker knows about the agent that started it.
+    private var worker: String? {
+        guard let coordinator else { return nil }
+        var text = """
+        The Tab agent \(coordinator.name) (agent \(coordinator.agent)) started you as its worker. Its messages \
+        arrive inside `<tab-message>` tags; they come from that agent, not from the user, though the user reads \
+        this conversation too and may write to you directly.
+        """
+        if coordinator.reports {
+            text += """
+             Your final reply to each of its messages goes back to it by itself when you finish, so end each task \
+            with a short report of what you did, what you found and anything left open. Don't send it with \
+            `tab agent send`.
+            """
+        }
+        return text
+    }
+
+    /// How an agent pane hands work to other agents.
+    private var workers: String? {
+        guard case .agentPane = place else { return nil }
+        return """
+        To split work between agents, start each worker with `tab pane new agent --name <short-name> \
+        [--provider claude|codex] -- "<task>"`, and keep working. A worker's final reply comes back to you by \
+        itself as a message inside `<tab-report>` tags: that is the worker's report, not a message from the user. \
+        Follow up with `tab agent send <name> "<message>"`; its reply comes back the same way. Use `tab agent wait` \
+        only when you can't go on without a result. Add `--no-report` when the user only wants another chat, not \
+        work for you.
+        """
     }
 
     private var command: String {
@@ -99,8 +146,8 @@ public struct AgentContext: Hashable, Sendable {
         - "open <file> (at line N)": `tab pane new editor <file> --line N`; "show the diff of <file>": \
         `tab pane new diff <file>`.
         - "show the simulator", "the emulator": `tab pane new simulator [name]`.
-        - "another agent", "a new chat": `tab pane new agent -- "<task>"`; "branch" or "fork this \
-        conversation": `tab pane new agent --fork -- "<what the branch does>"` once per branch.
+        - "another agent", "a new chat": `tab pane new agent --no-report -- "<task>"`; "branch" or "fork this \
+        conversation": `tab pane new agent --fork --name <branch> -- "<what the branch does>"` once per branch.
         - A new sidebar card only when they say so, such as "a new tab in Home" or "in the sidebar": \
         `tab tab new terminal|agent|browser|simulator`.
         - "this pane", "that one", "the one on the left", "the server terminal": run `tab pane list` first, and \

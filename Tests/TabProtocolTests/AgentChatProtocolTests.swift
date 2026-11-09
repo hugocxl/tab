@@ -38,6 +38,57 @@ final class AgentChatProtocolTests: XCTestCase {
                        .fork(session: fork, from: source))
     }
 
+    func testWorkerRequestsAndFieldsRoundTrip() throws {
+        let worker = SessionId(), coordinator = SessionId(), project = ProjectId()
+        let requests: [AgentChatRequest] = [
+            .delegate(session: worker, name: "tax-rules", coordinator: coordinator, reports: true),
+            .delegate(session: worker, name: nil, coordinator: nil, reports: false),
+            .message(session: worker, text: "Fix the tax", from: coordinator),
+            .acknowledge(session: worker, turn: UUID().uuidString, by: coordinator),
+            .deliverReports(session: coordinator),
+        ]
+        let peer = AgentPeer(session: coordinator, project: project, provider: .claude, name: "Fix ACME-412")
+        let snapshot = AgentChatSnapshot(session: worker, project: project, provider: .codex,
+            turns: [AgentChatTurn(userItemID: "task", startedAt: Date(timeIntervalSince1970: 1), requestedBy: coordinator,
+                                  upstream: SessionId(), report: .held)],
+            items: [AgentChatItem(id: "task", kind: .user, text: "Fix the tax",
+                                  workContext: .init(itemType: AgentPeerItemType.agentMessage, requestKind: "task"), peer: peer)],
+            name: "tax-rules", coordinator: peer, reportsToCoordinator: true, reportQueue: AgentReportQueue(held: 2, paused: true))
+        let messages = requests.map { Message.request(RequestId(1), .agentChat($0)) } + [.reply(RequestId(1), .agentChat(snapshot))]
+        for message in messages {
+            try message.validate()
+            XCTAssertEqual(try WireJSON.decode(Message.self, from: WireJSON.encode(message)), message)
+        }
+        XCTAssertThrowsError(try AgentChatRequest.message(session: worker, text: "Hi", from: worker).validate())
+        XCTAssertThrowsError(try AgentChatRequest.delegate(session: worker, name: "!!", coordinator: nil, reports: true).validate())
+    }
+
+    func testSnapshotsWithoutWorkerFieldsStillDecode() throws {
+        let session = SessionId(), project = ProjectId()
+        let older = #"{"session":"\#(session)","project":"\#(project)","provider":"claude","status":"idle","revision":3,"#
+            + #""turns":[{"userItemID":"a","startedAt":0,"status":"idle","outcome":"completed"}],"#
+            + #""items":[{"id":"a","kind":"user","text":"Hi","isComplete":true}]}"#
+        let snapshot = try JSONDecoder().decode(AgentChatSnapshot.self, from: Data(older.utf8))
+        XCTAssertNil(snapshot.name)
+        XCTAssertNil(snapshot.coordinator)
+        XCTAssertNil(snapshot.reportQueue)
+        XCTAssertNil(snapshot.turns?.first?.requestedBy)
+        XCTAssertNil(snapshot.items.first?.peer)
+        XCTAssertEqual(snapshot.displayName, "Hi")
+        // An older app ignores the new keys: they never break its decoding.
+        let newer = try JSONEncoder().encode(AgentChatTurn(userItemID: "a", startedAt: Date(), report: .init(rawValue: "future")))
+        XCTAssertEqual(try JSONDecoder().decode(AgentChatTurn.self, from: newer).report?.rawValue, "future")
+    }
+
+    func testNamesAreNormalized() {
+        XCTAssertEqual(AgentChatSnapshot.normalizedName("Tax Rules"), "tax-rules")
+        XCTAssertEqual(AgentChatSnapshot.normalizedName("  promo_tests/EU  "), "promo-tests-eu")
+        XCTAssertEqual(AgentChatSnapshot.normalizedName("-a--b-"), "a-b")
+        XCTAssertNil(AgentChatSnapshot.normalizedName("✨"))
+        XCTAssertEqual(AgentChatSnapshot.normalizedName(String(repeating: "x", count: 100))?.count,
+                       AgentChatSnapshot.maximumNameLength)
+    }
+
     func testCheckpointWireMessagesAndInvalidIdentifiers() throws {
         let id = UUID().uuidString
         let session = SessionId()

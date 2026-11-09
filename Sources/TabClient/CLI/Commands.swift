@@ -379,14 +379,16 @@ enum CLICommands {
         notes: """
         An agent is a conversation in one of Tab's agent panes, such as one that
         tab pane new agent started or forked. AGENT is the ID that command prints,
-        a unique start of one (at least 4 characters), or a name such as
-        wispy-cedar.
+        a unique start of one (at least 4 characters), its --name, or a name such
+        as wispy-cedar.
         read prints the last message of the agent's latest reply. wait returns
         once the agent is idle; it fails when the agent waits for the user to
         approve something, fails, or closes, or after --timeout seconds: 600 by
-        default, at most 3600. send starts a new turn, or joins the running one.
-        --json prints the agent's id, project, provider, status and reply, and
-        with read --all its messages.
+        default, at most 3600. send starts a new turn, or joins the running one;
+        sent from a Tab agent, the reply goes back to that agent by itself. Once
+        an agent has read a reply with read or wait, it doesn't get it again.
+        --json prints the agent's id, name, project, provider, status and reply,
+        and with read --all its messages.
         """)
 
     static let activity = CLIGroup(
@@ -558,23 +560,23 @@ enum CLICommands {
                 .pane(try placed(a, CLIPane(placement: .pane, project: a.value("--project"), content: try terminal(a))),
                       json: a.json)
             },
-            CLICommandSpec("pane new agent", ["[--project PROJECT] [--provider claude|codex] [--edge EDGE] [--beside PANE] [-- MESSAGE...]",
-                                              "--fork [AGENT] [--project PROJECT] [--edge EDGE] [--beside PANE] [-- MESSAGE...]"],
+            CLICommandSpec("pane new agent", ["[--name NAME] [--no-report] [--project PROJECT] [--provider claude|codex] [--edge EDGE] [--beside PANE] [-- MESSAGE...]",
+                                              "--fork [AGENT] [--name NAME] [--no-report] [--project PROJECT] [--edge EDGE] [--beside PANE] [-- MESSAGE...]"],
                            "Start an agent conversation in a new pane, or copy one with --fork; prints its ID",
-                           words: 0 ... 1, values: ["--project", "--provider"] + placementOptions, flags: ["--fork"],
-                           json: true, literal: true, place: .app) { a in
+                           words: 0 ... 1, values: ["--project", "--provider", "--name"] + placementOptions,
+                           flags: ["--fork", "--no-report"], json: true, literal: true, place: .app) { a in
                 guard a.flag("--fork") else {
                     guard a.words.isEmpty else { throw a.usage }
-                    return .pane(try placed(a, CLIPane(placement: .pane, project: a.value("--project"),
-                                                       content: try agent(a))), json: a.json)
+                    return .pane(try worker(a, try placed(a, CLIPane(placement: .pane, project: a.value("--project"),
+                                                                     content: try agent(a)))), json: a.json)
                 }
                 guard a.value("--provider") == nil else {
                     throw CLIError("a fork keeps its provider; leave out --provider")
                 }
                 if let agent = a.optional(0), SessionId(string: agent) == nil { throw CLIError("an agent is named by its ID") }
-                return .pane(try placed(a, CLIPane(placement: .pane, project: a.value("--project"),
+                return .pane(try worker(a, try placed(a, CLIPane(placement: .pane, project: a.value("--project"),
                                                    content: .fork(agent: a.optional(0), project: a.value("--project"),
-                                                                  message: try message(a)))), json: a.json)
+                                                                  message: try message(a))))), json: a.json)
             },
             CLICommandSpec("pane new browser", ["[URL] [--project PROJECT] [--profile PROFILE] [--edge EDGE] [--beside PANE]"],
                            "Open a page in a new pane; prints the browser's ID", words: 0 ... 1,
@@ -681,6 +683,11 @@ enum CLICommands {
         fork takes on; without it, the agent waits for the user. Read its replies
         with tab agent.
 
+        Started from a Tab agent, the new agent is that agent's worker: its final
+        reply to each of the agent's messages goes back to the agent by itself,
+        unless --no-report. --name gives it a short name, such as tax-rules, that
+        tab agent and its pane show; lowercase letters, digits and hyphens.
+
         SIMULATOR is an ID or a name from tab simulator list; without it, the pane shows
         the only running simulator, else the simulator picker. FILE is absolute or
         relative to the current folder, and inside the project; --staged shows the
@@ -697,10 +704,10 @@ enum CLICommands {
                            json: true, literal: true, place: .app) { a in
                 .pane(CLIPane(placement: .tab, project: nil, content: try terminal(a)), json: a.json)
             },
-            CLICommandSpec("tab new agent", ["[--provider claude|codex] [-- MESSAGE...]"],
-                           "Start an agent conversation in a new tab; prints its ID", values: ["--provider"],
-                           json: true, literal: true, place: .app) { a in
-                .pane(CLIPane(placement: .tab, project: nil, content: try agent(a)), json: a.json)
+            CLICommandSpec("tab new agent", ["[--name NAME] [--no-report] [--provider claude|codex] [-- MESSAGE...]"],
+                           "Start an agent conversation in a new tab; prints its ID", values: ["--provider", "--name"],
+                           flags: ["--no-report"], json: true, literal: true, place: .app) { a in
+                .pane(try worker(a, CLIPane(placement: .tab, project: nil, content: try agent(a))), json: a.json)
             },
             CLICommandSpec("tab new browser", ["[URL] [--profile PROFILE]"],
                            "Open a page in a new tab; prints the browser's ID", words: 0 ... 1,
@@ -734,6 +741,19 @@ enum CLICommands {
     private static let placementOptions = ["--edge", "--beside"]
 
     /// `pane` with the `--edge` and `--beside` it was given.
+    /// A new agent's name and whether it reports to the agent that starts it.
+    private static func worker(_ a: CLIArguments, _ pane: CLIPane) throws -> CLIPane {
+        var pane = pane
+        if let name = a.value("--name") {
+            guard AgentChatSnapshot.normalizedName(name) != nil else {
+                throw CLIError("a name needs a letter or digit, such as tax-rules")
+            }
+            pane.name = name
+        }
+        pane.reports = !a.flag("--no-report")
+        return pane
+    }
+
     private static func placed(_ a: CLIArguments, _ pane: CLIPane) throws -> CLIPane {
         var pane = pane
         pane.edge = try a.value("--edge").map(edge)

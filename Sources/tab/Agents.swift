@@ -10,16 +10,33 @@ enum Agents {
         case .read(let selector, let all):
             let snapshot = try await read(try await resolve(selector, client: client), client: client)
             report(snapshot, all: all, json: json)
+            await acknowledge(snapshot, client: client)
         case .wait(let selector, let timeoutMs):
             let agent = try await resolve(selector, client: client)
             let snapshot = try await wait(agent, timeout: TimeInterval(timeoutMs) / 1000, client: client)
             report(snapshot, all: false, json: json)
+            await acknowledge(snapshot, client: client)
         case .send(let selector, let text):
-            let snapshot = try await read(try await resolve(selector, client: client), client: client)
-            _ = try await client.agentChat(.send(session: snapshot.session, text: text, model: snapshot.model,
-                                                 reasoningEffort: snapshot.reasoningEffort))
+            let agent = try await resolve(selector, client: client)
+            if client.supports(.agentReports), let sender = hostingAgent(server: client.server.server), sender != agent {
+                // The reply goes back to the agent that sent this.
+                _ = try await client.agentChat(.message(session: agent, text: text, from: sender))
+            } else {
+                let snapshot = try await read(agent, client: client)
+                _ = try await client.agentChat(.send(session: snapshot.session, text: text, model: snapshot.model,
+                                                     reasoningEffort: snapshot.reasoningEffort))
+            }
             Output.ok(json: json)
         }
+    }
+
+    /// The agent running this command read the reply of `snapshot`'s latest
+    /// finished turn, so its report doesn't reach that agent a second time.
+    static func acknowledge(_ snapshot: AgentChatSnapshot, client: ServerClient) async {
+        guard client.supports(.agentReports), let reader = hostingAgent(server: client.server.server),
+              reader != snapshot.session,
+              let turn = snapshot.turns?.last(where: { $0.completedAt != nil && $0.requestedBy == reader }) else { return }
+        _ = try? await client.agentChat(.acknowledge(session: snapshot.session, turn: turn.userItemID, by: reader))
     }
 
     /// The Tab agent this command runs in, when it belongs to `server`.
@@ -34,10 +51,25 @@ enum Agents {
     /// The agent `selector` names: an ID, or a start or name of one the server knows.
     static func resolve(_ selector: String, client: ServerClient) async throws -> SessionId {
         if let id = SessionId(string: selector) { return id }
+        let agents = try await client.activity().agents
+        // A worker's name, preferring the caller's own workers when names repeat.
+        let named = agents.filter { $0.name == selector }
+        if named.count == 1, let only = named.first { return only.session }
+        if named.count > 1 {
+            if let caller = hostingAgent(server: client.server.server) {
+                var mine: [SessionId] = []
+                for agent in named {
+                    if let snapshot = try? await client.agentChat(.read(session: agent.session)),
+                       snapshot.coordinator?.session == caller { mine.append(agent.session) }
+                }
+                if mine.count == 1, let only = mine.first { return only }
+            }
+            throw CLIError("more than one agent is named \(selector); use its ID")
+        }
         guard SessionSelector.isValid(selector) else {
             throw CLIError("an agent is an ID, a start of one with at least 4 characters, or a name such as wispy-cedar")
         }
-        return try SessionSelector.resolve(selector, among: try await client.activity().agents.map(\.session))
+        return try SessionSelector.resolve(selector, among: agents.map(\.session))
     }
 
     static func read(_ agent: SessionId, client: ServerClient) async throws -> AgentChatSnapshot {
@@ -114,7 +146,7 @@ enum Agents {
         }
         var record: [String: JSONValue] = [
             "id": .string(snapshot.session.description),
-            "name": .string(SessionName.of(snapshot.session)),
+            "name": .string(snapshot.name ?? SessionName.of(snapshot.session)),
             "projectId": .string(snapshot.project.description),
             "provider": .string(snapshot.provider.rawValue),
             "status": .string(snapshot.status.rawValue),

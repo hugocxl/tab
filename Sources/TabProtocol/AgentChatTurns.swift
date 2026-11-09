@@ -21,14 +21,24 @@ public struct AgentChatTurn: Codable, Hashable, Sendable {
     public var status: AgentChatStatus
     public var checkpoint: AgentTurnCheckpoint?
     public var outcome: Outcome?
+    /// The agent that asked for this turn; its reply goes back to that agent.
+    public var requestedBy: SessionId?
+    /// The agent that asked `requestedBy` for the work this turn is part of, so a
+    /// worker's worker's report reaches the top of the chain.
+    public var upstream: SessionId?
+    public var report: Report?
 
-    public init(userItemID: String, startedAt: Date, completedAt: Date? = nil, status: AgentChatStatus = .working, checkpoint: AgentTurnCheckpoint? = nil, outcome: Outcome? = nil) {
+    public init(userItemID: String, startedAt: Date, completedAt: Date? = nil, status: AgentChatStatus = .working, checkpoint: AgentTurnCheckpoint? = nil, outcome: Outcome? = nil,
+                requestedBy: SessionId? = nil, upstream: SessionId? = nil, report: Report? = nil) {
         self.userItemID = userItemID
         self.startedAt = startedAt
         self.completedAt = completedAt
         self.status = status
         self.checkpoint = checkpoint
         self.outcome = outcome
+        self.requestedBy = requestedBy
+        self.upstream = upstream
+        self.report = report
     }
 }
 

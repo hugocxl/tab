@@ -42,6 +42,7 @@ class AgentCardRow: AgentTimelineRow {
         case .compaction: AgentCompactionRow()
         case .error: AgentErrorCardRow()
         case .notice: AgentNoticeRow()
+        case .peer(let mode): AgentPeerCardRow(mode: mode)
         }
     }
 

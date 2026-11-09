@@ -3,6 +3,18 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.90.0 - 2026-11-09
+
+### Added
+
+- An agent can hand parts of a task to named worker agents, and each worker's final reply comes back to it as
+  a report by itself, even while it keeps working.
+- Agent panes show a card for each worker they start, with its live state, and for each report that comes back;
+  a worker shows the task it was given and who sent it.
+- Reports wait while you've stopped an agent, and a Deliver button above the message box hands them over.
+- `tab pane new agent` takes `--name` for a short name that the pane and `tab agent` use, and `--no-report`
+  for an agent that shouldn't report back.
+
 ## 0.89.1 - 2026-11-09
 
 ### Fixed

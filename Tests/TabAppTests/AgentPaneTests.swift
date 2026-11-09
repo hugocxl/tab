@@ -107,6 +107,11 @@ final class AgentPaneTests: XCTestCase {
             case .close:
                 if let closeError { throw closeError }
                 snapshot.status = .closed
+            case .deliverReports:
+                snapshot.reportQueue = nil
+                snapshot.revision += 1
+            case .delegate, .message, .acknowledge:
+                break
             }
             return snapshot
         }
