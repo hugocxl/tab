@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.19.1 - 2026-11-09
+
+### Fixed
+
+- A tab card's Git branch line no longer collapses under its title's icon when
+  the branch arrives after the list appears.
+
 ## 0.19.0 - 2026-11-09
 
 ### Changed

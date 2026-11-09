@@ -296,11 +296,18 @@ final class TabCardCell: UICollectionViewListCell {
         ])
     }
 
+    /// Shows `card`. The list applies its snapshots animated, but a card's
+    /// rows change at once: a stack view's row hidden and shown again inside
+    /// an animation can stay collapsed.
     func configure(_ card: TabCard, icon: UIImage?) {
+        UIView.performWithoutAnimation { show(card, icon: icon) }
+    }
+
+    private func show(_ card: TabCard, icon: UIImage?) {
         let lead = card.lead
         titleLabel.text = card.title
-        titleLabel.isHidden = lead != nil
-        titleRow.isHidden = lead == nil
+        titleLabel.setShown(lead == nil)
+        titleRow.setShown(lead != nil)
         // With several panes no one pane stands for the card while they idle.
         if let lead { titleRow.configure(lead, title: card.title, idleCircle: card.rows.count > 1) }
 
@@ -315,17 +322,17 @@ final class TabCardCell: UICollectionViewListCell {
         for (view, row) in zip(paneStack.arrangedSubviews.compactMap { $0 as? PaneRowView }, rows) {
             view.configure(row)
         }
-        paneStack.isHidden = rows.isEmpty
+        paneStack.setShown(!rows.isEmpty)
 
         // Skip a name the title or the project row already shows.
         let name = card.location.flatMap { $0 == card.projectName || $0 == card.title ? nil : $0 }
         let parts = locationParts(card, name: name)
-        location.isHidden = parts.length == 0
+        location.setShown(parts.length > 0)
         location.label.attributedText = parts
         let git = card.branch != nil || card.base != nil || card.primary
         location.icon.image = (git ? CardStyle.Pierre.git : CardStyle.Pierre.folder).image
 
-        project.isHidden = card.projectName == nil
+        project.setShown(card.projectName != nil)
         project.label.text = card.projectName
         project.label.textColor = .secondaryLabel
         project.icon.image = icon ?? CardStyle.Pierre.folder.image
@@ -425,6 +432,15 @@ final class TabCardCell: UICollectionViewListCell {
     /// The card's fill, and the hairlines between cards, keep this far from
     /// the list's edges.
     static let cardInset: CGFloat = 8
+}
+
+private extension UIView {
+    /// Changes `isHidden` only when it differs: a stack view counts every
+    /// change, so setting the same value again can leave an arranged view
+    /// collapsed.
+    func setShown(_ shown: Bool) {
+        if isHidden == shown { isHidden = !shown }
+    }
 }
 
 extension AgentLogo {
