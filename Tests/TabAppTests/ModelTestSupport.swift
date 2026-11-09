@@ -9,10 +9,15 @@ import TabProtocol
 @MainActor
 final class ModelTestPresenter: AppPresenter {
     var window: NSWindow? { nil }
+    var confirms = true
+    private(set) var confirmations: [String] = []
     private(set) var broughtToFront = 0
     private(set) var messages: [String] = []
 
-    func confirm(title: String, message: String, confirm: String, destructive: Bool) async -> Bool { true }
+    func confirm(title: String, message: String, confirm: String, destructive: Bool) async -> Bool {
+        confirmations.append(title)
+        return confirms
+    }
     func showToast(_ message: String, style: Toast.Style) { messages.append(message) }
     func showRemoteFolderBrowser(_ server: ServerId) {}
     func bringToFront() { broughtToFront += 1 }
@@ -42,6 +47,7 @@ final class ModelFakeServer: ServerAPI, TerminalBackend, @unchecked Sendable {
     private var _fileReply: FilesReply = .entries([])
     private var _stops: [Bool] = []
     private var _idleStops = 0
+    var gitReply: (@Sendable (GitRequest) -> GitReply)?
     var beforeClaim: (@Sendable () async -> Void)?
 
     init(identity: ServerId = ServerId(), catalog: CatalogPage) {
@@ -183,7 +189,7 @@ final class ModelFakeServer: ServerAPI, TerminalBackend, @unchecked Sendable {
     }
     func git(_ request: GitRequest) async throws -> GitReply {
         locked { _gitRequests.append(request) }
-        return .summary(nil)
+        return gitReply?(request) ?? .summary(nil)
     }
     func files(_ request: FilesRequest) async throws -> FilesReply {
         locked { _fileRequests.append(request) }

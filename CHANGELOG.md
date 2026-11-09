@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.89.1 - 2026-11-09
+
+### Fixed
+
+- Closing the last pane in a worktree asks before removing the worktree and its
+  files, keeping the pane open when you cancel.
+
 ## 0.89.0 - 2026-11-09
 
 ### Changed

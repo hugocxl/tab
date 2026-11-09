@@ -22,6 +22,10 @@ extension AppModel {
             presenter?.bringToFront()
         case .close:
             let pane = try selector.resolve(request.pane)
+            if let project = worktreeClosingLastPane(pane) {
+                closeWorktree(project, approved: pane == caller ? [pane] : [], requiresConfirmation: true)
+                return .bool(true)
+            }
             guard pane != caller else {
                 Task { await commitClose([pane]) }
                 return .bool(true)

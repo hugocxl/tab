@@ -431,10 +431,21 @@ extension AppModel {
         guard let pane = pane ?? activePane else { return }
         Task {
             guard await controller(for: pane)?.willClose() ?? true else { return }
+            if let project = worktreeClosingLastPane(pane) {
+                closeWorktree(project, approved: [pane], requiresConfirmation: true)
+                return
+            }
             guard await controller(for: pane)?.commitClose() ?? true else { return }
             remove(pane)
             focusActiveContent()
         }
+    }
+
+    /// Closing the last pane must use the worktree removal flow.
+    func worktreeClosingLastPane(_ pane: PaneId) -> ProjectId? {
+        guard let id = state.paneProject(pane), let project = state.project(id),
+              project.kind == .worktree, project.tabs.flatMap(\.panes).count == 1 else { return nil }
+        return id
     }
 
     func remove(_ pane: PaneId) {

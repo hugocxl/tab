@@ -428,8 +428,9 @@ extension AppModel {
     /// user too unless Tab made the worktree and nothing would be lost: no
     /// changes, no ignored files, a branch, no teardown commands. When the
     /// worktree can't be removed, its panes still close. Panes in `approved`
-    /// already agreed to close.
-    public func closeWorktree(_ project: ProjectId, approved: Set<PaneId> = []) {
+    /// already agreed to close. Closing the last pane requires confirmation
+    /// even for a clean worktree, and keeps it open if inspection fails.
+    public func closeWorktree(_ project: ProjectId, approved: Set<PaneId> = [], requiresConfirmation: Bool = false) {
         guard let target = state.project(project), target.kind == .worktree,
               pendingWorktreeRemovals.insert(project).inserted else { return }
         let panes = target.tabs.flatMap(\.panes).map(\.id)
@@ -437,12 +438,18 @@ extension AppModel {
             defer { pendingWorktreeRemovals.remove(project) }
             guard await panesWillClose(panes.filter { !approved.contains($0) }) else { return }
             guard target.status == .available, sideClient(for: project) != nil else {
-                await commitClose(panes)
+                if requiresConfirmation {
+                    report("The worktree cannot be closed while its server or folder is unavailable.")
+                } else {
+                    await commitClose(panes)
+                }
                 return
             }
-            if case .failed(let message) = await removeWorktree(project, closing: panes) {
+            if case .failed(let message) = await removeWorktree(project, closing: panes, requiresConfirmation: requiresConfirmation) {
                 report("The worktree stays on disk: \(message)")
-                await commitClose(state.project(project)?.tabs.flatMap(\.panes).map(\.id) ?? [])
+                if !requiresConfirmation {
+                    await commitClose(state.project(project)?.tabs.flatMap(\.panes).map(\.id) ?? [])
+                }
             }
         }
     }
@@ -452,7 +459,7 @@ extension AppModel {
     /// Removes a worktree after inspecting it. `closing` holds the panes of
     /// a tab being closed, closed just before the files go; nil is Remove
     /// Worktree, which always asks.
-    private func removeWorktree(_ project: ProjectId, closing: [PaneId]?) async -> RemovalOutcome {
+    private func removeWorktree(_ project: ProjectId, closing: [PaneId]?, requiresConfirmation: Bool = false) async -> RemovalOutcome {
         guard let target = state.project(project), target.kind == .worktree, let side = sideClient(for: project) else {
             return .failed("The server is not connected.")
         }
@@ -489,7 +496,7 @@ extension AppModel {
         if removal.branch == nil { message += "\n\nIt isn't on a branch, so commits made in it may be lost." }
         var approved: [WorktreeHook]?
         // The server lists at most 50 ignored paths, so a full list may hide more.
-        var mustAsk = closing == nil || removal.dirty || removal.branch == nil || removal.ignoredPaths == nil
+        var mustAsk = requiresConfirmation || closing == nil || removal.dirty || removal.branch == nil || removal.ignoredPaths == nil
             || (removal.ignoredPaths?.count ?? 0) >= 50 || !lost.isEmpty || git[project]?.summary?.base == nil
         switch hooks {
         case .success(let list) where !list.isEmpty:
