@@ -54,6 +54,12 @@ public final class GlassView: NSView {
         public static let tooltip = Style(cornerRadius: 10, fallbackMaterial: .toolTip)
         /// Popups anchored to a control, such as the agent composer's suggestions.
         public static let popover = Style(cornerRadius: 10, fallbackMaterial: .menu)
+        /// The agent composer, floating over the conversation that scrolls behind it.
+        public static let agentComposer = Style(cornerRadius: 20, fallbackMaterial: .popover, regular: true)
+        /// Panels stacked above the agent composer: the prompt queue, questions and notices.
+        public static let agentPanel = Style(cornerRadius: 16, fallbackMaterial: .popover, regular: true)
+        /// The agent's activity capsule above those panels.
+        public static let agentActivity = Style(cornerRadius: 13, fallbackMaterial: .popover, regular: true)
     }
 
     private let material: NSView

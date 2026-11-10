@@ -370,10 +370,6 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
             self.saveDraft(); self.updateControls()
         }
         surface.microphone.onPress = { [weak self] in self?.voice.toggleDictation() }
-        surface.waveform.onPress = { [weak self] in
-            guard let self else { return }
-            self.voice.toggleReading(self.snapshot?.items.last { $0.kind == .assistant && $0.isComplete }?.text ?? "")
-        }
         updateControls()
     }
 
@@ -739,8 +735,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
             return
         case "new", "clear-conversation": onNewConversation?(); return
         case "resume": showHistory(); return
-        case "model": control = surface.model
-        case "effort": control = surface.effort
+        case "model", "effort": control = surface.modelPicker
         case "attach": chooseAttachments(); return
         case "stop": stop(); return
         case "clear":
@@ -968,21 +963,16 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         surface.composer.isEditable = !disposed && !restoringDraft
         surface.attach.isEnabled = !disposed && !restoringDraft
         surface.microphone.isEnabled = !disposed && !restoringDraft && snapshot?.status != .closed
-        surface.microphone.toolTip = voice.state == .idle || voice.state == .speaking ? "Dictate a message on this Mac" : "Finish dictation"
-        surface.waveform.isEnabled = !disposed && (voice.state == .speaking || snapshot?.items.contains { $0.kind == .assistant && $0.isComplete } == true)
-        surface.waveform.toolTip = voice.state == .speaking ? "Stop reading aloud" : "Read latest response aloud"
-        surface.microphone.contentTintColor = voice.state == .listening || voice.state == .authorizing ? surface.theme.accent : surface.theme.fgMuted
-        surface.waveform.contentTintColor = voice.state == .speaking ? surface.theme.accent : surface.theme.fgMuted
+        surface.microphone.toolTip = voice.state == .idle ? "Dictate a message on this Mac" : "Finish dictation"
+        surface.dictating = voice.state != .idle
         surface.send.isEnabled = !approvalInFlight && !disposed && created && commandTask == nil && canSend &&
             preparingAttachments == 0 && (!surface.composer.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !draftAttachments.isEmpty)
         surface.stop.isEnabled = !disposed && !needsAuthoritativeSnapshot && stopTask == nil && !stopRequested &&
             (submitting || snapshot?.status == .working || snapshot?.status == .waiting || hasActiveQueue)
         let busy = submitting || snapshot?.status == .working || snapshot?.status == .waiting || hasActiveQueue
-        surface.send.isHidden = false
         surface.send.toolTip = busy
             ? "Queue this prompt for the next response"
             : "Send message"
-        surface.stop.isHidden = !busy
         surface.model.isEnabled = canEditSelection && !needsAuthoritativeSnapshot
         surface.effort.isEnabled = surface.model.isEnabled && !supportedEfforts.isEmpty
         surface.contextIndicator.update(usedTokens: snapshot?.contextUsage?.usedTokens,
@@ -1000,8 +990,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
 
     private var statusText: String {
         if voice.state == .authorizing { return "Waiting for microphone and speech permission…" }
-        if voice.state == .listening { return "Listening… Click the microphone to finish and review your message." }
-        if voice.state == .speaking { return "Reading response aloud… Click the waveform to stop." }
+        if voice.state == .listening { return "Listening… Click the button again to finish and review your message." }
         if preparingAttachments > 0 { return "Preparing attachments…" }
         if historyTask != nil { return "Looking through past conversations…" }
         if needsAuthoritativeSnapshot { return "Reconnecting… Your transcript and draft are kept here." }

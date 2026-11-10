@@ -3,6 +3,21 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.90.0 - 2026-11-10
+
+### Changed
+
+- The agent composer fits on one row, with a larger attach button and one selector for the model and its reasoning effort.
+- Send, Stop and Dictate share one button that shows whichever applies to your draft and the agent's state.
+- The conversation scrolls behind the composer and the queued prompts, questions and notices above it, which float on glass.
+- Queued prompts read like the conversation, with their actions shown on hover.
+- A pending question appears only in its form above the composer, not also in the conversation.
+- Several images in one message show as a compact grid.
+
+### Removed
+
+- Reading agent responses aloud.
+
 ## 0.89.2 - 2026-11-09
 
 ### Fixed

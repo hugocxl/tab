@@ -105,13 +105,13 @@ final class AgentMessageMediaTests: XCTestCase {
         try await wait { media.images.first.flatMap { $0 } != nil }
         place(row, width: 600)
         let response = try XCTUnwrap(row.subviews.compactMap { $0 as? AgentResponseView }.first)
-        XCTAssertEqual(media.frame.height, 240)
-        XCTAssertEqual(media.frame.width, 480)
+        XCTAssertEqual(media.frame.height, 180)
+        XCTAssertEqual(media.frame.width, 360)
         XCTAssertGreaterThan(response.frame.minY, media.frame.maxY)
         row.update([AgentChatItem(id: "message", kind: .user, text: "", attachments: [image.descriptor])])
         place(row, width: 600)
         XCTAssertTrue(try XCTUnwrap(row.subviews.first { $0 is ThemedBackground }).isHidden)
-        XCTAssertEqual(row.frame.height, 268)
+        XCTAssertEqual(row.frame.height, 208)
         XCTAssertTrue(try XCTUnwrap(row.subviews.compactMap { $0 as? PillButton }.first { $0.toolTip == "Copy message" }).isHidden)
     }
 
@@ -131,11 +131,12 @@ final class AgentMessageMediaTests: XCTestCase {
         try await wait { media.images.allSatisfy { $0 != nil } }
         media.frame = NSRect(origin: .zero, size: media.measuredSize(maxWidth: 400))
         media.layoutSubtreeIfNeeded()
-        XCTAssertEqual(media.frame.size, NSSize(width: 400, height: 736))
-        XCTAssertEqual(tiles[0].frame.height, 240)
+        XCTAssertEqual(media.frame.size, NSSize(width: 360, height: 270))
+        XCTAssertEqual(tiles[0].frame.size, NSSize(width: 177, height: 132))
         XCTAssertTrue(tiles.allSatisfy(\.fitsWholeImage))
-        XCTAssertEqual(tiles[1].frame.maxY + 8, tiles[2].frame.minY)
-        XCTAssertEqual(tiles[0].frame.minX, tiles[1].frame.minX)
+        XCTAssertEqual(tiles[0].frame.maxY + 6, tiles[2].frame.minY)
+        XCTAssertEqual(tiles[0].frame.minX, tiles[2].frame.minX)
+        XCTAssertEqual(tiles[0].frame.maxX + 6, tiles[1].frame.minX)
         var previewIndex: Int?
         media.onPreview = { _, _, index in previewIndex = index }
         XCTAssertTrue(tiles[2].accessibilityPerformPress())

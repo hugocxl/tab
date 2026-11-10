@@ -4,8 +4,8 @@ import Speech
 
 /// Audio is used only after an explicit click. Recognition never sends audio off the Mac.
 @MainActor
-final class AgentVoice: NSObject, AVSpeechSynthesizerDelegate {
-    enum State: Equatable { case idle, authorizing, listening, speaking }
+final class AgentVoice: NSObject {
+    enum State: Equatable { case idle, authorizing, listening }
     private(set) var state: State = .idle { didSet { onChange?() } }
     var onChange: (() -> Void)?
     var onText: ((String) -> Void)?
@@ -18,9 +18,6 @@ final class AgentVoice: NSObject, AVSpeechSynthesizerDelegate {
     private var recognizer: SFSpeechRecognizer?
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var partial = ""
-    private let speech = AVSpeechSynthesizer()
-
-    override init() { super.init(); speech.delegate = self }
 
     func toggleDictation() {
         if state == .listening || state == .authorizing { stop(); return }
@@ -82,16 +79,6 @@ final class AgentVoice: NSObject, AVSpeechSynthesizerDelegate {
         }
     }
 
-    func toggleReading(_ text: String) {
-        if state == .speaking { stop(); return }
-        stop()
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        state = .speaking
-        let utterance = AVSpeechUtterance(string: String(text.prefix(32_000)))
-        utterance.voice = AVSpeechSynthesisVoice(language: Locale.current.identifier)
-        speech.speak(utterance)
-    }
-
     func stop() {
         generation = UUID()
         authorization?.cancel(); authorization = nil
@@ -99,14 +86,7 @@ final class AgentVoice: NSObject, AVSpeechSynthesizerDelegate {
         engine?.stop(); engine?.inputNode.removeTap(onBus: 0); engine = nil
         request?.endAudio(); request = nil
         recognition?.cancel(); recognition = nil; recognizer = nil
-        speech.stopSpeaking(at: .immediate)
         let text = partial; partial = ""; state = .idle
         if !text.isEmpty { onText?(text) }
-    }
-    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
-        Task { @MainActor [weak self] in
-            guard let self, self.state == .speaking, !self.speech.isSpeaking else { return }
-            self.state = .idle
-        }
     }
 }

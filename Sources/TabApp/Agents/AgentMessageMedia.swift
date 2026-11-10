@@ -48,7 +48,7 @@ final class AgentMessageMediaView: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
-        layer?.cornerRadius = 16
+        layer?.cornerRadius = 10
         layer?.masksToBounds = true
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -100,26 +100,45 @@ final class AgentMessageMediaView: NSView {
         } changed: { [weak self] in self?.onHeightChanged?() }
     }
 
-    private func tileHeight(_ tile: AgentMediaTile, width: CGFloat) -> CGFloat {
-        let ratio = tile.image.map { $0.size.width / max(1, $0.size.height) } ?? (4.0 / 3.0)
-        return min(240, max(64, width / max(0.01, ratio)))
-    }
+    private static let maximumWidth: CGFloat = 360
+    private static let singleMaximumHeight: CGFloat = 280
+    private static let gap: CGFloat = 6
 
+    /// One image keeps its own aspect ratio; several share a two-column grid of
+    /// 4:3 cells that show each whole image. The viewer opens the original.
     func measuredSize(maxWidth: CGFloat) -> NSSize {
         guard !tiles.isEmpty else { return .zero }
-        let width = min(480, max(0, maxWidth))
-        return NSSize(width: width, height: tiles.reduce(CGFloat(0)) { $0 + tileHeight($1, width: width) } + CGFloat(tiles.count - 1) * 8)
+        let width = min(Self.maximumWidth, max(0, maxWidth))
+        if tiles.count == 1 {
+            let ratio = tiles[0].image.map { $0.size.width / max(1, $0.size.height) } ?? (4.0 / 3.0)
+            let height = min(Self.singleMaximumHeight, width / max(0.01, ratio))
+            return NSSize(width: max(96, min(width, ceil(height * ratio))), height: max(64, ceil(height)))
+        }
+        let cell = cellSize(width: width)
+        let rows = CGFloat((tiles.count + 1) / 2)
+        return NSSize(width: width, height: rows * cell.height + (rows - 1) * Self.gap)
+    }
+
+    private func cellSize(width: CGFloat) -> NSSize {
+        let cellWidth = floor((width - Self.gap) / 2)
+        return NSSize(width: cellWidth, height: floor(cellWidth * 0.75))
     }
 
     override func layout() {
         super.layout()
-        var y: CGFloat = 0
+        if tiles.count == 1 {
+            tiles[0].frame = bounds
+        } else {
+            let cell = cellSize(width: bounds.width)
+            for (index, tile) in tiles.enumerated() {
+                let column = CGFloat(index % 2), row = CGFloat(index / 2)
+                tile.frame = NSRect(x: bounds.width - cell.width * (2 - column) - Self.gap * (1 - column),
+                                    y: row * (cell.height + Self.gap), width: cell.width, height: cell.height)
+            }
+        }
         for tile in tiles {
-            let height = tileHeight(tile, width: bounds.width)
-            tile.frame = NSRect(x: 0, y: y, width: bounds.width, height: height)
             tile.layer?.cornerRadius = 10
             tile.layer?.cornerCurve = .continuous
-            y += height + 8
         }
     }
 

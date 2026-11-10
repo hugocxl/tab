@@ -10,7 +10,9 @@ struct AgentTranscriptLayout {
     func spacing(at index: Int) -> CGFloat { trailingSpaces.indices.contains(index) ? trailingSpaces[index] : spacing }
 
     var count: Int { heights.count }
-    var height: CGFloat { count == 0 ? 214 : leading + prefix(count) + 4 }
+    /// Room after the last row, so it can scroll clear of the composer floating over it.
+    var trailingInset: CGFloat = 0
+    var height: CGFloat { (count == 0 ? 214 : leading + prefix(count) + 4) + trailingInset }
 
     mutating func reset(heights: [CGFloat], trailingSpaces: [CGFloat] = []) {
         self.trailingSpaces = trailingSpaces

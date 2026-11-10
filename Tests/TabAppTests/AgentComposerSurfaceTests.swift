@@ -10,7 +10,8 @@ final class AgentComposerSurfaceTests: XCTestCase {
         for width in [CGFloat(360), 680, 1000] {
             let view = surface(width: width)
             let card = view.composerScroll.superview
-            XCTAssertEqual(card?.frame.midY ?? 0, view.bounds.midY, accuracy: 1)
+            // The greeting above and the composer are centered together.
+            XCTAssertEqual(card?.frame.midY ?? 0, view.bounds.midY + 40, accuracy: 1)
             view.plan.isHidden = false
             view.needsLayout = true
             view.layoutSubtreeIfNeeded()
@@ -28,7 +29,7 @@ final class AgentComposerSurfaceTests: XCTestCase {
                 try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: URL(fileURLWithPath: output + "/empty-plan-\(Int(width)).png"))
                 window.close()
             }
-            for other in [view.attach, view.model, view.effort, view.send, view.stop] {
+            for other in [view.attach, view.modelPicker, view.send, view.stop] {
                 XCTAssertFalse(view.plan.frame.intersects(other.frame))
             }
         }
@@ -53,22 +54,24 @@ final class AgentComposerSurfaceTests: XCTestCase {
         return surface
     }
 
-    func testModelAndEffortRemainAccessibleWithoutAccessSelector() {
+    func testModelAndEffortShareOneSelectorOnTheControlRow() {
         for width in [CGFloat(360), 560, 680, 1000] {
             let surface = surface(width: width)
-            let controls = [surface.model, surface.effort]
-            for control in controls {
-                XCTAssertFalse(control.isHiddenOrHasHiddenAncestor)
-                XCTAssertGreaterThanOrEqual(control.frame.width, 70)
-                XCTAssertEqual(control.frame.height, 28)
-                XCTAssertTrue(control.superview?.bounds.contains(control.frame) == true)
-                XCTAssertFalse(control.frame.intersects(surface.send.frame), "Picker must not cover Send at \(width)pt")
-                XCTAssertNotNil(control.toolTip)
+            surface.plan.isHidden = false
+            surface.needsLayout = true
+            surface.layoutSubtreeIfNeeded()
+            let picker = surface.modelPicker
+            XCTAssertFalse(picker.isHiddenOrHasHiddenAncestor)
+            XCTAssertTrue(surface.model.isHidden && surface.effort.isHidden, "The pop-ups only hold the menus")
+            XCTAssertTrue(picker.labelText.contains("A custom model") && picker.labelText.contains("Extra high"))
+            XCTAssertGreaterThanOrEqual(picker.frame.width, 70, "at \(width)pt")
+            XCTAssertTrue(picker.superview?.bounds.contains(picker.frame) == true)
+            for other in [surface.send, surface.attach, surface.plan] {
+                XCTAssertFalse(picker.frame.intersects(other.frame), "Picker overlaps a control at \(width)pt")
             }
-            for index in controls.indices {
-                for other in controls.indices where other > index {
-                    XCTAssertFalse(controls[index].frame.intersects(controls[other].frame))
-                }
+            // One row: every control shares the attach button's line.
+            for control in [picker, surface.send, surface.plan] as [NSView] {
+                XCTAssertEqual(control.frame.midY, surface.attach.frame.midY, accuracy: 1)
             }
         }
     }
@@ -76,13 +79,19 @@ final class AgentComposerSurfaceTests: XCTestCase {
     func testImmediateSubmissionActivityContinuesThroughToolsAndStreamingThenHidesAtIdle() throws {
         let surface = surface()
         surface.setActivity(status: .idle, submitting: true)
-        XCTAssertFalse(surface.send.isHidden)
+        XCTAssertTrue(surface.send.isHidden, "An empty draft offers Stop, not Send")
         XCTAssertFalse(surface.stop.isHidden)
         XCTAssertTrue(visibleLabels(surface).contains("Sending…"))
         var snapshot = AgentChatSnapshot(session: SessionId(), project: ProjectId(), provider: .claude,
                                          status: .working, items: [AgentChatItem(id: "tool", kind: .tool, text: "Read source", isComplete: false)])
         surface.setActivity(status: .working, submitting: false)
         surface.render(snapshot)
+        surface.composer.string = "Follow up"
+        surface.refreshComposer()
+        surface.layoutSubtreeIfNeeded()
+        XCTAssertFalse(surface.send.isHidden, "A draft while working queues through Send")
+        XCTAssertTrue(surface.stop.isHidden)
+        surface.composer.string = ""
         XCTAssertFalse(visibleLabels(surface).contains("Working…"), "Working belongs in the transcript")
         snapshot.items.append(AgentChatItem(id: "answer", kind: .assistant, text: "Partial answer", isComplete: false))
         surface.render(snapshot)
@@ -98,7 +107,8 @@ final class AgentComposerSurfaceTests: XCTestCase {
         XCTAssertTrue(visibleLabels(surface).contains("Waiting for approval"))
         surface.setActivity(status: .idle, submitting: false)
         XCTAssertTrue(surface.stop.isHidden)
-        XCTAssertFalse(surface.send.isHidden)
+        XCTAssertTrue(surface.send.isHidden)
+        XCTAssertFalse(surface.microphone.isHidden, "Idle with an empty draft offers dictation")
         XCTAssertFalse(visibleLabels(surface).contains("Working…"))
         XCTAssertFalse(visibleLabels(surface).contains("Waiting for approval"))
     }
@@ -139,7 +149,7 @@ final class AgentComposerSurfaceTests: XCTestCase {
 
     func testComposerGrowsToCapAndKeepsDraftWhenNarrowed() {
         let surface = surface()
-        XCTAssertEqual(surface.composerScroll.frame.height, 56, accuracy: 1)
+        XCTAssertEqual(surface.composerScroll.frame.height, 44, accuracy: 1)
         let draft = String(repeating: "A multiline draft that should remain editable.\n", count: 40)
         surface.composer.string = draft
         surface.refreshComposer()

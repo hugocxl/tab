@@ -69,11 +69,18 @@ final class AgentTranscriptDocument: ThemedView {
     private var omittedCount = 0
     private var approvalsEnabled = true
     private let spareRowLimit = 32
-    private let emptyTitle = makeLabel("What can I help with?", font: AppFont.system(21, weight: .medium))
-    private let emptyDetail = makeLabel("Ask a question or make something new.", font: AppFont.body)
     private let earlier = makeLabel("", font: AppFont.footnote)
     private let showEarlier = PillButton("Show earlier messages", style: .plain)
 
+    /// Space under the last row for the composer and panels that float over the transcript.
+    var bottomInset: CGFloat {
+        get { geometry.trailingInset }
+        set {
+            guard geometry.trailingInset != newValue else { return }
+            geometry.trailingInset = newValue
+            updateFrame()
+        }
+    }
     private(set) var viewportWidth: CGFloat = 0
     private(set) var viewportOrigin: CGFloat = 0
     private(set) var measurementCount = 0
@@ -127,12 +134,10 @@ final class AgentTranscriptDocument: ThemedView {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        for label in [emptyTitle, emptyDetail, earlier] {
+        for label in [earlier] {
             label.translatesAutoresizingMaskIntoConstraints = true
             addSubview(label)
         }
-        emptyTitle.alignment = .center
-        emptyDetail.alignment = .center
         showEarlier.translatesAutoresizingMaskIntoConstraints = true
         showEarlier.onPress = { [weak self] in self?.onEarlier?() }
         addSubview(showEarlier)
@@ -144,8 +149,9 @@ final class AgentTranscriptDocument: ThemedView {
     func update(_ sourceItems: [AgentChatItem], omittedCount: Int, turns: [AgentChatTurn] = []) {
         self.sourceItems = sourceItems
         sourceTurns = turns
-        // Approval decisions remain in the authoritative audit snapshot, not the chat.
-        let items = sourceItems.filter { $0.kind != .approval || !$0.isComplete }
+        // Approval decisions remain in the authoritative audit snapshot, not the chat, and
+        // a pending question shows only in its form above the composer.
+        let items = sourceItems.filter { $0.kind != .approval || (!$0.isComplete && $0.questionnaire == nil) }
         let anchor = captureAnchor(at: lastViewport.minY)
         captureStates()
         migrateToolGroupStates()
@@ -390,8 +396,6 @@ final class AgentTranscriptDocument: ThemedView {
 
     override func themeDidChange() {
         themeEpoch &+= 1
-        emptyTitle.textColor = theme.fg
-        emptyDetail.textColor = theme.fgDim
         earlier.textColor = theme.fgDim
         showEarlier.setTitleColor(theme.fgMuted)
         reflow(viewportWidth: viewportWidth)
@@ -407,10 +411,6 @@ final class AgentTranscriptDocument: ThemedView {
         showEarlier.isHidden = omittedCount == 0
         earlier.frame = NSRect(x: left, y: start, width: rowWidth, height: 18)
         showEarlier.frame = NSRect(x: left - 4, y: start + 22, width: min(rowWidth, 180), height: 26)
-        emptyTitle.isHidden = !entries.isEmpty
-        emptyDetail.isHidden = !entries.isEmpty
-        emptyTitle.frame = NSRect(x: left, y: 88, width: rowWidth, height: 30)
-        emptyDetail.frame = NSRect(x: left, y: 128, width: rowWidth, height: 42)
     }
 
     private func updateFrame() {

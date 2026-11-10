@@ -253,9 +253,8 @@ final class AgentPaneTests: XCTestCase {
         })
         XCTAssertEqual(pane.surface.contextIndicator.fractionUsed ?? -1, 0.21, accuracy: 0.001)
         XCTAssertTrue(pane.surface.feedback.isHidden)
-        for control in [pane.surface.model, pane.surface.effort] {
-            XCTAssertEqual(control.frame.width, control.intrinsicContentSize.width)
-        }
+        XCTAssertEqual(pane.surface.modelPicker.frame.width, pane.surface.modelPicker.intrinsicContentSize.width)
+        XCTAssertTrue(pane.surface.modelPicker.labelText.hasPrefix("Claude Sonnet 5.5"))
         backend.snapshot.contextUsage = .init(usedTokens: 123)
         pane.refresh()
         try await wait { pane.surface.contextIndicator.usedTokens == 123 }
@@ -501,7 +500,7 @@ final class AgentPaneTests: XCTestCase {
         XCTAssertEqual(backend.requests.last, .send(session: backend.session, text: "Review the code",
             model: "gpt-6.1-sol", reasoningEffort: .high, provider: .codex))
         XCTAssertEqual(pane.title, "Review the code")
-        XCTAssertFalse(pane.surface.send.isHidden)
+        XCTAssertTrue(pane.surface.send.isHidden, "Stop takes the shared slot while the draft is empty")
         XCTAssertFalse(pane.surface.stop.isHidden)
         XCTAssertFalse(pane.surface.effort.isEnabled)
         pane.selectModel(provider: .claude, model: nil)
@@ -783,9 +782,9 @@ final class AgentPaneTests: XCTestCase {
         let after = pane.surface.composerScroll.convert(pane.surface.composerScroll.bounds, to: pane.view)
         XCTAssertGreaterThan(after.minY, before.minY, "Empty composer moves from center to bottom on the first message")
         XCTAssertEqual(after.height, before.height, accuracy: 1)
-        XCTAssertGreaterThanOrEqual(after.height, 56)
+        XCTAssertGreaterThanOrEqual(after.height, 44)
         XCTAssertLessThanOrEqual(after.height, 164)
-        // Narrow panes place model controls on a second row below the voice and send actions.
+        // One control row keeps the composer short.
         XCTAssertLessThan(pane.view.bounds.maxY - after.maxY, 140)
         let document = pane.surface.transcriptScroll.documentView as? AgentTranscriptDocument
         XCTAssertEqual(document?.entryCount, backend.snapshot.items.count)

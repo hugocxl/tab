@@ -121,7 +121,7 @@ final class AgentComposerTextView: NSTextView {
             outline.stroke()
         }
         guard string.isEmpty, !hasMarkedText() else { return }
-        ((planning ? "Plan changes" : "Plan, Build, / for skills, @ for context") as NSString).draw(at: textContainerOrigin, withAttributes: [
+        ((planning ? "Plan changes" : "Ask anything · @ for context, / for commands") as NSString).draw(at: textContainerOrigin, withAttributes: [
             .font: font ?? AppFont.system(14, weight: .light), .foregroundColor: placeholderColor,
         ])
     }
@@ -192,7 +192,7 @@ class AgentTextPopUp: NSPopUpButton {
     override func draw(_ dirtyRect: NSRect) {
         if isEnabled && (hovered || isHighlighted) {
             chatTheme.fg.withAlphaComponent(isHighlighted ? 0.10 : 0.055).setFill()
-            NSBezierPath(roundedRect: bounds, xRadius: 5, yRadius: 5).fill()
+            NSBezierPath(roundedRect: bounds, xRadius: bounds.height / 2, yRadius: bounds.height / 2).fill()
         }
         let color = isEnabled ? chatTheme.fgMuted : chatTheme.fgDim
         let paragraph = NSMutableParagraphStyle()
@@ -208,10 +208,12 @@ class AgentTextPopUp: NSPopUpButton {
             .draw(in: NSRect(x: 5, y: floor((bounds.height - 14) / 2), width: 14, height: 14),
                   from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
         }
-        (labelText as NSString).draw(in: NSRect(x: 25, y: floor((bounds.height - 16) / 2), width: max(0, bounds.width - 44), height: 18),
-            withAttributes: [.font: AppFont.small, .foregroundColor: color, .paragraphStyle: paragraph])
+        let attributes: [NSAttributedString.Key: Any] = [.font: AppFont.small, .foregroundColor: color, .paragraphStyle: paragraph]
+        let textHeight = ceil((labelText as NSString).size(withAttributes: attributes).height)
+        (labelText as NSString).draw(in: NSRect(x: 25, y: floor((bounds.height - textHeight) / 2), width: max(0, bounds.width - 44), height: textHeight),
+            withAttributes: attributes)
         AppIcon.chevronDown.image(size: 8, color: color)?.draw(
-            in: NSRect(x: max(0, bounds.width - 15), y: bounds.midY - 4, width: 8, height: 8),
+            in: NSRect(x: max(0, bounds.width - 16), y: floor(bounds.midY - 4), width: 8, height: 8),
             from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
     }
 }
@@ -244,17 +246,23 @@ class AgentComposerButton: NSButton {
 /// Shares one trailing position for send and interrupt; callers control visibility and enabled state.
 @MainActor
 final class AgentRoundButton: AgentComposerButton {
-    enum Kind { case send, stop }
+    /// Send, Stop and Dictate share one slot; the pane shows whichever applies.
+    enum Kind { case send, stop, dictate }
     let kind: Kind
     var onPress: (() -> Void)?
     var chatTheme: AppTheme = .shared { didSet { needsDisplay = true } }
+    /// Dictation is listening: the accent fill shows that a click finishes it.
+    var active = false { didSet { if active != oldValue { needsDisplay = true } } }
 
     init(kind: Kind) {
         self.kind = kind
         super.init(frame: .zero)
-        title = kind == .send ? "Send" : "Stop"
+        switch kind {
+        case .send: title = "Send"; toolTip = "Send message (Return)"
+        case .stop: title = "Stop"; toolTip = "Stop this turn"
+        case .dictate: title = "Dictate"; toolTip = "Dictate a message on this Mac"
+        }
         setAccessibilityLabel(title)
-        toolTip = kind == .send ? "Send message (Return)" : "Stop this turn"
         setButtonType(.momentaryPushIn)
         isBordered = false
         target = self
@@ -267,23 +275,148 @@ final class AgentRoundButton: AgentComposerButton {
     override var isEnabled: Bool { didSet { needsDisplay = true } }
 
     override func draw(_ dirtyRect: NSRect) {
-        let fill = isEnabled ? (kind == .stop ? chatTheme.danger : chatTheme.fg) : chatTheme.fg.withAlphaComponent(0.10)
+        let circle = NSBezierPath(ovalIn: bounds)
+        let solid = chatTheme.agentComposer.withAlphaComponent(1)
+        let fill = !isEnabled ? chatTheme.fg.withAlphaComponent(0.10) : active ? chatTheme.accent : chatTheme.fg
         fill.setFill()
-        NSBezierPath(ovalIn: bounds.insetBy(dx: 1, dy: 1)).fill()
+        circle.fill()
         if isEnabled && (hovered || isHighlighted) {
-            chatTheme.fg.withAlphaComponent(isHighlighted ? 0.16 : 0.08).setFill()
-            NSBezierPath(ovalIn: bounds.insetBy(dx: 1, dy: 1)).fill()
+            solid.withAlphaComponent(isHighlighted ? 0.24 : 0.12).setFill()
+            circle.fill()
         }
-        let ink = isEnabled ? (kind == .stop ? chatTheme.accentForeground : chatTheme.paneBackground) : chatTheme.fgDim
-        let icon: AppIcon = kind == .stop ? .stop : .arrowUp
-        let size: CGFloat = kind == .stop ? 10 : 14
+        let ink = !isEnabled ? chatTheme.fgDim : active ? chatTheme.accentForeground : solid
+        let icon: AppIcon
+        let size: CGFloat
+        switch kind {
+        case .send: icon = .arrowUp; size = 16
+        case .stop: icon = .stop; size = 11
+        case .dictate: icon = .waveform; size = 17
+        }
         icon.image(size: size, color: ink)?.draw(
-            in: NSRect(x: bounds.midX - size / 2, y: bounds.midY - size / 2, width: size, height: size),
+            in: NSRect(x: floor(bounds.midX - size / 2), y: floor(bounds.midY - size / 2), width: size, height: size),
             from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
     }
 
     @objc private func pressed() { perform() }
     func perform() { if isEnabled { onPress?() } }
+}
+
+/// One selector for the model and its reasoning effort, such as "Opus 5.5 · Medium".
+/// The model and effort pop-ups stay the source of truth; this menu lists both and
+/// sends their actions, so the controller handles a choice exactly as before.
+@MainActor
+final class AgentModelPicker: AgentComposerButton {
+    var chatTheme: AppTheme = .shared { didSet { needsDisplay = true } }
+    private let model: AgentTextPopUp
+    private let effort: AgentTextPopUp
+
+    init(model: AgentTextPopUp, effort: AgentTextPopUp) {
+        self.model = model
+        self.effort = effort
+        super.init(frame: .zero)
+        title = "Model and reasoning effort"
+        setAccessibilityLabel(title)
+        isBordered = false
+        setButtonType(.momentaryPushIn)
+        target = self
+        action = #selector(showMenu)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    override var isFlipped: Bool { true }
+    override var isEnabled: Bool { didSet { needsDisplay = true } }
+
+    var labelText: String {
+        let effortTitle = effort.labelText
+        return effort.isEnabled && effortTitle != "Off" ? "\(model.labelText) · \(effortTitle)" : model.labelText
+    }
+
+    /// Call when either pop-up's title or enabled state changes.
+    func refresh() {
+        isEnabled = model.isEnabled || effort.isEnabled
+        setAccessibilityValue(labelText)
+        toolTip = "\(labelText) · Changes apply to the next message"
+        invalidateIntrinsicContentSize()
+        needsDisplay = true
+    }
+
+    override var intrinsicContentSize: NSSize {
+        let width = (labelText as NSString).size(withAttributes: [.font: AppFont.body]).width
+        return NSSize(width: ceil(width) + 34, height: 32)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        if isEnabled && (hovered || isHighlighted) {
+            chatTheme.fg.withAlphaComponent(isHighlighted ? 0.10 : 0.06).setFill()
+            NSBezierPath(roundedRect: bounds, xRadius: bounds.height / 2, yRadius: bounds.height / 2).fill()
+        }
+        let color = isEnabled ? chatTheme.fgMuted : chatTheme.fgDim
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byTruncatingTail
+        let attributes: [NSAttributedString.Key: Any] = [.font: AppFont.body, .foregroundColor: color, .paragraphStyle: paragraph]
+        let textHeight = ceil((labelText as NSString).size(withAttributes: attributes).height)
+        (labelText as NSString).draw(in: NSRect(x: 12, y: floor((bounds.height - textHeight) / 2), width: max(0, bounds.width - 34), height: textHeight),
+                                     withAttributes: attributes)
+        AppIcon.chevronDown.image(size: 9, color: color)?.draw(
+            in: NSRect(x: bounds.width - 20, y: floor(bounds.midY - 4.5), width: 9, height: 9),
+            from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+    }
+
+    @objc private func showMenu() {
+        guard isEnabled else { return }
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        if let models = model.menu {
+            for item in models.items {
+                guard let copy = item.copy() as? NSMenuItem else { continue }
+                // Top-level pop-up items act through the pop-up's own action.
+                if copy.action == nil, copy.submenu == nil, !copy.isSeparatorItem {
+                    copy.target = model.target
+                    copy.action = model.action
+                }
+                if !model.isEnabled { disable(copy) }
+                menu.addItem(copy)
+            }
+        }
+        let efforts = effort.itemArray.enumerated().filter { !$0.element.isSeparatorItem }
+        if !efforts.isEmpty {
+            menu.addItem(.separator())
+            menu.addItem(.sectionHeader(title: "Reasoning effort"))
+            for (index, item) in efforts {
+                let choice = NSMenuItem(title: item.title, action: #selector(chooseEffort(_:)), keyEquivalent: "")
+                choice.target = self
+                choice.tag = index
+                choice.state = item === effort.selectedItem ? .on : .off
+                choice.isEnabled = effort.isEnabled && item.isEnabled
+                choice.toolTip = item.toolTip
+                menu.addItem(choice)
+            }
+        }
+        // The controller refreshes catalogs and holds menu rebuilds while the model menu is open.
+        if let models = model.menu { models.delegate?.menuWillOpen?(models) }
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: bounds.height + 4), in: self)
+        if let models = model.menu { models.delegate?.menuDidClose?(models) }
+    }
+
+    private func disable(_ item: NSMenuItem) {
+        item.isEnabled = false
+        item.submenu?.items.forEach { disable($0) }
+    }
+
+    @objc private func chooseEffort(_ sender: NSMenuItem) {
+        guard effort.isEnabled, effort.itemArray.indices.contains(sender.tag) else { return }
+        effort.selectItem(at: sender.tag)
+        if let action = effort.action { effort.sendAction(action, to: effort.target) }
+        refresh()
+    }
+
+    override func performClick(_ sender: Any?) { showMenu() }
+
+    override func accessibilityPerformPress() -> Bool {
+        guard isEnabled else { return false }
+        showMenu()
+        return true
+    }
 }
 
 @MainActor
@@ -325,7 +458,53 @@ final class AgentEndButton: AgentComposerButton {
     @objc private func pressed() { if isEnabled { onPress?() } }
 }
 
-/// A removable, theme-tinted collaboration-mode chip.
+/// A round, borderless composer icon button: attach, dictate, read aloud and queue actions.
+/// `contentTintColor` overrides the muted ink, such as the accent while dictating.
+@MainActor
+final class AgentIconButton: AgentComposerButton {
+    var onPress: (() -> Void)?
+    var chatTheme: AppTheme = .shared { didSet { needsDisplay = true } }
+    var icon: AppIcon { didSet { needsDisplay = true } }
+    /// A resting disc behind the icon, as on the composer's attach button.
+    var filled = false { didSet { needsDisplay = true } }
+    private let iconSize: CGFloat
+
+    init(icon: AppIcon, label: String, iconSize: CGFloat = 16) {
+        self.icon = icon
+        self.iconSize = iconSize
+        super.init(frame: .zero)
+        title = label
+        toolTip = label
+        setAccessibilityLabel(label)
+        isBordered = false
+        setButtonType(.momentaryPushIn)
+        target = self
+        action = #selector(pressed)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    override var isFlipped: Bool { true }
+    override var isEnabled: Bool { didSet { needsDisplay = true } }
+    override var contentTintColor: NSColor? { didSet { needsDisplay = true } }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let resting: CGFloat = filled ? 0.08 : 0
+        let alpha = isEnabled && (hovered || isHighlighted) ? resting + (isHighlighted ? 0.10 : 0.05) : resting
+        if alpha > 0 {
+            chatTheme.fg.withAlphaComponent(alpha).setFill()
+            NSBezierPath(ovalIn: bounds).fill()
+        }
+        let ink = isEnabled ? (contentTintColor ?? (filled ? chatTheme.fg : chatTheme.fgMuted)) : chatTheme.fgDim.withAlphaComponent(0.6)
+        icon.image(size: iconSize, color: ink)?.draw(
+            in: NSRect(x: floor(bounds.midX - iconSize / 2), y: floor(bounds.midY - iconSize / 2), width: iconSize, height: iconSize),
+            from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+    }
+
+    @objc private func pressed() { perform() }
+    func perform() { if isEnabled { onPress?() } }
+}
+
+/// A removable plan-mode chip, tinted with the theme's accent.
 @MainActor
 final class AgentPlanButton: AgentComposerButton {
     var onPress: (() -> Void)?
@@ -340,15 +519,24 @@ final class AgentPlanButton: AgentComposerButton {
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
     override var isFlipped: Bool { true }
+
+    override var intrinsicContentSize: NSSize {
+        let text = ("Plan" as NSString).size(withAttributes: [.font: AppFont.small]).width
+        return NSSize(width: ceil(10 + 14 + 5 + text + 8 + 8 + 9), height: 28)
+    }
+
     override func draw(_ dirtyRect: NSRect) {
-        let color = chatTheme.warning
-        color.withAlphaComponent(hovered ? 0.22 : 0.12).setFill()
+        let color = chatTheme.accent
+        color.withAlphaComponent(hovered ? 0.20 : 0.13).setFill()
         NSBezierPath(roundedRect: bounds, xRadius: bounds.height / 2, yRadius: bounds.height / 2).fill()
-        AppIcon.listTodo.image(size: 14, color: color)?.draw(in: NSRect(x: 9, y: 7, width: 14, height: 14),
+        let middle = bounds.midY
+        AppIcon.listTodo.image(size: 14, color: color)?.draw(in: NSRect(x: 10, y: middle - 7, width: 14, height: 14),
             from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
-        ("Plan" as NSString).draw(at: NSPoint(x: 29, y: 5), withAttributes: [.font: AppFont.small, .foregroundColor: color])
-        AppIcon.close.image(size: 10, color: color)?.draw(in: NSRect(x: bounds.width - 19, y: 9, width: 10, height: 10),
-            from: .zero, operation: .sourceOver, fraction: 0.7, respectFlipped: true, hints: nil)
+        let attributes: [NSAttributedString.Key: Any] = [.font: AppFont.small, .foregroundColor: color]
+        let textHeight = ("Plan" as NSString).size(withAttributes: attributes).height
+        ("Plan" as NSString).draw(at: NSPoint(x: 29, y: floor(middle - textHeight / 2)), withAttributes: attributes)
+        AppIcon.close.image(size: 8, color: color)?.draw(in: NSRect(x: bounds.width - 17, y: middle - 4, width: 8, height: 8),
+            from: .zero, operation: .sourceOver, fraction: hovered ? 1 : 0.65, respectFlipped: true, hints: nil)
     }
     @objc private func pressed() { onPress?() }
 }

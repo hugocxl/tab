@@ -16,10 +16,19 @@ final class AgentPaneView: ThemedView {
     let send = AgentRoundButton(kind: .send)
     let stop = AgentRoundButton(kind: .stop)
     let contextIndicator = AgentContextIndicator(frame: .zero)
-    private let pickerSeparators = [NSView(), NSView()]
-    let microphone = PillButton("", style: .plain)
-    let waveform = PillButton("", style: .plain)
-    let attach = PillButton("", style: .plain)
+    /// Dictation shares the send and stop slot: it shows while the draft is empty and idle.
+    let microphone = AgentRoundButton(kind: .dictate)
+    let attach = AgentIconButton(icon: .plus, label: "Attach files", iconSize: 18)
+    /// The model and reasoning effort, chosen together; `model` and `effort` hold the menus.
+    private(set) lazy var modelPicker = AgentModelPicker(model: model, effort: effort)
+    /// Dictation is authorizing or listening.
+    var dictating = false {
+        didSet {
+            guard dictating != oldValue else { return }
+            microphone.active = dictating
+            updatePrimaryAction()
+        }
+    }
     let attachmentStrip = AgentAttachmentStrip(frame: .zero)
     let suggestions = AgentComposerSuggestionsView(frame: .zero)
     let retry = PillButton("Refresh", style: .plain)
@@ -50,8 +59,13 @@ final class AgentPaneView: ThemedView {
     /// Images, video and audio of assistant Markdown, cached for this conversation.
     let mediaLoader = AgentMediaLoader()
 
-    private let composerCard = ThemedBackground(color: { $0.agentComposer })
-    private let activity = NSView()
+    private let composerCard = AgentSurfaceCard(style: .agentComposer)
+    /// Errors and status notes, in a glass card just above the composer.
+    private let notice = AgentSurfaceCard(style: .agentPanel)
+    private let emptyTitle = makeLabel("What can I help with?", font: AppFont.system(21, weight: .medium))
+    private let emptyDetail = makeLabel("Ask a question or make something new.", font: AppFont.body)
+    private let activity = AgentSurfaceCard(style: .agentActivity)
+    private var busy = false
     private let activityLabel = makeLabel("", font: AppFont.small)
     private let activitySpinner = NSProgressIndicator()
     private var activityStatus: AgentChatStatus = .idle
@@ -139,25 +153,15 @@ final class AgentPaneView: ThemedView {
         composerScroll.hasVerticalScroller = true
         composerScroll.autohidesScrollers = true
         composerScroll.scrollerStyle = .overlay
-        composerCard.cornerRadius = 24
-        composerCard.layer?.cornerCurve = .continuous
         plan.isHidden = true
         plan.setAccessibilityLabel("Disable plan mode")
         plan.toolTip = "Plan mode · Shift-Tab to toggle"
-        composerCard.layer?.borderWidth = Metrics.border
-        microphone.image = AppIcon.microphone.image(size: 18, scale: AppIcon.inlineScale)
-        waveform.image = AppIcon.waveform.image(size: 18, scale: AppIcon.inlineScale)
-        for control in [microphone, waveform] { control.imagePosition = .imageOnly }
-        microphone.setAccessibilityLabel("Dictate message")
-        waveform.setAccessibilityLabel("Read latest response aloud")
-        attach.image = AppIcon.plus.image(size: 16, scale: AppIcon.inlineScale)
-        attach.imagePosition = .imageOnly
-        attach.wantsLayer = true
-        attach.layer?.cornerRadius = 14
-        attach.setAccessibilityLabel("Attach files")
         attach.toolTip = "Attach files or drop them into the message box"
-        for separator in pickerSeparators { separator.wantsLayer = true; composerCard.addSubview(separator) }
-        for child in [composerScroll, attachmentStrip, attach, plan, model, effort, contextIndicator, microphone, waveform, send, stop] {
+        attach.filled = true
+        // The pop-ups keep the menus and selection; the combined picker presents them.
+        model.isHidden = true
+        effort.isHidden = true
+        for child in [composerScroll, attachmentStrip, attach, plan, model, effort, modelPicker, contextIndicator, microphone, send, stop] {
             composerCard.addSubview(child)
             // This surface uses measured frames: controls must not bring their own size constraints.
             child.translatesAutoresizingMaskIntoConstraints = true
@@ -171,12 +175,26 @@ final class AgentPaneView: ThemedView {
         activityLabel.setAccessibilityLabel("Agent activity")
         activity.addSubview(activitySpinner)
         activity.addSubview(activityLabel)
+        activityLabel.translatesAutoresizingMaskIntoConstraints = true
         activity.isHidden = true
-        feedback.font = AppFont.footnote
+        feedback.font = AppFont.small
         feedback.maximumNumberOfLines = 2
         feedback.lineBreakMode = .byTruncatingTail
+        for child in [feedback, retry] as [NSView] {
+            notice.addSubview(child)
+            child.translatesAutoresizingMaskIntoConstraints = true
+        }
+        notice.isHidden = true
+        for label in [emptyTitle, emptyDetail] {
+            label.alignment = .center
+            label.translatesAutoresizingMaskIntoConstraints = true
+        }
         // Suggestions sit behind the composer card so their lower edge tucks under it.
-        for child in [transcriptScroll, activity, endButton, suggestions, composerCard, promptQueue, questions, feedback, retry] { addSubview(child) }
+        // The transcript scrolls under everything that floats over its lower edge.
+        for child in [transcriptScroll, emptyTitle, emptyDetail, endButton, suggestions, composerCard, notice, questions, promptQueue, activity] {
+            addSubview(child)
+        }
+        retry.isHidden = true
         suggestions.isHidden = true
         selectionToolbar.isHidden = true
         selectionToolbar.onCite = { [weak self] in self?.citeSelection() }
@@ -202,70 +220,83 @@ final class AgentPaneView: ThemedView {
         defer { scrollMutationDepth -= 1 }
         let width = max(0, min(Self.readableWidth, bounds.width - 32))
         let left = floor((bounds.width - width) / 2)
-        let retryWidth = retry.isHidden ? 0 : min(72, retry.fittingSize.width)
-        let feedbackWidth = max(1, width - retryWidth - (retryWidth > 0 ? 8 : 0))
-        let footerTextHeight = (feedback.stringValue as NSString).boundingRect(
-            with: NSSize(width: feedbackWidth, height: .greatestFiniteMagnitude),
-            options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: [.font: AppFont.footnote]).height
-        let footerHeight = feedback.stringValue.isEmpty && retry.isHidden ? 0 : max(retry.isHidden ? 14 : 24, min(30, ceil(footerTextHeight)))
-        feedback.isHidden = footerHeight == 0
-        let footerTop = max(0, bounds.height - 10 - footerHeight)
-        feedback.frame = NSRect(x: left + 4, y: footerTop, width: max(0, feedbackWidth - 4), height: footerHeight)
-        retry.frame = NSRect(x: left + width - retryWidth, y: footerTop, width: retryWidth, height: footerHeight)
-
-        let editorWidth = max(1, width - 28)
+        updatePrimaryAction()
+        let editorX: CGFloat = 14
+        let editorWidth = max(1, width - editorX * 2)
         composerScroll.frame.size.width = editorWidth
         composer.frame.size.width = editorWidth
         if let container = composer.textContainer { composer.layoutManager?.ensureLayout(for: container) }
         let usedHeight = composer.layoutManager.flatMap { manager in
             composer.textContainer.map { manager.usedRect(for: $0).height }
         } ?? 0
-        let editorHeight = min(questions.isHidden ? 164 : 80, max(56, ceil(usedHeight) + 12))
-        let modelWidth = min(model.intrinsicContentSize.width, max(60, width * 0.34))
-        let effortWidth = min(effort.intrinsicContentSize.width, max(45, width * 0.22))
-        let compact = width < 720
-        let narrowPlan = width < 380 && !plan.isHidden
-        let controlsHeight: CGFloat = (compact ? 72 : 40) + (narrowPlan ? 32 : 0)
+        let editorHeight = min(questions.isHidden ? 164 : 80, max(44, ceil(usedHeight) + 12))
         let attachmentHeight: CGFloat = attachmentStrip.hasAttachments ? 76 : 0
-        let cardHeight = attachmentHeight + editorHeight + 14 + controlsHeight
-        composerCard.frame = NSRect(x: left, y: max(0, (snapshot?.items.isEmpty ?? true) && (snapshot?.queuedPrompts?.isEmpty ?? true) && !submitting && activityStatus == .idle ? (bounds.height - cardHeight) / 2 : footerTop - 8 - cardHeight), width: width, height: cardHeight)
-        attachmentStrip.frame = NSRect(x: 14, y: 8, width: editorWidth, height: attachmentHeight)
+        let editorTop: CGFloat = attachmentHeight > 0 ? 10 + attachmentHeight : 10
+        let controlsTop = editorTop + editorHeight + 2
+        layoutComposerControls(width: width, top: controlsTop)
+        let cardHeight = controlsTop + Self.controlSize + 10
+        let empty = isEmptyConversation
+        let cardY = empty ? floor((bounds.height - cardHeight) / 2) + 40 : bounds.height - 12 - cardHeight
+        composerCard.frame = NSRect(x: left, y: max(0, cardY), width: width, height: cardHeight)
+        attachmentStrip.frame = NSRect(x: editorX, y: 8, width: editorWidth, height: attachmentHeight)
         attachmentStrip.isHidden = attachmentHeight == 0
-        composerScroll.frame = NSRect(x: 14, y: 10 + attachmentHeight, width: editorWidth, height: editorHeight)
+        composerScroll.frame = NSRect(x: editorX, y: editorTop, width: editorWidth, height: editorHeight)
         composer.frame.size.height = max(editorHeight, ceil(usedHeight) + 12)
-        let controlsY = attachmentHeight + editorHeight + 16
-        attach.frame = NSRect(x: 12, y: controlsY + 1, width: 28, height: 28)
-        let actionFrame = NSRect(x: max(0, width - 44), y: controlsY, width: 30, height: 30)
-        send.frame = actionFrame
-        stop.frame = actionFrame.offsetBy(dx: -40, dy: 0)
-        plan.frame = NSRect(x: narrowPlan ? 12 : 48, y: controlsY + 1 + (narrowPlan ? 32 : 0), width: 88, height: 28)
-        let pickerY = controlsY + (compact ? 32 : 1) + (narrowPlan ? 32 : 0)
-        let pickerRight = compact ? width - 14 : width - 186
-        effort.frame = NSRect(x: max(14, pickerRight - effortWidth), y: pickerY, width: effortWidth, height: 28)
-        model.frame = NSRect(x: max(compact ? 14 : 140, effort.frame.minX - modelWidth - 4), y: pickerY, width: modelWidth, height: 28)
-        microphone.frame = NSRect(x: max(0, width - 112), y: controlsY, width: 28, height: 30)
-        waveform.frame = NSRect(x: max(0, width - 146), y: controlsY, width: 28, height: 30)
-        contextIndicator.frame = NSRect(x: max(0, width - 180), y: controlsY + 1, width: 28, height: 28)
-        for separator in pickerSeparators { separator.isHidden = true }
+        emptyTitle.isHidden = !empty
+        emptyDetail.isHidden = !empty
+        emptyTitle.frame = NSRect(x: left, y: composerCard.frame.minY - 82, width: width, height: 28)
+        emptyDetail.frame = NSRect(x: left, y: composerCard.frame.minY - 48, width: width, height: 20)
 
-        let activityHeight: CGFloat = activity.isHidden ? 0 : 30
-        let panelBudget = max(0, composerCard.frame.minY - activityHeight - 20)
-        let questionHeight = min(questions.preferredHeight, panelBudget)
-        let queueHeight = min(promptQueue.preferredHeight, max(0, panelBudget - questionHeight))
-        questions.frame = NSRect(x: left, y: max(0, composerCard.frame.minY - questionHeight - 8), width: width, height: questionHeight)
-        promptQueue.frame = NSRect(x: left, y: max(0, composerCard.frame.minY - questionHeight - queueHeight - 12), width: width, height: queueHeight)
-        let transcriptBottom = max(0, composerCard.frame.minY - activityHeight - questionHeight - queueHeight - (questionHeight + queueHeight > 0 ? 16 : 0))
-        activity.frame = NSRect(x: left + 4, y: transcriptBottom, width: max(0, width - 8), height: activityHeight)
-        activitySpinner.frame = NSRect(x: 0, y: 5, width: 16, height: 16)
-        activityLabel.frame = NSRect(x: activityStatus == .waiting ? 0 : 24, y: 4,
-                                     width: max(0, activity.bounds.width - 24), height: 20)
-        transcriptScroll.frame = NSRect(x: 0, y: 0, width: bounds.width, height: transcriptBottom)
+        // Glass cards stack above the composer, each the composer's width: a notice,
+        // then questions, then the queue, then the activity capsule.
+        let gap: CGFloat = 8
+        var top = composerCard.frame.minY
+        let noticeText = feedback.stringValue
+        notice.isHidden = noticeText.isEmpty && retry.isHidden
+        feedback.isHidden = notice.isHidden
+        if !notice.isHidden {
+            let retryWidth = retry.isHidden ? 0 : ceil(retry.fittingSize.width)
+            let textWidth = max(1, width - 28 - (retryWidth > 0 ? retryWidth + 8 : 0))
+            let textHeight = min(32, ceil((noticeText as NSString).boundingRect(
+                with: NSSize(width: textWidth, height: .greatestFiniteMagnitude),
+                options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: [.font: AppFont.small]).height))
+            let height = max(36, textHeight + 18)
+            top -= gap + height
+            notice.frame = NSRect(x: left, y: top, width: width, height: height)
+            feedback.frame = NSRect(x: 14, y: floor((height - textHeight) / 2), width: textWidth, height: textHeight)
+            retry.frame = NSRect(x: width - 8 - retryWidth, y: floor((height - 24) / 2), width: retryWidth, height: 24)
+        }
+        let activityHeight: CGFloat = activity.isHidden ? 0 : 26
+        let panelBudget = max(0, top - activityHeight - 64)
+        let questionHeight = questions.isHidden ? 0 : min(questions.preferredHeight(for: width), panelBudget)
+        if questionHeight > 0 {
+            top -= gap + questionHeight
+            questions.frame = NSRect(x: left, y: top, width: width, height: questionHeight)
+        }
+        let queueHeight = promptQueue.isHidden ? 0 : min(promptQueue.preferredHeight, max(0, panelBudget - questionHeight - gap))
+        if queueHeight > 0 {
+            top -= gap + queueHeight
+            promptQueue.frame = NSRect(x: left, y: top, width: width, height: queueHeight)
+        }
+        if activityHeight > 0 {
+            let labelWidth = ceil((activityLabel.stringValue as NSString).size(withAttributes: [.font: AppFont.small]).width) + 4
+            let spinnerWidth: CGFloat = activitySpinner.isHidden ? 0 : 22
+            top -= gap + activityHeight
+            activity.frame = NSRect(x: left, y: top, width: labelWidth + spinnerWidth + 24, height: activityHeight)
+            activitySpinner.frame = NSRect(x: 10, y: 5, width: 16, height: 16)
+            activityLabel.frame = NSRect(x: 12 + spinnerWidth, y: floor((activityHeight - 16) / 2), width: labelWidth, height: 16)
+        }
+        // The conversation runs under the floating cards and ends where the composer does;
+        // its last row can scroll clear of the topmost card.
+        let transcriptHeight = empty ? bounds.height : composerCard.frame.maxY
+        transcriptScroll.frame = NSRect(x: 0, y: 0, width: bounds.width, height: transcriptHeight)
+        transcript.bottomInset = empty ? 0 : max(0, transcriptHeight - top + 12)
         transcript.reflow(viewportWidth: transcriptScroll.contentSize.width)
         if followingEnd || lastViewportWidth == 0 { scrollToEnd() }
         else { restoreScrollAnchor(anchor) }
         // The find bar overlays the transcript's top edge, so opening it never moves the text.
         findBar?.frame = NSRect(x: 0, y: 0, width: bounds.width, height: AgentConversationFindBar.height)
-        endButton.frame = NSRect(x: floor((bounds.width - 126) / 2), y: max(0, transcriptBottom - 36), width: 126, height: 28)
+        endButton.frame = NSRect(x: floor((bounds.width - 126) / 2), y: max(0, top - 40), width: 126, height: 28)
         updateEndButton()
         let suggestionTop = max(0, composerCard.frame.minY + AgentComposerSuggestionsView.tuck - suggestions.preferredHeight)
         let suggestionWidth = floor(width * 0.9)
@@ -275,19 +306,63 @@ final class AgentPaneView: ThemedView {
         super.layout()
     }
 
+    private static let controlSize: CGFloat = 32
+
+    /// Nothing sent, queued or running yet: the composer sits centered under a greeting.
+    private var isEmptyConversation: Bool {
+        (snapshot?.items.isEmpty ?? true) && (snapshot?.queuedPrompts?.isEmpty ?? true) && !submitting && activityStatus == .idle
+    }
+
+    /// Send, Stop and Dictate take turns in one slot: Send for a draft (which queues while
+    /// the agent works), Stop while it works with nothing to send, Dictate otherwise.
+    func updatePrimaryAction() {
+        let hasDraft = !composer.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || attachmentStrip.hasAttachments
+        // While a submission is in flight its draft is still shown, but the slot offers Stop.
+        let showSend = hasDraft && !dictating && !submitting
+        let showStop = busy && (!hasDraft || submitting) && !dictating
+        send.isHidden = !showSend
+        stop.isHidden = !showStop
+        microphone.isHidden = showSend || showStop
+    }
+
+    /// Lays out the composer's single control row at `top`: attach and the plan chip on
+    /// the left; usage, the model picker and the primary action on the right.
+    private func layoutComposerControls(width: CGFloat, top: CGFloat) {
+        let padding: CGFloat = 10, size = Self.controlSize, gap: CGFloat = 6
+        let action = NSRect(x: width - padding - size, y: top, width: size, height: size)
+        for button in [send, stop, microphone] { button.frame = action }
+        var right = action.minX - gap
+        // Usage stays out of the way until the context window is half full.
+        contextIndicator.isHidden = (contextIndicator.fractionUsed ?? 0) < 0.5
+        if !contextIndicator.isHidden {
+            right -= 28
+            contextIndicator.frame = NSRect(x: right, y: top + 2, width: 28, height: 28)
+            right -= 2
+        }
+        var x = padding
+        attach.frame = NSRect(x: x, y: top, width: size, height: size)
+        x += size + gap
+        if !plan.isHidden {
+            let planWidth = plan.intrinsicContentSize.width
+            plan.frame = NSRect(x: x, y: top + 2, width: planWidth, height: 28)
+            x += planWidth + gap
+        }
+        let pickerWidth = max(0, min(modelPicker.intrinsicContentSize.width, right - x))
+        modelPicker.frame = NSRect(x: right - pickerWidth, y: top, width: pickerWidth, height: size)
+    }
+
     /// Call after programmatic draft edits; user edits already call this through the text view.
     func refreshComposer() {
         composer.needsDisplay = true
         needsLayout = true
-        model.needsDisplay = true
-        effort.needsDisplay = true
+        modelPicker.refresh()
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
         let point = convert(sender.draggingLocation, from: nil)
         guard composerCard.frame.contains(point), sender.draggingSourceOperationMask.contains(.copy),
               sender.draggingPasteboard.availableType(from: [.fileURL, .png, .tiff]) != nil else { return [] }
-        composerCard.layer?.borderColor = theme.accent.cgColor
+        composerCard.highlighted = true
         return .copy
     }
 
@@ -298,7 +373,7 @@ final class AgentPaneView: ThemedView {
     }
 
     override func draggingExited(_ sender: NSDraggingInfo?) {
-        composerCard.layer?.borderColor = theme.fg.withAlphaComponent(0.10).cgColor
+        composerCard.highlighted = false
     }
 
     override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool { !draggingEntered(sender).isEmpty }
@@ -317,8 +392,8 @@ final class AgentPaneView: ThemedView {
         activityStatus = status
         self.submitting = submitting
         let busy = submitting || status == .working || status == .waiting || (snapshot?.queuePaused != true && snapshot?.queuedPrompts?.isEmpty == false)
-        send.isHidden = false
-        stop.isHidden = !busy
+        self.busy = busy
+        updatePrimaryAction()
         activity.isHidden = !submitting && status != .waiting
         let text = submitting ? "Sending…" : status == .waiting ? (snapshot?.items.contains { $0.questionnaire != nil && !$0.isComplete } == true ? "Waiting for your answers" : "Waiting for approval") : "Working…"
         activityLabel.stringValue = busy ? text : ""
@@ -544,25 +619,28 @@ final class AgentPaneView: ThemedView {
 
     override func themeDidChange() {
         appearance = theme.nsAppearance
-        for button in [attach, microphone, waveform] { button.contentTintColor = theme.fgMuted }
-        retry.setTitleColor(theme.fgMuted)
+        attach.chatTheme = theme
+        modelPicker.chatTheme = theme
+        microphone.chatTheme = theme
+        retry.setTitleColor(theme.fg)
+        notice.theme = theme
+        activity.theme = theme
         promptQueue.theme = theme
         questions.theme = theme
         attachmentStrip.updateTheme(theme)
         suggestions.update(suggestions.items, theme: theme)
         needsDisplay = true
         composerCard.theme = theme
-        composerCard.layer?.borderColor = theme.fg.withAlphaComponent(0.10).cgColor
         composer.textColor = theme.fg
         composer.insertionPointColor = theme.accent
         composer.placeholderColor = theme.fgDim
         plan.chatTheme = theme
-        attach.layer?.backgroundColor = theme.fg.withAlphaComponent(0.08).cgColor
         composer.selectedTextAttributes = [.backgroundColor: theme.accent.withAlphaComponent(0.25)]
         activityLabel.textColor = theme.fgMuted
-        feedback.textColor = theme.fgDim
+        emptyTitle.textColor = theme.fg
+        emptyDetail.textColor = theme.fgDim
+        feedback.textColor = theme.fgMuted
         for control in [model, effort] { control.chatTheme = theme }
-        for separator in pickerSeparators { separator.layer?.backgroundColor = theme.fg.withAlphaComponent(0.18).cgColor }
         contextIndicator.chatTheme = theme
         send.chatTheme = theme
         stop.chatTheme = theme

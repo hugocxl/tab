@@ -113,12 +113,17 @@ final class AgentRenderingTests: XCTestCase {
         XCTAssertLessThanOrEqual(composerParent.frame.width, AgentPaneView.readableWidth)
         XCTAssertEqual(composerParent.frame.midX, surface.bounds.midX, accuracy: 1)
 
+        surface.contextIndicator.update(usedTokens: 120_000, contextWindow: 200_000)
+        surface.setActivity(status: .working, submitting: false)
         surface.frame.size.width = 360
         surface.needsLayout = true
         surface.layoutSubtreeIfNeeded()
-        XCTAssertFalse(surface.send.frame.intersects(surface.stop.frame))
+        XCTAssertFalse(surface.stop.isHidden)
+        XCTAssertTrue(surface.send.isHidden, "Send and Stop share one slot")
+        XCTAssertEqual(surface.send.frame, surface.stop.frame)
+        XCTAssertFalse(surface.contextIndicator.isHidden)
         XCTAssertFalse(surface.contextIndicator.frame.intersects(surface.stop.frame))
-        XCTAssertFalse(surface.send.frame.intersects(surface.effort.frame))
+        XCTAssertFalse(surface.modelPicker.frame.intersects(surface.stop.frame))
         XCTAssertLessThanOrEqual(surface.send.frame.maxX, composerParent.bounds.maxX)
     }
 

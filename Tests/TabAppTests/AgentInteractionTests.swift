@@ -88,8 +88,9 @@ final class AgentInteractionTests: XCTestCase {
         XCTAssertGreaterThan(surface.promptQueue.frame.height, 40)
         XCTAssertLessThanOrEqual(surface.promptQueue.frame.maxY, surface.questions.frame.minY)
         XCTAssertLessThanOrEqual(surface.questions.frame.maxY, surface.composerScroll.superview?.frame.minY ?? 0)
-        XCTAssertFalse(surface.plan.frame.intersects(surface.waveform.frame))
-        XCTAssertFalse(surface.microphone.frame.intersects(surface.stop.frame))
+        XCTAssertFalse(surface.plan.frame.intersects(surface.modelPicker.frame))
+        // Send, Stop and Dictate share one slot; exactly one of them shows.
+        XCTAssertEqual([surface.send, surface.stop, surface.microphone].filter { !$0.isHidden }.count, 1)
         if let path = ProcessInfo.processInfo.environment["TAB_AGENT_AUDIT_SNAPSHOTS"] {
             try FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
             let bitmap = try XCTUnwrap(surface.bitmapImageRepForCachingDisplay(in: surface.bounds))
