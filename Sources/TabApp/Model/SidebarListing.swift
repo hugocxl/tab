@@ -210,12 +210,14 @@ public struct SidebarListingBuilder {
 
     /// Top-level projects the workspace and host filters list, in sidebar
     /// order: this computer's first, each server's Home first among its own.
-    public func listedParents() -> [Project] {
+    /// `everyHost` lists every computer's projects, for pickers that open
+    /// panes anywhere whichever computer the sidebar shows.
+    public func listedParents(everyHost: Bool = false) -> [Project] {
         var parents = state.projects.filter { project in
             project.parentId == nil
                 && (!project.home || project.isRemoteHome)
                 && state.isListed(project)
-                && appearance.sidebarHost.matches(project.serverId)
+                && (everyHost || appearance.sidebarHost.matches(project.serverId))
         }
         sort(&parents)
         let byServer = state.remoteServersSelected || appearance.sidebarProjectOrder != .manual

@@ -805,7 +805,7 @@ final class PaletteSource: PaletteDataSource {
     private func newInProjectItems(_ kind: PaneKind, _ query: String) -> [PaletteItem] {
         let builder = model.listingBuilder()
         let currentRoot = current.parentId ?? current.id
-        var parents = builder.listedParents().filter { !$0.home }
+        var parents = builder.listedParents(everyHost: true).filter { !$0.home }
         if let index = parents.firstIndex(where: { $0.id == currentRoot }) {
             parents.insert(parents.remove(at: index), at: 0)
         }

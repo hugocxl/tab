@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.91.1 - 2026-11-10
+
+### Fixed
+
+- The palette's new pane commands list projects on every computer, not only
+  the one the sidebar shows.
+
 ## 0.91.0 - 2026-11-10
 
 ### Added
