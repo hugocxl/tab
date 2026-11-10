@@ -314,9 +314,13 @@ final class TabCardCell: UICollectionViewListCell {
         project.icon.image = icon ?? TabIcon.folder.template
         project.icon.tintColor = TabIcon.folder.color()
 
+        // A Mac that isn't connected dims its cards; opening one still works.
+        contentView.alpha = card.offline ? 0.5 : 1
+
         updateElapsed()
         let statuses = card.rows.map { "\($0.title) \(Self.describe($0.status))" }
-        accessibilityLabel = ([card.title, name, card.branch, card.primary ? "primary" : nil, card.projectName] + statuses)
+        accessibilityLabel = ([card.title, name, card.branch, card.primary ? "primary" : nil, card.projectName] + statuses
+            + [card.offline ? "not connected" : nil])
             .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", ")
     }
 
@@ -390,14 +394,23 @@ final class TabCardCell: UICollectionViewListCell {
         elapsedTimer = nil
     }
 
-    /// Cards sit flush with hairlines between them; the selected one is
-    /// filled, as on the desktop.
+    /// The selected card's surface: translucent glass, as on the desktop.
+    private lazy var selectionGlass: UIVisualEffectView = {
+        let glass = UIVisualEffectView(effect: UIGlassEffect(style: .regular))
+        glass.cornerConfiguration = .uniformCorners(radius: .fixed(Self.cornerRadius))
+        return glass
+    }()
+
+    private static let cornerRadius: CGFloat = 12
+
+    /// Cards sit flush with hairlines between them; the selected one sits on
+    /// glass, as on the desktop.
     override func updateConfiguration(using state: UICellConfigurationState) {
         var background = UIBackgroundConfiguration.clear()
-        background.cornerRadius = 12
+        background.cornerRadius = Self.cornerRadius
         background.backgroundInsets = NSDirectionalEdgeInsets(top: 0, leading: Self.cardInset, bottom: 0, trailing: Self.cardInset)
         if state.isSelected {
-            background.backgroundColor = .secondarySystemFill
+            background.customView = selectionGlass
             background.strokeColor = .separator
             background.strokeWidth = 1 / max(traitCollection.displayScale, 1)
         } else if state.isHighlighted {

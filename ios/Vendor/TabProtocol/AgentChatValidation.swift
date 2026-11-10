@@ -3,6 +3,26 @@ import Foundation
 extension AgentChatRequest {
     public func validate() throws(ErrorCode) {
         switch self {
+        case .submit(_, let prompt): try prompt.validate()
+        case .editQueued(_, let id, let text, _, let settings):
+            if let model = settings?.model { try Validation.message(model, limit: 256) }
+            try settings?.effort?.validate()
+            guard UUID(uuidString: id) != nil else { throw .badRequest }
+            try Validation.message(text, limit: 64 * 1024)
+        case .removeQueued(_, let id, _), .deliverQueued(_, let id, _):
+            guard UUID(uuidString: id) != nil else { throw .badRequest }
+        case .moveQueued(_, let id, let before, _):
+            guard UUID(uuidString: id) != nil, UUID(uuidString: before) != nil, id != before else { throw .badRequest }
+        case .resumeQueue: break
+        case .answer(_, let request, let answers, _):
+            try Validation.message(request, limit: 1024)
+            guard answers.count <= 12 else { throw .badRequest }
+            for (id, values) in answers {
+                try Validation.message(id, limit: 1024)
+                guard values.count <= 32 else { throw .badRequest }
+                for value in values { try Validation.message(value, limit: 16 * 1024) }
+            }
+
         case .send(_, let text, let model, let effort, _, let attachments):
             try AgentChatAttachment.validate(attachments ?? [])
             if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !(attachments ?? []).isEmpty {
@@ -16,7 +36,7 @@ extension AgentChatRequest {
             try Validation.message(request, limit: 1024)
         case .fork(let session, let from, _):
             guard session != from else { throw .badRequest }
-        case .create, .read, .interrupt, .close, .setAccess:
+        case .create, .read, .interrupt, .close, .setAccess, .setPlan:
             break
         }
     }
@@ -44,8 +64,15 @@ extension AgentChatSnapshot {
                 throw .badRequest
             }
         }
+        guard (queuedPrompts?.count ?? 0) <= 16 else { throw .badRequest }
+        for prompt in queuedPrompts ?? [] {
+            guard UUID(uuidString: prompt.id) != nil, prompt.text.utf8.count <= 64 * 1024,
+                  (prompt.error?.utf8.count ?? 0) <= 8192, prompt.attachments.count <= AgentChatAttachment.maxCount else { throw .badRequest }
+            for attachment in prompt.attachments { try attachment.validate() }
+        }
         for turn in turns ?? [] { try turn.checkpoint?.validate() }
         for item in items {
+            try item.questionnaire?.validate()
             if let context = item.workContext {
                 guard [context.runID, context.providerTurnID, context.itemType, context.sourceStatus, context.toolNonExecutionKind, context.requestKind, context.planStatus]
                     .allSatisfy({ ($0?.utf8.count ?? 0) <= 4096 && $0?.contains("\0") != true }) else { throw .badRequest }
@@ -71,6 +98,7 @@ extension AgentChatItem {
     public var transcriptByteCount: Int {
         text.utf8.count + (detail?.utf8.count ?? 0) + (tool?.transcriptByteCount ?? 0)
             + (attachments ?? []).reduce(0) { $0 + $1.transcriptByteCount }
+            + (questionnaire?.transcriptByteCount ?? 0)
             + (createdAt == nil ? 0 : 48) + (updatedAt == nil ? 0 : 48)
             + (workContext.map { context in
                 400 + [context.runID, context.providerTurnID, context.itemType, context.sourceStatus, context.toolNonExecutionKind, context.requestKind, context.planStatus]

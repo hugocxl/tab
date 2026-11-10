@@ -153,3 +153,102 @@ extension ServerModel {
         return plain ? word : "'" + word.replacingOccurrences(of: "'", with: #"'\''"#) + "'"
     }
 }
+
+/// What closing a worktree's last panes would remove, for the user to decide
+/// whether its folder goes too. The inspection binds the removal to the folder
+/// as it is now, so the server refuses it if the worktree changed meanwhile.
+public struct WorktreeClosing: Sendable {
+    public var project: ProjectDescriptor
+    public var removal: WorktreeRemoval
+    /// Teardown commands removing it runs; nil for none.
+    public var teardown: [WorktreeHook]?
+    /// Why the teardown commands couldn't be listed; removing then runs none.
+    public var teardownFailure: String?
+
+    /// What removing the worktree loses, as the desktop says it when closing one.
+    public var message: String {
+        let name = project.name
+        let kept = removal.branch.map { " Its branch “\($0)” is kept." } ?? ""
+        var message = removal.dirty
+            ? "“\(name)” has uncommitted changes. Removing the worktree discards them and deletes its files.\(kept)"
+            : "Removing “\(name)” deletes the worktree and its files.\(kept)"
+        let lost = (removal.ignoredPaths ?? []).filter { !Self.isRebuildable($0) }
+        if !lost.isEmpty {
+            message += "\n\nFiles Git ignores are deleted too: " + lost.prefix(5).joined(separator: ", ")
+                + (lost.count > 5 ? " and more." : ".")
+        } else if removal.ignoredPaths == nil {
+            message += "\n\nFiles Git ignores, if any, are deleted too."
+        }
+        if removal.branch == nil { message += "\n\nIt isn't on a branch, so commits made in it may be lost." }
+        if let teardown, !teardown.isEmpty {
+            message += "\n\nTeardown commands that will run:\n" + teardown.map { "• " + $0.command }.joined(separator: "\n")
+        } else if let teardownFailure {
+            message += "\n\nTeardown commands could not be loaded, so none will run: \(teardownFailure)"
+        }
+        return message
+    }
+
+    /// Folders that dependency managers and builds fill again, which the
+    /// message leaves out, as the desktop does.
+    static let rebuildableFolders: Set<String> = [
+        "node_modules", ".build", "dist", "target", ".next", ".nuxt", ".turbo", ".cache",
+        ".parcel-cache", "DerivedData", ".gradle", "Pods", ".venv", "venv", "__pycache__",
+        ".pytest_cache", ".mypy_cache", ".swiftpm", ".dart_tool",
+    ]
+
+    /// An ignored path as `git status` lists it: a whole folder ends in `/`.
+    static func isRebuildable(_ path: String) -> Bool {
+        guard path.hasSuffix("/") else { return false }
+        return rebuildableFolders.contains(String(path.dropLast().split(separator: "/").last ?? ""))
+    }
+}
+
+/// Closing a worktree's last panes, as the desktop does: it asks whether the
+/// worktree and its files go too, and never removes them without asking.
+extension ServerModel {
+    /// The worktree that closing `panes` leaves with no pane open; nil when
+    /// they aren't in a worktree, or other panes of it stay open.
+    public func worktreeClosed(by panes: Set<PaneId>) -> ProjectDescriptor? {
+        guard let board, !panes.isEmpty,
+              let entry = board.projects.first(where: { $0.tabs.contains { $0.panes.contains { panes.contains($0.id) } } }),
+              let project = project(entry.project) else { return nil }
+        return Self.closesWorktree(project, tabs: entry.tabs, closing: panes) ? project : nil
+    }
+
+    /// The worktree that closing `tab` leaves with no pane open.
+    public func worktreeClosed(byClosing tab: TabId) -> ProjectDescriptor? {
+        guard let found = self.tab(tab) else { return nil }
+        return worktreeClosed(by: Set(found.tab.panes.map(\.id)))
+    }
+
+    static func closesWorktree(_ project: ProjectDescriptor, tabs: [Tab], closing: Set<PaneId>) -> Bool {
+        guard !project.home, project.kind == .worktree else { return false }
+        let open = tabs.flatMap(\.panes).map(\.id)
+        return !open.isEmpty && open.allSatisfy(closing.contains)
+    }
+
+    /// Asks the server what removing `project`'s worktree would lose.
+    public func inspectWorktreeClosing(_ project: ProjectDescriptor) async throws -> WorktreeClosing {
+        guard case .removal(let removal) = try await git(project.id, .inspectRemoval) else {
+            throw ConnectError.failed("The Mac gave an unexpected reply.")
+        }
+        var closing = WorktreeClosing(project: project, removal: removal)
+        do {
+            if case .worktreeHooks(let hooks) = try await git(project.id, .worktreeHooks(teardown: true)), !hooks.isEmpty {
+                closing.teardown = hooks
+            }
+        } catch {
+            closing.teardownFailure = error.localizedDescription
+        }
+        return closing
+    }
+
+    /// Removes the inspected worktree and its files, running the teardown
+    /// commands the user saw; its branch stays. The server ends its
+    /// terminals and closes its tabs.
+    public func removeWorktree(_ closing: WorktreeClosing) async throws {
+        let intent = WorktreeIntent(action: .remove(expected: closing.removal), options: WorktreeOptions(hooks: closing.teardown))
+        _ = try await git(closing.project.id, .worktree(intent))
+        try? await readCatalog()
+    }
+}

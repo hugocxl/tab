@@ -42,11 +42,14 @@ public struct PairedServer: Codable, Hashable, Sendable, Identifiable {
 /// The paired servers, kept in `servers.json` beside their Keychain tokens.
 public final class PairedServerStore: @unchecked Sendable {
     private let file: URL
+    /// Where `servers.json` and the app's other state live.
+    public let directory: URL
     private let tokens: TokenVault
     private let lock = NSLock()
 
     public init(directory: URL = PairedServerStore.defaultDirectory,
                 tokens: TokenVault = Keychain(service: "com.hugocorta.tabios.device-token")) {
+        self.directory = directory
         file = directory.appendingPathComponent("servers.json")
         self.tokens = tokens
     }

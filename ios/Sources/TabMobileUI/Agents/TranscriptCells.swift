@@ -19,10 +19,12 @@ final class TranscriptTextView: UITextView {
     required init?(coder: NSCoder) { fatalError("not used") }
 }
 
-/// A user message in a tinted bubble on the trailing side.
+/// A user message in a tinted bubble on the trailing side, its images above it.
 final class UserMessageCell: UICollectionViewCell {
     private let bubble = UIView()
     private let text = TranscriptTextView()
+    private let images = MessageImagesView()
+    private let stack = UIStackView()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -30,17 +32,21 @@ final class UserMessageCell: UICollectionViewCell {
         bubble.backgroundColor = UIColor.tintColor.withAlphaComponent(0.16)
         bubble.layer.cornerRadius = 20
         bubble.layer.cornerCurve = .continuous
-        bubble.translatesAutoresizingMaskIntoConstraints = false
         text.translatesAutoresizingMaskIntoConstraints = false
         text.font = .preferredFont(forTextStyle: .body)
-        contentView.addSubview(bubble)
         bubble.addSubview(text)
+        stack.axis = .vertical
+        stack.alignment = .trailing
+        stack.spacing = 6
+        stack.addArrangedSubview(images)
+        stack.addArrangedSubview(bubble)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(stack)
         NSLayoutConstraint.activate([
-            bubble.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 10),
-            bubble.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -6),
-            bubble.trailingAnchor.constraint(equalTo: column.trailingAnchor),
-            bubble.leadingAnchor.constraint(greaterThanOrEqualTo: column.leadingAnchor,
-                                            constant: 48),
+            stack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 10),
+            stack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -6),
+            stack.trailingAnchor.constraint(equalTo: column.trailingAnchor),
+            stack.leadingAnchor.constraint(equalTo: column.leadingAnchor, constant: 48),
             text.topAnchor.constraint(equalTo: bubble.topAnchor, constant: 10),
             text.bottomAnchor.constraint(equalTo: bubble.bottomAnchor, constant: -10),
             text.leadingAnchor.constraint(equalTo: bubble.leadingAnchor, constant: 14),
@@ -50,11 +56,92 @@ final class UserMessageCell: UICollectionViewCell {
 
     required init?(coder: NSCoder) { fatalError("not used") }
 
-    func configure(_ item: AgentChatItem) {
-        let attachments = item.attachments?.map { "📎 \($0.name)" }.joined(separator: "\n")
-        text.text = [item.text, attachments].compactMap { $0?.isEmpty == false ? $0 : nil }.joined(separator: "\n")
+    /// `image` gives an attached image once it has loaded, else nil.
+    func configure(_ item: AgentChatItem, image: (AgentChatAttachmentDescriptor) -> UIImage?) {
+        let attachments = item.attachments ?? []
+        let pictures = attachments.filter { $0.mimeType.hasPrefix("image/") }
+        let files = attachments.filter { !$0.mimeType.hasPrefix("image/") }.map { "📎 \($0.name)" }.joined(separator: "\n")
+        let body = [item.text, files].filter { !$0.isEmpty }.joined(separator: "\n")
+        text.text = body
         text.font = .preferredFont(forTextStyle: .body)
         text.textColor = .label
+        bubble.isHidden = body.isEmpty
+        images.show(pictures.map { ($0, image($0)) })
+        images.isHidden = pictures.isEmpty
+    }
+}
+
+/// A message's images: one keeps its own shape, several share a two-column
+/// grid of 4:3 tiles, as on the desktop. A tile waits with a placeholder
+/// until its image loads.
+final class MessageImagesView: UIView {
+    private static let maximumWidth: CGFloat = 280
+    private static let singleMaximumHeight: CGFloat = 260
+    private static let gap: CGFloat = 6
+    private var tiles: [UIImageView] = []
+    private var size = CGSize.zero
+
+    func show(_ images: [(AgentChatAttachmentDescriptor, UIImage?)]) {
+        while tiles.count < images.count {
+            let tile = UIImageView()
+            tile.contentMode = .scaleAspectFill
+            tile.clipsToBounds = true
+            tile.layer.cornerRadius = 12
+            tile.layer.cornerCurve = .continuous
+            tile.backgroundColor = .tertiarySystemFill
+            tile.isAccessibilityElement = true
+            addSubview(tile)
+            tiles.append(tile)
+        }
+        for (index, tile) in tiles.enumerated() {
+            tile.isHidden = index >= images.count
+            guard index < images.count else { continue }
+            tile.image = images[index].1
+            tile.accessibilityLabel = images[index].0.name
+        }
+        let next = Self.size(images.map(\.1))
+        if next != size {
+            size = next
+            invalidateIntrinsicContentSize()
+        }
+        setNeedsLayout()
+    }
+
+    private static func size(_ images: [UIImage?]) -> CGSize {
+        guard let first = images.first else { return .zero }
+        let width = maximumWidth
+        if images.count == 1 {
+            let ratio = first.map { $0.size.width / max(1, $0.size.height) } ?? 4.0 / 3.0
+            let height = min(singleMaximumHeight, width / max(0.01, ratio))
+            return CGSize(width: max(96, min(width, ceil(height * ratio))), height: max(64, ceil(height)))
+        }
+        let cell = cellSize(width: width)
+        let rows = CGFloat((images.count + 1) / 2)
+        return CGSize(width: width, height: rows * cell.height + (rows - 1) * gap)
+    }
+
+    private static func cellSize(width: CGFloat) -> CGSize {
+        let cellWidth = floor((width - gap) / 2)
+        return CGSize(width: cellWidth, height: floor(cellWidth * 0.75))
+    }
+
+    override var intrinsicContentSize: CGSize { size }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let shown = tiles.filter { !$0.isHidden }
+        if shown.count == 1 {
+            shown[0].frame = bounds
+            return
+        }
+        let cell = Self.cellSize(width: bounds.width)
+        for (index, tile) in shown.enumerated() {
+            let column = CGFloat(index % 2), row = CGFloat(index / 2)
+            // Rows fill from the trailing side, as the bubble does.
+            let x = shown.count % 2 == 1 && index == shown.count - 1
+                ? bounds.width - cell.width : column * (cell.width + Self.gap)
+            tile.frame = CGRect(x: x, y: row * (cell.height + Self.gap), width: cell.width, height: cell.height)
+        }
     }
 }
 

@@ -263,6 +263,10 @@ extension TabMutation {
             try pane.validateShape()
         case .dockPane(_, _, _, let level):
             if level < 0 || level > 64 { throw .badRequest }
+        case .positionPane(_, _, let share):
+            if !share.isFinite || !(Layout<PaneId>.minimumRatio...Layout<PaneId>.maximumRatio).contains(share) {
+                throw .badRequest
+            }
         case .setRatio(_, _, let ratio):
             if !ratio.isFinite { throw .badRequest }
         case .updatePane(_, let content):
@@ -776,6 +780,7 @@ extension GitPullRequestAction {
 
 extension FilesRequest {
     public func validate() throws(ErrorCode) {
+        try root?.validateAbsolute()
         switch action {
         case .list(let path), .read(let path), .readBytes(let path), .stat(let path), .mkdir(let path):
             try path.validateRelative()
@@ -863,6 +868,7 @@ extension FilesReply {
 extension FileChanges {
     public func validate() throws(ErrorCode) {
         if paths.count > Limits.maxFileChanges || (rescan && !paths.isEmpty) { throw .badRequest }
+        try root?.validateAbsolute()
         for path in paths { try path.validateRelative() }
     }
 }

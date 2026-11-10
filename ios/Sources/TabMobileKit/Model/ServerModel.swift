@@ -33,9 +33,10 @@ public final class ServerModel: Identifiable {
     public private(set) var activity = ActivitySnapshot(revision: 0)
     public private(set) var metadata: [SessionId: SessionMetadata] = [:]
     public private(set) var progress: [SessionId: SessionProgress] = [:]
-    /// Branch and base of projects with open tabs; nil for a folder that isn't a repository.
+    /// Branch and base of projects with open tabs; nil for a folder that isn't
+    /// a repository. Until the server answers, what the cards showed last time.
     public private(set) var gitSummaries: [ProjectId: GitSummary?] = [:]
-    /// Project icon file bytes, once found.
+    /// Project icon file bytes, once found; until the server answers, the ones found last time.
     public private(set) var projectIcons: [ProjectId: Data] = [:]
 
     /// The colors this app draws terminals in, so programs that ask for them
@@ -70,9 +71,16 @@ public final class ServerModel: Identifiable {
     @ObservationIgnored private var simulatorsDirty = false
     // Observed, so cards that read a pane's chosen agent follow it from the moment the pane opens.
     private var agents: [SessionId: AgentChatController] = [:]
+    /// Agent panes' unsent drafts, kept beside `servers.json`.
+    @ObservationIgnored private lazy var drafts = AgentDraftStore(directory: store.directory.appendingPathComponent("Drafts"))
     @ObservationIgnored private var gitRead: [ProjectId: Date] = [:]
     @ObservationIgnored private var watchedProject: ProjectId?
+    /// Projects whose icon was read from Caches, looked for on the server, and found there, since launch.
+    @ObservationIgnored private var iconsRead: Set<ProjectId> = []
     @ObservationIgnored private var iconSearches: Set<ProjectId> = []
+    @ObservationIgnored private var iconsAnswered: Set<ProjectId> = []
+    @ObservationIgnored private let iconDirectory: URL?
+    @ObservationIgnored private let memory: CardMemory
     /// Decides whether found icon bytes decode; set by the app.
     @ObservationIgnored public var isImage: (Data) -> Bool = { _ in true }
 
@@ -81,11 +89,30 @@ public final class ServerModel: Identifiable {
         var size: Size
     }
 
-    public init(server: PairedServer, store: PairedServerStore, clientId: ClientId) {
+    /// `cacheDirectory` keeps what the cards showed last time; nil keeps nothing.
+    public init(server: PairedServer, store: PairedServerStore, clientId: ClientId,
+                cacheDirectory: URL? = ServerModel.defaultCacheDirectory) {
         id = server.id
         self.server = server
         self.store = store
         self.clientId = clientId
+        iconDirectory = cacheDirectory?.appendingPathComponent("ProjectIcons", isDirectory: true)
+        memory = CardMemory(file: cacheDirectory?.appendingPathComponent("Cards", isDirectory: true)
+            .appendingPathComponent("\(server.id.description).json"))
+        gitSummaries = memory.gitSummaries
+    }
+
+    /// The app's Caches folder.
+    public nonisolated static var defaultCacheDirectory: URL? {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+    }
+
+    /// Whether the server answers now; cards dim while it doesn't.
+    public var isConnected: Bool { status == .connected }
+
+    /// Deletes what the cards remembered of this Mac, once it is forgotten.
+    public func forgetCache() {
+        memory.erase()
     }
 
     // MARK: Connecting
@@ -237,6 +264,7 @@ public final class ServerModel: Identifiable {
         let page = try await client.catalog()
         home = page.home
         projects = page.projects
+        memory.retain(projects: Set(page.projects.map(\.id)))
         materialize()
     }
 
@@ -457,6 +485,7 @@ public final class ServerModel: Identifiable {
                 guard case .summary(let summary)? = try? await client.git(GitRequest(project: project, action: .summary)) else {
                     return
                 }
+                memory.setGit(project, summary)
                 if gitSummaries[project] != .some(summary) { gitSummaries[project] = .some(summary) }
             }
         }
@@ -470,30 +499,37 @@ public final class ServerModel: Identifiable {
         refreshGit(force: [project])
     }
 
-    /// The project's icon bytes; starts looking for them on first use.
+    /// The project's icon bytes. On first use, the icon found last time shows
+    /// at once, and the server is asked again once connected.
     public func icon(_ project: ProjectId) -> Data? {
-        if let icon = projectIcons[project] { return icon }
-        guard let client, !iconSearches.contains(project), let target = self.project(project), !target.home else { return nil }
-        iconSearches.insert(project)
-        let cache = Self.iconCache(project)
+        let shown = projectIcons[project]
+        guard let target = self.project(project), !target.home else { return shown }
+        let cache = iconDirectory?.appendingPathComponent(project.description)
+        if iconsRead.insert(project).inserted, let cache {
+            Task {
+                // Unless the server answered first.
+                guard !iconsAnswered.contains(project), let cached = try? Data(contentsOf: cache), !cached.isEmpty else { return }
+                projectIcons[project] = cached
+            }
+        }
+        guard let client, iconSearches.insert(project).inserted else { return shown }
         let isImage = isImage
         Task {
-            if let cached = try? Data(contentsOf: cache) {
-                if !cached.isEmpty { projectIcons[project] = cached }
+            let found = await ProjectIconFinder.find(client: client, project: project, isImage: isImage)
+            guard self.client === client else {
+                // Cut off; ask again on the next connection.
+                iconSearches.remove(project)
                 return
             }
-            let found = await ProjectIconFinder.find(client: client, project: project, isImage: isImage)
-            try? FileManager.default.createDirectory(at: cache.deletingLastPathComponent(), withIntermediateDirectories: true)
-            // An empty file remembers that there is none.
-            try? (found ?? Data()).write(to: cache)
-            if let found { projectIcons[project] = found }
+            if let cache {
+                try? FileManager.default.createDirectory(at: cache.deletingLastPathComponent(), withIntermediateDirectories: true)
+                // An empty file remembers that there is none.
+                try? (found ?? Data()).write(to: cache)
+            }
+            iconsAnswered.insert(project)
+            if projectIcons[project] != found { projectIcons[project] = found }
         }
-        return nil
-    }
-
-    private static func iconCache(_ project: ProjectId) -> URL {
-        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("ProjectIcons", isDirectory: true).appendingPathComponent(project.description)
+        return shown
     }
 
     // MARK: Activity
@@ -521,7 +557,8 @@ public final class ServerModel: Identifiable {
     /// The controller for an agent pane's chat.
     public func agent(_ session: SessionId, project: ProjectId, provider: AgentChatProvider) -> AgentChatController {
         if let existing = agents[session] { return existing }
-        let controller = AgentChatController(session: session, project: project, provider: provider, server: self)
+        let controller = AgentChatController(session: session, project: project, provider: provider, server: self,
+                                             drafts: drafts)
         agents[session] = controller
         return controller
     }

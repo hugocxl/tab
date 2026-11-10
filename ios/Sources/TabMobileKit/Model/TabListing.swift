@@ -113,6 +113,8 @@ public struct TabCard: Identifiable, Hashable, Sendable {
     /// Whose icon the project row shows.
     public var iconProject: ProjectId?
     public var panes: [PaneSummary]
+    /// The card's Mac isn't connected: the card shows dimmed until it is.
+    public var offline: Bool = false
 
     /// The pane the card's title row stands for: a lone pane, else the most
     /// pressing one, else the one the title names, else the first. Several
@@ -194,7 +196,8 @@ extension ServerModel {
             branch: branch, base: git?.base, baseAhead: git?.baseAhead, primary: primary,
             status: status(of: tab),
             projectName: project.home ? nil : root.name, iconProject: project.home ? nil : root.id,
-            panes: tab.panes.map { summary(of: $0) }
+            panes: tab.panes.map { summary(of: $0) },
+            offline: !isConnected
         )
     }
 

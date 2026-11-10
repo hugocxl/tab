@@ -73,6 +73,7 @@ public final class AppModel {
 
     public func forget(_ id: ServerId) {
         server(id)?.suspend()
+        server(id)?.forgetCache()
         servers.removeAll { $0.id == id }
         store.remove(id)
     }

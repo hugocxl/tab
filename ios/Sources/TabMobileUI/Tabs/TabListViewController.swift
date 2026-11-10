@@ -9,7 +9,8 @@ final class TabListViewController: UICollectionViewController {
     private let app: AppModel
     private var dataSource: UICollectionViewDiffableDataSource<ServerId, TabId>!
     private var cards: [TabId: (server: ServerModel, card: TabCard)] = [:]
-    private var icons: [ProjectId: UIImage] = [:]
+    /// Project icons decoded once, with the bytes they came from.
+    private var icons: [ProjectId: (data: Data, image: UIImage)] = [:]
     private var filter = ""
     private let statusView = UIContentUnavailableView(configuration: .empty())
     private let settingsButton = UIBarButtonItem()
@@ -345,15 +346,16 @@ final class TabListViewController: UICollectionViewController {
         }
     }
 
-    /// The project's icon, decoded once; starts the search on first use.
+    /// The project's icon, decoded once per icon the server finds; starts
+    /// the search on first use.
     private func icon(_ project: ProjectId?, on server: ServerModel) -> UIImage? {
-        guard let project else { return nil }
-        if let icon = icons[project] { return icon }
-        guard let data = server.icon(project), let image = UIImage(data: data) else { return nil }
+        guard let project, let data = server.icon(project) else { return nil }
+        if let icon = icons[project], icon.data == data { return icon.image }
+        guard let image = UIImage(data: data) else { return nil }
         let rendered = UIGraphicsImageRenderer(size: CGSize(width: 32, height: 32)).image { _ in
             image.draw(in: CGRect(x: 0, y: 0, width: 32, height: 32))
         }
-        icons[project] = rendered
+        icons[project] = (data, rendered)
         return rendered
     }
 
@@ -376,7 +378,7 @@ final class TabListViewController: UICollectionViewController {
             for card in cards { next[card.id] = (server, card) }
         }
         let changed = next.keys.filter { id in cards[id].map { $0.card != next[id]?.1 } ?? false }
-        let iconsArrived = servers.contains { server in server.projectIcons.keys.contains { icons[$0] == nil } }
+        let iconsArrived = servers.contains { server in server.projectIcons.contains { icons[$0.key]?.data != $0.value } }
         cards = next.mapValues { (server: $0.0, card: $0.1) }
         snapshot.reconfigureItems(iconsArrived ? Array(next.keys) : changed)
         dataSource.apply(snapshot, animatingDifferences: view.window != nil)
@@ -475,8 +477,9 @@ final class TabListViewController: UICollectionViewController {
 
     private func swipeActions(_ path: IndexPath) -> UISwipeActionsConfiguration? {
         guard let id = dataSource.itemIdentifier(for: path), let entry = cards[id] else { return nil }
-        let close = UIContextualAction(style: .destructive, title: "Close Tab") { _, _, done in
-            try? entry.server.closeTab(id)
+        let close = UIContextualAction(style: .destructive, title: "Close Tab") { [weak self] _, _, done in
+            guard let self else { return done(false) }
+            WorktreeClosingAlert.closeTab(id, on: entry.server, from: self)
             done(true)
         }
         close.image = UIImage(systemName: "checkmark")
@@ -491,7 +494,7 @@ final class TabListViewController: UICollectionViewController {
         }
         let server = entry.server
         let card = entry.card
-        return UIContextMenuConfiguration(actionProvider: { _ in
+        return UIContextMenuConfiguration(actionProvider: { [weak self] _ in
             let anchor = card.tab.panes.last?.id
             let size = Size(cols: 80, rows: 24)
             let newPane = UIMenu(title: "New Pane", image: UIImage(systemName: "plus.square.on.square"), children: [
@@ -509,8 +512,9 @@ final class TabListViewController: UICollectionViewController {
                 })
             }
             children.append(UIMenu(options: .displayInline, children: [
-                UIAction(title: "Close Tab", image: UIImage(systemName: "xmark"), attributes: .destructive) { _ in
-                    try? server.closeTab(id)
+                UIAction(title: "Close Tab", image: UIImage(systemName: "xmark"), attributes: .destructive) { [weak self] _ in
+                    guard let self else { return }
+                    WorktreeClosingAlert.closeTab(id, on: server, from: self)
                 },
             ]))
             return UIMenu(children: children)

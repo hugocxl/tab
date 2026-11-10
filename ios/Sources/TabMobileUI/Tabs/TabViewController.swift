@@ -234,9 +234,10 @@ final class TabViewController: UIViewController {
         let add = UIBarButtonItem(image: UIImage(systemName: "plus"), menu: UIMenu(title: "New Pane", children: kinds))
         add.accessibilityLabel = "New Pane"
         var more: [UIMenuElement] = []
+        if let focused, let position = positionMenu(focused, in: tab) { more.append(position) }
         if let focused, tab.panes.count > 1 {
             more.append(UIAction(title: "Close Pane", image: UIImage(systemName: "xmark.square")) { [weak self] _ in
-                try? self?.server.closePane(focused)
+                self?.closePane(focused)
             })
         }
         more.append(UIAction(title: "Close Tab", image: UIImage(systemName: "xmark"), attributes: .destructive) { [weak self] _ in
@@ -245,6 +246,35 @@ final class TabViewController: UIViewController {
         let menu = UIBarButtonItem(image: UIImage(systemName: "ellipsis"), menu: UIMenu(children: more))
         menu.accessibilityLabel = "More"
         navigationItem.rightBarButtonItems = [menu, add]
+    }
+
+    /// Places the focused pane at an edge of the tab, as the desktop's
+    /// command palette does: offered by servers that can, with other panes.
+    private func positionMenu(_ pane: PaneId, in tab: Tab) -> UIMenu? {
+        let positions = server.panePositions(in: tab)
+        guard !positions.isEmpty else { return nil }
+        let edges = Dictionary(grouping: positions, by: \.edge)
+        let sections = [Direction.left, .right, .up, .down].compactMap { edge -> UIMenu? in
+            guard let choices = edges[edge] else { return nil }
+            let actions = choices.map { position in
+                UIAction(title: position.title, image: UIImage(systemName: Self.symbol(edge))) { [weak self] _ in
+                    guard let self else { return }
+                    try? server.positionPane(pane, at: position)
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                }
+            }
+            return UIMenu(title: PanePosition.name(edge), options: .displayInline, children: actions)
+        }
+        return UIMenu(title: "Position", image: UIImage(systemName: "rectangle.split.3x1"), children: sections)
+    }
+
+    private static func symbol(_ edge: Direction) -> String {
+        switch edge {
+        case .left: "rectangle.lefthalf.filled"
+        case .right: "rectangle.righthalf.filled"
+        case .up: "rectangle.tophalf.filled"
+        case .down: "rectangle.bottomhalf.filled"
+        }
     }
 
     // MARK: Pane switcher
@@ -295,7 +325,17 @@ final class TabViewController: UIViewController {
         focus(id)
     }
 
+    /// Closes a pane; the last pane of a worktree asks about the worktree first.
+    private func closePane(_ pane: PaneId) {
+        WorktreeClosingAlert.closePane(pane, on: server, from: self)
+    }
+
     private func confirmCloseTab() {
+        // A worktree's last tab asks about the worktree instead.
+        if server.worktreeClosed(byClosing: tabId) != nil {
+            WorktreeClosingAlert.closeTab(tabId, on: server, from: self)
+            return
+        }
         let alert = UIAlertController(title: "Close this tab?", message: "Its terminals end and its agents stop, on every device.",
                                       preferredStyle: .actionSheet)
         alert.addAction(UIAlertAction(title: "Close Tab", style: .destructive) { [weak self] _ in
@@ -339,7 +379,7 @@ final class TabViewController: UIViewController {
             confirmCloseTab()
             return
         }
-        try? server.closePane(focused)
+        closePane(focused)
     }
 
     @objc private func closeTabCommand() { confirmCloseTab() }
@@ -372,6 +412,7 @@ final class TabViewController: UIViewController {
         }
         panes = [:]
         shownLayout = []
+        updateSwitcher([])
         title = nil
         navigationItem.subtitle = nil
         navigationItem.rightBarButtonItems = nil

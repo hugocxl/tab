@@ -1,11 +1,16 @@
 import Foundation
 import Observation
+import os
 import TabProtocol
 import TabShared
 
 /// One agent pane's conversation. The server runs the agent and sends whole
 /// snapshots: this reads the newest one when the server says the chat
 /// changed, at most one read at a time, and never goes back to an older one.
+///
+/// It also keeps the pane's draft, saved as it changes, so text, files and
+/// answers outlive the app, and a prompt resubmitted after a lost connection
+/// keeps its id and isn't taken twice.
 @MainActor
 @Observable
 public final class AgentChatController {
@@ -20,20 +25,37 @@ public final class AgentChatController {
     public private(set) var effort: AgentReasoningEffort?
     /// A command is on its way; sending again waits for it.
     public private(set) var busy = false
+    /// A message is on its way and the server hasn't taken it yet.
+    public private(set) var submitting = false
     public private(set) var error: String?
+    /// Changes when the draft changes other than by typing, such as when it's
+    /// restored or a sent message leaves it; the composer then reloads it.
+    public private(set) var draftGeneration = 0
+    /// The saved draft has been read, so the composer may edit it.
+    public private(set) var draftRestored = false
 
+    @ObservationIgnored public private(set) var draft = AgentDraft()
     @ObservationIgnored private weak var server: ServerModel?
+    @ObservationIgnored private let drafts: AgentDraftStore?
+    @ObservationIgnored private var draftRevision: UInt64 = 0
+    @ObservationIgnored private var draftSave: Task<Void, Never>?
     @ObservationIgnored private var created = false
     @ObservationIgnored private var reading = false
     @ObservationIgnored private var readAgain = false
     @ObservationIgnored private var wanted = false
+    /// The server predates queued prompts, so messages go by `send`.
+    @ObservationIgnored private var sendsDirectly = false
+    @ObservationIgnored private static let log = Logger(subsystem: "com.hugocorta.tabios", category: "agent")
 
-    init(session: SessionId, project: ProjectId, provider: AgentChatProvider, server: ServerModel) {
+    init(session: SessionId, project: ProjectId, provider: AgentChatProvider, server: ServerModel?,
+         drafts: AgentDraftStore?) {
         self.session = session
         self.project = project
         self.provider = provider
         self.server = server
+        self.drafts = drafts
         selection = (provider, nil)
+        restoreDraft()
     }
 
     /// The provider stays open to change until the conversation starts, as on the desktop.
@@ -52,6 +74,31 @@ public final class AgentChatController {
     public var status: AgentChatStatus { snapshot?.status ?? .idle }
     public var items: [AgentChatItem] { snapshot?.items ?? [] }
     public var isRunning: Bool { status == .working || status == .waiting }
+    public var planMode: Bool { snapshot?.planMode == true }
+    public var queuedPrompts: [AgentQueuedPrompt] { snapshot?.queuedPrompts ?? [] }
+    public var queuePaused: Bool { snapshot?.queuePaused == true }
+
+    /// Queued prompts will go on their own once the agent is free.
+    public var hasActiveQueue: Bool { !queuePaused && !queuedPrompts.isEmpty }
+
+    /// Something is happening that Stop can end: a message on its way, a
+    /// turn, or prompts waiting their turn.
+    public var isBusy: Bool { submitting || isRunning || hasActiveQueue }
+
+    /// The question the agent is waiting on, answered in its form above the composer.
+    public var pendingQuestion: AgentChatItem? {
+        items.first { $0.questionnaire != nil && !$0.isComplete }
+    }
+
+    /// Nothing sent, queued or running yet.
+    public var isEmptyConversation: Bool {
+        (snapshot?.items.isEmpty ?? true) && queuedPrompts.isEmpty && !submitting && !isRunning
+    }
+
+    /// A message can be sent now, or queued behind the running turn.
+    public var canSend: Bool {
+        snapshot != nil && status != .closed && draftRestored
+    }
 
     /// Starts following the chat: creates it on the server if it's new.
     public func open() {
@@ -62,6 +109,7 @@ public final class AgentChatController {
 
     public func close() {
         wanted = false
+        saveDraft(immediately: true)
     }
 
     func connectionRestored(_ client: ServerClient) {
@@ -101,8 +149,8 @@ public final class AgentChatController {
         }
     }
 
-    private func accept(_ next: AgentChatSnapshot) {
-        guard next.revision >= (snapshot?.revision ?? 0) else { return }
+    func accept(_ next: AgentChatSnapshot) {
+        guard next.session == session, next.revision >= (snapshot?.revision ?? 0) else { return }
         let first = snapshot == nil
         snapshot = next
         provider = next.provider
@@ -112,6 +160,7 @@ public final class AgentChatController {
             effort = next.reasoningEffort
         }
         error = nil
+        forgetAnsweredQuestions()
     }
 
     private func loadModels() {
@@ -125,15 +174,127 @@ public final class AgentChatController {
         }
     }
 
+    /// The bytes of a file sent with a message, for showing its image.
+    public func attachment(item: String, id: String) async throws -> AgentChatAttachment {
+        guard let client = server?.client else { throw ClientError.disconnected }
+        let request = AgentAttachmentRequest(session: session, item: item, attachment: id)
+        return try await client.agentAttachment(request).attachment
+    }
+
+    // MARK: Draft
+
+    /// The composer's text changed as the user typed.
+    public func draftChanged(text: String) {
+        guard draft.text != text else { return }
+        draft.text = text
+        saveDraft()
+    }
+
+    /// Why `attachment` can't join the draft, or nil once it has.
+    public func attach(_ attachment: AgentChatAttachment) -> String? {
+        if let problem = AgentDraftAttachments.problem(adding: attachment, to: draft.attachments) { return problem }
+        draft.attachments.append(attachment)
+        saveDraft()
+        return nil
+    }
+
+    public func detach(_ id: String) {
+        draft.attachments.removeAll { $0.id == id }
+        saveDraft()
+    }
+
+    /// Keeps what's been answered so far in a question's form; private answers are never saved.
+    public func questionAnswersChanged(_ answers: [String: [String]], for item: AgentChatItem) {
+        let secrets = Set(item.questionnaire?.questions.filter(\.secret).map(\.id) ?? [])
+        let kept = answers.filter { !secrets.contains($0.key) && !$0.value.isEmpty }
+        guard draft.answers[item.id] ?? [:] != kept else { return }
+        draft.answers[item.id] = kept.isEmpty ? nil : kept
+        saveDraft()
+    }
+
+    private func forgetAnsweredQuestions() {
+        let pending = Set(items.filter { $0.questionnaire != nil && !$0.isComplete }.map(\.id))
+        let kept = draft.answers.filter { pending.contains($0.key) }
+        guard kept.count != draft.answers.count else { return }
+        draft.answers = kept
+        saveDraft()
+    }
+
+    private func restoreDraft() {
+        guard let drafts else {
+            draftRestored = true
+            return
+        }
+        Task {
+            let saved = await drafts.read(session)
+            // Anything typed before the file was read wins over it.
+            if let saved, draft.text.isEmpty, draft.attachments.isEmpty {
+                draft = saved
+                draftGeneration += 1
+            }
+            draftRestored = true
+        }
+    }
+
+    private func saveDraft(immediately: Bool = false) {
+        guard let drafts, draftRestored else { return }
+        draftRevision += 1
+        let revision = draftRevision
+        let draft = draft
+        let session = session
+        draftSave?.cancel()
+        draftSave = Task {
+            if !immediately {
+                try? await Task.sleep(for: .milliseconds(300))
+                guard !Task.isCancelled else { return }
+            }
+            do {
+                try await drafts.write(draft, session: session, revision: revision)
+            } catch {
+                Self.log.error("Couldn't save an agent draft: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
     // MARK: Commands
 
-    /// Sends a message, with the chat's current model and effort.
-    public func send(_ text: String, attachments: [AgentChatAttachment] = []) {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty || !attachments.isEmpty else { return }
-        run(.send(session: session, text: trimmed, model: selection.model, reasoningEffort: effort,
-                  provider: selection.provider == snapshot?.provider ? nil : selection.provider,
-                  attachments: attachments.isEmpty ? nil : attachments))
+    /// Sends the draft, with the chat's current model, effort and plan mode.
+    /// While the agent works the server queues it for the next turn. The
+    /// draft clears once the server has it; edits typed meanwhile stay.
+    public func send() {
+        let text = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !busy, canSend, !text.isEmpty || !draft.attachments.isEmpty else { return }
+        let attachments = draft.attachments
+        var prompt = AgentPrompt(text: text, model: selection.model, effort: effort, provider: selection.provider,
+                                 planMode: planMode, attachments: attachments)
+        // A retry of the same message keeps its id, so the server takes it only once.
+        if let previous = draft.submission, previous.text == text, previous.attachments == attachments {
+            prompt = previous
+        }
+        draft.submission = prompt
+        saveDraft(immediately: true)
+        let sentText = draft.text
+        let sentIDs = Set(attachments.map(\.id))
+        submitting = true
+        run(sendsDirectly ? legacySend(prompt) : .submit(session: session, prompt: prompt), fallback: legacySend(prompt)) {
+            [weak self] in
+            guard let self else { return }
+            submitting = false
+            draft.submission = nil
+            draft.attachments.removeAll { sentIDs.contains($0.id) }
+            if draft.text == sentText { draft.text = "" }
+            draftGeneration += 1
+            saveDraft(immediately: true)
+        } finally: { [weak self] in
+            self?.submitting = false
+        }
+    }
+
+    /// The same message for a server that predates queued prompts.
+    private func legacySend(_ prompt: AgentPrompt) -> AgentChatRequest {
+        .send(session: session, text: prompt.text, model: prompt.model, reasoningEffort: prompt.effort,
+              provider: prompt.provider == snapshot?.provider ? nil : prompt.provider,
+              attachments: prompt.attachments.isEmpty ? nil : prompt.attachments)
     }
 
     /// Chooses the provider and model for the next message.
@@ -152,27 +313,94 @@ public final class AgentChatController {
         run(.approve(session: session, request: item.id, allow: allow))
     }
 
-    public func setAccess(_ mode: AgentAccessMode) {
-        run(.setAccess(session: session, mode: mode))
+    /// Answers the pending question, or dismisses it when `cancelled`.
+    public func answer(_ item: AgentChatItem, answers: [String: [String]], cancelled: Bool) {
+        run(.answer(session: session, request: item.id, answers: cancelled ? [:] : answers, cancelled: cancelled))
+    }
+
+    /// Plan mode applies from the next turn, so it changes only while the agent is free.
+    public func togglePlanMode() {
+        guard !busy, snapshot != nil else { return }
+        guard status == .idle || status == .failed else {
+            error = "Stop the current response before changing plan mode."
+            return
+        }
+        run(.setPlan(session: session, enabled: !planMode))
     }
 
     public func interrupt() {
-        guard isRunning else { return }
-        run(.interrupt(session: session))
+        guard isRunning || hasActiveQueue else { return }
+        run(.interrupt(session: session), exclusive: false)
     }
 
-    private func run(_ request: AgentChatRequest) {
-        guard let client = server?.client else {
-            error = "Not connected."
+    // MARK: Queue
+
+    /// Changes a queued prompt's text; `useCurrentSettings` also gives it the
+    /// model, effort and plan mode now chosen. Its files stay with it.
+    public func editQueued(_ prompt: AgentQueuedPrompt, text: String, useCurrentSettings: Bool) {
+        let settings = useCurrentSettings
+            ? AgentQueuedSettings(model: effectiveModel, effort: effort, planMode: planMode) : nil
+        run(.editQueued(session: session, id: prompt.id, text: text, expectedRevision: prompt.revision, settings: settings))
+    }
+
+    public func removeQueued(_ prompt: AgentQueuedPrompt) {
+        run(.removeQueued(session: session, id: prompt.id, expectedRevision: prompt.revision))
+    }
+
+    /// Sends a queued prompt now, ahead of the rest.
+    public func deliverQueued(_ prompt: AgentQueuedPrompt) {
+        run(.deliverQueued(session: session, id: prompt.id, expectedRevision: prompt.revision))
+    }
+
+    /// The queued prompt before `prompt` that it can move ahead of.
+    public func earlierQueued(than prompt: AgentQueuedPrompt) -> AgentQueuedPrompt? {
+        guard prompt.state == .queued, let index = queuedPrompts.firstIndex(where: { $0.id == prompt.id }) else { return nil }
+        return queuedPrompts[..<index].last { $0.state == .queued }
+    }
+
+    public func moveQueuedEarlier(_ prompt: AgentQueuedPrompt) {
+        guard let earlier = earlierQueued(than: prompt) else { return }
+        run(.moveQueued(session: session, id: prompt.id, beforeID: earlier.id, expectedRevision: prompt.revision))
+    }
+
+    public func resumeQueue() {
+        run(.resumeQueue(session: session))
+    }
+
+    /// Runs one command; `fallback` replaces it once if the server is too old
+    /// to know it. `exclusive` commands wait for none other to be on its way.
+    private func run(_ request: AgentChatRequest, fallback: AgentChatRequest? = nil, exclusive: Bool = true,
+                     onSuccess: (() -> Void)? = nil, finally: (() -> Void)? = nil) {
+        guard !exclusive || !busy else {
+            finally?()
             return
         }
-        busy = true
+        guard let client = server?.client else {
+            error = "Not connected."
+            finally?()
+            return
+        }
+        if exclusive { busy = true }
         Task {
-            defer { busy = false }
+            defer {
+                if exclusive { busy = false }
+                finally?()
+            }
             do {
-                accept(try await client.agentChat(request))
+                let reply: AgentChatSnapshot
+                do {
+                    reply = try await client.agentChat(request)
+                } catch let failure as ClientError where failure.serverCode == .unsupported && fallback != nil {
+                    guard let fallback else { throw failure }
+                    sendsDirectly = true
+                    reply = try await client.agentChat(fallback)
+                }
+                onSuccess?()
+                accept(reply)
             } catch let failure as ClientError {
-                error = failure.description
+                error = failure.serverCode == .unsupported
+                    ? "The Tab on this Mac can't do that yet. Update Tab on the Mac, then try again."
+                    : failure.description
             } catch {}
         }
     }

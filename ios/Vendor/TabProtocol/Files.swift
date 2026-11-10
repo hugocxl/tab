@@ -1,13 +1,17 @@
 import Foundation
 
 /// A file operation inside a server project. Paths are relative to the
-/// project folder; the empty path is the folder itself.
+/// project folder, or to `root` when given; the empty path is the folder itself.
 public struct FilesRequest: Hashable, Codable, Sendable {
     public var project: ProjectId
+    /// An absolute folder that stands in for the project's, such as a Home
+    /// terminal's folder. Servers without `Feature.fileRoots` ignore it.
+    public var root: ServerPath?
     public var action: FilesAction
 
-    public init(project: ProjectId, action: FilesAction) {
+    public init(project: ProjectId, root: ServerPath? = nil, action: FilesAction) {
         self.project = project
+        self.root = root
         self.action = action
     }
 }
@@ -329,10 +333,14 @@ public struct FileChanges: Hashable, Codable, Sendable {
     public var paths: [ServerPath]
     /// Too much changed to list; read everything again.
     public var rescan: Bool
+    /// The watch's `FilesRequest.root`, which `paths` are relative to;
+    /// `nil` for the project's folder.
+    public var root: ServerPath?
 
-    public init(paths: [ServerPath] = [], rescan: Bool = false) {
+    public init(paths: [ServerPath] = [], rescan: Bool = false, root: ServerPath? = nil) {
         self.paths = paths
         self.rescan = rescan
+        self.root = root
     }
 
     /// Adds `other`, turning into a rescan past `Limits.maxFileChanges` paths.

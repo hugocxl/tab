@@ -259,6 +259,19 @@ public indirect enum Layout<Leaf: Hashable & Sendable>: Hashable, Sendable {
         return found
     }
 
+    /// Places a leaf along a whole tab edge. The remaining subtree keeps its
+    /// ordering and split ratios. Shares exclude the divider gutter.
+    public func positioned(_ leaf: Leaf, edge: Direction, share: Double) -> Layout? {
+        guard share.isFinite, (Self.minimumRatio...Self.maximumRatio).contains(share),
+              contains(leaf), leaves.count > 1 else { return nil }
+        var remainder = self
+        remainder.remove(leaf)
+        let before = edge == .left || edge == .up
+        return .split(axis: edge.axis, ratio: before ? share : 1 - share,
+                      first: before ? .leaf(leaf) : remainder,
+                      second: before ? remainder : .leaf(leaf))
+    }
+
     /// The layout after dropping `leaf` on `target`: on its `edge`, or in its
     /// place (swapping) without one. `nil` for a drop on itself or outside.
     public func moved(_ leaf: Leaf, onto target: Leaf, edge: Direction?) -> Layout? {

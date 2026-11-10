@@ -98,7 +98,8 @@ public enum AgentTranscript {
         case .user: return .user(item)
         case .assistant: return item.text.isEmpty ? nil : .assistant(item)
         // Answered approvals, automatic ones included, leave the transcript, as on the desktop.
-        case .approval: return item.isComplete ? nil : .approval(item)
+        // A question is answered in its form above the composer, not here.
+        case .approval: return item.isComplete || item.questionnaire != nil ? nil : .approval(item)
         case .notice: return .notice(item, isError: item.workContext?.itemType == "error")
         case .tool:
             switch item.workContext?.itemType {

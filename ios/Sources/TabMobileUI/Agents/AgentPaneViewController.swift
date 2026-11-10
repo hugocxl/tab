@@ -5,7 +5,9 @@ import TabProtocol
 import UIKit
 import UniformTypeIdentifiers
 
-/// An agent pane: the conversation, and a glass composer riding the keyboard.
+/// An agent pane: the conversation, and a glass composer riding the keyboard
+/// with the agent's question, queued prompts and notices floating above it.
+/// The conversation scrolls behind all of them.
 final class AgentPaneViewController: UIViewController, UICollectionViewDelegate {
     let controller: AgentChatController
     private var collectionView: UICollectionView!
@@ -18,11 +20,22 @@ final class AgentPaneViewController: UIViewController, UICollectionViewDelegate 
     /// Rendered Markdown by item id, redone only when the text changes.
     private var rendered: [String: (text: String, value: NSAttributedString)] = [:]
     private let composer = AgentComposerView()
+    private let panels = UIStackView()
+    private let notice = AgentNoticeView()
+    private let question = AgentQuestionView()
+    private let queue = AgentQueueView()
     private let emptyView = UIContentUnavailableView(configuration: .empty())
     private let latestButton = UIButton(configuration: .glass())
-    private let errorNotice = UILabel()
+    /// What went wrong on this device, such as dictation; the controller's error shows otherwise.
+    private var problem: String?
+    private var problemRevision: UInt64?
+    /// Sent images by attachment id, once loaded.
+    private let images = NSCache<NSString, UIImage>()
+    private var loadingImages: Set<String> = []
     private var didInitialScroll = false
     private var showsLatest = false
+    private var followsEnd = true
+    private var contentSizeObservation: NSKeyValueObservation?
 
     init(controller: AgentChatController) {
         self.controller = controller
@@ -46,25 +59,27 @@ final class AgentPaneViewController: UIViewController, UICollectionViewDelegate 
         collectionView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(collectionView)
         configureDataSource()
+        followEnd()
 
         emptyView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(emptyView)
 
         composer.translatesAutoresizingMaskIntoConstraints = false
-        composer.onSend = { [weak self] text, attachments in self?.controller.send(text, attachments: attachments) }
-        composer.onStop = { [weak self] in self?.controller.interrupt() }
         composer.onAttach = { [weak self] source in self?.pickAttachments(from: source) }
+        composer.onProblem = { [weak self] message in
+            self?.problem = message
+            self?.problemRevision = self?.controller.snapshot?.revision
+            self?.updateNotice()
+        }
         view.addSubview(composer)
 
-        // What went wrong with the last command, above the composer until the next reply.
-        errorNotice.font = .preferredFont(forTextStyle: .footnote)
-        errorNotice.adjustsFontForContentSizeCategory = true
-        errorNotice.textColor = .systemRed
-        errorNotice.textAlignment = .center
-        errorNotice.numberOfLines = 3
-        errorNotice.isHidden = true
-        errorNotice.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(errorNotice)
+        // From the top: queued prompts, the agent's question, then what went wrong.
+        panels.axis = .vertical
+        panels.spacing = 8
+        panels.translatesAutoresizingMaskIntoConstraints = false
+        for panel in [queue, question, notice] as [UIView] { panels.addArrangedSubview(panel) }
+        view.addSubview(panels)
+        configurePanels()
 
         latestButton.configuration?.image = UIImage(systemName: "arrow.down",
                                                     withConfiguration: UIImage.SymbolConfiguration(weight: .semibold))
@@ -72,7 +87,10 @@ final class AgentPaneViewController: UIViewController, UICollectionViewDelegate 
         latestButton.accessibilityLabel = "Scroll to latest"
         latestButton.isHidden = true
         latestButton.translatesAutoresizingMaskIntoConstraints = false
-        latestButton.addAction(UIAction { [weak self] _ in self?.scrollToBottom(animated: true) }, for: .primaryActionTriggered)
+        latestButton.addAction(UIAction { [weak self] _ in
+            self?.followsEnd = true
+            self?.scrollToBottom(animated: true)
+        }, for: .primaryActionTriggered)
         view.addSubview(latestButton)
 
         // Text keeps a readable measure: full width on a phone, a column on an iPad.
@@ -81,8 +99,12 @@ final class AgentPaneViewController: UIViewController, UICollectionViewDelegate 
         view.keyboardLayoutGuide.usesBottomSafeArea = false
         let composerOnSafeArea = composer.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor)
         composerOnSafeArea.priority = .defaultHigh
+        // The composer and its cards fill the column whatever they hold.
+        let composerFills = composer.widthAnchor.constraint(equalTo: view.widthAnchor, constant: -24)
+        composerFills.priority = .required - 1
         NSLayoutConstraint.activate([
             composerOnSafeArea,
+            composerFills,
             composer.bottomAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.bottomAnchor),
             composer.bottomAnchor.constraint(lessThanOrEqualTo: view.keyboardLayoutGuide.topAnchor, constant: -8),
             collectionView.topAnchor.constraint(equalTo: view.topAnchor),
@@ -94,24 +116,30 @@ final class AgentPaneViewController: UIViewController, UICollectionViewDelegate 
             emptyView.widthAnchor.constraint(lessThanOrEqualTo: view.widthAnchor, constant: -40),
             composer.leadingAnchor.constraint(equalTo: readable.leadingAnchor),
             composer.trailingAnchor.constraint(equalTo: readable.trailingAnchor),
-            errorNotice.leadingAnchor.constraint(equalTo: composer.leadingAnchor, constant: 12),
-            errorNotice.trailingAnchor.constraint(equalTo: composer.trailingAnchor, constant: -12),
-            errorNotice.bottomAnchor.constraint(equalTo: composer.topAnchor, constant: -8),
+            panels.leadingAnchor.constraint(equalTo: composer.leadingAnchor),
+            panels.trailingAnchor.constraint(equalTo: composer.trailingAnchor),
+            panels.bottomAnchor.constraint(equalTo: composer.topAnchor, constant: -8),
+            panels.topAnchor.constraint(greaterThanOrEqualTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
+            question.heightAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.heightAnchor, multiplier: 0.5),
             latestButton.trailingAnchor.constraint(equalTo: composer.trailingAnchor),
-            latestButton.bottomAnchor.constraint(equalTo: composer.topAnchor, constant: -12),
+            latestButton.bottomAnchor.constraint(equalTo: panels.topAnchor, constant: -12),
             latestButton.widthAnchor.constraint(equalToConstant: 44),
             latestButton.heightAnchor.constraint(equalToConstant: 44),
         ])
         // The transcript scrolls under the composer, which blurs it as glass does.
         collectionView.contentInset.bottom = 8
         addKeyCommand(UIKeyCommand(title: "Send", action: #selector(sendCommand), input: "\r", modifierFlags: .command))
+        addKeyCommand(UIKeyCommand(title: "Plan Mode", action: #selector(planCommand), input: "\t", modifierFlags: .shift))
     }
 
     @objc private func sendCommand() { composer.sendNow() }
+    @objc private func planCommand() { controller.togglePlanMode() }
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        let top = errorNotice.isHidden ? composer.frame.minY : errorNotice.frame.minY
+        // The last row can scroll clear of the topmost floating card.
+        let shown = panels.arrangedSubviews.contains { !$0.isHidden }
+        let top = shown ? panels.frame.minY : composer.frame.minY
         let inset = view.bounds.maxY - top - view.safeAreaInsets.bottom + 8
         if collectionView.contentInset.bottom != inset {
             let atBottom = isNearBottom
@@ -137,7 +165,20 @@ final class AgentPaneViewController: UIViewController, UICollectionViewDelegate 
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        if scrollView.isDragging || scrollView.isDecelerating { followsEnd = isNearBottom }
         updateLatestButton()
+    }
+
+    /// Rows start at estimated heights and grow as they're drawn, and images
+    /// load late: while the reader is at the end, the end stays in view.
+    private func followEnd() {
+        contentSizeObservation = collectionView.observe(\.contentSize, options: [.old, .new]) { [weak self] _, change in
+            guard change.oldValue != change.newValue else { return }
+            MainActor.assumeIsolated {
+                guard let self, self.followsEnd, self.didInitialScroll, !self.collectionView.isDragging else { return }
+                self.scrollToBottom(animated: false)
+            }
+        }
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -147,6 +188,7 @@ final class AgentPaneViewController: UIViewController, UICollectionViewDelegate 
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
+        composer.stopDictating()
         controller.close()
     }
 
@@ -156,14 +198,82 @@ final class AgentPaneViewController: UIViewController, UICollectionViewDelegate 
         let snapshot = controller.snapshot
         composer.update(controller)
         apply(AgentTranscript.rows(snapshot, expanded: expandedTurns))
-        emptyView.isHidden = !(snapshot?.items.isEmpty ?? false)
+        emptyView.isHidden = snapshot == nil || !controller.isEmptyConversation
         if !emptyView.isHidden { showEmpty(controller.selection.provider) }
-        let error = controller.error
-        if errorNotice.text != error {
-            errorNotice.text = error
-            errorNotice.isHidden = error == nil
-            view.setNeedsLayout()
+        let enabled = !controller.busy
+        let pending = controller.pendingQuestion
+        var changed = question.update(pending, enabled: enabled, saved: pending.flatMap { controller.draft.answers[$0.id] })
+        changed = queue.update(controller.queuedPrompts, paused: controller.queuePaused, enabled: enabled,
+                               earlier: controller.earlierQueued(than:)) || changed
+        // A problem here lasts until the conversation moves on.
+        if snapshot?.revision != problemRevision { problem = nil }
+        changed = notice.show(problem ?? controller.error) || changed
+        if changed { animatePanels() }
+    }
+
+    private func updateNotice() {
+        if notice.show(problem ?? controller.error) { animatePanels() }
+    }
+
+    private func animatePanels() {
+        UIView.animate(withDuration: 0.25) {
+            self.view.layoutIfNeeded()
         }
+    }
+
+    private func configurePanels() {
+        question.onAnswer = { [weak self] item, answers, cancelled in
+            self?.controller.answer(item, answers: answers, cancelled: cancelled)
+        }
+        question.onChange = { [weak self] item, answers in
+            self?.controller.questionAnswersChanged(answers, for: item)
+        }
+        queue.onEdit = { [weak self] prompt in self?.editQueued(prompt) }
+        queue.onRemove = { [weak self] prompt in self?.controller.removeQueued(prompt) }
+        queue.onDeliver = { [weak self] prompt in self?.deliverQueued(prompt) }
+        queue.onMoveEarlier = { [weak self] prompt in self?.controller.moveQueuedEarlier(prompt) }
+        queue.onResume = { [weak self] in self?.controller.resumeQueue() }
+    }
+
+    /// Edits a queued prompt's text; its files stay with it, and saving doesn't send it.
+    private func editQueued(_ prompt: AgentQueuedPrompt) {
+        let alert = UIAlertController(
+            title: "Edit Queued Prompt",
+            message: prompt.state == .uncertain
+                ? "The earlier delivery may have reached the agent. Editing doesn't send it again."
+                : "Its attachments stay with it. Saving doesn't send it.",
+            preferredStyle: .alert)
+        alert.addTextField { field in
+            field.text = prompt.text
+            field.clearButtonMode = .whileEditing
+        }
+        let edited = { [weak alert] in alert?.textFields?.first?.text ?? prompt.text }
+        alert.addAction(UIAlertAction(title: "Save", style: .default) { [weak self] _ in
+            self?.controller.editQueued(prompt, text: edited(), useCurrentSettings: false)
+        })
+        alert.addAction(UIAlertAction(title: "Save with Current Model", style: .default) { [weak self] _ in
+            self?.controller.editQueued(prompt, text: edited(), useCurrentSettings: true)
+        })
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.preferredAction = alert.actions.first
+        present(alert, animated: true)
+    }
+
+    /// Sends a queued prompt now; one that may already have reached the agent asks first.
+    private func deliverQueued(_ prompt: AgentQueuedPrompt) {
+        guard prompt.state == .uncertain || prompt.state == .failed else {
+            controller.deliverQueued(prompt)
+            return
+        }
+        let alert = UIAlertController(
+            title: "Send This Prompt Again?",
+            message: "The earlier delivery may have reached the agent. Review the conversation first; sending again can repeat its actions.",
+            preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "Send Again", style: .default) { [weak self] _ in
+            self?.controller.deliverQueued(prompt)
+        })
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        present(alert, animated: true)
     }
 
     /// A new conversation: which agent it starts with, and that the menu changes it.
@@ -180,8 +290,8 @@ final class AgentPaneViewController: UIViewController, UICollectionViewDelegate 
 
     private func configureDataSource() {
         let user = UICollectionView.CellRegistration<UserMessageCell, String> { [weak self] cell, _, id in
-            guard case .user(let item)? = self?.rows[id] else { return }
-            cell.configure(item)
+            guard let self, case .user(let item)? = rows[id] else { return }
+            cell.configure(item) { [weak self] attachment in self?.image(attachment, in: item) }
         }
         let assistant = UICollectionView.CellRegistration<AssistantMessageCell, String> { [weak self] cell, _, id in
             guard let self, case .assistant(let item)? = rows[id] else { return }
@@ -224,6 +334,25 @@ final class AgentPaneViewController: UIViewController, UICollectionViewDelegate 
             case .notice?, nil: view.dequeueConfiguredReusableCell(using: notice, for: path, item: id)
             }
         }
+    }
+
+    /// A sent image, or nil while it loads; the row redraws once it has.
+    private func image(_ attachment: AgentChatAttachmentDescriptor, in item: AgentChatItem) -> UIImage? {
+        if let cached = images.object(forKey: attachment.id as NSString) { return cached }
+        guard loadingImages.insert(attachment.id).inserted else { return nil }
+        Task { [weak self] in
+            guard let self else { return }
+            let data = try? await controller.attachment(item: item.id, id: attachment.id).data
+            let image = await Task.detached { data.flatMap { UIImage(data: $0)?.preparingThumbnail(of: CGSize(width: 720, height: 720)) } }.value
+            loadingImages.remove(attachment.id)
+            guard let image else { return }
+            images.setObject(image, forKey: attachment.id as NSString)
+            var snapshot = dataSource.snapshot()
+            guard snapshot.indexOfItem(item.id) != nil else { return }
+            snapshot.reconfigureItems([item.id])
+            await dataSource.apply(snapshot, animatingDifferences: false)
+        }
+        return nil
     }
 
     private func render(_ item: AgentChatItem) -> NSAttributedString {
@@ -276,7 +405,11 @@ final class AgentPaneViewController: UIViewController, UICollectionViewDelegate 
         order = nextOrder
         dataSource.apply(snapshot, animatingDifferences: didInitialScroll && structural) { [weak self] in
             guard let self, wasAtBottom, !nextOrder.isEmpty else { return }
-            scrollToBottom(animated: didInitialScroll)
+            if didInitialScroll {
+                scrollToBottom(animated: true)
+                return
+            }
+            scrollToBottom(animated: false)
             didInitialScroll = true
         }
     }
@@ -352,7 +485,7 @@ final class AgentPaneViewController: UIViewController, UICollectionViewDelegate 
 extension AgentPaneViewController: PHPickerViewControllerDelegate, UIDocumentPickerDelegate,
     UIImagePickerControllerDelegate, UINavigationControllerDelegate {
     func pickAttachments(from source: AttachmentSource) {
-        let room = AgentChatAttachment.maxCount - composer.attachments.count
+        let room = AgentChatAttachment.maxCount - controller.draft.attachments.count
         guard room > 0 else {
             showAttachmentProblem("A message can carry up to \(AgentChatAttachment.maxCount) files.")
             return
@@ -418,11 +551,11 @@ extension AgentPaneViewController: PHPickerViewControllerDelegate, UIDocumentPic
     }
 
     private func addAttachment(_ attachment: AgentChatAttachment) {
-        if let problem = AgentDraftAttachments.problem(adding: attachment, to: composer.attachments) {
+        if let problem = controller.attach(attachment) {
             showAttachmentProblem(problem)
             return
         }
-        composer.add(attachment)
+        composer.update(controller)
     }
 
     private func showAttachmentProblem(_ message: String) {

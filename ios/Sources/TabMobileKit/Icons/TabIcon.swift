@@ -124,6 +124,7 @@ public enum TabIcon: String, CaseIterable, Sendable {
     case markdown
     case maximize
     case mcp
+    case microphone
     case minus
     case minusCircle = "minus-circle"
     case monitor
@@ -189,15 +190,19 @@ public enum TabIcon: String, CaseIterable, Sendable {
     case terraform
     case themes
     case toml
+    case trash
     case triangleAlert = "triangle-alert"
     case triangleAlertFill = "triangle-alert-fill"
     case typescript
     case video
+    case viewList = "view-list"
+    case viewTree = "view-tree"
     case vim
     case vite
     case vscode
     case vue
     case wasm
+    case waveform
     case webpack
     case word
     case wrap

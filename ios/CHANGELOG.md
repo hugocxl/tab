@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.22.0 - 2026-11-10
+
+### Added
+
+- Answer an agent's questions in a form above the message box, with its
+  choices, your own answer and private answers that are never saved.
+- Prompts waiting for the agent show above the message box, where you can edit,
+  move, send now or remove them, and resume them after the Mac pauses them.
+- Turn plan mode on from the model menu or with Shift-Tab on an iPad keyboard,
+  and off with its chip in the message box.
+- Dictate a message with the button in the message box; the words are
+  recognized on your iPhone or iPad.
+- Images sent with a message show in the conversation, several of them in a
+  compact grid.
+- Place a pane at the left, right, top or bottom of its tab in thirds, halves or
+  two thirds from the pane menu, keeping the other panes together.
+
+### Changed
+
+- An agent pane keeps its unsent message, files and answers when you leave it or
+  quit the app, and a message sent again after a lost connection isn't taken
+  twice.
+- The message box has a larger attach button, one picker for the model and its
+  reasoning effort, and one button that sends, stops or dictates.
+- The conversation scrolls behind the message box and the cards above it.
+- A question shows only in its form, not also in the conversation.
+- New agent panes no longer offer an access setting; they use the Mac's default.
+- Tabs from a Mac that isn't connected show dimmed in the list until it
+  connects.
+- Project icons and Git branches on cards appear as soon as the app opens, from
+  what it showed last time, and update once the Mac answers.
+- The selected card in the iPad sidebar sits on translucent glass.
+- Closing the last tab or pane of a worktree asks whether to remove the worktree
+  and its files, says what would be lost, and keeps everything open when you
+  cancel.
+
+### Fixed
+
+- An agent pane opens at its newest message, and stays there as images and long
+  replies load.
+- The pane switcher no longer stays on screen after its tab closes.
+
 ## 0.21.0 - 2026-11-10
 
 ### Changed

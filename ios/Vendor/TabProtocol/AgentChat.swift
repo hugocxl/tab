@@ -11,7 +11,7 @@ public enum AgentChatStatus: String, Codable, Hashable, Sendable {
     case idle, working, waiting, failed, closed
 }
 
-/// Host-side permission handling. Full access is always an explicit user choice.
+/// Host-side permission handling, retained for compatibility with existing conversations.
 public enum AgentAccessMode: String, Codable, Hashable, Sendable, CaseIterable {
     case standard, ask, fullAccess
 
@@ -83,6 +83,7 @@ public struct AgentChatItem: Codable, Hashable, Sendable, Identifiable {
     public var text: String
     public var detail: String?
     public var isComplete: Bool
+    public var questionnaire: AgentQuestionnaire?
     public var tool: AgentToolActivity?
     public var attachments: [AgentChatAttachmentDescriptor]?
     /// First/last server observation. Absent on older persisted transcripts.
@@ -93,7 +94,8 @@ public struct AgentChatItem: Codable, Hashable, Sendable, Identifiable {
     public init(id: String = UUID().uuidString, kind: Kind, text: String,
                 detail: String? = nil, isComplete: Bool = true, tool: AgentToolActivity? = nil,
                 attachments: [AgentChatAttachmentDescriptor]? = nil, createdAt: Date? = nil,
-                updatedAt: Date? = nil, workContext: AgentChatWorkContext? = nil) {
+                updatedAt: Date? = nil, workContext: AgentChatWorkContext? = nil, questionnaire: AgentQuestionnaire? = nil) {
+        self.questionnaire = questionnaire
         self.id = id
         self.kind = kind
         self.text = text
@@ -117,6 +119,9 @@ public struct AgentChatSnapshot: Codable, Hashable, Sendable {
     public var resolvedModel: String?
     public var contextUsage: AgentContextUsage?
     public var reasoningEffort: AgentReasoningEffort?
+    public var queuedPrompts: [AgentQueuedPrompt]?
+    public var queuePaused: Bool?
+    public var planMode: Bool?
     public var accessMode: AgentAccessMode?
     public var turns: [AgentChatTurn]?
     public var status: AgentChatStatus
@@ -147,11 +152,14 @@ public struct AgentChatSnapshot: Codable, Hashable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case session, project, provider, providerSession, model, resolvedModel, contextUsage, reasoningEffort, accessMode, turns, status, revision, items
+        case session, project, provider, providerSession, model, resolvedModel, contextUsage, reasoningEffort, accessMode, planMode, queuedPrompts, queuePaused, turns, status, revision, items
     }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        queuedPrompts = try c.decodeIfPresent([AgentQueuedPrompt].self, forKey: .queuedPrompts)
+        queuePaused = try c.decodeIfPresent(Bool.self, forKey: .queuePaused)
+        planMode = try c.decodeIfPresent(Bool.self, forKey: .planMode)
         session = try c.decode(SessionId.self, forKey: .session)
         project = try c.decode(ProjectId.self, forKey: .project)
         provider = try c.decode(AgentChatProvider.self, forKey: .provider)
@@ -174,12 +182,22 @@ public enum AgentChatRequest: Codable, Hashable, Sendable {
     /// Provider seeds new conversations only; reconnect returns the server's selected provider.
     case create(session: SessionId, project: ProjectId, provider: AgentChatProvider)
     case read(session: SessionId)
+    case submit(session: SessionId, prompt: AgentPrompt)
+    case editQueued(session: SessionId, id: String, text: String, expectedRevision: UInt64, settings: AgentQueuedSettings? = nil)
+    case removeQueued(session: SessionId, id: String, expectedRevision: UInt64)
+    case deliverQueued(session: SessionId, id: String, expectedRevision: UInt64)
+    case moveQueued(session: SessionId, id: String, beforeID: String, expectedRevision: UInt64)
+    case resumeQueue(session: SessionId)
+    case answer(session: SessionId, request: String, answers: [String: [String]], cancelled: Bool)
+
     /// Nil model/effort explicitly restore provider defaults; nil provider keeps the current provider.
     case send(session: SessionId, text: String, model: String?, reasoningEffort: AgentReasoningEffort? = nil,
               provider: AgentChatProvider? = nil, attachments: [AgentChatAttachment]? = nil)
     case approve(session: SessionId, request: String, allow: Bool)
     /// Updates host approvals immediately; native provider sandbox policy changes on the next turn.
     case setAccess(session: SessionId, mode: AgentAccessMode)
+    /// Selects collaboration mode for the next turn; active turns cannot change mode.
+    case setPlan(session: SessionId, enabled: Bool)
     case interrupt(session: SessionId)
     case close(session: SessionId)
     /// Idempotent: a new conversation `session` that starts with everything `from`
