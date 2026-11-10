@@ -1,5 +1,0 @@
-<svg fill="none" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
-  <path d="M8 1 L8 4 A3 3 0 0 0 11 7 L14 7 L14 12.5 A2.5 2.5 0 0 1 11.49 15 L4.49 15 A2.5 2.5 0 0 1 2 12.5 L2 3.5 A2.5 2.5 0 0 1 4.49 1 Z" fill="currentColor" opacity=".4"/>
-  <path d="M9.5 1 A0.5 0.5 0 0 1 9.86 1.15 L13.86 5.14 A0.5 0.5 0 0 1 14 5.5 L14 6 L11 6 A2 2 0 0 1 9 4 L9 1 Z" fill="currentColor"/>
-  <path d="M5.5 8.5 A0.75 0.75 0 0 1 6.6 7.83 L10.86 10.08 A0.75 0.75 0 0 1 10.86 11.42 L6.6 13.67 A0.75 0.75 0 0 1 5.5 13 L5.5 8.5 Z M7 9.75 L7 11.75 L8.9 10.76 L7 9.75 Z" fill="currentColor" fill-rule="evenodd"/>
-</svg>

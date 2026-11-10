@@ -83,7 +83,7 @@ runs the same script.
 - Use AppKit throughout. SwiftUI is allowed only for Settings forms and static
   dialogs, never on the terminal rendering path.
 - Shortcuts come only from `ShortcutCatalog`, and colors only from `AppTheme`.
-- Icons come only from `AppIcon`, Tab's own SVG set in `Resources/TabIcons`
+- Icons come from `AppIcon`, backed by IconsCXL and two local view-mode SVGs in `Resources/TabIcons`
   (one kebab-case file per case; `scripts/icons/STYLE.md` says how to draw one,
   and `scripts/icons/` normalizes and previews them). Only the sidebar's header
   and footer buttons and the pane header draw SF Symbols, through
@@ -118,7 +118,7 @@ input. Measure with Instruments when in doubt.
 - Settings and state files only grow, so they are JSON through `Codable`, and
   decoders tolerate unknown keys and missing optional keys.
 - Follow the existing patterns, and fix root causes rather than symptoms.
-- Use no third-party packages beyond Apple frameworks and the vendored
+- Use no third-party packages beyond Apple frameworks, IconsCXL and the vendored
   libghostty-vt. Proposing one needs the maintainer's approval, with its GitHub
   URL, star count and maintenance status. Third-party artwork or code you adapt
   goes in `THIRD_PARTY_NOTICES.md`.

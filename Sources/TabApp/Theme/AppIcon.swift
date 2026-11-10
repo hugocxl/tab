@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import TabCore
+import IconsCXL
 
 /// Tab Icons: signature marks carry their theme hue; UI templates inherit the caller's tint.
 public enum AppIcon: String, CaseIterable, Sendable {
@@ -358,7 +359,8 @@ public enum AppIcon: String, CaseIterable, Sendable {
     public func image(size: CGFloat = Metrics.glyph, scale: CGFloat = 1) -> NSImage? {
         let key = "template-\(rawValue)-\(size)-\(scale)"
         if let cached = IconCache.images[key] { return cached }
-        guard let source = BundledImage.loadTabIcon(rawValue), source.size.width > 0, source.size.height > 0 else { return nil }
+        let source = Icon(rawValue: rawValue)?.nsImage ?? BundledImage.loadTabIcon(rawValue)
+        guard let source, source.size.width > 0, source.size.height > 0 else { return nil }
         let fit = min(size * scale / source.size.width, size * scale / source.size.height)
         let fitted = NSSize(width: source.size.width * fit, height: source.size.height * fit)
         let image = NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in

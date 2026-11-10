@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.92.0 - 2026-11-10
+
+### Changed
+
+- App icons now come from the shared IconsCXL library used by Tab for iPhone and iPad.
+
 ## 0.91.1 - 2026-11-10
 
 ### Fixed

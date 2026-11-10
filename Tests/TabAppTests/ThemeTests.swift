@@ -119,11 +119,11 @@ final class ThemeTests: XCTestCase {
         }
     }
 
-    func testEveryBundledSVGHasAnIconCase() throws {
-        let folder = try XCTUnwrap(BundledImage.tabIconURL("folder")).deletingLastPathComponent()
+    func testEveryLocalSVGHasAnIconCase() throws {
+        let folder = try XCTUnwrap(BundledImage.tabIconURL("view-list")).deletingLastPathComponent()
         let files = try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
         let names = Set(files.filter { $0.pathExtension == "svg" }.map { $0.deletingPathExtension().lastPathComponent })
-        XCTAssertEqual(names, Set(AppIcon.allCases.map(\.rawValue)))
+        XCTAssertEqual(names, Set(["view-list", "view-tree"]))
     }
 
     /// Wide and narrow icons come back on the same square canvas as the rest,
