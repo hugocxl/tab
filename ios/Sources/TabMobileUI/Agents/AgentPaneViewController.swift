@@ -77,7 +77,14 @@ final class AgentPaneViewController: UIViewController, UICollectionViewDelegate 
 
         // Text keeps a readable measure: full width on a phone, a column on an iPad.
         let readable = ReadableColumn.guide(in: view, margin: 12)
+        // The composer rests on the safe area's bottom edge, and keeps a gap above the keyboard.
+        view.keyboardLayoutGuide.usesBottomSafeArea = false
+        let composerOnSafeArea = composer.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor)
+        composerOnSafeArea.priority = .defaultHigh
         NSLayoutConstraint.activate([
+            composerOnSafeArea,
+            composer.bottomAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.bottomAnchor),
+            composer.bottomAnchor.constraint(lessThanOrEqualTo: view.keyboardLayoutGuide.topAnchor, constant: -8),
             collectionView.topAnchor.constraint(equalTo: view.topAnchor),
             collectionView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             collectionView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
@@ -87,7 +94,6 @@ final class AgentPaneViewController: UIViewController, UICollectionViewDelegate 
             emptyView.widthAnchor.constraint(lessThanOrEqualTo: view.widthAnchor, constant: -40),
             composer.leadingAnchor.constraint(equalTo: readable.leadingAnchor),
             composer.trailingAnchor.constraint(equalTo: readable.trailingAnchor),
-            composer.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor, constant: -8),
             errorNotice.leadingAnchor.constraint(equalTo: composer.leadingAnchor, constant: 12),
             errorNotice.trailingAnchor.constraint(equalTo: composer.trailingAnchor, constant: -12),
             errorNotice.bottomAnchor.constraint(equalTo: composer.topAnchor, constant: -8),

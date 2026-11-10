@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.21.0 - 2026-11-10
+
+### Changed
+
+- An agent's message box sits just above the bottom edge of the screen, with no
+  extra space beneath it.
+
 ## 0.20.0 - 2026-11-09
 
 ### Changed
