@@ -63,6 +63,12 @@ final class Preferences {
         didSet { defaults.set(keyboardLayout.rawValue, forKey: "terminal.keyboardLayout") }
     }
 
+    /// The tab list groups its cards under their projects, as the desktop
+    /// sidebar's Projects layout does, instead of one Open Tabs list.
+    var groupsByProject: Bool {
+        didSet { defaults.set(groupsByProject, forKey: "tabs.groupsByProject") }
+    }
+
     @ObservationIgnored private var schemes: [String: ColorScheme] = [:]
 
     private init() {
@@ -73,6 +79,7 @@ final class Preferences {
         appearance = defaults.string(forKey: "appearance").flatMap(Appearance.init) ?? .system
         keyboardLayout = defaults.string(forKey: "terminal.keyboardLayout").flatMap(KeyboardLayout.init)
             ?? (UIDevice.current.userInterfaceIdiom == .pad ? .compact : .full)
+        groupsByProject = defaults.bool(forKey: "tabs.groupsByProject")
     }
 
     /// The terminal colors for the appearance, read from the bundled theme file.

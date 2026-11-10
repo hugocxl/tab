@@ -70,6 +70,26 @@ final class TabListingTests: XCTestCase {
         XCTAssertEqual(ServerModel.title(rows: [], customTitle: nil, branch: nil), "Empty tab")
     }
 
+    /// Grouping by project keeps Home first, then the server's project order,
+    /// with a worktree's tab under its project and the Open Tabs order within.
+    func testGroupingByProjectFollowsTheProjectOrder() {
+        let home = ProjectDescriptor(home: true, directory: ServerPath("/Users/me"), name: "Home")
+        let app = ProjectDescriptor(directory: ServerPath("/app"), name: "app")
+        let site = ProjectDescriptor(directory: ServerPath("/site"), name: "site")
+        let empty = ProjectDescriptor(directory: ServerPath("/empty"), name: "empty")
+        let worktree = ProjectDescriptor(directory: ServerPath("/app-wt"), name: "wt", kind: .worktree, parentId: app.id)
+        func card(_ project: ProjectDescriptor, root: ProjectDescriptor?) -> TabCard {
+            TabCard(server: ServerId(), project: project, tab: Tab(pane: Pane(content: .terminal(session: nil))),
+                    title: project.name, rows: [], primary: false, status: .idle,
+                    projectName: root?.name, iconProject: root?.id, panes: [])
+        }
+        let cards = [card(site, root: site), card(worktree, root: app), card(home, root: nil), card(app, root: app)]
+        let groups = ServerModel.groups(cards, projects: [home, app, site, empty, worktree])
+        XCTAssertEqual(groups.map(\.project?.name), [nil, "app", "site"])
+        XCTAssertEqual(groups[1].cards.map(\.project.name), ["wt", "app"])
+        XCTAssertTrue(ServerModel.groups([], projects: [home, app]).isEmpty)
+    }
+
     func testElapsedTimeReadsLikeTheDesktop() {
         XCTAssertEqual(ServerModel.elapsedText(43), "43s")
         XCTAssertEqual(ServerModel.elapsedText(185), "3m")

@@ -40,6 +40,10 @@ struct SettingsView: View {
                     .labelsHidden()
                 }
 
+                Section("Tabs") {
+                    Toggle("Group by Project", isOn: $preferences.groupsByProject)
+                }
+
                 Section("Terminal") {
                     LabeledContent("Text Size") {
                         Stepper(value: $preferences.fontSize, in: 8...28, step: 1) {

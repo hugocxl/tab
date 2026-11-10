@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.23.0 - 2026-11-10
+
+### Added
+
+- Group the tab list by project from the filter menu or Settings, as the Mac's
+  sidebar does in its Projects layout.
+
 ## 0.22.0 - 2026-11-10
 
 ### Added

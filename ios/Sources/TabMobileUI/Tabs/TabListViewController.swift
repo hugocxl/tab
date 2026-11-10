@@ -4,10 +4,20 @@ import UIKit
 
 /// The home screen: the desktop sidebar's Open Tabs layout. Every open tab of
 /// every paired Mac, oldest first, each card saying what runs there, where,
-/// and in which project. With more than one Mac, each gets a heading.
+/// and in which project. With more than one Mac, each gets a heading. Grouped
+/// by project, it is the sidebar's Projects layout: Home's tabs, then each
+/// project's under its header.
 final class TabListViewController: UICollectionViewController {
     private let app: AppModel
-    private var dataSource: UICollectionViewDiffableDataSource<ServerId, TabId>!
+    private let preferences = Preferences.shared
+    /// A Mac's Home tabs, or with grouping one project's.
+    private struct Section: Hashable {
+        var server: ServerId
+        var project: ProjectId?
+    }
+    private var dataSource: UICollectionViewDiffableDataSource<Section, TabId>!
+    private var groupedProjects: [ProjectId: ProjectDescriptor] = [:]
+    private var grouped = false
     private var cards: [TabId: (server: ServerModel, card: TabCard)] = [:]
     /// Project icons decoded once, with the bytes they came from.
     private var icons: [ProjectId: (data: Data, image: UIImage)] = [:]
@@ -90,10 +100,10 @@ final class TabListViewController: UICollectionViewController {
     init(app: AppModel) {
         self.app = app
         super.init(collectionViewLayout: UICollectionViewLayout())
-        let layout = UICollectionViewCompositionalLayout { [weak self] _, environment in
+        let layout = UICollectionViewCompositionalLayout { [weak self] index, environment in
             var configuration = UICollectionLayoutListConfiguration(appearance: .plain)
             configuration.backgroundColor = .clear
-            configuration.headerMode = (self?.visibleServers.count ?? 0) > 1 ? .supplementary : .none
+            configuration.headerMode = self?.showsHeader(section: index) ?? false ? .supplementary : .none
             configuration.trailingSwipeActionsConfigurationProvider = { path in self?.swipeActions(path) }
             // A hairline between cards, as wide as a card's fill, except beside
             // the selected one and after the last.
@@ -193,24 +203,43 @@ final class TabListViewController: UICollectionViewController {
         updateHeaders()
     }
 
+    /// A project's section always has its header; Home's names its Mac when
+    /// more than one shows.
+    private func showsHeader(section index: Int) -> Bool {
+        guard let dataSource, let section = dataSource.sectionIdentifier(for: index) else { return false }
+        return section.project != nil || visibleServers.count > 1
+    }
+
     /// Headers aren't items, so a snapshot never reconfigures them; their Mac's
     /// status is read here, where a change brings the next update.
     private func updateHeaders() {
         let kind = UICollectionView.elementKindSectionHeader
         for path in collectionView.indexPathsForVisibleSupplementaryElements(ofKind: kind) {
             guard let header = collectionView.supplementaryView(forElementKind: kind, at: path) as? UICollectionViewListCell,
-                  let id = dataSource.sectionIdentifier(for: path.section), let server = app.server(id) else { continue }
-            configure(header, for: server)
+                  let section = dataSource.sectionIdentifier(for: path.section) else { continue }
+            configure(header, for: section)
         }
         // Also for headers scrolled out of view, so they're right when they return.
         for server in app.servers { _ = server.status }
     }
 
-    private func configure(_ header: UICollectionViewListCell, for server: ServerModel) {
+    private func configure(_ header: UICollectionViewListCell, for section: Section) {
+        guard let server = app.server(section.server) else { return }
         var content = UIListContentConfiguration.header()
-        content.text = server.server.name
-        content.secondaryText = Self.describe(server.status)
         content.prefersSideBySideTextAndSecondaryText = true
+        if let id = section.project, let project = groupedProjects[id] {
+            content.text = project.name
+            // With several Macs, which one the project is on.
+            content.secondaryText = visibleServers.count > 1 ? server.server.name : nil
+            let icon = self.icon(id, on: server)
+            content.image = icon ?? TabIcon.folder.template
+            content.imageProperties.tintColor = icon == nil ? TabIcon.folder.color() : nil
+            content.imageProperties.maximumSize = CGSize(width: 18, height: 18)
+            content.imageProperties.cornerRadius = 4
+        } else {
+            content.text = server.server.name
+            content.secondaryText = Self.describe(server.status)
+        }
         header.contentConfiguration = content
     }
 
@@ -245,7 +274,12 @@ final class TabListViewController: UICollectionViewController {
                 self?.setNeedsUpdateProperties()
             }
         }
-        var children: [UIMenuElement] = [UIMenu(options: .displayInline, children: kinds)]
+        let grouping = UIAction(title: "Group by Project", image: UIImage(systemName: "folder"),
+                                state: preferences.groupsByProject ? .on : .off) { [weak self] _ in
+            self?.preferences.groupsByProject.toggle()
+        }
+        var children: [UIMenuElement] = [UIMenu(options: .displayInline, children: kinds),
+                                          UIMenu(options: .displayInline, children: [grouping])]
         let servers = app.servers
         if servers.count > 1 {
             let all = UIAction(title: "All Macs", image: UIImage(systemName: "laptopcomputer.and.iphone"),
@@ -331,12 +365,12 @@ final class TabListViewController: UICollectionViewController {
     private func configureDataSource() {
         let cell = UICollectionView.CellRegistration<TabCardCell, TabId> { [weak self] cell, _, id in
             guard let self, let entry = cards[id] else { return }
-            cell.configure(entry.card, icon: icon(entry.card.iconProject, on: entry.server))
+            cell.configure(entry.card, icon: icon(entry.card.iconProject, on: entry.server), showsProject: !grouped)
         }
         let header = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(
             elementKind: UICollectionView.elementKindSectionHeader) { [weak self] header, _, path in
-            guard let self, let id = dataSource.sectionIdentifier(for: path.section), let server = app.server(id) else { return }
-            configure(header, for: server)
+            guard let self, let section = dataSource.sectionIdentifier(for: path.section) else { return }
+            configure(header, for: section)
         }
         dataSource = UICollectionViewDiffableDataSource(collectionView: collectionView) { view, path, id in
             view.dequeueConfiguredReusableCell(using: cell, for: path, item: id)
@@ -360,8 +394,10 @@ final class TabListViewController: UICollectionViewController {
     }
 
     private func apply(_ servers: [ServerModel]) {
-        var snapshot = NSDiffableDataSourceSnapshot<ServerId, TabId>()
+        var snapshot = NSDiffableDataSourceSnapshot<Section, TabId>()
         var next: [TabId: (ServerModel, TabCard)] = [:]
+        var projects: [ProjectId: ProjectDescriptor] = [:]
+        let grouping = preferences.groupsByProject
         let query = filter.lowercased()
         for server in servers {
             let cards = server.cards.filter { card in
@@ -373,15 +409,29 @@ final class TabListViewController: UICollectionViewController {
             // Icons that arrived since: touching them registers the dependency.
             _ = server.projectIcons.count
             guard !cards.isEmpty || servers.count > 1 else { continue }
-            snapshot.appendSections([server.id])
-            snapshot.appendItems(cards.map(\.id), toSection: server.id)
             for card in cards { next[card.id] = (server, card) }
+            let groups = grouping ? server.groups(cards) : [TabGroup(project: nil, cards: cards)]
+            // With several Macs, each keeps its Home section for its heading.
+            if servers.count > 1, groups.first.map({ $0.project != nil }) ?? true {
+                snapshot.appendSections([Section(server: server.id)])
+            }
+            for group in groups {
+                let section = Section(server: server.id, project: group.project?.id)
+                snapshot.appendSections([section])
+                snapshot.appendItems(group.cards.map(\.id), toSection: section)
+                if let project = group.project { projects[project.id] = project }
+            }
         }
         let changed = next.keys.filter { id in cards[id].map { $0.card != next[id]?.1 } ?? false }
         let iconsArrived = servers.contains { server in server.projectIcons.contains { icons[$0.key]?.data != $0.value } }
+        let regrouped = grouping != grouped
         cards = next.mapValues { (server: $0.0, card: $0.1) }
-        snapshot.reconfigureItems(iconsArrived ? Array(next.keys) : changed)
+        groupedProjects = projects
+        grouped = grouping
+        snapshot.reconfigureItems(iconsArrived || regrouped ? Array(next.keys) : changed)
         dataSource.apply(snapshot, animatingDifferences: view.window != nil)
+        // Cards lose or regain their project row, and the headers change.
+        if regrouped { collectionView.collectionViewLayout.invalidateLayout() }
         if let selected, let path = dataSource.indexPath(for: selected), splitViewController?.isCollapsed == false {
             collectionView.selectItem(at: path, animated: false, scrollPosition: [])
         }

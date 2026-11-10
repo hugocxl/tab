@@ -132,6 +132,19 @@ public struct TabCard: Identifiable, Hashable, Sendable {
     }
 }
 
+/// One project's open tabs, as the desktop sidebar's Projects layout groups
+/// them under the project's header, its worktrees' tabs included.
+public struct TabGroup: Hashable, Sendable {
+    /// Nil for Home, whose tabs lead the list without a header.
+    public var project: ProjectDescriptor?
+    public var cards: [TabCard]
+
+    public init(project: ProjectDescriptor?, cards: [TabCard]) {
+        self.project = project
+        self.cards = cards
+    }
+}
+
 /// A pane as a tab view lists it.
 public struct PaneSummary: Hashable, Sendable {
     public enum Kind: Hashable, Sendable {
@@ -178,6 +191,32 @@ extension ServerModel {
             default: return left.offset < right.offset
             }
         }.map(\.element.0)
+    }
+
+    /// `cards` grouped by project, as the desktop's Projects layout groups
+    /// them: Home's first, then each project in the server's order with its
+    /// worktrees', each group keeping the Open Tabs order. A project with no
+    /// card listed is left out.
+    public func groups(_ cards: [TabCard]) -> [TabGroup] {
+        Self.groups(cards, projects: projects)
+    }
+
+    static func groups(_ cards: [TabCard], projects: [ProjectDescriptor]) -> [TabGroup] {
+        var home: [TabCard] = []
+        var byRoot: [ProjectId: [TabCard]] = [:]
+        for card in cards {
+            guard let root = card.iconProject else {
+                home.append(card)
+                continue
+            }
+            byRoot[root, default: []].append(card)
+        }
+        var groups = home.isEmpty ? [] : [TabGroup(project: nil, cards: home)]
+        for project in projects {
+            guard let cards = byRoot[project.id] else { continue }
+            groups.append(TabGroup(project: project, cards: cards))
+        }
+        return groups
     }
 
     private func card(_ tab: Tab, in project: ProjectDescriptor, root: ProjectDescriptor) -> TabCard {

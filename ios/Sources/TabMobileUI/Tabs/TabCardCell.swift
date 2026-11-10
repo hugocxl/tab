@@ -273,11 +273,12 @@ final class TabCardCell: UICollectionViewListCell {
     /// Shows `card`. The list applies its snapshots animated, but a card's
     /// rows change at once: a stack view's row hidden and shown again inside
     /// an animation can stay collapsed.
-    func configure(_ card: TabCard, icon: UIImage?) {
-        UIView.performWithoutAnimation { show(card, icon: icon) }
+    /// Under a project's header, `showsProject` is false: the header names it.
+    func configure(_ card: TabCard, icon: UIImage?, showsProject: Bool = true) {
+        UIView.performWithoutAnimation { show(card, icon: icon, showsProject: showsProject) }
     }
 
-    private func show(_ card: TabCard, icon: UIImage?) {
+    private func show(_ card: TabCard, icon: UIImage?, showsProject: Bool) {
         let lead = card.lead
         titleLabel.text = card.title
         titleLabel.setShown(lead == nil)
@@ -308,7 +309,7 @@ final class TabCardCell: UICollectionViewListCell {
         location.icon.image = (git ? TabIcon.gitBranch : .folder).template
         location.icon.tintColor = git ? .tertiaryLabel : TabIcon.folder.color()
 
-        project.setShown(card.projectName != nil)
+        project.setShown(showsProject && card.projectName != nil)
         project.label.text = card.projectName
         project.label.textColor = .secondaryLabel
         project.icon.image = icon ?? TabIcon.folder.template
