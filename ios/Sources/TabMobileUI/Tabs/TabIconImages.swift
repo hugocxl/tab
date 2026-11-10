@@ -1,5 +1,6 @@
 import TabMobileKit
 import UIKit
+import IconsCXL
 
 extension TabIcon.Hue {
     /// The hue as Tab's themes draw icons: shade 600 on light backgrounds,
@@ -32,7 +33,9 @@ extension TabIcon.Hue {
 extension TabIcon {
     /// The SVG as a template image at its own aspect ratio, for an image view
     /// to tint and fit.
-    var template: UIImage? { UIImage(named: "TabIcons/" + rawValue) }
+    var template: UIImage? {
+        Icon(rawValue: rawValue)?.uiImage ?? UIImage(named: "TabIcons/" + rawValue)
+    }
 
     /// The mark's color: its signature hue, else `plain`.
     func color(plain: UIColor = .secondaryLabel) -> UIColor {

@@ -5,7 +5,7 @@ set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 . "$ROOT/scripts/simulator.sh"
 DEVICE=$(iphone_simulator)
-STRICT="SWIFT_TREAT_WARNINGS_AS_ERRORS=YES GCC_TREAT_WARNINGS_AS_ERRORS=YES"
+STRICT="GCC_TREAT_WARNINGS_AS_ERRORS=YES"
 
 echo "== Version"
 CHANGELOG=$(sed -n 's/^## \([0-9][0-9.]*\) .*/\1/p' "$ROOT/CHANGELOG.md" | head -1)

@@ -24,7 +24,6 @@ for file in TabCore/Tabs/TabReducer.swift TabCore/Theme.swift \
 import TabProtocol/' "$target"
 done
 cp -R "$TAB/Sources/TabCore/Resources/Themes" "$ROOT/Vendor/TabShared/Tab/Resources/Themes"
-"$ROOT/scripts/sync-icons.sh" "$TAB"
 
 REVISION=$(git -C "$TAB" rev-parse HEAD)
 VERSION=$(sed -n 's/^## \([0-9][0-9.]*\) .*/\1/p' "$TAB/CHANGELOG.md" | head -1)

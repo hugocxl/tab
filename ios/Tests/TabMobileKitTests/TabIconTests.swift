@@ -4,12 +4,12 @@ import XCTest
 
 /// Tab Icons follow the desktop's names and rules, and every icon ships.
 final class TabIconTests: XCTestCase {
-    func testEveryIconHasItsImageInTheAssetCatalog() throws {
+    func testUnpublishedIconsRemainInTheAssetCatalog() throws {
         let catalog = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .appendingPathComponent("../../App/Resources/Assets.xcassets/TabIcons").standardized
         let shipped = try Set(FileManager.default.contentsOfDirectory(atPath: catalog.path)
             .filter { $0.hasSuffix(".imageset") }.map { String($0.dropLast(".imageset".count)) })
-        XCTAssertEqual(shipped, Set(TabIcon.allCases.map(\.rawValue)))
+        XCTAssertEqual(shipped, Set(["view-list", "view-tree"]))
     }
 
     func testTerminalsShowTheirCommand() {

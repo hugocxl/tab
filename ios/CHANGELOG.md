@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.24.0 - 2026-11-10
+
+### Changed
+
+- Tab icons now use the same IconsCXL library as the Mac app.
+
 ## 0.23.0 - 2026-11-10
 
 ### Added

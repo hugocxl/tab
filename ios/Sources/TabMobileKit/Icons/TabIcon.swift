@@ -1,8 +1,7 @@
 import TabProtocol
 
-/// Tab Icons, Tab's own icon set, by the names of its SVGs in the app's asset
-/// catalog (`TabIcons/<name>`, from `scripts/sync-icons.sh`). Mirrors
-/// `AppIcon` in Tab: keep its cases and hues in step.
+/// Tab icons by their IconsCXL resource names. The two view-mode icons still
+/// ship in the app catalog. Mirrors `AppIcon` in Tab: keep cases and hues in step.
 public enum TabIcon: String, CaseIterable, Sendable {
     case agents
     case antigravity

@@ -1,6 +1,0 @@
-<svg fill="none" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
-  <path d="M8 0C1.42 0 0 1.42 0 8s1.42 8 8 8 8-1.42 8-8-1.42-8-8-8" fill="currentColor" opacity=".2"/>
-  <path d="M2.88 3.26 L10.27 3.26 L10.27 8.19 L7.81 8.19 L7.81 10.66 L5.34 10.66 L5.34 13.12 L2.88 13.12 L2.88 3.26 Z M5.34 5.73 L5.34 8.19 L7.81 8.19 L7.81 5.73 L5.34 5.73 Z" fill="currentColor" fill-rule="evenodd"/>
-  <path d="M10.27 8.19 L12.74 8.19 L12.74 13.12 L10.27 13.12 L10.27 8.19 Z" fill="currentColor" fill-rule="evenodd"/>
-  <path d="M12.17 2.88 Q12.37 3.63 12.63 3.9 Q12.9 4.17 13.12 4.21 Q12.37 4.39 12.29 4.78 L12.17 5.53 Q11.99 4.78 11.72 4.51 Q11.46 4.24 11.22 4.21 Q11.99 4.01 12.06 3.63 Z" fill="currentColor" fill-rule="evenodd"/>
-</svg>
