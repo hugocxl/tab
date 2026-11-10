@@ -30,8 +30,8 @@ final class ThemeTests: XCTestCase {
         XCTAssertEqual(catalog.entries.prefix(2).map(\.name), ["Tab", "Tab Light"])
         XCTAssertTrue(catalog.errors.isEmpty, "\(catalog.errors)")
         let tab = try XCTUnwrap(catalog.find("Tab"))
-        XCTAssertEqual(tab.scheme.background, RGBColor(0x1A1A19))
-        XCTAssertEqual(tab.scheme.foreground, RGBColor(0xCECDC8))
+        XCTAssertEqual(tab.scheme.background, RGBColor(0x232721))
+        XCTAssertEqual(tab.scheme.foreground, RGBColor(0xCED0C6))
         XCTAssertEqual(tab.scheme.swatches.count, 16)
         let rest = catalog.entries.dropFirst(2).map { $0.name.lowercased() }
         XCTAssertEqual(rest, rest.sorted())
@@ -64,7 +64,7 @@ final class ThemeTests: XCTestCase {
         let light = ChromePalette(scheme: ColorScheme.parse("background = #f0f0f5\nforeground = #1e1e2e\npalette = 4=#ffff00\n"))
         XCTAssertTrue(light.isLight)
         XCTAssertEqual(light.accentForeground, ChromeColor(red: 0, green: 0, blue: 0))
-        XCTAssertEqual(ChromePalette(scheme: ColorScheme()).bg, ChromeColor(RGBColor(0x1A1A19)))
+        XCTAssertEqual(ChromePalette(scheme: ColorScheme()).bg, ChromeColor(RGBColor(0x232721)))
     }
 
     func testColorsCodeAsHexStrings() throws {

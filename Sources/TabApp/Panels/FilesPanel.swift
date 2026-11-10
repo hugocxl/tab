@@ -122,6 +122,7 @@ public final class FilesPanelController: NSViewController, NSTableViewDataSource
             scroll.widthAnchor.constraint(equalTo: stack.widthAnchor),
         ])
         applyColors()
+        card.onColorsChange = { [weak self] in self?.themeDidChange() }
         updateStatus()
     }
 

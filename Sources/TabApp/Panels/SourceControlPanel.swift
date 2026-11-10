@@ -130,6 +130,7 @@ public final class SourceControlController: NSViewController, NSTableViewDataSou
         ])
         message.setContentHuggingPriority(.required, for: .vertical)
         themeDidChange()
+        card.onColorsChange = { [weak self] in self?.themeDidChange() }
         setViewMode(host?.sourceControlTree == true ? .tree : .list, persist: false)
     }
 

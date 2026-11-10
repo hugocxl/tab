@@ -104,6 +104,7 @@ public final class DiffPaneController: NSViewController {
         ])
         note.leadingAnchor.constraint(equalTo: stack.leadingAnchor, constant: Metrics.gutter).isActive = true
         themeDidChange()
+        background.onColorsChange = { [weak self] in self?.themeDidChange() }
         render()
     }
 

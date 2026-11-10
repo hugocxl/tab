@@ -148,6 +148,7 @@ public final class EditorPaneController: NSViewController, NSTextViewDelegate, N
         ])
         message.setContentHuggingPriority(.defaultLow, for: .vertical)
         themeDidChange()
+        background.onColorsChange = { [weak self] in self?.themeDidChange() }
         render()
     }
 

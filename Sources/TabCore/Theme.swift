@@ -243,15 +243,15 @@ public struct ChromePalette: Equatable, Sendable {
     public var diffRemove: ChromeColor
     public var diffHunk: ChromeColor
 
-    private static let fallbackBackground = RGBColor(0x1A_1A_19)
-    private static let fallbackForeground = RGBColor(0xCE_CD_C8)
-    private static let fallbackAccent = RGBColor(0xD9_77_57)
+    private static let fallbackBackground = RGBColor(0x23_27_21)
+    private static let fallbackForeground = RGBColor(0xCE_D0_C6)
+    private static let fallbackAccent = RGBColor(0xCD_A7_6B)
 
     public init(scheme: ColorScheme) {
         let background = ChromeColor(scheme.background ?? Self.fallbackBackground)
         let foreground = ChromeColor(scheme.foreground ?? Self.fallbackForeground)
         let accent = ChromeColor(scheme.paletteColor(4) ?? Self.fallbackAccent)
-        let danger = ChromeColor(scheme.paletteColor(1) ?? RGBColor(0xF0_64_6E))
+        let danger = ChromeColor(scheme.paletteColor(1) ?? RGBColor(0xEC_7B_79))
         bg = background
         fg = foreground
         fgMuted = foreground.withAlpha(0.65)
@@ -262,9 +262,9 @@ public struct ChromePalette: Equatable, Sendable {
         self.accent = accent
         accentSoft = accent.withAlpha(0.1)
         accentForeground = accent.luminance > 0.6 ? ChromeColor(red: 0, green: 0, blue: 0) : ChromeColor(red: 1, green: 1, blue: 1)
-        warning = ChromeColor(scheme.paletteColor(3) ?? RGBColor(0xE0_AF_68))
+        warning = ChromeColor(scheme.paletteColor(3) ?? RGBColor(0xE3_D1_70))
         self.danger = danger
-        diffAdd = ChromeColor(scheme.paletteColor(2) ?? RGBColor(0x22_C5_5E))
+        diffAdd = ChromeColor(scheme.paletteColor(2) ?? RGBColor(0x9A_BE_87))
         diffRemove = danger
         diffHunk = scheme.paletteColor(6).map { ChromeColor($0) } ?? accent
     }

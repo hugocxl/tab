@@ -37,15 +37,15 @@ final class ThemeTests: XCTestCase {
 
     func testUnknownThemeFallsBackToDefaults() {
         let theme = AppTheme(catalog: ThemeCatalog(entries: []), darkTheme: "Missing", lightTheme: "Missing", systemIsDark: true)
-        XCTAssertEqual(TabCore.RGBColor(theme.bg), TabCore.RGBColor(0x1A1A19))
-        XCTAssertEqual(TabCore.RGBColor(theme.fg), TabCore.RGBColor(0xCECDC8))
+        XCTAssertEqual(TabCore.RGBColor(theme.bg), TabCore.RGBColor(0x232721))
+        XCTAssertEqual(TabCore.RGBColor(theme.fg), TabCore.RGBColor(0xCED0C6))
     }
 
     func testCardBlendsMatchStyleGuide() {
         let palette = AppTheme(catalog: ThemeCatalog(entries: []), systemIsDark: true).palette
         let card = AppTheme.card(palette)
-        // 2.5% of #cecdc8 over #1a1a19 is about #1f1f1e.
-        XCTAssertEqual(card.red * 255, 31, accuracy: 1)
+        // 2.5% of #ced0c6 over #232721 is #272b25.
+        XCTAssertEqual(TabCore.RGBColor(card.nsColor), TabCore.RGBColor(0x272B25))
         XCTAssertEqual(card.alpha, 1)
         XCTAssertEqual(AppTheme.chrome(palette), palette.bg)
     }
@@ -88,6 +88,31 @@ final class ThemeTests: XCTestCase {
         XCTAssertEqual(theme.iconHex(.gray), "#6c6c71")
     }
 
+    /// Editor, diff and panel controllers color plain AppKit labels once, so
+    /// they must hear of a theme change, including one made while hidden.
+    func testViewsReportColorChangesToTheirControllers() async throws {
+        let theme = AppTheme(catalog: catalog(), darkTheme: "Night", lightTheme: "Day", systemIsDark: true)
+        let view = ThemedView()
+        view.theme = theme
+        var changes = 0
+        view.onColorsChange = { changes += 1 }
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 100, height: 100), styleMask: [], backing: .buffered, defer: true)
+        window.contentView?.addSubview(view)
+        XCTAssertEqual(changes, 0, "showing a view is not a change")
+
+        theme.setSystemDark(false)
+        for _ in 0..<200 where changes == 0 { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(changes, 1)
+
+        view.removeFromSuperview()
+        theme.setSystemDark(true)
+        window.contentView?.addSubview(view)
+        XCTAssertEqual(changes, 2)
+        view.removeFromSuperview()
+        window.contentView?.addSubview(view)
+        XCTAssertEqual(changes, 2)
+    }
+
     func testEveryIconHasAnImage() {
         for icon in AppIcon.allCases {
             XCTAssertNotNil(icon.image(), "\(icon.rawValue).svg did not load")
@@ -119,6 +144,81 @@ final class ThemeTests: XCTestCase {
         XCTAssertFalse(tinted.isTemplate)
         XCTAssertTrue(tinted === AppIcon.folder.image(size: 16, color: .systemBlue))
     }
+}
+
+/// Tab's own themes: readable text on every surface, and the copies the app
+/// falls back to before the catalog loads.
+final class BuiltInThemeTests: XCTestCase {
+    private func builtIn(dark: Bool) throws -> (scheme: ColorScheme, palette: ChromePalette) {
+        let catalog = ThemeCatalog.load(customDirectory: nil)
+        let name = dark ? ThemeCatalog.defaultDark : ThemeCatalog.defaultLight
+        let scheme = try XCTUnwrap(catalog.find(name)).scheme
+        return (scheme, ChromePalette(scheme: scheme))
+    }
+
+    private func contrast(_ text: ChromeColor, on surface: ChromeColor) -> Double {
+        let opaque = text.blended(over: surface, amount: text.alpha)
+        return TerminalPalette.contrast(TerminalPalette.luminance(TabCore.RGBColor(opaque.nsColor).value),
+                                        TerminalPalette.luminance(TabCore.RGBColor(surface.nsColor).value))
+    }
+
+    func testFallbackColorsMatchTheBundledThemes() throws {
+        for dark in [true, false] {
+            let (scheme, _) = try builtIn(dark: dark)
+            let fallback = TerminalPalette(dark: dark)
+            let themed = TerminalPalette(scheme: scheme, dark: dark)
+            XCTAssertEqual(fallback.background, themed.background, "dark: \(dark)")
+            XCTAssertEqual(fallback.foreground, themed.foreground, "dark: \(dark)")
+            XCTAssertEqual(fallback.colors, themed.colors, "dark: \(dark)")
+        }
+        let (scheme, palette) = try builtIn(dark: true)
+        let fallback = ChromePalette(scheme: ColorScheme())
+        for role in [\ChromePalette.bg, \.fg, \.accent, \.accentForeground, \.warning, \.danger, \.diffAdd] {
+            XCTAssertEqual(fallback[keyPath: role], palette[keyPath: role])
+        }
+        XCTAssertEqual(SyntaxColors(scheme: ColorScheme(), palette: palette).foreground, scheme.foreground)
+    }
+
+    func testTextStaysLegibleOnPanesAndChrome() throws {
+        for dark in [true, false] {
+            let (scheme, palette) = try builtIn(dark: dark)
+            for surface in [AppTheme.card(palette), AppTheme.chrome(palette)] {
+                let context = "dark: \(dark), surface: \(TabCore.RGBColor(surface.nsColor))"
+                XCTAssertGreaterThanOrEqual(contrast(palette.fg, on: surface), 7, context)
+                XCTAssertGreaterThanOrEqual(contrast(palette.fgMuted, on: surface), 4.5, context)
+                XCTAssertGreaterThanOrEqual(contrast(palette.accent, on: surface), 4.5, context)
+            }
+            XCTAssertGreaterThanOrEqual(contrast(palette.accentForeground, on: palette.accent), 4.5, "dark: \(dark)")
+            // No yellow reaches 4.5 on paper and still reads as yellow.
+            let card = AppTheme.card(palette)
+            for index in 1...14 where index != 7 {
+                let color = ChromeColor(try XCTUnwrap(scheme.paletteColor(index)))
+                let minimum = index >= 8 ? 3 : dark ? 4.5 : 3.9
+                XCTAssertGreaterThanOrEqual(contrast(color, on: card), minimum, "dark: \(dark), color \(index)")
+            }
+            let selection = try XCTUnwrap(scheme.selectionBackground).resolve(foreground: palette.fg.rgb, background: card.rgb)
+            let selected = try XCTUnwrap(scheme.selectionForeground).resolve(foreground: palette.fg.rgb, background: card.rgb)
+            XCTAssertGreaterThanOrEqual(contrast(ChromeColor(selected), on: ChromeColor(selection)), 7, "dark: \(dark)")
+            XCTAssertGreaterThanOrEqual(contrast(ChromeColor(selection), on: card), 1.25, "dark: \(dark)")
+        }
+    }
+
+    /// Status dots differ only by color: connected, connecting and failing
+    /// servers draw in the accent, the warning and the danger color.
+    func testAccentWarningAndDangerStayApart() throws {
+        for dark in [true, false] {
+            let (_, palette) = try builtIn(dark: dark)
+            let colors = [palette.accent, palette.warning, palette.danger].map { $0.rgb.value }
+            for (first, second) in [(0, 1), (0, 2), (1, 2)] {
+                XCTAssertGreaterThanOrEqual(TerminalPalette.distance(colors[first], colors[second]).squareRoot(), 85,
+                                            "dark: \(dark), \(first) and \(second)")
+            }
+        }
+    }
+}
+
+private extension ChromeColor {
+    var rgb: TabCore.RGBColor { TabCore.RGBColor(nsColor) }
 }
 
 @MainActor

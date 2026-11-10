@@ -278,7 +278,7 @@ public final class AppTheme: ObservableObject {
             let raised = palette.raised.nsColor
             let fill: GlassPlane? = switch (isKey, isActive) {
             case (true, true): GlassPlane(raised.withAlphaComponent(0.5))
-            case (true, false): GlassPlane(NSColor(srgbRed: 0.122, green: 0.137, blue: 0.157, alpha: 0.05), blend: "plusD")
+            case (true, false): GlassPlane(fg(alpha: 0.05), blend: "plusD")
             case (false, _): GlassPlane(raised.withAlphaComponent(0.4))
             }
             return GlassRecipe(tint: canvas.withAlphaComponent(0.1), backdrop: isKey && isActive ? GlassPlane(raised.withAlphaComponent(0.85)) : nil, fill: fill)

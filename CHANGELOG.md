@@ -3,6 +3,24 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.91.0 - 2026-11-10
+
+### Added
+
+- A new website introduces Tab's terminal, agent, simulator and browser panes,
+  with download and installation guidance.
+
+### Changed
+
+- Tab's light and dark themes use warm neutrals and ochre accents that match
+  the website, with clearer text, selections and terminal colors.
+- The project overview now shares the website's messaging and product screenshot.
+
+### Fixed
+
+- Editor, diff, Files and Source Control views update their colors when the
+  theme changes, including after being hidden.
+
 ## 0.90.0 - 2026-11-10
 
 ### Changed

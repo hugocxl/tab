@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import TabCore
 
 /// A layer-backed view that redraws when its theme's palette changes. Only
 /// views in a window listen, so detached views cost nothing.
@@ -9,6 +10,14 @@ open class ThemedView: NSView {
         didSet { subscribe() }
     }
 
+    /// Called when the theme's colors differ from the ones in use when this
+    /// was set, so a controller that colors plain AppKit views applies them
+    /// again. A change the view missed outside a window arrives when it returns.
+    public var onColorsChange: (() -> Void)? {
+        didSet { appliedColors = ThemeColors(theme) }
+    }
+
+    private var appliedColors: ThemeColors?
     private var paletteObservation: AnyCancellable?
     private var keyObservation: AnyCancellable?
 
@@ -49,8 +58,17 @@ open class ThemedView: NSView {
         // theme's color properties, so deliver after that mutation has completed.
         paletteObservation = Publishers.Merge3(theme.$palette.dropFirst().map { _ in () }, theme.$interface.dropFirst().map { _ in () }, theme.$accessibility.dropFirst().map { _ in () })
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.themeDidChange() }
+            .sink { [weak self] _ in self?.applyTheme() }
+        applyTheme()
+    }
+
+    private func applyTheme() {
         themeDidChange()
+        guard let onColorsChange else { return }
+        let colors = ThemeColors(theme)
+        guard colors != appliedColors else { return }
+        appliedColors = colors
+        onColorsChange()
     }
 
     /// Called when the palette changes while the view is in a window.
@@ -152,4 +170,15 @@ func makeLabel(_ text: String, font: NSFont = AppFont.body, color: NSColor? = ni
     label.lineBreakMode = .byTruncatingTail
     label.translatesAutoresizingMaskIntoConstraints = false
     return label
+}
+
+private struct ThemeColors: Equatable {
+    let palette: ChromePalette
+    let scheme: TabCore.ColorScheme
+
+    @MainActor
+    init(_ theme: AppTheme) {
+        palette = theme.palette
+        scheme = theme.scheme
+    }
 }

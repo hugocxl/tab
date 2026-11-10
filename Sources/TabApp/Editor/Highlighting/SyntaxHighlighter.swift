@@ -152,7 +152,7 @@ public struct SyntaxColors: Sendable {
 
     public init(scheme: ColorScheme, palette: ChromePalette) {
         func color(_ index: Int, _ fallback: UInt32) -> TabCore.RGBColor { scheme.paletteColor(index) ?? TabCore.RGBColor(fallback) }
-        let fg = scheme.foreground ?? TabCore.RGBColor(0xCECDC8)
+        let fg = scheme.foreground ?? TabCore.RGBColor(0xCED0C6)
         foreground = fg
         colors = [
             .keyword: color(5, 0xC678DD),

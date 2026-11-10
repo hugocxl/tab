@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f5f3ed">
+  <title>Tab — Native terminal multiplexer + ADE for Mac</title>
+  <meta name="description" content="Terminal, agent, simulator, and browser panes. One fully native Mac workspace. Tab is a terminal multiplexer and agent development environment with its own server.">
+  <link rel="canonical" href="https://hugocxl.github.io/tab/">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Tab — Your terminal. Your agents. Your whole dev loop.">
+  <meta property="og:description" content="A fully native terminal multiplexer + agent development environment for Mac. Four first-class panes. Its own server. One workspace.">
+  <meta property="og:url" content="https://hugocxl.github.io/tab/">
+  <meta property="og:image" content="https://hugocxl.github.io/tab/assets/tab-window.png">
+  <meta property="og:image:alt" content="Tab workspace with agent conversations, terminals, an iPhone simulator, a browser pane, and the file explorer">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="preload" href="assets/fonts/Junicode-Regular-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header wrap">
+    <a class="wordmark" href="./" aria-label="Tab home">
+      <img src="assets/mascot.svg" width="36" height="36" alt="">
+      <span>Tab</span>
+    </a>
+    <nav aria-label="Main navigation">
+      <a href="https://github.com/hugocxl/tab">GitHub</a>
+      <a class="nav-download" href="#download">Download</a>
+    </nav>
+  </header>
+  <main id="main">
+    <section class="hero wrap" aria-labelledby="hero-title">
+      <div class="eyebrow"><span class="status-dot"></span> A terminal multiplexer + ADE for Mac</div>
+      <h1 id="hero-title">Your terminal.<br>Your agents.<br><span>Your whole dev loop.</span></h1>
+      <div class="hero-bottom">
+        <div>
+          <p class="hero-description">Terminal, agent, simulator, and browser panes.<br class="desktop-break"> First-class citizens. One fully native workspace.</p>
+          <div class="actions"><a class="button" href="https://github.com/hugocxl/tab/releases/latest">Download for Mac <span aria-hidden="true">↗</span></a><a class="text-link" href="https://github.com/hugocxl/tab">Explore the source <span aria-hidden="true">↗</span></a></div>
+          <p class="requirements">macOS 14+ <span>·</span> Apple silicon <span>·</span> Free &amp; open source</p>
+        </div>
+        <img class="hero-mascot" src="assets/mascot.svg" width="180" height="180" alt="Tab’s pearl-white mascot">
+      </div>
+    </section>
+    <figure class="product wrap">
+      <a href="assets/tab-window.png" aria-label="View the Tab screenshot at full size"><img src="assets/tab-window.png" width="1920" height="1080" alt="Tab workspace with agent conversations, terminals, an iPhone simulator, a browser pane, and the file explorer" fetchpriority="high"></a>
+      <figcaption><span>Four panes. One workspace. Arrange yours your way.</span><span>Swift + AppKit / Ghostty terminal engine</span></figcaption>
+    </figure>
+    <section class="workspace wrap section" id="workspace" aria-labelledby="workspace-title">
+      <div class="section-heading"><p class="eyebrow">01 / The workspace</p><h2 id="workspace-title">Four panes.<br>Equal footing.</h2><p>Your shell, your coding agent, and the app you’re building belong together. Give each one the space it needs.</p></div>
+      <div class="pane-grid">
+        <article class="pane-card"><div class="pane-label"><span class="pane-icon icon-terminal" aria-hidden="true"></span><span>01</span></div><h3>Terminal</h3><p>Your shell, at home. Run commands, watch logs, and keep development servers going with the Ghostty terminal engine.</p><span class="pane-detail">Split. Resize. Keep running.</span></article>
+        <article class="pane-card"><div class="pane-label"><span class="pane-icon icon-agents" aria-hidden="true"></span><span>02</span></div><h3>Agent</h3><p>Work with Claude Code or Codex in a native conversation pane. Keep the tools to inspect and test their changes right beside them.</p><span class="pane-detail">From conversation to running code.</span></article>
+        <article class="pane-card"><div class="pane-label"><span class="pane-icon icon-simulator" aria-hidden="true"></span><span>03</span></div><h3>Simulator</h3><p>See your mobile app where you’re working. Interact with iOS simulators and Android emulators in their own panes.</p><span class="pane-detail">Build it. Run it. Touch it.</span></article>
+        <article class="pane-card"><div class="pane-label"><span class="pane-icon icon-browser" aria-hidden="true"></span><span>04</span></div><h3>Browser</h3><p>Open your local app, a preview, or the docs. Keep the page in view while you change the code that powers it.</p><span class="pane-detail">Your feedback loop, in the layout.</span></article>
+      </div>
+    </section>
+    <section class="native-band" aria-labelledby="native-title"><div class="wrap native-content"><p class="eyebrow">Mac, through and through.</p><h2 id="native-title">Fully native.<br>Right down to the feel.</h2><p>Written in Swift. Built with AppKit. Native keyboard shortcuts, flexible split panes, and macOS glass surfaces. A workspace made for the Mac you’re using.</p><div class="native-facts"><span>Swift + AppKit</span><span>Apple silicon</span><span>No Electron</span></div></div></section>
+    <section class="wrap section" aria-labelledby="workflow-title">
+      <div class="section-heading"><p class="eyebrow">02 / A little more room to work</p><h2 id="workflow-title">One project.<br>As many angles as you need.</h2></div>
+      <div class="feature-rows">
+        <article><span class="row-number">01</span><h3>A tab for the task.</h3><p>Give each project or Git worktree its own sidebar tab. Arrange panes inside it. Keep parallel tasks separate, with files and Git diffs close at hand.</p></article>
+        <article><span class="row-number">02</span><h3>Your agents.<br>Your way of working.</h3><p>Use your installed and authenticated Claude Code or Codex CLI in native agent panes. Prefer another CLI agent? Run it in a terminal pane.</p></article>
+        <article><span class="row-number">03</span><h3>Local feel.<br>Remote Mac.</h3><p>Connect to another Mac over SSH. Work with its projects, terminals, and simulators. Browser pages travel through the server’s tunnels, so localhost stays with the workspace.</p></article>
+      </div>
+    </section>
+    <section class="server-section wrap" aria-labelledby="server-title">
+      <div><p class="eyebrow">03 / Its own server. Included.</p><h2 id="server-title">Close the app.<br>Keep your terminals running.</h2><p>Tab’s background server owns your terminal sessions and workspace state. Quit the desktop app, come back later, and reconnect to your work.</p><p class="server-note">The Mac running your workspace needs to stay awake. Closing a terminal pane ends that session.</p></div>
+      <div class="server-diagram" role="img" aria-label="The Tab desktop app and tab CLI connect to the included tabd server, which owns sessions and workspace state"><div class="diagram-clients"><span>Tab app</span><span>tab CLI</span></div><div class="diagram-lines" aria-hidden="true"></div><div class="diagram-server"><span class="status-dot"></span><strong>tabd</strong><span>Included background server</span></div><p>Terminal sessions · Workspace state</p></div>
+    </section>
+    <section class="wrap section faq" aria-labelledby="faq-title">
+      <div class="section-heading"><p class="eyebrow">A few useful details</p><h2 id="faq-title">Before you open Tab.</h2></div>
+      <details><summary>What’s an ADE?</summary><p>An agent development environment: a workspace for working with coding agents and the tools around them. Tab combines that with a terminal multiplexer, bringing agents, terminals, simulators, and browsers into one native Mac app.</p></details>
+      <details><summary>What do I need to run it?</summary><p>A Mac with Apple silicon running macOS 14 or later. Native agent conversations use an installed, authenticated Claude Code or Codex CLI. iOS simulators need Xcode and a simulator runtime; Android emulators need the Android SDK and an emulator.</p></details>
+      <details><summary>Does Tab include an agent subscription?</summary><p>No. Tab is free and open source. You use your own agent CLI and provider account; any provider fees are separate.</p></details>
+      <details><summary>What comes in the download?</summary><p>The native desktop app, the <code>tab</code> command-line tool, and the <code>tabd</code> background server, together in one Mac app bundle.</p></details>
+      <details><summary>Can I build it myself?</summary><p>Yes. Tab is MIT licensed. The <a href="https://github.com/hugocxl/tab#build-from-source">README has build instructions</a>, and the full source is on GitHub.</p></details>
+    </section>
+    <section class="download wrap" id="download" aria-labelledby="download-title">
+      <img src="assets/mascot.svg" alt="" width="130" height="130" loading="lazy">
+      <p class="eyebrow">Make yourself a workspace.</p><h2 id="download-title">It all comes together in Tab.</h2>
+      <a class="button" href="https://github.com/hugocxl/tab/releases/latest">Download for Mac <span aria-hidden="true">↗</span></a>
+      <p class="requirements">macOS 14+ <span>·</span> Apple silicon <span>·</span> Free &amp; open source</p>
+      <ol class="install-steps"><li><span>1</span> Download the latest DMG.</li><li><span>2</span> Drag Tab into Applications.</li><li><span>3</span> Open a project. Make it yours.</li></ol>
+    </section>
+  </main>
+  <footer class="site-footer wrap"><a class="wordmark" href="./">Tab<span class="wordmark-dot">.</span></a><p>Made for Mac. Open to everyone.</p><nav aria-label="Footer"><a href="https://github.com/hugocxl/tab">Source</a><a href="https://github.com/hugocxl/tab/blob/main/CHANGELOG.md">Changelog</a><a href="https://github.com/hugocxl/tab/blob/main/LICENSE">MIT License</a></nav></footer>
+</body>
+</html>
