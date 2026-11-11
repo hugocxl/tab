@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.24.1 - 2026-11-11
+
+### Fixed
+
+- Swiping in a terminal now scrolls programs that use the mouse, such as Claude
+  Code, instead of doing nothing.
+
 ## 0.24.0 - 2026-11-10
 
 ### Changed

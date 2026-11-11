@@ -400,7 +400,7 @@ final class TerminalView: UIView, UIKeyInput, TerminalDisplay {
         if modes.mouseTracking || (modes.alternateScroll && controller.grid?.historyTotal == 0) {
             let cell = cell(at: location) ?? (0, 0)
             for _ in 0..<min(abs(rows), 100) {
-                controller.send(.mouse(MouseEvent(action: .press, scroll: rows > 0 ? .up : .down,
+                controller.send(.mouse(MouseEvent(action: .scroll, scroll: rows > 0 ? .up : .down,
                                                   col: cell.col, row: cell.row)))
             }
         } else {

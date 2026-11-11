@@ -167,7 +167,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.24.0;
+				MARKETING_VERSION = 0.24.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.hugocorta.tabios;
 				PRODUCT_NAME = Tab;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -206,7 +206,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.24.0;
+				MARKETING_VERSION = 0.24.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.hugocorta.tabios;
 				PRODUCT_NAME = Tab;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
