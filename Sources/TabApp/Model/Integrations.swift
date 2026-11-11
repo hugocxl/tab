@@ -159,7 +159,11 @@ extension ServerAPI {
 extension AppModel: UpdaterHost {
     public var localServerBuild: BuildInfo? { connections[.local]?.main?.server.build }
 
+    public var localServerInstance: UInt64? { connections[.local]?.main?.server.instance }
+
     public var runningSessionCount: Int { localSessionCount }
+
+    public var runningAgentCount: Int { connections[.local]?.activity.agents.count ?? 0 }
 
     public func endAllSessions() async throws {
         guard let main = connections[.local]?.main else { throw ModelError("This Mac's server is not running.") }
@@ -176,7 +180,9 @@ extension AppModel: UpdaterHost {
         return (try? await main.stopServerIfIdle()) ?? false
     }
 
-    public func prepareToQuitForUpdate() -> Bool {
+    public func prepareToQuitForUpdate() async throws -> Bool {
+        guard !openEditors.contains(where: \.isDirty) else { return false }
+        try await flushAgentDrafts()
         saveNow()
         browserProfiles.saveHistories()
         return !openEditors.contains(where: \.isDirty)

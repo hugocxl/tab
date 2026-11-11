@@ -160,35 +160,31 @@ public struct Installation: Equatable, Sendable {
         defer { lock.unlock() }
         guard let entries = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else { return }
         for entry in entries where owns(entry) && entry.standardizedFileURL != keeping?.standardizedFileURL {
-            let previous = entry.appendingPathComponent(PreparedUpdate.previousName)
-            if FileManager.default.fileExists(atPath: previous.path), RunningProcesses.anyRunning(inside: previous) {
-                continue
-            }
+            // A crash after the atomic exchange can leave the old running
+            // bundle at the candidate path instead of previous.app.
+            if RunningProcesses.anyRunning(inside: entry) { continue }
+            // Another profile may have a verified download here. Its pending
+            // record is not ours, so only explicit discard may remove it.
+            let candidate = entry.appendingPathComponent(bundle.lastPathComponent)
+            if FileManager.default.fileExists(atPath: candidate.path) { continue }
             try? FileManager.default.removeItem(at: entry)
         }
     }
 
     @discardableResult
-    static func run(_ program: String, _ arguments: [String]) throws -> String {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: program)
-        process.arguments = arguments
-        let output = Pipe()
-        process.standardOutput = output
-        process.standardError = output
-        process.standardInput = FileHandle.nullDevice
+    static func run(_ program: String, _ arguments: [String], timeout: TimeInterval = 120) throws -> String {
         do {
-            try process.run()
+            let output = try BoundedProcess.run(
+                program: program, arguments: arguments, environment: ProcessInfo.processInfo.environment,
+                directory: "/", timeout: timeout, limit: 1_048_576)
+            return String(decoding: output.stdout, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        } catch BoundedProcess.Failure.timedOut {
+            throw UpdateError.install("\((program as NSString).lastPathComponent) timed out. Try the update again.")
+        } catch BoundedProcess.Failure.exited(let reason), BoundedProcess.Failure.io(let reason) {
+            throw UpdateError.install("\((program as NSString).lastPathComponent) failed: \(reason)")
         } catch {
-            throw UpdateError.install("\(program) failed: \(error.localizedDescription)")
+            throw UpdateError.install("\((program as NSString).lastPathComponent) failed: \(String(describing: error))")
         }
-        let data = output.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        let text = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard process.terminationStatus == 0 else {
-            throw UpdateError.install("\((program as NSString).lastPathComponent) failed: \(text)")
-        }
-        return text
     }
 }
 
@@ -233,7 +229,7 @@ public struct PreparedUpdate: Equatable, Sendable {
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         process.arguments = [
             "-c",
-            "while /bin/kill -0 \"$1\" 2>/dev/null; do /bin/sleep 0.1; done; /usr/bin/open \"$2\"",
+            "while /bin/kill -0 \"$1\" 2>/dev/null; do /bin/sleep 0.1; done; /usr/bin/open -n \"$2\"",
             "tab-relaunch", String(pid), bundle.path,
         ]
         process.standardInput = FileHandle.nullDevice
@@ -250,24 +246,25 @@ public struct PreparedUpdate: Equatable, Sendable {
     public func discard() {
         guard let lock = try? installation.replacementLock() else { return }
         defer { lock.unlock() }
-        guard installation.owns(staging), !FileManager.default.fileExists(atPath: backup.path) else { return }
+        guard installation.owns(staging), !FileManager.default.fileExists(atPath: backup.path),
+              !RunningProcesses.anyRunning(inside: staging) else { return }
         try? FileManager.default.removeItem(at: staging)
     }
 }
 
-/// Moves app bundles with a rollback at every step.
+/// Exchanges app bundles atomically, with a rollback at every subsequent step.
 public enum BundleReplacement {
-    /// Moves `current` to `backup` and `next` to `current`, then runs
-    /// `then`. When a step fails, `current` is restored.
+    /// Exchanges `current` and `next`, keeps the old bundle at `backup`, then
+    /// runs `then`. The installed path remains present even if the process exits.
     public static func replace(current: URL, next: URL, backup: URL, then: () throws -> Void = {}) throws {
-        try move(current, to: backup, failure: "Could not move the installed app aside")
+        try exchange(current, next)
         do {
-            try move(next, to: current, failure: "Could not install the update")
+            try move(next, to: backup, failure: "Could not keep the previous app")
         } catch {
             do {
-                try move(backup, to: current, failure: "")
+                try exchange(current, next)
             } catch {
-                throw UpdateError.install("Could not install the update or restore the previous app. The previous app is at \(backup.path).")
+                throw UpdateError.install("Could not restore the previous app. It is at \(next.path).")
             }
             throw error
         }
@@ -275,12 +272,18 @@ public enum BundleReplacement {
             try then()
         } catch {
             do {
-                try move(current, to: next, failure: "Could not move the new app aside")
-                try move(backup, to: current, failure: "Could not restore the previous app")
+                try exchange(current, backup)
+                try move(backup, to: next, failure: "Could not restore the staged update")
             } catch {
-                throw UpdateError.install("Could not relaunch or restore the previous app. The previous app is at \(backup.path).")
+                throw UpdateError.install("Could not finish rolling back the update. Check \(current.path) and \(backup.path).")
             }
             throw error
+        }
+    }
+
+    private static func exchange(_ first: URL, _ second: URL) throws {
+        guard renamex_np(first.path, second.path, UInt32(RENAME_SWAP)) == 0 else {
+            throw UpdateError.install("Could not exchange the app bundles: \(String(cString: strerror(errno)))")
         }
     }
 

@@ -8,8 +8,12 @@ public protocol UpdaterHost: AnyObject {
     /// The connected local server's build (version and protocol versions);
     /// `nil` while disconnected.
     var localServerBuild: BuildInfo? { get }
+    /// Changes each time the local server process starts.
+    var localServerInstance: UInt64? { get }
     /// Terminals on the local server, including idle and detached ones.
     var runningSessionCount: Int { get }
+    /// Open agent sessions, including chats waiting for input.
+    var runningAgentCount: Int { get }
     /// Stops the local server, ending every terminal on it.
     func endAllSessions() async throws
     /// Stops the local server only when no terminal runs; returns whether it stops.
@@ -18,7 +22,7 @@ public protocol UpdaterHost: AnyObject {
     func restartLocalServer() async throws
     /// Saves state and settles unsaved editors before quitting for an
     /// update; `false` cancels the install.
-    func prepareToQuitForUpdate() -> Bool
+    func prepareToQuitForUpdate() async throws -> Bool
     /// Quits the app. The new version is already in place and starts once
     /// this process exits.
     func quitForUpdate()
@@ -41,6 +45,8 @@ public enum UpdaterStatus: Equatable, Sendable {
     /// Downloaded and verified, waiting for the person.
     case ready(version: String)
     case installing(version: String)
+    /// The bundle was replaced; quitting may still be cancelled by unsaved work.
+    case installed(version: String)
     /// Restarting the outdated local server on this app's build.
     case restartingServer
 }
@@ -78,14 +84,15 @@ public final class UpdaterController {
             return UpdateChip.Ready(version: prepared.version, compatible: UpdateDecision.isCompatible(prepared.manifest, with: server))
         }
         var outdatedServer: String?
-        if let version = server?.version, sessions > 0, version != dismissedServer,
+        if let version = server?.version, version != dismissedServer,
            UpdateDecision.isOutdated(serverVersion: version, appVersion: Release.version) {
             outdatedServer = version
         }
         let checking = manualCheck && (status == .checking || installation == nil)
         let offered = available.map(\.version).flatMap { $0 == dismissedAvailable ? nil : $0 }
         return UpdateChip.make(status: status, notice: notice, checking: checking, showsDownload: downloadingVersion != dismissedDownload,
-                               available: downloadingVersion == nil ? offered : nil, ready: ready, outdatedServer: outdatedServer, sessions: sessions)
+                               available: downloadingVersion == nil ? offered : nil, ready: ready, outdatedServer: outdatedServer,
+                               sessions: sessions, agents: host.runningAgentCount, waitingForServer: server == nil && prepared?.version != dismissedReady ? prepared?.version : nil)
     }
 
     private weak var host: UpdaterHost?
@@ -97,6 +104,13 @@ public final class UpdaterController {
     private var timer: Timer?
     private var task: Task<Void, Never>?
     private var replacingServer = false
+    private var operations = UpdaterOperations()
+
+    /// App termination must not cancel a bundle replacement in progress.
+    var isInstalling: Bool {
+        if case .installing = status { return true }
+        return false
+    }
     /// A check the person asked for is running or waits for the updater to start.
     private var manualCheck = false
     /// Server controls wait while an update is being installed or downloaded.
@@ -116,6 +130,8 @@ public final class UpdaterController {
     }
     private var noticeTimer: Timer?
     private var serverRestartTimer: Timer?
+    private var serverRestartAttempt: UUID?
+    private var restartingInstance: UInt64?
     private var dismissedAvailable: String?
     private var dismissedReady: String?
     private var dismissedDownload: String?
@@ -133,6 +149,18 @@ public final class UpdaterController {
         updatedMarker = dirs.root.appendingPathComponent("updated-to")
         serverStartupLock = dirs.root.appendingPathComponent("server.startup-lock")
         downloader = UpdateDownloader(configuration: configuration)
+    }
+
+    init(host: UpdaterHost, dirs: TabDirs, prepared: PreparedUpdate, operations: UpdaterOperations) {
+        self.host = host
+        record = dirs.root.appendingPathComponent("pending-update.json")
+        updatedMarker = dirs.root.appendingPathComponent("updated-to")
+        serverStartupLock = dirs.root.appendingPathComponent("server.startup-lock")
+        downloader = UpdateDownloader()
+        installation = prepared.installation
+        self.prepared = prepared
+        self.operations = operations
+        status = .ready(version: prepared.version)
     }
 
     /// Uses a new session configuration, such as after the proxy changed.
@@ -160,7 +188,7 @@ public final class UpdaterController {
                     return .failure(.unavailable(error.localizedDescription))
                 }
             }.value
-            guard let self else { return }
+            guard let self, !Task.isCancelled else { return }
             self.task = nil
             switch result {
             case .failure(let error):
@@ -203,7 +231,7 @@ public final class UpdaterController {
         dismissedDownload = nil
         dismissedServer = nil
         switch status {
-        case .installing, .restartingServer:
+        case .installing, .installed, .restartingServer, .downloading, .preparing:
             host?.updaterDidChange()
             return
         case .unavailable(let reason):
@@ -246,6 +274,16 @@ public final class UpdaterController {
             previewNextChip()
             return
         }
+        if status == .checking {
+            switch action {
+            case .download, .update, .restartServer, .endTerminalsAndUpdate, .endTerminalsAndRestartServer:
+                task?.cancel()
+                task = nil
+                manualCheck = false
+                refreshStatus()
+            default: break
+            }
+        }
         switch action {
         case .download:
             download()
@@ -254,7 +292,9 @@ public final class UpdaterController {
         case .endTerminalsAndUpdate:
             install(.endTerminals)
         case .restartServer:
-            if host?.runningSessionCount ?? 0 > 0 { notice = .confirmServerRestart } else { restartServer() }
+            guard !isBusy else { return }
+            dismissedServer = nil
+            notice = .confirmServerRestart
         case .endTerminalsAndRestartServer:
             restartServer()
         case .checkAgain:
@@ -277,14 +317,17 @@ public final class UpdaterController {
     public func reconcile() {
         guard let host else { return }
         if status == .restartingServer {
-            guard let build = host.localServerBuild,
+            guard let instance = host.localServerInstance, instance != restartingInstance,
+                  let build = host.localServerBuild,
                   !UpdateDecision.isOutdated(serverVersion: build.version, appVersion: Release.version) else { return }
             serverRestartTimer?.invalidate()
+            serverRestartAttempt = nil
+            task = nil
             refreshStatus()
             notice = .serverRestarted(version: build.version)
             return
         }
-        guard !isBusy, host.localServerBuild != nil, !replacingServer,
+        guard !isBusy, host.localServerBuild != nil, !replacingServer, host.runningAgentCount == 0,
               UpdateDecision.shouldReplaceServer(serverVersion: host.localServerBuild?.version, appVersion: Release.version,
                                                  sessions: host.runningSessionCount)
         else { return }
@@ -299,7 +342,7 @@ public final class UpdaterController {
 
     private var isBusy: Bool {
         switch status {
-        case .checking, .downloading, .preparing, .installing, .restartingServer: return true
+        case .checking, .downloading, .preparing, .installing, .installed, .restartingServer: return true
         default: return false
         }
     }
@@ -316,13 +359,15 @@ public final class UpdaterController {
         guard !isBusy, installation != nil else { return }
         status = .checking
         let downloader = downloader
+        let operations = operations
         task = Task { [weak self] in
             let result: Result<UpdateManifest?, Error>
             do {
-                result = .success(try await downloader.latest())
+                result = .success(try await operations.latest(downloader))
             } catch {
                 result = .failure(error)
             }
+            guard !Task.isCancelled else { return }
             self?.finishCheck(result)
         }
     }
@@ -345,11 +390,13 @@ public final class UpdaterController {
             refreshStatus()
             if manual { notice = .checkFailed(UpdateChip.reason(error)) }
         case .success(let latest):
+            if case .checkFailed = notice { notice = nil }
             available = Self.newerRelease(latest, than: prepared?.version)
             refreshStatus()
             if manual, available == nil, prepared == nil { notice = .upToDate(version: Release.version) }
         }
         host?.updaterDidChange()
+        reconcile()
     }
 
     /// Update: downloads and verifies the available release in the background.
@@ -368,12 +415,17 @@ public final class UpdaterController {
                 let archive = try await downloader.download(manifest, into: folder) { fraction in
                     Task { @MainActor in self?.downloadProgressed(version, fraction) }
                 }
+                try Task.checkCancellation()
                 self?.status = .preparing(version: version)
                 result = .success(try await Task.detached(priority: .utility) {
                     try installation.prepare(archive: archive, manifest: manifest)
                 }.value)
             } catch {
                 result = .failure(error)
+            }
+            guard !Task.isCancelled else {
+                if case .success(let update) = result { Task.detached(priority: .utility) { update.discard() } }
+                return
             }
             self?.finishDownload(result, version: version)
         }
@@ -402,6 +454,7 @@ public final class UpdaterController {
             refreshStatus()
         }
         host?.updaterDidChange()
+        reconcile()
     }
 
     private func refreshStatus() {
@@ -436,9 +489,13 @@ public final class UpdaterController {
     }
 
     private func update() {
+        if case .installed = status {
+            host?.quitForUpdate()
+            return
+        }
         guard let prepared, let host, let server = host.localServerBuild else { return }
         let compatible = UpdateDecision.isCompatible(prepared.manifest, with: server)
-        switch UpdateDecision.step(compatible: compatible, sessions: host.runningSessionCount) {
+        switch UpdateDecision.step(compatible: compatible, sessions: host.runningSessionCount, agents: host.runningAgentCount) {
         case .install: install(.keepServer)
         case .installStoppingIdleServer: install(.stopIdleServer)
         case .confirmEndingTerminals: notice = .confirmUpdate
@@ -448,22 +505,35 @@ public final class UpdaterController {
     /// Replaces the app and relaunches.
     private func install(_ mode: InstallMode) {
         guard let prepared, let host, !isBusy, host.localServerBuild != nil else { return }
-        guard host.prepareToQuitForUpdate() else {
-            notice = .unsavedEditors
-            return
-        }
         notice = nil
         status = .installing(version: prepared.version)
         let record = record
         let updatedMarker = updatedMarker
         let serverStartupLock = serverStartupLock
+        let operations = operations
         task = Task { [weak self] in
             do {
+                guard try await host.prepareToQuitForUpdate() else {
+                    self?.task = nil
+                    self?.refreshStatus()
+                    self?.notice = .unsavedEditors
+                    return
+                }
+                try Task.checkCancellation()
                 let lease = try await Task.detached(priority: .userInitiated) {
                     try FileLock.tryLock(serverStartupLock)
                 }.value
                 defer { lease.unlock() }
-                try await Task.detached(priority: .userInitiated) { try prepared.validate() }.value
+                do {
+                    try await Task.detached(priority: .userInitiated) { try operations.validate(prepared) }.value
+                } catch {
+                    self?.prepared = nil
+                    if self?.available == nil { self?.available = prepared.manifest }
+                    try? FileManager.default.removeItem(at: record)
+                    Task.detached(priority: .utility) { prepared.discard() }
+                    throw error
+                }
+                try Task.checkCancellation()
                 switch mode {
                 case .keepServer:
                     // The server may have been replaced by an older one since the person chose.
@@ -477,16 +547,23 @@ public final class UpdaterController {
                     guard await host.stopLocalServerIfIdle() else {
                         self?.task = nil
                         self?.refreshStatus()
+                        self?.notice = .installFailed("The server is busy with terminals or agents, or could not be reached. Try again once it is idle.")
                         return
                     }
                 case .endTerminals:
-                    try await host.endAllSessions()
+                    if !UpdateDecision.isCompatible(prepared.manifest, with: host.localServerBuild) {
+                        try await host.endAllSessions()
+                    }
                 }
                 try await Task.detached(priority: .userInitiated) {
-                    try prepared.install()
+                    try operations.install(prepared)
                     try? FileManager.default.removeItem(at: record)
                     UpdatedMarker.save(prepared.version, to: updatedMarker)
                 }.value
+                self?.prepared = nil
+                self?.available = nil
+                self?.task = nil
+                self?.status = .installed(version: prepared.version)
                 host.quitForUpdate()
             } catch {
                 guard let self else { return }
@@ -505,15 +582,22 @@ public final class UpdaterController {
     private func restartServer() {
         guard let host, !isBusy else { return }
         notice = nil
+        let attempt = UUID()
+        serverRestartAttempt = attempt
+        restartingInstance = host.localServerInstance
         status = .restartingServer
         serverRestartTimer?.invalidate()
         serverRestartTimer = Timer.scheduledTimer(withTimeInterval: Self.serverRestartTimeout, repeats: false) { [weak self] _ in
-            MainActor.assumeIsolated { self?.serverRestartFailed("The server didn’t come back in time.") }
+            MainActor.assumeIsolated {
+                guard self?.serverRestartAttempt == attempt else { return }
+                self?.serverRestartFailed("The server didn’t come back in time.")
+            }
         }
-        Task { [weak self] in
+        task = Task { [weak self] in
             do {
                 try await host.restartLocalServer()
             } catch {
+                guard !Task.isCancelled, self?.serverRestartAttempt == attempt else { return }
                 self?.serverRestartFailed(UpdateChip.reason(error))
             }
         }
@@ -522,6 +606,9 @@ public final class UpdaterController {
     private func serverRestartFailed(_ reason: String) {
         guard status == .restartingServer else { return }
         serverRestartTimer?.invalidate()
+        serverRestartAttempt = nil
+        task?.cancel()
+        task = nil
         refreshStatus()
         notice = .serverRestartFailed(reason)
     }
@@ -575,9 +662,17 @@ enum PendingUpdateRecord {
         do {
             try update.validate()
         } catch {
+            update.discard()
             try? FileManager.default.removeItem(at: url)
             return nil
         }
         return update
     }
+}
+
+/// External work, separated from orchestration for failure-path tests.
+struct UpdaterOperations {
+    var latest: @Sendable (UpdateDownloader) async throws -> UpdateManifest? = { try await $0.latest() }
+    var validate: @Sendable (PreparedUpdate) throws -> Void = { try $0.validate() }
+    var install: @Sendable (PreparedUpdate) throws -> Void = { try $0.install() }
 }

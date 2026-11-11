@@ -26,9 +26,9 @@ public enum UpdateDecision {
     }
 
     /// What installing does now. Nothing ends without asking.
-    public static func step(compatible: Bool, sessions: Int) -> UpdateStep {
+    public static func step(compatible: Bool, sessions: Int, agents: Int = 0) -> UpdateStep {
         if compatible { return .install }
-        return sessions == 0 ? .installStoppingIdleServer : .confirmEndingTerminals
+        return sessions == 0 && agents == 0 ? .installStoppingIdleServer : .confirmEndingTerminals
     }
 
     /// Whether the running local server is from an older build than this app.

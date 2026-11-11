@@ -103,22 +103,24 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     public func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let model, let controller = windowController, !terminating else { return .terminateNow }
-        guard !terminationPending else { return .terminateLater }
+        guard !model.updater.isInstalling else { return .terminateCancel }
+        guard !terminationPending else { return .terminateCancel }
+        // AppKit's terminate-later loop does not run main-actor tasks. Keep
+        // the normal event loop alive until drafts are saved, then quit again.
         terminationPending = true
         let editors = model.openEditors.filter(\.isDirty)
         guard !editors.isEmpty else {
             finishAfterSavingDrafts()
-            return .terminateLater
+            return .terminateCancel
         }
         EditorPaneController.confirmClose(editors, window: controller.window) { [weak self] proceed in
             guard proceed else {
                 self?.terminationPending = false
-                NSApp.reply(toApplicationShouldTerminate: false)
                 return
             }
             self?.finishAfterSavingDrafts()
         }
-        return .terminateLater
+        return .terminateCancel
     }
 
     private func finishAfterSavingDrafts() {
@@ -126,8 +128,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
             do {
                 try await self.model?.flushAgentDrafts()
+                // Restart may have been clicked while this save was suspended.
+                guard self.model?.updater.isInstalling != true else {
+                    self.terminationPending = false
+                    return
+                }
                 self.finish()
-                NSApp.reply(toApplicationShouldTerminate: true)
+                NSApp.terminate(nil)
             } catch {
                 self.terminationPending = false
                 let alert = NSAlert()
@@ -135,7 +142,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 alert.informativeText = error.localizedDescription
                 alert.addButton(withTitle: "Keep Tab open")
                 alert.runModal()
-                NSApp.reply(toApplicationShouldTerminate: false)
             }
         }
     }

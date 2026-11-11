@@ -6,6 +6,18 @@ import XCTest
 @testable import TabApp
 
 final class UpdaterProcessTests: XCTestCase {
+    func testInstallerCommandTimeoutAndErrorsAreRecoverable() throws {
+        let started = Date()
+        XCTAssertThrowsError(try Installation.run("/bin/sh", ["-c", "sleep 30"], timeout: 0.1)) { error in
+            XCTAssertTrue(UpdateChip.reason(error).contains("timed out"))
+        }
+        XCTAssertLessThan(Date().timeIntervalSince(started), 3)
+        XCTAssertThrowsError(try Installation.run("/bin/sh", ["-c", "echo disk-full >&2; exit 1"])) { error in
+            XCTAssertTrue(UpdateChip.reason(error).contains("disk-full"))
+        }
+        XCTAssertEqual(try Installation.run("/bin/sh", ["-c", "printf done"]), "done")
+    }
+
     func testPlatformManifestAndChannelFeed() throws {
         let asset: [String: Any] = [
             "url": "https://github.com/hugocxl/tab/releases/download/v1.1.0/Tab-1.1.0-arm64.dmg",

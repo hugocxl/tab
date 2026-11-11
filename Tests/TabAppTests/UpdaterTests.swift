@@ -247,6 +247,32 @@ final class UpdaterTests: XCTestCase {
         XCTAssertEqual(UpdateChip.sentence("You’re offline."), "You’re offline.")
     }
 
+    func testErrorsAndManualChecksAreNotHiddenByUpdateOffers() {
+        let ready = UpdateChip.Ready(version: "1.1.0", compatible: true)
+        let failed = chip(.available(version: "1.2.0"), notice: .downloadFailed(version: "1.2.0", reason: "offline"),
+                          available: "1.2.0", ready: ready, outdatedServer: "1.0.0")
+        XCTAssertEqual(failed?.tone, .danger)
+        XCTAssertEqual(failed?.button?.action, .download)
+        XCTAssertEqual(chip(notice: .checkFailed("offline"), available: "1.2.0", ready: ready)?.tone, .danger)
+        XCTAssertEqual(chip(.checking, checking: true, available: "1.2.0", ready: ready)?.message, "Checking for updates…")
+        XCTAssertNil(chip(.checking, checking: true, ready: ready)?.button)
+    }
+
+    func testAppUpdateTakesPriorityOverAnOlderCompatibleServer() {
+        let ready = UpdateChip.Ready(version: "1.1.0", compatible: true)
+        XCTAssertEqual(chip(ready: ready, outdatedServer: "1.0.0", sessions: 2)?.button?.action, .update)
+        XCTAssertEqual(chip(available: "1.2.0", outdatedServer: "1.0.0", sessions: 2)?.button?.action, .download)
+        XCTAssertNil(chip(.downloading(version: "1.2.0", progress: 0.5), showsDownload: false,
+                          ready: ready, outdatedServer: "1.0.0", sessions: 2))
+        XCTAssertEqual(chip(.installed(version: "1.1.0"), ready: nil, outdatedServer: "1.0.0")?.button?.action, .update)
+    }
+
+    func testRestartWarningsIncludeAgentsEvenWithoutTerminals() {
+        let confirmation = chip(notice: .confirmServerRestart, outdatedServer: "1.0.0", sessions: 0)
+        XCTAssertEqual(confirmation?.button?.action, .endTerminalsAndRestartServer)
+        XCTAssertTrue(confirmation?.message.contains("agents") == true)
+    }
+
     /// Every sample in the debug preview still produces its chip.
     func testUpdateChipPreviewCoversEveryState() {
         XCTAssertEqual(UpdateChip.previews.count, 21)
@@ -349,10 +375,25 @@ final class UpdaterTests: XCTestCase {
         }
     }
 
+    func testCleanupPreservesAnotherProfilesStagedDownload() throws {
+        let root = try temporaryFolder()
+        let installation = Installation(bundle: root.appendingPathComponent("Tab.app"), team: "TESTTEAM00")
+        let staging = root.appendingPathComponent(".tab-update-another-profile")
+        let candidate = staging.appendingPathComponent("Tab.app")
+        try FileManager.default.createDirectory(at: candidate, withIntermediateDirectories: true)
+        installation.cleanUp()
+        XCTAssertTrue(FileManager.default.fileExists(atPath: candidate.path))
+    }
+
     func testCleanupKeepsBundlesWhoseServerStillRuns() throws {
+        try assertCleanupKeepsRunningBundle(named: "previous.app")
+        try assertCleanupKeepsRunningBundle(named: "Tab.app")
+    }
+
+    private func assertCleanupKeepsRunningBundle(named name: String) throws {
         let folder = try temporaryFolder()
         let installation = Installation(bundle: folder.appendingPathComponent("Tab.app"), team: "TESTTEAM00")
-        let busy = folder.appendingPathComponent(".tab-update-busy/previous.app")
+        let busy = folder.appendingPathComponent(".tab-update-busy/" + name)
         let idle = folder.appendingPathComponent(".tab-update-idle/previous.app")
         let kept = folder.appendingPathComponent(".tab-update-pending")
         for path in [installation.bundle, busy.deletingLastPathComponent(), idle, kept] {

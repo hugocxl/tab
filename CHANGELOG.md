@@ -3,6 +3,23 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.94.0 - 2026-11-11
+
+### Changed
+
+- Update notices show failures, retries and connection status clearly, and offer
+  ready app updates before restarting an older server.
+- Restart confirmations account for open agent sessions as well as terminals.
+
+### Fixed
+
+- Restarting after an update no longer freezes while saving agent drafts, and
+  cancelling a quit leaves the installed update ready to restart.
+- Interrupted updates preserve the installed app, running bundles and other
+  profiles' downloads, while invalid downloads can be downloaded again.
+- Update commands time out when stalled, and server restarts finish only when
+  a new server instance connects.
+
 ## 0.93.0 - 2026-11-11
 
 ### Added

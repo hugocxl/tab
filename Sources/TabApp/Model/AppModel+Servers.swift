@@ -336,7 +336,11 @@ extension AppModel {
         case .changed(let topic, _):
             switch topic {
             case .catalog: Task { await refreshCatalog(server) }
-            case .activity: Task { await refreshActivity(server) }
+            case .activity:
+                Task {
+                    await refreshActivity(server)
+                    if server.isLocal { updater.reconcile() }
+                }
             case .sessions:
                 if server.isLocal, let main = connection.main {
                     Task {
