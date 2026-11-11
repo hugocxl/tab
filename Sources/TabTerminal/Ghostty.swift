@@ -17,19 +17,15 @@ enum Ghostty {
     }
 
     static func gridRef() -> GhosttyGridRef {
-        var ref = GhosttyGridRef()
-        ref.size = MemoryLayout<GhosttyGridRef>.size
-        return ref
+        GhosttyGridRef()
     }
 
     static func style() -> GhosttyStyle {
-        var style = GhosttyStyle()
-        style.size = MemoryLayout<GhosttyStyle>.size
-        return style
+        GhosttyStyle()
     }
 
     static func selection(_ start: GhosttyGridRef, _ end: GhosttyGridRef, rectangle: Bool) -> GhosttySelection {
-        GhosttySelection(size: MemoryLayout<GhosttySelection>.size, start: start, end: end, rectangle: rectangle)
+        GhosttySelection(start: start, end: end, rectangle: rectangle)
     }
 }
 

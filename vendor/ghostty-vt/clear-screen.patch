@@ -1,8 +1,8 @@
 diff --git i/include/ghostty/vt/terminal.h w/include/ghostty/vt/terminal.h
-index b586556..07ece62 100644
+index bb887c01b..663d4ed8e 100644
 --- i/include/ghostty/vt/terminal.h
 +++ w/include/ghostty/vt/terminal.h
-@@ -3245,6 +3245,18 @@ GHOSTTY_API GhosttyResult ghostty_terminal_new(const GhosttyAllocator* allocator
+@@ -3128,6 +3128,18 @@ GHOSTTY_API GhosttyResult ghostty_terminal_new(const GhosttyAllocator* allocator
   */
  GHOSTTY_API void ghostty_terminal_free(GhosttyTerminal terminal);
  
@@ -22,11 +22,11 @@ index b586556..07ece62 100644
   * Perform a full reset of the terminal (RIS).
   *
 diff --git i/src/lib_vt.zig w/src/lib_vt.zig
-index 0625208..9c1413e 100644
+index 1a338e6ce..2bac59bbb 100644
 --- i/src/lib_vt.zig
 +++ w/src/lib_vt.zig
-@@ -326,6 +326,7 @@ comptime {
-         }
+@@ -313,6 +313,7 @@ comptime {
+         @export(&c.render_state_free, .{ .name = "ghostty_render_state_free" });
          @export(&c.terminal_new, .{ .name = "ghostty_terminal_new" });
          @export(&c.terminal_free, .{ .name = "ghostty_terminal_free" });
 +        @export(&c.terminal_clear_screen, .{ .name = "ghostty_terminal_clear_screen" });
@@ -34,10 +34,10 @@ index 0625208..9c1413e 100644
          @export(&c.terminal_resize, .{ .name = "ghostty_terminal_resize" });
          @export(&c.terminal_set, .{ .name = "ghostty_terminal_set" });
 diff --git i/src/terminal/c/main.zig w/src/terminal/c/main.zig
-index a0c0dc3..581ffbe 100644
+index 3c32b58b1..fa1a57969 100644
 --- i/src/terminal/c/main.zig
 +++ w/src/terminal/c/main.zig
-@@ -189,6 +189,7 @@ pub const sys_set = sys.set;
+@@ -194,6 +194,7 @@ pub const sys_set = sys.set;
  
  pub const terminal_new = terminal.new;
  pub const terminal_free = terminal.free;
@@ -46,10 +46,10 @@ index a0c0dc3..581ffbe 100644
  pub const terminal_resize = terminal.resize;
  pub const terminal_set = terminal.set;
 diff --git i/src/terminal/c/terminal.zig w/src/terminal/c/terminal.zig
-index 5f047f4..1979d08 100644
+index a5f6a3184..35f967fc6 100644
 --- i/src/terminal/c/terminal.zig
 +++ w/src/terminal/c/terminal.zig
-@@ -1847,6 +1847,35 @@ pub fn resize(
+@@ -1861,6 +1861,35 @@ pub fn resize(
      return .success;
  }
  

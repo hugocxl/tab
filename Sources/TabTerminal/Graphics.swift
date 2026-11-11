@@ -116,18 +116,16 @@ final class GraphicsCache {
         var width: UInt32 = 0
         var height: UInt32 = 0
         var format = GHOSTTY_KITTY_IMAGE_FORMAT_RGBA
-        var pointer: UnsafePointer<UInt8>?
-        var length = 0
-        guard ghostty_kitty_graphics_image_get(handle, GHOSTTY_KITTY_IMAGE_DATA_WIDTH, &width) == GHOSTTY_SUCCESS,
-              ghostty_kitty_graphics_image_get(handle, GHOSTTY_KITTY_IMAGE_DATA_HEIGHT, &height) == GHOSTTY_SUCCESS,
-              ghostty_kitty_graphics_image_get(handle, GHOSTTY_KITTY_IMAGE_DATA_FORMAT, &format) == GHOSTTY_SUCCESS,
-              ghostty_kitty_graphics_image_get(handle, GHOSTTY_KITTY_IMAGE_DATA_DATA_PTR, &pointer) == GHOSTTY_SUCCESS,
-              ghostty_kitty_graphics_image_get(handle, GHOSTTY_KITTY_IMAGE_DATA_DATA_LEN, &length) == GHOSTTY_SUCCESS,
-              let pointer
+        var pixelData = GhosttyString()
+        guard ghostty_kitty_graphics_image_get(handle, GHOSTTY_KITTY_GRAPHICS_IMAGE_DATA_WIDTH, &width) == GHOSTTY_SUCCESS,
+              ghostty_kitty_graphics_image_get(handle, GHOSTTY_KITTY_GRAPHICS_IMAGE_DATA_HEIGHT, &height) == GHOSTTY_SUCCESS,
+              ghostty_kitty_graphics_image_get(handle, GHOSTTY_KITTY_GRAPHICS_IMAGE_DATA_FORMAT, &format) == GHOSTTY_SUCCESS,
+              ghostty_kitty_graphics_image_get(handle, GHOSTTY_KITTY_GRAPHICS_IMAGE_DATA_PIXELS, &pixelData) == GHOSTTY_SUCCESS,
+              let pointer = pixelData.ptr
         else { return nil }
         let pixels = Int(width) * Int(height)
         guard pixels > 0, pixels * 4 <= maxGraphicsBytes,
-              let rgba = Self.premultipliedRGBA(UnsafeBufferPointer(start: pointer, count: length), pixels: pixels, format: format)
+              let rgba = Self.premultipliedRGBA(UnsafeBufferPointer(start: pointer, count: pixelData.len), pixels: pixels, format: format)
         else { return nil }
         let image = GraphicImage(id: id, generation: generation, width: width, height: height, rgba: rgba)
         images[id] = image

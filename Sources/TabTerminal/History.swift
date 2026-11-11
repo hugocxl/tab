@@ -150,11 +150,11 @@ extension Terminal {
 
         scroll(viewportActive ? .bottom : .row(Int(scrollbar.offset)))
         try updateRenderState(.history)
-        try Ghostty.check(ghostty_render_state_set(engineRender.state, GHOSTTY_RENDER_STATE_OPTION_DIRTY, &dirty), .history)
+        try Ghostty.check(ghostty_render_state_set(engineRender.state, GHOSTTY_RENDER_STATE_OPT_DIRTY, &dirty), .history)
         try forEachRow { index, rows in
             guard index < rowDirty.count else { return }
             var flag = rowDirty[index]
-            ghostty_render_state_row_set(rows, GHOSTTY_RENDER_STATE_ROW_OPTION_DIRTY, &flag)
+            ghostty_render_state_row_set(rows, GHOSTTY_RENDER_STATE_ROW_OPT_DIRTY, &flag)
         }
         if let failure { throw failure }
         return result

@@ -296,29 +296,43 @@ extension Style {
         fg = Color(engine.fg_color)
         bg = Color(engine.bg_color)
         underlineColor = Color(engine.underline_color)
-        bold = engine.bold
-        italic = engine.italic
-        faint = engine.faint
-        inverse = engine.inverse
-        invisible = engine.invisible
-        strikethrough = engine.strikethrough
-        overline = engine.overline
-        underline = switch Int(engine.underline) {
-        case Int(GHOSTTY_SGR_UNDERLINE_NONE.rawValue): .none
-        case Int(GHOSTTY_SGR_UNDERLINE_DOUBLE.rawValue): .double
-        case Int(GHOSTTY_SGR_UNDERLINE_CURLY.rawValue): .curly
-        case Int(GHOSTTY_SGR_UNDERLINE_DOTTED.rawValue): .dotted
-        case Int(GHOSTTY_SGR_UNDERLINE_DASHED.rawValue): .dashed
+        let flags = engine.flags
+        bold = flags & StyleFlag.bold != 0
+        italic = flags & StyleFlag.italic != 0
+        faint = flags & StyleFlag.faint != 0
+        inverse = flags & StyleFlag.inverse != 0
+        invisible = flags & StyleFlag.invisible != 0
+        strikethrough = flags & StyleFlag.strikethrough != 0
+        overline = flags & StyleFlag.overline != 0
+        underline = switch UInt32((flags & StyleFlag.underlineMask) >> StyleFlag.underlineShift) {
+        case GHOSTTY_SGR_UNDERLINE_NONE.rawValue: .none
+        case GHOSTTY_SGR_UNDERLINE_DOUBLE.rawValue: .double
+        case GHOSTTY_SGR_UNDERLINE_CURLY.rawValue: .curly
+        case GHOSTTY_SGR_UNDERLINE_DOTTED.rawValue: .dotted
+        case GHOSTTY_SGR_UNDERLINE_DASHED.rawValue: .dashed
         default: .single
         }
     }
 }
 
+/// `GhosttyStyleFlags` bits; the C header defines them as cast macros Swift can't import.
+private enum StyleFlag {
+    static let bold: GhosttyStyleFlags = 1 << 0
+    static let italic: GhosttyStyleFlags = 1 << 1
+    static let faint: GhosttyStyleFlags = 1 << 2
+    static let inverse: GhosttyStyleFlags = 1 << 4
+    static let invisible: GhosttyStyleFlags = 1 << 5
+    static let strikethrough: GhosttyStyleFlags = 1 << 6
+    static let overline: GhosttyStyleFlags = 1 << 7
+    static let underlineShift: GhosttyStyleFlags = 8
+    static let underlineMask: GhosttyStyleFlags = 0x7 << underlineShift
+}
+
 extension Color {
     init(_ engine: GhosttyStyleColor) {
-        switch engine.tag {
-        case GHOSTTY_STYLE_COLOR_PALETTE: self = .indexed(engine.value.palette)
-        case GHOSTTY_STYLE_COLOR_RGB: self = .rgb(engine.value.rgb.r, engine.value.rgb.g, engine.value.rgb.b)
+        switch UInt32(engine.tag) {
+        case GHOSTTY_STYLE_COLOR_PALETTE.rawValue: self = .indexed(engine.value.palette)
+        case GHOSTTY_STYLE_COLOR_RGB.rawValue: self = .rgb(engine.value.rgb.r, engine.value.rgb.g, engine.value.rgb.b)
         default: self = .default
         }
     }

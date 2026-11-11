@@ -254,10 +254,10 @@ public final class Terminal {
         try Ghostty.check(ghostty_terminal_set(handle, GHOSTTY_TERMINAL_OPT_COLOR_PALETTE, &engine), .colors)
         if let shape = colors.cursorStyle {
             var style = switch shape {
-            case .block: GHOSTTY_TERMINAL_CURSOR_STYLE_BLOCK
-            case .bar: GHOSTTY_TERMINAL_CURSOR_STYLE_BAR
-            case .underline: GHOSTTY_TERMINAL_CURSOR_STYLE_UNDERLINE
-            case .hollow: GHOSTTY_TERMINAL_CURSOR_STYLE_BLOCK_HOLLOW
+            case .block: GHOSTTY_CURSOR_STYLE_BLOCK
+            case .bar: GHOSTTY_CURSOR_STYLE_BAR
+            case .underline: GHOSTTY_CURSOR_STYLE_UNDERLINE
+            case .hollow: GHOSTTY_CURSOR_STYLE_BLOCK_HOLLOW
             }
             try Ghostty.check(ghostty_terminal_set(handle, GHOSTTY_TERMINAL_OPT_DEFAULT_CURSOR_STYLE, &style), .colors)
         } else {
@@ -316,13 +316,13 @@ public final class Terminal {
         try updateRenderState(.cursor)
         var visible = true
         try Ghostty.check(ghostty_render_state_get(engineRender.state, GHOSTTY_RENDER_STATE_DATA_CURSOR_VISIBLE, &visible), .cursor)
-        var style = GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_BLOCK
+        var style = GHOSTTY_CURSOR_STYLE_BLOCK
         try Ghostty.check(
             ghostty_render_state_get(engineRender.state, GHOSTTY_RENDER_STATE_DATA_CURSOR_VISUAL_STYLE, &style), .cursor)
         let shape: CursorShape = switch style {
-        case GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_BAR: .bar
-        case GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_UNDERLINE: .underline
-        case GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_BLOCK_HOLLOW: .hollow
+        case GHOSTTY_CURSOR_STYLE_BAR: .bar
+        case GHOSTTY_CURSOR_STYLE_UNDERLINE: .underline
+        case GHOSTTY_CURSOR_STYLE_BLOCK_HOLLOW: .hollow
         default: .block
         }
         return Cursor(shape: shape, row: row, col: column, visible: visible)
@@ -500,17 +500,17 @@ public final class Terminal {
         var viewport = GhosttyTerminalScrollViewport()
         switch target {
         case .top:
-            viewport.tag = GHOSTTY_SCROLL_VIEWPORT_TOP
+            viewport.tag = GHOSTTY_TERMINAL_SCROLL_VIEWPORT_TOP
         case .bottom:
-            viewport.tag = GHOSTTY_SCROLL_VIEWPORT_BOTTOM
+            viewport.tag = GHOSTTY_TERMINAL_SCROLL_VIEWPORT_BOTTOM
         case let .delta(rows):
-            viewport.tag = GHOSTTY_SCROLL_VIEWPORT_DELTA
+            viewport.tag = GHOSTTY_TERMINAL_SCROLL_VIEWPORT_DELTA
             viewport.value.delta = rows
         case let .row(row):
-            viewport.tag = GHOSTTY_SCROLL_VIEWPORT_ROW
+            viewport.tag = GHOSTTY_TERMINAL_SCROLL_VIEWPORT_ROW
             viewport.value.row = max(0, row)
         case let .prompt(prompts):
-            viewport.tag = GHOSTTY_SCROLL_VIEWPORT_DELTA_PROMPT
+            viewport.tag = GHOSTTY_TERMINAL_SCROLL_VIEWPORT_DELTA_PROMPT
             viewport.value.delta_prompt = prompts
         }
         ghostty_terminal_scroll_viewport(handle, viewport)

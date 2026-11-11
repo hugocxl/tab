@@ -3,7 +3,7 @@
 # as vendor/GhosttyVT.xcframework for SwiftPM. Needs Zig 0.17.0 and Xcode.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-COMMIT="6ba144158577d033ccb6ed4b574e4013957c9161"
+COMMIT="0fa3d577a5614150ff8e2c152de5fb9d5c6d2dec"
 SRC="$ROOT/vendor/ghostty-src"
 VT="$ROOT/vendor/ghostty-vt"
 OUT="$ROOT/vendor/GhosttyVT.xcframework"

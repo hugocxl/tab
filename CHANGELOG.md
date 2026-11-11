@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.94.1 - 2026-11-11
+
+### Changed
+
+- Terminals run on the stable 1.0 release of Ghostty's terminal engine.
+
 ## 0.94.0 - 2026-11-11
 
 ### Changed

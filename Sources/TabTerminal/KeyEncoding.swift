@@ -28,9 +28,9 @@ final class Keyboard {
     }
 
     func encode(_ key: KeyEvent, terminal: GhosttyTerminal) throws -> Data {
-        ghostty_key_encoder_setopt_from_terminal(encoder, terminal)
+        ghostty_key_encoder_set_from_terminal(encoder, terminal)
         var optionAsAlt = key.optionAsAlt ? GHOSTTY_OPTION_AS_ALT_TRUE : GHOSTTY_OPTION_AS_ALT_FALSE
-        ghostty_key_encoder_setopt(encoder, GHOSTTY_KEY_ENCODER_OPT_MACOS_OPTION_AS_ALT, &optionAsAlt)
+        ghostty_key_encoder_set(encoder, GHOSTTY_KEY_ENCODER_OPT_MACOS_OPTION_AS_ALT, &optionAsAlt)
         ghostty_key_event_set_action(event, Self.action(key.action))
         ghostty_key_event_set_key(event, KeyNames.key(key.key))
         ghostty_key_event_set_mods(event, Self.mods(key.modifiers))
@@ -38,11 +38,9 @@ final class Keyboard {
         ghostty_key_event_set_composing(event, false)
         ghostty_key_event_set_unshifted_codepoint(event, key.unshiftedCodepoint)
         var text = key.text
-        defer { ghostty_key_event_set_utf8(event, nil, 0) }
+        defer { ghostty_key_event_set_utf8(event, GhosttyString()) }
         return try text.withUTF8 { utf8 in
-            utf8.withMemoryRebound(to: CChar.self) { chars in
-                ghostty_key_event_set_utf8(event, chars.isEmpty ? nil : chars.baseAddress, chars.count)
-            }
+            ghostty_key_event_set_utf8(event, GhosttyString(ptr: utf8.isEmpty ? nil : utf8.baseAddress, len: utf8.count))
             return try encodeEvent()
         }
     }

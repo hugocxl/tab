@@ -70,7 +70,6 @@ final class EngineCallbacks {
 
     private static let desktopNotification: GhosttyTerminalDesktopNotificationFn = { _, userdata, notification in
         guard let callbacks = callbacks(userdata), let notification,
-              notification.pointee.size >= MemoryLayout<GhosttyTerminalDesktopNotification>.size,
               callbacks.notifications.count < maxNotifications else { return }
         let title = truncated(Ghostty.string(notification.pointee.title))
         let body = truncated(Ghostty.string(notification.pointee.body))

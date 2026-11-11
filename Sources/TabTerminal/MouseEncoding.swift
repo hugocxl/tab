@@ -36,7 +36,7 @@ final class Mouse {
             screen_width: UInt32(size.cols), screen_height: UInt32(size.rows),
             cell_width: 1, cell_height: 1,
             padding_top: 0, padding_bottom: 0, padding_right: 0, padding_left: 0)
-        ghostty_mouse_encoder_setopt(encoder, GHOSTTY_MOUSE_ENCODER_OPT_SIZE, &encoderSize)
+        ghostty_mouse_encoder_set(encoder, GHOSTTY_MOUSE_ENCODER_OPT_SIZE, &encoderSize)
         reset()
     }
 
@@ -70,9 +70,9 @@ final class Mouse {
             action = GHOSTTY_MOUSE_ACTION_PRESS
             button = direction == .up ? GHOSTTY_MOUSE_BUTTON_FOUR : GHOSTTY_MOUSE_BUTTON_FIVE
         }
-        ghostty_mouse_encoder_setopt_from_terminal(encoder, terminal)
+        ghostty_mouse_encoder_set_from_terminal(encoder, terminal)
         var pressed = !held.isEmpty
-        ghostty_mouse_encoder_setopt(encoder, GHOSTTY_MOUSE_ENCODER_OPT_ANY_BUTTON_PRESSED, &pressed)
+        ghostty_mouse_encoder_set(encoder, GHOSTTY_MOUSE_ENCODER_OPT_ANY_BUTTON_PRESSED, &pressed)
         ghostty_mouse_event_set_action(event, action)
         if let button {
             ghostty_mouse_event_set_button(event, button)

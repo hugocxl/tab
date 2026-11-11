@@ -115,7 +115,7 @@ final class SearchSession {
 
     /// Selects the next older match (wrapping to the newest after the oldest).
     func selectNext() -> GhosttySelection? {
-        guard ghostty_search_set(handle, GHOSTTY_SEARCH_OPT_SELECT_NEXT, nil) == GHOSTTY_SUCCESS else { return nil }
+        guard ghostty_search_select_next(handle) == GHOSTTY_SUCCESS else { return nil }
         return selected()
     }
 }
@@ -200,28 +200,28 @@ extension Terminal {
     /// The output of the command around `point`, from its semantic prompt
     /// marks (OSC 133), or nil when `point` is not command output.
     public func selectCommandOutput(at point: GridPoint) throws -> GridRange? {
-        let reference = try gridRef(point, .selection)
+        var reference = try gridRef(point, .selection)
         var selection = Ghostty.selection(Ghostty.gridRef(), Ghostty.gridRef(), rectangle: false)
-        let result = ghostty_terminal_select_output(handle, reference, &selection)
+        let result = ghostty_terminal_select_output(handle, &reference, &selection)
         if result == GHOSTTY_NO_VALUE { return nil }
         try Ghostty.check(result, .selection)
         return range(selection)
     }
 
     private func format(_ selection: inout GhosttySelection) throws -> String {
-        try withUnsafePointer(to: &selection) { pointer in
-            let options = GhosttyTerminalSelectionFormatOptions(
-                size: MemoryLayout<GhosttyTerminalSelectionFormatOptions>.size,
-                emit: GHOSTTY_FORMATTER_FORMAT_PLAIN, unwrap: true, trim: true, selection: pointer)
-            var output: UnsafeMutablePointer<UInt8>?
-            var length = 0
-            let result = ghostty_terminal_selection_format_alloc(handle, nil, options, &output, &length)
-            defer { ghostty_free(nil, output, length) }
-            if result == GHOSTTY_NO_VALUE { return "" }
-            try Ghostty.check(result, .selection)
-            guard let output else { return "" }
-            return String(decoding: UnsafeBufferPointer(start: output, count: length), as: UTF8.self)
-        }
+        var formatter: GhosttyFormatter?
+        try Ghostty.check(ghostty_formatter_terminal_new(nil, &formatter, handle), .selection)
+        defer { ghostty_formatter_free(formatter) }
+        var unwrap = true
+        try Ghostty.check(ghostty_formatter_set(formatter, GHOSTTY_FORMATTER_OPT_UNWRAP, &unwrap), .selection)
+        try Ghostty.check(ghostty_formatter_set(formatter, GHOSTTY_FORMATTER_OPT_SELECTION, &selection), .selection)
+        var output: UnsafeMutablePointer<UInt8>?
+        var length = 0
+        let result = ghostty_formatter_format_alloc(formatter, nil, &output, &length)
+        defer { ghostty_free(nil, output, length) }
+        try Ghostty.check(result, .selection)
+        guard let output else { return "" }
+        return String(decoding: UnsafeBufferPointer(start: output, count: length), as: UTF8.self)
     }
 
     func gridRef(_ point: GridPoint, _ step: TerminalStep) throws -> GhosttyGridRef {
