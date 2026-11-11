@@ -295,6 +295,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         surface.model.action = #selector(modelSelected(_:))
         surface.effort.target = self
         surface.effort.action = #selector(effortSelected)
+        surface.subagents.onReveal = { [weak self] id in self?.surface.reveal(.item(id)) }
         surface.promptQueue.onEdit = { [weak self] prompt in self?.editQueued(prompt) }
         surface.promptQueue.onRemove = { [weak self] prompt in self?.run(.removeQueued(session: self?.session ?? SessionId(), id: prompt.id, expectedRevision: prompt.revision)) }
         surface.promptQueue.onDeliver = { [weak self] prompt in self?.deliverQueued(prompt) }
@@ -956,6 +957,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
             ? ["compact", "review"] : (snapshot?.provider == .claude ? (snapshot?.commands ?? []) : [])
         let interactionsEnabled = !disposed && !needsAuthoritativeSnapshot && commandTask == nil && !approvalInFlight
         surface.promptQueue.update(snapshot?.queuedPrompts ?? [], paused: snapshot?.queuePaused == true, enabled: interactionsEnabled)
+        surface.subagents.update(snapshot?.subagents ?? [])
         surface.questions.update(snapshot?.items.first { $0.questionnaire != nil && !$0.isComplete }, enabled: interactionsEnabled)
         surface.questions.restore(questionDrafts)
         surface.plan.isHidden = snapshot?.planMode != true

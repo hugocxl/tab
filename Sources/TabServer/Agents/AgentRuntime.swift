@@ -11,6 +11,8 @@ internal enum AgentRuntimeEvent: Sendable {
     /// The latest message the provider wrote to its conversation, where a fork made now begins.
     case providerMessage(String)
     case contextUsage(AgentContextUsage)
+    /// The agents still running for the conversation, replacing the previous list.
+    case subagents([AgentSubagent])
     case resolvedModel(String)
     case commands([String])
     case planMode(Bool)
@@ -199,6 +201,7 @@ internal final class AgentRuntime: @unchecked Sendable {
         processGeneration = UUID()
         process?.stop()
         process = nil
+        claude.endProcess()
         pending.removeAll() // Only non-awaited interrupt acknowledgments can remain after an idle turn.
         resumeSession = session
         ready = false
@@ -504,6 +507,7 @@ internal final class AgentRuntime: @unchecked Sendable {
                     self.processGeneration = UUID()
                     self.process?.stop()
                     self.process = nil
+                    self.claude.endProcess()
                     self.ready = false
                     let count = self.unconsumedClaudeInputs.count
                     self.unconsumedClaudeInputs.removeAll()

@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.93.0 - 2026-11-11
+
+### Added
+
+- Agent panes list the agents Claude is running above the composer, with their
+  progress, and clicking one shows the step that started it.
+
 ## 0.92.0 - 2026-11-10
 
 ### Changed

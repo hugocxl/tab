@@ -169,6 +169,8 @@ final class AgentSessions: @unchecked Sendable {
                     continue
                 }
                 let entry = Entry(saved.snapshot, directory: saved.directory)
+                // Agents ran in a provider process that ended with the previous server.
+                entry.snapshot.subagents = nil
                 do {
                     entry.inbox = try AgentPromptInbox.load(root.appendingPathComponent("inbox/" + entry.snapshot.session.description + ".json"))
                     if !entry.inbox.records.isEmpty || entry.inbox.paused {
@@ -754,6 +756,10 @@ final class AgentSessions: @unchecked Sendable {
             guard usage.usedTokens >= 0, usage.contextWindow.map({ $0 > 0 }) ?? true,
                   entry.snapshot.contextUsage != usage else { return }
             entry.snapshot.contextUsage = usage
+        case .subagents(let subagents):
+            let running = subagents.isEmpty ? nil : Array(subagents.prefix(AgentSubagent.maxCount))
+            guard entry.snapshot.subagents != running else { return }
+            entry.snapshot.subagents = running
         case .planMode(let enabled):
             entry.snapshot.planMode = enabled
             persist(entry)
@@ -933,6 +939,8 @@ final class AgentSessions: @unchecked Sendable {
         entry.approving.removeAll()
         entry.interrupting = nil
         entry.accessTask = nil
+        // Its agents stop with its provider process.
+        entry.snapshot.subagents = nil
         clearDeferredEvents(entry)
         Task { runtime?.stop() }
     }

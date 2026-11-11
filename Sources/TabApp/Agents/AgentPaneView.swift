@@ -10,6 +10,7 @@ final class AgentPaneView: ThemedView {
     let plan = AgentPlanButton(frame: .zero)
     let composer = AgentComposerTextView()
     let promptQueue = AgentQueueView(frame: .zero)
+    let subagents = AgentSubagentsView(frame: .zero)
     let questions = AgentQuestionView(frame: .zero)
     var citationEnvironmentId: String?
     var citationThreadId: String?
@@ -191,7 +192,7 @@ final class AgentPaneView: ThemedView {
         }
         // Suggestions sit behind the composer card so their lower edge tucks under it.
         // The transcript scrolls under everything that floats over its lower edge.
-        for child in [transcriptScroll, emptyTitle, emptyDetail, endButton, suggestions, composerCard, notice, questions, promptQueue, activity] {
+        for child in [transcriptScroll, emptyTitle, emptyDetail, endButton, suggestions, composerCard, notice, questions, promptQueue, subagents, activity] {
             addSubview(child)
         }
         retry.isHidden = true
@@ -248,7 +249,7 @@ final class AgentPaneView: ThemedView {
         emptyDetail.frame = NSRect(x: left, y: composerCard.frame.minY - 48, width: width, height: 20)
 
         // Glass cards stack above the composer, each the composer's width: a notice,
-        // then questions, then the queue, then the activity capsule.
+        // then questions, then the queue, then running agents, then the activity capsule.
         let gap: CGFloat = 8
         var top = composerCard.frame.minY
         let noticeText = feedback.stringValue
@@ -277,6 +278,12 @@ final class AgentPaneView: ThemedView {
         if queueHeight > 0 {
             top -= gap + queueHeight
             promptQueue.frame = NSRect(x: left, y: top, width: width, height: queueHeight)
+        }
+        let subagentHeight = subagents.isHidden ? 0
+            : min(subagents.preferredHeight, max(0, panelBudget - questionHeight - queueHeight - gap * 2))
+        if subagentHeight > 0 {
+            top -= gap + subagentHeight
+            subagents.frame = NSRect(x: left, y: top, width: width, height: subagentHeight)
         }
         if activityHeight > 0 {
             let labelWidth = ceil((activityLabel.stringValue as NSString).size(withAttributes: [.font: AppFont.small]).width) + 4
@@ -626,6 +633,7 @@ final class AgentPaneView: ThemedView {
         notice.theme = theme
         activity.theme = theme
         promptQueue.theme = theme
+        subagents.theme = theme
         questions.theme = theme
         attachmentStrip.updateTheme(theme)
         suggestions.update(suggestions.items, theme: theme)

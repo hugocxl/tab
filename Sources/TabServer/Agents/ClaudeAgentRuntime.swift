@@ -30,6 +30,11 @@ internal final class ClaudeAgentRuntime {
     }
     private var lastThinking: ThinkingUpdate?
     private var compaction: AgentChatItem?
+    private var subagents: [AgentSubagent] = []
+    /// Background agents' task IDs, with the tool rows that started them, which
+    /// take their final report when they finish after the turn has ended.
+    private var backgroundTasks: [String: String] = [:]
+    private var backgroundTools: [String: AgentChatItem] = [:]
 
     init(onEvent: @escaping @Sendable (AgentRuntimeEvent) -> Void) { self.onEvent = onEvent }
 
@@ -56,6 +61,7 @@ internal final class ClaudeAgentRuntime {
         switch message["type"] as? String {
         case "system":
             receiveCompaction(message)
+            receiveTask(message)
             if message["subtype"] as? String == "init", let commands = message["slash_commands"] as? [String] {
                 onEvent(.commands(commands))
             }
@@ -128,6 +134,7 @@ internal final class ClaudeAgentRuntime {
                 }
                 item.tool = activity
                 tools[id] = item
+                if backgroundTools[id] != nil { backgroundTools[id] = item }
                 onEvent(media.images.isEmpty ? .item(item) : .toolItem(item, images: media.images))
             }
         case "result":
@@ -179,6 +186,11 @@ internal final class ClaudeAgentRuntime {
                 item.tool?.completedAt = Date()
                 onEvent(.item(item))
             }
+            // A turn's foreground agents have all reported by its result.
+            if subagents.contains(where: { !$0.background }) {
+                subagents.removeAll { !$0.background }
+                onEvent(.subagents(subagents))
+            }
             texts.removeAll()
             tools.removeAll()
             streamedIDs.removeAll()
@@ -188,6 +200,77 @@ internal final class ClaudeAgentRuntime {
             compaction = nil
         default: break
         }
+    }
+
+    /// The provider process stopped, and every agent it ran with it.
+    func endProcess() {
+        backgroundTasks.removeAll()
+        backgroundTools.removeAll()
+        guard !subagents.isEmpty else { return }
+        subagents.removeAll()
+        onEvent(.subagents([]))
+    }
+
+    /// Claude reports each agent it starts as a task: started, then progress, then a
+    /// notification when it finishes. Its shell tasks aren't agents.
+    private func receiveTask(_ message: [String: Any]) {
+        guard let id = message["task_id"] as? String, id.utf8.count <= 1024 else { return }
+        switch message["subtype"] as? String {
+        case "task_started":
+            let type = message["task_type"] as? String ?? ""
+            guard type.hasSuffix("agent") || message["subagent_type"] is String,
+                  !subagents.contains(where: { $0.id == id }), subagents.count < AgentSubagent.maxCount else { return }
+            let toolUseID = (message["tool_use_id"] as? String).flatMap { $0.utf8.count <= 1024 ? $0 : nil }
+            let background = message["is_backgrounded"] as? Bool == true
+            subagents.append(AgentSubagent(id: id, toolUseID: toolUseID,
+                description: agentSubagentText(message["description"]) ?? "Agent",
+                agentType: agentSubagentText(message["subagent_type"]), background: background,
+                startedAt: Date()))
+            if background, let toolUseID, backgroundTasks.count < AgentSubagent.maxCount {
+                backgroundTasks[id] = toolUseID
+                backgroundTools[toolUseID] = tools[toolUseID]
+                    ?? AgentChatItem(id: toolUseID, kind: .tool, text: "Agent", tool: agentToolActivity(name: "Agent", input: nil))
+            }
+        case "task_progress":
+            guard let index = subagents.firstIndex(where: { $0.id == id }) else { return }
+            let usage = message["usage"] as? [String: Any]
+            subagents[index].activity = agentSubagentText(message["description"]) ?? subagents[index].activity
+            subagents[index].toolUses = agentTokenCount(usage?["tool_uses"]) ?? subagents[index].toolUses
+            subagents[index].tokens = agentTokenCount(usage?["total_tokens"]) ?? subagents[index].tokens
+        case "task_updated":
+            guard let status = (message["patch"] as? [String: Any])?["status"] as? String,
+                  let finished = agentSubagentFinish(status), subagents.contains(where: { $0.id == id }) else { return }
+            finishTask(id, status: finished, summary: nil)
+        case "task_notification":
+            finishTask(id, status: agentSubagentFinish(message["status"] as? String ?? "") ?? .completed,
+                       summary: message["summary"] as? String)
+            return
+        default: return
+        }
+        onEvent(.subagents(subagents))
+    }
+
+    private func finishTask(_ id: String, status: AgentSubagent.Status, summary: String?) {
+        if subagents.contains(where: { $0.id == id }) {
+            subagents.removeAll { $0.id == id }
+            onEvent(.subagents(subagents))
+        }
+        // A background agent's row said only that it launched; its report replaces that.
+        guard let summary, !summary.isEmpty, let toolUseID = backgroundTasks.removeValue(forKey: id),
+              var item = backgroundTools.removeValue(forKey: toolUseID) else { return }
+        var activity = item.tool ?? agentToolActivity(name: item.text, input: nil)
+        activity.output = summary
+        activity.outputIsJSON = false
+        activity.status = status == .completed ? .completed : status == .failed ? .failed : .interrupted
+        activity.completedAt = Date()
+        item.tool = activity
+        item.detail = summary
+        item.isComplete = true
+        var context = item.workContext ?? AgentChatWorkContext()
+        context.sourceStatus = status == .completed ? "completed" : status == .failed ? "failed" : "cancelled"
+        item.workContext = context
+        item.updatedAt = Date()
+        onEvent(.item(item))
     }
 
     func capturePlan(nativeID: String?, name: String?, input: Any?) {
@@ -386,6 +469,24 @@ internal func agentToolActivity(name: String, input: String?, previous: AgentToo
         }
     }
     return activity
+}
+
+/// A provider's short subagent label, on one line and bounded for the snapshot.
+internal func agentSubagentText(_ value: Any?) -> String? {
+    guard let text = value as? String else { return nil }
+    let line = text.split(whereSeparator: \.isNewline).joined(separator: " ").trimmingCharacters(in: .whitespaces)
+    guard !line.isEmpty else { return nil }
+    return line.utf8.count <= 1024 ? line : String(line.prefix(240))
+}
+
+/// A finished task's provider status, or nil while it still runs.
+internal func agentSubagentFinish(_ status: String) -> AgentSubagent.Status? {
+    switch status {
+    case "completed": return .completed
+    case "failed", "error": return .failed
+    case "killed", "stopped", "cancelled", "interrupted": return .stopped
+    default: return nil
+    }
 }
 
 internal func agentToolDenied(_ output: String?) -> Bool {
