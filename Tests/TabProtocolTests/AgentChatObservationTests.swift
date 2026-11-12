@@ -16,6 +16,23 @@ final class AgentChatObservationTests: XCTestCase {
         let turn = AgentChatTurn(userItemID: "user", startedAt: Date(), status: .idle, outcome: .init(rawValue: "future_terminal_outcome"))
         XCTAssertEqual(try WireJSON.decode(AgentChatTurn.self, from: WireJSON.encode(turn)), turn)
     }
+    func testWorkingTimePausesWhileWaitingForTheUser() throws {
+        let start = Date(timeIntervalSince1970: 1000)
+        var turn = AgentChatTurn(userItemID: "user", startedAt: start)
+        XCTAssertEqual(turn.workingTime(at: start.addingTimeInterval(10)), 10)
+        turn.observe(.waiting, at: start.addingTimeInterval(10))
+        XCTAssertEqual(turn.workingTime(at: start.addingTimeInterval(70)), 10, "The timer holds while a question waits")
+        turn.observe(.waiting, at: start.addingTimeInterval(40))
+        turn.observe(.working, at: start.addingTimeInterval(70))
+        XCTAssertEqual(turn.workingTime(at: start.addingTimeInterval(75)), 15, "Answering resumes from where it stopped")
+        turn.observe(.waiting, at: start.addingTimeInterval(80))
+        turn.observe(.idle, at: start.addingTimeInterval(90))
+        turn.completedAt = start.addingTimeInterval(90)
+        XCTAssertEqual(turn.workingTime(at: start.addingTimeInterval(500)), 20, "A turn ending mid-question excludes the wait")
+        XCTAssertEqual(try WireJSON.decode(AgentChatTurn.self, from: WireJSON.encode(turn)), turn)
+        let legacy = try JSONDecoder().decode(AgentChatTurn.self, from: Data(#"{"userItemID":"old","startedAt":0,"completedAt":5,"status":"idle"}"#.utf8))
+        XCTAssertEqual(legacy.workingTime(at: Date()), 5)
+    }
     func testCompactionCountsRoundTripAndMalformedCountsAreRejected() throws {
         let context = AgentChatWorkContext(itemType: "compaction", sourceStatus: "completed", beforeTokenCount: 12000, afterTokenCount: 5801)
         let item = AgentChatItem(id: "compact", kind: .tool, text: "Context compacted", workContext: context)

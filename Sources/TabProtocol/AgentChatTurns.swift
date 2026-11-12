@@ -21,14 +21,39 @@ public struct AgentChatTurn: Codable, Hashable, Sendable {
     public var status: AgentChatStatus
     public var checkpoint: AgentTurnCheckpoint?
     public var outcome: Outcome?
+    /// When the agent began waiting for the user to answer an approval or question.
+    public var waitingSince: Date?
+    /// Seconds the turn spent waiting for the user before `waitingSince`.
+    public var waited: TimeInterval?
 
-    public init(userItemID: String, startedAt: Date, completedAt: Date? = nil, status: AgentChatStatus = .working, checkpoint: AgentTurnCheckpoint? = nil, outcome: Outcome? = nil) {
+    public init(userItemID: String, startedAt: Date, completedAt: Date? = nil, status: AgentChatStatus = .working, checkpoint: AgentTurnCheckpoint? = nil, outcome: Outcome? = nil,
+                waitingSince: Date? = nil, waited: TimeInterval? = nil) {
         self.userItemID = userItemID
         self.startedAt = startedAt
         self.completedAt = completedAt
         self.status = status
         self.checkpoint = checkpoint
         self.outcome = outcome
+        self.waitingSince = waitingSince
+        self.waited = waited
+    }
+
+    /// Seconds the agent has worked on the turn by `now`, leaving out time spent
+    /// waiting for the user. It stops while the turn waits and once it completes.
+    public func workingTime(at now: Date) -> TimeInterval {
+        let end = completedAt ?? waitingSince ?? now
+        return max(0, end.timeIntervalSince(startedAt) - (waited ?? 0))
+    }
+
+    /// Records a status change: waiting starts the pause, anything else ends it.
+    public mutating func observe(_ status: AgentChatStatus, at now: Date) {
+        self.status = status
+        if status == .waiting {
+            if waitingSince == nil { waitingSince = now }
+        } else if let since = waitingSince {
+            waited = (waited ?? 0) + max(0, now.timeIntervalSince(since))
+            waitingSince = nil
+        }
     }
 }
 

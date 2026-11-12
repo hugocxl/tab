@@ -612,19 +612,27 @@ final class AgentTranscriptDocument: ThemedView {
             toolCounts.append((toolCounts.last ?? 0) + (item.kind == .tool ? 1 : 0))
             approvalCounts.append((approvalCounts.last ?? 0) + (item.kind == .approval && !item.isComplete ? 1 : 0))
         }
+        // Messages sent while the agent works join its turn, so a turn's answer is its
+        // last one before the next turn starts, not before the next user message.
+        let turnIDs = Set(turns.map(\.userItemID))
+        var turnAnswers: [String: Int] = [:]
+        var lastTurnAnswer: Int?
+        for index in items.indices.reversed() {
+            if items[index].kind == .assistant, lastTurnAnswer == nil { lastTurnAnswer = index }
+            guard items[index].kind == .user, turnIDs.contains(items[index].id) else { continue }
+            if let lastTurnAnswer { turnAnswers[items[index].id] = lastTurnAnswer }
+            lastTurnAnswer = nil
+        }
         var timestamps: [String: Date] = [:]
         var durations: [String: TimeInterval] = [:]
         var groups: [Int: (AgentChatTurn, Int)] = [:]
-        // A running turn's timer sits below everything the turn has shown so far.
-        var working: [Int: AgentChatTurn] = [:]
         for turn in turns {
             timestamps[turn.userItemID] = turn.startedAt
-            if turn.completedAt == nil, let end = userEnds[turn.userItemID] { working[end] = turn }
             guard let endDate = turn.completedAt, let start = itemIndices[turn.userItemID],
-                  let end = userEnds[turn.userItemID], let answer = answers[turn.userItemID] else { continue }
-            if answer < end {
-                timestamps[items[answer].id] = endDate
-                durations[items[answer].id] = endDate.timeIntervalSince(turn.startedAt)
+                  let answer = answers[turn.userItemID] else { continue }
+            if let turnAnswer = turnAnswers[turn.userItemID] {
+                timestamps[items[turnAnswer].id] = endDate
+                durations[items[turnAnswer].id] = turn.workingTime(at: endDate)
             }
             guard answer > start + 1, toolCounts[answer] > toolCounts[start + 1],
                   approvalCounts[answer] == approvalCounts[start + 1] else { continue }
@@ -641,22 +649,17 @@ final class AgentTranscriptDocument: ThemedView {
                          provider: card == .compaction ? provider : nil)
         }
         var result: [Entry] = []
-        func appendWorking(before index: Int) {
-            guard let turn = working[index] else { return }
-            result.append(Entry(id: "working:" + turn.userItemID, kind: .working, items: [], turn: turn))
-        }
         var index = 0
         while index < items.endIndex {
-            appendWorking(before: index)
             let item = items[index]
             if item.kind == .user { currentTurnIsRunning = runningUserIDs.contains(item.id) }
             if let (turn, end) = groups[index] {
                 // Failures stay visible below the fold; every other card folds like a tool.
                 let work = items[index..<end]
                 let folded = work.filter { classifier.classify($0)?.folds != false }
-                let unanswered = (userEnds[turn.userItemID] ?? end) <= end
+                let unanswered = turnAnswers[turn.userItemID] == nil
                 result.append(Entry(id: "work:" + turn.userItemID, kind: .work, items: folded, turn: turn,
-                                    duration: unanswered ? turn.completedAt?.timeIntervalSince(turn.startedAt) : nil))
+                                    duration: unanswered ? turn.completedAt.map { turn.workingTime(at: $0) } : nil))
                 result.append(contentsOf: work.filter { classifier.classify($0)?.folds == false }.map(entry(for:)))
                 index = end
                 continue
@@ -664,7 +667,11 @@ final class AgentTranscriptDocument: ThemedView {
             result.append(entry(for: item))
             index += 1
         }
-        appendWorking(before: items.endIndex)
+        // Only the newest turn can still be running, and its timer is always the
+        // conversation's last row, below messages sent while it works.
+        if let turn = turns.last, turn.completedAt == nil, itemIndices[turn.userItemID] != nil {
+            result.append(Entry(id: "working:" + turn.userItemID, kind: .working, items: [], turn: turn))
+        }
         var foundAnswer = false
         for position in result.indices.reversed() {
             if result[position].items.first?.kind == .user { foundAnswer = false }

@@ -223,6 +223,33 @@ final class AgentTimelineTests: XCTestCase {
         XCTAssertNil(document.frameForEntry("working:user"))
     }
 
+    func testWorkingTimerStaysBelowMessagesSentDuringTheTurn() throws {
+        let document = AgentTranscriptDocument(frame: .zero)
+        let items = [AgentChatItem(id: "user", kind: .user, text: "Fix the strip"),
+                     AgentChatItem(id: "tool", kind: .tool, text: "Bash"),
+                     AgentChatItem(id: "steer", kind: .user, text: "in history too."),
+                     AgentChatItem(id: "reply", kind: .assistant, text: "Checking", isComplete: false),
+                     AgentChatItem(id: "read", kind: .tool, text: "Read")]
+        let turn = AgentChatTurn(userItemID: "user", startedAt: Date().addingTimeInterval(-33))
+        document.update(items, omittedCount: 0, turns: [turn])
+        document.reflow(viewportWidth: 700)
+        let working = try XCTUnwrap(document.frameForEntry("working:user"))
+        for id in ["steer", "reply", "activity:read"] {
+            XCTAssertGreaterThan(working.minY, try XCTUnwrap(document.frameForEntry(id)).maxY, id)
+        }
+    }
+
+    func testOnlyTheNewestRunningTurnShowsATimer() throws {
+        let document = AgentTranscriptDocument(frame: .zero)
+        let items = [AgentChatItem(id: "old", kind: .user, text: "First"),
+                     AgentChatItem(id: "new", kind: .user, text: "Second")]
+        document.update(items, omittedCount: 0, turns: [AgentChatTurn(userItemID: "old", startedAt: Date()),
+                                                         AgentChatTurn(userItemID: "new", startedAt: Date())])
+        document.reflow(viewportWidth: 700)
+        XCTAssertNil(document.frameForEntry("working:old"))
+        XCTAssertNotNil(document.frameForEntry("working:new"))
+    }
+
     func testCopyActionWaitsForTurnCompletionAfterProgressMessageEnds() throws {
         let document = AgentTranscriptDocument(frame: .zero)
         let items = [AgentChatItem(id: "user", kind: .user, text: "Review this"),

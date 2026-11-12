@@ -639,6 +639,7 @@ final class AgentSessions: @unchecked Sendable {
                         if entry.snapshot.status == .waiting,
                            !entry.snapshot.items.contains(where: { $0.kind == .approval && !$0.isComplete }) {
                             entry.snapshot.status = .working
+                            updateTurn(entry, status: .working)
                         }
                         touch(entry)
                     }
@@ -1027,9 +1028,10 @@ final class AgentSessions: @unchecked Sendable {
     private func updateTurn(_ entry: Entry, status: AgentChatStatus, outcome: AgentChatTurn.Outcome? = nil) {
         guard var turns = entry.snapshot.turns, let index = turns.indices.last,
               turns[index].completedAt == nil else { return }
-        turns[index].status = status
+        let now = Date()
+        turns[index].observe(status, at: now)
         if status == .idle || status == .failed || status == .closed {
-            turns[index].completedAt = max(Date(), turns[index].startedAt)
+            turns[index].completedAt = max(now, turns[index].startedAt)
             turns[index].outcome = outcome
             captureCompletedTurn(entry, turnID: turns[index].userItemID)
         }

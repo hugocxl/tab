@@ -3,6 +3,15 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.95.1 - 2026-11-12
+
+### Fixed
+
+- An agent pane's working timer stays at the bottom of the conversation, even
+  after you send a message while the agent works.
+- An agent pane's working timer pauses while the agent waits for your answer and
+  resumes when you reply, and finished turns leave that wait out of their time.
+
 ## 0.95.0 - 2026-11-12
 
 ### Changed

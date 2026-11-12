@@ -499,7 +499,7 @@ final class AgentActivityRow: AgentTimelineRow {
 }
 
 /// The bottom of a running turn: the sidebar's working glyph and the turn's live
-/// elapsed time, to a tenth of a second.
+/// working time, to a tenth of a second. It holds while the agent waits for the user.
 @MainActor
 final class AgentWorkingRow: AgentTimelineRow {
     var turn: AgentChatTurn? { didSet { if oldValue != turn { refresh() } } }
@@ -530,7 +530,7 @@ final class AgentWorkingRow: AgentTimelineRow {
     }
     deinit { ticker?.invalidate() }
     private func refresh() {
-        let text = AgentTurnTime.elapsed(Date().timeIntervalSince(turn?.startedAt ?? Date()))
+        let text = AgentTurnTime.elapsed(turn?.workingTime(at: Date()) ?? 0)
         if label.stringValue != text { label.stringValue = text }
     }
     override func update(_ items: [AgentChatItem]) { refresh() }
