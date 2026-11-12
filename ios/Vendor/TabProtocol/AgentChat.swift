@@ -118,6 +118,8 @@ public struct AgentChatSnapshot: Codable, Hashable, Sendable {
     public var commands: [String]?
     public var resolvedModel: String?
     public var contextUsage: AgentContextUsage?
+    /// Agents the provider's agent started that are still running, oldest first.
+    public var subagents: [AgentSubagent]?
     public var reasoningEffort: AgentReasoningEffort?
     public var queuedPrompts: [AgentQueuedPrompt]?
     public var queuePaused: Bool?
@@ -152,7 +154,7 @@ public struct AgentChatSnapshot: Codable, Hashable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case session, project, provider, providerSession, model, resolvedModel, contextUsage, reasoningEffort, accessMode, planMode, queuedPrompts, queuePaused, turns, status, revision, items
+        case session, project, provider, providerSession, model, resolvedModel, contextUsage, subagents, reasoningEffort, accessMode, planMode, queuedPrompts, queuePaused, turns, status, revision, items
     }
 
     public init(from decoder: Decoder) throws {
@@ -167,6 +169,7 @@ public struct AgentChatSnapshot: Codable, Hashable, Sendable {
         model = try c.decodeIfPresent(String.self, forKey: .model)
         resolvedModel = try c.decodeIfPresent(String.self, forKey: .resolvedModel)
         contextUsage = try c.decodeIfPresent(AgentContextUsage.self, forKey: .contextUsage)
+        subagents = try c.decodeIfPresent([AgentSubagent].self, forKey: .subagents)
         reasoningEffort = try c.decodeIfPresent(AgentReasoningEffort.self, forKey: .reasoningEffort)
         accessMode = try c.decodeIfPresent(AgentAccessMode.self, forKey: .accessMode) ?? .standard
         turns = try c.decodeIfPresent([AgentChatTurn].self, forKey: .turns)

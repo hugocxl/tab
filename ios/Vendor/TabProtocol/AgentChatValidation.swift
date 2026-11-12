@@ -64,6 +64,8 @@ extension AgentChatSnapshot {
                 throw .badRequest
             }
         }
+        guard (subagents?.count ?? 0) <= AgentSubagent.maxCount else { throw .badRequest }
+        for subagent in subagents ?? [] { try subagent.validate() }
         guard (queuedPrompts?.count ?? 0) <= 16 else { throw .badRequest }
         for prompt in queuedPrompts ?? [] {
             guard UUID(uuidString: prompt.id) != nil, prompt.text.utf8.count <= 64 * 1024,

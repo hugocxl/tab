@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.25.0 - 2026-11-12
+
+### Changed
+
+- Terminals use the Mac's new warm light and dark Tab themes, with clearer text
+  and ochre accents.
+
 ## 0.24.1 - 2026-11-11
 
 ### Fixed
