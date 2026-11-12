@@ -1,4 +1,5 @@
 import Observation
+import TabProtocol
 import TabShared
 import UIKit
 
@@ -69,6 +70,11 @@ final class Preferences {
         didSet { defaults.set(groupsByProject, forKey: "tabs.groupsByProject") }
     }
 
+    /// Projects whose tabs the grouped list hides under their header.
+    var collapsedProjects: Set<ProjectId> {
+        didSet { defaults.set(collapsedProjects.map(\.uuid.uuidString), forKey: "tabs.collapsedProjects") }
+    }
+
     @ObservationIgnored private var schemes: [String: ColorScheme] = [:]
 
     private init() {
@@ -80,6 +86,8 @@ final class Preferences {
         keyboardLayout = defaults.string(forKey: "terminal.keyboardLayout").flatMap(KeyboardLayout.init)
             ?? (UIDevice.current.userInterfaceIdiom == .pad ? .compact : .full)
         groupsByProject = defaults.bool(forKey: "tabs.groupsByProject")
+        collapsedProjects = Set((defaults.stringArray(forKey: "tabs.collapsedProjects") ?? [])
+            .compactMap(UUID.init(uuidString:)).map(ProjectId.init(uuid:)))
     }
 
     /// The terminal colors for the appearance, read from the bundled theme file.

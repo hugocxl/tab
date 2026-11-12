@@ -28,11 +28,14 @@ final class NewTabViewController: UICollectionViewController {
     }
 
     /// Opens the sheet over `presenter`, from `source` when it's a bar button.
+    /// `kind` and `checkout` nil start from the ones used last.
     static func present(over presenter: UIViewController, app: AppModel, server: ServerModel, kind: MobilePaneKind?,
-                        location: ProjectId?, source: UIBarButtonItem?, onCreated: @escaping (ServerModel, TabId) -> Void) {
+                        location: ProjectId?, checkout: NewTabForm.Checkout? = nil, source: UIBarButtonItem?,
+                        onCreated: @escaping (ServerModel, TabId) -> Void) {
         let remembered = Remembered.load()
         guard let form = NewTabForm(server: server, kind: kind ?? remembered.kind(on: server), location: location,
-                                    checkout: NewTabForm.Checkout(rawValue: remembered.checkout) ?? .current) else { return }
+                                    checkout: checkout ?? NewTabForm.Checkout(rawValue: remembered.checkout) ?? .current)
+        else { return }
         let controller = NewTabViewController(app: app, form: form)
         controller.onCreated = onCreated
         let navigation = UINavigationController(rootViewController: controller)

@@ -17,6 +17,8 @@ final class TabListViewController: UICollectionViewController {
     }
     private var dataSource: UICollectionViewDiffableDataSource<Section, TabId>!
     private var groupedProjects: [ProjectId: ProjectDescriptor] = [:]
+    /// Projects whose tabs are hidden under their header, with how many.
+    private var collapsedCounts: [ProjectId: Int] = [:]
     private var grouped = false
     private var cards: [TabId: (server: ServerModel, card: TabCard)] = [:]
     /// Project icons decoded once, with the bytes they came from.
@@ -215,7 +217,7 @@ final class TabListViewController: UICollectionViewController {
     private func updateHeaders() {
         let kind = UICollectionView.elementKindSectionHeader
         for path in collectionView.indexPathsForVisibleSupplementaryElements(ofKind: kind) {
-            guard let header = collectionView.supplementaryView(forElementKind: kind, at: path) as? UICollectionViewListCell,
+            guard let header = collectionView.supplementaryView(forElementKind: kind, at: path) as? TabSectionHeader,
                   let section = dataSource.sectionIdentifier(for: path.section) else { continue }
             configure(header, for: section)
         }
@@ -223,24 +225,61 @@ final class TabListViewController: UICollectionViewController {
         for server in app.servers { _ = server.status }
     }
 
-    private func configure(_ header: UICollectionViewListCell, for section: Section) {
+    private func configure(_ header: TabSectionHeader, for section: Section) {
         guard let server = app.server(section.server) else { return }
         var content = UIListContentConfiguration.header()
         content.prefersSideBySideTextAndSecondaryText = true
-        if let id = section.project, let project = groupedProjects[id] {
-            content.text = project.name
-            // With several Macs, which one the project is on.
-            content.secondaryText = visibleServers.count > 1 ? server.server.name : nil
-            let icon = self.icon(id, on: server)
-            content.image = icon ?? TabIcon.folder.template
-            content.imageProperties.tintColor = icon == nil ? TabIcon.folder.color() : nil
-            content.imageProperties.maximumSize = CGSize(width: 18, height: 18)
-            content.imageProperties.cornerRadius = 4
-        } else {
+        guard let id = section.project, let project = groupedProjects[id] else {
             content.text = server.server.name
             content.secondaryText = Self.describe(server.status)
+            header.contentConfiguration = content
+            header.showMac()
+            return
         }
+        let hidden = collapsedCounts[id]
+        content.text = project.name
+        // With several Macs, which one the project is on; collapsed, how many tabs it hides.
+        let mac = visibleServers.count > 1 ? server.server.name : nil
+        let count = hidden.map { $0 == 1 ? "1 tab" : "\($0) tabs" }
+        content.secondaryText = [mac, count].compactMap { $0 }.joined(separator: " · ")
+        let icon = self.icon(id, on: server)
+        content.image = icon ?? TabIcon.folder.template
+        content.imageProperties.tintColor = icon == nil ? TabIcon.folder.color() : nil
+        content.imageProperties.maximumSize = CGSize(width: 18, height: 18)
+        content.imageProperties.cornerRadius = 4
         header.contentConfiguration = content
+        header.showProject(project.name, collapsed: hidden != nil, menu: projectMenu(project, on: server)) { [weak self] in
+            guard let self else { return }
+            // While searching every group is open, so collapsing waits for the search to end.
+            guard filter.isEmpty else { return }
+            if preferences.collapsedProjects.remove(id) == nil { preferences.collapsedProjects.insert(id) }
+        }
+    }
+
+    /// A project header's menu: new panes and worktrees in the project, as
+    /// the desktop header's menu and New Worktree button offer.
+    private func projectMenu(_ project: ProjectDescriptor, on server: ServerModel) -> UIMenu {
+        var children: [UIMenuElement] = [
+            UIMenu(title: "New Pane", image: UIImage(systemName: "plus.square.on.square"), children: [
+                UIAction(title: "Terminal", image: UIImage(systemName: "apple.terminal")) { [weak self] _ in
+                    self?.newPane(.terminal, in: project.id, on: server)
+                },
+                UIAction(title: "Agent", image: UIImage(systemName: "sparkles")) { [weak self] _ in
+                    self?.newPane(.agent(.claude), in: project.id, on: server)
+                },
+            ]),
+        ]
+        if (server.gitSummaries[project.id] ?? nil) != nil {
+            children.append(UIAction(title: "New Worktree…", image: TabIcon.gitBranch.template) { [weak self] _ in
+                self?.showNewTab(kind: nil, on: server, location: project.id, checkout: .worktree)
+            })
+        }
+        children.append(UIMenu(options: .displayInline, children: [
+            UIAction(title: "Copy Path", image: UIImage(systemName: "doc.on.doc")) { _ in
+                UIPasteboard.general.string = project.directory.rawValue
+            },
+        ]))
+        return UIMenu(title: project.name, children: children)
     }
 
     static func describe(_ status: ServerModel.Status) -> String {
@@ -316,10 +355,15 @@ final class TabListViewController: UICollectionViewController {
     func showNewTab(kind: MobilePaneKind?, source: UIBarButtonItem? = nil) {
         let current = selected.flatMap { cards[$0] }
         guard let server = current?.server ?? app.servers.first(where: { $0.board != nil }) else { return }
+        showNewTab(kind: kind, on: server, location: current?.card.project.id, source: source)
+    }
+
+    private func showNewTab(kind: MobilePaneKind?, on server: ServerModel, location: ProjectId?,
+                            checkout: NewTabForm.Checkout? = nil, source: UIBarButtonItem? = nil) {
         let presenter = splitViewController ?? self
         guard presenter.presentedViewController == nil else { return }
-        NewTabViewController.present(over: presenter, app: app, server: server, kind: kind,
-                                     location: current?.card.project.id, source: source) { [weak self] server, tab in
+        NewTabViewController.present(over: presenter, app: app, server: server, kind: kind, location: location,
+                                     checkout: checkout, source: source) { [weak self] server, tab in
             guard let card = server.cards.first(where: { $0.id == tab }) else { return }
             self?.open(card, on: server)
         }
@@ -331,6 +375,16 @@ final class TabListViewController: UICollectionViewController {
         guard let server = current ?? app.servers.first(where: { $0.board != nil }),
               let tab = try? server.newTab(kind, size: Size(cols: 80, rows: 24)),
               let card = server.cards.first(where: { $0.id == tab }) else { return }
+        open(card, on: server)
+    }
+
+    /// A terminal or agent pane in `project` at once, from its header: the
+    /// project's one tab gains it on the right, or it starts that tab.
+    private func newPane(_ kind: MobilePaneKind, in project: ProjectId, on server: ServerModel) {
+        preferences.collapsedProjects.remove(project)
+        guard let tab = try? server.newTab(kind, in: project, size: Size(cols: 80, rows: 24)),
+              let card = server.cards.first(where: { $0.id == tab }) ?? server.cards.first(where: { $0.project.id == project })
+        else { return }
         open(card, on: server)
     }
 
@@ -367,7 +421,7 @@ final class TabListViewController: UICollectionViewController {
             guard let self, let entry = cards[id] else { return }
             cell.configure(entry.card, icon: icon(entry.card.iconProject, on: entry.server), showsProject: !grouped)
         }
-        let header = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(
+        let header = UICollectionView.SupplementaryRegistration<TabSectionHeader>(
             elementKind: UICollectionView.elementKindSectionHeader) { [weak self] header, _, path in
             guard let self, let section = dataSource.sectionIdentifier(for: path.section) else { return }
             configure(header, for: section)
@@ -397,8 +451,11 @@ final class TabListViewController: UICollectionViewController {
         var snapshot = NSDiffableDataSourceSnapshot<Section, TabId>()
         var next: [TabId: (ServerModel, TabCard)] = [:]
         var projects: [ProjectId: ProjectDescriptor] = [:]
+        var collapsed: [ProjectId: Int] = [:]
         let grouping = preferences.groupsByProject
         let query = filter.lowercased()
+        // A search shows what it found in every project.
+        let collapsedProjects = query.isEmpty ? preferences.collapsedProjects : []
         for server in servers {
             let cards = server.cards.filter { card in
                 guard shown.admits(card) else { return false }
@@ -418,17 +475,25 @@ final class TabListViewController: UICollectionViewController {
             for group in groups {
                 let section = Section(server: server.id, project: group.project?.id)
                 snapshot.appendSections([section])
+                if let project = group.project {
+                    projects[project.id] = project
+                    if collapsedProjects.contains(project.id) {
+                        collapsed[project.id] = group.cards.count
+                        continue
+                    }
+                }
                 snapshot.appendItems(group.cards.map(\.id), toSection: section)
-                if let project = group.project { projects[project.id] = project }
             }
         }
-        let changed = next.keys.filter { id in cards[id].map { $0.card != next[id]?.1 } ?? false }
+        let listed = Set(snapshot.itemIdentifiers)
+        let changed = listed.filter { id in cards[id].map { $0.card != next[id]?.1 } ?? false }
         let iconsArrived = servers.contains { server in server.projectIcons.contains { icons[$0.key]?.data != $0.value } }
         let regrouped = grouping != grouped
         cards = next.mapValues { (server: $0.0, card: $0.1) }
         groupedProjects = projects
+        collapsedCounts = collapsed
         grouped = grouping
-        snapshot.reconfigureItems(iconsArrived || regrouped ? Array(next.keys) : changed)
+        snapshot.reconfigureItems(Array(iconsArrived || regrouped ? listed : changed))
         dataSource.apply(snapshot, animatingDifferences: view.window != nil)
         // Cards lose or regain their project row, and the headers change.
         if regrouped { collectionView.collectionViewLayout.invalidateLayout() }

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.26.0 - 2026-11-12
+
+### Added
+
+- Tap a project's header in the tab list grouped by project to hide or show its
+  tabs, as in the Mac's sidebar; hidden projects stay hidden next time and say
+  how many tabs they hold.
+- A project's header has a menu to add a terminal or agent pane to the project,
+  start a new worktree of a Git project, or copy its path.
+
 ## 0.25.0 - 2026-11-12
 
 ### Changed
