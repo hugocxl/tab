@@ -92,7 +92,7 @@ private final class AgentSubagentRows: NSView {
 /// One running agent: a spinner, what it was asked to do, what it's doing now and
 /// how much it has done.
 @MainActor
-private final class AgentSubagentRow: NSView {
+final class AgentSubagentRow: NSView {
     var onPress: ((String) -> Void)?
     private let spinner = NSProgressIndicator()
     private let title = makeLabel("", font: AppFont.body)
@@ -166,7 +166,23 @@ private final class AgentSubagentRow: NSView {
     override func mouseEntered(with event: NSEvent) { hovered = true }
     override func mouseExited(with event: NSEvent) { hovered = false }
 
+    override var acceptsFirstResponder: Bool { toolUseID != nil }
+    override func becomeFirstResponder() -> Bool { needsDisplay = true; return true }
+    override func resignFirstResponder() -> Bool { needsDisplay = true; return true }
+    override func keyDown(with event: NSEvent) { interpretKeyEvents([event]) }
+    override func insertNewline(_ sender: Any?) { _ = accessibilityPerformPress() }
+    override func insertText(_ insertString: Any) {
+        if insertString as? String == " " { _ = accessibilityPerformPress() }
+    }
+    override func draw(_ dirtyRect: NSRect) {
+        guard window?.firstResponder === self else { return }
+        theme.accent.withAlphaComponent(0.7).setStroke()
+        let ring = NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 1), xRadius: 7, yRadius: 7)
+        ring.lineWidth = 2
+        ring.stroke()
+    }
     override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
         guard let toolUseID else { return }
         onPress?(toolUseID)
     }

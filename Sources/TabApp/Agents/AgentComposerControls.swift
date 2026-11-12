@@ -221,6 +221,17 @@ class AgentTextPopUp: NSPopUpButton {
 /// Keeps native button keyboard activation, focus masks and mouse tracking around custom artwork.
 @MainActor
 class AgentComposerButton: NSButton {
+    var onFocusChange: ((Bool) -> Void)?
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        if accepted { onFocusChange?(true); needsDisplay = true }
+        return accepted
+    }
+    override func resignFirstResponder() -> Bool {
+        let accepted = super.resignFirstResponder()
+        if accepted { onFocusChange?(false); needsDisplay = true }
+        return accepted
+    }
     private var hoverTracking: NSTrackingArea?
     private(set) var hovered = false
 
@@ -243,10 +254,10 @@ class AgentComposerButton: NSButton {
     override func mouseExited(with event: NSEvent) { hovered = false; needsDisplay = true }
 }
 
-/// Shares one trailing position for send and interrupt; callers control visibility and enabled state.
+/// Native composer actions; callers control placement, visibility and enabled state.
 @MainActor
 final class AgentRoundButton: AgentComposerButton {
-    /// Send, Stop and Dictate share one slot; the pane shows whichever applies.
+    /// Stop remains available beside Send while drafting during active work.
     enum Kind { case send, stop, dictate }
     let kind: Kind
     var onPress: (() -> Void)?

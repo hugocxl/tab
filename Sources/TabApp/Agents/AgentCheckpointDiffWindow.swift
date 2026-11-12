@@ -7,6 +7,7 @@ final class AgentCheckpointDiffWindow: NSWindowController, NSWindowDelegate, NST
     typealias Fetch = (AgentCheckpointRequest) async throws -> AgentCheckpointReply
     private let session: SessionId
     private let checkpoint: String
+    var checkpointID: String { checkpoint }
     private let fetch: Fetch
     private let surface = AgentCheckpointDiffSurface(frame: .zero)
     private var files: [AgentTurnCheckpoint.File] = []
@@ -15,6 +16,16 @@ final class AgentCheckpointDiffWindow: NSWindowController, NSWindowDelegate, NST
     private var selectedPath: String?
     private var selectionGeneration = 0
     var onClose: (() -> Void)?
+    var onReviewChange: (([AgentReviewComment]) -> Void)? {
+        didSet {
+            surface.setReviewEnabled(onReviewChange != nil)
+            window?.minSize = NSSize(width: onReviewChange == nil ? 600 : 680, height: 360)
+        }
+    }
+    var onDraftReview: (() throws -> Void)?
+    var reviewComments: [AgentReviewComment] = [] { didSet { surface.updateReviewCount(reviewComments.count) } }
+    private var commentEditor: AgentTextEditorSheet?
+    private var commentPicker: AgentSearchPicker?
 
     init(session: SessionId, checkpoint: String, path: String?, theme: AppTheme, fetch: @escaping Fetch) {
         self.session = session; self.checkpoint = checkpoint; self.fetch = fetch
@@ -34,6 +45,19 @@ final class AgentCheckpointDiffWindow: NSWindowController, NSWindowDelegate, NST
             guard let self else { return }
             if self.files.isEmpty { self.load(path: path) }
             else if let selected = self.selectedPath { self.select(selected) }
+        }
+        surface.addComment.onPress = { [weak self] in self?.addComment() }
+        surface.reviewComments.onPress = { [weak self] in self?.showComments() }
+        surface.draftReview.onPress = { [weak self] in
+            do { try self?.onDraftReview?() }
+            catch {
+                guard let self, let window = self.window else { return }
+                let alert = NSAlert()
+                alert.messageText = "Could not add comments to the draft"
+                alert.informativeText = error.localizedDescription
+                alert.window.appearance = self.surface.theme.nsAppearance
+                alert.beginSheetModal(for: window)
+            }
         }
         window.center()
         load(path: path)
@@ -86,6 +110,50 @@ final class AgentCheckpointDiffWindow: NSWindowController, NSWindowDelegate, NST
             }
         }
     }
+    private func addComment() {
+        guard let path = selectedPath, let document = surface.rows.document,
+              let selection = surface.rows.reviewSelection, let lines = selection.lines(in: document) else { return }
+        editComment(AgentReviewComment(checkpoint: checkpoint, path: path, old: selection.old,
+                                      firstLine: lines.first, lastLine: lines.last, source: lines.source, text: ""), existing: false)
+    }
+
+    private func showComments() {
+        guard commentEditor == nil else { return }
+        commentPicker?.close()
+        let picker = AgentSearchPicker(title: "Review comments", placeholder: "Search comments or files…", theme: surface.theme)
+        picker.update(reviewComments.map { .init(id: $0.id, title: $0.text, detail: $0.location) },
+                      note: "Choose a comment to edit or delete it. Comments are saved with the conversation draft.")
+        picker.onSelect = { [weak self] id in
+            guard let self, let comment = self.reviewComments.first(where: { $0.id == id }) else { return }
+            self.editComment(comment, existing: true)
+        }
+        picker.onClose = { [weak self] in self?.commentPicker = nil }
+        commentPicker = picker
+        picker.present(in: window)
+    }
+
+    private func editComment(_ comment: AgentReviewComment, existing: Bool) {
+        guard commentEditor == nil, let window else { return }
+        let editor = AgentTextEditorSheet(title: existing ? "Edit review comment" : "Add review comment",
+            detail: comment.location + "\nCheckpoint: " + checkpoint,
+            text: comment.text, theme: surface.theme, allowsDelete: existing)
+        commentEditor = editor
+        editor.present(in: window) { [weak self] response, text, _ in
+            guard let self else { return }
+            self.commentEditor = nil
+            var comments = self.reviewComments
+            if response == .alertThirdButtonReturn {
+                comments.removeAll { $0.id == comment.id }
+            } else if response == .alertFirstButtonReturn, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                var edited = comment
+                edited.text = text
+                if let index = comments.firstIndex(where: { $0.id == comment.id }) { comments[index] = edited }
+                else { comments.append(edited) }
+            } else { return }
+            self.onReviewChange?(comments)
+        }
+    }
+
     func numberOfRows(in tableView: NSTableView) -> Int { files.count }
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         guard files.indices.contains(row) else { return nil }
@@ -101,6 +169,7 @@ final class AgentCheckpointDiffWindow: NSWindowController, NSWindowDelegate, NST
     }
     func windowWillClose(_ notification: Notification) {
         loadTask?.cancel(); selectionTask?.cancel()
+        commentEditor?.close(); commentPicker?.close()
         onClose?()
     }
 }
@@ -116,7 +185,11 @@ private final class AgentCheckpointDiffSurface: ThemedView {
     private let mode = SegmentedPill(["Unified", "Split"], selected: 0)
     private let fileScroll = NSScrollView()
     private let diffScroll = NSScrollView()
-    private let rows = DiffRowsView()
+    let rows = DiffRowsView()
+    let addComment = PillButton("Add comment", style: .plain)
+    let reviewComments = PillButton("Comments", style: .plain)
+    let draftReview = PillButton("Add comments to draft", style: .normal)
+    private var reviewEnabled = false
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -133,7 +206,7 @@ private final class AgentCheckpointDiffSurface: ThemedView {
         }
         diffScroll.hasHorizontalScroller = true
         path.lineBreakMode = .byTruncatingMiddle
-        for child in [fileScroll, diffScroll, path, counts, message, note, mode, retry] {
+        for child in [fileScroll, diffScroll, path, counts, message, note, mode, retry, addComment, reviewComments, draftReview] {
             child.translatesAutoresizingMaskIntoConstraints = true; addSubview(child)
         }
         mode.onChange = { [weak self] index in
@@ -144,9 +217,16 @@ private final class AgentCheckpointDiffSurface: ThemedView {
         }
         note.isHidden = true
         retry.isHidden = true
+        setReviewEnabled(false)
+        rows.onReviewSelection = { [weak self] in self?.updateReviewSelection() }
+        rows.setAccessibilityElement(true)
+        rows.setAccessibilityRole(.textArea)
+        rows.setAccessibilityLabel("Historical diff. Use arrows to select lines, Shift-Up or Shift-Down to extend, and Left or Right to choose old or new lines.")
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
     func showMessage(_ text: String, retry: Bool = false) {
+        rows.document = nil
+        updateReviewSelection()
         message.stringValue = text; message.isHidden = false
         diffScroll.isHidden = true; note.isHidden = true
         self.retry.isHidden = !retry
@@ -161,6 +241,25 @@ private final class AgentCheckpointDiffSurface: ThemedView {
         diffScroll.contentView.scroll(to: .zero)
         needsLayout = true
     }
+    func setReviewEnabled(_ enabled: Bool) {
+        reviewEnabled = enabled
+        rows.reviewEnabled = enabled
+        for button in [addComment, reviewComments, draftReview] { button.isHidden = !enabled }
+        updateReviewSelection()
+        needsLayout = true
+    }
+    func updateReviewCount(_ count: Int) {
+        reviewComments.title = "Comments (\(count))"
+        reviewComments.isEnabled = count > 0
+        draftReview.isEnabled = count > 0
+    }
+    private func updateReviewSelection() {
+        let lines = rows.document.flatMap { rows.reviewSelection?.lines(in: $0) }
+        addComment.isEnabled = reviewEnabled && lines != nil
+        addComment.toolTip = lines.map { "Comment on lines \($0.first)–\($0.last)" } ?? "Select lines in the diff first"
+        rows.setAccessibilityValue(lines.map { "Selected lines \($0.first) through \($0.last), \(rows.reviewSelection?.old == true ? "old" : "new") side" } ?? "No lines selected")
+    }
+
     override func layout() {
         super.layout()
         let sidebar: CGFloat = min(260, bounds.width * 0.28)
@@ -171,13 +270,19 @@ private final class AgentCheckpointDiffSurface: ThemedView {
         path.frame = NSRect(x: left, y: 10, width: max(1, width - 240), height: 20)
         counts.frame = NSRect(x: max(left, bounds.width - 250), y: 10, width: 90, height: 20)
         mode.frame = NSRect(x: max(left, bounds.width - 152), y: 5, width: 140, height: 28)
-        diffScroll.frame = NSRect(x: left, y: 40, width: width, height: max(1, bounds.height - 40 - (note.isHidden ? 0 : 24)))
+        diffScroll.frame = NSRect(x: left, y: 40, width: width, height: max(1, bounds.height - 40 - (note.isHidden ? 0 : 24) - (reviewEnabled ? 40 : 0)))
         rows.fitWidth(diffScroll.contentSize.width)
         message.frame = NSRect(x: left + 12, y: 64, width: max(1, width - 24), height: 44)
         retry.frame = NSRect(x: left + 12, y: 116, width: 70, height: 28)
-        note.frame = NSRect(x: left, y: bounds.height - 22, width: width, height: 20)
+        let footerY = bounds.height - 34
+        addComment.frame = NSRect(x: left, y: footerY, width: 100, height: 28)
+        reviewComments.frame = NSRect(x: left + 106, y: footerY, width: 110, height: 28)
+        draftReview.frame = NSRect(x: max(left + 222, bounds.width - 190), y: footerY, width: 178, height: 28)
+        note.frame = NSRect(x: left, y: bounds.height - (reviewEnabled ? 62 : 22), width: width, height: 20)
     }
     override func themeDidChange() {
+        appearance = theme.nsAppearance
+        window?.appearance = theme.nsAppearance
         wantsLayer = true; layer?.backgroundColor = theme.card.cgColor
         rows.theme = theme; rows.themeDidChange()
         path.textColor = theme.fg; message.textColor = theme.fgMuted; note.textColor = theme.fgDim

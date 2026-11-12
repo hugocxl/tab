@@ -1,5 +1,6 @@
 import AppKit
 import TabProtocol
+import TabCore
 import XCTest
 @testable import TabApp
 
@@ -23,6 +24,17 @@ private actor CheckpointDiffGate {
 
 @MainActor
 final class AgentCheckpointDiffWindowTests: XCTestCase {
+    func testHistoricalDiffControlsUseTheConversationsLightAppearance() {
+        _ = NSApplication.shared
+        let theme = AppTheme(catalog: ThemeCatalog.load(customDirectory: nil), systemIsDark: false)
+        let controller = AgentCheckpointDiffWindow(session: SessionId(), checkpoint: "turn", path: nil, theme: theme) { request in
+            .init(checkpoint: request.checkpoint, files: [], totalFiles: 0)
+        }
+        defer { controller.close() }
+        XCTAssertEqual(controller.window?.appearance?.bestMatch(from: [.aqua, .darkAqua]), .aqua)
+        XCTAssertEqual(controller.window?.contentView?.appearance?.bestMatch(from: [.aqua, .darkAqua]), .aqua)
+    }
+
     func testSlowPreviousSelectionCannotReplaceTheSelectedFile() async throws {
         _ = NSApplication.shared
         let gate = CheckpointDiffGate()

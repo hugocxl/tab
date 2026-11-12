@@ -87,7 +87,7 @@ final class AgentInteractionTests: XCTestCase {
         XCTAssertGreaterThan(surface.questions.frame.height, 180)
         XCTAssertGreaterThan(surface.promptQueue.frame.height, 40)
         XCTAssertLessThanOrEqual(surface.promptQueue.frame.maxY, surface.questions.frame.minY)
-        XCTAssertLessThanOrEqual(surface.questions.frame.maxY, surface.composerScroll.superview?.frame.minY ?? 0)
+        XCTAssertLessThanOrEqual(surface.questions.convert(surface.questions.bounds, to: surface).maxY, surface.composerScroll.superview?.frame.minY ?? 0)
         XCTAssertFalse(surface.plan.frame.intersects(surface.modelPicker.frame))
         // Send, Stop and Dictate share one slot; exactly one of them shows.
         XCTAssertEqual([surface.send, surface.stop, surface.microphone].filter { !$0.isHidden }.count, 1)

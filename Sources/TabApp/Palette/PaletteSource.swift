@@ -216,6 +216,12 @@ final class PaletteSource: PaletteDataSource {
                                         shortcut: shortcut.flatMap { keymap.chord($0) }, disabled: disabled, target: .page(page)))
         }
         let terminalPane = model.activePane.flatMap { model.state.pane($0) }?.content.isTerminal ?? false
+        let agentPane = model.activePane.flatMap { model.controller(for: $0) } is AgentPaneController
+        for (id, title) in [(ShortcutId.agentPromptOutline, "Agent: Conversation Prompts…"),
+                            (.agentPreviousPrompt, "Agent: Previous Prompt"), (.agentNextPrompt, "Agent: Next Prompt"),
+                            (.agentHistory, "Agent: Continue Conversation…")] {
+            command(id, title, .panes, disabled: !agentPane)
+        }
         let project = current.id
         let paneCount = model.activeTab?.panes.count ?? 0
         let missing = current.status == .missing

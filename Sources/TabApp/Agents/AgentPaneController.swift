@@ -29,6 +29,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     private var draftRevision: UInt64 = 0
     private var restoringDraft = false
     private var lastSubmission: AgentPrompt?
+    private var reviewComments: [AgentReviewComment] = []
     private var questionDrafts: [String: [String: [String]]] = [:]
     private var initialPreferences: AgentComposerPreferences?
     private var savePreferences: ((AgentComposerPreferences?) -> Void)?
@@ -39,12 +40,14 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     var confirmClose: (() async -> Bool)?
     var onNewConversation: (() -> Void)?
     /// Conversations Claude Code and Codex saved for this folder outside Tab.
-    var loadHistory: (() async throws -> [AgentHistoryEntry])?
+    var loadHistory: (() async throws -> AgentHistoryReply)?
     /// Continues one of them as the conversation with the given ID.
     var importHistory: ((AgentHistoryEntry, SessionId) async throws -> AgentChatSnapshot)?
     /// Shows a conversation this pane doesn't hold, beside it.
     var showConversation: ((AgentChatSnapshot) -> Void)?
     private var historyTask: Task<Void, Never>?
+    private var historyPicker: AgentSearchPicker?
+    private var queueEditor: AgentTextEditorSheet?
     var titleDidChange: (() -> Void)?
 
     private let request: (AgentChatRequest) async throws -> AgentChatSnapshot
@@ -52,7 +55,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     private var filePreview: AgentFilePreviewWindow?
     private var mediaPreview: AgentMediaPreviewWindow?
     private var toolDiffWindows: [String: (activity: AgentToolActivity, window: AgentCheckpointDiffWindow)] = [:]
-    private var checkpointWindows: [String: AgentCheckpointDiffWindow] = [:]
+    private(set) var checkpointWindows: [String: AgentCheckpointDiffWindow] = [:]
     var loadCheckpoint: AgentCheckpointDiffWindow.Fetch?
     private var refreshTask: Task<Void, Never>?
     private var commandTask: Task<Void, Never>?
@@ -161,7 +164,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
             guard let model, let project = owningProject(), let client = model.sideClient(for: project) else {
                 throw AgentPaneError.offline
             }
-            return try await client.agentHistory(.init(project: project)).entries
+            return try await client.agentHistory(.init(project: project))
         }
         importHistory = { [weak model] entry, target in
             guard let model, let project = owningProject(), let client = model.sideClient(for: project) else {
@@ -334,6 +337,33 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
             let controller = AgentCheckpointDiffWindow(session: self.session, checkpoint: id, path: path,
                 theme: self.surface.theme, fetch: fetch)
             controller.onClose = { [weak self] in self?.checkpointWindows.removeValue(forKey: key) }
+            controller.reviewComments = self.reviewComments.filter { $0.checkpoint == id }
+            controller.onReviewChange = { [weak self] comments in
+                guard let self else { return }
+                self.reviewComments.removeAll { $0.checkpoint == id }
+                self.reviewComments += comments
+                self.refreshReviewComments()
+                self.saveDraft(immediate: true)
+            }
+            controller.onDraftReview = { [weak self] in
+                guard let self, !self.disposed, !self.restoringDraft else { throw ModelError("The conversation draft is unavailable.") }
+                let comments = self.reviewComments.filter { $0.checkpoint == id }
+                guard !comments.isEmpty else { return }
+                let text = AgentReviewComment.prompt(comments)
+                let editor = self.surface.composer
+                let separator = editor.string.isEmpty ? "" : "\n\n"
+                guard editor.string.utf8.count + separator.utf8.count + text.utf8.count <= 256 * 1024 else {
+                    throw ModelError("These comments would exceed the draft size limit. Shorten the draft or the comments first.")
+                }
+                editor.insertText(separator + text, replacementRange: NSRange(location: editor.textStorage?.length ?? 0, length: 0))
+                self.reviewComments.removeAll { $0.checkpoint == id }
+                self.refreshReviewComments()
+                self.surface.refreshComposer()
+                self.saveDraft(immediate: true)
+                self.updateControls()
+                self.surface.window?.makeKeyAndOrderFront(nil)
+                self.focusContent()
+            }
             self.checkpointWindows[key] = controller
             controller.showWindow(nil)
         }
@@ -374,6 +404,12 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         updateControls()
     }
 
+    private func refreshReviewComments() {
+        for controller in checkpointWindows.values {
+            controller.reviewComments = reviewComments.filter { $0.checkpoint == controller.checkpointID }
+        }
+    }
+
     func focusContent() {
         view.window?.makeFirstResponder(surface.composer)
     }
@@ -381,7 +417,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     func didHide() { voice.stop() } // Keep the draft and scroll position when switching projects.
 
     func willClose() async -> Bool {
-        guard submitting || snapshot?.status == .working || snapshot?.status == .waiting || snapshot?.queuedPrompts?.isEmpty == false else { return true }
+        guard submitting || snapshot?.status == .working || snapshot?.status == .waiting || snapshot?.queuedPrompts?.isEmpty == false || snapshot?.subagents?.contains(where: { $0.status == .running }) == true else { return true }
         return await confirmClose?() ?? true
     }
 
@@ -406,6 +442,9 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
 
     func dispose() {
         voice.stop()
+        historyPicker?.close()
+        queueEditor?.close()
+        surface.closeOutline()
         saveDraft(immediate: true)
         attachmentCache.cancel()
         filePreview?.close()
@@ -736,6 +775,9 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
             return
         case "new", "clear-conversation": onNewConversation?(); return
         case "resume": showHistory(); return
+        case "outline": surface.showOutline(); return
+        case "previous-prompt": surface.navigatePrompt(previous: true); return
+        case "next-prompt": surface.navigatePrompt(previous: false); return
         case "model", "effort": control = surface.modelPicker
         case "attach": chooseAttachments(); return
         case "stop": stop(); return
@@ -754,7 +796,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         control.performClick(nil)
     }
 
-    private func showHistory() {
+    func showHistory() {
         guard !disposed, historyTask == nil, let loadHistory else { return }
         errorMessage = nil
         historyTask = Task { [weak self] in
@@ -775,36 +817,26 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         updateControls()
     }
 
-    private func presentHistory(_ entries: [AgentHistoryEntry]) {
-        guard !entries.isEmpty else {
-            showComposerError("Claude Code and Codex have no other conversations saved for this folder.")
-            return
-        }
-        let menu = NSMenu()
+    private func presentHistory(_ reply: AgentHistoryReply) {
+        historyPicker?.close()
+        let picker = AgentSearchPicker(title: "Continue conversation", placeholder: "Search titles or providers…", theme: surface.theme)
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .short
-        for provider in TabCore.AgentChatProvider.allCases {
-            let group = entries.filter { $0.provider == provider }
-            guard !group.isEmpty else { continue }
-            menu.addItem(NSMenuItem.sectionHeader(title: provider.name))
-            for entry in group.prefix(40) {
-                let title = entry.title.count > 80 ? entry.title.prefix(79) + "…" : entry.title
-                let item = NSMenuItem(title: String(title), action: #selector(historySelected(_:)), keyEquivalent: "")
-                item.target = self
-                item.representedObject = entry
-                let when = formatter.localizedString(for: entry.updatedAt, relativeTo: Date())
-                if #available(macOS 14.4, *) { item.subtitle = when }
-                item.toolTip = entry.title + "\n" + when
-                menu.addItem(item)
-            }
+        picker.update(reply.entries.map { entry in
+            .init(id: entry.id, title: entry.title, detail: entry.provider.name + " · " + formatter.localizedString(for: entry.updatedAt, relativeTo: Date()))
+        }, note: reply.truncated ? "Showing the newest 200 conversations. Older results were omitted by the server."
+            : reply.entries.isEmpty ? "No other saved conversations in this folder." : "Conversations saved for this folder")
+        picker.onSelect = { [weak self] id in
+            guard let entry = reply.entries.first(where: { $0.id == id }) else { return }
+            self?.resumeHistory(entry)
         }
-        let anchor = surface.composerScroll
-        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: anchor.isFlipped ? 0 : anchor.bounds.height), in: anchor)
+        picker.onClose = { [weak self] in self?.historyPicker = nil }
+        historyPicker = picker
+        picker.present(in: surface.window)
     }
 
-    @objc private func historySelected(_ sender: NSMenuItem) {
-        guard !disposed, historyTask == nil, let entry = sender.representedObject as? AgentHistoryEntry,
-              let importHistory else { return }
+    private func resumeHistory(_ entry: AgentHistoryEntry) {
+        guard !disposed, historyTask == nil, let importHistory else { return }
         // An unused pane takes the conversation over; otherwise it opens beside this one.
         let unused = created && !submitting && commandTask == nil && snapshot.map {
             $0.items.isEmpty && $0.providerSession == nil && $0.status == .idle
@@ -1232,6 +1264,8 @@ extension AgentPaneController {
                 self.surface.composer.textStorage?.setAttributedString(draft.attributed(theme: self.surface.theme))
                 self.lastSubmission = draft.submission
                 self.questionDrafts = draft.answers
+                self.reviewComments = draft.reviewComments ?? []
+                self.refreshReviewComments()
                 var attachments: [AgentDraftAttachment] = []
                 for item in draft.attachments {
                     let thumbnail = item.mimeType.hasPrefix("image/") ? await AgentAttachmentImporter.previewImage(data: item.data, pixels: 160) : nil
@@ -1252,7 +1286,7 @@ extension AgentPaneController {
             questionDrafts = questionDrafts.filter { pending.contains($0.key) }
         }
         return AgentSavedDraft(text: surface.composer.attributedString(), attachments: draftAttachments,
-                               submission: lastSubmission, answers: questionDrafts)
+                               submission: lastSubmission, answers: questionDrafts, reviewComments: reviewComments)
     }
     private func saveDraft(immediate: Bool = false) {
         guard !restoringDraft, let store = draftStore else { return }
@@ -1280,25 +1314,20 @@ extension AgentPaneController {
     }
 
     private func editQueued(_ prompt: AgentQueuedPrompt) {
-        guard commandTask == nil else { return }
-        let alert = NSAlert()
-        alert.messageText = "Edit queued prompt"
-        alert.window.appearance = surface.theme.nsAppearance
-        alert.informativeText = prompt.state == .uncertain
-            ? "The earlier delivery may have reached the agent. Editing does not send it again. Attachments stay with the prompt."
-            : "Attachments stay with this prompt. Saving does not send it immediately."
-        let content = NSView(frame: NSRect(x: 0, y: 0, width: 440, height: 110))
-        let field = NSTextField(string: prompt.text)
-        field.frame = NSRect(x: 0, y: 38, width: 440, height: 72)
-        field.cell?.wraps = true; field.cell?.isScrollable = false
-        let settings = NSButton(checkboxWithTitle: "Use current model, reasoning effort and plan mode", target: nil, action: nil)
-        settings.frame = NSRect(x: 0, y: 0, width: 440, height: 28)
-        content.addSubview(field); content.addSubview(settings)
-        alert.accessoryView = content
-        alert.addButton(withTitle: "Save"); alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        run(.editQueued(session: session, id: prompt.id, text: field.stringValue, expectedRevision: prompt.revision,
-                        settings: settings.state == .on ? .init(model: effectiveModel, effort: reasoningEffort, planMode: snapshot?.planMode == true) : nil))
+        guard commandTask == nil, queueEditor == nil, let window = surface.window else { return }
+        let editor = AgentTextEditorSheet(title: "Edit queued prompt",
+            detail: prompt.state == .uncertain
+                ? "The earlier delivery may have reached the agent. Editing does not send it again. Attachments stay with the prompt."
+                : "Attachments stay with this prompt. Saving does not send it immediately.",
+            text: prompt.text, theme: surface.theme, showsSettings: true)
+        queueEditor = editor
+        editor.present(in: window) { [weak self] response, text, useSettings in
+            guard let self else { return }
+            self.queueEditor = nil
+            guard response == .alertFirstButtonReturn, !self.disposed else { return }
+            self.run(.editQueued(session: self.session, id: prompt.id, text: text, expectedRevision: prompt.revision,
+                settings: useSettings ? .init(model: self.effectiveModel, effort: self.reasoningEffort, planMode: self.snapshot?.planMode == true) : nil))
+        }
     }
     private func deliverQueued(_ prompt: AgentQueuedPrompt) {
         guard commandTask == nil else { return }

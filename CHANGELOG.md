@@ -3,6 +3,26 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.96.0 - 2026-11-12
+
+### Added
+
+- Agent panes offer a searchable prompt outline, previous and next prompt
+  navigation, and searchable conversation history.
+- Current task progress stays within reach above the agent composer and opens
+  the corresponding task list.
+- Comments on recorded turn changes retain their file and line context, survive
+  reopening, and collect into an editable follow-up draft.
+
+### Fixed
+
+- Stop remains available while drafting a follow-up, and closing an agent pane
+  asks before stopping its running background agents.
+- Queued prompts support multiline editing without blocking other windows,
+  preserve keyboard focus during updates, and remain reachable in short panes.
+- Agent questions focus missing answers, background-agent rows support keyboard
+  activation, and historical diff controls follow the conversation's appearance.
+
 ## 0.95.1 - 2026-11-12
 
 ### Fixed

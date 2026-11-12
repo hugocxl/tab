@@ -612,6 +612,50 @@ final class AgentPaneTests: XCTestCase {
         }
     }
 
+    func testDiffCommentsAppendToDraftWithoutSendingOrReplacingCitations() async throws {
+        let backend = Backend()
+        let pane = backend.controller()
+        defer { pane.dispose() }
+        pane.refresh()
+        try await wait { pane.snapshot != nil }
+        let draft = NSMutableAttributedString(string: "Keep my draft")
+        draft.addAttribute(.agentAssistantCitation, value: "existing-citation", range: NSRange(location: 0, length: 4))
+        pane.surface.composer.textStorage?.setAttributedString(draft)
+        pane.loadCheckpoint = { request in .init(checkpoint: request.checkpoint, files: [], totalFiles: 0) }
+        pane.surface.onOpenCheckpoint?("checkpoint", nil)
+        let review = try XCTUnwrap(pane.checkpointWindows.values.first)
+        let comment = AgentReviewComment(checkpoint: "checkpoint", path: "source.swift", old: false,
+                                        firstLine: 4, lastLine: 6, source: "retained code", text: "Please handle empty input")
+        review.onReviewChange?([comment])
+        XCTAssertEqual(review.reviewComments, [comment])
+        try review.onDraftReview?()
+        XCTAssertTrue(pane.surface.composer.string.hasPrefix("Keep my draft\n\n"))
+        XCTAssertTrue(pane.surface.composer.string.contains("Please handle empty input"))
+        XCTAssertEqual(pane.surface.composer.attributedString().attribute(.agentAssistantCitation, at: 0, effectiveRange: nil) as? String, "existing-citation")
+        XCTAssertTrue(backend.submissions.isEmpty)
+        XCTAssertTrue(review.reviewComments.isEmpty)
+        let after = pane.surface.composer.string
+        try review.onDraftReview?()
+        XCTAssertEqual(pane.surface.composer.string, after, "Adding twice cannot duplicate consumed comments")
+    }
+
+    func testIdleParentWithRunningSubagentRequiresCloseConfirmation() async throws {
+        let backend = Backend()
+        backend.snapshot.status = .idle
+        backend.snapshot.subagents = [.init(id: "child", description: "Running tests", background: true)]
+        let pane = backend.controller()
+        defer { pane.dispose() }
+        var asked = false
+        pane.confirmClose = { asked = true; return false }
+        pane.refresh()
+        try await wait { pane.snapshot != nil }
+        let approved = await pane.willClose()
+        XCTAssertFalse(approved)
+        XCTAssertTrue(asked)
+        XCTAssertFalse(backend.requests.contains(.close(session: backend.session)))
+        XCTAssertEqual(backend.snapshot.subagents?.first?.status, .running)
+    }
+
     func testCloseApprovalDoesNotTerminateAgentBeforeOtherPanesCanVeto() async throws {
         let backend = Backend()
         backend.snapshot.status = .working

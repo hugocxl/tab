@@ -71,6 +71,7 @@ final class AgentQueueView: ThemedView {
     private var paused = false
     private var enabled = true
     private var signature = ""
+    private var rowViews: [String: AgentQueueRow] = [:]
     private(set) var preferredHeight: CGFloat = 0
 
     override init(frame: NSRect) {
@@ -113,45 +114,46 @@ final class AgentQueueView: ThemedView {
     }
 
     private func rebuildRows() {
-        rows.subviews.forEach { $0.removeFromSuperview() }
+        let ids = Set(prompts.map(\.id))
+        for id in Array(rowViews.keys) where !ids.contains(id) {
+            rowViews.removeValue(forKey: id)?.removeFromSuperview()
+        }
         for (offset, prompt) in prompts.enumerated() {
+            let row = rowViews[prompt.id] ?? AgentQueueRow()
+            rowViews[prompt.id] = row
+            if row.superview == nil { rows.addSubview(row) }
+            if row.actions.isEmpty {
+                row.actions = [(.pencil, "Edit queued prompt"), (.chevronUp, "Move earlier in queue"),
+                               (.arrowUp, "Send now"), (.trash, "Remove queued prompt")].map { icon, title in
+                    let button = AgentIconButton(icon: icon, label: title, iconSize: 13)
+                    button.onFocusChange = { [weak row] focused in row?.actionFocused = focused }
+                    return button
+                }
+            }
+            let files = prompt.attachments.count
+            let attachmentText = files == 0 ? "" : files == 1 ? "1 attachment" : "\(files) attachments"
+            row.text.stringValue = prompt.text.isEmpty ? attachmentText : prompt.text.replacingOccurrences(of: "\n", with: " ")
+            row.text.toolTip = prompt.error ?? prompt.text
+            row.detail.stringValue = prompt.text.isEmpty ? "" : attachmentText
+            row.needsReview = prompt.state == .uncertain || prompt.state == .failed
+            row.status.stringValue = prompt.state == .delivering ? "Sending…" : row.needsReview ? "Needs review" : ""
+            row.status.toolTip = prompt.error
+            row.status.setAccessibilityHelp(prompt.error)
             let earlier = prompt.state == .queued ? prompts.prefix(offset).last(where: { $0.state == .queued }) : nil
-            rows.addSubview(makeRow(prompt, earlier: earlier))
+            for button in row.actions {
+                button.isHidden = prompt.state == .delivering
+                button.isEnabled = enabled
+            }
+            row.actions[0].onPress = { [weak self] in self?.onEdit?(prompt) }
+            row.actions[1].isHidden = earlier == nil || prompt.state == .delivering
+            row.actions[1].onPress = { [weak self] in if let earlier { self?.onMove?(prompt, earlier.id) } }
+            row.actions[2].onPress = { [weak self] in self?.onDeliver?(prompt) }
+            let deliveryLabel = row.needsReview ? "Review and retry delivery" : "Send now"
+            row.actions[2].toolTip = deliveryLabel
+            row.actions[2].setAccessibilityLabel(deliveryLabel)
+            row.actions[3].onPress = { [weak self] in self?.onRemove?(prompt) }
+            row.apply(theme)
         }
-    }
-
-    private func makeRow(_ prompt: AgentQueuedPrompt, earlier: AgentQueuedPrompt?) -> AgentQueueRow {
-        let row = AgentQueueRow()
-        let files = prompt.attachments.count
-        let attachmentText = files == 0 ? "" : files == 1 ? "1 attachment" : "\(files) attachments"
-        row.text.stringValue = prompt.text.isEmpty ? attachmentText : prompt.text.replacingOccurrences(of: "\n", with: " ")
-        row.text.toolTip = prompt.error ?? prompt.text
-        row.detail.stringValue = prompt.text.isEmpty ? "" : attachmentText
-        row.needsReview = prompt.state == .uncertain || prompt.state == .failed
-        switch prompt.state {
-        case .delivering: row.status.stringValue = "Sending…"
-        case .uncertain, .failed: row.status.stringValue = "Needs review"
-        default: row.status.stringValue = ""
-        }
-        row.status.toolTip = prompt.error
-        guard prompt.state != .delivering else { return row }
-        var actions: [AgentIconButton] = []
-        actions.append(action(.pencil, "Edit queued prompt") { [weak self] in self?.onEdit?(prompt) })
-        if let earlier {
-            actions.append(action(.chevronUp, "Move earlier in queue") { [weak self] in self?.onMove?(prompt, earlier.id) })
-        }
-        actions.append(action(.arrowUp, row.needsReview ? "Review and retry delivery" : "Send now") { [weak self] in self?.onDeliver?(prompt) })
-        actions.append(action(.trash, "Remove queued prompt") { [weak self] in self?.onRemove?(prompt) })
-        row.actions = actions
-        return row
-    }
-
-    private func action(_ icon: AppIcon, _ title: String, press: @escaping () -> Void) -> AgentIconButton {
-        let button = AgentIconButton(icon: icon, label: title, iconSize: 13)
-        button.onPress = press
-        button.isEnabled = enabled
-        button.chatTheme = theme
-        return button
     }
 
     override func layout() {
@@ -164,7 +166,8 @@ final class AgentQueueView: ThemedView {
         let top = inset + headerHeight
         scroll.frame = NSRect(x: 0, y: top, width: bounds.width, height: max(0, bounds.height - top - inset))
         let width = max(1, scroll.contentSize.width)
-        for (index, row) in rows.subviews.enumerated() {
+        for (index, prompt) in prompts.enumerated() {
+            guard let row = rowViews[prompt.id] else { continue }
             row.frame = NSRect(x: inset, y: CGFloat(index) * Self.rowHeight, width: width - inset * 2, height: Self.rowHeight)
         }
         rows.frame = NSRect(x: 0, y: 0, width: width, height: CGFloat(rows.subviews.count) * Self.rowHeight)
@@ -192,6 +195,7 @@ private final class AgentQueueRow: NSView {
     let detail = makeLabel("", font: AppFont.small)
     let status = makeLabel("", font: AppFont.small)
     var needsReview = false
+    var actionFocused = false { didSet { updateHover() } }
     var actions: [AgentIconButton] = [] {
         didSet {
             oldValue.forEach { $0.removeFromSuperview() }
@@ -237,7 +241,7 @@ private final class AgentQueueRow: NSView {
         layer?.backgroundColor = hovered ? theme.fg.withAlphaComponent(0.05).cgColor : nil
     }
 
-    private var showsActions: Bool { hovered || needsReview }
+    private var showsActions: Bool { hovered || needsReview || actionFocused }
 
     func apply(_ theme: AppTheme) {
         self.theme = theme
@@ -253,7 +257,7 @@ private final class AgentQueueRow: NSView {
         super.layout()
         let button: CGFloat = 26
         var right = bounds.width - 3
-        for view in actions.reversed() {
+        for view in actions.reversed() where !view.isHidden {
             right -= button
             view.frame = NSRect(x: right, y: floor((bounds.height - button) / 2), width: button, height: button)
         }
@@ -390,6 +394,14 @@ final class AgentQuestionView: ThemedView, NSTextFieldDelegate {
         guard let requestID, let form else { return }
         do { try form.validate(answers: answers, cancelled: cancelled) } catch {
             self.error.stringValue = "Answer each required question first."
+            self.error.toolTip = self.error.stringValue
+            self.error.setAccessibilityValue(self.error.stringValue)
+            if let block = blocks.first(where: { $0.question.required && (answers[$0.question.id]?.isEmpty ?? true) }) {
+                block.scrollToVisible(block.bounds)
+                window?.makeFirstResponder(block.choices.first ?? block.field)
+            }
+            NSAccessibility.post(element: self.error, notification: .announcementRequested,
+                                 userInfo: [.announcement: self.error.stringValue, .priority: NSAccessibilityPriorityLevel.high.rawValue])
             return
         }
         onAnswer?(requestID, cancelled ? [:] : answers, cancelled)

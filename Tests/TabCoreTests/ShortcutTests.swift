@@ -82,7 +82,8 @@ final class ShortcutTests: XCTestCase {
     func testEveryDefaultBindingRoundTripsAndResolvesBothDirections() throws {
         let keymap = Keymap()
         for action in ShortcutCatalog.keymapActions {
-            if [.selectCommandOutput, .detachTerminal, .newAgent, .newClaudeAgent, .newCodexAgent].contains(action) {
+            if [.selectCommandOutput, .detachTerminal, .newAgent, .newClaudeAgent, .newCodexAgent,
+                .agentPromptOutline, .agentPreviousPrompt, .agentNextPrompt, .agentHistory].contains(action) {
                 XCTAssertNil(keymap.chord(action))
                 continue
             }

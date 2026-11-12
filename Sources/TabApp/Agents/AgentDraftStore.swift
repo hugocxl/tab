@@ -8,11 +8,13 @@ struct AgentSavedDraft: Codable, Sendable {
     var attachments: [AgentChatAttachment]
     var submission: AgentPrompt?
     var answers: [String: [String: [String]]]
+    var reviewComments: [AgentReviewComment]?
     @MainActor
-    init(text: NSAttributedString, attachments: [AgentDraftAttachment], submission: AgentPrompt?, answers: [String: [String: [String]]]) {
+    init(text: NSAttributedString, attachments: [AgentDraftAttachment], submission: AgentPrompt?, answers: [String: [String: [String]]], reviewComments: [AgentReviewComment] = []) {
         self.text = text.string; spans = []
         self.attachments = attachments.map { .init(id: $0.id, name: $0.name, mimeType: $0.mimeType, data: $0.data) }
         self.submission = submission; self.answers = answers
+        self.reviewComments = reviewComments.isEmpty ? nil : reviewComments
         text.enumerateAttributes(in: NSRange(location: 0, length: text.length)) { attributes, range, _ in
             var values: [String: String] = [:]
             for key in [NSAttributedString.Key.agentAssistantCitation, .agentAssistantCitationIdentity, .agentThreadMention] {

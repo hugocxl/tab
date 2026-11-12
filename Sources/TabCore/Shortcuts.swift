@@ -202,6 +202,7 @@ public enum ShortcutCatalog {
         .selectProject6, .selectProject7, .selectProject8, .selectProject9,
         .copy, .paste, .find, .findNext, .findPrevious, .scrollToBottom,
         .previousPrompt, .nextPrompt, .selectCommandOutput,
+        .agentPromptOutline, .agentPreviousPrompt, .agentNextPrompt, .agentHistory,
         .toggleAgentPlan, .increaseFontSize, .decreaseFontSize, .newAgentPane, .newBrowserPane, .newSimulatorPane,
         .newAgentPaneBelow, .newBrowserPaneBelow, .newSimulatorPaneBelow,
     ]
@@ -644,6 +645,10 @@ public enum ShortcutId: String, CaseIterable, Codable, Sendable {
     case commandPaletteActions = "command_palette.actions"
     case newBrowserPane = "new_browser_tab"
     case newSimulatorPane = "new_simulator_pane"
+    case agentPromptOutline = "agent_prompt_outline"
+    case agentPreviousPrompt = "agent_previous_prompt"
+    case agentNextPrompt = "agent_next_prompt"
+    case agentHistory = "agent_history"
     case toggleAgentPlan = "toggle_agent_plan"
     case newAgentPane = "new_agent_pane"
     case newAgentPaneBelow = "new_agent_pane_below"
@@ -799,6 +804,10 @@ extension ShortcutCatalog {
         ShortcutDefinition(.commandPaletteActions, keys: ["cmd-k"], contexts: ["CommandPalette"], keyContexts: [["CommandPalette"]], group: .palette),
         ShortcutDefinition(.newBrowserPane, keys: ["cmd-alt-b"], contexts: ["WorkspaceTabs"], keyContexts: [["WorkspaceTabs"]], group: .browser),
         ShortcutDefinition(.newSimulatorPane, keys: ["cmd-alt-s"], contexts: ["WorkspaceTabs"], keyContexts: [["WorkspaceTabs"]], group: .panes),
+        ShortcutDefinition(.agentPromptOutline, keys: [], contexts: ["WorkspaceTabs"], keyContexts: [], group: .panes),
+        ShortcutDefinition(.agentPreviousPrompt, keys: [], contexts: ["WorkspaceTabs"], keyContexts: [], group: .panes),
+        ShortcutDefinition(.agentNextPrompt, keys: [], contexts: ["WorkspaceTabs"], keyContexts: [], group: .panes),
+        ShortcutDefinition(.agentHistory, keys: [], contexts: ["WorkspaceTabs"], keyContexts: [], group: .panes),
         ShortcutDefinition(.toggleAgentPlan, keys: ["shift-tab"], contexts: ["WorkspaceTabs"], keyContexts: [["WorkspaceTabs"]], group: .panes),
         ShortcutDefinition(.newAgentPane, keys: ["cmd-alt-a"], contexts: ["WorkspaceTabs"], keyContexts: [["WorkspaceTabs"]], group: .panes),
         ShortcutDefinition(.newAgentPaneBelow, keys: ["cmd-alt-shift-a"], contexts: ["WorkspaceTabs"], keyContexts: [["WorkspaceTabs"]], group: .panes),

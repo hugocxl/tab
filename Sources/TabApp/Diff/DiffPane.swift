@@ -236,7 +236,12 @@ public final class DiffPaneController: NSViewController {
 /// markers and syntax-colored source text in the code font, clipped to the
 /// visible columns.
 final class DiffRowsView: ThemedView {
-    var document: DiffDocument? { didSet { needsDisplay = true } }
+    var document: DiffDocument? { didSet { reviewSelection = nil; reviewAnchor = nil; reviewHead = nil; needsDisplay = true } }
+    var reviewEnabled = false
+    var onReviewSelection: (() -> Void)?
+    var reviewSelection: DiffReviewSelection? { didSet { needsDisplay = true; onReviewSelection?() } }
+    private var reviewAnchor: Int?
+    private var reviewHead: Int?
     var split = false { didSet { needsDisplay = true } }
     var font: NSFont = AppFont.mono(12) {
         didSet {
@@ -264,6 +269,83 @@ final class DiffRowsView: ThemedView {
     }
 
     override var acceptsFirstResponder: Bool { true }
+
+    func reviewRow(at point: NSPoint) -> (index: Int, old: Bool)? {
+        guard let document, cell.height > 0, point.y >= 0 else { return nil }
+        let index = Int(point.y / cell.height)
+        if split {
+            guard document.split.indices.contains(index) else { return nil }
+            let old = point.x < bounds.width / 2
+            guard let row = old ? document.split[index].left : document.split[index].right,
+                  (old ? document.rows[row].oldLineNumber : document.rows[row].newLineNumber) != nil else { return nil }
+            return (row, old)
+        }
+        guard document.rows.indices.contains(index), document.rows[index].kind != .hunk else { return nil }
+        let row = document.rows[index]
+        let old = row.kind == .deletion || (row.kind == .context && point.x < Metrics.gutter + CGFloat(document.numberColumns) * cell.width)
+        guard (old ? row.oldLineNumber : row.newLineNumber) != nil else { return nil }
+        return (index, old)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard reviewEnabled, let row = reviewRow(at: convert(event.locationInWindow, from: nil)) else {
+            super.mouseDown(with: event); return
+        }
+        window?.makeFirstResponder(self)
+        if !event.modifierFlags.contains(.shift) || reviewSelection?.old != row.old { reviewAnchor = row.index }
+        let anchor = reviewAnchor ?? row.index
+        reviewHead = row.index
+        reviewSelection = .init(rows: min(anchor, row.index)...max(anchor, row.index), old: row.old)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard reviewEnabled, let anchor = reviewAnchor,
+              let row = reviewRow(at: convert(event.locationInWindow, from: nil)), row.old == reviewSelection?.old else { return }
+        reviewHead = row.index
+        reviewSelection = .init(rows: min(anchor, row.index)...max(anchor, row.index), old: row.old)
+        autoscroll(with: event)
+    }
+
+    override func keyDown(with event: NSEvent) {
+        guard reviewEnabled else { super.keyDown(with: event); return }
+        interpretKeyEvents([event])
+    }
+    override func moveUp(_ sender: Any?) { moveReview(-1, extend: false) }
+    override func moveDown(_ sender: Any?) { moveReview(1, extend: false) }
+    override func moveUpAndModifySelection(_ sender: Any?) { moveReview(-1, extend: true) }
+    override func moveDownAndModifySelection(_ sender: Any?) { moveReview(1, extend: true) }
+    override func moveLeft(_ sender: Any?) { selectReviewSide(old: true) }
+    override func moveRight(_ sender: Any?) { selectReviewSide(old: false) }
+
+    private func selectReviewSide(old: Bool) {
+        guard let selection = reviewSelection, let document else { return }
+        let current = reviewHead ?? selection.rows.lowerBound
+        guard let pair = document.split.first(where: { $0.left == current || $0.right == current }),
+              let target = old ? pair.left : pair.right,
+              (old ? document.rows[target].oldLineNumber : document.rows[target].newLineNumber) != nil else { return }
+        reviewAnchor = target
+        reviewHead = target
+        reviewSelection = .init(rows: target...target, old: old)
+    }
+
+    private func moveReview(_ delta: Int, extend: Bool) {
+        guard let document else { return }
+        let old = reviewSelection?.old ?? false
+        let current = reviewHead ?? reviewSelection.map { delta < 0 ? $0.rows.lowerBound : $0.rows.upperBound }
+        var next = current.map { $0 + delta } ?? (delta > 0 ? 0 : document.rows.count - 1)
+        while document.rows.indices.contains(next) {
+            if (old ? document.rows[next].oldLineNumber : document.rows[next].newLineNumber) != nil {
+                let anchor = extend ? (reviewAnchor ?? next) : next
+                reviewAnchor = anchor
+                reviewHead = next
+                reviewSelection = .init(rows: min(anchor, next)...max(anchor, next), old: old)
+                let visual = split ? document.split.firstIndex(where: { (old ? $0.left : $0.right) == next }) ?? 0 : next
+                scrollToVisible(NSRect(x: visibleRect.minX, y: CGFloat(visual) * cell.height, width: 1, height: cell.height))
+                return
+            }
+            next += delta
+        }
+    }
 
     /// Sizes the view to its rows and widest line, at least `width` wide.
     func fitWidth(_ width: CGFloat) {
@@ -313,6 +395,11 @@ final class DiffRowsView: ThemedView {
             frame.intersection(dirty).fill()
         default:
             break
+        }
+        if reviewEnabled, let selection = reviewSelection, selection.rows.contains(index),
+           unified || selection.old == old {
+            theme.accent.withAlphaComponent(0.18).setFill()
+            frame.intersection(dirty).fill()
         }
         let origin = frame.minX + Metrics.gutter
         let firstColumn = max(Int((max(dirty.minX, frame.minX) - origin) / cell.width), 0)

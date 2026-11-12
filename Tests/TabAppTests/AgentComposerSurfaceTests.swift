@@ -90,7 +90,8 @@ final class AgentComposerSurfaceTests: XCTestCase {
         surface.refreshComposer()
         surface.layoutSubtreeIfNeeded()
         XCTAssertFalse(surface.send.isHidden, "A draft while working queues through Send")
-        XCTAssertTrue(surface.stop.isHidden)
+        XCTAssertFalse(surface.stop.isHidden, "Stop remains available without discarding the draft")
+        XCTAssertFalse(surface.stop.frame.intersects(surface.send.frame))
         surface.composer.string = ""
         XCTAssertFalse(visibleLabels(surface).contains("Working…"), "Working belongs in the transcript")
         snapshot.items.append(AgentChatItem(id: "answer", kind: .assistant, text: "Partial answer", isComplete: false))

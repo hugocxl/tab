@@ -11,6 +11,13 @@ final class AgentPaneView: ThemedView {
     let composer = AgentComposerTextView()
     let promptQueue = AgentQueueView(frame: .zero)
     let subagents = AgentSubagentsView(frame: .zero)
+    let taskProgressButton = PillButton("", style: .plain)
+    private var taskProgress = AgentTaskProgress()
+    let panelScroll = NSScrollView()
+    private let panelDocument = AgentPanelDocument()
+    var outlinePicker: AgentSearchPicker?
+    var outlineSource: [AgentChatItem]?
+    var navigationPromptID: String?
     let questions = AgentQuestionView(frame: .zero)
     var citationEnvironmentId: String?
     var citationThreadId: String?
@@ -179,6 +186,7 @@ final class AgentPaneView: ThemedView {
         activityLabel.translatesAutoresizingMaskIntoConstraints = true
         activity.isHidden = true
         feedback.font = AppFont.small
+        feedback.isSelectable = true
         feedback.maximumNumberOfLines = 2
         feedback.lineBreakMode = .byTruncatingTail
         for child in [feedback, retry] as [NSView] {
@@ -192,8 +200,25 @@ final class AgentPaneView: ThemedView {
         }
         // Suggestions sit behind the composer card so their lower edge tucks under it.
         // The transcript scrolls under everything that floats over its lower edge.
-        for child in [transcriptScroll, emptyTitle, emptyDetail, endButton, suggestions, composerCard, notice, questions, promptQueue, subagents, activity] {
+        for child in [transcriptScroll, emptyTitle, emptyDetail, endButton, suggestions, composerCard, notice, panelScroll, activity] {
             addSubview(child)
+        }
+        panelScroll.documentView = panelDocument
+        panelScroll.drawsBackground = false
+        panelScroll.hasVerticalScroller = true
+        panelScroll.autohidesScrollers = true
+        panelScroll.scrollerStyle = .overlay
+        for panel in [subagents, promptQueue, questions, taskProgressButton] as [NSView] {
+            panel.translatesAutoresizingMaskIntoConstraints = true
+            panelDocument.addSubview(panel)
+        }
+        taskProgressButton.font = AppFont.small
+        taskProgressButton.alignment = .left
+        taskProgressButton.lineBreakMode = .byTruncatingTail
+        taskProgressButton.isHidden = true
+        taskProgressButton.onPress = { [weak self] in
+            guard let self, let id = self.taskProgress.target else { return }
+            self.reveal(.item(id))
         }
         retry.isHidden = true
         suggestions.isHidden = true
@@ -269,22 +294,25 @@ final class AgentPaneView: ThemedView {
         }
         let activityHeight: CGFloat = activity.isHidden ? 0 : 26
         let panelBudget = max(0, top - activityHeight - 64)
-        let questionHeight = questions.isHidden ? 0 : min(questions.preferredHeight(for: width), panelBudget)
-        if questionHeight > 0 {
-            top -= gap + questionHeight
-            questions.frame = NSRect(x: left, y: top, width: width, height: questionHeight)
+        let questionHeight = questions.isHidden ? 0 : min(questions.preferredHeight(for: width), max(160, panelBudget))
+        let panels: [(NSView, CGFloat)] = [
+            (taskProgressButton, taskProgressButton.isHidden ? 0 : 28),
+            (subagents, subagents.isHidden ? 0 : subagents.preferredHeight),
+            (promptQueue, promptQueue.isHidden ? 0 : promptQueue.preferredHeight),
+            (questions, questionHeight)
+        ]
+        var panelY: CGFloat = 0
+        for (panel, height) in panels {
+            guard height > 0 else { panel.frame = .zero; continue }
+            if panelY > 0 { panelY += gap }
+            panel.frame = NSRect(x: 0, y: panelY, width: width, height: height)
+            panelY += height
         }
-        let queueHeight = promptQueue.isHidden ? 0 : min(promptQueue.preferredHeight, max(0, panelBudget - questionHeight - gap))
-        if queueHeight > 0 {
-            top -= gap + queueHeight
-            promptQueue.frame = NSRect(x: left, y: top, width: width, height: queueHeight)
-        }
-        let subagentHeight = subagents.isHidden ? 0
-            : min(subagents.preferredHeight, max(0, panelBudget - questionHeight - queueHeight - gap * 2))
-        if subagentHeight > 0 {
-            top -= gap + subagentHeight
-            subagents.frame = NSRect(x: left, y: top, width: width, height: subagentHeight)
-        }
+        let panelHeight = min(panelY, panelBudget)
+        panelScroll.isHidden = panelHeight == 0
+        if panelHeight > 0 { top -= gap + panelHeight }
+        panelScroll.frame = NSRect(x: left, y: top, width: width, height: panelHeight)
+        panelDocument.frame = NSRect(x: 0, y: 0, width: width, height: panelY)
         if activityHeight > 0 {
             let labelWidth = ceil((activityLabel.stringValue as NSString).size(withAttributes: [.font: AppFont.small]).width) + 4
             let spinnerWidth: CGFloat = activitySpinner.isHidden ? 0 : 22
@@ -320,13 +348,12 @@ final class AgentPaneView: ThemedView {
         (snapshot?.items.isEmpty ?? true) && (snapshot?.queuedPrompts?.isEmpty ?? true) && !submitting && activityStatus == .idle
     }
 
-    /// Send, Stop and Dictate take turns in one slot: Send for a draft (which queues while
-    /// the agent works), Stop while it works with nothing to send, Dictate otherwise.
+    /// Send queues a draft while working; Stop remains beside it. Dictate appears while idle.
     func updatePrimaryAction() {
         let hasDraft = !composer.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || attachmentStrip.hasAttachments
         // While a submission is in flight its draft is still shown, but the slot offers Stop.
         let showSend = hasDraft && !dictating && !submitting
-        let showStop = busy && (!hasDraft || submitting) && !dictating
+        let showStop = busy && !dictating
         send.isHidden = !showSend
         stop.isHidden = !showStop
         microphone.isHidden = showSend || showStop
@@ -339,6 +366,11 @@ final class AgentPaneView: ThemedView {
         let action = NSRect(x: width - padding - size, y: top, width: size, height: size)
         for button in [send, stop, microphone] { button.frame = action }
         var right = action.minX - gap
+        if !send.isHidden && !stop.isHidden {
+            right -= size
+            stop.frame = NSRect(x: right, y: top, width: size, height: size)
+            right -= gap
+        }
         // Usage stays out of the way until the context window is half full.
         contextIndicator.isHidden = (contextIndicator.fractionUsed ?? 0) < 0.5
         if !contextIndicator.isHidden {
@@ -470,7 +502,17 @@ final class AgentPaneView: ThemedView {
     }
 
     func render(_ snapshot: AgentChatSnapshot) {
+        if self.snapshot?.session != snapshot.session { navigationPromptID = nil }
         self.snapshot = snapshot
+        taskProgress.update(snapshot)
+        if taskProgressButton.title != taskProgress.title {
+            taskProgressButton.title = taskProgress.title
+            taskProgressButton.setTitleColor(theme.fgDim)
+            taskProgressButton.toolTip = taskProgress.title
+            taskProgressButton.setAccessibilityLabel(taskProgress.title)
+        }
+        taskProgressButton.isHidden = taskProgress.target == nil
+        updateOutline()
         preserveScroll {
             // Keep every retained entry as lightweight data. Native row views are
             // limited by the viewport, not by dropping older conversation items.
@@ -577,6 +619,7 @@ final class AgentPaneView: ThemedView {
     }
 
     private func didScroll() {
+        if scrollMutationDepth == 0 { navigationPromptID = nil }
         hideSelectionToolbar()
         guard scrollMutationDepth == 0, !transcript.isUpdatingViewport else { return }
         followingEnd = isAtBottom
@@ -625,6 +668,7 @@ final class AgentPaneView: ThemedView {
     }
 
     override func themeDidChange() {
+        taskProgressButton.setTitleColor(theme.fgDim)
         appearance = theme.nsAppearance
         attach.chatTheme = theme
         modelPicker.chatTheme = theme
@@ -660,4 +704,9 @@ final class AgentPaneView: ThemedView {
         selectionToolbar.themeDidChange()
         composer.needsDisplay = true
     }
+}
+
+@MainActor
+private final class AgentPanelDocument: NSView {
+    override var isFlipped: Bool { true }
 }

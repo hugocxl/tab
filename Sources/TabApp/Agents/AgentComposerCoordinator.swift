@@ -29,6 +29,9 @@ final class AgentComposerCoordinator {
     private var loadedAt = Date.distantPast
     private var actions: [AgentComposerSuggestion] {
         [
+            .init(id: "outline", title: "/outline", subtitle: "Search prompts in this conversation", icon: .listTodo, kind: .action),
+            .init(id: "previous-prompt", title: "/previous-prompt", subtitle: "Go to the previous prompt", icon: .chevronUp, kind: .action),
+            .init(id: "next-prompt", title: "/next-prompt", subtitle: "Go to the next prompt", icon: .chevronDown, kind: .action),
             .init(id: "skills", title: "/skills", subtitle: "Browse installed skills", icon: .sparkles, kind: .action),
             .init(id: "status", title: "/status", subtitle: "Show current conversation settings", icon: .info, kind: .action),
             .init(id: "new", title: "/new", subtitle: "Start a new conversation", icon: .conversationAdd, kind: .action),
