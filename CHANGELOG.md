@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.95.0 - 2026-11-12
+
+### Changed
+
+- Sidebar status indicators align at the right edge, pane icons stay on the left,
+  and tabs with multiple panes omit the title icon.
+
 ## 0.94.1 - 2026-11-11
 
 ### Changed

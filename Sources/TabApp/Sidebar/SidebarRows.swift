@@ -65,7 +65,7 @@ final class SidebarCardView: HoverView {
         var icon: NSImage?
     }
 
-    /// Every leading icon's box: the panes' statuses and kinds, the
+    /// Every leading icon's box: the panes' kinds, the
     /// location's and the project's icons.
     static let iconSide: CGFloat = 14
     /// Where text after a leading icon starts.
@@ -142,7 +142,7 @@ final class SidebarCardView: HoverView {
         // A lone pane is what the title and status already describe.
         paneRows = data.panes.count > 1 ? data.panes.map { PaneRowView(row: $0) } : []
         // With several panes no one pane stands for the card while they idle.
-        titleRow = data.lead.map { PaneRowView(row: $0, title: data.title, idleCircle: data.panes.count > 1) }
+        titleRow = data.lead.map { PaneRowView(row: $0, title: data.title, showsIcon: data.panes.count == 1, idleCircle: data.panes.count > 1) }
         // Skip a name the title or the project row already shows.
         let name = data.name.flatMap { $0 == header?.title || $0 == data.title ? nil : $0 }
         showsLocation = name != nil || data.branch != nil || data.pullRequest != nil
@@ -210,7 +210,7 @@ final class SidebarCardView: HoverView {
         var width = bounds.width - 2 * (Metrics.border + 10)
         if let titleRow, !titleRow.wrapsTitle { return 1 }
         if hintBadge != nil { width -= 18 + 6 }
-        if titleRow != nil { width -= SidebarCardView.textInset }
+        if let titleRow { width -= titleRow.textInsets }
         return Self.titleLines(data.title, width: width)
     }
 
@@ -315,11 +315,12 @@ final class SidebarCardView: HoverView {
             hintBadge.frame = CGRect(x: x, y: center - 9, width: 18, height: 18)
             x += 18 + 6
         }
-        closeButton.frame = CGRect(x: right - 15, y: center - 9, width: 18, height: 18)
+        closeButton.frame = CGRect(x: right - 18, y: center - 9, width: 18, height: 18)
         let titleRight = closeButton.isHidden ? right : right - 18 - 6
         let titleHeight = CGFloat(lines) * Self.titleLineHeight
         titleLabel.frame = CGRect(x: x, y: (center - Self.titleLineHeight / 2).rounded(), width: max(titleRight - x, 0), height: titleHeight)
-        titleRow?.frame = CGRect(x: x, y: top, width: max(titleRight - x, 0), height: titleBlock)
+        titleRow?.hidesStatus = !closeButton.isHidden
+        titleRow?.frame = CGRect(x: x, y: top, width: max(right - x, 0), height: titleBlock)
         top += titleBlock
         if !paneRows.isEmpty { top += Line.sectionGap }
         for row in paneRows {
@@ -371,9 +372,8 @@ final class SidebarCardView: HoverView {
     }
 }
 
-/// One pane in a card's list: what it is doing, or its kind or agent while
-/// it is idle, then its title, folder and how long it has worked. As a
-/// card's title its icon is larger.
+/// One pane in a card's list: its icon, title and folder, with elapsed time
+/// and status at the trailing edge. A card's title uses larger icons.
 final class PaneRowView: ThemedView {
     static let height: CGFloat = 20
     /// The title's icon box, as tall as the title's text.
@@ -398,8 +398,9 @@ final class PaneRowView: ThemedView {
     private let isTitle: Bool
 
     /// `title` replaces the row's text when the row is its card's title.
-    /// `idleCircle` shows an empty circle instead of the pane's icon while idle.
-    init(row: ActivityCardData.PaneRow, title: String? = nil, idleCircle: Bool = false) {
+    /// `showsIcon` is false for a title whose panes already list their icons.
+    /// `idleCircle` shows an empty status circle while idle.
+    init(row: ActivityCardData.PaneRow, title: String? = nil, showsIcon: Bool = true, idleCircle: Bool = false) {
         self.row = row
         isTitle = title != nil
         let font = title == nil ? AppFont.system(12) : AppFont.body
@@ -412,8 +413,7 @@ final class PaneRowView: ThemedView {
         // The list's spinners stay gray beside its colored icons.
         status.grayWorking = !isTitle
         status.status = row.status
-        // A status takes the icon's place.
-        icon.isHidden = row.status != .idle || idleCircle
+        icon.isHidden = !showsIcon
         for view in [status, icon, titleLabel, detailLabel, elapsedLabel] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = true
             addSubview(view)
@@ -455,6 +455,18 @@ final class PaneRowView: ThemedView {
 
     private var iconSide: CGFloat { isTitle ? Self.titleIconSide : SidebarCardView.iconSide }
 
+    /// The card's close button replaces its status without shifting the row.
+    var hidesStatus = false {
+        didSet { status.isHidden = hidesStatus }
+    }
+
+    private var leadingInset: CGFloat { icon.isHidden ? 0 : SidebarCardView.textInset }
+    private var statusInset: CGFloat { isTitle || row.status != .idle || status.showsIdle ? iconSide + 6 : 0 }
+    /// Space unavailable to the title, also used to measure wrapped card titles.
+    var textInsets: CGFloat {
+        leadingInset + statusInset + (elapsedLabel.isHidden ? 0 : elapsedLabel.textWidth + 6)
+    }
+
     override func layout() {
         super.layout()
         // Everything lines up with the first line when a title wraps.
@@ -462,9 +474,9 @@ final class PaneRowView: ThemedView {
         // Centered on the list's icon column, so a larger title icon reaches
         // into the card's padding and the text still lines up.
         let iconBox = CGRect(x: (SidebarCardView.iconSide - iconSide) / 2, y: (center - iconSide / 2).rounded(), width: iconSide, height: iconSide)
-        status.frame = iconBox
+        status.frame = CGRect(x: bounds.width - iconSide, y: iconBox.minY, width: iconSide, height: iconSide)
         icon.frame = iconBox
-        var trailing = bounds.width
+        var trailing = bounds.width - statusInset
         let height = isTitle ? SidebarCardView.titleLineHeight : titleLabel.intrinsicContentSize.height
         let y = (center - height / 2).rounded()
         if !elapsedLabel.isHidden {
@@ -472,7 +484,7 @@ final class PaneRowView: ThemedView {
             elapsedLabel.frame = CGRect(x: trailing - width, y: y, width: width, height: height)
             trailing -= width + 6
         }
-        let x = SidebarCardView.textInset
+        let x = leadingInset
         if !detailLabel.isHidden {
             // The folder follows the title, which gives up space first while
             // the folder keeps at least its share.
