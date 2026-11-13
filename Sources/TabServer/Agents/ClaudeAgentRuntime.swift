@@ -36,6 +36,9 @@ internal final class ClaudeAgentRuntime {
     private var backgroundTasks: [String: String] = [:]
     private var backgroundTools: [String: AgentChatItem] = [:]
 
+    /// The user stopped the turn, so tools its result leaves unfinished were interrupted.
+    var interrupted = false
+
     init(onEvent: @escaping @Sendable (AgentRuntimeEvent) -> Void) { self.onEvent = onEvent }
 
     func beginTurn() {
@@ -178,9 +181,10 @@ internal final class ClaudeAgentRuntime {
                 let denied = (message["permission_denials"] as? [[String: Any]])?.contains {
                     $0["tool_use_id"] as? String == item.id
                 } == true
-                item.tool?.status = denied ? .denied : message["is_error"] as? Bool == true ? .failed : .completed
+                let failed = message["is_error"] as? Bool == true
+                item.tool?.status = denied ? .denied : interrupted ? .interrupted : failed ? .failed : .completed
                 var context = item.workContext ?? AgentChatWorkContext()
-                context.sourceStatus = denied || message["is_error"] as? Bool == true ? "failed" : "completed"
+                context.sourceStatus = denied || (failed && !interrupted) ? "failed" : interrupted ? "cancelled" : "completed"
                 if denied { context.toolNonExecutionKind = "permission-rule" }
                 item.workContext = context
                 item.tool?.completedAt = Date()

@@ -975,9 +975,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         updateControls()
     }
 
-    private var hasActiveQueue: Bool {
-        snapshot?.queuePaused != true && snapshot?.queuedPrompts?.isEmpty == false
-    }
+    private var hasActiveQueue: Bool { snapshot?.hasActiveQueue == true }
 
     private var canSend: Bool {
         guard !needsAuthoritativeSnapshot, let snapshot else { return false }
@@ -1032,7 +1030,8 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         switch snapshot?.status {
         case .working, .waiting: return ""
         case .closed: return "This conversation has ended. Open a new agent pane to continue."
-        case .failed: return "Turn failed · Change the model or try again"
+        // A turn cut short by a server restart says so in the conversation; it didn't fail.
+        case .failed: return snapshot?.turns?.last?.outcome == .interrupted ? "" : "Turn failed · Change the model or try again"
         case .idle: return ""
         case nil: return "Connecting…"
         }

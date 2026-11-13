@@ -3,6 +3,21 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.97.1 - 2026-11-13
+
+### Fixed
+
+- Sending a message in an agent pane no longer flashes a card over the
+  composer.
+- Stopping an agent no longer reports that it failed, and tools it was running
+  show as interrupted.
+- A message sent after stopping an agent, or after a failed response, is sent
+  right away instead of waiting in a paused queue.
+- Stopping an agent just as it finishes, during a follow-up or during a Codex
+  compaction no longer adds false notices, loses the follow-up or ends the
+  conversation.
+- Prompts that need review no longer keep an agent pane looking busy.
+
 ## 0.97.0 - 2026-11-13
 
 ### Changed

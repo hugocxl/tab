@@ -48,6 +48,9 @@ internal final class AgentRuntime: @unchecked Sendable {
     private var closed = false
     private var failed = false
     private var busy = false
+    /// The user stopped the running turn. Providers end such a turn with an error
+    /// (Claude's `error_during_execution` result); that error is the stop, not a failure.
+    private var interruptRequested = false
     /// Follow-ups written to Claude that it has not echoed back yet. Claude folds a
     /// follow-up into the running turn at a tool boundary, or else answers it in
     /// its own turn after the current result; only the echo tells which.
@@ -139,6 +142,7 @@ internal final class AgentRuntime: @unchecked Sendable {
                     return
                 }
                 self.busy = true
+                self.interruptRequested = false
                 self.onEvent(.status(.working))
                 let submit: (Result<[String: Any], Error>) -> Void = { result in
                     do {
@@ -501,6 +505,7 @@ internal final class AgentRuntime: @unchecked Sendable {
     func interrupt() async throws {
         try await perform {
             guard self.busy else { return }
+            self.interruptRequested = true
             if self.provider == .claude {
                 if !self.unconsumedClaudeInputs.isEmpty {
                     self.resumeSession = self.claude.sessionID ?? self.resumeSession
@@ -516,14 +521,19 @@ internal final class AgentRuntime: @unchecked Sendable {
                     self.completeTurn()
                     return
                 }
-                try self.request("interrupt", params: [:]) { result in
-                    if case .failure(let error) = result { self.fail(error.localizedDescription) }
-                }
+                try self.request("interrupt", params: [:], completion: self.interruptAcknowledged)
             } else if let threadID = self.threadID, let turnID = self.turnID {
-                try self.request("turn/interrupt", params: ["threadId": threadID, "turnId": turnID]) { result in
-                    if case .failure(let error) = result { self.fail(error.localizedDescription) }
-                }
+                try self.request("turn/interrupt", params: ["threadId": threadID, "turnId": turnID],
+                                 completion: self.interruptAcknowledged)
             } else { self.close() }
+        }
+    }
+
+    /// A refused or unanswered stop isn't a failure: the turn may have just finished, and one
+    /// that keeps running is stopped by its session after a bounded wait.
+    private func interruptAcknowledged(_ result: Result<[String: Any], Error>) {
+        if case .failure(let error) = result {
+            ServerLog.error("\(provider.name) did not acknowledge an interrupt: \(error.localizedDescription)")
         }
     }
 
@@ -636,9 +646,10 @@ internal final class AgentRuntime: @unchecked Sendable {
         if type == "user", message["isReplay"] as? Bool == true, let input = message["uuid"] as? String {
             unconsumedClaudeInputs.remove(input.lowercased())
         }
+        claude.interrupted = interruptRequested
         claude.receive(message, source: source)
         if type == "result" {
-            if message["is_error"] as? Bool == true {
+            if message["is_error"] as? Bool == true, !interruptRequested {
                 fail((message["errors"] as? [String])?.joined(separator: "\n") ?? message["result"] as? String ?? "Claude turn failed.")
             } else { completeTurn() }
         }
@@ -692,12 +703,12 @@ internal final class AgentRuntime: @unchecked Sendable {
         if method == "turn/started", let turn = params["turn"] as? [String: Any] { turnID = turn["id"] as? String }
         if method == "turn/completed" {
             let turn = params["turn"] as? [String: Any] ?? [:]
-            if turn["status"] as? String == "failed" {
+            if turn["status"] as? String == "failed", !interruptRequested {
                 let error = turn["error"] as? [String: Any]
                 fail(error?["message"] as? String ?? "Codex turn failed.")
             } else { completeTurn() }
         }
-        if method == "error", params["willRetry"] as? Bool != true {
+        if method == "error", params["willRetry"] as? Bool != true, !interruptRequested {
             let error = params["error"] as? [String: Any]
             fail(error?["message"] as? String ?? "Codex reported an error.")
         }
@@ -712,6 +723,7 @@ internal final class AgentRuntime: @unchecked Sendable {
             return
         }
         busy = false
+        interruptRequested = false
         turnID = nil
         finishApprovals()
         onEvent(.status(.idle))

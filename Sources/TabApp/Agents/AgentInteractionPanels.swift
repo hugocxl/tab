@@ -50,6 +50,14 @@ final class AgentSurfaceCard: ThemedView {
     }
 }
 
+extension AgentChatSnapshot {
+    /// Prompts the server will send on its own. One that needs review waits for the user,
+    /// so it keeps nothing busy.
+    var hasActiveQueue: Bool {
+        queuePaused != true && queuedPrompts?.contains { $0.state == .queued || $0.state == .delivering } == true
+    }
+}
+
 /// Prompts sent while the agent works, waiting above the composer until their turn.
 @MainActor
 final class AgentQueueView: ThemedView {
@@ -94,7 +102,12 @@ final class AgentQueueView: ThemedView {
 
     private var headerHeight: CGFloat { paused ? Self.headerHeight : 0 }
 
-    func update(_ prompts: [AgentQueuedPrompt], paused: Bool, enabled: Bool) {
+    func update(_ queued: [AgentQueuedPrompt], paused: Bool, enabled: Bool) {
+        // A prompt being delivered already shows in the conversation; listing it here
+        // too would flash this card over the composer on every send.
+        let prompts = queued.filter { $0.state != .delivering }
+        // Resume only means something while a prompt waits to be sent.
+        let paused = paused && prompts.contains { $0.state == .queued }
         let signature = prompts.map { "\($0.id):\($0.revision):\($0.state)" }.joined(separator: ",") + "|\(paused)|\(enabled)"
         guard self.signature != signature else { return }
         self.signature = signature
@@ -136,16 +149,13 @@ final class AgentQueueView: ThemedView {
             row.text.toolTip = prompt.error ?? prompt.text
             row.detail.stringValue = prompt.text.isEmpty ? "" : attachmentText
             row.needsReview = prompt.state == .uncertain || prompt.state == .failed
-            row.status.stringValue = prompt.state == .delivering ? "Sending…" : row.needsReview ? "Needs review" : ""
+            row.status.stringValue = row.needsReview ? "Needs review" : ""
             row.status.toolTip = prompt.error
             row.status.setAccessibilityHelp(prompt.error)
             let earlier = prompt.state == .queued ? prompts.prefix(offset).last(where: { $0.state == .queued }) : nil
-            for button in row.actions {
-                button.isHidden = prompt.state == .delivering
-                button.isEnabled = enabled
-            }
+            for button in row.actions { button.isEnabled = enabled }
             row.actions[0].onPress = { [weak self] in self?.onEdit?(prompt) }
-            row.actions[1].isHidden = earlier == nil || prompt.state == .delivering
+            row.actions[1].isHidden = earlier == nil
             row.actions[1].onPress = { [weak self] in if let earlier { self?.onMove?(prompt, earlier.id) } }
             row.actions[2].onPress = { [weak self] in self?.onDeliver?(prompt) }
             let deliveryLabel = row.needsReview ? "Review and retry delivery" : "Send now"

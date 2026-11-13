@@ -834,9 +834,12 @@ final class AgentSessionsTests: XCTestCase {
         XCTAssertEqual(box.runtime?.stops, 0)
         try await Task.sleep(nanoseconds: 100_000_000)
         let stopped = try await sessions.handle(.read(session: session))
-        XCTAssertEqual(stopped.status, .failed)
-        XCTAssertTrue(stopped.items.contains { $0.text.contains("did not finish interrupting") })
+        XCTAssertEqual(stopped.status, .idle, "A stop the provider ignores still ends as a stop, not a failure")
+        XCTAssertEqual(stopped.turns?.last?.outcome, .interrupted)
+        XCTAssertTrue(stopped.items.contains { $0.kind == .notice && $0.text == "Agent interrupted." })
         XCTAssertEqual(box.runtime?.stops, 1)
+        let resumed = try await sessions.handle(.send(session: session, text: "carry on", model: nil))
+        XCTAssertEqual(resumed.status, .working)
     }
 
     func testInterruptDuringStartupSettlesSendImmediatelyAndFencesLateCallbacks() async throws {
@@ -874,8 +877,8 @@ final class AgentSessionsTests: XCTestCase {
         }
         await fulfillment(of: [started], timeout: 2)
         let interrupted = try await sessions.handle(.interrupt(session: session))
-        XCTAssertEqual(interrupted.status, .failed)
-        XCTAssertTrue(interrupted.items.contains { $0.text.contains("startup stopped") })
+        XCTAssertEqual(interrupted.status, .idle)
+        XCTAssertTrue(interrupted.items.contains { $0.kind == .notice && $0.text == "Agent interrupted." })
         await fulfillment(of: [settled, stopped], timeout: 1)
         let submission = try await sending.value
         XCTAssertEqual(submission, interrupted)
@@ -1384,7 +1387,7 @@ final class AgentSessionsTests: XCTestCase {
         let sending = Task { try await sessions.handle(.send(session: session, text: "cancel before launch", model: nil)) }
         await fulfillment(of: [configuring], timeout: 2)
         let stopped = try await sessions.handle(.interrupt(session: session))
-        XCTAssertEqual(stopped.status, .failed)
+        XCTAssertEqual(stopped.status, .idle)
         let submitted = try await sending.value
         XCTAssertEqual(submitted, stopped)
         await gate.release()
@@ -1462,6 +1465,118 @@ extension AgentSessionsTests {
         let drained = try await waitForQueue(sessions, id) { $0.status == .working && $0.queuedPrompts?.isEmpty == true }
         XCTAssertEqual(drained.items.filter { $0.kind == .user }.map(\.text), ["First", "Edited third", "Second"])
         XCTAssertEqual(box.runtime?.models.count, 3)
+    }
+
+    func testSubmitWhileIdleRepliesWithTheMessageAlreadyInTheConversation() async throws {
+        let root = try root()
+        let sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, callback in
+            let runtime = FakeAgentRuntime(callback)
+            runtime.onSend = { try await Task.sleep(for: .seconds(30)) } // A slow provider startup.
+            return runtime
+        })
+        defer { sessions.shutdown() }
+        let id = SessionId()
+        _ = try await sessions.handle(.create(session: id, project: ProjectId(), provider: .claude))
+        let prompt = AgentPrompt(text: "Hello", model: nil, effort: nil, provider: .claude, planMode: false)
+        let reply = try await sessions.handle(.submit(session: id, prompt: prompt))
+        XCTAssertEqual(reply.status, .working)
+        XCTAssertEqual(reply.items.last { $0.kind == .user }?.text, "Hello",
+                       "The reply must not leave the message only in the queue while the provider starts")
+        XCTAssertEqual(reply.queuedPrompts?.allSatisfy { $0.state == .delivering }, true)
+    }
+
+    func testNewMessageAfterStopResumesTheQueueAndSendsAtOnce() async throws {
+        let root = try root()
+        let box = AgentRuntimeBox()
+        let sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, callback in
+            let runtime = FakeAgentRuntime(callback); box.install(runtime); return runtime
+        })
+        defer { sessions.shutdown() }
+        let id = SessionId()
+        _ = try await sessions.handle(.create(session: id, project: ProjectId(), provider: .codex))
+        _ = try await sessions.handle(.submit(session: id, prompt: AgentPrompt(text: "First", model: nil, effort: nil,
+                                                                               provider: .codex, planMode: false)))
+        _ = try await waitForQueue(sessions, id) { $0.status == .working && $0.queuedPrompts?.isEmpty == true }
+        let held = AgentPrompt(text: "Later", model: nil, effort: nil, provider: .codex, planMode: false)
+        _ = try await sessions.handle(.submit(session: id, prompt: held))
+        let stopped = try await sessions.handle(.interrupt(session: id))
+        XCTAssertEqual(stopped.status, .idle)
+        XCTAssertEqual(stopped.queuePaused, true)
+        XCTAssertEqual(stopped.queuedPrompts?.map(\.text), ["Later"])
+        let next = AgentPrompt(text: "Carry on", model: nil, effort: nil, provider: .codex, planMode: false)
+        _ = try await sessions.handle(.submit(session: id, prompt: next))
+        let resumed = try await waitForQueue(sessions, id) { $0.status == .working && $0.queuedPrompts?.count == 1 }
+        XCTAssertNotEqual(resumed.queuePaused, true)
+        XCTAssertEqual(resumed.items.filter { $0.kind == .user }.map(\.text), ["First", "Carry on"],
+                       "The new message goes ahead of the prompt the stop held")
+        box.runtime?.callback(.status(.idle))
+        let drained = try await waitForQueue(sessions, id) { $0.status == .working && $0.queuedPrompts?.isEmpty == true }
+        XCTAssertEqual(drained.items.filter { $0.kind == .user }.map(\.text), ["First", "Carry on", "Later"])
+    }
+
+    func testStopAfterTheTurnFinishedOnlyHoldsTheQueue() async throws {
+        let root = try root(), box = AgentRuntimeBox()
+        let sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, callback in
+            let runtime = FakeAgentRuntime(callback)
+            runtime.onInterrupt = { XCTFail("An idle agent has nothing to interrupt") }
+            box.install(runtime)
+            return runtime
+        })
+        defer { sessions.shutdown() }
+        let id = SessionId()
+        _ = try await sessions.handle(.create(session: id, project: ProjectId(), provider: .codex))
+        _ = try await sessions.handle(.send(session: id, text: "First", model: nil))
+        box.runtime?.callback(.status(.idle))
+        let finished = try await waitForQueue(sessions, id) { $0.status == .idle }
+        let stopped = try await sessions.handle(.interrupt(session: id))
+        XCTAssertEqual(stopped.status, .idle)
+        XCTAssertEqual(stopped.queuePaused, true)
+        XCTAssertEqual(stopped.items, finished.items, "A stop that races the end of a turn adds no notice")
+        XCTAssertEqual(stopped.turns?.last?.outcome, .completed)
+    }
+
+    func testStopWhenTheRuntimeHasNoTurnToInterruptKeepsTheConversation() async throws {
+        let root = try root(), box = AgentRuntimeBox()
+        let sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, callback in
+            let runtime = FakeAgentRuntime(callback)
+            // As Codex does before a compaction reports its turn.
+            runtime.onInterrupt = { callback(.status(.closed)) }
+            box.install(runtime)
+            return runtime
+        })
+        defer { sessions.shutdown() }
+        let id = SessionId()
+        _ = try await sessions.handle(.create(session: id, project: ProjectId(), provider: .codex))
+        _ = try await sessions.handle(.send(session: id, text: "/compact", model: nil))
+        let first = try XCTUnwrap(box.runtime)
+        _ = try await sessions.handle(.interrupt(session: id))
+        let stopped = try await waitForQueue(sessions, id) { $0.status != .working }
+        XCTAssertEqual(stopped.status, .idle, "Stopping must not end the conversation")
+        XCTAssertEqual(stopped.turns?.last?.outcome, .interrupted)
+        let next = try await sessions.handle(.send(session: id, text: "Carry on", model: nil))
+        XCTAssertEqual(next.status, .working)
+        XCTAssertFalse(first === box.runtime)
+    }
+
+    func testNewMessageAfterFailureStartsANewTurn() async throws {
+        let root = try root()
+        let box = AgentRuntimeBox()
+        let sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, callback in
+            let runtime = FakeAgentRuntime(callback); box.install(runtime); return runtime
+        })
+        defer { sessions.shutdown() }
+        let id = SessionId()
+        _ = try await sessions.handle(.create(session: id, project: ProjectId(), provider: .codex))
+        _ = try await sessions.handle(.send(session: id, text: "First", model: nil))
+        let first = try XCTUnwrap(box.runtime)
+        first.callback(.failure("Provider crashed"))
+        let failed = try await waitForQueue(sessions, id) { $0.status == .failed }
+        XCTAssertEqual(failed.queuePaused, true)
+        _ = try await sessions.handle(.submit(session: id, prompt: AgentPrompt(text: "Try again", model: nil, effort: nil,
+                                                                               provider: .codex, planMode: false)))
+        let retried = try await waitForQueue(sessions, id) { $0.status == .working && $0.queuedPrompts?.isEmpty == true }
+        XCTAssertEqual(retried.items.last { $0.kind == .user }?.text, "Try again")
+        XCTAssertFalse(first === box.runtime, "A failed provider is replaced, resuming its conversation")
     }
 
     func testQueueStorageFailureDoesNotDeliverAndRetainsPrompt() async throws {

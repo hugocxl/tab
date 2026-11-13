@@ -81,7 +81,7 @@ final class AgentComposerSurfaceTests: XCTestCase {
         surface.setActivity(status: .idle, submitting: true)
         XCTAssertTrue(surface.send.isHidden, "An empty draft offers Stop, not Send")
         XCTAssertFalse(surface.stop.isHidden)
-        XCTAssertTrue(visibleLabels(surface).contains("Sending…"))
+        XCTAssertFalse(visibleLabels(surface).contains("Sending…"), "A send must not flash a card over the composer")
         var snapshot = AgentChatSnapshot(session: SessionId(), project: ProjectId(), provider: .claude,
                                          status: .working, items: [AgentChatItem(id: "tool", kind: .tool, text: "Read source", isComplete: false)])
         surface.setActivity(status: .working, submitting: false)

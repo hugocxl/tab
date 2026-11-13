@@ -398,13 +398,13 @@ final class AgentRuntimeTests: XCTestCase {
         XCTAssertEqual(params?["turnId"] as? String, "turn")
     }
 
-    func testClaudeInterruptCancelApprovalAndErrorResult() async throws {
+    func testClaudeInterruptCancelsApprovalAndEndsItsErrorResultAsAStop() async throws {
         let recorder = AgentRuntimeRecorder()
         let waiting = expectation(description: "waiting")
-        let failed = expectation(description: "error result")
+        let stopped = expectation(description: "interrupted result")
         recorder.observe = { event in
             if case .status(.waiting) = event { waiting.fulfill() }
-            if case .status(.failed) = event { failed.fulfill() }
+            if case .status(.idle) = event { stopped.fulfill() }
         }
         let fixture = try AgentRuntimeFixture("""
         take
@@ -414,7 +414,7 @@ final class AgentRuntimeTests: XCTestCase {
         take
         emit '{"type":"control_cancel_request","request_id":"cancel-me"}'
         emit '{"type":"control_response","response":{"subtype":"success","request_id":"2"}}'
-        emit '{"type":"result","subtype":"success","is_error":true,"errors":["fixture failure"]}'
+        emit '{"type":"result","subtype":"error_during_execution","is_error":true,"errors":["[ede_diagnostic] result_type=user"]}'
         hold
         """)
         defer { fixture.remove() }
@@ -423,11 +423,33 @@ final class AgentRuntimeTests: XCTestCase {
         try await runtime.send(text: "hello", model: nil)
         await fulfillment(of: [waiting], timeout: 5)
         try await runtime.interrupt()
-        await fulfillment(of: [failed], timeout: 5)
+        await fulfillment(of: [stopped], timeout: 5)
         XCTAssertEqual(recorder.transcript["cancel-me"]?.text, "Cancelled")
-        XCTAssertEqual(recorder.failures, ["fixture failure"])
+        XCTAssertEqual(recorder.failures, [], "Claude ends an interrupted turn with an error result; that is the stop, not a failure")
+        XCTAssertFalse(recorder.statuses.contains(.failed))
         let message = try XCTUnwrap(fixture.messages().last)
         XCTAssertEqual((message["request"] as? [String: Any])?["subtype"] as? String, "interrupt")
+    }
+
+    func testClaudeErrorResultWithoutAStopFailsTheTurn() async throws {
+        let recorder = AgentRuntimeRecorder()
+        let failed = expectation(description: "error result")
+        recorder.observe = { event in
+            if case .status(.failed) = event { failed.fulfill() }
+        }
+        let fixture = try AgentRuntimeFixture("""
+        take
+        emit '{"type":"control_response","response":{"subtype":"success","request_id":"1"}}'
+        take
+        emit '{"type":"result","subtype":"error_during_execution","is_error":true,"errors":["fixture failure"]}'
+        hold
+        """)
+        defer { fixture.remove() }
+        let runtime = fixture.runtime(.claude, recorder: recorder)
+        defer { runtime.stop() }
+        try await runtime.send(text: "hello", model: nil)
+        await fulfillment(of: [failed], timeout: 5)
+        XCTAssertEqual(recorder.failures, ["fixture failure"])
     }
 
     func testStartupTimeoutAndStopCancelPendingSend() async throws {

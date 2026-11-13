@@ -75,7 +75,6 @@ final class AgentPaneView: ThemedView {
     private let activity = AgentSurfaceCard(style: .agentActivity)
     private var busy = false
     private let activityLabel = makeLabel("", font: AppFont.small)
-    private let activitySpinner = NSProgressIndicator()
     private var activityStatus: AgentChatStatus = .idle
     private var submitting = false
     private var renderedItems: [AgentChatItem] = []
@@ -177,11 +176,7 @@ final class AgentPaneView: ThemedView {
         stop.isHidden = true
         model.toolTip = "Choose the provider and model for the next message"
         effort.toolTip = "Choose the reasoning effort for the next message"
-        activitySpinner.style = .spinning
-        activitySpinner.controlSize = .small
-        activitySpinner.isDisplayedWhenStopped = false
         activityLabel.setAccessibilityLabel("Agent activity")
-        activity.addSubview(activitySpinner)
         activity.addSubview(activityLabel)
         activityLabel.translatesAutoresizingMaskIntoConstraints = true
         activity.isHidden = true
@@ -315,11 +310,9 @@ final class AgentPaneView: ThemedView {
         panelDocument.frame = NSRect(x: 0, y: 0, width: width, height: panelY)
         if activityHeight > 0 {
             let labelWidth = ceil((activityLabel.stringValue as NSString).size(withAttributes: [.font: AppFont.small]).width) + 4
-            let spinnerWidth: CGFloat = activitySpinner.isHidden ? 0 : 22
             top -= gap + activityHeight
-            activity.frame = NSRect(x: left, y: top, width: labelWidth + spinnerWidth + 24, height: activityHeight)
-            activitySpinner.frame = NSRect(x: 10, y: 5, width: 16, height: 16)
-            activityLabel.frame = NSRect(x: 12 + spinnerWidth, y: floor((activityHeight - 16) / 2), width: labelWidth, height: 16)
+            activity.frame = NSRect(x: left, y: top, width: labelWidth + 24, height: activityHeight)
+            activityLabel.frame = NSRect(x: 12, y: floor((activityHeight - 16) / 2), width: labelWidth, height: 16)
         }
         // The conversation runs under the floating cards and ends where the composer does;
         // its last row can scroll clear of the topmost card.
@@ -430,17 +423,16 @@ final class AgentPaneView: ThemedView {
         let changed = activityStatus != status || self.submitting != submitting
         activityStatus = status
         self.submitting = submitting
-        let busy = submitting || status == .working || status == .waiting || (snapshot?.queuePaused != true && snapshot?.queuedPrompts?.isEmpty == false)
+        let busy = submitting || status == .working || status == .waiting || snapshot?.hasActiveQueue == true
         self.busy = busy
         updatePrimaryAction()
-        activity.isHidden = !submitting && status != .waiting
-        let text = submitting ? "Sending…" : status == .waiting ? (snapshot?.items.contains { $0.questionnaire != nil && !$0.isComplete } == true ? "Waiting for your answers" : "Waiting for approval") : "Working…"
-        activityLabel.stringValue = busy ? text : ""
+        // Only a wait on the user earns a capsule; sending and working show in the
+        // conversation and the stop button, so a send never flashes a card.
+        activity.isHidden = status != .waiting
+        activityLabel.stringValue = status != .waiting ? ""
+            : snapshot?.items.contains { $0.questionnaire != nil && !$0.isComplete } == true ? "Waiting for your answers" : "Waiting for approval"
         activityLabel.setAccessibilityValue(activityLabel.stringValue)
         guard changed else { return }
-        activitySpinner.isHidden = !busy || status == .waiting
-        if busy && status != .waiting { activitySpinner.startAnimation(nil) }
-        else { activitySpinner.stopAnimation(nil) }
         needsLayout = true
     }
 

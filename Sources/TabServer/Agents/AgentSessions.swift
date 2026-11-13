@@ -71,6 +71,8 @@ final class AgentSessions: @unchecked Sendable {
         var runtime: (any AgentSessionRuntime)?
         var generation = UUID()
         var submitting = false
+        /// The submission in flight is a follow-up to the running turn, not its start.
+        var steering = false
         var pendingSubmission: PendingReply?
         var approving: Set<String> = []
         var interrupting: UUID?
@@ -109,12 +111,26 @@ final class AgentSessions: @unchecked Sendable {
         var lastProviderMessage: String?
     }
 
+    /// Where a request's snapshot goes: a waiting caller, or a queued delivery that
+    /// must begin on `queue` before the reply to the submit that started it.
+    private struct Reply: Sendable {
+        let complete: @Sendable (Result<AgentChatSnapshot, Error>) -> Void
+
+        init(_ complete: @escaping @Sendable (Result<AgentChatSnapshot, Error>) -> Void) { self.complete = complete }
+        init(_ continuation: CheckedContinuation<AgentChatSnapshot, Error>) {
+            complete = { continuation.resume(with: $0) }
+        }
+
+        func resume(returning snapshot: AgentChatSnapshot) { complete(.success(snapshot)) }
+        func resume(throwing error: Error) { complete(.failure(error)) }
+    }
+
     private final class PendingReply: @unchecked Sendable {
         var finished = false // Confined to queue.
-        let continuation: CheckedContinuation<AgentChatSnapshot, Error>
+        let continuation: Reply
         var task: Task<Void, Never>?
 
-        init(_ continuation: CheckedContinuation<AgentChatSnapshot, Error>) {
+        init(_ continuation: Reply) {
             self.continuation = continuation
         }
     }
@@ -225,7 +241,7 @@ final class AgentSessions: @unchecked Sendable {
         return try await withCheckedThrowingContinuation { continuation in
             queue.async { [self] in
                 do {
-                    try begin(request, continuation: continuation)
+                    try begin(request, continuation: Reply(continuation))
                 } catch {
                     continuation.resume(throwing: error)
                 }
@@ -284,7 +300,7 @@ final class AgentSessions: @unchecked Sendable {
     }
 
     private func begin(_ request: AgentChatRequest,
-                       continuation: CheckedContinuation<AgentChatSnapshot, Error>, deliveryID: String? = nil) throws {
+                       continuation: Reply, deliveryID: String? = nil) throws {
         if case .create(let id, let project, let provider) = request {
             if let entry = entries[id] {
                 guard entry.snapshot.project == project else {
@@ -340,6 +356,12 @@ final class AgentSessions: @unchecked Sendable {
         if case .interrupt = request {
             entry.deliveryCancelled = true
             try mutateInbox(entry) { $0.paused = true }
+            if !entry.submitting, entry.snapshot.status != .working, entry.snapshot.status != .waiting {
+                // Nothing is running, as when Stop races a turn that just finished:
+                // the stop only holds the queue.
+                continuation.resume(returning: entry.snapshot)
+                return
+            }
         }
         if case .setPlan(_, let enabled) = request {
             guard !entry.submitting, entry.snapshot.status != .working, entry.snapshot.status != .waiting else {
@@ -362,13 +384,10 @@ final class AgentSessions: @unchecked Sendable {
                 return
             }
         }
-        if case .interrupt = request, entry.submitting {
+        if case .interrupt = request, entry.submitting, !entry.steering {
             // No authoritative turn exists yet, so there is nothing to interrupt
             // gracefully. Fence the startup and settle its reply before stopping it.
-            retireRuntime(entry)
-            interrupted(entry, message: "Agent startup stopped. Send a message to retry.")
-            touch(entry)
-            persist(entry)
+            stopTurn(entry)
             settleSubmission(entry)
             continuation.resume(returning: entry.snapshot)
             return
@@ -392,6 +411,7 @@ final class AgentSessions: @unchecked Sendable {
                 try AgentAttachments.record(staged, root: attachmentRoot)
                 let generation = entry.generation
                 entry.submitting = true
+                entry.steering = true
                 let pending = PendingReply(continuation)
                 entry.pendingSubmission = pending
                 queue.asyncAfter(deadline: .now() + submissionTimeout) { [self] in
@@ -412,6 +432,7 @@ final class AgentSessions: @unchecked Sendable {
                                 return
                             }
                             entry.submitting = false
+                            entry.steering = false
                             entry.snapshot.items.append(self.observedItem(.init(id: userID, kind: .user, text: text,
                                 attachments: attachments?.map(\.descriptor)), entry: entry))
                             self.touch(entry)
@@ -423,8 +444,13 @@ final class AgentSessions: @unchecked Sendable {
                             guard !pending.finished else { return }
                             pending.finished = true
                             if entry.pendingSubmission === pending { entry.pendingSubmission = nil }
-                            if entry.generation == generation { entry.submitting = false }
+                            if entry.generation == generation { entry.submitting = false; entry.steering = false }
                             try? FileManager.default.removeItem(at: attachmentRoot)
+                            if error is AgentTurnFinishedError, deliveryID != nil, entry.deliveryCancelled {
+                                // The user stopped the turn this follow-up was meant for.
+                                continuation.resume(throwing: AgentDeliveryNotStarted())
+                                return
+                            }
                             // The turn ended while the follow-up was on its way; its idle
                             // status is already applied, so the message starts a new turn.
                             guard error is AgentTurnFinishedError, entry.generation == generation,
@@ -621,13 +647,13 @@ final class AgentSessions: @unchecked Sendable {
                                 entry.interrupting = nil
                                 entry.snapshot.items.append(AgentChatItem(kind: .notice, text: "Agent interrupted."))
                             } else {
-                                entry.snapshot.items.append(AgentChatItem(kind: .notice,
-                                                                         text: "Interrupt requested. Waiting for the agent to finish."))
+                                // The stop button already shows the request; the transcript
+                                // only records the outcome.
                                 queue.asyncAfter(deadline: .now() + interruptTimeout) { [self] in
                                     guard entry.generation == generation, entry.interrupting == interruption,
                                           !stopping, entry.snapshot.status != .closed else { return }
-                                    receive(.failure("The agent did not finish interrupting in time and was stopped."),
-                                            session: id, generation: generation)
+                                    stopTurn(entry)
+                                    drainInbox(entry)
                                 }
                             }
                             touch(entry)
@@ -700,6 +726,13 @@ final class AgentSessions: @unchecked Sendable {
         }
         switch event {
         case .toolItem: return
+        case .status(.closed) where entry.interrupting != nil:
+            // A runtime with no turn to interrupt yet, such as a Codex compaction
+            // that has not started, stops its process. The conversation carries on.
+            stopTurn(entry)
+            settleSubmission(entry)
+            drainInbox(entry)
+            return
         case .item(let item):
             guard item.id.utf8.count <= 1024 else { return }
             if item.kind == .approval, !item.isComplete,
@@ -911,6 +944,18 @@ final class AgentSessions: @unchecked Sendable {
         bound(entry)
     }
 
+    /// Ends a turn the user stopped by stopping its provider. The conversation stays
+    /// usable: the next message resumes it in a new provider process.
+    private func stopTurn(_ entry: Entry) {
+        retireRuntime(entry)
+        entry.snapshot.status = .idle
+        updateTurn(entry, status: .idle, outcome: .interrupted)
+        for index in entry.snapshot.items.indices { entry.snapshot.items[index].isComplete = true }
+        entry.snapshot.items.append(AgentChatItem(kind: .notice, text: "Agent interrupted."))
+        touch(entry)
+        persist(entry)
+    }
+
     private func close(_ entry: Entry) {
         guard entry.snapshot.status != .closed else { return }
         entry.deliveryCancelled = true
@@ -937,6 +982,7 @@ final class AgentSessions: @unchecked Sendable {
         let runtime = entry.runtime
         entry.runtime = nil
         entry.submitting = false
+        entry.steering = false
         entry.approving.removeAll()
         entry.interrupting = nil
         entry.accessTask = nil
@@ -1429,6 +1475,11 @@ final class AgentSessions: @unchecked Sendable {
     }
 }
 
+/// A queued prompt's delivery was stopped before the agent received it.
+struct AgentDeliveryNotStarted: LocalizedError {
+    var errorDescription: String? { "Delivery was cancelled before it began." }
+}
+
 extension AgentSessions {
     private func mutateInbox(_ entry: Entry, _ change: (inout AgentPromptInbox) throws -> Void) throws {
         if let error = entry.inboxError { throw AgentRuntimeError("Queue storage is unavailable: " + error) }
@@ -1462,7 +1513,21 @@ extension AgentSessions {
             guard prompt.provider == entry.snapshot.provider || entry.snapshot.providerSession == nil else {
                 throw AgentRuntimeError("An established conversation cannot switch providers.")
             }
-            try mutateInbox(entry) { try $0.submit(prompt) }
+            // A new message after a stop or failure is the user carrying on, so it
+            // resumes the queue. Prompts that need review stay put, and a reconnect
+            // resending a prompt already accepted changes nothing.
+            try mutateInbox(entry) { inbox in
+                let resent = inbox.records.contains { $0.id == prompt.id }
+                try inbox.submit(prompt)
+                guard !resent, inbox.paused else { return }
+                inbox.paused = false
+                // It answers what the user just saw, so it goes ahead of prompts held by the stop.
+                if let first = inbox.records.firstIndex(where: { $0.display?.state == .queued }),
+                   first < inbox.records.count - 1 {
+                    inbox.records.insert(inbox.records.removeLast(), at: first)
+                    for i in inbox.records.indices where inbox.records[i].display != nil { inbox.records[i].display?.revision += 1 }
+                }
+            }
             drainInbox(entry)
         case .editQueued(_, let id, let text, let revision, let settings):
             try mutateInbox(entry) { inbox in
@@ -1495,9 +1560,6 @@ extension AgentSessions {
                 inbox.records[index].display = nil
             }
         case .resumeQueue:
-            guard entry.snapshot.status != .failed else {
-                throw AgentRuntimeError("Review the failed response and use Send now on the prompt you want to retry.")
-            }
             try mutateInbox(entry) { $0.paused = false }
             drainInbox(entry)
         case .deliverQueued(_, let id, let revision):
@@ -1509,7 +1571,9 @@ extension AgentSessions {
     }
 
     private func drainInbox(_ entry: Entry) {
-        guard !stopping, entry.snapshot.status == .idle, !entry.submitting, entry.deliveryID == nil,
+        // A failed turn pauses the queue, so only the user resuming it delivers after one.
+        guard !stopping, entry.snapshot.status == .idle || entry.snapshot.status == .failed,
+              !entry.submitting, entry.deliveryID == nil,
               entry.interrupting == nil, !entry.inbox.paused,
               let index = entry.inbox.records.firstIndex(where: { $0.display?.state == .queued }) else { return }
         do { try deliverInbox(entry, index: index) }
@@ -1541,26 +1605,7 @@ extension AgentSessions {
         entry.deliveryID = attemptID
         entry.deliveryCancelled = false
         let id = entry.snapshot.session
-        Task { [self] in
-            let outcome: Result<AgentChatSnapshot, Error>
-            do {
-                let snapshot: AgentChatSnapshot = try await withCheckedThrowingContinuation { continuation in
-                    writer.async { [self] in
-                      queue.async { [self] in
-                        do {
-                            if let error = entry.inboxError { throw AgentRuntimeError(error) }
-                            guard !stopping, entry.snapshot.status != .closed, entry.deliveryID == attemptID, !entry.deliveryCancelled else {
-                                throw AgentRuntimeError("Delivery was cancelled before it began.")
-                            }
-                            try begin(.send(session: id, text: prompt.text, model: prompt.model, reasoningEffort: prompt.effort,
-                                            provider: prompt.provider, attachments: prompt.attachments),
-                                      continuation: continuation, deliveryID: attemptID)
-                        } catch { continuation.resume(throwing: error) }
-                      }
-                    }
-                }
-                outcome = .success(snapshot)
-            } catch { outcome = .failure(error) }
+        let delivered = Reply { [self] outcome in
             queue.async { [self] in
                 entry.deliveryID = nil
                 do {
@@ -1570,6 +1615,11 @@ extension AgentSessions {
                         case .success(let snapshot) where snapshot.status != .failed && snapshot.status != .closed:
                             inbox.records[index].prompt = nil
                             inbox.records[index].display = nil
+                        case .failure(let error) where error is AgentDeliveryNotStarted:
+                            // The agent never saw it, so it waits in the held queue as it was.
+                            inbox.paused = true
+                            inbox.records[index].display?.state = .queued
+                            inbox.records[index].display?.revision += 1
                         default:
                             inbox.paused = true
                             inbox.records[index].display?.state = .uncertain
@@ -1579,6 +1629,22 @@ extension AgentSessions {
                     }
                 } catch { entry.inboxError = error.localizedDescription }
                 drainInbox(entry)
+            }
+        }
+        // The prompt is durably marked delivering before the provider sees it. Enqueued
+        // now, the delivery starts ahead of the reply to the submit that queued it, so
+        // that reply already shows the message in the conversation.
+        writer.async { [self] in
+            queue.async { [self] in
+                do {
+                    if let error = entry.inboxError { throw AgentRuntimeError(error) }
+                    guard !stopping, entry.snapshot.status != .closed, entry.deliveryID == attemptID, !entry.deliveryCancelled else {
+                        throw AgentDeliveryNotStarted()
+                    }
+                    try begin(.send(session: id, text: prompt.text, model: prompt.model, reasoningEffort: prompt.effort,
+                                    provider: prompt.provider, attachments: prompt.attachments),
+                              continuation: delivered, deliveryID: attemptID)
+                } catch { delivered.resume(throwing: error) }
             }
         }
     }
