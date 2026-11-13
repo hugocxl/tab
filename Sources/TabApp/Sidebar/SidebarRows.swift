@@ -92,14 +92,14 @@ final class SidebarCardView: HoverView {
     /// A title wraps to at most this many lines.
     static let maxTitleLines = 2
     static var titleLineHeight: CGFloat {
-        let font = AppFont.body
+        let font = AppFont.bodyMedium
         return ceil(font.ascender - font.descender + font.leading)
     }
 
     /// How many lines `title` takes in `width`, up to `maxTitleLines`.
     static func titleLines(_ title: String, width: CGFloat) -> Int {
         guard width > 0 else { return 1 }
-        let height = NSAttributedString(string: title, attributes: [.font: AppFont.body])
+        let height = NSAttributedString(string: title, attributes: [.font: AppFont.bodyMedium])
             .boundingRect(with: NSSize(width: width, height: .greatestFiniteMagnitude), options: [.usesLineFragmentOrigin]).height
         return min(max(Int((height / titleLineHeight).rounded(.up)), 1), maxTitleLines)
     }
@@ -138,7 +138,7 @@ final class SidebarCardView: HoverView {
             headerLabel = nil
         }
         hintBadge = hint.map { HintBadge($0) }
-        titleLabel = makeLabel(data.title, font: AppFont.body)
+        titleLabel = makeLabel(data.title, font: AppFont.bodyMedium)
         // A lone pane is what the title and status already describe.
         paneRows = data.panes.count > 1 ? data.panes.map { PaneRowView(row: $0) } : []
         // With several panes no one pane stands for the card while they idle.
@@ -224,7 +224,7 @@ final class SidebarCardView: HoverView {
 
     override func themeDidChange() {
         glass?.appearance = theme.nsAppearance
-        headerLabel?.textColor = theme.fgMuted
+        headerLabel?.textColor = theme.fg
         titleLabel.textColor = theme.fg
         if usesDefaultHeaderIcon {
             headerIcon?.image = AppIcon.folder.image(size: Self.iconSide, theme: theme)
@@ -403,7 +403,7 @@ final class PaneRowView: ThemedView {
     init(row: ActivityCardData.PaneRow, title: String? = nil, showsIcon: Bool = true, idleCircle: Bool = false) {
         self.row = row
         isTitle = title != nil
-        let font = title == nil ? AppFont.system(12) : AppFont.body
+        let font = title == nil ? AppFont.system(12) : AppFont.bodyMedium
         titleLabel = makeLabel(title ?? row.title, font: font)
         detailLabel = makeLabel(row.detail ?? "", font: font)
         super.init(frame: .zero)

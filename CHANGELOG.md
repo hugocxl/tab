@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.97.0 - 2026-11-13
+
+### Changed
+
+- Sidebar card titles are slightly bolder, and each card's project name uses the
+  primary text color.
+
 ## 0.96.0 - 2026-11-12
 
 ### Added
