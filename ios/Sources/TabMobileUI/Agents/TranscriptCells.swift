@@ -597,11 +597,63 @@ final class WorkCell: UICollectionViewCell {
     }
 }
 
-/// The agent is working: an animated glyph and the elapsed time.
+/// "3 files changed  +40 −12" at the end of a turn; it opens the turn's recorded diff.
+final class ChangesCell: UICollectionViewCell {
+    private let label = UILabel()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        let column = ReadableColumn.guide(in: contentView)
+        label.font = .preferredFont(forTextStyle: .footnote)
+        label.adjustsFontForContentSizeCategory = true
+        label.textColor = .secondaryLabel
+        label.lineBreakMode = .byTruncatingMiddle
+        let icon = UIImageView(image: UIImage(systemName: "doc.badge.plus"))
+        icon.tintColor = .secondaryLabel
+        icon.preferredSymbolConfiguration = UIImage.SymbolConfiguration(textStyle: .footnote)
+        icon.setContentHuggingPriority(.required, for: .horizontal)
+        let chevron = UIImageView(image: UIImage(systemName: "chevron.right"))
+        chevron.tintColor = .tertiaryLabel
+        chevron.preferredSymbolConfiguration = UIImage.SymbolConfiguration(textStyle: .caption1, scale: .small)
+        chevron.setContentHuggingPriority(.required, for: .horizontal)
+        let stack = UIStackView(arrangedSubviews: [icon, label, chevron, UIView()])
+        stack.spacing = 6
+        stack.alignment = .center
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 6),
+            stack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -6),
+            stack.leadingAnchor.constraint(equalTo: column.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: column.trailingAnchor),
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    func configure(_ checkpoint: AgentTurnCheckpoint, comments: Int) {
+        let files = checkpoint.totalFiles == 1 ? "1 file changed" : "\(checkpoint.totalFiles) files changed"
+        let text = NSMutableAttributedString(string: files + "  ")
+        text.append(NSAttributedString(string: "+\(checkpoint.additions)", attributes: [.foregroundColor: UIColor.systemGreen]))
+        text.append(NSAttributedString(string: " −\(checkpoint.deletions)", attributes: [.foregroundColor: UIColor.systemRed]))
+        if comments > 0 {
+            text.append(NSAttributedString(string: comments == 1 ? "  · 1 comment" : "  · \(comments) comments"))
+        }
+        label.attributedText = text
+        accessibilityLabel = "\(files), \(checkpoint.additions) lines added, \(checkpoint.deletions) removed"
+            + (comments > 0 ? ", \(comments) review comments" : "")
+        accessibilityTraits = .button
+        accessibilityHint = "Shows the changes"
+        isAccessibilityElement = true
+    }
+}
+
+/// The agent is working: an animated glyph and the time it has worked, which
+/// stands still while it waits for you.
 final class WorkingCell: UICollectionViewCell {
     private let icon = UIImageView(image: UIImage(systemName: "ellipsis"))
     private let label = UILabel()
-    private var since: Date?
+    private var turn: AgentChatTurn?
     private var timer: Timer?
 
     override init(frame: CGRect) {
@@ -626,22 +678,26 @@ final class WorkingCell: UICollectionViewCell {
 
     required init?(coder: NSCoder) { fatalError("not used") }
 
-    func configure(since: Date?) {
-        self.since = since
+    func configure(turn: AgentChatTurn?) {
+        self.turn = turn
         icon.addSymbolEffect(.variableColor.iterative.dimInactiveLayers, options: .repeat(.continuous))
         tick()
         timer?.invalidate()
+        timer = nil
+        // Paused while waiting for an answer: nothing changes until the next snapshot.
+        guard turn != nil, turn?.waitingSince == nil else { return }
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tick() }
         }
     }
 
     private func tick() {
-        guard let since else {
+        guard let turn else {
             label.text = "Working"
             return
         }
-        label.text = "Working · \(WorkCell.format(Date().timeIntervalSince(since)))"
+        let state = turn.waitingSince == nil ? "Working" : "Waiting for you"
+        label.text = "\(state) · \(WorkCell.format(turn.workingTime(at: Date())))"
     }
 
     override func prepareForReuse() {

@@ -3,7 +3,8 @@ import TabProtocol
 
 /// What an agent pane's composer holds and hasn't sent: the message, its
 /// files, the prompt last submitted (so a retry keeps its identity), and the
-/// answers typed into a pending question, without private ones.
+/// answers typed into a pending question, without private ones, and comments
+/// on the changes of past turns.
 public struct AgentDraft: Codable, Hashable, Sendable {
     public var text: String
     public var attachments: [AgentChatAttachment]
@@ -12,20 +13,23 @@ public struct AgentDraft: Codable, Hashable, Sendable {
     public var submission: AgentPrompt?
     /// Answers by question request id, then by question id.
     public var answers: [String: [String: [String]]]
+    /// Comments on turns' recorded changes, not yet added to the message.
+    public var reviewComments: [AgentReviewComment]
 
     public init(text: String = "", attachments: [AgentChatAttachment] = [], submission: AgentPrompt? = nil,
-                answers: [String: [String: [String]]] = [:]) {
+                answers: [String: [String: [String]]] = [:], reviewComments: [AgentReviewComment] = []) {
         self.text = text
         self.attachments = attachments
         self.submission = submission
         self.answers = answers
+        self.reviewComments = reviewComments
     }
 
     public var isEmpty: Bool {
-        text.isEmpty && attachments.isEmpty && submission == nil && answers.isEmpty
+        text.isEmpty && attachments.isEmpty && submission == nil && answers.isEmpty && reviewComments.isEmpty
     }
 
-    private enum CodingKeys: String, CodingKey { case text, attachments, submission, answers }
+    private enum CodingKeys: String, CodingKey { case text, attachments, submission, answers, reviewComments }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -33,6 +37,16 @@ public struct AgentDraft: Codable, Hashable, Sendable {
         attachments = try c.decodeIfPresent([AgentChatAttachment].self, forKey: .attachments) ?? []
         submission = try? c.decodeIfPresent(AgentPrompt.self, forKey: .submission)
         answers = (try? c.decodeIfPresent([String: [String: [String]]].self, forKey: .answers)) ?? [:]
+        reviewComments = (try? c.decodeIfPresent([AgentReviewComment].self, forKey: .reviewComments)) ?? []
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(text, forKey: .text)
+        try c.encode(attachments, forKey: .attachments)
+        try c.encodeIfPresent(submission, forKey: .submission)
+        try c.encode(answers, forKey: .answers)
+        if !reviewComments.isEmpty { try c.encode(reviewComments, forKey: .reviewComments) }
     }
 }
 

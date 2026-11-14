@@ -38,7 +38,51 @@ final class AgentTranscriptTests: XCTestCase {
         let turn = AgentChatTurn(userItemID: "u", startedAt: start)
         let rows = AgentTranscript.rows(snapshot(items, turns: [turn], status: .working), expanded: [])
         XCTAssertEqual(rows.map(\.id), ["u", "t1", "working"])
-        XCTAssertEqual(rows.last, .working(since: start))
+        XCTAssertEqual(rows.last, .working(turn: turn))
+    }
+
+    /// Time spent waiting for an answer counts neither while waiting nor once
+    /// the turn finishes.
+    func testWorkingTimeLeavesOutWaitsForTheUser() {
+        var turn = AgentChatTurn(userItemID: "u", startedAt: start)
+        turn.observe(.waiting, at: start.addingTimeInterval(10))
+        XCTAssertEqual(turn.workingTime(at: start.addingTimeInterval(100)), 10)
+        turn.observe(.working, at: start.addingTimeInterval(70))
+        XCTAssertEqual(turn.workingTime(at: start.addingTimeInterval(75)), 15)
+        turn.completedAt = start.addingTimeInterval(80)
+        let items = [AgentChatItem(id: "u", kind: .user, text: "go"), AgentChatItem(id: "t1", kind: .tool, text: "Bash")]
+        let rows = AgentTranscript.rows(snapshot(items, turns: [turn]), expanded: [])
+        XCTAssertEqual(rows[1], .work(turn: "u", steps: 1, duration: 20, expanded: false))
+    }
+
+    /// While the agent waits for an answer the working row stays, standing still.
+    func testWaitingTurnKeepsItsWorkingRow() {
+        var turn = AgentChatTurn(userItemID: "u", startedAt: start)
+        turn.observe(.waiting, at: start.addingTimeInterval(5))
+        let items = [AgentChatItem(id: "u", kind: .user, text: "go")]
+        let rows = AgentTranscript.rows(snapshot(items, turns: [turn], status: .waiting), expanded: [])
+        XCTAssertEqual(rows.last, .working(turn: turn))
+    }
+
+    func testFinishedTurnEndsWithItsChangedFiles() {
+        let checkpoint = AgentTurnCheckpoint(id: UUID().uuidString, files: [.init(path: "a.swift", additions: 3, deletions: 1)],
+                                             totalFiles: 1, additions: 3, deletions: 1)
+        var first = AgentChatTurn(userItemID: "u1", startedAt: start, completedAt: start.addingTimeInterval(3), status: .idle)
+        first.checkpoint = checkpoint
+        let second = AgentChatTurn(userItemID: "u2", startedAt: start.addingTimeInterval(5))
+        let items = [AgentChatItem(id: "u1", kind: .user, text: "edit"), AgentChatItem(id: "a1", kind: .assistant, text: "Done"),
+                     AgentChatItem(id: "u2", kind: .user, text: "more")]
+        let rows = AgentTranscript.rows(snapshot(items, turns: [first, second], status: .working), expanded: [])
+        XCTAssertEqual(rows.map(\.id), ["u1", "a1", "changes-u1", "u2", "working"])
+    }
+
+    func testTurnHoldingAStepIsItsPrompt() {
+        let items = [AgentChatItem(id: "u1", kind: .user, text: "a"), AgentChatItem(id: "t1", kind: .tool, text: "Bash"),
+                     AgentChatItem(id: "u2", kind: .user, text: "b"), AgentChatItem(id: "t2", kind: .tool, text: "Edit")]
+        let snapshot = snapshot(items, turns: [])
+        XCTAssertEqual(AgentTranscript.turn(holding: "t2", in: snapshot), "u2")
+        XCTAssertEqual(AgentTranscript.turn(holding: "t1", in: snapshot), "u1")
+        XCTAssertNil(AgentTranscript.turn(holding: "u1", in: snapshot))
     }
 
     /// Answered approvals, "Automatically approved" ones above all, would

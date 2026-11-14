@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.27.0 - 2026-11-14
+
+### Added
+
+- A turn that changed files ends with them; tap to read each file's recorded
+  diff, comment on its lines, and add the comments to your message.
+- Agents running in the background show above the message box with their
+  progress, and tapping one shows the step that started it.
+- The current task list's progress shows above the message box, and tapping it
+  shows the list.
+- The pane menu lists the conversation's prompts to search and jump to, and
+  moves to the previous or next prompt.
+- Continue a conversation Claude Code or Codex saved for the folder, from the
+  pane menu, here when nothing has been said yet or in a new pane beside it.
+
+### Changed
+
+- Stop stays beside Send while you type a follow-up as the agent works.
+- Queued prompts are edited in a sheet with room for several lines, and keep
+  their place and menus as the agent works.
+- The cards above the message box scroll together when the pane is short.
+- Submitting a question with a required answer missing shows that question.
+
+### Fixed
+
+- The working timer pauses while the agent waits for your answer, and finished
+  turns leave that wait out of their time.
+- Closing a pane or tab whose agent is working, or runs agents in the
+  background, asks before stopping them.
+
 ## 0.26.0 - 2026-11-12
 
 ### Added

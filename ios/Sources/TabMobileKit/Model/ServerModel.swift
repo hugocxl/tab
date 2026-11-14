@@ -409,6 +409,16 @@ public final class ServerModel: Identifiable {
         return pane.id
     }
 
+    /// A pane beside `anchor` showing the agent conversation `session`, such as
+    /// one continued from the agent's saved history.
+    @discardableResult
+    public func openAgent(_ session: SessionId, provider: AgentChatProvider, beside anchor: PaneId,
+                          edge: Direction = .down) throws -> PaneId {
+        let pane = Pane(content: .agent(session: session, provider: provider))
+        try perform(.insertPane(pane, anchor: anchor, edge: edge))
+        return pane.id
+    }
+
     /// Records the simulator a simulator pane shows, on every device.
     public func setSimulator(_ pane: PaneId, _ simulator: SimulatorPane) throws {
         try perform(.updatePane(pane, content: .simulator(simulator)))
@@ -611,7 +621,26 @@ public final class ServerModel: Identifiable {
     }
 
     /// The open controller of an agent pane, if one is shown.
-    func agentController(_ session: SessionId) -> AgentChatController? { agents[session] }
+    /// What closing `panes` would stop: agents at work, and agents they run in
+    /// the background. Panes this device hasn't opened count by their activity.
+    public func workStopped(byClosing panes: Set<PaneId>) -> (agents: Int, background: Int) {
+        let sessions = (board?.projects ?? []).flatMap(\.tabs).flatMap(\.panes)
+            .filter { panes.contains($0.id) }.compactMap(\.content.agentSession)
+        var agents = 0
+        var background = 0
+        for session in sessions {
+            if let controller = self.agents[session] {
+                if controller.isBusy { agents += 1 }
+                background += controller.runningSubagents.count
+            } else if let state = agentActivity(session)?.state, state == .working || state == .blocked {
+                agents += 1
+            }
+        }
+        return (agents, background)
+    }
+
+    /// The controller of an agent pane this device shows, if any.
+    public func agentController(_ session: SessionId) -> AgentChatController? { agents[session] }
 
     /// Drops controllers of panes no longer on the board.
     public func pruneControllers() {

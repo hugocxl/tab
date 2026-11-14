@@ -72,6 +72,7 @@ final class AgentQueueView: AgentPanelCard {
     private let rows = UIStackView()
     private var scrollHeight: NSLayoutConstraint!
     private var signature = ""
+    private var rowViews: [String: QueuedPromptRow] = [:]
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -120,7 +121,8 @@ final class AgentQueueView: AgentPanelCard {
 
     required init?(coder: NSCoder) { fatalError("not used") }
 
-    /// Shows `prompts`; returns whether anything changed.
+    /// Shows `prompts`; returns whether anything changed. Each prompt keeps
+    /// its row, so focus and an open menu survive updates.
     @discardableResult
     func update(_ prompts: [AgentQueuedPrompt], paused: Bool, enabled: Bool,
                 earlier: (AgentQueuedPrompt) -> AgentQueuedPrompt?) -> Bool {
@@ -130,9 +132,16 @@ final class AgentQueueView: AgentPanelCard {
         isHidden = prompts.isEmpty
         header.isHidden = !paused
         resume.isEnabled = enabled
-        rows.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        for prompt in prompts {
-            rows.addArrangedSubview(row(prompt, canMoveEarlier: earlier(prompt) != nil, enabled: enabled))
+        let ids = Set(prompts.map(\.id))
+        for (id, row) in rowViews where !ids.contains(id) {
+            row.removeFromSuperview()
+            rowViews[id] = nil
+        }
+        for (index, prompt) in prompts.enumerated() {
+            let row = rowViews[prompt.id] ?? makeRow()
+            rowViews[prompt.id] = row
+            row.show(prompt, canMoveEarlier: earlier(prompt) != nil, enabled: enabled)
+            if rows.arrangedSubviews.firstIndex(of: row) != index { rows.insertArrangedSubview(row, at: index) }
         }
         rows.layoutIfNeeded()
         let rowHeight = rows.arrangedSubviews.first?.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).height ?? 44
@@ -140,23 +149,60 @@ final class AgentQueueView: AgentPanelCard {
         return true
     }
 
-    private func row(_ prompt: AgentQueuedPrompt, canMoveEarlier: Bool, enabled: Bool) -> UIView {
-        let needsReview = prompt.state == .uncertain || prompt.state == .failed
-        let files = prompt.attachments.count
-        let filesText = files == 0 ? "" : files == 1 ? "1 attachment" : "\(files) attachments"
-        let icon = UIImageView(image: UIImage(systemName: "clock.arrow.circlepath"))
+    private func makeRow() -> QueuedPromptRow {
+        let row = QueuedPromptRow()
+        row.onDeliver = { [weak self] prompt in self?.onDeliver?(prompt) }
+        row.onEdit = { [weak self] prompt in self?.onEdit?(prompt) }
+        row.onMoveEarlier = { [weak self] prompt in self?.onMoveEarlier?(prompt) }
+        row.onRemove = { [weak self] prompt in self?.onRemove?(prompt) }
+        return row
+    }
+}
+
+/// One queued prompt: its text, its state, and a menu of what can be done with it.
+private final class QueuedPromptRow: UIStackView {
+    var onDeliver: ((AgentQueuedPrompt) -> Void)?
+    var onEdit: ((AgentQueuedPrompt) -> Void)?
+    var onMoveEarlier: ((AgentQueuedPrompt) -> Void)?
+    var onRemove: ((AgentQueuedPrompt) -> Void)?
+    private let icon = UIImageView(image: UIImage(systemName: "clock.arrow.circlepath"))
+    private let text = UILabel()
+    private let detail = UILabel()
+    private let more = UIButton(configuration: .plain())
+
+    init() {
+        super.init(frame: .zero)
         icon.tintColor = .tertiaryLabel
         icon.preferredSymbolConfiguration = UIImage.SymbolConfiguration(textStyle: .footnote)
         icon.setContentHuggingPriority(.required, for: .horizontal)
-        let text = UILabel()
-        text.text = prompt.text.isEmpty ? filesText : prompt.text.replacingOccurrences(of: "\n", with: " ")
         text.font = .preferredFont(forTextStyle: .body)
         text.adjustsFontForContentSizeCategory = true
         text.lineBreakMode = .byTruncatingTail
         text.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let detail = UILabel()
         detail.font = .preferredFont(forTextStyle: .footnote)
         detail.adjustsFontForContentSizeCategory = true
+        detail.setContentHuggingPriority(.required, for: .horizontal)
+        detail.setContentCompressionResistancePriority(.required, for: .horizontal)
+        more.configuration?.image = UIImage(systemName: "ellipsis.circle")
+        more.showsMenuAsPrimaryAction = true
+        more.accessibilityLabel = "Queued prompt actions"
+        more.setContentHuggingPriority(.required, for: .horizontal)
+        for view in [icon, text, detail, more] { addArrangedSubview(view) }
+        alignment = .center
+        spacing = 8
+        isLayoutMarginsRelativeArrangement = true
+        directionalLayoutMargins = NSDirectionalEdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 0)
+        heightAnchor.constraint(greaterThanOrEqualToConstant: 40).isActive = true
+        isAccessibilityElement = false
+    }
+
+    required init(coder: NSCoder) { fatalError("not used") }
+
+    func show(_ prompt: AgentQueuedPrompt, canMoveEarlier: Bool, enabled: Bool) {
+        let needsReview = prompt.state == .uncertain || prompt.state == .failed
+        let files = prompt.attachments.count
+        let filesText = files == 0 ? "" : files == 1 ? "1 attachment" : "\(files) attachments"
+        text.text = prompt.text.isEmpty ? filesText : prompt.text.replacingOccurrences(of: "\n", with: " ")
         switch prompt.state {
         case .delivering:
             detail.text = "Sending…"
@@ -169,17 +215,9 @@ final class AgentQueueView: AgentPanelCard {
             detail.textColor = .tertiaryLabel
         }
         detail.isHidden = detail.text == nil
-        detail.setContentHuggingPriority(.required, for: .horizontal)
-        detail.setContentCompressionResistancePriority(.required, for: .horizontal)
-
-        let more = UIButton(configuration: .plain())
-        more.configuration?.image = UIImage(systemName: "ellipsis.circle")
         more.configuration?.baseForegroundColor = needsReview ? .systemOrange : .secondaryLabel
-        more.showsMenuAsPrimaryAction = true
-        more.accessibilityLabel = "Queued prompt actions"
         more.isEnabled = enabled && prompt.state != .delivering
         more.isHidden = prompt.state == .delivering
-        more.setContentHuggingPriority(.required, for: .horizontal)
         var actions: [UIMenuElement] = [
             UIAction(title: needsReview ? "Review and Send Again" : "Send Now", image: UIImage(systemName: "arrow.up")) {
                 [weak self] _ in self?.onDeliver?(prompt)
@@ -197,17 +235,193 @@ final class AgentQueueView: AgentPanelCard {
             },
         ]))
         more.menu = UIMenu(title: prompt.error ?? "", children: actions)
-
-        let row = UIStackView(arrangedSubviews: [icon, text, detail, more])
-        row.alignment = .center
-        row.spacing = 8
-        row.isLayoutMarginsRelativeArrangement = true
-        row.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 0)
-        row.heightAnchor.constraint(greaterThanOrEqualToConstant: 40).isActive = true
-        row.isAccessibilityElement = false
         text.accessibilityLabel = "Queued: \(text.text ?? "")"
         text.accessibilityValue = detail.text
+    }
+}
+
+/// Agents the conversation's agent started that are still running, so work
+/// in the background stays visible after the turn ends. Tapping one shows the
+/// step that started it.
+final class AgentSubagentsView: AgentPanelCard {
+    var onReveal: ((String) -> Void)?
+    private static let visibleRows = 3
+    private let scroll = UIScrollView()
+    private let rows = UIStackView()
+    private var rowViews: [String: SubagentRow] = [:]
+    private var shown: [AgentSubagent] = []
+    private var scrollHeight: NSLayoutConstraint!
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isHidden = true
+        rows.axis = .vertical
+        rows.translatesAutoresizingMaskIntoConstraints = false
+        scroll.addSubview(rows)
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(scroll)
+        scrollHeight = scroll.heightAnchor.constraint(equalToConstant: 0)
+        NSLayoutConstraint.activate([
+            scroll.topAnchor.constraint(equalTo: content.topAnchor, constant: 6),
+            scroll.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -6),
+            scroll.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 6),
+            scroll.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -6),
+            rows.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor),
+            rows.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor),
+            rows.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor),
+            rows.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor),
+            rows.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor),
+            scrollHeight,
+        ])
+        accessibilityLabel = "Running agents"
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    /// Shows the running ones of `subagents`, reusing each one's row so its
+    /// spinner keeps turning. Returns whether anything changed.
+    @discardableResult
+    func update(_ subagents: [AgentSubagent]) -> Bool {
+        guard subagents != shown else { return false }
+        let structureChanged = subagents.map(\.id) != shown.map(\.id)
+        shown = subagents
+        isHidden = subagents.isEmpty
+        let ids = Set(subagents.map(\.id))
+        for (id, row) in rowViews where !ids.contains(id) {
+            row.removeFromSuperview()
+            rowViews[id] = nil
+        }
+        for (index, subagent) in subagents.enumerated() {
+            let row = rowViews[subagent.id] ?? makeRow()
+            rowViews[subagent.id] = row
+            row.show(subagent)
+            if rows.arrangedSubviews.firstIndex(of: row) != index { rows.insertArrangedSubview(row, at: index) }
+        }
+        scrollHeight.constant = CGFloat(min(subagents.count, Self.visibleRows)) * SubagentRow.height
+        return structureChanged
+    }
+
+    private func makeRow() -> SubagentRow {
+        let row = SubagentRow()
+        row.addAction(UIAction { [weak self, weak row] _ in
+            guard let id = row?.toolUseID else { return }
+            self?.onReveal?(id)
+        }, for: .primaryActionTriggered)
         return row
+    }
+}
+
+/// One running agent: a spinner, what it was asked to do, then what it's
+/// doing now and how much it has done. A control, so a keyboard can focus and
+/// activate it.
+private final class SubagentRow: UIControl {
+    static let height: CGFloat = 48
+    private(set) var toolUseID: String?
+    private let spinner = UIActivityIndicatorView(style: .medium)
+    private let title = UILabel()
+    private let activity = UILabel()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        layer.cornerRadius = 12
+        layer.cornerCurve = .continuous
+        spinner.startAnimating()
+        spinner.setContentHuggingPriority(.required, for: .horizontal)
+        title.font = .preferredFont(forTextStyle: .subheadline)
+        title.lineBreakMode = .byTruncatingTail
+        activity.font = .preferredFont(forTextStyle: .caption1)
+        activity.textColor = .secondaryLabel
+        activity.lineBreakMode = .byTruncatingTail
+        let labels = UIStackView(arrangedSubviews: [title, activity])
+        labels.axis = .vertical
+        let row = UIStackView(arrangedSubviews: [spinner, labels])
+        row.spacing = 10
+        row.alignment = .center
+        row.isUserInteractionEnabled = false
+        row.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(row)
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: Self.height),
+            row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            row.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+        isAccessibilityElement = true
+        accessibilityTraits = .button
+        focusEffect = UIFocusHaloEffect()
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    override var canBecomeFocused: Bool { toolUseID != nil }
+
+    override var isHighlighted: Bool {
+        didSet { backgroundColor = isHighlighted ? .tertiarySystemFill : .clear }
+    }
+
+    func show(_ subagent: AgentSubagent) {
+        toolUseID = subagent.toolUseID
+        isEnabled = subagent.toolUseID != nil
+        title.text = subagent.description
+        var parts: [String] = []
+        if subagent.background { parts.append("Background") }
+        if let uses = subagent.toolUses, uses > 0 { parts.append(uses == 1 ? "1 tool" : "\(uses) tools") }
+        if let tokens = subagent.tokens, tokens > 0 { parts.append(Self.tokens(tokens)) }
+        let doing = subagent.activity ?? (subagent.background ? "Working in the background" : "Starting")
+        activity.text = ([doing] + parts.filter { $0 != "Background" || subagent.activity != nil }).joined(separator: " · ")
+        accessibilityLabel = "\(subagent.description), \(doing)"
+        accessibilityValue = parts.joined(separator: ", ")
+        accessibilityHint = toolUseID == nil ? nil : "Shows the step that started it"
+    }
+
+    private static func tokens(_ count: Int) -> String {
+        count >= 1_000_000 ? String(format: "%.1fM tokens", Double(count) / 1_000_000)
+            : count >= 1_000 ? "\(count / 1_000)k tokens" : "\(count) tokens"
+    }
+}
+
+/// The current task list's progress, such as "2 of 5 done · Run the tests";
+/// tapping it shows the list in the conversation.
+final class AgentTaskProgressView: AgentPanelCard {
+    var onReveal: (() -> Void)?
+    private let button = UIButton(configuration: .plain())
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isHidden = true
+        button.configuration?.image = UIImage(systemName: "checklist")
+        button.configuration?.imagePadding = 8
+        button.configuration?.baseForegroundColor = .secondaryLabel
+        button.configuration?.titleLineBreakMode = .byTruncatingTail
+        button.configuration?.contentInsets = NSDirectionalEdgeInsets(top: 8, leading: 14, bottom: 8, trailing: 14)
+        button.contentHorizontalAlignment = .leading
+        button.accessibilityHint = "Shows the task list"
+        button.addAction(UIAction { [weak self] _ in self?.onReveal?() }, for: .primaryActionTriggered)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(button)
+        NSLayoutConstraint.activate([
+            button.topAnchor.constraint(equalTo: content.topAnchor),
+            button.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+            button.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            button.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    /// Shows `title`; nil hides it. Returns whether anything changed.
+    @discardableResult
+    func show(_ title: String?) -> Bool {
+        guard button.configuration?.title != title || isHidden != (title == nil) else { return false }
+        var text = AttributedString(title ?? "")
+        text.font = .preferredFont(forTextStyle: .footnote)
+        button.configuration?.attributedTitle = text
+        button.configuration?.title = title
+        button.accessibilityLabel = title
+        let hidden = title == nil
+        let appeared = isHidden != hidden
+        isHidden = hidden
+        return appeared
     }
 }
 
@@ -334,6 +548,17 @@ final class AgentQuestionView: AgentPanelCard, UITextFieldDelegate {
         return true
     }
 
+    /// Scrolls to the first required question without an answer, focuses it,
+    /// and says what's missing.
+    private func revealFirstUnanswered() {
+        guard let block = blocks.first(where: { $0.question.required && $0.answers.isEmpty }) else { return }
+        layoutIfNeeded()
+        scroll.scrollRectToVisible(block.convert(block.bounds, to: scroll), animated: true)
+        if block.question.options.isEmpty { block.field.becomeFirstResponder() }
+        UIAccessibility.post(notification: .layoutChanged, argument: block)
+        UIAccessibility.post(notification: .announcement, argument: "Answer “\(block.question.title)” first.")
+    }
+
     private func answer(cancelled: Bool) {
         guard let item, let form = item.questionnaire else { return }
         let answers = answers
@@ -342,6 +567,7 @@ final class AgentQuestionView: AgentPanelCard, UITextFieldDelegate {
         } catch {
             self.error.text = "Answer each required question first."
             UINotificationFeedbackGenerator().notificationOccurred(.error)
+            revealFirstUnanswered()
             return
         }
         endEditing(true)

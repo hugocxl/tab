@@ -13,8 +13,10 @@ public enum TranscriptRow: Hashable, Sendable, Identifiable {
     case notice(AgentChatItem, isError: Bool)
     /// A finished turn's tool steps, folded.
     case work(turn: String, steps: Int, duration: TimeInterval?, expanded: Bool)
-    /// The agent is working on a turn that started at `since`.
-    case working(since: Date?)
+    /// The files a finished turn changed, which open its recorded diff.
+    case changes(turn: String, checkpoint: AgentTurnCheckpoint)
+    /// The agent is working on `turn`; its time leaves out waits for the user.
+    case working(turn: AgentChatTurn?)
 
     /// Which cell shows the row.
     public var kind: Int {
@@ -27,6 +29,7 @@ public enum TranscriptRow: Hashable, Sendable, Identifiable {
         case .notice: 5
         case .work: 6
         case .working: 7
+        case .changes: 8
         }
     }
 
@@ -36,6 +39,7 @@ public enum TranscriptRow: Hashable, Sendable, Identifiable {
             item.id
         case .notice(let item, _): item.id
         case .work(let turn, _, _, _): "work-\(turn)"
+        case .changes(let turn, _): "changes-\(turn)"
         case .working: "working"
         }
     }
@@ -54,6 +58,7 @@ public enum AgentTranscript {
 
         for item in snapshot.items {
             if item.kind == .user {
+                appendChanges(currentTurn, to: &rows)
                 currentTurn = turns[item.id]
                 folded = nil
                 rows.append(.user(item))
@@ -61,7 +66,7 @@ public enum AgentTranscript {
             }
             let isStep = item.kind == .tool && !isCard(item)
             if isStep, let turn = currentTurn, turn.completedAt != nil, !expanded.contains(turn.userItemID) {
-                let duration = turn.completedAt.map { $0.timeIntervalSince(turn.startedAt) }
+                let duration = turn.completedAt.map { turn.workingTime(at: $0) }
                 if let open = folded {
                     folded = (open.index, open.steps + 1)
                     rows[open.index] = .work(turn: turn.userItemID, steps: open.steps + 1, duration: duration,
@@ -75,22 +80,41 @@ public enum AgentTranscript {
             if isStep, let turn = currentTurn, turn.completedAt != nil, folded == nil {
                 folded = (rows.count, 0)
                 rows.append(.work(turn: turn.userItemID, steps: 0, duration: turn.completedAt.map {
-                    $0.timeIntervalSince(turn.startedAt)
+                    turn.workingTime(at: $0)
                 }, expanded: true))
             }
             if let row = row(for: item) { rows.append(row) }
         }
+        appendChanges(currentTurn, to: &rows)
         // Expanded folds count their steps too.
         for index in rows.indices {
             guard case .work(let turn, 0, let duration, true) = rows[index] else { continue }
             let steps = stepCount(snapshot, turn: turn)
             rows[index] = .work(turn: turn, steps: steps, duration: duration, expanded: true)
         }
-        if snapshot.status == .working {
-            let since = snapshot.turns?.last(where: { $0.completedAt == nil })?.startedAt
-            rows.append(.working(since: since))
+        // Always last, below messages sent while the agent works; it stands
+        // still while the agent waits for an answer.
+        let open = snapshot.turns?.last { $0.completedAt == nil }
+        if snapshot.status == .working || snapshot.status == .waiting && open != nil {
+            rows.append(.working(turn: open))
         }
         return rows
+    }
+
+    /// A finished turn that changed files ends with them.
+    private static func appendChanges(_ turn: AgentChatTurn?, to rows: inout [TranscriptRow]) {
+        guard let turn, turn.completedAt != nil, let checkpoint = turn.checkpoint, checkpoint.totalFiles > 0 else { return }
+        rows.append(.changes(turn: turn.userItemID, checkpoint: checkpoint))
+    }
+
+    /// The prompt that started the turn holding `item`, when `item` is one of its steps.
+    public static func turn(holding item: String, in snapshot: AgentChatSnapshot?) -> String? {
+        var turn: String?
+        for candidate in snapshot?.items ?? [] {
+            if candidate.kind == .user { turn = candidate.id }
+            if candidate.id == item { return candidate.kind == .user ? nil : turn }
+        }
+        return nil
     }
 
     private static func row(for item: AgentChatItem) -> TranscriptRow? {

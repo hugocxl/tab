@@ -2,12 +2,14 @@ import ImageIO
 import PhotosUI
 import TabMobileKit
 import TabProtocol
+import TabShared
 import UIKit
 import UniformTypeIdentifiers
 
 /// An agent pane: the conversation, and a glass composer riding the keyboard
-/// with the agent's question, queued prompts and notices floating above it.
-/// The conversation scrolls behind all of them.
+/// with the task list's progress, running agents, the agent's question,
+/// queued prompts and notices floating above it. The conversation scrolls
+/// behind all of them.
 final class AgentPaneViewController: UIViewController, UICollectionViewDelegate {
     let controller: AgentChatController
     private var collectionView: UICollectionView!
@@ -20,7 +22,11 @@ final class AgentPaneViewController: UIViewController, UICollectionViewDelegate 
     /// Rendered Markdown by item id, redone only when the text changes.
     private var rendered: [String: (text: String, value: NSAttributedString)] = [:]
     private let composer = AgentComposerView()
+    private let panelsScroll = UIScrollView()
     private let panels = UIStackView()
+    private let taskProgressView = AgentTaskProgressView()
+    private var taskProgress = AgentTaskProgress()
+    private let subagents = AgentSubagentsView()
     private let notice = AgentNoticeView()
     private let question = AgentQuestionView()
     private let queue = AgentQueueView()
@@ -36,6 +42,9 @@ final class AgentPaneViewController: UIViewController, UICollectionViewDelegate 
     private var showsLatest = false
     private var followsEnd = true
     private var contentSizeObservation: NSKeyValueObservation?
+    /// The prompt the previous and next prompt commands last moved to, until the reader scrolls.
+    private var navigationPromptID: String?
+    private var loadingHistory = false
 
     init(controller: AgentChatController) {
         self.controller = controller
@@ -73,12 +82,18 @@ final class AgentPaneViewController: UIViewController, UICollectionViewDelegate 
         }
         view.addSubview(composer)
 
-        // From the top: queued prompts, the agent's question, then what went wrong.
+        // From the top: the task list's progress, running agents, queued prompts,
+        // the agent's question, then what went wrong. They scroll together when
+        // the pane is too short for all of them.
         panels.axis = .vertical
         panels.spacing = 8
         panels.translatesAutoresizingMaskIntoConstraints = false
-        for panel in [queue, question, notice] as [UIView] { panels.addArrangedSubview(panel) }
-        view.addSubview(panels)
+        for panel in [taskProgressView, subagents, queue, question, notice] as [UIView] { panels.addArrangedSubview(panel) }
+        panelsScroll.addSubview(panels)
+        panelsScroll.clipsToBounds = false
+        panelsScroll.showsVerticalScrollIndicator = false
+        panelsScroll.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(panelsScroll)
         configurePanels()
 
         latestButton.configuration?.image = UIImage(systemName: "arrow.down",
@@ -102,6 +117,9 @@ final class AgentPaneViewController: UIViewController, UICollectionViewDelegate 
         // The composer and its cards fill the column whatever they hold.
         let composerFills = composer.widthAnchor.constraint(equalTo: view.widthAnchor, constant: -24)
         composerFills.priority = .required - 1
+        // As tall as the cards, until the pane is too short and they scroll.
+        let panelsFit = panelsScroll.heightAnchor.constraint(equalTo: panels.heightAnchor)
+        panelsFit.priority = .defaultHigh - 60
         NSLayoutConstraint.activate([
             composerOnSafeArea,
             composerFills,
@@ -116,13 +134,19 @@ final class AgentPaneViewController: UIViewController, UICollectionViewDelegate 
             emptyView.widthAnchor.constraint(lessThanOrEqualTo: view.widthAnchor, constant: -40),
             composer.leadingAnchor.constraint(equalTo: readable.leadingAnchor),
             composer.trailingAnchor.constraint(equalTo: readable.trailingAnchor),
-            panels.leadingAnchor.constraint(equalTo: composer.leadingAnchor),
-            panels.trailingAnchor.constraint(equalTo: composer.trailingAnchor),
-            panels.bottomAnchor.constraint(equalTo: composer.topAnchor, constant: -8),
-            panels.topAnchor.constraint(greaterThanOrEqualTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
+            panelsScroll.leadingAnchor.constraint(equalTo: composer.leadingAnchor),
+            panelsScroll.trailingAnchor.constraint(equalTo: composer.trailingAnchor),
+            panelsScroll.bottomAnchor.constraint(equalTo: composer.topAnchor, constant: -8),
+            panelsScroll.topAnchor.constraint(greaterThanOrEqualTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
+            panels.topAnchor.constraint(equalTo: panelsScroll.contentLayoutGuide.topAnchor),
+            panels.bottomAnchor.constraint(equalTo: panelsScroll.contentLayoutGuide.bottomAnchor),
+            panels.leadingAnchor.constraint(equalTo: panelsScroll.contentLayoutGuide.leadingAnchor),
+            panels.trailingAnchor.constraint(equalTo: panelsScroll.contentLayoutGuide.trailingAnchor),
+            panels.widthAnchor.constraint(equalTo: panelsScroll.frameLayoutGuide.widthAnchor),
+            panelsFit,
             question.heightAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.heightAnchor, multiplier: 0.5),
             latestButton.trailingAnchor.constraint(equalTo: composer.trailingAnchor),
-            latestButton.bottomAnchor.constraint(equalTo: panels.topAnchor, constant: -12),
+            latestButton.bottomAnchor.constraint(equalTo: panelsScroll.topAnchor, constant: -12),
             latestButton.widthAnchor.constraint(equalToConstant: 44),
             latestButton.heightAnchor.constraint(equalToConstant: 44),
         ])
@@ -139,7 +163,7 @@ final class AgentPaneViewController: UIViewController, UICollectionViewDelegate 
         super.viewDidLayoutSubviews()
         // The last row can scroll clear of the topmost floating card.
         let shown = panels.arrangedSubviews.contains { !$0.isHidden }
-        let top = shown ? panels.frame.minY : composer.frame.minY
+        let top = shown ? panelsScroll.frame.minY : composer.frame.minY
         let inset = view.bounds.maxY - top - view.safeAreaInsets.bottom + 8
         if collectionView.contentInset.bottom != inset {
             let atBottom = isNearBottom
@@ -165,7 +189,11 @@ final class AgentPaneViewController: UIViewController, UICollectionViewDelegate 
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
-        if scrollView.isDragging || scrollView.isDecelerating { followsEnd = isNearBottom }
+        guard scrollView === collectionView else { return }
+        if scrollView.isDragging || scrollView.isDecelerating {
+            followsEnd = isNearBottom
+            navigationPromptID = nil
+        }
         updateLatestButton()
     }
 
@@ -205,6 +233,9 @@ final class AgentPaneViewController: UIViewController, UICollectionViewDelegate 
         var changed = question.update(pending, enabled: enabled, saved: pending.flatMap { controller.draft.answers[$0.id] })
         changed = queue.update(controller.queuedPrompts, paused: controller.queuePaused, enabled: enabled,
                                earlier: controller.earlierQueued(than:)) || changed
+        changed = subagents.update(controller.runningSubagents) || changed
+        taskProgress.update(snapshot)
+        changed = taskProgressView.show(taskProgress.target == nil ? nil : taskProgress.title) || changed
         // A problem here lasts until the conversation moves on.
         if snapshot?.revision != problemRevision { problem = nil }
         changed = notice.show(problem ?? controller.error) || changed
@@ -233,30 +264,27 @@ final class AgentPaneViewController: UIViewController, UICollectionViewDelegate 
         queue.onDeliver = { [weak self] prompt in self?.deliverQueued(prompt) }
         queue.onMoveEarlier = { [weak self] prompt in self?.controller.moveQueuedEarlier(prompt) }
         queue.onResume = { [weak self] in self?.controller.resumeQueue() }
+        subagents.onReveal = { [weak self] id in self?.reveal(id) }
+        taskProgressView.onReveal = { [weak self] in
+            guard let self, let id = taskProgress.target else { return }
+            reveal(id)
+        }
     }
 
-    /// Edits a queued prompt's text; its files stay with it, and saving doesn't send it.
+    /// Edits a queued prompt's text in a sheet that streaming updates leave
+    /// alone; its files stay with it, and saving doesn't send it.
     private func editQueued(_ prompt: AgentQueuedPrompt) {
-        let alert = UIAlertController(
+        guard presentedViewController == nil else { return }
+        let editor = TextEditorViewController(
             title: "Edit Queued Prompt",
-            message: prompt.state == .uncertain
-                ? "The earlier delivery may have reached the agent. Editing doesn't send it again."
+            note: prompt.state == .uncertain
+                ? "The earlier delivery may have reached the agent. Editing doesn't send it again. Its attachments stay with it."
                 : "Its attachments stay with it. Saving doesn't send it.",
-            preferredStyle: .alert)
-        alert.addTextField { field in
-            field.text = prompt.text
-            field.clearButtonMode = .whileEditing
-        }
-        let edited = { [weak alert] in alert?.textFields?.first?.text ?? prompt.text }
-        alert.addAction(UIAlertAction(title: "Save", style: .default) { [weak self] _ in
-            self?.controller.editQueued(prompt, text: edited(), useCurrentSettings: false)
-        })
-        alert.addAction(UIAlertAction(title: "Save with Current Model", style: .default) { [weak self] _ in
-            self?.controller.editQueued(prompt, text: edited(), useCurrentSettings: true)
-        })
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.preferredAction = alert.actions.first
-        present(alert, animated: true)
+            text: prompt.text, option: "Use the current model, reasoning effort and plan mode") { [weak self] outcome in
+                guard case .saved(let text, let useCurrentSettings) = outcome else { return }
+                self?.controller.editQueued(prompt, text: text, useCurrentSettings: useCurrentSettings)
+            }
+        present(editor.inSheet(), animated: true)
     }
 
     /// Sends a queued prompt now; one that may already have reached the agent asks first.
@@ -284,6 +312,154 @@ final class AgentPaneViewController: UIViewController, UICollectionViewDelegate 
         empty.text = "New Agent"
         empty.secondaryText = "\(provider.name) runs on your Mac, in this project. Choose another agent or model from the menu beside the message."
         emptyView.configuration = empty
+    }
+
+    // MARK: Navigation
+
+    /// The pane's own commands, for the tab's menu: the conversation's
+    /// prompts, moving between them, and continuing a saved conversation.
+    func paneMenu(openBeside: @escaping (AgentChatSnapshot) -> Void) -> UIMenu {
+        let hasPrompts = controller.items.contains { $0.kind == .user }
+        let outline = UIAction(title: "Prompts…", image: UIImage(systemName: "list.bullet.indent"),
+                               attributes: hasPrompts ? [] : .disabled) { [weak self] _ in self?.showOutline() }
+        let previous = UIAction(title: "Previous Prompt", image: UIImage(systemName: "chevron.up"),
+                                attributes: hasPrompts ? [] : .disabled) { [weak self] _ in self?.navigatePrompt(previous: true) }
+        let next = UIAction(title: "Next Prompt", image: UIImage(systemName: "chevron.down"),
+                            attributes: hasPrompts ? [] : .disabled) { [weak self] _ in self?.navigatePrompt(previous: false) }
+        let history = UIAction(title: "Continue a Conversation…", image: UIImage(systemName: "clock.arrow.circlepath"),
+                               attributes: loadingHistory ? .disabled : []) { [weak self] _ in
+            self?.showSavedConversations(openBeside: openBeside)
+        }
+        history.subtitle = "Saved by Claude Code or Codex for this folder"
+        return UIMenu(title: "Conversation", options: .displayInline, children: [outline, previous, next, history])
+    }
+
+    /// A searchable list of the conversation's prompts; choosing one shows it.
+    func showOutline() {
+        guard presentedViewController == nil else { return }
+        let picker = SearchPickerViewController(title: "Prompts", placeholder: "Search prompts") { [weak self] entry in
+            self?.revealPrompt(entry.id)
+        }
+        picker.update(AgentPromptNavigation.entries(controller.items), note: "The prompts this conversation still holds.")
+        present(picker.inSheet(), animated: true)
+    }
+
+    /// Shows the prompt before or after the last one moved to, or else the
+    /// one above or below the top of the screen.
+    func navigatePrompt(previous: Bool) {
+        let prompts = controller.items.filter { $0.kind == .user }.map(\.id)
+        let id: String?
+        if let current = navigationPromptID {
+            id = AgentPromptNavigation.destination(ids: prompts, current: current, previous: previous)
+        } else {
+            let top = collectionView.contentOffset.y + collectionView.adjustedContentInset.top
+            let positions = prompts.compactMap { id -> (String, CGFloat)? in
+                guard let path = dataSource.indexPath(for: id),
+                      let frame = collectionView.layoutAttributesForItem(at: path)?.frame else { return nil }
+                return (id, frame.minY)
+            }
+            id = previous ? positions.last(where: { $0.1 < top - 1 })?.0 : positions.first(where: { $0.1 > top + 1 })?.0
+        }
+        guard let id else {
+            UINotificationFeedbackGenerator().notificationOccurred(.warning)
+            return
+        }
+        revealPrompt(id)
+    }
+
+    private func revealPrompt(_ id: String) {
+        reveal(id)
+        navigationPromptID = id
+    }
+
+    /// Scrolls `id` to the top, unfolding its turn when one of its steps.
+    private func reveal(_ id: String) {
+        if rows[id] == nil, let turn = AgentTranscript.turn(holding: id, in: controller.snapshot) {
+            expandedTurns.insert(turn)
+            apply(AgentTranscript.rows(controller.snapshot, expanded: expandedTurns))
+        }
+        guard let path = dataSource.indexPath(for: id) else { return }
+        followsEnd = false
+        collectionView.scrollToItem(at: path, at: .top, animated: true)
+        UISelectionFeedbackGenerator().selectionChanged()
+        if let cell = collectionView.cellForItem(at: path) { UIAccessibility.post(notification: .layoutChanged, argument: cell) }
+    }
+
+    /// The files a turn changed, with their diffs to read and comment on.
+    private func showChanges(_ checkpoint: AgentTurnCheckpoint) {
+        guard presentedViewController == nil else { return }
+        let changes = AgentChangesViewController(controller: controller, checkpoint: checkpoint)
+        changes.onCommentsChanged = { [weak self] in self?.reconfigureChanges() }
+        changes.onAddedToMessage = { [weak self] in
+            guard let self else { return }
+            composer.update(controller)
+            composer.focus()
+        }
+        present(changes.inSheet(), animated: true)
+    }
+
+    /// Redraws the changed-files rows, whose comment counts may have changed.
+    private func reconfigureChanges() {
+        var snapshot = dataSource.snapshot()
+        let ids = snapshot.itemIdentifiers.filter { if case .changes? = rows[$0] { true } else { false } }
+        guard !ids.isEmpty else { return }
+        snapshot.reconfigureItems(ids)
+        dataSource.apply(snapshot, animatingDifferences: false)
+    }
+
+    /// Lists the conversations Claude Code and Codex saved for this folder;
+    /// choosing one continues it here when nothing has been said yet, or
+    /// beside this pane otherwise.
+    private func showSavedConversations(openBeside: @escaping (AgentChatSnapshot) -> Void) {
+        guard !loadingHistory, presentedViewController == nil else { return }
+        loadingHistory = true
+        Task { [weak self] in
+            guard let self else { return }
+            defer { loadingHistory = false }
+            let reply: AgentHistoryReply
+            do {
+                reply = try await controller.savedConversations()
+            } catch {
+                showHistoryProblem(error, doing: "list saved conversations")
+                return
+            }
+            let formatter = RelativeDateTimeFormatter()
+            formatter.unitsStyle = .short
+            let picker = SearchPickerViewController(title: "Continue a Conversation", placeholder: "Search titles or agents") {
+                [weak self] entry in
+                guard let saved = reply.entries.first(where: { $0.id == entry.id }) else { return }
+                self?.continueConversation(saved, openBeside: openBeside)
+            }
+            picker.update(reply.entries.map { entry in
+                AgentPickerEntry(id: entry.id, title: entry.title,
+                                 detail: entry.provider.name + " · " + formatter.localizedString(for: entry.updatedAt, relativeTo: Date()))
+            }, note: reply.truncated ? "The newest \(AgentHistoryReply.maxEntries) conversations. The Mac left older ones out."
+                : reply.entries.isEmpty ? "Claude Code and Codex saved no other conversations for this folder."
+                : "Conversations saved for this folder on the Mac.")
+            present(picker.inSheet(), animated: true)
+        }
+    }
+
+    private func continueConversation(_ entry: AgentHistoryEntry, openBeside: @escaping (AgentChatSnapshot) -> Void) {
+        guard !loadingHistory else { return }
+        loadingHistory = true
+        Task { [weak self] in
+            guard let self else { return }
+            defer { loadingHistory = false }
+            do {
+                if let other = try await controller.continueConversation(entry) { openBeside(other) }
+            } catch {
+                showHistoryProblem(error, doing: "continue that conversation")
+            }
+        }
+    }
+
+    private func showHistoryProblem(_ error: Error, doing action: String) {
+        problem = (error as? ClientError)?.serverCode == .unsupported
+            ? "The Tab on this Mac can't \(action) yet. Update Tab on the Mac, then try again."
+            : "Couldn't \(action): \(error.localizedDescription)"
+        problemRevision = controller.snapshot?.revision
+        updateNotice()
     }
 
     // MARK: Transcript
@@ -319,8 +495,12 @@ final class AgentPaneViewController: UIViewController, UICollectionViewDelegate 
             cell.configure(steps: steps, duration: duration, expanded: expanded)
         }
         let working = UICollectionView.CellRegistration<WorkingCell, String> { [weak self] cell, _, id in
-            guard case .working(let since)? = self?.rows[id] else { return }
-            cell.configure(since: since)
+            guard case .working(let turn)? = self?.rows[id] else { return }
+            cell.configure(turn: turn)
+        }
+        let changes = UICollectionView.CellRegistration<ChangesCell, String> { [weak self] cell, _, id in
+            guard let self, case .changes(_, let checkpoint)? = rows[id] else { return }
+            cell.configure(checkpoint, comments: controller.reviewComments(for: checkpoint.id).count)
         }
         dataSource = UICollectionViewDiffableDataSource(collectionView: collectionView) { [weak self] view, path, id in
             switch self?.rows[id] {
@@ -331,6 +511,7 @@ final class AgentPaneViewController: UIViewController, UICollectionViewDelegate 
             case .approval?: view.dequeueConfiguredReusableCell(using: approval, for: path, item: id)
             case .work?: view.dequeueConfiguredReusableCell(using: work, for: path, item: id)
             case .working?: view.dequeueConfiguredReusableCell(using: working, for: path, item: id)
+            case .changes?: view.dequeueConfiguredReusableCell(using: changes, for: path, item: id)
             case .notice?, nil: view.dequeueConfiguredReusableCell(using: notice, for: path, item: id)
             }
         }
@@ -436,6 +617,8 @@ final class AgentPaneViewController: UIViewController, UICollectionViewDelegate 
         case .work(let turn, _, _, _)?:
             if expandedTurns.contains(turn) { expandedTurns.remove(turn) } else { expandedTurns.insert(turn) }
             apply(AgentTranscript.rows(controller.snapshot, expanded: expandedTurns))
+        case .changes(_, let checkpoint)?:
+            showChanges(checkpoint)
         default:
             break
         }

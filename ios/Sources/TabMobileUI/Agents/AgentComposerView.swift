@@ -33,7 +33,8 @@ enum AttachmentSource {
 /// The composer in a glass card: attached files, the message, then one row
 /// with Attach, the plan mode chip, one picker for the model and its effort,
 /// and one button that is Send for a draft, Stop while the agent works with
-/// nothing to send, and Dictate otherwise.
+/// nothing to send, and Dictate otherwise. While the agent works, Stop stays
+/// beside Send as you type a follow-up.
 final class AgentComposerView: UIView, UITextViewDelegate {
     private static let minimumTextHeight: CGFloat = 40
     private static let controlSize: CGFloat = 40
@@ -47,6 +48,7 @@ final class AgentComposerView: UIView, UITextViewDelegate {
     private let plan = UIButton(configuration: .tinted())
     private let model = UIButton(configuration: .plain())
     private let primary = UIButton(configuration: .prominentGlass())
+    private let stop = UIButton(configuration: .glass())
     private let dictation = AgentDictation()
     private var heightConstraint: NSLayoutConstraint!
     private weak var controller: AgentChatController?
@@ -118,13 +120,19 @@ final class AgentComposerView: UIView, UITextViewDelegate {
         primary.configuration?.cornerStyle = .capsule
         primary.tintColor = .label
         primary.addAction(UIAction { [weak self] _ in self?.performPrimary() }, for: .primaryActionTriggered)
+        stop.configuration?.cornerStyle = .capsule
+        stop.configuration?.image = UIImage(systemName: "stop.fill", withConfiguration: UIImage.SymbolConfiguration(weight: .semibold))
+        stop.configuration?.baseForegroundColor = .label
+        stop.accessibilityLabel = "Stop"
+        stop.isHidden = true
+        stop.addAction(UIAction { [weak self] _ in self?.interrupt() }, for: .primaryActionTriggered)
         dictation.onChange = { [weak self] in self?.refreshPrimary() }
         dictation.onText = { [weak self] heard in self?.insertDictation(heard) }
         dictation.onError = { [weak self] message in self?.onProblem?(message) }
 
         let spacer = UIView()
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let bar = UIStackView(arrangedSubviews: [attach, plan, spacer, model, primary])
+        let bar = UIStackView(arrangedSubviews: [attach, plan, spacer, model, stop, primary])
         bar.axis = .horizontal
         bar.alignment = .center
         bar.spacing = 6
@@ -159,6 +167,8 @@ final class AgentComposerView: UIView, UITextViewDelegate {
             model.heightAnchor.constraint(equalToConstant: Self.controlSize),
             primary.widthAnchor.constraint(equalToConstant: Self.controlSize),
             primary.heightAnchor.constraint(equalToConstant: Self.controlSize),
+            stop.widthAnchor.constraint(equalToConstant: Self.controlSize),
+            stop.heightAnchor.constraint(equalToConstant: Self.controlSize),
         ])
         refreshPrimary()
     }
@@ -203,6 +213,14 @@ final class AgentComposerView: UIView, UITextViewDelegate {
     func sendNow() {
         guard hasDraft else { return }
         send()
+    }
+
+    /// Puts the cursor at the end of the message.
+    func focus() {
+        text.becomeFirstResponder()
+        let end = text.endOfDocument
+        text.selectedTextRange = text.textRange(from: end, to: end)
+        text.scrollRangeToVisible(NSRange(location: (text.text as NSString).length, length: 0))
     }
 
     func stopDictating() {
@@ -312,12 +330,17 @@ final class AgentComposerView: UIView, UITextViewDelegate {
         case .send:
             send()
         case .stop:
-            UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
-            controller?.interrupt()
+            interrupt()
         case .dictate:
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
             dictation.toggle()
         }
+    }
+
+    /// Stops the agent and pauses its queue; the draft stays.
+    private func interrupt() {
+        UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
+        controller?.interrupt()
     }
 
     private func send() {
@@ -358,6 +381,8 @@ final class AgentComposerView: UIView, UITextViewDelegate {
         primary.tintColor = listening ? .tintColor : .label
         primary.accessibilityLabel = label
         primary.isEnabled = controller?.canSend != false || action == .stop
+        let showsStop = action == .send && controller?.isBusy == true
+        if stop.isHidden == showsStop { stop.isHidden = !showsStop }
         if listening {
             primary.imageView?.addSymbolEffect(.pulse, options: .repeat(.continuous))
         } else {

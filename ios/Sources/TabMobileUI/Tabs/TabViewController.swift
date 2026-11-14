@@ -234,6 +234,13 @@ final class TabViewController: UIViewController {
         let add = UIBarButtonItem(image: UIImage(systemName: "plus"), menu: UIMenu(title: "New Pane", children: kinds))
         add.accessibilityLabel = "New Pane"
         var more: [UIMenuElement] = []
+        if let focused, let agent = panes[focused] as? AgentPaneViewController {
+            // Built as it opens, so the conversation's updates leave the bar alone.
+            more.append(UIDeferredMenuElement.uncached { [weak self, weak agent] completion in
+                guard let agent else { return completion([]) }
+                completion([agent.paneMenu { [weak self] other in self?.openConversation(other, beside: focused) }])
+            })
+        }
         if let focused, let position = positionMenu(focused, in: tab) { more.append(position) }
         if let focused, tab.panes.count > 1 {
             more.append(UIAction(title: "Close Pane", image: UIImage(systemName: "xmark.square")) { [weak self] _ in
@@ -325,7 +332,14 @@ final class TabViewController: UIViewController {
         focus(id)
     }
 
-    /// Closes a pane; the last pane of a worktree asks about the worktree first.
+    /// Shows a conversation continued from the agent's saved history beside `anchor`.
+    private func openConversation(_ snapshot: AgentChatSnapshot, beside anchor: PaneId) {
+        guard let id = try? server.openAgent(snapshot.session, provider: snapshot.provider, beside: anchor) else { return }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        focus(id)
+    }
+
+    /// Closes a pane; a working agent and the last pane of a worktree ask first.
     private func closePane(_ pane: PaneId) {
         WorktreeClosingAlert.closePane(pane, on: server, from: self)
     }
@@ -340,7 +354,7 @@ final class TabViewController: UIViewController {
                                       preferredStyle: .actionSheet)
         alert.addAction(UIAlertAction(title: "Close Tab", style: .destructive) { [weak self] _ in
             guard let self else { return }
-            try? server.closeTab(tabId)
+            WorktreeClosingAlert.closeTab(tabId, on: server, from: self, agentsConfirmed: true)
         })
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         alert.popoverPresentationController?.sourceItem = navigationItem.rightBarButtonItems?.first

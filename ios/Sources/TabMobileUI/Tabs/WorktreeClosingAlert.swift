@@ -2,28 +2,58 @@ import TabMobileKit
 import TabProtocol
 import UIKit
 
-/// Closing the last panes of a worktree, as the desktop does: the worktree is
-/// inspected, then an alert says what removing it would lose and offers to
-/// remove it, to keep it, or to keep the panes open. Files never go without
-/// asking.
+/// Closing panes as the desktop does. Agents still at work, or running
+/// agents in the background, stop only once you say so. For the last panes
+/// of a worktree, the worktree is inspected, then an alert says what removing
+/// it would lose and offers to remove it, to keep it, or to keep the panes
+/// open. Files never go without asking.
 @MainActor
 enum WorktreeClosingAlert {
-    /// Closes `tab`, asking about its worktree first when it holds the last panes.
-    static func closeTab(_ tab: TabId, on server: ServerModel, from presenter: UIViewController) {
-        guard let worktree = server.worktreeClosed(byClosing: tab) else {
-            try? server.closeTab(tab)
-            return
+    /// Closes `tab`, asking about its working agents and its worktree first.
+    /// `agentsConfirmed` skips the first question, when the caller already
+    /// said its agents stop.
+    static func closeTab(_ tab: TabId, on server: ServerModel, from presenter: UIViewController,
+                         agentsConfirmed: Bool = false) {
+        let panes = Set(server.tab(tab)?.tab.panes.map(\.id) ?? [])
+        confirmStopping(agentsConfirmed ? (0, 0) : server.workStopped(byClosing: panes), closing: "Tab",
+                        from: presenter) {
+            guard let worktree = server.worktreeClosed(byClosing: tab) else {
+                try? server.closeTab(tab)
+                return
+            }
+            ask(about: worktree, on: server, from: presenter) { try? server.closeTab(tab) }
         }
-        ask(about: worktree, on: server, from: presenter) { try? server.closeTab(tab) }
     }
 
-    /// Closes `pane`, asking about its worktree first when it is the last pane.
+    /// Closes `pane`, asking about its working agent and its worktree first.
     static func closePane(_ pane: PaneId, on server: ServerModel, from presenter: UIViewController) {
-        guard let worktree = server.worktreeClosed(by: [pane]) else {
-            try? server.closePane(pane)
+        confirmStopping(server.workStopped(byClosing: [pane]), closing: "Pane", from: presenter) {
+            guard let worktree = server.worktreeClosed(by: [pane]) else {
+                try? server.closePane(pane)
+                return
+            }
+            ask(about: worktree, on: server, from: presenter) { try? server.closePane(pane) }
+        }
+    }
+
+    /// Asks before closing stops agents at work or in the background.
+    private static func confirmStopping(_ work: (agents: Int, background: Int), closing noun: String,
+                                        from presenter: UIViewController, close: @escaping () -> Void) {
+        guard work.agents > 0 || work.background > 0 else {
+            close()
             return
         }
-        ask(about: worktree, on: server, from: presenter) { try? server.closePane(pane) }
+        var parts: [String] = []
+        if work.agents > 0 { parts.append(work.agents == 1 ? "an agent that is working" : "\(work.agents) agents that are working") }
+        if work.background > 0 {
+            parts.append(work.background == 1 ? "1 agent running in the background" : "\(work.background) agents running in the background")
+        }
+        let alert = UIAlertController(title: "Stop the Agents?",
+                                      message: "Closing stops \(parts.joined(separator: " and ")), on every device.",
+                                      preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "Close \(noun)", style: .destructive) { _ in close() })
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        present(alert, from: presenter)
     }
 
     private static func ask(about worktree: ProjectDescriptor, on server: ServerModel, from presenter: UIViewController,

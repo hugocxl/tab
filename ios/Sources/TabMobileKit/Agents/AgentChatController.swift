@@ -77,6 +77,12 @@ public final class AgentChatController {
     public var planMode: Bool { snapshot?.planMode == true }
     public var queuedPrompts: [AgentQueuedPrompt] { snapshot?.queuedPrompts ?? [] }
     public var queuePaused: Bool { snapshot?.queuePaused == true }
+    /// Agents the conversation's agent started that are still running.
+    public var runningSubagents: [AgentSubagent] { (snapshot?.subagents ?? []).filter { $0.status == .running } }
+
+    /// Closing the pane would stop work: a turn, queued prompts or agents
+    /// running in the background.
+    public var closingStopsWork: Bool { isBusy || !runningSubagents.isEmpty }
 
     /// Queued prompts will go on their own once the agent is free.
     public var hasActiveQueue: Bool { !queuePaused && !queuedPrompts.isEmpty }
@@ -174,6 +180,39 @@ public final class AgentChatController {
         }
     }
 
+    /// One page of the files a turn changed, or one file's diff when `path` is set.
+    public func checkpoint(_ checkpoint: String, path: String? = nil, offset: Int = 0) async throws -> AgentCheckpointReply {
+        guard let client = server?.client else { throw ClientError.disconnected }
+        return try await client.agentCheckpoint(AgentCheckpointRequest(session: session, checkpoint: checkpoint, path: path,
+                                                                       offset: offset))
+    }
+
+    /// Conversations Claude Code and Codex saved for this project's folder outside Tab.
+    public func savedConversations() async throws -> AgentHistoryReply {
+        guard let client = server?.client else { throw ClientError.disconnected }
+        return try await client.agentHistory(AgentHistoryRequest(project: project))
+    }
+
+    /// Whether this pane can take over a saved conversation: nothing has been said in it.
+    public var isUnused: Bool {
+        created && !submitting && !busy && snapshot.map {
+            $0.items.isEmpty && $0.providerSession == nil && $0.status == .idle
+        } == true
+    }
+
+    /// Continues `entry`: in this pane when it's unused, which then returns nil;
+    /// otherwise as a new conversation, which the caller opens beside it.
+    public func continueConversation(_ entry: AgentHistoryEntry) async throws -> AgentChatSnapshot? {
+        guard let client = server?.client else { throw ClientError.disconnected }
+        let target = isUnused ? session : SessionId()
+        let reply = try await client.importAgentHistory(AgentHistoryImport(session: target, project: project,
+                                                                           provider: entry.provider,
+                                                                           providerSession: entry.providerSession))
+        guard reply.session == session else { return reply }
+        accept(reply)
+        return nil
+    }
+
     /// The bytes of a file sent with a message, for showing its image.
     public func attachment(item: String, id: String) async throws -> AgentChatAttachment {
         guard let client = server?.client else { throw ClientError.disconnected }
@@ -201,6 +240,36 @@ public final class AgentChatController {
     public func detach(_ id: String) {
         draft.attachments.removeAll { $0.id == id }
         saveDraft()
+    }
+
+    /// The review comments on `checkpoint`'s changes.
+    public func reviewComments(for checkpoint: String) -> [AgentReviewComment] {
+        draft.reviewComments.filter { $0.checkpoint == checkpoint }
+    }
+
+    /// Replaces the review comments on `checkpoint`'s changes.
+    public func setReviewComments(_ comments: [AgentReviewComment], for checkpoint: String) {
+        draft.reviewComments.removeAll { $0.checkpoint == checkpoint }
+        draft.reviewComments += comments
+        saveDraft(immediately: true)
+    }
+
+    /// Adds the comments on `checkpoint` to the end of the message, without
+    /// sending it, and lets them go. Returns why it can't.
+    public func addReviewToDraft(_ checkpoint: String) -> String? {
+        guard draftRestored else { return "The message isn't ready yet. Try again in a moment." }
+        let comments = reviewComments(for: checkpoint)
+        guard !comments.isEmpty else { return nil }
+        let text = AgentReviewComment.prompt(comments)
+        let separator = draft.text.isEmpty ? "" : "\n\n"
+        guard draft.text.utf8.count + separator.utf8.count + text.utf8.count <= 256 * 1024 else {
+            return "These comments would make the message too long. Shorten the message or the comments first."
+        }
+        draft.text += separator + text
+        draft.reviewComments.removeAll { $0.checkpoint == checkpoint }
+        draftGeneration += 1
+        saveDraft(immediately: true)
+        return nil
     }
 
     /// Keeps what's been answered so far in a question's form; private answers are never saved.

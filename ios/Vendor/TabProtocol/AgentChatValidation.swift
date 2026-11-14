@@ -60,6 +60,7 @@ extension AgentChatSnapshot {
             guard turns.count <= 512,
                   turns.allSatisfy({ turn in
                       users.contains(turn.userItemID) && (turn.completedAt.map { $0 >= turn.startedAt } ?? true)
+                          && (turn.waited.map { $0.isFinite && $0 >= 0 } ?? true)
                   }) else {
                 throw .badRequest
             }
