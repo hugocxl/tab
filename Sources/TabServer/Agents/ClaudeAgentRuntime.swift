@@ -235,15 +235,21 @@ internal final class ClaudeAgentRuntime {
         }
     }
 
-    /// MCP servers that didn't start, said once each, since their tools are missing.
+    /// MCP servers that failed to start, said once in one notice, since their tools are
+    /// missing. Servers waiting for sign-in are connectors the user hasn't connected, so
+    /// they stay quiet.
     private func reportServers(_ servers: [[String: Any]]) {
-        for server in servers.prefix(64) {
-            guard let name = (server["name"] as? String).flatMap(agentSubagentText), let status = server["status"] as? String,
-                  ["failed", "needs-auth"].contains(status), reportedServers.insert(name).inserted else { continue }
-            let text = status == "needs-auth" ? "The MCP server “\(name)” needs you to sign in; its tools are unavailable."
-                : "The MCP server “\(name)” failed to start; its tools are unavailable."
-            onEvent(.item(AgentChatItem(id: "mcp-server:" + name, kind: .notice, text: text)))
+        let failed = servers.prefix(64).compactMap { server -> String? in
+            guard server["status"] as? String == "failed",
+                  let name = (server["name"] as? String).flatMap(agentSubagentText),
+                  reportedServers.insert(name).inserted else { return nil }
+            return name
         }
+        guard let first = failed.first else { return }
+        let text = failed.count == 1 ? "The MCP server “\(first)” failed to start; its tools are unavailable."
+            : "\(failed.count) MCP servers failed to start; their tools are unavailable: "
+                + failed.map { "“\($0)”" }.joined(separator: ", ") + "."
+        onEvent(.item(AgentChatItem(id: "mcp-servers:" + failed.joined(separator: ","), kind: .notice, text: text)))
     }
 
     /// A `result`'s usage: tokens across the turn's requests, its cost, model and stop reason.

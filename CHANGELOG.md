@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.98.1 - 2026-11-14
+
+### Fixed
+
+- Agent panes no longer list every connector that needs signing in, and MCP
+  servers that fail to start are reported together in one line.
+
 ## 0.98.0 - 2026-11-14
 
 ### Added
