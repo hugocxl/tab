@@ -131,9 +131,10 @@ struct ActivityCardData: Equatable {
     var panes: [PaneRow]
     var selected: Bool
     var unavailable: Bool
-    /// Another computer's card while its server isn't connected: dimmed,
-    /// but selecting it still connects.
+    /// Another computer's card while its server isn't connected.
     var offline: Bool
+    /// Dimmed and inert: no hover, no close button, and clicks do nothing.
+    var disabled: Bool { unavailable || offline }
 
     /// The pane the card's title row stands for: a lone pane, else the most
     /// pressing one, else the one the title names, else the focused one.
