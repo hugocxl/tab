@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.99.0 - 2026-11-14
+
+### Changed
+
+- Sidebar tabs that are unavailable, such as another computer's tabs while it
+  isn't connected, can no longer be clicked.
+
 ## 0.98.0 - 2026-11-14
 
 ### Added

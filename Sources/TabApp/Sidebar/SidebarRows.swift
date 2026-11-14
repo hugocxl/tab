@@ -57,7 +57,7 @@ final class SidebarCardView: HoverView {
     /// The hairlines above and below, which hide while this card is filled.
     var dividers: [CardDivider] = []
     /// Whether the card is filled: selected, or hovered.
-    var isHighlighted: Bool { data.selected || (isHovered && !data.unavailable) }
+    var isHighlighted: Bool { data.selected || (isHovered && !data.disabled) }
 
     /// The project row the Open Tabs layout puts at the bottom.
     struct Header {
@@ -179,7 +179,7 @@ final class SidebarCardView: HoverView {
         closeButton.onPress = { [weak self] _ in self?.onClose?() }
         addSubview(closeButton)
         toolTip = Self.baseDescription(data)
-        alphaValue = data.unavailable || data.offline ? 0.5 : 1
+        alphaValue = data.disabled ? 0.5 : 1
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
         let parts = [headerLabel?.stringValue, titleLabel.stringValue, data.name, data.branch, data.primary ? "primary" : nil,
@@ -283,7 +283,7 @@ final class SidebarCardView: HoverView {
     override var wantsUpdateLayer: Bool { true }
 
     override func updateLayer() {
-        let hovered = !data.selected && isHovered && !data.unavailable
+        let hovered = !data.selected && isHovered && !data.disabled
         layer?.backgroundColor = (data.selected ? theme.surface : hovered ? theme.hover : .clear).cgColor
         layer?.borderColor = (data.selected ? theme.fg(alpha: 0.08) : .clear).cgColor
     }
@@ -295,7 +295,7 @@ final class SidebarCardView: HoverView {
     }
 
     private func updateCloseButton() {
-        let shown = isHovered && onClose != nil && !data.unavailable
+        let shown = isHovered && onClose != nil && !data.disabled
         guard closeButton.isHidden == shown else { return }
         closeButton.isHidden = !shown
         needsLayout = true
@@ -356,7 +356,7 @@ final class SidebarCardView: HoverView {
 
     override func mouseUp(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        guard !data.unavailable, bounds.contains(point) else { return }
+        guard !data.disabled, bounds.contains(point) else { return }
         if let row = paneRows.first(where: { $0.frame.contains(point) }), let onPaneClick {
             onPaneClick(row.row.id)
         } else {
@@ -367,6 +367,7 @@ final class SidebarCardView: HoverView {
     override func menu(for event: NSEvent) -> NSMenu? { menuProvider?() }
 
     override func accessibilityPerformPress() -> Bool {
+        guard !data.disabled else { return false }
         onClick?()
         return true
     }
