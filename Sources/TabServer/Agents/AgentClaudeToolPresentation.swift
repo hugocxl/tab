@@ -12,6 +12,32 @@ internal func agentNormalizedClaudeToolName(_ name: String) -> String {
     }))
 }
 
+/// A Grep or Glob result as file-search rows: `path:line:text` matches, or one path per
+/// line. Nil when the output isn't a list of files.
+internal func agentClaudeFileSearch(name: String, input: String?, output: String?) -> AgentToolActivity.FileSearchDetails? {
+    guard ["grep", "glob"].contains(agentNormalizedClaudeToolName(name)), let output, !output.isEmpty else { return nil }
+    let pattern = input.flatMap { $0.data(using: .utf8) }
+        .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }?["pattern"] as? String
+    var results: [AgentToolActivity.FileSearchDetails.Result] = []
+    let matchLine = try? NSRegularExpression(pattern: #"^(.+?):(\d+):(.*)$"#)
+    for raw in output.split(whereSeparator: \.isNewline).prefix(200) {
+        let line = raw.trimmingCharacters(in: .whitespaces)
+        guard !line.isEmpty, !line.hasPrefix("Found "), !line.hasPrefix("No files found"), !line.hasPrefix("No matches") else { continue }
+        let range = NSRange(line.startIndex..., in: line)
+        if let match = matchLine?.firstMatch(in: line, range: range),
+           let file = Range(match.range(at: 1), in: line), let number = Range(match.range(at: 2), in: line),
+           let text = Range(match.range(at: 3), in: line) {
+            results.append(.init(fileName: String(line[file]), line: UInt64(line[number]), preview: String(line[text])))
+        } else if !line.contains(" ") || line.hasPrefix("/") {
+            results.append(.init(fileName: line))
+        } else {
+            return nil
+        }
+    }
+    guard !results.isEmpty else { return nil }
+    return .init(pattern: pattern, results: results)
+}
+
 internal func agentClaudeToolPresentation(_ name: String) -> AgentToolActivity.Presentation {
     switch agentNormalizedClaudeToolName(name) {
     case "bash": return .command

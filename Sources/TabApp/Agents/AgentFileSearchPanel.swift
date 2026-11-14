@@ -1,8 +1,7 @@
 import AppKit
 import TabProtocol
 
-/// The V2 file_search inspector. Provider Grep/Glob calls remain dynamic tools,
-/// as in the source; only explicitly typed records use this presentation.
+/// The V2 file_search inspector, also showing Claude's Grep and Glob results as files.
 @MainActor
 final class AgentFileSearchPanel: NSView, @preconcurrency NSLayoutManagerDelegate {
     override var isFlipped: Bool { true }

@@ -107,12 +107,14 @@ final class AgentHistoryTests: XCTestCase {
 
     func testClaudeTranscriptKeepsWhatWasSaidAndDone() throws {
         let transcript = try history.transcript(provider: .claude, session: claudeSession, directory: project.path)
-        XCTAssertEqual(transcript.items.map(\.kind), [.user, .assistant, .tool, .assistant, .user])
-        XCTAssertEqual(transcript.items.map(\.text), ["Fix the login bug\nIt fails on Safari", "Looking.", "Bash", "Fixed it.",
+        // Reasoning comes back as a Thinking row, as it showed while it streamed.
+        XCTAssertEqual(transcript.items.map(\.kind), [.user, .tool, .assistant, .tool, .assistant, .user])
+        XCTAssertEqual(transcript.items.map(\.text), ["Fix the login bug\nIt fails on Safari", "Thinking", "Looking.", "Bash", "Fixed it.",
                                                      "/review login"])
-        XCTAssertEqual(transcript.items[2].tool?.output, "1 failure")
-        XCTAssertEqual(transcript.items[2].tool?.status, .failed)
-        XCTAssertEqual(transcript.items[2].tool?.category, .command)
+        XCTAssertEqual(transcript.items[1].detail, "Hmm")
+        XCTAssertEqual(transcript.items[3].tool?.output, "1 failure")
+        XCTAssertEqual(transcript.items[3].tool?.status, .failed)
+        XCTAssertEqual(transcript.items[3].tool?.category, .command)
         XCTAssertNotNil(transcript.items[0].createdAt)
         XCTAssertEqual(transcript.resolvedModel, "claude-opus-5-5")
         XCTAssertEqual(Set(transcript.items.map(\.id)).count, transcript.items.count)
@@ -150,5 +152,41 @@ final class AgentHistoryTests: XCTestCase {
         try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
         let lines = try records.map { String(decoding: try JSONSerialization.data(withJSONObject: $0), as: UTF8.self) }
         try (lines.joined(separator: "\n") + "\n" + trailing).write(to: file, atomically: true, encoding: .utf8)
+    }
+
+    func testImportKeepsImagesExitCodesDurationsAndTurns() throws {
+        let png = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]).base64EncodedString()
+        let codex = AgentHistory.codexTranscript([
+            ["type": "response_item", "timestamp": "2026-11-04T10:00:00.000Z",
+             "payload": ["type": "message", "role": "user", "id": "u", "content": [
+                ["type": "input_text", "text": "What is this?"], ["type": "input_image", "image_url": "data:image/png;base64," + png]]]],
+            ["type": "response_item", "timestamp": "2026-11-04T10:00:01.000Z",
+             "payload": ["type": "reasoning", "id": "r", "summary": [["type": "summary_text", "text": "Checking the image"]]]],
+            ["type": "response_item", "timestamp": "2026-11-04T10:00:02.000Z",
+             "payload": ["type": "function_call", "id": "c", "call_id": "call", "name": "shell", "arguments": "{\"command\":[\"false\"]}"]],
+            ["type": "response_item", "timestamp": "2026-11-04T10:00:09.000Z",
+             "payload": ["type": "function_call_output", "call_id": "call",
+                         "output": "{\"output\":\"nope\\n\",\"metadata\":{\"exit_code\":1,\"duration_seconds\":2.5}}"]],
+            ["type": "response_item", "timestamp": "2026-11-04T10:00:10.000Z",
+             "payload": ["type": "message", "role": "assistant", "id": "a", "content": [["type": "output_text", "text": "A logo."]]]],
+        ])
+        XCTAssertEqual(codex.items.map(\.kind), [.user, .tool, .tool, .assistant])
+        XCTAssertEqual(codex.items[1].detail, "Checking the image")
+        let command = try XCTUnwrap(codex.items[2].tool)
+        XCTAssertEqual(command.output, "nope\n")
+        XCTAssertEqual(command.exitCode, 1)
+        XCTAssertEqual(command.status, .failed)
+        XCTAssertEqual(try XCTUnwrap(command.completedAt).timeIntervalSince(try XCTUnwrap(command.startedAt)), 2.5, accuracy: 0.001)
+        XCTAssertEqual(codex.images["u"]?.first?.mimeType, "image/png")
+        let turns = AgentHistoryTranscript.turns(codex.items)
+        XCTAssertEqual(turns.map(\.userItemID), ["u"])
+        XCTAssertEqual(try XCTUnwrap(turns.first?.completedAt).timeIntervalSince(try XCTUnwrap(turns.first?.startedAt)), 10, accuracy: 0.001)
+
+        let claude = AgentHistory.claudeTranscript([
+            ["type": "user", "uuid": "u", "timestamp": "2026-11-04T10:00:00.000Z",
+             "message": ["role": "user", "content": [["type": "image", "source": ["type": "base64", "media_type": "image/png", "data": png]]]]],
+        ])
+        XCTAssertEqual(claude.items.map(\.kind), [.user], "An image alone is still a message")
+        XCTAssertEqual(claude.images["u"]?.count, 1)
     }
 }

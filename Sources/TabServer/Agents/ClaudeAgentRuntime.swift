@@ -14,6 +14,8 @@ internal final class ClaudeAgentRuntime {
     private var tools: [String: AgentChatItem] = [:]
     private var blocks: [Int: String] = [:]
     private var partialInputs: [String: String] = [:]
+    /// The input fields already sent for a tool whose input is still being written.
+    private var shownPartialFields: [String: [String: String]] = [:]
     private var contextUsage: AgentContextUsage?
     private var contextModel: String?
     private var contextWindows: [String: Int] = [:]
@@ -31,10 +33,20 @@ internal final class ClaudeAgentRuntime {
     private var lastThinking: ThinkingUpdate?
     private var compaction: AgentChatItem?
     private var subagents: [AgentSubagent] = []
+    /// Agents that finished since the user's last prompt, newest last, so their outcome
+    /// stays visible; the next prompt clears them.
+    private var finishedSubagents: [AgentSubagent] = []
     /// Background agents' task IDs, with the tool rows that started them, which
     /// take their final report when they finish after the turn has ended.
     private var backgroundTasks: [String: String] = [:]
     private var backgroundTools: [String: AgentChatItem] = [:]
+    /// Each agent's own steps, from the messages Claude tags with its Agent tool's ID.
+    private var children: [String: AgentSubagentTranscript] = [:]
+    private var childOrder: [String] = []
+    /// The background agent that finished most recently, which Claude may answer
+    /// in a turn of its own.
+    private(set) var lastFinishedBackground: AgentSubagent?
+    private var reportedServers: Set<String> = []
 
     /// The user stopped the turn, so tools its result leaves unfinished were interrupted.
     var interrupted = false
@@ -42,7 +54,7 @@ internal final class ClaudeAgentRuntime {
     init(onEvent: @escaping @Sendable (AgentRuntimeEvent) -> Void) { self.onEvent = onEvent }
 
     func beginTurn() {
-        messageID = nil; blocks.removeAll(); partialInputs.removeAll()
+        messageID = nil; blocks.removeAll(); partialInputs.removeAll(); shownPartialFields.removeAll()
         reasoning.removeAll(); reasoningStreamBlocks.removeAll()
         nextReasoningBlock.removeAll(); snapshotReasoningBlock.removeAll(); reasoningSnapshots.removeAll()
         lastThinking = nil
@@ -57,7 +69,10 @@ internal final class ClaudeAgentRuntime {
             onEvent(.providerSession(session))
         }
         // Subagent messages belong to their tool, not the root assistant stream.
-        if let parent = message["parent_tool_use_id"], !(parent is NSNull) { return }
+        if let parent = message["parent_tool_use_id"], !(parent is NSNull) {
+            if let parent = parent as? String { receiveChild(message, parent: parent, source: source) }
+            return
+        }
         if ["assistant", "user"].contains(message["type"] as? String), let uuid = message["uuid"] as? String {
             onEvent(.providerMessage(uuid))
         }
@@ -71,6 +86,7 @@ internal final class ClaudeAgentRuntime {
             if message["subtype"] as? String == "init", let model = message["model"] as? String {
                 onEvent(.resolvedModel(model))
             }
+            if message["subtype"] as? String == "init" { reportServers(message["mcp_servers"] as? [[String: Any]] ?? []) }
         case "stream_event":
             guard let event = message["event"] as? [String: Any] else { return }
             stream(event, source: source)
@@ -114,6 +130,11 @@ internal final class ClaudeAgentRuntime {
                 activity.outputIsJSON = agentToolOutputIsJSON(content)
                 agentUpdateClaudeWebSearch(&activity, result: message["tool_use_result"])
                 agentUpdateClaudeFileChange(&activity, result: message["tool_use_result"])
+                // Grep and Glob list files; the file-search panel shows them as links.
+                if let search = agentClaudeFileSearch(name: activity.name ?? item.text, input: activity.input, output: output) {
+                    activity.fileSearchDetails = search
+                    activity.presentation = .fileSearch
+                }
                 let failed = block["is_error"] as? Bool == true
                 let nonExecutionKind = (message["tool_result_meta"] as? [[String: Any]])?
                     .first(where: { $0["id"] as? String == id })?["non_execution_kind"] as? String
@@ -174,8 +195,15 @@ internal final class ClaudeAgentRuntime {
                     onEvent(.contextUsage(usage))
                 }
             }
+            if let usage = Self.turnUsage(message, model: contextModel) { onEvent(.turnUsage(usage)) }
             // The result string repeats the final assistant answer. Never append it again.
-            for (id, text) in texts { onEvent(.item(AgentChatItem(id: id, kind: .assistant, text: text))) }
+            for (id, text) in texts { onEvent(.itemUpdate(AgentChatItem(id: id, kind: .assistant, text: text))) }
+            // A command such as `/cost` answers with its result alone; show that once.
+            if texts.isEmpty, tools.isEmpty, message["is_error"] as? Bool != true, message["subtype"] as? String == "success",
+               let result = message["result"] as? String, !result.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                let id = "result:" + (message["uuid"] as? String ?? UUID().uuidString)
+                onEvent(.item(AgentChatItem(id: id, kind: .assistant, text: result)))
+            }
             for (_, var item) in tools where !item.isComplete {
                 item.isComplete = true
                 let denied = (message["permission_denials"] as? [[String: Any]])?.contains {
@@ -192,8 +220,9 @@ internal final class ClaudeAgentRuntime {
             }
             // A turn's foreground agents have all reported by its result.
             if subagents.contains(where: { !$0.background }) {
+                for agent in subagents where !agent.background { retire(agent, status: .completed) }
                 subagents.removeAll { !$0.background }
-                onEvent(.subagents(subagents))
+                publishSubagents()
             }
             texts.removeAll()
             tools.removeAll()
@@ -206,31 +235,127 @@ internal final class ClaudeAgentRuntime {
         }
     }
 
-    /// The provider process stopped, and every agent it ran with it.
-    func endProcess() {
+    /// MCP servers that didn't start, said once each, since their tools are missing.
+    private func reportServers(_ servers: [[String: Any]]) {
+        for server in servers.prefix(64) {
+            guard let name = (server["name"] as? String).flatMap(agentSubagentText), let status = server["status"] as? String,
+                  ["failed", "needs-auth"].contains(status), reportedServers.insert(name).inserted else { continue }
+            let text = status == "needs-auth" ? "The MCP server “\(name)” needs you to sign in; its tools are unavailable."
+                : "The MCP server “\(name)” failed to start; its tools are unavailable."
+            onEvent(.item(AgentChatItem(id: "mcp-server:" + name, kind: .notice, text: text)))
+        }
+    }
+
+    /// A `result`'s usage: tokens across the turn's requests, its cost, model and stop reason.
+    static func turnUsage(_ message: [String: Any], model: String?) -> AgentTurnUsage? {
+        let usage = message["usage"] as? [String: Any]
+        var input = agentTokenCount(usage?["input_tokens"])
+        for key in ["cache_read_input_tokens", "cache_creation_input_tokens"] {
+            if let value = agentTokenCount(usage?[key]) { input = (input ?? 0) + value }
+        }
+        let output = agentTokenCount(usage?["output_tokens"])
+        let cost = (message["total_cost_usd"] as? NSNumber)?.doubleValue
+        let stop = (message["stop_reason"] as? String) ?? (message["subtype"] as? String).flatMap { $0.hasPrefix("error_max") ? $0 : nil }
+        let resolved = model ?? (message["modelUsage"] as? [String: Any])?.keys.sorted().first
+        guard input != nil || output != nil || cost != nil || stop != nil else { return nil }
+        return AgentTurnUsage(inputTokens: input, outputTokens: output, costUSD: cost.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil },
+                              model: resolved.flatMap { $0.utf8.count <= 256 ? $0 : nil },
+                              stopReason: stop.flatMap { $0.utf8.count <= 64 ? $0 : nil })
+    }
+
+    /// The provider process stopped, and every agent it ran with it. Returns how many
+    /// were still running, so the caller can say they were stopped.
+    @discardableResult
+    func endProcess() -> Int {
         backgroundTasks.removeAll()
         backgroundTools.removeAll()
-        guard !subagents.isEmpty else { return }
+        children.removeAll()
+        childOrder.removeAll()
+        let running = subagents.count
+        guard !subagents.isEmpty || !finishedSubagents.isEmpty else { return 0 }
         subagents.removeAll()
+        finishedSubagents.removeAll()
         onEvent(.subagents([]))
+        return running
+    }
+
+    /// The user sent a prompt: finished agents have been seen, so they leave the list.
+    func clearFinishedSubagents() {
+        lastFinishedBackground = nil
+        guard !finishedSubagents.isEmpty else { return }
+        finishedSubagents.removeAll()
+        publishSubagents()
+    }
+
+    private func publishSubagents() {
+        onEvent(.subagents(subagents + finishedSubagents))
+    }
+
+    /// Rebuilds an agent's steps with a nested runtime fed the messages tagged with it.
+    private func receiveChild(_ message: [String: Any], parent: String, source: AgentProviderJSON?) {
+        guard parent.utf8.count <= 1024, ["assistant", "user", "stream_event"].contains(message["type"] as? String) else { return }
+        let transcript: AgentSubagentTranscript
+        if let existing = children[parent] { transcript = existing }
+        else {
+            if childOrder.count >= AgentSubagentTranscript.maxAgents {
+                children.removeValue(forKey: childOrder.removeFirst())
+            }
+            transcript = AgentSubagentTranscript()
+            children[parent] = transcript
+            childOrder.append(parent)
+        }
+        var own = message
+        own["parent_tool_use_id"] = NSNull()
+        own.removeValue(forKey: "session_id")
+        own.removeValue(forKey: "uuid")
+        transcript.runtime.receive(own, source: nil)
+        onEvent(.subagentSteps(toolUseID: parent, items: transcript.items))
+    }
+
+    private func retire(_ agent: AgentSubagent, status: AgentSubagent.Status, summary: String? = nil) {
+        if let toolUseID = agent.toolUseID, let transcript = children[toolUseID] {
+            transcript.finish()
+            onEvent(.subagentSteps(toolUseID: toolUseID, items: transcript.items))
+        }
+        var finished = agent
+        finished.status = status
+        finished.finishedAt = Date()
+        if let line = summary.flatMap(agentSubagentText) { finished.activity = line }
+        finishedSubagents.removeAll { $0.id == agent.id }
+        finishedSubagents.append(finished)
+        if finishedSubagents.count > AgentSubagent.maxFinished { finishedSubagents.removeFirst() }
+        if agent.background { lastFinishedBackground = finished }
     }
 
     /// Claude reports each agent it starts as a task: started, then progress, then a
     /// notification when it finishes. Its shell tasks aren't agents.
     private func receiveTask(_ message: [String: Any]) {
+        if message["subtype"] as? String == "background_tasks_changed" {
+            reconcileBackgroundTasks(message["tasks"] as? [[String: Any]] ?? [])
+            return
+        }
         guard let id = message["task_id"] as? String, id.utf8.count <= 1024 else { return }
         switch message["subtype"] as? String {
         case "task_started":
             let type = message["task_type"] as? String ?? ""
-            guard type.hasSuffix("agent") || message["subagent_type"] is String,
-                  !subagents.contains(where: { $0.id == id }), subagents.count < AgentSubagent.maxCount else { return }
+            // A shell the agent left running in the background shows with its agents.
+            let shell = type == "local_bash" && message["is_backgrounded"] as? Bool == true && message["owned_by_subagent"] as? Bool != true
+            guard type.hasSuffix("agent") || message["subagent_type"] is String || shell else { return }
             let toolUseID = (message["tool_use_id"] as? String).flatMap { $0.utf8.count <= 1024 ? $0 : nil }
             let background = message["is_backgrounded"] as? Bool == true
-            subagents.append(AgentSubagent(id: id, toolUseID: toolUseID,
-                description: agentSubagentText(message["description"]) ?? "Agent",
-                agentType: agentSubagentText(message["subagent_type"]), background: background,
-                startedAt: Date()))
-            if background, let toolUseID, backgroundTasks.count < AgentSubagent.maxCount {
+            if let index = subagents.firstIndex(where: { $0.id == id }) {
+                // Known from the background task list, which doesn't name its tool.
+                subagents[index].toolUseID = subagents[index].toolUseID ?? toolUseID
+                subagents[index].background = subagents[index].background || background
+                subagents[index].agentType = subagents[index].agentType ?? agentSubagentText(message["subagent_type"])
+            } else {
+                guard subagents.count < AgentSubagent.maxCount else { return }
+                subagents.append(AgentSubagent(id: id, toolUseID: toolUseID,
+                    description: agentSubagentText(message["description"]) ?? (shell ? "Shell" : "Agent"),
+                    agentType: shell ? "Shell" : agentSubagentText(message["subagent_type"]), background: background,
+                    startedAt: Date()))
+            }
+            if background, let toolUseID, backgroundTasks[id] == nil, backgroundTasks.count < AgentSubagent.maxCount {
                 backgroundTasks[id] = toolUseID
                 backgroundTools[toolUseID] = tools[toolUseID]
                     ?? AgentChatItem(id: toolUseID, kind: .tool, text: "Agent", tool: agentToolActivity(name: "Agent", input: nil))
@@ -251,13 +376,44 @@ internal final class ClaudeAgentRuntime {
             return
         default: return
         }
-        onEvent(.subagents(subagents))
+        publishSubagents()
+    }
+
+    /// Claude lists every running background task after each change. An agent in the
+    /// list this runtime missed is added; a background agent no longer listed has
+    /// finished, even if its own notification never came.
+    private func reconcileBackgroundTasks(_ tasks: [[String: Any]]) {
+        var listed: Set<String> = []
+        var changed = false
+        for task in tasks.prefix(AgentSubagent.maxCount) {
+            guard let id = task["task_id"] as? String, id.utf8.count <= 1024 else { continue }
+            listed.insert(id)
+            let type = task["task_type"] as? String ?? ""
+            guard type.hasSuffix("agent") || task["subagent_type"] is String else { continue }
+            guard !subagents.contains(where: { $0.id == id }), subagents.count < AgentSubagent.maxCount else { continue }
+            subagents.append(AgentSubagent(id: id, description: agentSubagentText(task["description"]) ?? "Agent",
+                                           agentType: agentSubagentText(task["subagent_type"]), background: true,
+                                           startedAt: Date()))
+            changed = true
+        }
+        for agent in subagents where agent.background && !listed.contains(agent.id) {
+            retire(agent, status: .completed)
+            subagents.removeAll { $0.id == agent.id }
+            changed = true
+        }
+        if changed { publishSubagents() }
     }
 
     private func finishTask(_ id: String, status: AgentSubagent.Status, summary: String?) {
-        if subagents.contains(where: { $0.id == id }) {
+        if let agent = subagents.first(where: { $0.id == id }) {
             subagents.removeAll { $0.id == id }
-            onEvent(.subagents(subagents))
+            retire(agent, status: status, summary: summary)
+            publishSubagents()
+        } else if let summary, let index = finishedSubagents.firstIndex(where: { $0.id == id }),
+                  let line = agentSubagentText(summary) {
+            // `task_updated` finished it first; the notification brings its report.
+            finishedSubagents[index].activity = line
+            publishSubagents()
         }
         // A background agent's row said only that it launched; its report replaces that.
         guard let summary, !summary.isEmpty, let toolUseID = backgroundTasks.removeValue(forKey: id),
@@ -314,6 +470,7 @@ internal final class ClaudeAgentRuntime {
             if delta["type"] as? String == "input_json_delta", let index = event["index"] as? Int,
                let id = blocks[index], let fragment = delta["partial_json"] as? String {
                 partialInputs[id, default: ""] += fragment
+                showPartialInput(id)
             }
         case "content_block_stop":
             if let index = event["index"] as? Int, let id = reasoningStreamBlocks.removeValue(forKey: index) {
@@ -327,6 +484,28 @@ internal final class ClaudeAgentRuntime {
             }
         default: break
         }
+    }
+
+    private static let partialField = try? NSRegularExpression(
+        pattern: #""(command|file_path|notebook_path|path|pattern|url|query|description)"\s*:\s*"((?:[^"\\]|\\.)*)""#)
+
+    /// While Claude writes a tool's input, its path or command is sent as soon as it is
+    /// complete, so a row writing a large file says which; each field is sent once.
+    private func showPartialInput(_ id: String) {
+        let unknown = tools[id]?.tool?.input.map { $0.isEmpty || $0 == "{}" } ?? true
+        guard var item = tools[id], unknown || shownPartialFields[id] != nil,
+              let partial = partialInputs[id], partial.utf8.count <= 256 * 1024, let pattern = Self.partialField else { return }
+        var fields: [String: String] = [:]
+        for match in pattern.matches(in: partial, range: NSRange(partial.startIndex..., in: partial)) {
+            guard let key = Range(match.range(at: 1), in: partial), let value = Range(match.range(at: 2), in: partial) else { continue }
+            let raw = "\"" + partial[value] + "\""
+            fields[String(partial[key])] = (try? JSONDecoder().decode(String.self, from: Data(raw.utf8))) ?? String(partial[value])
+        }
+        guard !fields.isEmpty, fields != shownPartialFields[id] else { return }
+        shownPartialFields[id] = fields
+        item.tool = agentToolActivity(name: item.text, input: agentRuntimeJSON(fields), previous: item.tool)
+        tools[id] = item
+        onEvent(.item(item))
     }
 
     private func updateReasoning(id: String, text: String, complete: Bool, append: Bool) {
@@ -493,9 +672,11 @@ internal func agentSubagentFinish(_ status: String) -> AgentSubagent.Status? {
     }
 }
 
+/// Whether a failed tool's result says the user or a permission rule refused it. A
+/// command's own "Permission denied" (a file it couldn't open) is an ordinary failure.
 internal func agentToolDenied(_ output: String?) -> Bool {
     let output = (output ?? "").lowercased()
-    return output.contains("permission denied") || output.contains("user denied") || output.contains("user rejected")
+    return (output.contains("permission to use") && output.contains("denied")) || output.contains("user denied") || output.contains("user rejected")
         || output.contains("user declined tool execution")
         || output.contains("tool use was rejected")
 }
@@ -542,4 +723,59 @@ internal func agentClaudeWritesUpdatesAsThinking(_ model: String) -> Bool {
           let majorRange = Range(match.range(at: 1), in: model), let major = Int(model[majorRange]) else { return false }
     let minor = Range(match.range(at: 2), in: model).flatMap { Int(model[$0]) } ?? 0
     return major > 5 || (major == 5 && minor >= 1)
+}
+
+/// One agent's own steps: its tool calls and text, rebuilt by a nested runtime from
+/// the messages Claude tags with the agent's tool ID. Held in memory with its
+/// provider process, keeping the newest `maxItems` within `maxBytes`.
+final class AgentSubagentTranscript: @unchecked Sendable {
+    static let maxItems = 200
+    static let maxBytes = 256 * 1024
+    static let maxAgents = 16
+    private static let maxField = 16 * 1024
+
+    private(set) var items: [AgentChatItem] = []
+    private(set) lazy var runtime = ClaudeAgentRuntime(onEvent: { [weak self] event in self?.apply(event) })
+
+    private func apply(_ event: AgentRuntimeEvent) {
+        switch event {
+        case .item(let item), .toolItem(let item, _): upsert(item)
+        case .textDelta(let id, let text):
+            if let index = items.firstIndex(where: { $0.id == id }) {
+                items[index].text = Self.clip(items[index].text + text)
+            } else { upsert(AgentChatItem(id: id, kind: .assistant, text: text, isComplete: false)) }
+        default: return
+        }
+        bound()
+    }
+
+    /// The agent ended: nothing of its own is still running.
+    func finish() {
+        AgentSessions.finishItems(&items)
+    }
+
+    private func upsert(_ source: AgentChatItem) {
+        var item = source
+        item.text = Self.clip(item.text)
+        item.detail = item.detail.map(Self.clip)
+        if var tool = item.tool {
+            tool.input = tool.input.map(Self.clip)
+            tool.output = tool.output.map(Self.clip)
+            item.tool = tool
+        }
+        item.attachments = nil
+        if let index = items.firstIndex(where: { $0.id == item.id }) { items[index] = item }
+        else { items.append(item) }
+    }
+
+    private func bound() {
+        if items.count > Self.maxItems { items.removeFirst(items.count - Self.maxItems) }
+        var bytes = items.reduce(0) { $0 + $1.transcriptByteCount }
+        while bytes > Self.maxBytes, items.count > 1 { bytes -= items.removeFirst().transcriptByteCount }
+    }
+
+    private static func clip(_ text: String) -> String {
+        guard text.utf8.count > maxField else { return text }
+        return String(decoding: text.utf8.prefix(maxField), as: UTF8.self) + "\n[Truncated]"
+    }
 }

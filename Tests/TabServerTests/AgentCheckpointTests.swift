@@ -94,4 +94,32 @@ final class AgentCheckpointTests: XCTestCase {
         XCTAssertNil(changes.first?.deletions)
         XCTAssertThrowsError(try repo.run("rev-parse", "--verify", "HEAD"))
     }
+
+    /// Later captures start from the last capture's index, so a file an earlier turn
+    /// changed isn't hashed again, and the captures stay exact when the user's own
+    /// index moves on in between.
+    func testCapturesReuseTheirIndexAndStayExact() throws {
+        let repo = try GitTestRepo(commit: false)
+        try repo.write("kept.txt", "kept\n")
+        try repo.write("edited.txt", "one\n")
+        try repo.commit("initial")
+        let store = AgentCheckpointStore()
+        let first = try store.capture(directory: repo.path)
+        defer { try? store.remove(first) }
+        let gitDirectory = try repo.run("rev-parse", "--absolute-git-dir").trimmingCharacters(in: .whitespacesAndNewlines)
+        let cache = URL(fileURLWithPath: gitDirectory).appendingPathComponent("tab-checkpoint-index-" + AgentCheckpointStore.folderKey(repo.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: cache.path))
+        try repo.write("edited.txt", "two\n")
+        try repo.write("new.txt", "new\n")
+        let second = try store.capture(directory: repo.path)
+        defer { try? store.remove(second) }
+        // The user stages and removes files between turns; the checkpoint follows the folder.
+        try repo.run("add", "new.txt")
+        try FileManager.default.removeItem(atPath: (repo.path as NSString).appendingPathComponent("kept.txt"))
+        let third = try store.capture(directory: repo.path)
+        defer { try? store.remove(third) }
+        XCTAssertEqual(Set(try store.files(from: first, to: second).map(\.path)), ["edited.txt", "new.txt"])
+        XCTAssertEqual(try store.files(from: second, to: third).map(\.path), ["kept.txt"])
+        XCTAssertEqual(try repo.run("show", ":kept.txt"), "kept\n", "The user's index is untouched")
+    }
 }

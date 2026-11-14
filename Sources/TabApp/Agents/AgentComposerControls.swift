@@ -13,6 +13,8 @@ final class AgentComposerTextView: NSTextView {
     var onOpenCitation: ((AgentAssistantCitation) -> Void)?
     /// Copied assistant text of this conversation pastes as a quotation when this returns true.
     var onPasteContext: ((NSPasteboard) -> Bool)?
+    /// Takes a long pasted text as an attachment; false pastes it inline.
+    var onPasteLongText: ((String) -> Bool)?
     var planning = false { didSet { needsDisplay = true } }
     var placeholderColor = NSColor.secondaryLabelColor
     private var acceptingAttachmentDrop = false { didSet { needsDisplay = true } }
@@ -50,6 +52,7 @@ final class AgentComposerTextView: NSTextView {
     override func paste(_ sender: Any?) {
         if receiveAttachment(from: .general) { return }
         if onPasteContext?(.general) == true { return }
+        if let text = NSPasteboard.general.string(forType: .string), onPasteLongText?(text) == true { return }
         pasteAsPlainText(sender)
     }
 
@@ -166,7 +169,12 @@ class AgentTextPopUp: NSPopUpButton {
         setAccessibilityLabel(label)
         setAccessibilityHelp("Choose \(label.lowercased())")
         toolTip = label
-        focusRingType = .none
+        focusRingType = .exterior
+    }
+
+    override var focusRingMaskBounds: NSRect { bounds }
+    override func drawFocusRingMask() {
+        NSBezierPath(roundedRect: bounds, xRadius: min(8, bounds.height / 2), yRadius: min(8, bounds.height / 2)).fill()
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -237,10 +245,16 @@ class AgentComposerButton: NSButton {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        focusRingType = .none
+        // Keyboard focus shows the system ring around the drawn capsule or circle.
+        focusRingType = .exterior
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override var focusRingMaskBounds: NSRect { bounds }
+    override func drawFocusRingMask() {
+        NSBezierPath(roundedRect: bounds, xRadius: bounds.height / 2, yRadius: bounds.height / 2).fill()
+    }
 
     override func updateTrackingAreas() {
         if let hoverTracking { removeTrackingArea(hoverTracking) }
@@ -285,23 +299,28 @@ final class AgentRoundButton: AgentComposerButton {
 
     override var isEnabled: Bool { didSet { needsDisplay = true } }
 
+    /// Send is the one solid button; Stop and an idle Dictate are quieter, so the
+    /// primary action stands out beside them.
+    private var quiet: Bool { kind == .stop || (kind == .dictate && !active) }
+
     override func draw(_ dirtyRect: NSRect) {
         let circle = NSBezierPath(ovalIn: bounds)
         let solid = chatTheme.agentComposer.withAlphaComponent(1)
-        let fill = !isEnabled ? chatTheme.fg.withAlphaComponent(0.10) : active ? chatTheme.accent : chatTheme.fg
+        let fill = !isEnabled ? chatTheme.fg.withAlphaComponent(0.10) : active ? chatTheme.accent
+            : quiet ? chatTheme.fg.withAlphaComponent(0.10) : chatTheme.fg
         fill.setFill()
         circle.fill()
         if isEnabled && (hovered || isHighlighted) {
-            solid.withAlphaComponent(isHighlighted ? 0.24 : 0.12).setFill()
+            (quiet ? chatTheme.fg : solid).withAlphaComponent(isHighlighted ? 0.14 : 0.07).setFill()
             circle.fill()
         }
-        let ink = !isEnabled ? chatTheme.fgDim : active ? chatTheme.accentForeground : solid
+        let ink = !isEnabled ? chatTheme.fgDim : active ? chatTheme.accentForeground : quiet ? chatTheme.fg : solid
         let icon: AppIcon
         let size: CGFloat
         switch kind {
         case .send: icon = .arrowUp; size = 16
         case .stop: icon = .stop; size = 11
-        case .dictate: icon = .waveform; size = 17
+        case .dictate: icon = .microphone; size = 16
         }
         icon.image(size: size, color: ink)?.draw(
             in: NSRect(x: floor(bounds.midX - size / 2), y: floor(bounds.midY - size / 2), width: size, height: size),
@@ -520,6 +539,14 @@ final class AgentIconButton: AgentComposerButton {
 final class AgentPlanButton: AgentComposerButton {
     var onPress: (() -> Void)?
     var chatTheme: AppTheme = .shared { didSet { needsDisplay = true } }
+    /// Plan mode is on: the accent chip with a close mark. Off, a quiet chip turns it on.
+    var active = true {
+        didSet {
+            guard oldValue != active else { return }
+            invalidateIntrinsicContentSize()
+            needsDisplay = true
+        }
+    }
     override init(frame: NSRect) {
         super.init(frame: frame)
         title = "Plan"
@@ -533,19 +560,23 @@ final class AgentPlanButton: AgentComposerButton {
 
     override var intrinsicContentSize: NSSize {
         let text = ("Plan" as NSString).size(withAttributes: [.font: AppFont.small]).width
-        return NSSize(width: ceil(10 + 14 + 5 + text + 8 + 8 + 9), height: 28)
+        return NSSize(width: ceil(10 + 14 + 5 + text + (active ? 8 + 8 + 9 : 10)), height: 28)
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        let color = chatTheme.accent
-        color.withAlphaComponent(hovered ? 0.20 : 0.13).setFill()
-        NSBezierPath(roundedRect: bounds, xRadius: bounds.height / 2, yRadius: bounds.height / 2).fill()
+        let color = active ? chatTheme.accent : chatTheme.fgDim
+        let fill: CGFloat = active ? (hovered ? 0.20 : 0.13) : (hovered ? 0.08 : 0)
+        if fill > 0 {
+            color.withAlphaComponent(fill).setFill()
+            NSBezierPath(roundedRect: bounds, xRadius: bounds.height / 2, yRadius: bounds.height / 2).fill()
+        }
         let middle = bounds.midY
         AppIcon.listTodo.image(size: 14, color: color)?.draw(in: NSRect(x: 10, y: middle - 7, width: 14, height: 14),
             from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
         let attributes: [NSAttributedString.Key: Any] = [.font: AppFont.small, .foregroundColor: color]
         let textHeight = ("Plan" as NSString).size(withAttributes: attributes).height
         ("Plan" as NSString).draw(at: NSPoint(x: 29, y: floor(middle - textHeight / 2)), withAttributes: attributes)
+        guard active else { return }
         AppIcon.close.image(size: 8, color: color)?.draw(in: NSRect(x: bounds.width - 17, y: middle - 4, width: 8, height: 8),
             from: .zero, operation: .sourceOver, fraction: hovered ? 1 : 0.65, respectFlipped: true, hints: nil)
     }

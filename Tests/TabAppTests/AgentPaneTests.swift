@@ -83,7 +83,7 @@ final class AgentPaneTests: XCTestCase {
                     await withCheckedContinuation { readGate = $0 }
                     return beforeReconnect
                 }
-            case .approve(_, let id, _):
+            case .approve(_, let id, _, _, _):
                 if gateNextApproval {
                     gateNextApproval = false
                     await withCheckedContinuation { approvalGate = $0 }
@@ -235,6 +235,346 @@ final class AgentPaneTests: XCTestCase {
         XCTAssertFalse(backend.requests.contains { if case .send = $0 { return true }; return false })
     }
 
+    /// A hint raised while the agent streams used to vanish with the next snapshot, about
+    /// 100 ms later; it now stays until dismissed and never offers Refresh.
+    func testComposerNoticeSurvivesStreamingSnapshotsAndIsDismissible() async throws {
+        let backend = Backend()
+        backend.snapshot.status = .working
+        let pane = backend.controller()
+        defer { pane.dispose() }
+        pane.refresh()
+        try await wait { pane.snapshot != nil }
+        pane.togglePlanMode()
+        let hint = "Stop the current response before changing plan mode."
+        XCTAssertEqual(pane.notice?.text, hint)
+        backend.snapshot.items.append(.init(kind: .assistant, text: "Streaming…", isComplete: false))
+        backend.snapshot.revision += 1
+        pane.refresh()
+        try await wait { pane.snapshot?.revision == backend.snapshot.revision }
+        XCTAssertEqual(pane.surface.feedback.stringValue, hint)
+        XCTAssertTrue(pane.surface.retry.isHidden, "Refresh can't fix a validation hint")
+        XCTAssertFalse(pane.surface.dismissNotice.isHidden)
+        pane.surface.dismissNotice.perform()
+        XCTAssertNil(pane.notice)
+        XCTAssertNotEqual(pane.surface.feedback.stringValue, hint)
+        XCTAssertTrue(pane.surface.dismissNotice.isHidden)
+    }
+
+    /// Escape stops the agent the way the Stop button does, and only when nothing else wants the key.
+    func testEscapeStopsOnlyWhileWorkingAndNothingElseClaimsTheKey() async throws {
+        _ = NSApplication.shared
+        XCTAssertEqual(Keymap().action(for: try KeyChord("escape")), .stopAgent)
+        let backend = Backend()
+        backend.snapshot.status = .working
+        backend.snapshot.revision = 2
+        let pane = backend.controller()
+        defer { pane.dispose() }
+        pane.keyDisplay = { $0 == .stopAgent ? "⎋" : nil }
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 700, height: 600), styleMask: .borderless, backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        let outside = NSTextField(frame: NSRect(x: 0, y: 0, width: 10, height: 10))
+        let root = NSView(frame: window.contentLayoutRect)
+        pane.surface.frame = root.bounds
+        root.addSubview(pane.surface)
+        root.addSubview(outside)
+        window.contentView = root
+        defer { window.close() }
+        pane.refresh()
+        try await wait { pane.snapshot?.status == .working && pane.surface.stop.isEnabled }
+        XCTAssertEqual(pane.surface.stop.toolTip, "Stop this turn (⎋)", "The tooltip names the key from the keymap")
+        func interrupts() -> Int { backend.requests.filter { $0 == .interrupt(session: backend.session) }.count }
+
+        window.makeFirstResponder(outside)
+        XCTAssertFalse(pane.performConversationShortcut(.stopAgent), "Focus outside the pane")
+        window.makeFirstResponder(pane.surface.composer)
+        pane.surface.suggestions.isHidden = false
+        XCTAssertFalse(pane.performConversationShortcut(.stopAgent), "The suggestion list closes first")
+        pane.surface.suggestions.isHidden = true
+        pane.surface.selectionToolbar.isHidden = false
+        XCTAssertFalse(pane.performConversationShortcut(.stopAgent), "The selection toolbar hides first")
+        pane.surface.selectionToolbar.isHidden = true
+        pane.surface.composer.setMarkedText("か", selectedRange: NSRange(location: 1, length: 0),
+                                            replacementRange: NSRange(location: NSNotFound, length: 0))
+        XCTAssertFalse(pane.performConversationShortcut(.stopAgent), "An input method's text is cancelled first")
+        pane.surface.composer.unmarkText()
+        XCTAssertTrue(pane.surface.performFind(.open))
+        window.makeFirstResponder(pane.surface.composer)
+        XCTAssertFalse(pane.performConversationShortcut(.stopAgent), "Find closes first")
+        XCTAssertTrue(pane.surface.performFind(.close))
+        XCTAssertEqual(interrupts(), 0)
+
+        window.makeFirstResponder(pane.surface.composer)
+        XCTAssertTrue(pane.performConversationShortcut(.stopAgent))
+        try await wait { interrupts() == 1 }
+        try await wait { pane.snapshot?.status == .idle }
+        XCTAssertFalse(pane.performConversationShortcut(.stopAgent), "Nothing to stop: the key goes on")
+        XCTAssertEqual(interrupts(), 1)
+    }
+
+    func testRetrySendsTheFailedTurnsPromptAgainAsANewPromptWithItsAttachments() async throws {
+        let backend = Backend()
+        let file = AgentChatAttachmentDescriptor(id: "a1", name: "notes.txt", mimeType: "text/plain", byteCount: 5)
+        backend.snapshot.items = [.init(id: "u1", kind: .user, text: "Build it", attachments: [file]),
+                                  .init(kind: .notice, text: "Model overloaded")]
+        backend.snapshot.turns = [AgentChatTurn(userItemID: "u1", startedAt: Date(timeIntervalSinceNow: -5), completedAt: Date(),
+                                                status: .failed, outcome: .failed)]
+        backend.snapshot.status = .failed
+        backend.snapshot.revision = 3
+        let pane = backend.controller()
+        defer { pane.dispose() }
+        var fetches = 0
+        pane.surface.fetchAttachment = { item, descriptor in
+            fetches += 1
+            XCTAssertEqual(item, "u1"); XCTAssertEqual(descriptor, file)
+            return Data("hello".utf8)
+        }
+        pane.refresh()
+        try await wait { pane.snapshot != nil && !pane.surface.retryTurn.isHidden }
+        XCTAssertTrue(pane.surface.feedback.stringValue.hasPrefix("Turn failed"))
+        XCTAssertTrue(pane.surface.retryTurn.isEnabled)
+        pane.surface.retryTurn.perform()
+        try await wait { backend.submissions.count == 1 }
+        let prompt = try XCTUnwrap(backend.submissions.first)
+        XCTAssertEqual(prompt.text, "Build it")
+        XCTAssertNotEqual(prompt.id, "u1", "A retry is a new submission")
+        XCTAssertEqual(prompt.attachments.map(\.data), [Data("hello".utf8)])
+        XCTAssertEqual(prompt.attachments.map(\.name), ["notes.txt"])
+        XCTAssertEqual(fetches, 1)
+    }
+
+    func testRetryIsDisabledWithAReasonWhenAttachmentsAreGone() async throws {
+        let backend = Backend()
+        backend.snapshot.items = [.init(id: "u1", kind: .user, text: "Look", attachments: [
+            AgentChatAttachmentDescriptor(id: "a1", name: "shot.png", mimeType: "image/png", byteCount: 5)])]
+        backend.snapshot.turns = [AgentChatTurn(userItemID: "u1", startedAt: Date(timeIntervalSinceNow: -5), completedAt: Date(),
+                                                status: .idle, outcome: .interrupted)]
+        backend.snapshot.revision = 3
+        let pane = backend.controller()
+        defer { pane.dispose() }
+        pane.surface.fetchAttachment = { _, _ in throw ModelError("expired") }
+        pane.refresh()
+        try await wait { !pane.surface.retryTurn.isHidden }
+        XCTAssertEqual(pane.surface.feedback.stringValue, "Stopped", "A stopped turn can be retried too")
+        pane.surface.retryTurn.perform()
+        try await wait { pane.surface.retryTurn.toolTip?.hasPrefix("Can't retry") == true }
+        XCTAssertFalse(pane.surface.retryTurn.isEnabled)
+        XCTAssertTrue(backend.submissions.isEmpty)
+    }
+
+    func testEditAsNewPromptAddsToTheDraftWithoutSending() async throws {
+        let backend = Backend()
+        backend.snapshot.items = [.init(id: "u1", kind: .user, text: "Rename the type"), .init(kind: .assistant, text: "Done")]
+        backend.snapshot.revision = 2
+        let pane = backend.controller()
+        defer { pane.dispose() }
+        pane.refresh()
+        try await wait { pane.snapshot != nil }
+        let message = try XCTUnwrap(pane.snapshot?.items.first)
+        pane.editAsNewPrompt(message)
+        XCTAssertEqual(pane.surface.composer.string, "Rename the type")
+        pane.surface.composer.string = "Keep this"
+        pane.editAsNewPrompt(message)
+        XCTAssertEqual(pane.surface.composer.string, "Keep this\n\nRename the type", "A draft is added to, never replaced")
+        XCTAssertTrue(backend.submissions.isEmpty)
+        XCTAssertFalse(backend.requests.contains { if case .send = $0 { return true }; return false })
+    }
+
+    func testUpdatesReadOnlyWhatChangedAndFallBackToFullReads() async throws {
+        let backend = Backend()
+        backend.snapshot.items = [.init(id: "u", kind: .user, text: "Go"), .init(id: "a", kind: .assistant, text: "Wor", isComplete: false)]
+        backend.snapshot.status = .working
+        backend.snapshot.revision = 3
+        let pane = backend.controller()
+        defer { pane.dispose() }
+        var sinceReads: [UInt64] = []
+        pane.conversationRequest = { request in
+            guard case .readSince(_, let revision) = request else { throw ModelError("unexpected") }
+            sinceReads.append(revision)
+            var changed = backend.snapshot
+            changed.items = changed.items.filter { $0.id == "a" }
+            return .delta(AgentChatDelta(snapshot: changed, since: revision, itemIDs: backend.snapshot.items.map(\.id)))
+        }
+        pane.refresh()
+        try await wait { pane.snapshot?.revision == 3 }
+        func fullReads() -> Int { backend.requests.filter { $0 == .read(session: backend.session) }.count }
+        let readsBefore = fullReads()
+        backend.snapshot.items[1].text = "Working"
+        backend.snapshot.revision = 4
+        pane.sessionChanged(session: backend.session, revision: 4)
+        try await wait { pane.snapshot?.items.last?.text == "Working" }
+        XCTAssertEqual(sinceReads, [3])
+        XCTAssertEqual(fullReads(), readsBefore, "A streamed update reads only what changed")
+
+        // A reply that doesn't fit what the pane holds falls back to a full read.
+        pane.conversationRequest = { _ in .delta(AgentChatDelta(snapshot: backend.snapshot, since: 1, itemIDs: ["missing"])) }
+        backend.snapshot.revision = 5
+        pane.sessionChanged(session: backend.session, revision: 5)
+        try await wait { pane.snapshot?.revision == 5 }
+        XCTAssertEqual(fullReads(), readsBefore + 1)
+
+        // An older server says it can't; the pane remembers that for the connection.
+        var asked = 0
+        pane.conversationRequest = { _ in asked += 1; throw ClientError.server(ErrorReply(code: .unsupported, message: "")) }
+        for revision in [6, 7] as [UInt64] {
+            backend.snapshot.revision = revision
+            pane.sessionChanged(session: backend.session, revision: revision)
+            try await wait { pane.snapshot?.revision == revision }
+        }
+        XCTAssertEqual(asked, 1)
+        XCTAssertEqual(fullReads(), readsBefore + 3)
+
+        // A reconnect always starts again from a full read.
+        pane.connectionChanged()
+        try await wait { fullReads() == readsBefore + 4 }
+        XCTAssertEqual(asked, 1)
+    }
+
+    func testContextPopoverCompactsThroughTheProviderCommandWhenItHasOne() async throws {
+        let backend = Backend()
+        backend.snapshot.revision = 2
+        let pane = backend.controller()
+        defer { pane.dispose() }
+        pane.refresh()
+        try await wait { pane.snapshot != nil }
+        XCTAssertNil(pane.surface.contextIndicator.onCompact, "No compact command reported")
+        backend.snapshot.commands = ["compact"]
+        backend.snapshot.revision += 1
+        pane.refresh()
+        try await wait { pane.surface.contextIndicator.onCompact != nil }
+        pane.surface.composer.string = "My draft"
+        pane.surface.contextIndicator.onCompact?()
+        try await wait { backend.submissions.count == 1 }
+        XCTAssertEqual(backend.submissions.first?.text, "/compact")
+        XCTAssertEqual(pane.surface.composer.string, "My draft", "The draft is left alone")
+    }
+
+    func testUpRecallsEarlierPromptsAndDownWalksBack() async throws {
+        let backend = Backend()
+        backend.snapshot.items = [.init(id: "1", kind: .user, text: "First"), .init(kind: .assistant, text: "A"),
+                                  .init(id: "2", kind: .user, text: "Second"), .init(kind: .assistant, text: "B")]
+        backend.snapshot.revision = 2
+        let pane = backend.controller()
+        defer { pane.dispose() }
+        pane.refresh()
+        try await wait { pane.snapshot != nil }
+        let composer = pane.surface.composer
+        let up = #selector(NSResponder.moveUp(_:)), down = #selector(NSResponder.moveDown(_:))
+        XCTAssertTrue(pane.textView(composer, doCommandBy: up))
+        XCTAssertEqual(composer.string, "Second")
+        XCTAssertTrue(pane.textView(composer, doCommandBy: up))
+        XCTAssertEqual(composer.string, "First")
+        XCTAssertTrue(pane.textView(composer, doCommandBy: up), "The oldest stays")
+        XCTAssertEqual(composer.string, "First")
+        XCTAssertTrue(pane.textView(composer, doCommandBy: down))
+        XCTAssertEqual(composer.string, "Second")
+        XCTAssertTrue(pane.textView(composer, doCommandBy: down))
+        XCTAssertEqual(composer.string, "", "Past the newest clears the composer")
+        composer.string = "Typed"
+        XCTAssertFalse(pane.textView(composer, doCommandBy: up), "A draft keeps Up for moving the caret")
+        composer.string = ""
+        XCTAssertTrue(pane.textView(composer, doCommandBy: up))
+        composer.string = "Second, edited"
+        XCTAssertFalse(pane.textView(composer, doCommandBy: up), "Editing ends the walk")
+        composer.string = ""
+        composer.setMarkedText("か", selectedRange: NSRange(location: 1, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+        XCTAssertFalse(pane.textView(composer, doCommandBy: up), "Not while an input method composes")
+    }
+
+    func testPlanChipShowsWhenOffAndSlashPlanTogglesIt() async throws {
+        let backend = Backend()
+        backend.snapshot.revision = 2
+        let pane = backend.controller()
+        defer { pane.dispose() }
+        pane.refresh()
+        try await wait { pane.snapshot != nil }
+        XCTAssertFalse(pane.surface.plan.isHidden, "The plan switch is visible while off")
+        XCTAssertFalse(pane.surface.plan.active)
+        pane.surface.composer.string = "/plan"
+        pane.send()
+        try await wait { pane.snapshot?.planMode == true }
+        XCTAssertTrue(pane.surface.plan.active)
+        XCTAssertEqual(pane.surface.plan.accessibilityLabel(), "Disable plan mode")
+    }
+
+    func testAModelChosenWhileWorkingGoesWithTheNextPrompt() async throws {
+        let backend = Backend()
+        backend.snapshot.status = .working
+        backend.snapshot.revision = 2
+        let pane = backend.controller()
+        defer { pane.dispose() }
+        pane.refresh()
+        try await wait { pane.snapshot != nil && pane.surface.model.isEnabled }
+        pane.selectModel(provider: .claude, model: "claude-opus-5-5")
+        XCTAssertEqual(pane.selection.model, "claude-opus-5-5")
+        pane.surface.composer.string = "Next, with Opus"
+        pane.send()
+        try await wait { backend.submissions.count == 1 }
+        XCTAssertEqual(backend.submissions.first?.model, "claude-opus-5-5")
+    }
+
+    func testApprovalShortcutsAnswerTheOldestPendingApproval() async throws {
+        let backend = Backend()
+        backend.snapshot.status = .waiting
+        backend.snapshot.items = [.init(id: "first", kind: .approval, text: "Run", isComplete: false),
+                                  .init(id: "second", kind: .approval, text: "Write", isComplete: false)]
+        let pane = backend.controller()
+        defer { pane.dispose() }
+        var answered: [(String, Bool)] = []
+        pane.surface.onApproval = { answered.append(($0, $1)) }
+        XCTAssertFalse(pane.performConversationShortcut(.allowAgentApproval), "Nothing is known yet")
+        pane.refresh()
+        try await wait { pane.snapshot?.items.count == 2 }
+        XCTAssertTrue(pane.performConversationShortcut(.denyAgentApproval))
+        XCTAssertEqual(answered.first?.0, "first")
+        XCTAssertEqual(answered.first?.1, false)
+    }
+
+    func testRequestErrorOffersRefreshAndClearsOnTheNextAcceptedSnapshot() async throws {
+        let backend = Backend()
+        let pane = backend.controller()
+        defer { pane.dispose() }
+        pane.refresh()
+        try await wait { pane.snapshot != nil }
+        backend.failSend = true
+        pane.surface.composer.string = "Hello"
+        pane.send()
+        try await wait { pane.errorMessage != nil }
+        XCTAssertFalse(pane.surface.retry.isHidden)
+        XCTAssertTrue(pane.surface.dismissNotice.isHidden)
+        backend.snapshot.revision += 1
+        pane.refresh()
+        try await wait { pane.errorMessage == nil }
+        XCTAssertTrue(pane.surface.retry.isHidden)
+        XCTAssertEqual(pane.surface.composer.string, "Hello", "The failed draft is retained")
+    }
+
+    func testStatusIsAnInformationalNoticeThatExpires() async throws {
+        let backend = Backend()
+        let pane = backend.controller()
+        defer { pane.dispose() }
+        pane.infoNoticeLifetime = .milliseconds(60)
+        pane.refresh()
+        try await wait { pane.snapshot != nil }
+        pane.surface.composer.string = "/status"
+        pane.send()
+        XCTAssertEqual(pane.notice?.kind, .info)
+        XCTAssertNil(pane.errorMessage, "/status is not an error")
+        XCTAssertTrue(pane.surface.retry.isHidden)
+        XCTAssertTrue(pane.surface.feedback.stringValue.hasPrefix("Claude Code"))
+        try await wait { pane.notice == nil }
+        XCTAssertFalse(pane.surface.feedback.stringValue.hasPrefix("Claude Code"))
+        // A warning that replaced an expiring notice is not taken down by the old timer.
+        pane.surface.composer.string = "/status"
+        pane.send()
+        backend.snapshot.status = .working
+        backend.snapshot.revision += 1
+        pane.refresh()
+        try await wait { pane.snapshot?.status == .working }
+        pane.togglePlanMode()
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertEqual(pane.notice?.kind, .warning)
+    }
+
     func testProviderContextAndResolvedModelReachCompactControlsWithoutChangingSettings() async throws {
         let backend = Backend()
         backend.snapshot.resolvedModel = "claude-sonnet-5-5"
@@ -345,7 +685,7 @@ final class AgentPaneTests: XCTestCase {
         try await wait { pane.snapshot?.status == .working }
         XCTAssertEqual(backend.snapshot.model, "custom-model")
         XCTAssertEqual(pane.surface.composer.string, "A new draft typed while sending")
-        XCTAssertFalse(pane.surface.model.isEnabled)
+        XCTAssertTrue(pane.surface.model.isEnabled, "The model can change for the next prompt while the agent works")
     }
 
     func testStopDuringSubmissionWaitsForAcceptedSend() async throws {
@@ -502,9 +842,9 @@ final class AgentPaneTests: XCTestCase {
         XCTAssertEqual(pane.title, "Review the code")
         XCTAssertTrue(pane.surface.send.isHidden, "Stop takes the shared slot while the draft is empty")
         XCTAssertFalse(pane.surface.stop.isHidden)
-        XCTAssertFalse(pane.surface.effort.isEnabled)
+        XCTAssertTrue(pane.surface.effort.isEnabled, "Effort can change for the next prompt while the agent works")
         pane.selectModel(provider: .claude, model: nil)
-        XCTAssertEqual(pane.selection.provider, .codex)
+        XCTAssertEqual(pane.selection.provider, .codex, "The provider can't change while a turn runs")
     }
 
     func testResumedConversationRestoresOptionsAndLocksOnlyOtherProviders() async throws {
@@ -972,5 +1312,127 @@ final class AgentPaneTests: XCTestCase {
                     .write(to: URL(fileURLWithPath: output).appendingPathComponent(name))
             }
         }
+    }
+
+    func testConversationCopiesAsMarkdownWithEachSpeakerAndToolLines() {
+        var snapshot = AgentChatSnapshot(session: SessionId(), project: ProjectId(), provider: .claude)
+        let tool = AgentToolActivity(name: "Bash", input: "swift test", status: .completed)
+        snapshot.items = [
+            AgentChatItem(kind: .user, text: "Run the tests"),
+            AgentChatItem(kind: .tool, text: "Bash", tool: tool),
+            AgentChatItem(kind: .assistant, text: "All **green**."),
+        ]
+        let markdown = AgentPaneController.markdown(snapshot)
+        XCTAssertTrue(markdown.hasPrefix("**You**\n\nRun the tests\n\n> Bash"), markdown)
+        XCTAssertTrue(markdown.hasSuffix("**Claude Code**\n\nAll **green**.\n"), markdown)
+    }
+
+    func testClosedConversationOffersNewConversation() async throws {
+        let backend = Backend()
+        backend.snapshot.status = .closed
+        let pane = backend.controller()
+        defer { pane.dispose() }
+        var opened = 0
+        pane.onNewConversation = { opened += 1 }
+        pane.refresh()
+        try await wait { pane.snapshot != nil }
+        XCTAssertFalse(pane.surface.newConversation.isHidden)
+        pane.surface.newConversation.onPress?()
+        XCTAssertEqual(opened, 1)
+    }
+
+    func testApprovalCanAllowAToolForTheConversationOrDenyWithAReason() async throws {
+        let backend = Backend()
+        backend.snapshot.status = .waiting
+        backend.snapshot.items = [AgentChatItem(id: "first", kind: .approval, text: "Bash", isComplete: false),
+                                  AgentChatItem(id: "second", kind: .approval, text: "Write", isComplete: false)]
+        let pane = backend.controller()
+        defer { pane.dispose() }
+        pane.refresh()
+        try await wait { pane.snapshot != nil }
+        XCTAssertTrue(pane.surface.revealPendingRequest(), "The waiting capsule shows the first pending request")
+        pane.choose(.allowAlways, approval: "first")
+        try await wait { backend.requests.contains(.approve(session: backend.session, request: "first", allow: true, always: true)) }
+        try await wait { pane.snapshot?.items.first?.isComplete == true }
+        pane.askDenialReason = { tool in tool == "Write" ? "  Use the existing file  " : nil }
+        pane.choose(.denyWithReason, approval: "second")
+        try await wait {
+            backend.requests.contains(.approve(session: backend.session, request: "second", allow: false, reason: "Use the existing file"))
+        }
+    }
+
+    func testDictationShowsWordsAsTheyAreRecognized() {
+        let backend = Backend()
+        let pane = backend.controller()
+        defer { pane.dispose() }
+        pane.surface.composer.string = "Hello"
+        pane.placeDictation("this is", final: false)
+        XCTAssertEqual(pane.surface.composer.string, "Hello this is")
+        pane.placeDictation("this is a test", final: false)
+        XCTAssertEqual(pane.surface.composer.string, "Hello this is a test")
+        pane.placeDictation("This is a test.", final: true)
+        XCTAssertEqual(pane.surface.composer.string, "Hello This is a test.")
+        pane.placeDictation("Again", final: true)
+        XCTAssertEqual(pane.surface.composer.string, "Hello This is a test. Again", "A new dictation adds after the last one")
+    }
+
+    func testProjectFilesAreNamedAndOthersAttached() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("tab-e5-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("Sources"), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appendingPathComponent("Sources/App.swift"), image = root.appendingPathComponent("shot.png")
+        let spaced = root.appendingPathComponent("Read Me.md")
+        for file in [source, image, spaced] { try Data("x".utf8).write(to: file) }
+        let outside = FileManager.default.temporaryDirectory.appendingPathComponent("elsewhere.txt")
+        let split = AgentPaneController.splitProjectFiles([source, image, spaced, outside], root: root.path)
+        XCTAssertEqual(split.mentions, ["Sources/App.swift", "Read Me.md"])
+        XCTAssertEqual(split.attachments, [image, outside], "Images are attached so the model sees them")
+        XCTAssertEqual(AgentPaneController.splitProjectFiles([source], root: nil).attachments, [source], "A remote project attaches")
+
+        let backend = Backend()
+        let pane = backend.controller()
+        defer { pane.dispose() }
+        pane.localProjectRoot = root.path
+        pane.attachFiles([source, spaced])
+        XCTAssertEqual(pane.surface.composer.string, "@Sources/App.swift @\"Read Me.md\" ")
+    }
+
+    func testLongPasteBecomesATextAttachment() {
+        let backend = Backend()
+        let pane = backend.controller()
+        defer { pane.dispose() }
+        XCTAssertFalse(pane.attachLongPaste("A short paste"))
+        let long = (1...250).map { "line \($0)" }.joined(separator: "\n")
+        XCTAssertTrue(pane.attachLongPaste(long))
+        XCTAssertTrue(pane.surface.composer.string.isEmpty)
+    }
+
+    func testEmptyMentionListsTopLevelFilesFirst() {
+        let paths = ["b/deep/x.swift", "README.md", "a/one.swift", "Package.swift", "a/b/c.swift"]
+        XCTAssertEqual(AgentComposerCoordinator.shallowest(paths, limit: 3), ["Package.swift", "README.md", "a/one.swift"])
+    }
+
+    func testEarlierItemsLoadAboveTheRetainedOnes() async throws {
+        let backend = Backend()
+        backend.snapshot.items = [AgentChatItem(id: "now", kind: .user, text: "Latest")]
+        backend.snapshot.omittedItems = 3
+        let pane = backend.controller()
+        defer { pane.dispose() }
+        var asked: [AgentConversationRequest] = []
+        pane.conversationRequest = { request in
+            asked.append(request)
+            return .earlier(AgentEarlierItems(items: (1...3).map { AgentChatItem(id: "old-\($0)", kind: .user, text: "Old \($0)") },
+                                              start: 0, total: 3))
+        }
+        XCTAssertNotNil(pane.surface.onLoadEarlier)
+        pane.refresh()
+        try await wait { pane.snapshot != nil }
+        pane.loadEarlier()
+        try await wait { pane.earlierItems.count == 3 }
+        XCTAssertEqual(asked, [.earlier(session: backend.session, before: nil, limit: AgentEarlierItems.maxItems)])
+        XCTAssertEqual(pane.surface.snapshot?.items.map(\.id), ["old-1", "old-2", "old-3", "now"])
+        XCTAssertEqual(pane.surface.snapshot?.omittedItems, 0)
+        XCTAssertNil(pane.surface.onLoadEarlier, "The start is reached, so nothing more loads")
+        XCTAssertEqual(pane.snapshot?.items.count, 1, "The conversation itself is unchanged")
     }
 }

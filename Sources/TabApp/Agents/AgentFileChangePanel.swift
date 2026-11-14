@@ -13,6 +13,10 @@ final class AgentFileChangePanel: NSView, @preconcurrency NSLayoutManagerDelegat
     private let button = AgentDiffButton(frame: .zero)
     private let error = AgentRichTextView(frame: .zero)
     private let errorScroll = NSScrollView(frame: .zero)
+    /// The edit's own diff, in place, so reviewing edits needs no window per tool.
+    private let preview = AgentRichTextView(frame: .zero)
+    private let previewScroll = AgentPassThroughScrollView(frame: .zero)
+    static let previewHeight: CGFloat = 320
     private var operations: [AgentRichTextView] = []
     var compactControls = true
     var outputScrollPosition: NSPoint { restoredScrollPosition ?? errorScroll.contentView.bounds.origin }
@@ -28,6 +32,14 @@ final class AgentFileChangePanel: NSView, @preconcurrency NSLayoutManagerDelegat
         errorScroll.hasVerticalScroller = true
         errorScroll.autohidesScrollers = true
         errorScroll.documentView = error
+        previewScroll.drawsBackground = false
+        previewScroll.borderType = .noBorder
+        previewScroll.hasVerticalScroller = true
+        previewScroll.autohidesScrollers = true
+        previewScroll.documentView = preview
+        previewScroll.isHidden = true
+        preview.setAccessibilityLabel("Diff")
+        addSubview(previewScroll)
         button.onPress = { [weak self] in self?.onOpenDiff?() }
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -94,6 +106,9 @@ final class AgentFileChangePanel: NSView, @preconcurrency NSLayoutManagerDelegat
         let failed = activity.status == .failed && details.diff?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
         errorScroll.isHidden = !failed
         error.setContent(AgentCommandPresentation.text(failed ? details.diff ?? "" : "", color: theme.fgMuted))
+        let diffs = failed ? [] : Self.diffs(activity)
+        previewScroll.isHidden = diffs.isEmpty
+        preview.setContent(diffs.isEmpty ? NSAttributedString() : AgentToolText.diffText(diffs.joined(separator: "\n"), theme: theme))
         let changes = details.operations ?? []
         while operations.count > changes.count {
             operations.removeLast().removeFromSuperview()
@@ -117,6 +132,17 @@ final class AgentFileChangePanel: NSView, @preconcurrency NSLayoutManagerDelegat
         for view in [path, counts, error] + operations { view.selectedTextAttributes = [.backgroundColor: theme.accent.withAlphaComponent(0.22)] }
         needsLayout = true
     }
+
+    /// The diffs an edit carries: its details' patch, else each change's.
+    static func diffs(_ activity: AgentToolActivity) -> [String] {
+        if let diff = activity.fileChangeDetails?.diff, !diff.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return [diff] }
+        return (activity.fileChanges ?? []).compactMap { change in
+            guard let diff = change.diff, !diff.isEmpty else { return nil }
+            return (activity.fileChanges?.count ?? 0) > 1 ? change.path + "\n" + diff : diff
+        }
+    }
+
+    var showsDiff: Bool { !previewScroll.isHidden }
 
     @discardableResult
     func arrange(width: CGFloat, apply: Bool) -> CGFloat {
@@ -145,6 +171,15 @@ final class AgentFileChangePanel: NSView, @preconcurrency NSLayoutManagerDelegat
             lineHeight = max(lineHeight, size.height); x += size.width + 8
         }
         finishLine(); y += lineHeight
+        if !previewScroll.isHidden {
+            y += 8
+            let height = preview.height(for: width)
+            if apply {
+                previewScroll.frame = NSRect(x: 0, y: y, width: width, height: min(Self.previewHeight, height))
+                preview.frame = NSRect(x: 0, y: 0, width: width, height: height)
+            }
+            y += min(Self.previewHeight, height)
+        }
         if !errorScroll.isHidden {
             y += 8
             let height = error.height(for: width)

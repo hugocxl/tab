@@ -130,6 +130,12 @@ enum AgentResponseParser {
                 i += math.count
                 continue
             }
+            if parseRawHTML, paragraph.isEmpty, trimmed.lowercased().hasPrefix("<table"), let table = htmlTable(lines, from: i) {
+                flush()
+                result.append(.table(table.headers, table.rows, Array(repeating: .left, count: table.headers.count)))
+                i = table.end
+                continue
+            }
             if i + 1 < lines.count, line.contains("|"), !startsTableBoundary(line), let alignments = tableSeparator(lines[i + 1]) {
                 let headers = cells(line)
                 if headers.count == alignments.count {
@@ -438,6 +444,36 @@ enum AgentResponseParser {
             if part.hasPrefix(":"), part.hasSuffix(":") { return .center }
             return part.hasSuffix(":") ? .right : .left
         }
+    }
+
+    private static let htmlRow = try? NSRegularExpression(pattern: "<tr\\b[^>]*>(.*?)</tr\\s*>", options: [.caseInsensitive, .dotMatchesLineSeparators])
+    private static let htmlCell = try? NSRegularExpression(pattern: "<t([hd])\\b[^>]*>(.*?)</t[hd]\\s*>", options: [.caseInsensitive, .dotMatchesLineSeparators])
+
+    /// A whole `<table>` an assistant wrote as HTML, as a table's header and rows; nil until
+    /// its closing tag arrives or when it has no rows. `end` is the line after it.
+    static func htmlTable(_ lines: [String], from start: Int) -> (headers: [String], rows: [[String]], end: Int)? {
+        var end = start
+        while end < lines.count, end - start < 2000 {
+            defer { end += 1 }
+            guard lines[end].range(of: "</table", options: .caseInsensitive) != nil else { continue }
+            let html = lines[start...end].joined(separator: "\n") as NSString
+            guard let rowPattern = htmlRow, let cellPattern = htmlCell else { return nil }
+            var headerRow: [String]?
+            var rows: [[String]] = []
+            for row in rowPattern.matches(in: html as String, range: NSRange(location: 0, length: html.length)) {
+                let body = html.substring(with: row.range(at: 1)) as NSString
+                let cells = cellPattern.matches(in: body as String, range: NSRange(location: 0, length: body.length))
+                let texts = cells.map { body.substring(with: $0.range(at: 2)).split(whereSeparator: \.isWhitespace).joined(separator: " ") }
+                let isHeader = !cells.isEmpty && cells.allSatisfy { body.substring(with: $0.range(at: 1)).lowercased() == "h" }
+                if headerRow == nil, rows.isEmpty, isHeader { headerRow = texts } else if !texts.isEmpty { rows.append(texts) }
+            }
+            let headers = headerRow ?? (rows.isEmpty ? [] : rows.removeFirst())
+            guard !headers.isEmpty else { return nil }
+            let width = max(headers.count, rows.map(\.count).max() ?? 0)
+            func padded(_ row: [String]) -> [String] { row + Array(repeating: "", count: width - row.count) }
+            return (padded(headers), rows.map(padded), end + 1)
+        }
+        return nil
     }
 
     private static func roman(_ number: Int) -> String {

@@ -133,7 +133,7 @@ private final class LiveAgentEvents: @unchecked Sendable {
         locked {
             switch event {
             case .commands: break
-            case .item(let item), .toolItem(let item, _):
+            case .item(let item), .toolItem(let item, _), .itemUpdate(let item):
                 switch item.kind {
                 case .assistant: rows[item.id] = item.text
                 case .approval, .tool:
@@ -142,7 +142,7 @@ private final class LiveAgentEvents: @unchecked Sendable {
                 }
             case .textDelta(let id, let text): rows[id, default: ""] += text
             case .providerSession(let id): session = id
-            case .contextUsage, .resolvedModel, .providerMessage, .planMode, .subagents: break
+            case .contextUsage, .resolvedModel, .providerMessage, .planMode, .subagents, .subagentSteps, .providerTurn, .activity, .turnUsage: break
             case .failure(let message): error = message
             case .status(let status):
                 statuses.append(status.rawValue)

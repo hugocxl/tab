@@ -109,14 +109,18 @@ final class KeyDispatcher {
         case .pane:
             return true
         case .action(let id):
-            return actions.perform(id)
+            // Escape stops an agent only while it works; otherwise it goes on as before.
+            if actions.perform(id) { return true }
+            return clearsSidebarFilter(event, editingText: editingText)
         case .pass:
-            if event.keyCode == 53, !editingText, !model.nameFilter.isEmpty {
-                actions.clearSidebarFilter()
-                return true
-            }
-            return false
+            return clearsSidebarFilter(event, editingText: editingText)
         }
+    }
+
+    private func clearsSidebarFilter(_ event: NSEvent, editingText: Bool) -> Bool {
+        guard event.keyCode == 53, !editingText, !model.nameFilter.isEmpty else { return false }
+        actions.clearSidebarFilter()
+        return true
     }
 
     // MARK: Shortcut hints

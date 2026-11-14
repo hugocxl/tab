@@ -14,6 +14,11 @@ final class AgentResponseTable: AgentResponseSection {
     private var alignments: [AgentMarkdown.TableAlignment] = []
     private var tableTheme: AppTheme = .shared
     private var measuredWidth: CGFloat?
+    /// Each column's narrowest and natural width, which don't change with the pane's
+    /// width, so a split drag doesn't measure every cell again.
+    private var columnMetrics: (minimum: [CGFloat], preferred: [CGFloat])?
+    /// How many times the cells were measured, for tests.
+    private(set) var cellMeasurements = 0
     private var gridWidth: CGFloat = 0
     private var gridHeight: CGFloat = 0
     private(set) var copyReset: Task<Void, Never>?
@@ -50,16 +55,17 @@ final class AgentResponseTable: AgentResponseSection {
         copy.contentTintColor = AgentMarkdownPalette(theme: theme).muted
         copy.image = copyIcon.image(size: 12, scale: AppIcon.inlineScale, color: AgentMarkdownPalette(theme: theme).muted)
         measuredWidth = nil
+        columnMetrics = nil
         cellContents = ([headers] + rows).enumerated().flatMap { row, values in
             headers.indices.map { column in
                 AgentMarkdown.inline(values.indices.contains(column) ? values[column] : "", theme: theme,
-                    font: AppFont.system(14, weight: row == 0 ? .semibold : .light), fileLinks: true, references: references, lineBreaks: lineBreaks, rawHTML: rawHTML)
+                    font: AgentFont.system(14, weight: row == 0 ? .semibold : .light), fileLinks: true, references: references, lineBreaks: lineBreaks, rawHTML: rawHTML)
             }
         }
         text.delegate = delegate
         text.linkTextAttributes = [:] // Inline spans already carry their own link or code color.
         text.selectedTextAttributes = [.backgroundColor: theme.accent.withAlphaComponent(0.22)]
-        text.setAccessibilityLabel("Table: " + headers.joined(separator: ", "))
+        text.setAccessibilityLabel("Table, \(rows.count) \(rows.count == 1 ? "row" : "rows"): " + headers.joined(separator: ", "))
     }
 
     override func height(for width: CGFloat) -> CGFloat {
@@ -77,7 +83,9 @@ final class AgentResponseTable: AgentResponseSection {
         return gridHeight + 26 + (gridWidth > width ? 10 : 0)
     }
 
-    private func rebuildTable(width: CGFloat) {
+    private func measureColumns() -> (minimum: [CGFloat], preferred: [CGFloat]) {
+        if let columnMetrics { return columnMetrics }
+        cellMeasurements += 1
         var minimum: [CGFloat] = []
         var preferred: [CGFloat] = []
         for column in headers.indices {
@@ -100,6 +108,12 @@ final class AgentResponseTable: AgentResponseSection {
             minimum.append(min(384, max(1, longestWord, prefixWidth) + padding))
             preferred.append(min(384, max(1, natural) + padding))
         }
+        columnMetrics = (minimum, preferred)
+        return (minimum, preferred)
+    }
+
+    private func rebuildTable(width: CGFloat) {
+        let (minimum, preferred) = measureColumns()
         let minTotal = minimum.reduce(0, +)
         let preferredTotal = preferred.reduce(0, +)
         gridWidth = max(width, minTotal)
@@ -129,13 +143,13 @@ final class AgentResponseTable: AgentResponseSection {
             block.setWidth(column == headers.count - 1 ? 0 : 12, type: .absoluteValueType, for: .padding, edge: .maxX)
             let paragraph = NSMutableParagraphStyle()
             paragraph.textBlocks = [block]
-            paragraph.minimumLineHeight = 22.75
-            paragraph.maximumLineHeight = 22.75
+            paragraph.minimumLineHeight = 22.75 * AgentTextScale.factor
+            paragraph.maximumLineHeight = 22.75 * AgentTextScale.factor
             paragraph.lineBreakMode = .byWordWrapping
             let alignment = alignments.indices.contains(column) ? alignments[column] : .left
             switch alignment { case .left: paragraph.alignment = .left; case .center: paragraph.alignment = .center; case .right: paragraph.alignment = .right }
             let cell = NSMutableAttributedString(attributedString: cellContents[index])
-            cell.append(NSAttributedString(string: "\n", attributes: [.font: AppFont.system(14, weight: .light)]))
+            cell.append(NSAttributedString(string: "\n", attributes: [.font: AgentFont.system(14, weight: .light)]))
             cell.addAttribute(.paragraphStyle, value: paragraph, range: NSRange(location: 0, length: cell.length))
             content.append(cell)
         }

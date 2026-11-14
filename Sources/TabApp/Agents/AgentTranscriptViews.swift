@@ -9,12 +9,26 @@ class AgentTimelineRow: ThemedView {
     var onPreviewAttachments: ((String, [AgentChatAttachmentDescriptor], Int) -> Void)?
     var onDisclosure: (() -> Void)?
     var onApproval: ((String, Bool) -> Void)?
+    var onApprovalChoice: ((String, AgentApprovalChoice) -> Void)?
     var onRunShellCommand: ((String) -> Void)? { didSet { runCommandHandlerDidChange() } }
     func runCommandHandlerDidChange() {}
     var onOpenFile: ((String, Int?) -> Void)?
     var workspaceRoot: String?
     var onOpenToolDiff: ((String, AgentToolActivity) -> Void)?
     var onOpenCheckpoint: ((String, String?) -> Void)?
+    /// Opens the steps of the agent an Agent tool row started, by its tool ID.
+    var onOpenSubagent: ((String) -> Void)? { didSet { subagentHandlerDidChange() } }
+    /// Puts a user message's text into the composer as a new prompt.
+    var onEditPrompt: ((AgentChatItem) -> Void)? { didSet { editPromptHandlerDidChange() } }
+    func editPromptHandlerDidChange() {}
+    /// Opens a new conversation holding what came before a user message.
+    var onForkPrompt: ((AgentChatItem) -> Void)? { didSet { editPromptHandlerDidChange() } }
+    /// Reverts a turn's changes: all of its files, or the given paths.
+    var onRevert: ((AgentTurnCheckpoint, [String]?) -> Void)? { didSet { revertHandlerDidChange() } }
+    /// Shows a tool's whole output, by its item ID.
+    var onShowFullOutput: ((String) -> Void)?
+    func revertHandlerDidChange() {}
+    func subagentHandlerDidChange() {}
     var onOpenCitation: ((AgentAssistantCitation) -> Void)?
     var onOpenThread: ((AgentThreadLink) -> Void)?
     /// Link cards and file-link tooltips of assistant responses.
@@ -50,6 +64,10 @@ class AgentTimelineRow: ThemedView {
         findTextGeneration &+= 1
     }
 
+    /// Opens the row for a Find match that isn't in its text views, such as a tool call's
+    /// output. True when the row is the match's place to show.
+    func revealForFind() -> Bool { false }
+
     /// Opens what hides `range` of `view`, one of `findTextViews`: a folded `<details>`
     /// block, or a collapsed message. True when the row changed.
     func revealFindText(_ view: AgentRichTextView, range: NSRange) -> Bool {
@@ -83,6 +101,12 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
         }
     }
     private let copy = PillButton("Copy", style: .plain)
+    /// Puts this message's text in the composer; it starts a new prompt, nothing is rewound.
+    private let editPrompt = PillButton("", style: .plain)
+    /// Opens a new conversation from before this message, beside this one.
+    private let forkPrompt = PillButton("", style: .plain)
+    /// The conversation's provider can resume at an earlier message.
+    var forkable = false { didSet { if oldValue != forkable { renderText() } } }
     private let expandMessage = PillButton("Show full message", style: .plain)
     /// A long user message shows this much of its text until "Show full message".
     static let collapsedMessageHeight: CGFloat = 176
@@ -93,6 +117,8 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
     private var timestampDate: Date?
     /// How long the turn this message answers took, shown before its time.
     var duration: TimeInterval? { didSet { if oldValue != duration { updateTimestampText() } } }
+    /// What the turn this message answers used, for the footer's tooltip.
+    var usage: AgentTurnUsage? { didSet { if oldValue != usage { updateTimestampText() } } }
     /// User and assistant messages fill at most this fraction of the conversation lane.
     static let widthFraction: CGFloat = 0.8
     private var copyReset: Task<Void, Never>?
@@ -101,6 +127,9 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
     private let permissionTitle = makeLabel("Approval needed", font: AppFont.small)
     private let deny = PillButton("Deny", style: .normal)
     private let allow = PillButton("Allow", style: .primary)
+    private let allowAlways = PillButton("Always Allow", style: .normal)
+    /// Whether this approval's tool may be allowed for the rest of the conversation.
+    var alwaysAllowable = false { didSet { if oldValue != alwaysAllowable { renderText() } } }
     private var bubbleWidth: CGFloat = 0
     private var bodyHeight: CGFloat = 0
     private var detailHeight: CGFloat = 0
@@ -144,6 +173,35 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
             self?.actionsFocused = focused
             self?.updateActionVisibility()
         }
+        editPrompt.translatesAutoresizingMaskIntoConstraints = true
+        editPrompt.font = AppFont.footnote
+        editPrompt.toolTip = "Edit as new prompt"
+        editPrompt.setAccessibilityLabel("Edit as new prompt")
+        editPrompt.imagePosition = .imageOnly
+        editPrompt.isHidden = true
+        addSubview(editPrompt)
+        editPrompt.onFocusChange = { [weak self] focused in
+            self?.actionsFocused = focused
+            self?.updateActionVisibility()
+        }
+        editPrompt.onPress = { [weak self] in
+            guard let self, let item = self.item else { return }
+            self.onEditPrompt?(item)
+        }
+        forkPrompt.translatesAutoresizingMaskIntoConstraints = true
+        forkPrompt.toolTip = "Fork from here: a new conversation with what came before this message"
+        forkPrompt.setAccessibilityLabel("Fork from here")
+        forkPrompt.imagePosition = .imageOnly
+        forkPrompt.isHidden = true
+        addSubview(forkPrompt)
+        forkPrompt.onFocusChange = { [weak self] focused in
+            self?.actionsFocused = focused
+            self?.updateActionVisibility()
+        }
+        forkPrompt.onPress = { [weak self] in
+            guard let self, let item = self.item else { return }
+            self.onForkPrompt?(item)
+        }
         copy.onPress = { [weak self] in
             guard let text = self?.item?.text else { return }
             NSPasteboard.general.clearContents()
@@ -167,7 +225,7 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
             self.onDisclosure?()
         }
         addSubview(detail)
-        for child in [permissionTitle, deny, allow] {
+        for child in [permissionTitle, deny, allowAlways, allow] {
             child.translatesAutoresizingMaskIntoConstraints = true
             addSubview(child)
         }
@@ -179,9 +237,41 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
             guard let self, let item = self.item else { return }
             self.onApproval?(item.id, false)
         }
+        allowAlways.onPress = { [weak self] in
+            guard let self, let item = self.item else { return }
+            self.onApprovalChoice?(item.id, .allowAlways)
+        }
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    private var pendingApproval: AgentChatItem? {
+        guard let item, item.kind == .approval, !item.isComplete, item.questionnaire == nil else { return nil }
+        return item
+    }
+    private var canAlwaysAllow: Bool {
+        guard let pendingApproval else { return false }
+        return alwaysAllowable && onApprovalChoice != nil && AgentApprovalScope.canAlwaysAllow(pendingApproval.text)
+    }
+    /// Only Claude takes a reason with a denial.
+    private var canGiveReason: Bool { pendingApproval != nil && alwaysAllowable && onApprovalChoice != nil }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        guard let item = pendingApproval else { return super.menu(for: event) }
+        let menu = NSMenu()
+        menu.addItem(ClosureMenuItem("Allow") { [weak self] in self?.onApproval?(item.id, true) })
+        if canAlwaysAllow {
+            menu.addItem(ClosureMenuItem("Always Allow \(item.text) in This Conversation") { [weak self] in
+                self?.onApprovalChoice?(item.id, .allowAlways)
+            })
+        }
+        menu.addItem(.separator())
+        menu.addItem(ClosureMenuItem("Deny") { [weak self] in self?.onApproval?(item.id, false) })
+        if canGiveReason {
+            menu.addItem(ClosureMenuItem("Deny with Reason…") { [weak self] in self?.onApprovalChoice?(item.id, .denyWithReason) })
+        }
+        return menu
+    }
 
     /// The rendered assistant message, or nil for user, notice and approval rows.
     var assistantItem: AgentChatItem? { item?.kind == .assistant ? item : nil }
@@ -198,6 +288,9 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
     override func runCommandHandlerDidChange() {
         response.onRunShellCommand = item?.kind == .assistant ? onRunShellCommand : nil
     }
+
+    override func editPromptHandlerDidChange() { renderText() }
+    override func revertHandlerDidChange() { changes.onRevert = onRevert }
 
     override func linkServicesDidChange() { renderText() }
 
@@ -236,6 +329,11 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
         copy.title = ""
         copy.image = AppIcon.copy.image(size: 12, scale: AppIcon.inlineScale)
         copy.imagePosition = .imageOnly
+        editPrompt.isHidden = item.kind != .user || item.text.isEmpty || !item.isComplete || onEditPrompt == nil
+        editPrompt.image = AppIcon.pencil.image(size: 12, scale: AppIcon.inlineScale)
+        editPrompt.setTitleColor(theme.fgDim)
+        forkPrompt.isHidden = item.kind != .user || !item.isComplete || onForkPrompt == nil || !forkable
+        forkPrompt.image = AppIcon.gitBranch.image(size: 12, scale: AppIcon.inlineScale)
         updateActionVisibility()
         copy.setTitleColor(theme.fgDim)
         timestamp.textColor = theme.fgDim
@@ -257,6 +355,9 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
         permissionTitle.textColor = pending ? theme.accent : theme.fgDim
         allow.isHidden = !pending || item.questionnaire != nil
         deny.isHidden = !pending || item.questionnaire != nil
+        allowAlways.isHidden = allow.isHidden || !canAlwaysAllow
+        allowAlways.toolTip = "Let \(item.text) run without asking for the rest of this conversation"
+        deny.toolTip = canGiveReason ? "Deny. Right-click to tell the agent why." : nil
         detail.isHidden = item.kind != .approval || (item.detail ?? "").isEmpty
     }
 
@@ -265,7 +366,7 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
         if item.kind == .user {
             let plain = item.text as NSString
             let natural = plain.boundingRect(with: NSSize(width: max(1, width * Self.widthFraction - 28), height: .greatestFiniteMagnitude),
-                options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: [.font: AppFont.system(14, weight: .light)]).width
+                options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: [.font: AgentFont.system(14, weight: .light)]).width
             let attachmentWidth = attachmentCards.map(\.naturalWidth).max() ?? 0
             bubbleWidth = min(width * Self.widthFraction, max(48, ceil(max(natural, attachmentWidth)) + 28))
             let hasRichBlocks = AgentResponsePart.partition(AgentResponseParser.parse(item.text, parseRawHTML: false)).contains { $0.kind != 0 }
@@ -321,7 +422,10 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
                 attachmentTop += card.preferredHeight + 4
             }
             copy.frame = NSRect(x: width - 60, y: (filesOnly ? attachmentsHeight : bubble.isHidden ? media.frame.maxY : bubble.frame.maxY) + 4, width: 60, height: 24)
-            timestamp.frame = NSRect(x: max(0, width - (copy.isHidden ? 150 : 220)), y: copy.frame.minY + 4, width: 150, height: 18)
+            editPrompt.frame = NSRect(x: copy.frame.minX - 28, y: copy.frame.minY, width: 28, height: 24)
+            forkPrompt.frame = NSRect(x: (editPrompt.isHidden ? copy.frame.minX : editPrompt.frame.minX) - 28, y: copy.frame.minY, width: 28, height: 24)
+            let actionsWidth: CGFloat = (copy.isHidden ? 0 : 70) + (editPrompt.isHidden ? 0 : 28) + (forkPrompt.isHidden ? 0 : 28)
+            timestamp.frame = NSRect(x: max(0, width - 150 - actionsWidth), y: copy.frame.minY + 4, width: 150, height: 18)
             timestamp.alignment = .right
         } else if item.kind == .approval {
             permissionTitle.frame = NSRect(x: 0, y: 0, width: width, height: 18)
@@ -329,7 +433,8 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
             detail.frame = NSRect(x: 12, y: body.frame.maxY + 12, width: max(1, width - 24), height: detailHeight)
             let actionsY = detail.isHidden ? body.frame.maxY + 12 : detail.frame.maxY + 12
             deny.frame = NSRect(x: 0, y: actionsY, width: 62, height: 26)
-            allow.frame = NSRect(x: 70, y: actionsY, width: 66, height: 26)
+            allowAlways.frame = NSRect(x: 70, y: actionsY, width: allowAlways.isHidden ? 0 : 108, height: 26)
+            allow.frame = NSRect(x: allowAlways.isHidden ? 70 : allowAlways.frame.maxX + 8, y: actionsY, width: 66, height: 26)
         } else if item.kind == .assistant {
             response.frame = NSRect(x: 0, y: 0, width: width, height: bodyHeight)
             response.layoutSubtreeIfNeeded()
@@ -356,14 +461,23 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
     override func mouseEntered(with event: NSEvent) { hovered = true; updateActionVisibility() }
     override func mouseExited(with event: NSEvent) { hovered = false; updateActionVisibility() }
 
-    /// An assistant message's width: the lane narrowed to the shared message fraction.
-    static func responseWidth(_ width: CGFloat) -> CGFloat { max(1, floor(width * widthFraction)) }
+    /// Below this lane width an answer uses the whole lane: a gutter costs most in narrow splits.
+    static let fullWidthLane: CGFloat = 680
+
+    /// An assistant message's width: the whole lane while it is narrow, the shared message
+    /// fraction once that is wider, and the narrow width in between, so resizing a split
+    /// never makes the text jump.
+    static func responseWidth(_ width: CGFloat) -> CGFloat {
+        max(1, floor(min(width, max(fullWidthLane, width * widthFraction))))
+    }
 
     private func updateActionVisibility() {
         // An answer's footer always shows when its turn ended; a user message's only on hover.
         // Keep controls in the accessibility tree while matching the quiet resting footer.
         let opacity: CGFloat = hovered || actionsFocused || item?.kind == .assistant ? 1 : 0
         copy.alphaValue = opacity
+        editPrompt.alphaValue = opacity
+        forkPrompt.alphaValue = opacity
         timestamp.alphaValue = opacity
     }
 
@@ -383,14 +497,31 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
     private func updateTimestampText() {
         guard let date = timestampDate else { return }
         let time = AgentTurnTime.moment(date)
-        let text = item?.kind == .assistant ? duration.map { AgentTurnTime.duration($0) + " · " + time } ?? time : time
-        guard timestamp.stringValue != text else { return }
-        timestamp.stringValue = text
+        var text = item?.kind == .assistant ? duration.map { AgentTurnTime.duration($0) + " · " + time } ?? time : time
+        if item?.kind == .assistant, usage?.stoppedAtLimit == true { text += " · Stopped at a limit" }
         let formatter = DateFormatter()
         formatter.dateStyle = .full
         formatter.timeStyle = .medium
-        timestamp.toolTip = formatter.string(from: date)
+        let tooltip = ([formatter.string(from: date)] + (item?.kind == .assistant ? Self.describe(usage) : [])).joined(separator: "\n")
+        guard timestamp.stringValue != text || timestamp.toolTip != tooltip else { return }
+        timestamp.stringValue = text
+        timestamp.toolTip = tooltip
         needsLayout = true
+    }
+
+    /// A turn's usage, a line each: model, tokens, cost and why it stopped.
+    static func describe(_ usage: AgentTurnUsage?) -> [String] {
+        guard let usage else { return [] }
+        func tokens(_ count: Int) -> String { count >= 1000 ? String(format: "%.1fk", Double(count) / 1000) : "\(count)" }
+        var lines: [String] = []
+        if let model = usage.model { lines.append(model) }
+        let counts = [usage.inputTokens.map { tokens($0) + " tokens in" }, usage.outputTokens.map { tokens($0) + " out" }].compactMap { $0 }
+        if !counts.isEmpty { lines.append(counts.joined(separator: " · ")) }
+        if let cost = usage.costUSD, cost > 0 { lines.append(String(format: "$%.4f", cost)) }
+        if let reason = usage.stopReason {
+            lines.append("Stopped: " + (usage.stoppedAtLimit ? "reached a limit (\(reason))" : reason.replacingOccurrences(of: "_", with: " ")))
+        }
+        return lines
     }
 
     override func themeDidChange() {
@@ -472,12 +603,24 @@ final class AgentActivityRow: AgentTimelineRow {
         }
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    override func subagentHandlerDidChange() { tool.onOpenSubagent = onOpenSubagent }
+    override func revealForFind() -> Bool {
+        guard item?.tool != nil else { return false }
+        if !expanded {
+            expanded = true
+            refresh()
+            onDisclosure?()
+        }
+        return true
+    }
     override func update(_ items: [AgentChatItem]) {
         item = items.first
         refresh()
     }
     private func refresh() {
         tool.workspaceRoot = workspaceRoot
+        tool.onShowFullOutput = onShowFullOutput
+        tool.onRunShellCommand = onRunShellCommand
         tool.fetchAttachment = fetchAttachment
         tool.onPreviewAttachments = onPreviewAttachments
         tool.onHTMLDocument = onHTMLDocument
@@ -498,17 +641,21 @@ final class AgentActivityRow: AgentTimelineRow {
     }
 }
 
-/// The bottom of a running turn: the sidebar's working glyph and the turn's live
-/// working time, to a tenth of a second. It holds while the agent waits for the user.
+/// The bottom of a running turn: the sidebar's working glyph, the turn's live working
+/// time in whole seconds, and what the agent is doing now, such as `Bash · swift build`.
+/// The time holds while the agent waits for the user.
 @MainActor
 final class AgentWorkingRow: AgentTimelineRow {
     var turn: AgentChatTurn? { didSet { if oldValue != turn { refresh() } } }
+    /// The newest unfinished item's label, worked out when the transcript's entries are
+    /// built, so a tick only formats the time.
+    var activity: String? { didSet { if oldValue != activity { refresh() } } }
     private let glyph = ActivityGlyph()
     private let label = makeLabel("", font: .monospacedDigitSystemFont(ofSize: 13, weight: .regular))
-    private var ticker: Timer?
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         label.translatesAutoresizingMaskIntoConstraints = true
+        label.lineBreakMode = .byTruncatingTail
         label.setAccessibilityLabel("Agent working time")
         addSubview(glyph)
         addSubview(label)
@@ -516,21 +663,14 @@ final class AgentWorkingRow: AgentTimelineRow {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        ticker?.invalidate()
-        ticker = nil
-        guard window != nil else { return }
+        guard window != nil else { AgentSecondTicker.shared.unsubscribe(self); return }
         // Only this label changes on each tick: no layout or row measurement.
-        let ticker = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.refresh() }
-        }
-        ticker.tolerance = 0.02
-        RunLoop.main.add(ticker, forMode: .common)
-        self.ticker = ticker
+        AgentSecondTicker.shared.subscribe(self) { [weak self] in self?.refresh() }
         refresh()
     }
-    deinit { ticker?.invalidate() }
     private func refresh() {
-        let text = AgentTurnTime.elapsed(turn?.workingTime(at: Date()) ?? 0)
+        var text = AgentTurnTime.seconds(turn?.workingTime(at: Date()) ?? 0)
+        if let activity { text += " · " + activity }
         if label.stringValue != text { label.stringValue = text }
     }
     override func update(_ items: [AgentChatItem]) { refresh() }
@@ -544,18 +684,51 @@ final class AgentWorkingRow: AgentTimelineRow {
         label.textColor = theme.fgDim
         refresh()
     }
+
+    /// The working line's note: a retry or rate limit first, as it explains a long wait;
+    /// a usage warning only when nothing else is running.
+    static func describe(_ activity: AgentChatActivity?, otherwise item: String?) -> String? {
+        guard let activity else { return item }
+        let time = activity.resumesAt.map { date -> String in
+            let formatter = DateFormatter()
+            formatter.timeStyle = .short
+            formatter.dateStyle = Calendar.current.isDateInToday(date) ? .none : .short
+            return formatter.string(from: date)
+        }
+        switch activity.kind {
+        case .retrying:
+            return ["Retrying" + (activity.attempt.map { " (attempt \($0))" } ?? ""), activity.message].compactMap { $0 }.joined(separator: " · ")
+        case .rateLimited:
+            return "Rate limited" + (time.map { " · resumes at \($0)" } ?? "")
+        case .rateLimitWarning:
+            return item ?? [activity.message, time.map { "resets at \($0)" }].compactMap { $0 }.joined(separator: " · ")
+        default:
+            return item
+        }
+    }
+
+    /// What an unfinished item says the agent is doing: a tool and its operation,
+    /// `Thinking`, or nil for streaming prose, which shows itself.
+    static func activity(of item: AgentChatItem, root: String?) -> String? {
+        guard item.kind == .tool, !item.isComplete else { return nil }
+        guard let tool = item.tool else {
+            return item.workContext?.itemType == "reasoning" ? "Thinking" : item.text.split(whereSeparator: \.isNewline).first.map(String.init)
+        }
+        let name = AgentToolPresentation.displayName(tool)
+        guard let operation = AgentToolPresentation.operation(tool, root: root)?
+            .split(whereSeparator: \.isNewline).first.map({ String($0.prefix(200)) }) else { return name }
+        return name + " · " + operation
+    }
 }
 
 /// How the conversation writes a turn's times.
 enum AgentTurnTime {
-    /// A running turn, to a tenth of a second: `40.3s`, `3m 05.2s`, `1h 03m 05.2s`.
-    static func elapsed(_ seconds: TimeInterval) -> String {
-        let tenths = Int((max(0, seconds) * 10).rounded(.down))
-        let fraction = String(format: "%04.1f", Double(tenths % 600) / 10)
-        let minutes = tenths / 600
-        if minutes == 0 { return String(format: "%.1fs", Double(tenths) / 10) }
-        if minutes < 60 { return "\(minutes)m \(fraction)s" }
-        return String(format: "%dh %02dm ", minutes / 60, minutes % 60) + fraction + "s"
+    /// A running turn, in whole seconds: `40s`, `3m 05s`, `1h 03m 05s`.
+    static func seconds(_ seconds: TimeInterval) -> String {
+        let total = Int(max(0, seconds).rounded(.down))
+        if total < 60 { return "\(total)s" }
+        if total < 3600 { return String(format: "%dm %02ds", total / 60, total % 60) }
+        return String(format: "%dh %02dm %02ds", total / 3600, total % 3600 / 60, total % 60)
     }
 
     /// A finished turn: `2s`, `3m, 0s`, `1h, 3m`.
@@ -583,4 +756,12 @@ enum AgentTurnTime {
         formatter.dateStyle = .short
         return formatter.string(from: date) + " " + time
     }
+}
+
+/// An answer to an approval beyond a plain Allow or Deny.
+enum AgentApprovalChoice: Equatable {
+    /// Allow it, and the same tool for the rest of the conversation.
+    case allowAlways
+    /// Deny it and tell the agent why.
+    case denyWithReason
 }

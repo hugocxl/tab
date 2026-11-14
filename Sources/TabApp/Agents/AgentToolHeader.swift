@@ -7,7 +7,7 @@ import AppKit
 final class AgentToolHeader: NSButton {
     var onPress: (() -> Void)?
     var labelColor = NSColor.labelColor
-    var iconColor = NSColor.secondaryLabelColor
+    var iconColor = NSColor.secondaryLabelColor { didSet { updateGlyph() } }
     var focusColor = NSColor.controlAccentColor
     var chipColor = NSColor.secondaryLabelColor
     var plateColor = NSColor.quaternaryLabelColor
@@ -16,8 +16,12 @@ final class AgentToolHeader: NSButton {
     var operation: String? { didSet { if oldValue != operation { needsDisplay = true } } }
     /// A muted note after the operation, such as why a tool did not run.
     var suffix: String? { didSet { if oldValue != suffix { needsDisplay = true } } }
-    var expanded = false { didSet { if oldValue != expanded { needsDisplay = true } } }
-    var hovered = false { didSet { if oldValue != hovered { needsDisplay = true } } }
+    var expanded = false { didSet { if oldValue != expanded { needsDisplay = true; updateGlyph() } } }
+    var hovered = false { didSet { if oldValue != hovered { needsDisplay = true; updateGlyph() } } }
+    /// The tool is still working: the icon slot shows the activity glyph, which
+    /// animates in Core Animation without redrawing the header.
+    var running = false { didSet { if oldValue != running { needsDisplay = true; updateGlyph() } } }
+    private let glyph = ActivityGlyph()
     var timestamp: Date? { didSet { if oldValue != timestamp { updateTimestamp() } } }
     private(set) var timestampTooltip: String?
 
@@ -41,6 +45,25 @@ final class AgentToolHeader: NSButton {
         action = #selector(pressed)
         setButtonType(.momentaryPushIn)
         focusRingType = .none
+        glyph.isHidden = true
+        glyph.frame = NSRect(x: 10, y: 9, width: 12, height: 12)
+        addSubview(glyph)
+    }
+
+    /// Hovering, focus or an open row show the disclosure sign in place of the glyph.
+    private var showsGlyph: Bool {
+        running && !(isEnabled && (expanded || hovered || window?.firstResponder === self))
+    }
+
+    private func updateGlyph() {
+        glyph.isHidden = !showsGlyph
+        if !glyph.isHidden { glyph.style = .spinner(iconColor) }
+    }
+
+    override func layout() {
+        super.layout()
+        glyph.frame = NSRect(x: 10, y: floor((bounds.height - 12) / 2), width: 12, height: 12)
+        updateGlyph()
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -71,9 +94,9 @@ final class AgentToolHeader: NSButton {
             NSBezierPath(roundedRect: bounds, xRadius: 7, yRadius: 7).fill()
         }
         let icon: AppIcon = !isEnabled ? activityIcon : expanded ? .minus : hovered || focused ? .plus : activityIcon
-        icon.image(size: 15, scale: AppIcon.inlineScale, theme: .shared, tint: iconColor)?.draw(
+        if !showsGlyph { icon.image(size: 15, scale: AppIcon.inlineScale, theme: .shared, tint: iconColor)?.draw(
             in: NSRect(x: 9, y: (bounds.height - 15) / 2, width: 15, height: 15), from: .zero,
-            operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+            operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil) }
         let attributes = titleAttributes
         let titleSize = (title as NSString).size(withAttributes: attributes)
         var x = Self.iconWidth
@@ -113,12 +136,14 @@ final class AgentToolHeader: NSButton {
     override func becomeFirstResponder() -> Bool {
         let accepted = super.becomeFirstResponder()
         needsDisplay = true
+        updateGlyph()
         return accepted
     }
 
     override func resignFirstResponder() -> Bool {
         let accepted = super.resignFirstResponder()
         needsDisplay = true
+        updateGlyph()
         return accepted
     }
 
@@ -128,4 +153,8 @@ final class AgentToolHeader: NSButton {
     }
 
     @objc private func pressed() { if isEnabled { onPress?() } }
+
+    /// The row's actions, built when the menu opens.
+    var menuProvider: (() -> NSMenu?)?
+    override func menu(for event: NSEvent) -> NSMenu? { menuProvider?() ?? super.menu(for: event) }
 }

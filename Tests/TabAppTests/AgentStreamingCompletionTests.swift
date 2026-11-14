@@ -25,6 +25,47 @@ final class AgentStreamingCompletionTests: XCTestCase {
         return font.fontDescriptor.symbolicTraits.contains(.italic)
     }
 
+    // MARK: Ambiguous tails
+
+    /// `Here are the steps:\n-` rendered the sentence as a heading until the next character.
+    func testAStructurallyAmbiguousLastLineWaitsForTheNextText() {
+        let hold = AgentStreamingCompletion.holdingBackAmbiguousTail
+        XCTAssertEqual(hold("Here are the steps:\n-"), "Here are the steps:\n")
+        XCTAssertEqual(hold("Title\n=="), "Title\n")
+        XCTAssertEqual(hold("Intro\n##"), "Intro\n")
+        XCTAssertEqual(hold("Intro\n>"), "Intro\n")
+        XCTAssertEqual(hold("Steps:\n12."), "Steps:\n")
+        XCTAssertEqual(hold("Code:\n``"), "Code:\n")
+        XCTAssertEqual(hold("Here are the steps:\n- first"), "Here are the steps:\n- first", "Once it reads as a list item it shows")
+        XCTAssertEqual(hold("Title\n---\n"), "Title\n---\n", "A finished line has decided")
+        XCTAssertEqual(hold("```swift\nlet a = 1\n-"), "```swift\nlet a = 1\n-", "Code is never structure")
+        // A table shows once its separator row arrives.
+        XCTAssertEqual(hold("Results:\n| Name | Value |"), "Results:\n")
+        XCTAssertEqual(hold("Results:\n| Name | Value |\n| --- "), "Results:\n")
+        XCTAssertEqual(hold("Results:\n| Name | Value |\n| --- | --- |\n| a"), "Results:\n| Name | Value |\n| --- | --- |\n| a")
+        let response = AgentResponseView(frame: .zero)
+        response.isStreaming = true
+        response.setContent("Here are the steps:\n-", theme: theme)
+        XCTAssertFalse(response.sectionViews.contains { view in
+            (view as? AgentResponseProse)?.text.textStorage?.attribute(.agentMarkdownHeading, at: 0, effectiveRange: nil) != nil
+        }, "No flash of a heading")
+    }
+
+    /// A streaming repair inside a quote stayed after the message finished.
+    func testAFinishedMessageRendersNestedContentAsWritten() {
+        let response = AgentResponseView(frame: .zero)
+        response.isStreaming = true
+        let source = "> quoted *emphasis"
+        response.setContent(source, theme: theme)
+        response.isStreaming = false
+        response.setContent(source, theme: theme)
+        let texts = response.textViews.map(\.string).joined()
+        let fresh = AgentResponseView(frame: .zero)
+        fresh.setContent(source, theme: theme)
+        XCTAssertEqual(texts, fresh.textViews.map(\.string).joined(), "The finished message renders as if it never streamed")
+        XCTAssertEqual(response.textViews.first?.textStorage?.isEqual(to: try! XCTUnwrap(fresh.textViews.first?.textStorage)), true)
+    }
+
     // MARK: Each marker
 
     func testUnclosedStrongStarRendersBold() {

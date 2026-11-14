@@ -201,6 +201,7 @@ public enum SettingsCatalog {
         SettingItem("privacy-bluetooth", "Bluetooth", "", .privacy, "Permissions"),
         SettingItem("privacy-automation", "Automation", "Lets programs control other apps, such as with osascript.", .privacy, "Terminal Programs"),
         SettingItem("privacy-files", "Full Disk Access", "Lets programs read protected folders, such as Mail and Safari data.", .privacy, "Terminal Programs"),
+        SettingItem("agent-remote-images", "Load remote images", "Images an agent's answer names by a web address. Click to load shows the site first; Never shows only the link and loads no link icons. Project files always load.", .privacy, "Agent Conversations"),
         // Browser
         SettingItem("browser-enabled", "Enable built-in browser", "Open web pages in browser tabs and let tab browser commands drive them.", .browser, "General"),
         SettingItem("browser-terminal-links", "Open terminal links in the browser", "Command-click a web link in a terminal to open it in a browser tab instead of your system browser.", .browser, "General"),

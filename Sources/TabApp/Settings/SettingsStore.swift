@@ -268,6 +268,16 @@ public final class SettingsStore {
         }
     }
 
+    public func updateAgents(_ id: String, _ change: (inout AgentSettings) -> Void) {
+        attempt(id) {
+            var next = settings
+            change(&next.agents)
+            try next.saveAgents(to: dirs.settings)
+            settings = next
+            applySettings()
+        }
+    }
+
     public func updateNotifications(_ id: String, _ change: (inout NotificationSettings) -> Void) {
         attempt(id) {
             var next = settings

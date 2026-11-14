@@ -6,7 +6,7 @@ final class AgentResponseContainer: AgentResponseSection {
     override var kind: Int { 3 }
     let response = AgentResponseView(frame: .zero)
     private let alertIcon = NSImageView()
-    private let marker = makeLabel("", font: AppFont.system(14))
+    private let marker = makeLabel("", font: AgentFont.system(14))
     let disclosure = PillButton("", style: .plain)
     private var container: AgentResponsePart.Container?
     private var expanded = false
@@ -24,7 +24,7 @@ final class AgentResponseContainer: AgentResponseSection {
         marker.translatesAutoresizingMaskIntoConstraints = true
         disclosure.translatesAutoresizingMaskIntoConstraints = true
         disclosure.alignment = .left
-        disclosure.font = AppFont.system(14, weight: .medium)
+        disclosure.font = AgentFont.system(14, weight: .medium)
         addSubview(marker); addSubview(disclosure); addSubview(response); addSubview(alertIcon)
         response.onHeightChanged = { [weak self] in self?.changed() }
         disclosure.onPress = { [weak self] in
@@ -79,7 +79,7 @@ final class AgentResponseContainer: AgentResponseSection {
         bullet = nil
         orderedMarker = nil
         setAccessibilityLabel(nil)
-        marker.font = AppFont.system(compactProse ? 12 : 14)
+        marker.font = AgentFont.system(compactProse ? 12 : 14)
         alertIcon.isHidden = true
         disclosure.isHidden = true
         response.isHidden = false
@@ -90,14 +90,14 @@ final class AgentResponseContainer: AgentResponseSection {
             leading = 12; top = 28
             let icon: AppIcon
             switch title {
-            case "Tip": border = .systemGreen; icon = .lightbulb
+            case "Tip": border = theme.success; icon = .lightbulb
             case "Important": border = .systemPurple; icon = .commentText
             case "Warning": border = .systemOrange; icon = .triangleAlert
-            case "Caution": border = .systemRed; icon = .octagonAlert
+            case "Caution": border = theme.danger; icon = .octagonAlert
             default: border = .systemBlue; icon = .info
             }
             marker.stringValue = title; marker.textColor = border
-            marker.font = AppFont.system(14, weight: .medium)
+            marker.font = AgentFont.system(14, weight: .medium)
             marker.isHidden = false; alertIcon.isHidden = false
             alertIcon.image = icon.image(size: 14, scale: AppIcon.inlineScale)
             alertIcon.contentTintColor = border
@@ -115,8 +115,8 @@ final class AgentResponseContainer: AgentResponseSection {
             }
             taskState = AgentTaskCheckbox.state(marker: text, dark: !theme.palette.isLight)
             if taskState != nil {
-                taskIndent = leading - AgentListLayout.gutter(structure: structure, blocks: [], font: AppFont.system(compactProse ? 12 : 14))
-                leading = taskIndent + AgentTaskCheckbox.textInset(font: AppFont.system(compactProse ? 12 : 14))
+                taskIndent = leading - AgentListLayout.gutter(structure: structure, blocks: [], font: AgentFont.system(compactProse ? 12 : 14))
+                leading = taskIndent + AgentTaskCheckbox.textInset(font: AgentFont.system(compactProse ? 12 : 14))
                 marker.isHidden = true
                 setAccessibilityLabel(text == "☑" ? "Completed task" : "Incomplete task")
             } else { setAccessibilityLabel(nil) }
@@ -134,6 +134,16 @@ final class AgentResponseContainer: AgentResponseSection {
         disclosure.setTitleColor(theme.fg)
         needsDisplay = true
     }
+    /// Renders the nested content again if it asked to, as after streaming ends; the
+    /// section itself only re-applies when its part changes.
+    func refreshContent(theme: AppTheme) {
+        switch part {
+        case .container(_, let source)?: response.setContent(source, theme: theme)
+        case .nested(_, let blocks)?: response.setPreparedContent(blocks, theme: theme)
+        default: break
+        }
+    }
+
     private func refreshDisclosure() {
         guard case .details(let title, _) = container else { return }
         disclosure.title = title
@@ -170,7 +180,7 @@ final class AgentResponseContainer: AgentResponseSection {
                 baseline = text.convert(NSPoint.zero, to: self).y + manager.lineFragmentRect(forGlyphAt: 0, effectiveRange: nil).minY + manager.location(forGlyphAt: 0).y
             }
             if let bullet {
-                AgentListBullet.draw(bullet, rect: AgentListBullet.rect(textX: leading, baseline: baseline, font: AppFont.system(compactProse ? 12 : 14)), color: marker.textColor ?? .labelColor)
+                AgentListBullet.draw(bullet, rect: AgentListBullet.rect(textX: leading, baseline: baseline, font: AgentFont.system(compactProse ? 12 : 14)), color: marker.textColor ?? .labelColor)
             }
             if let orderedMarker {
                 let font = NSFont.monospacedDigitSystemFont(ofSize: compactProse ? 12 : 14, weight: .regular)

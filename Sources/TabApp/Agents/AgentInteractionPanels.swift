@@ -274,7 +274,7 @@ private final class AgentQueueRow: NSView {
         // Hidden actions give their room back to the prompt's text.
         right = showsActions ? right - 6 : bounds.width - 10
         for label in [status, detail] where !label.stringValue.isEmpty {
-            let width = ceil(label.intrinsicContentSize.width)
+            let width = label.singleLineWidth
             right -= width
             label.frame = NSRect(x: right, y: floor((bounds.height - 16) / 2), width: width, height: 16)
             right -= 10
@@ -397,7 +397,23 @@ final class AgentQuestionView: ThemedView, NSTextFieldDelegate {
 
     func controlTextDidChange(_ obj: Notification) {
         error.stringValue = ""
+        needsLayout = true
         onChange?()
+    }
+
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        // Return adds a line to a written answer; the Submit Answers shortcut sends the form.
+        guard commandSelector == #selector(NSResponder.insertNewline(_:)), !(control is NSSecureTextField) else { return false }
+        textView.insertNewlineIgnoringFieldEditor(nil)
+        return true
+    }
+
+    /// Submits the answers as the Submit button does; false when there's no form to submit.
+    @discardableResult
+    func submitAnswers() -> Bool {
+        guard !isHidden, form != nil, submit.isEnabled else { return false }
+        answer(cancelled: false)
+        return true
     }
 
     private func answer(cancelled: Bool) {
@@ -496,6 +512,13 @@ private final class AgentQuestionBlock: NSView {
         }
         field = question.secret ? NSSecureTextField() : NSTextField()
         field.bezelStyle = .roundedBezel
+        if !question.secret {
+            // A written answer can run to several lines; Return adds one, Command-Return submits.
+            field.usesSingleLineMode = false
+            field.cell?.wraps = true
+            field.cell?.isScrollable = false
+            field.lineBreakMode = .byWordWrapping
+        }
         field.font = AppFont.body
         field.placeholderString = question.options.isEmpty ? "Your answer" : "Or write your own answer"
         field.setAccessibilityLabel(question.title)
@@ -545,8 +568,10 @@ private final class AgentQuestionBlock: NSView {
             }
             y += 8
         }
-        if apply { field.frame = NSRect(x: 0, y: y, width: width, height: 26) }
-        return y + 26
+        let fieldHeight = question.secret ? 26 : min(92, max(26, measure(NSAttributedString(string: field.stringValue.isEmpty ? " " : field.stringValue,
+                                                                                         attributes: [.font: AppFont.body]), width - 10) + 9))
+        if apply { field.frame = NSRect(x: 0, y: y, width: width, height: fieldHeight) }
+        return y + fieldHeight
     }
 
     func apply(_ theme: AppTheme) {

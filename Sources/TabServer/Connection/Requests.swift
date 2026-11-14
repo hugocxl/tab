@@ -46,6 +46,10 @@ extension ClientConnection {
             Task { [self] in
                 reply(id, await asyncResult { .agentChat(try await server.agents.handle(request)) })
             }
+        case .agentConversation(let request):
+            Task { [self] in
+                reply(id, await asyncResult { .agentConversation(try await server.agents.conversation(request)) })
+            }
         case .agentModelCatalog(let request):
             Task { [self] in
                 reply(id, await asyncResult { .agentModelCatalog(try await server.agentModelCatalog.handle(request)) })
@@ -298,7 +302,7 @@ extension ClientConnection {
             try remote.revoke(device)
             return .remoteAccess(remote.state())
 
-        case .hello, .ping, .unknown, .authenticate, .pair, .git, .files, .exec, .cancelExec, .agentChat, .agentCheckpoint, .agentAttachment,
+        case .hello, .ping, .unknown, .authenticate, .pair, .git, .files, .exec, .cancelExec, .agentChat, .agentConversation, .agentCheckpoint, .agentAttachment,
              .agentComposerContext, .agentModelCatalog, .agentHistory, .importAgentHistory, .openTunnel, .closeTunnel, .listSimulators, .simulatorAction, .attachSimulator,
              .detachSimulator, .simulatorScreenshot:
             throw ServiceError(.badRequest, "Unexpected request")

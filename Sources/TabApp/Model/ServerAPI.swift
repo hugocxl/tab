@@ -19,6 +19,7 @@ public protocol ServerAPI: AnyObject, Sendable {
     func agentAttachment(_ request: AgentAttachmentRequest) async throws -> AgentAttachmentReply
     func agentCheckpoint(_ request: AgentCheckpointRequest) async throws -> AgentCheckpointReply
     func agentChat(_ request: AgentChatRequest) async throws -> AgentChatSnapshot
+    func agentConversation(_ request: AgentConversationRequest) async throws -> AgentConversationReply
     func agentComposerContext(_ request: AgentComposerContextRequest) async throws -> AgentComposerContextReply
     func agentModelCatalog(_ request: AgentModelCatalogRequest) async throws -> AgentModelCatalogReply
     func agentHistory(_ request: AgentHistoryRequest) async throws -> AgentHistoryReply
@@ -81,6 +82,10 @@ extension ServerAPI {
 
     public func agentCheckpoint(_ request: AgentCheckpointRequest) async throws -> AgentCheckpointReply {
         throw ModelError("Turn diffs are unsupported by this server.")
+    }
+
+    public func agentConversation(_ request: AgentConversationRequest) async throws -> AgentConversationReply {
+        throw ClientError.server(ErrorReply(code: .unsupported, message: "This server predates this request."))
     }
 
     public func agentModelCatalog(_ request: AgentModelCatalogRequest) async throws -> AgentModelCatalogReply {

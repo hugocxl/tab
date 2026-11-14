@@ -1,5 +1,6 @@
 import AppKit
 import ImageIO
+import TabCore
 
 /// Loads the media of one conversation's assistant messages. A source is requested
 /// only while some view observes it; observers of the same source share one request,
@@ -22,6 +23,8 @@ final class AgentMediaLoader {
         case loading
         case loaded(Entry)
         case failed(String)
+        /// A web image the remote-image setting holds back; `clickable` when a click loads it.
+        case blocked(host: String, clickable: Bool)
 
         var entry: Entry? { if case .loaded(let entry) = self { return entry }; return nil }
         var isLoading: Bool { if case .loading = self { return true }; return false }
@@ -42,6 +45,11 @@ final class AgentMediaLoader {
     var workspaceMedia: WorkspaceMedia?
     /// The least-recently-used cache bound, in bytes of data and decoded pixels.
     var costLimit = 64 * 1024 * 1024 { didSet { evict() } }
+    /// Whether web images load: the user's setting, read at each request.
+    var remotePolicy: () -> RemoteImagePolicy = { AgentSettings().remoteImages }
+    /// Web sources the user clicked to load in this conversation.
+    private var approvedRemote: Set<String> = []
+    private var blockedMedia: [String: AgentMarkdownMedia] = [:]
 
     /// Requests started over the loader's lifetime.
     private(set) var requestCount = 0
@@ -70,6 +78,11 @@ final class AgentMediaLoader {
             observer(state)
             return observation
         }
+        if let blocked = blockedState(media) {
+            blockedMedia[key] = media
+            observer(blocked)
+            return observation
+        }
         start(media)
         if let state = states[key] { observer(state) }
         return observation
@@ -79,6 +92,11 @@ final class AgentMediaLoader {
     /// task releases its share of the request.
     func entry(for media: AgentMarkdownMedia) async throws -> Entry {
         if let entry = state(for: media.source)?.entry { return entry }
+        // Asking for the bytes, as opening a preview does, is the click that loads it.
+        if case .blocked(_, let clickable)? = blockedState(media) {
+            guard clickable else { throw ModelError("Loading web images is turned off in Settings → Privacy.") }
+            approvedRemote.insert(media.source)
+        }
         let box = ObservationBox()
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Entry, Error>) in
@@ -89,6 +107,7 @@ final class AgentMediaLoader {
                     case .loading: return
                     case .loaded(let entry): resumed = true; continuation.resume(returning: entry)
                     case .failed(let message): resumed = true; continuation.resume(throwing: ModelError(message))
+                    case .blocked: resumed = true; continuation.resume(throwing: ModelError("Loading web images is turned off in Settings → Privacy."))
                     }
                     // The observation may not be stored yet when a cached state reports synchronously.
                     Task { @MainActor in box.observation?.cancel(); box.observation = nil }
@@ -105,8 +124,29 @@ final class AgentMediaLoader {
         }
     }
 
+    /// Whether `media` is a web image the setting holds back now.
+    func blockedState(_ media: AgentMarkdownMedia) -> State? {
+        guard case .remote(let url)? = AgentMediaSource(media.source), !approvedRemote.contains(media.source) else { return nil }
+        switch remotePolicy() {
+        case .always: return nil
+        case .clickToLoad: return .blocked(host: url.host ?? url.absoluteString, clickable: true)
+        case .never: return .blocked(host: url.host ?? url.absoluteString, clickable: false)
+        }
+    }
+
+    /// The user clicked to load a held-back web image: views waiting on it start loading.
+    func approve(_ source: String) {
+        guard remotePolicy() != .never else { return }
+        approvedRemote.insert(source)
+        guard let media = blockedMedia.removeValue(forKey: source), observers[source]?.isEmpty == false, states[source] == nil else { return }
+        start(media)
+        if let state = states[source] { for observer in observers[source].map({ Array($0.values) }) ?? [] { observer(state) } }
+    }
+
     /// Forgets every result and cancels every request, for another conversation.
     func reset() {
+        approvedRemote.removeAll()
+        blockedMedia.removeAll()
         for task in tasks.values { task.cancel() }
         tasks.removeAll()
         states.removeAll()

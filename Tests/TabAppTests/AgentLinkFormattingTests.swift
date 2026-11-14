@@ -48,6 +48,31 @@ final class AgentLinkFormattingTests: XCTestCase {
         }
     }
 
+    /// The link detector reads `main.rs` as `http://main.rs`; prose must only link what is
+    /// written as a link.
+    func testDetectedLinksNeedASchemeOrWww() throws {
+        _ = NSApplication.shared
+        let theme = AppTheme(systemIsDark: false)
+        func links(_ source: String) -> [String] {
+            let rendered = AgentMarkdown.inline(source, theme: theme)
+            var found: [String] = []
+            rendered.enumerateAttribute(.link, in: NSRange(location: 0, length: rendered.length)) { value, _, _ in
+                if let url = value as? URL { found.append(url.absoluteString) }
+            }
+            return found
+        }
+        for prose in ["I updated main.rs and lib.rs.", "The ASP.NET host reads notes.ai and script.pl.",
+                      "Run it from config.yaml, then index.ts."] {
+            XCTAssertEqual(links(prose), [], prose)
+        }
+        XCTAssertEqual(links("See https://example.com/docs for details."), ["https://example.com/docs"])
+        XCTAssertEqual(links("Mirror at http://example.org."), ["http://example.org"])
+        XCTAssertEqual(links("Visit www.example.com today."), ["http://www.example.com"])
+        XCTAssertEqual(links("Write to mailto:team@example.com please."), ["mailto:team@example.com"])
+        XCTAssertTrue(AgentMarkdown.isExplicitWebLink("HTTPS://EXAMPLE.COM"))
+        XCTAssertFalse(AgentMarkdown.isExplicitWebLink("main.rs"))
+    }
+
     func testFaviconInsetPreservesSelectionAndCopyText() throws {
         _ = NSApplication.shared
         let text = AgentRichTextView(frame: .zero)

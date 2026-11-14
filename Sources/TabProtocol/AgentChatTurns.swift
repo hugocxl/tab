@@ -25,6 +25,8 @@ public struct AgentChatTurn: Codable, Hashable, Sendable {
     public var waitingSince: Date?
     /// Seconds the turn spent waiting for the user before `waitingSince`.
     public var waited: TimeInterval?
+    /// What the turn used and why it stopped, when the provider reports it.
+    public var usage: AgentTurnUsage?
 
     public init(userItemID: String, startedAt: Date, completedAt: Date? = nil, status: AgentChatStatus = .working, checkpoint: AgentTurnCheckpoint? = nil, outcome: Outcome? = nil,
                 waitingSince: Date? = nil, waited: TimeInterval? = nil) {
@@ -54,6 +56,27 @@ public struct AgentChatTurn: Codable, Hashable, Sendable {
             waited = (waited ?? 0) + max(0, now.timeIntervalSince(since))
             waitingSince = nil
         }
+    }
+}
+
+/// A turn's tokens, cost, model and stop reason, as the provider reported them.
+public struct AgentTurnUsage: Codable, Hashable, Sendable {
+    public var inputTokens: Int?
+    public var outputTokens: Int?
+    public var costUSD: Double?
+    public var model: String?
+    /// The provider's own reason, such as `end_turn` or `max_tokens`.
+    public var stopReason: String?
+
+    public init(inputTokens: Int? = nil, outputTokens: Int? = nil, costUSD: Double? = nil, model: String? = nil, stopReason: String? = nil) {
+        self.inputTokens = inputTokens; self.outputTokens = outputTokens; self.costUSD = costUSD
+        self.model = model; self.stopReason = stopReason
+    }
+
+    /// The turn ended because it hit a limit rather than because it was done.
+    public var stoppedAtLimit: Bool {
+        guard let stopReason else { return false }
+        return ["max_tokens", "model_context_window_exceeded", "max_turns", "error_max_turns", "error_max_budget_usd"].contains(stopReason)
     }
 }
 

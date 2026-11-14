@@ -21,6 +21,8 @@ struct AgentDiagramError: Error, Equatable {
     var message: String
     /// 1-based line of the source where parsing stopped, when known.
     var line: Int?
+    /// A kind of diagram Tab doesn't draw, rather than a mistake in the source.
+    var unsupported = false
 }
 
 /// A laid-out diagram: its size, and a drawing closure for a Core Graphics context whose

@@ -189,4 +189,48 @@ final class AgentAccessTests: XCTestCase {
         XCTAssertEqual((response["result"] as? [String: Any])?["decision"] as? String, "accept")
         XCTAssertFalse(recorder.statuses.contains(.waiting))
     }
+
+    func testAlwaysAllowAnswersTheSameToolLaterAndDenialCarriesReason() async throws {
+        let fixture = try AgentRuntimeFixture(#"""
+        take
+        emit '{"type":"control_response","response":{"subtype":"success","request_id":"1","response":{}}}'
+        take
+        emit '{"type":"control_request","request_id":"bash-1","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"ls"}}}'
+        take
+        emit '{"type":"control_request","request_id":"bash-2","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"pwd"}}}'
+        take
+        emit '{"type":"control_request","request_id":"plan","request":{"subtype":"can_use_tool","tool_name":"ExitPlanMode","input":{"plan":"Do it"}}}'
+        take
+        emit '{"type":"result","subtype":"success","is_error":false}'
+        hold
+        """#)
+        defer { fixture.remove() }
+        let recorder = AgentRuntimeRecorder()
+        let runtime = fixture.runtime(.claude, recorder: recorder)
+        defer { runtime.stop() }
+        try await runtime.setAccess(.ask)
+        try await runtime.send(text: "Look around", model: nil)
+        try await waitFor { recorder.transcript["bash-1"]?.isComplete == false }
+        try await runtime.approve(request: "bash-1", allow: true, always: true, reason: nil)
+        try await waitFor { recorder.transcript["plan"]?.isComplete == false }
+        XCTAssertEqual(recorder.transcript["bash-2"]?.text, "Automatically approved")
+        do {
+            try await runtime.approve(request: "plan", allow: true, always: true, reason: nil)
+            XCTFail("A plan approval must never be allowed for the rest of the conversation")
+        } catch {}
+        try await runtime.approve(request: "plan", allow: false, always: false, reason: "Ask me first")
+        try await waitFor { (try? fixture.messages().count) == 5 }
+        let responses = try fixture.messages().compactMap { $0["response"] as? [String: Any] }
+        let denial = try XCTUnwrap(responses.first { $0["request_id"] as? String == "plan" }?["response"] as? [String: Any])
+        XCTAssertEqual(denial["behavior"] as? String, "deny")
+        XCTAssertEqual(denial["message"] as? String, "User declined tool execution: Ask me first")
+    }
+
+    private func waitFor(_ condition: () -> Bool) async throws {
+        for _ in 0..<500 {
+            if condition() { return }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTFail("Condition never held")
+    }
 }

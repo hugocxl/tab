@@ -18,6 +18,15 @@ protocol AgentTextSelectionHost: AnyObject {
     /// Escape in the transcript: hides the selection toolbar, or else closes the find bar
     /// and returns the keyboard to the composer. False when neither was shown.
     func transcriptDidPressEscape() -> Bool
+    /// Items about the whole conversation, at the end of every transcript context menu.
+    func conversationMenuItems() -> [NSMenuItem]
+    /// A drag that began in `view` is at `windowPoint`, maybe over other text.
+    func textSelectionDidDrag(in view: AgentRichTextView, to windowPoint: NSPoint)
+}
+
+extension AgentTextSelectionHost {
+    func conversationMenuItems() -> [NSMenuItem] { [] }
+    func textSelectionDidDrag(in view: AgentRichTextView, to windowPoint: NSPoint) {}
 }
 
 /// The rendered plain text of one message: its text views in reading order, joined by a
@@ -176,6 +185,38 @@ struct AgentTranscriptSelection {
             return ranges.isEmpty ? nil : Message(item: item, map: map, ranges: ranges)
         }
         return AgentTranscriptSelection(messages: messages)
+    }
+
+    /// Carries a drag that began in `source` across the text views between it and `point`
+    /// (in `root`'s coordinates): those passed are selected whole, the one under the point
+    /// up to it, and the rest cleared. `source` keeps the selection its own drag made.
+    static func extendDrag(in root: NSView, from source: AgentRichTextView, to point: NSPoint) {
+        // Top-down distances, whichever way `root` is flipped.
+        func top(_ rect: NSRect) -> CGFloat { root.isFlipped ? rect.minY : root.bounds.height - rect.maxY }
+        func bottom(_ rect: NSRect) -> CGFloat { root.isFlipped ? rect.maxY : root.bounds.height - rect.minY }
+        let y = root.isFlipped ? point.y : root.bounds.height - point.y
+        let ordered = textViews(in: root).filter { !$0.isHiddenOrHasHiddenAncestor }
+            .map { (view: $0, frame: root.convert($0.bounds, from: $0)) }
+            .sorted { top($0.frame) != top($1.frame) ? top($0.frame) < top($1.frame) : $0.frame.minX < $1.frame.minX }
+        guard let sourceIndex = ordered.firstIndex(where: { $0.view === source }) else { return }
+        let sourceFrame = ordered[sourceIndex].frame
+        let downward = y > bottom(sourceFrame), upward = y < top(sourceFrame)
+        for (index, entry) in ordered.enumerated() where entry.view !== source {
+            let length = entry.view.string.utf16.count
+            let range: NSRange
+            if downward, index > sourceIndex, top(entry.frame) <= y {
+                let end = bottom(entry.frame) <= y ? length
+                    : entry.view.characterIndexForInsertion(at: entry.view.convert(point, from: root))
+                range = NSRange(location: 0, length: min(max(0, end), length))
+            } else if upward, index < sourceIndex, bottom(entry.frame) >= y {
+                let start = top(entry.frame) >= y ? 0
+                    : min(max(0, entry.view.characterIndexForInsertion(at: entry.view.convert(point, from: root))), length)
+                range = NSRange(location: start, length: length - start)
+            } else {
+                range = NSRange(location: entry.view.selectedRange().location, length: 0)
+            }
+            if entry.view.selectedRange() != range { entry.view.setSelectedRange(range) }
+        }
     }
 
     /// Every rich text view under `root`, for clearing stale selections.

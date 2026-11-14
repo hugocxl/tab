@@ -18,6 +18,11 @@ final class AgentTableScrollView: NSScrollView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    override func scrollWheel(with event: NSEvent) {
+        if AgentPassThroughScrollView.passes(event, scroll: self) { nextResponder?.scrollWheel(with: event); return }
+        super.scrollWheel(with: event)
+    }
+
     override var acceptsFirstResponder: Bool {
         (documentView?.frame.width ?? 0) > contentView.bounds.width
     }

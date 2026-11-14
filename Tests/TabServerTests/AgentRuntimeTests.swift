@@ -130,6 +130,43 @@ final class AgentRuntimeTests: XCTestCase {
         XCTAssertNotNil(users[1]["uuid"] as? String)
     }
 
+    /// After a background agent finishes, Claude answers it in a turn nobody sent. That
+    /// turn is reported, and a prompt sent meanwhile waits for it instead of being
+    /// refused or ended by its result.
+    func testClaudeTurnItBeginsItselfIsATurnAndHoldsASendUntilItEnds() async throws {
+        let recorder = AgentRuntimeRecorder()
+        let started = expectation(description: "Claude starts its own turn")
+        let done = expectation(description: "the held prompt's turn finishes")
+        recorder.observe = { event in
+            if case .providerTurn = event { started.fulfill() }
+            if case .status(.idle) = event, recorder.statuses.count == 5 { done.fulfill() }
+        }
+        let fixture = try AgentRuntimeFixture("""
+        take
+        emit '{"type":"control_response","response":{"subtype":"success","request_id":"1","response":{}}}'
+        take
+        emit '{"type":"result","subtype":"success","result":"LAUNCHED"}'
+        emit '{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg_own"}},"parent_tool_use_id":null}'
+        emit '{"type":"assistant","message":{"id":"msg_own","content":[{"type":"text","text":"The agent finished."}]},"parent_tool_use_id":null}'
+        sleep 0.4
+        emit '{"type":"result","subtype":"success","result":"The agent finished."}'
+        take
+        emit '{"type":"result","subtype":"success","result":"Second"}'
+        hold
+        """)
+        defer { fixture.remove() }
+        let runtime = fixture.runtime(.claude, recorder: recorder)
+        defer { runtime.stop() }
+        try await runtime.send(text: "Start", model: nil)
+        await fulfillment(of: [started], timeout: 5)
+        try await runtime.send(text: "Next", model: nil)
+        await fulfillment(of: [done], timeout: 5)
+        XCTAssertEqual(recorder.statuses, [.working, .idle, .working, .working, .idle])
+        XCTAssertEqual(recorder.transcript["msg_own"]?.text, "The agent finished.")
+        let users = try fixture.messages().filter { $0["type"] as? String == "user" }
+        XCTAssertEqual(users.count, 2, "The held prompt is written once, after Claude's own turn")
+    }
+
     func testClaudeFollowupFoldedIntoTheRunningTurnFinishesWithItsSingleResult() async throws {
         let recorder = AgentRuntimeRecorder()
         let idle = expectation(description: "the folded turn finishes")
@@ -207,6 +244,95 @@ final class AgentRuntimeTests: XCTestCase {
         XCTAssertEqual(params["expectedTurnId"] as? String, "active")
         XCTAssertNil(params["model"])
         XCTAssertEqual(messages.filter { $0["method"] as? String == "turn/start" }.count, 1)
+    }
+
+    /// A Codex agent's own thread finishing must not end the conversation's turn or put
+    /// the agent's messages in it.
+    func testCodexChildThreadNotificationsStayOutOfTheParentTurn() async throws {
+        let recorder = AgentRuntimeRecorder()
+        let idle = expectation(description: "the parent turn ends")
+        recorder.observe = { if case .status(.idle) = $0 { idle.fulfill() } }
+        let fixture = try AgentRuntimeFixture("""
+        take
+        emit '{"id":1,"result":{}}'
+        take
+        take
+        emit '{"id":2,"result":{"thread":{"id":"thread"}}}'
+        take
+        emit '{"id":3,"result":{"turn":{"id":"active"}}}'
+        emit '{"method":"item/agentMessage/delta","params":{"threadId":"child-thread","turnId":"child-turn","itemId":"child-msg","delta":"child text"}}'
+        emit '{"method":"turn/completed","params":{"threadId":"child-thread","turn":{"id":"child-turn","status":"completed"}}}'
+        emit '{"method":"item/agentMessage/delta","params":{"threadId":"thread","turnId":"active","itemId":"parent-msg","delta":"parent text"}}'
+        sleep 0.2
+        emit '{"method":"turn/completed","params":{"threadId":"thread","turn":{"id":"active","status":"completed"}}}'
+        hold
+        """)
+        defer { fixture.remove() }
+        let runtime = fixture.runtime(.codex, recorder: recorder)
+        defer { runtime.stop() }
+        try await runtime.send(text: "Start", model: "test-model")
+        await fulfillment(of: [idle], timeout: 5)
+        XCTAssertEqual(recorder.statuses, [.working, .idle], "Only the parent's own completion ends its turn")
+        XCTAssertNil(recorder.transcript["child-msg"])
+        XCTAssertEqual(recorder.transcript["parent-msg"]?.text, "parent text")
+    }
+
+    /// Rate limits and retries used to be invisible: the pane showed plain work for minutes.
+    func testRateLimitEventsAndCodexRetriesBecomeActivity() async throws {
+        // Shape from a recorded Claude Code 2.1.311 stream.
+        let warning = AgentRuntime.rateLimitActivity(["status": "allowed_warning", "resetsAt": 1794585600,
+                                                      "rateLimitType": "five_hour", "utilization": 0.98])
+        XCTAssertEqual(warning?.kind, .rateLimitWarning)
+        XCTAssertEqual(warning?.message, "98% of the usage limit used")
+        XCTAssertEqual(warning?.resumesAt, Date(timeIntervalSince1970: 1794585600))
+        XCTAssertEqual(AgentRuntime.rateLimitActivity(["status": "rejected", "resetsAt": 1794585600])?.kind, .rateLimited)
+        XCTAssertNil(AgentRuntime.rateLimitActivity(["status": "allowed"]))
+
+        let recorder = AgentRuntimeRecorder()
+        let idle = expectation(description: "the turn ends")
+        recorder.observe = { if case .status(.idle) = $0 { idle.fulfill() } }
+        let fixture = try AgentRuntimeFixture("""
+        take
+        emit '{"id":1,"result":{}}'
+        take
+        take
+        emit '{"id":2,"result":{"thread":{"id":"thread"}}}'
+        take
+        emit '{"id":3,"result":{"turn":{"id":"active"}}}'
+        emit '{"method":"error","params":{"threadId":"thread","turnId":"active","willRetry":true,"error":{"message":"Model overloaded"}}}'
+        emit '{"method":"error","params":{"threadId":"thread","turnId":"active","willRetry":true,"error":{"message":"Model overloaded"}}}'
+        emit '{"method":"item/agentMessage/delta","params":{"threadId":"thread","turnId":"active","itemId":"m","delta":"ok"}}'
+        emit '{"method":"turn/completed","params":{"threadId":"thread","turn":{"id":"active","status":"completed"}}}'
+        hold
+        """)
+        defer { fixture.remove() }
+        let runtime = fixture.runtime(.codex, recorder: recorder)
+        defer { runtime.stop() }
+        try await runtime.send(text: "Start", model: "test-model")
+        await fulfillment(of: [idle], timeout: 5)
+        XCTAssertEqual(recorder.activities.map { $0?.attempt }, [1, 2, nil], "Each retry counts, and output clears it")
+        XCTAssertEqual(recorder.activities.first??.message, "Model overloaded")
+        XCTAssertTrue(recorder.failures.isEmpty, "A retried error is not a failure")
+    }
+
+    /// A Claude command that answers with a result alone, such as `/cost`, showed nothing.
+    func testClaudeResultWithoutMessagesShowsItsText() async throws {
+        let recorder = AgentRuntimeRecorder()
+        let idle = expectation(description: "the command finishes")
+        recorder.observe = { if case .status(.idle) = $0 { idle.fulfill() } }
+        let fixture = try AgentRuntimeFixture("""
+        take
+        emit '{"type":"control_response","response":{"subtype":"success","request_id":"1","response":{}}}'
+        take
+        emit '{"type":"result","subtype":"success","is_error":false,"result":"Total cost: $0.01","uuid":"result-1"}'
+        hold
+        """)
+        defer { fixture.remove() }
+        let runtime = fixture.runtime(.claude, recorder: recorder)
+        defer { runtime.stop() }
+        try await runtime.send(text: "/cost", model: nil)
+        await fulfillment(of: [idle], timeout: 5)
+        XCTAssertEqual(recorder.transcript.values.filter { $0.kind == .assistant }.map(\.text), ["Total cost: $0.01"])
     }
 
     func testDynamicFutureReasoningPassesThroughBothProviderRuntimes() async throws {
@@ -839,11 +965,14 @@ final class AgentRuntimeRecorder: @unchecked Sendable {
     var messages: [String] { snapshot.compactMap { if case .providerMessage(let value) = $0 { return value }; return nil } }
     var contextUsage: [AgentContextUsage] { snapshot.compactMap { if case .contextUsage(let value) = $0 { return value }; return nil } }
     var resolvedModels: [String] { snapshot.compactMap { if case .resolvedModel(let value) = $0 { return value }; return nil } }
+    var subagentLists: [[AgentSubagent]] { snapshot.compactMap { if case .subagents(let value) = $0 { return value }; return nil } }
+    var activities: [AgentChatActivity?] { snapshot.compactMap { if case .activity(let value) = $0 { return .some(value) }; return nil } }
     var transcript: [String: AgentChatItem] {
         var items: [String: AgentChatItem] = [:]
         for event in snapshot {
             switch event {
             case .item(let item), .toolItem(let item, _): items[item.id] = item
+            case .itemUpdate(let item): if items[item.id] != nil { items[item.id] = item }
             case .textDelta(let id, let text): items[id]?.text += text
             default: break
             }

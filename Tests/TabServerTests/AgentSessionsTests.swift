@@ -38,6 +38,12 @@ private final class FakeAgentRuntime: AgentSessionRuntime, @unchecked Sendable {
     func approve(request: String, allow: Bool) async throws {
         if let onApprove { try await onApprove(request, allow) } else { callback(.status(.idle)) }
     }
+    private var allowedTools: Set<String> = []
+    var alwaysAllowed: Set<String> { lock.withLock { allowedTools } }
+    func approve(request: String, allow: Bool, always: Bool, reason: String?) async throws {
+        try await approve(request: request, allow: allow)
+    }
+    func setAlwaysAllowed(_ tools: Set<String>) async throws { lock.withLock { allowedTools = tools } }
     func setAccess(_ mode: AgentAccessMode) async throws {
         lock.withLock { currentAccess = mode }
         if let onAccess { try await onAccess(mode) }
@@ -422,6 +428,65 @@ final class AgentSessionsTests: XCTestCase {
         _ = try await sessions.handle(.send(session: branch, text: "Branch", model: "claude-opus-5-5"))
         XCTAssertEqual(box.runtime?.launches.first?.forkSource, "source-conversation")
         XCTAssertEqual(box.runtime?.launches.first?.forkPoint, "message-1")
+    }
+
+    /// Forking from an earlier message resumes the provider conversation at the message
+    /// that turn began after; the runtime turns that into `--resume-session-at`, which
+    /// `testClaudeForkForksOnlyUntilItsNewSessionIsKnown` checks against a Claude peer.
+    func testForkFromAnEarlierMessageStartsFromBeforeIt() async throws {
+        let root = try root(), box = AgentRuntimeBox(), messages = AgentEventCount()
+        let factory: AgentSessions.Factory = { _, _, resume, callback in
+            let runtime = FakeAgentRuntime(callback)
+            runtime.providerSession = resume == nil ? "source-conversation" : "forked-conversation"
+            runtime.onSend = {
+                messages.increment()
+                callback(.providerMessage("message-\(messages.count)"))
+                callback(.item(AgentChatItem(id: "answer-\(messages.count)", kind: .assistant, text: "Answer \(messages.count)")))
+                callback(.status(.idle))
+            }
+            box.install(runtime)
+            return runtime
+        }
+        let sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: factory)
+        defer { sessions.shutdown() }
+        let source = SessionId(), project = ProjectId()
+        _ = try await sessions.handle(.create(session: source, project: project, provider: .claude))
+        _ = try await sessions.handle(.send(session: source, text: "First", model: nil))
+        _ = try await sessions.handle(.send(session: source, text: "Second", model: nil))
+        _ = try await sessions.handle(.send(session: source, text: "Third", model: nil))
+        let original = try await sessions.handle(.read(session: source))
+        let second = try XCTUnwrap(original.items.first { $0.text == "Second" })
+        let fork = SessionId()
+        guard case .forked(let copied) = try await sessions.conversation(.fork(session: fork, from: source, project: nil, at: second.id)) else {
+            return XCTFail("Unexpected reply")
+        }
+        XCTAssertEqual(copied.items.map(\.text), ["First", "Answer 1"], "The fork holds what came before that message")
+        XCTAssertEqual(copied.status, .idle)
+        guard case .forked(let again) = try await sessions.conversation(.fork(session: fork, from: source, project: nil, at: second.id)) else {
+            return XCTFail("Unexpected reply")
+        }
+        XCTAssertEqual(again, copied, "Idempotent")
+        _ = try await sessions.handle(.send(session: fork, text: "Second, differently", model: nil))
+        XCTAssertEqual(box.runtime?.launches.first?.forkSource, "source-conversation")
+        XCTAssertEqual(box.runtime?.launches.first?.forkPoint, "message-1", "It resumes after the first turn's last message")
+
+        let first = try XCTUnwrap(original.items.first { $0.text == "First" })
+        let fresh = SessionId()
+        guard case .forked(let empty) = try await sessions.conversation(.fork(session: fresh, from: source, project: nil, at: first.id)) else {
+            return XCTFail("Unexpected reply")
+        }
+        XCTAssertTrue(empty.items.isEmpty)
+        XCTAssertNil(empty.providerSession, "Forking at the first message is a new conversation")
+
+        let codex = SessionId()
+        _ = try await sessions.handle(.create(session: codex, project: project, provider: .codex))
+        _ = try await sessions.handle(.send(session: codex, text: "Hi", model: nil))
+        let codexSnapshot = try await sessions.handle(.read(session: codex))
+        let hi = try XCTUnwrap(codexSnapshot.items.first { $0.kind == .user })
+        do {
+            _ = try await sessions.conversation(.fork(session: SessionId(), from: codex, project: nil, at: hi.id))
+            XCTFail("Codex forks only whole threads")
+        } catch {}
     }
 
     func testImportedConversationResumesItsProviderSessionAndIsImportedOnce() async throws {
@@ -840,6 +905,64 @@ final class AgentSessionsTests: XCTestCase {
         XCTAssertEqual(box.runtime?.stops, 1)
         let resumed = try await sessions.handle(.send(session: session, text: "carry on", model: nil))
         XCTAssertEqual(resumed.status, .working)
+    }
+
+    /// A stopped or failed turn used to leave its unfinished tools `running` forever.
+    func testToolsStillRunningWhenATurnEndsEarlyBecomeInterrupted() async throws {
+        let root = try root(), box = AgentRuntimeBox()
+        let sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, interruptTimeout: 0.02,
+                                         factory: { _, _, _, callback in
+            let runtime = FakeAgentRuntime(callback)
+            runtime.onInterrupt = {}
+            box.install(runtime)
+            return runtime
+        })
+        defer { sessions.shutdown() }
+        let session = SessionId()
+        _ = try await sessions.handle(.create(session: session, project: ProjectId(), provider: .claude))
+        _ = try await sessions.handle(.send(session: session, text: "build", model: nil))
+        let running = AgentChatItem(id: "bash", kind: .tool, text: "Bash", isComplete: false,
+                                    tool: AgentToolActivity(name: "Bash", category: .command, status: .running))
+        let finished = AgentChatItem(id: "read", kind: .tool, text: "Read", isComplete: true,
+                                     tool: AgentToolActivity(name: "Read", category: .read, status: .completed))
+        box.runtime?.callback(.item(running))
+        box.runtime?.callback(.item(finished))
+        _ = try await sessions.handle(.interrupt(session: session))
+        try await Task.sleep(nanoseconds: 100_000_000)
+        let stopped = try await sessions.handle(.read(session: session))
+        XCTAssertEqual(stopped.items.first { $0.id == "bash" }?.tool?.status, .interrupted)
+        XCTAssertEqual(stopped.items.first { $0.id == "read" }?.tool?.status, .completed)
+        XCTAssertTrue(stopped.items.allSatisfy(\.isComplete))
+
+        _ = try await sessions.handle(.send(session: session, text: "again", model: nil))
+        box.runtime?.callback(.item(AgentChatItem(id: "bash-2", kind: .tool, text: "Bash", isComplete: false,
+                                                  tool: AgentToolActivity(name: "Bash", category: .command, status: .running))))
+        box.runtime?.callback(.failure("Provider crashed"))
+        try await Task.sleep(nanoseconds: 50_000_000)
+        let failed = try await sessions.handle(.read(session: session))
+        XCTAssertEqual(failed.status, .failed)
+        XCTAssertEqual(failed.items.first { $0.id == "bash-2" }?.tool?.status, .interrupted)
+    }
+
+    /// A stop the provider refused used to leave the turn working forever.
+    func testAFailedInterruptEndsTheTurnByStoppingTheProvider() async throws {
+        let root = try root(), box = AgentRuntimeBox()
+        let sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, callback in
+            let runtime = FakeAgentRuntime(callback)
+            runtime.onInterrupt = { throw AgentRuntimeError("broken pipe") }
+            box.install(runtime)
+            return runtime
+        })
+        defer { sessions.shutdown() }
+        let session = SessionId()
+        _ = try await sessions.handle(.create(session: session, project: ProjectId(), provider: .claude))
+        _ = try await sessions.handle(.send(session: session, text: "hello", model: nil))
+        let stopped = try await sessions.handle(.interrupt(session: session))
+        XCTAssertEqual(stopped.status, .idle)
+        XCTAssertEqual(stopped.turns?.last?.outcome, .interrupted)
+        XCTAssertTrue(stopped.items.contains { $0.text.contains("didn't take the stop") })
+        XCTAssertEqual(box.runtime?.stops, 1)
+        XCTAssertEqual(stopped.queuePaused, true, "Stop still holds the queue")
     }
 
     func testInterruptDuringStartupSettlesSendImmediatelyAndFencesLateCallbacks() async throws {
@@ -1365,6 +1488,199 @@ final class AgentSessionsTests: XCTestCase {
         XCTAssertLessThan(frame.count, Limits.maxFrame)
     }
 
+    /// A tool result used to arrive twice, as `detail` and `tool.output`, halving how many
+    /// fit. Stored once, twice as many large reads stay in the conversation.
+    func testToolBodiesAreStoredOnceAndDroppedItemsAreCountedAcrossTrimsAndRestarts() async throws {
+        let root = try root(), box = AgentRuntimeBox()
+        let body = String(repeating: "r", count: 15 * 1024)
+        func tool(_ index: Int) -> AgentChatItem {
+            AgentChatItem(id: "read-\(index)", kind: .tool, text: "Read", detail: body,
+                          tool: AgentToolActivity(name: "Read", category: .read, input: "{}", output: body, status: .completed))
+        }
+        let session = SessionId()
+        var omitted = 0
+        do {
+            let sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, callback in
+                let runtime = FakeAgentRuntime(callback); box.install(runtime); return runtime
+            })
+            _ = try await sessions.handle(.create(session: session, project: ProjectId(), provider: .claude))
+            _ = try await sessions.handle(.send(session: session, text: "read everything", model: nil))
+            for index in 0..<40 { box.runtime?.callback(.item(tool(index))) }
+            box.runtime?.callback(.status(.idle))
+            let first = try await waitForQueue(sessions, session) { $0.status == .idle }
+            let reads = first.items.filter { $0.kind == .tool }
+            XCTAssertTrue(reads.allSatisfy { $0.detail == nil }, "The body is kept once, in the tool")
+            XCTAssertTrue(reads.dropFirst().allSatisfy { $0.tool?.output == body }, "Only the oldest kept read may be clipped")
+            XCTAssertGreaterThan(reads.count, 25, "Counted once, far more than 16 large reads fit")
+            XCTAssertLessThanOrEqual(first.items.reduce(0) { $0 + $1.transcriptByteCount }, 512 * 1024)
+            omitted = try XCTUnwrap(first.omittedItems)
+            XCTAssertEqual(omitted, 40 - reads.count)
+            // A second trim adds to the count rather than replacing it.
+            _ = try await sessions.handle(.send(session: session, text: "again", model: nil))
+            for index in 40..<60 { box.runtime?.callback(.item(tool(index))) }
+            box.runtime?.callback(.status(.idle))
+            let second = try await waitForQueue(sessions, session) { $0.status == .idle && $0.items.contains { $0.id == "read-59" } }
+            XCTAssertGreaterThan(second.omittedItems ?? 0, omitted)
+            omitted = second.omittedItems ?? 0
+            sessions.shutdown()
+        }
+        let restarted = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, callback in FakeAgentRuntime(callback) })
+        defer { restarted.shutdown() }
+        let reloaded = try await restarted.handle(.read(session: session))
+        XCTAssertEqual(reloaded.omittedItems, omitted, "The count is saved with the conversation")
+        // The dropped items are archived in order and come back a page at a time, newest first.
+        guard case .earlier(let newest) = try await restarted.conversation(.earlier(session: session, before: nil, limit: 5)) else {
+            return XCTFail("Expected earlier items")
+        }
+        XCTAssertEqual(newest.total, omitted)
+        XCTAssertEqual(newest.items.count, 5)
+        XCTAssertEqual(newest.start, omitted - 5)
+        let oldestRetained = try XCTUnwrap(reloaded.items.first { $0.kind == .tool }?.id)
+        let lastArchived = try XCTUnwrap(newest.items.last?.id)
+        XCTAssertLessThan(Int(lastArchived.dropFirst(5)) ?? 99, Int(oldestRetained.dropFirst(5)) ?? 0)
+        guard case .earlier(let first) = try await restarted.conversation(.earlier(session: session, before: newest.start, limit: 100)) else {
+            return XCTFail("Expected earlier items")
+        }
+        XCTAssertEqual(first.start, 0)
+        XCTAssertEqual(first.items.first?.id, "read-0", "Paging reaches the conversation's start")
+        XCTAssertEqual(first.items.count + newest.items.count, omitted)
+        XCTAssertNoThrow(try AgentConversationReply.earlier(first).validate())
+    }
+
+    /// Claude repeats each assistant message at the end of a turn. One already trimmed
+    /// must not come back at the end, out of order.
+    /// Output kept only its last 16 KiB with no way to see the rest; a file read lost its start.
+    func testLongToolOutputIsKeptWholeOnTheServerAndReadsKeepTheirStart() async throws {
+        let root = try root(), box = AgentRuntimeBox()
+        let sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, callback in
+            let runtime = FakeAgentRuntime(callback); box.install(runtime); return runtime
+        })
+        defer { sessions.shutdown() }
+        let session = SessionId()
+        _ = try await sessions.handle(.create(session: session, project: ProjectId(), provider: .claude))
+        _ = try await sessions.handle(.send(session: session, text: "go", model: nil))
+        let log = (0..<2000).map { "log line \($0)" }.joined(separator: "\n")
+        let file = (0..<2000).map { "source line \($0)" }.joined(separator: "\n")
+        box.runtime?.callback(.item(AgentChatItem(id: "bash", kind: .tool, text: "Bash",
+            tool: .init(name: "Bash", category: .command, input: "make", output: log, status: .completed, presentation: .command))))
+        box.runtime?.callback(.item(AgentChatItem(id: "read", kind: .tool, text: "Read",
+            tool: .init(name: "Read", category: .read, input: "{}", output: file, status: .completed))))
+        box.runtime?.callback(.status(.idle))
+        let snapshot = try await waitForQueue(sessions, session) { $0.status == .idle }
+        let bash = try XCTUnwrap(snapshot.items.first { $0.id == "bash" }?.tool)
+        let read = try XCTUnwrap(snapshot.items.first { $0.id == "read" }?.tool)
+        XCTAssertEqual(bash.fullOutputBytes, log.utf8.count)
+        XCTAssertLessThanOrEqual(bash.output?.utf8.count ?? .max, 16 * 1024)
+        XCTAssertTrue(bash.output?.contains("log line 1999") == true, "A command keeps its end")
+        XCTAssertTrue(read.output?.hasPrefix("source line 0\n") == true, "A read keeps its start")
+        try await Task.sleep(for: .milliseconds(50))
+        guard case .toolOutput(let whole) = try await sessions.conversation(.toolOutput(session: session, item: "bash")) else {
+            return XCTFail("Unexpected reply")
+        }
+        XCTAssertEqual(whole.text, log)
+        do {
+            _ = try await sessions.conversation(.toolOutput(session: session, item: "nothing"))
+            XCTFail("Only kept outputs can be read")
+        } catch {}
+    }
+
+    func testRepeatedMessagesOnlyUpdateItemsTheConversationStillHolds() async throws {
+        let root = try root(), box = AgentRuntimeBox()
+        let sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, callback in
+            let runtime = FakeAgentRuntime(callback); box.install(runtime); return runtime
+        })
+        defer { sessions.shutdown() }
+        let session = SessionId()
+        _ = try await sessions.handle(.create(session: session, project: ProjectId(), provider: .claude))
+        _ = try await sessions.handle(.send(session: session, text: "hello", model: nil))
+        box.runtime?.callback(.item(AgentChatItem(id: "kept", kind: .assistant, text: "Draft", isComplete: false)))
+        box.runtime?.callback(.itemUpdate(AgentChatItem(id: "kept", kind: .assistant, text: "Final")))
+        box.runtime?.callback(.itemUpdate(AgentChatItem(id: "trimmed", kind: .assistant, text: "Gone")))
+        box.runtime?.callback(.status(.idle))
+        let snapshot = try await waitForQueue(sessions, session) { $0.status == .idle }
+        XCTAssertEqual(snapshot.items.first { $0.id == "kept" }?.text, "Final")
+        XCTAssertFalse(snapshot.items.contains { $0.id == "trimmed" })
+    }
+
+    func testOlderSnapshotsWithDuplicatedToolBodiesStillLoad() async throws {
+        let root = try root()
+        let session = SessionId(), project = ProjectId()
+        let body = String(repeating: "o", count: 2048)
+        var snapshot = AgentChatSnapshot(session: session, project: project, provider: .claude, status: .idle, revision: 4)
+        snapshot.items = [AgentChatItem(id: "u", kind: .user, text: "read"),
+                          AgentChatItem(id: "t", kind: .tool, text: "Read", detail: body,
+                                        tool: AgentToolActivity(name: "Read", category: .read, output: body, status: .completed)),
+                          AgentChatItem(id: "todo", kind: .tool, text: "Updated plan", detail: #"{"steps":[]}"#,
+                                        workContext: .init(itemType: "todo_list"))]
+        let saved: [String: Any] = ["snapshot": try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(snapshot))),
+                                    "directory": root.path]
+        try JSONSerialization.data(withJSONObject: saved).write(to: root.appendingPathComponent(session.description + ".json"))
+        let sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, callback in FakeAgentRuntime(callback) })
+        defer { sessions.shutdown() }
+        let loaded = try await sessions.handle(.read(session: session))
+        XCTAssertEqual(loaded.items.first { $0.id == "t" }?.tool?.output, body)
+        XCTAssertNil(loaded.items.first { $0.id == "t" }?.detail)
+        XCTAssertEqual(loaded.items.first { $0.id == "todo" }?.detail, #"{"steps":[]}"#, "Typed cards keep their detail")
+        XCTAssertNil(loaded.omittedItems)
+    }
+
+    /// An incremental read applied to the client's snapshot gives exactly the full read,
+    /// through appends, streamed text and items trimmed away.
+    func testIncrementalReadsMatchFullReadsThroughAppendsStreamingAndTrims() async throws {
+        let root = try root(), box = AgentRuntimeBox()
+        let sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, callback in
+            let runtime = FakeAgentRuntime(callback); box.install(runtime); return runtime
+        })
+        defer { sessions.shutdown() }
+        let id = SessionId()
+        _ = try await sessions.handle(.create(session: id, project: ProjectId(), provider: .claude))
+        var held = try await sessions.handle(.send(session: id, text: "start", model: nil))
+        func step(_ change: () -> Void, file: StaticString = #filePath, line: UInt = #line) async throws {
+            change()
+            try await Task.sleep(for: .milliseconds(20))
+            let full = try await sessions.handle(.read(session: id))
+            guard case .delta(let delta) = try await sessions.conversation(.readSince(session: id, revision: held.revision)) else {
+                return XCTFail("Unexpected reply", file: file, line: line)
+            }
+            XCTAssertLessThan(delta.snapshot.items.count, max(2, full.items.count), "Only changed items travel", file: file, line: line)
+            let applied = try XCTUnwrap(delta.applied(to: held), file: file, line: line)
+            XCTAssertEqual(applied, full, file: file, line: line)
+            held = applied
+        }
+        try await step { box.runtime?.callback(.item(AgentChatItem(id: "a1", kind: .assistant, text: "Hel", isComplete: false))) }
+        try await step { box.runtime?.callback(.textDelta(id: "a1", text: "lo")) }
+        try await step {
+            for index in 0..<520 { box.runtime?.callback(.item(AgentChatItem(id: "t\(index)", kind: .tool, text: "Read", isComplete: true))) }
+        }
+        XCTAssertGreaterThan(held.omittedItems ?? 0, 0, "The trim removed the oldest items")
+        try await step { box.runtime?.callback(.status(.idle)) }
+        guard case .delta(let unchanged) = try await sessions.conversation(.readSince(session: id, revision: held.revision)) else {
+            return XCTFail("Unexpected reply")
+        }
+        XCTAssertTrue(unchanged.snapshot.items.isEmpty)
+        XCTAssertEqual(unchanged.applied(to: held), held)
+    }
+
+    func testIncrementalReadAfterARestartSendsEverything() async throws {
+        let root = try root()
+        let id = SessionId()
+        var held: AgentChatSnapshot
+        do {
+            let sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, callback in FakeAgentRuntime(callback) })
+            _ = try await sessions.handle(.create(session: id, project: ProjectId(), provider: .claude))
+            held = try await sessions.handle(.send(session: id, text: "start", model: nil))
+            sessions.shutdown()
+        }
+        let restarted = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, callback in FakeAgentRuntime(callback) })
+        defer { restarted.shutdown() }
+        let full = try await restarted.handle(.read(session: id))
+        held.revision = full.revision - 1
+        guard case .delta(let delta) = try await restarted.conversation(.readSince(session: id, revision: held.revision)) else {
+            return XCTFail("Unexpected reply")
+        }
+        XCTAssertEqual(delta.snapshot.items.map(\.id), full.items.map(\.id), "Unknown history means every item is sent")
+    }
+
     func testStopWhileInitialAccessConfigurationIsPendingCannotSubmitLater() async throws {
         let root = try root(), box = AgentRuntimeBox()
         let gate = AgentSubmissionGate()
@@ -1465,6 +1781,73 @@ extension AgentSessionsTests {
         let drained = try await waitForQueue(sessions, id) { $0.status == .working && $0.queuedPrompts?.isEmpty == true }
         XCTAssertEqual(drained.items.filter { $0.kind == .user }.map(\.text), ["First", "Edited third", "Second"])
         XCTAssertEqual(box.runtime?.models.count, 3)
+    }
+
+    /// Claude's answer to a finished background agent used to stream while the
+    /// conversation stayed idle, with no turn and Stop disabled.
+    func testTurnTheProviderBeginsItselfIsRecordedAndKeepsTheQueueWaiting() async throws {
+        let root = try root(), box = AgentRuntimeBox()
+        let sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, callback in
+            let runtime = FakeAgentRuntime(callback); box.install(runtime); return runtime
+        })
+        defer { sessions.shutdown() }
+        let id = SessionId()
+        _ = try await sessions.handle(.create(session: id, project: ProjectId(), provider: .claude))
+        _ = try await sessions.handle(.submit(session: id, prompt: AgentPrompt(text: "Launch", model: nil, effort: nil,
+                                                                               provider: .claude, planMode: false)))
+        _ = try await waitForQueue(sessions, id) { $0.status == .working && $0.queuedPrompts?.isEmpty == true }
+        box.runtime?.callback(.subagents([AgentSubagent(id: "a1", toolUseID: "toolu_agent", description: "bg probe", background: true)]))
+        box.runtime?.callback(.subagentSteps(toolUseID: "toolu_agent", items: [AgentChatItem(id: "step", kind: .assistant, text: "DONE")]))
+        box.runtime?.callback(.status(.idle))
+        let idle = try await waitForQueue(sessions, id) { $0.status == .idle }
+        XCTAssertEqual(idle.subagents?.first?.steps, 1)
+        guard case .subagentSteps(let steps) = try await sessions.conversation(.subagentSteps(session: id, toolUseID: "toolu_agent")) else {
+            return XCTFail("Unexpected reply")
+        }
+        XCTAssertEqual(steps.items.map(\.text), ["DONE"])
+
+        box.runtime?.callback(.providerTurn(reason: "Background agent “bg probe” finished"))
+        box.runtime?.callback(.item(AgentChatItem(id: "answer", kind: .assistant, text: "It finished.", isComplete: false)))
+        let working = try await waitForQueue(sessions, id) { $0.status == .working }
+        let anchor = try XCTUnwrap(working.items.last { $0.kind == .user })
+        XCTAssertTrue(anchor.isProviderTurn)
+        XCTAssertEqual(working.turns?.last?.userItemID, anchor.id)
+        XCTAssertNil(working.turns?.last?.completedAt)
+        XCTAssertNoThrow(try working.validate(), "Older apps validate turns against user rows")
+        // A prompt sent now waits in the queue; the provider's turn is not interrupted.
+        _ = try await sessions.handle(.submit(session: id, prompt: AgentPrompt(text: "Next", model: nil, effort: nil,
+                                                                               provider: .claude, planMode: false)))
+        let queued = try await sessions.handle(.read(session: id))
+        XCTAssertEqual(queued.queuedPrompts?.map(\.text), ["Next"])
+        XCTAssertEqual(box.runtime?.models.count, 1)
+        box.runtime?.callback(.status(.idle))
+        let next = try await waitForQueue(sessions, id) { $0.status == .working && $0.queuedPrompts?.isEmpty == true }
+        XCTAssertNotNil(next.turns?.first { $0.userItemID == anchor.id }?.completedAt)
+        XCTAssertEqual(next.items.filter { $0.kind == .user && !$0.isProviderTurn }.map(\.text), ["Launch", "Next"])
+    }
+
+    func testRestartAndProviderChangesSayWhichRunningAgentsStopped() async throws {
+        let root = try root(), box = AgentRuntimeBox()
+        let id = SessionId()
+        do {
+            let sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, callback in
+                let runtime = FakeAgentRuntime(callback); box.install(runtime); return runtime
+            })
+            _ = try await sessions.handle(.create(session: id, project: ProjectId(), provider: .claude))
+            _ = try await sessions.handle(.send(session: id, text: "Launch", model: nil))
+            box.runtime?.callback(.subagents([AgentSubagent(id: "a1", description: "one", background: true),
+                                              AgentSubagent(id: "a2", description: "two", background: true)]))
+            box.runtime?.callback(.status(.idle))
+            _ = try await waitForQueue(sessions, id) { $0.status == .idle && $0.subagents?.count == 2 }
+            sessions.shutdown()
+        }
+        let restarted = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, callback in
+            FakeAgentRuntime(callback)
+        })
+        defer { restarted.shutdown() }
+        let snapshot = try await restarted.handle(.read(session: id))
+        XCTAssertNil(snapshot.subagents)
+        XCTAssertTrue(snapshot.items.contains { $0.kind == .notice && $0.text == "Stopped 2 running agents because the server restarted." })
     }
 
     func testSubmitWhileIdleRepliesWithTheMessageAlreadyInTheConversation() async throws {
@@ -1663,5 +2046,88 @@ extension AgentSessionsTests {
         _ = try await waitForQueue(sessions, id) { $0.items.first { $0.id == "questions" }?.isComplete == true }
         let repeated = try await sessions.handle(.answer(session: id, request: "questions", answers: ["choice": ["A"]], cancelled: false))
         XCTAssertEqual(repeated.items.first { $0.id == "questions" }?.text, "Answered")
+    }
+
+    func testAlwaysAllowedToolsOutliveRestartUntilAskIsChosen() async throws {
+        let root = try root(), box = AgentRuntimeBox()
+        let factory: AgentSessions.Factory = { _, _, _, callback in
+            let runtime = FakeAgentRuntime(callback)
+            runtime.onSend = {
+                callback(.item(AgentChatItem(id: "bash", kind: .approval, text: "Bash", isComplete: false)))
+                callback(.item(AgentChatItem(id: "question", kind: .approval, text: "AskUserQuestion", isComplete: false)))
+                callback(.status(.waiting))
+            }
+            box.install(runtime)
+            return runtime
+        }
+        let sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: factory)
+        let id = SessionId()
+        _ = try await sessions.handle(.create(session: id, project: ProjectId(), provider: .claude))
+        _ = try await sessions.handle(.send(session: id, text: "hello", model: nil))
+        do {
+            _ = try await sessions.handle(.approve(session: id, request: "question", allow: true, always: true))
+            XCTFail("A question is never allowed for the rest of the conversation")
+        } catch {}
+        _ = try await sessions.handle(.approve(session: id, request: "bash", allow: true, always: true))
+        sessions.shutdown()
+
+        let restored = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: factory)
+        defer { restored.shutdown() }
+        _ = try await restored.handle(.send(session: id, text: "again", model: nil))
+        XCTAssertEqual(box.runtime?.alwaysAllowed, ["Bash"])
+        _ = try await restored.handle(.setAccess(session: id, mode: .ask))
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(box.runtime?.alwaysAllowed, [])
+    }
+
+    func testConversationsClosedLongAgoArePrunedWithTheirFiles() async throws {
+        let root = try root()
+        let closed = SessionId(), open = SessionId()
+        do {
+            let sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, callback in FakeAgentRuntime(callback) })
+            _ = try await sessions.handle(.create(session: closed, project: ProjectId(), provider: .claude))
+            _ = try await sessions.handle(.create(session: open, project: ProjectId(), provider: .claude))
+            _ = try await sessions.handle(.close(session: closed))
+            sessions.shutdown()
+        }
+        let outputs = root.appendingPathComponent("outputs/" + closed.description, isDirectory: true)
+        try FileManager.default.createDirectory(at: outputs, withIntermediateDirectories: true)
+        let old = Date().addingTimeInterval(-AgentSessions.closedRetention - 86_400)
+        for id in [closed, open] {
+            try FileManager.default.setAttributes([.modificationDate: old], ofItemAtPath: root.appendingPathComponent(id.description + ".json").path)
+        }
+        let restarted = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, callback in FakeAgentRuntime(callback) })
+        defer { restarted.shutdown() }
+        _ = try await restarted.handle(.read(session: open))
+        do {
+            _ = try await restarted.handle(.read(session: closed))
+            XCTFail("A conversation closed long ago is gone")
+        } catch {}
+        restarted.shutdown()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent(closed.description + ".json").path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: outputs.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent(open.description + ".json").path),
+                      "An open conversation stays however old")
+    }
+
+    func testImportedImagesBecomeAttachmentsAndTurnsAreTimed() async throws {
+        let root = try root()
+        let sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, callback in FakeAgentRuntime(callback) })
+        defer { sessions.shutdown() }
+        let png = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        var saved = AgentHistoryTranscript(items: [
+            AgentChatItem(id: "u1", kind: .user, text: "What is this?", createdAt: start, updatedAt: start),
+            AgentChatItem(id: "a1", kind: .assistant, text: "A logo.", createdAt: start.addingTimeInterval(7), updatedAt: start.addingTimeInterval(7)),
+        ])
+        saved.images["u1"] = [AgentChatAttachment(id: "img", name: "Image 1.png", mimeType: "image/png", data: png)]
+        let request = AgentHistoryImport(session: SessionId(), project: ProjectId(), provider: .claude, providerSession: "claude-1")
+        let imported = try await sessions.importHistory(request, transcript: { [saved] _ in saved })
+        let descriptor = try XCTUnwrap(imported.items.first?.attachments?.first)
+        XCTAssertEqual(descriptor.mimeType, "image/png")
+        let reply = try await sessions.attachment(.init(session: request.session, item: "u1", attachment: descriptor.id))
+        XCTAssertEqual(reply.attachment.data, png)
+        XCTAssertEqual(imported.turns?.first.map { $0.completedAt?.timeIntervalSince($0.startedAt) }, 7)
+        XCTAssertNoThrow(try imported.validate())
     }
 }

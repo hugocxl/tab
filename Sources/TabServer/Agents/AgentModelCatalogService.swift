@@ -37,11 +37,16 @@ actor AgentModelCatalogService {
         self.projectDirectory = projectDirectory
     }
 
+    /// How long a discovery holds before the next request starts the CLI again: a found
+    /// catalog changes rarely, so every pane's menu reuses it for ten minutes; an empty one
+    /// is retried sooner.
+    static func freshness(_ reply: AgentModelCatalogReply) -> TimeInterval { reply.models.isEmpty ? 30 : 600 }
+
     func handle(_ request: AgentModelCatalogRequest) async throws -> AgentModelCatalogReply {
         let directory = try projectDirectory(request.project)
         let provider = request.provider
         let key = Key(project: request.project, provider: provider)
-        if !request.forceRefresh, let cached = cached[key], now().timeIntervalSince(cached.0) < 30 { return cached.1 }
+        if !request.forceRefresh, let cached = cached[key], now().timeIntervalSince(cached.0) < Self.freshness(cached.1) { return cached.1 }
         if let pending = pending[key] {
             if !request.forceRefresh, let cached = cached[key], !cached.1.models.isEmpty { return cached.1 }
             return await completeRefresh(pending, key: key)

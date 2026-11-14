@@ -122,7 +122,19 @@ final class AgentResponseMedia: AgentResponseSection {
 
     private func render(_ state: AgentMediaLoader.State, tile: AgentMediaTile, index: Int) {
         switch state {
-        case .loading: return
+        case .loading: tile.unblock(); return
+        case .blocked(let host, let clickable):
+            let media = items[index]
+            if clickable {
+                tile.block("Image from \(host) · Click to load") { [weak self] in self?.services?.mediaLoader?.approve(media.source) }
+            } else {
+                let openLink = services?.openLink
+                tile.block("Image from \(host) not loaded · Click to open the link") {
+                    if let url = AgentMediaSource(media.source).flatMap({ if case .remote(let url) = $0 { return url } else { return nil } }) {
+                        openLink?(url.absoluteString)
+                    }
+                }
+            }
         case .failed(let message): tile.fail(message)
         case .loaded(let entry):
             guard let image = entry.image else { tile.fail("Image unavailable"); return }

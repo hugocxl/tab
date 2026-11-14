@@ -74,13 +74,17 @@ final class AgentContextIndicator: AgentComposerButton {
         }
     }
 
+    /// Compacts the conversation through the provider's own command; nil when the
+    /// provider has none or can't run it now.
+    var onCompact: (() -> Void)?
+
     @objc private func showDetails() {
         guard window != nil else { return }
         if popover?.isShown == true { popover?.close(); return }
         let controller = NSViewController()
         let background = ThemedBackground(color: { $0.floating })
         background.theme = chatTheme
-        background.frame = NSRect(x: 0, y: 0, width: 310, height: 100)
+        background.frame = NSRect(x: 0, y: 0, width: 310, height: onCompact == nil ? 100 : 136)
         let heading = makeLabel("Context window", font: AppFont.system(13, weight: .medium))
         heading.textColor = chatTheme.fg
         heading.frame = NSRect(x: 16, y: 14, width: 278, height: 20)
@@ -90,6 +94,16 @@ final class AgentContextIndicator: AgentComposerButton {
         detail.textColor = chatTheme.fgMuted
         detail.frame = NSRect(x: 16, y: 42, width: 278, height: 42)
         background.addSubview(detail)
+        if let onCompact {
+            let compact = PillButton("Compact conversation", style: .normal)
+            compact.toolTip = "Summarize the conversation so far to free context"
+            compact.frame = NSRect(x: 16, y: 96, width: 180, height: 28)
+            compact.onPress = { [weak self] in
+                self?.popover?.close()
+                onCompact()
+            }
+            background.addSubview(compact)
+        }
         controller.view = background
         let panel = NSPopover()
         panel.behavior = .transient

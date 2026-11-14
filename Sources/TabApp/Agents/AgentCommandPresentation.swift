@@ -36,9 +36,19 @@ enum AgentCommandPresentation {
         return content
     }
 
+    /// What an open tool shows without output: nothing while it runs, and whether it
+    /// ended before writing any.
+    static func emptyOutput(_ status: AgentToolActivity.Status?) -> String {
+        switch status {
+        case .running: ""
+        case .interrupted: "Interrupted before output"
+        default: "No output."
+        }
+    }
+
     static func output(_ activity: AgentToolActivity, theme: AppTheme) -> NSAttributedString {
         guard let output = activity.output, !output.isEmpty else {
-            let value = text(activity.status == .running ? "" : "No output.", color: theme.fgMuted)
+            let value = text(emptyOutput(activity.status), color: theme.fgMuted)
             value.addAttribute(.font, value: NSFontManager.shared.convert(AppFont.mono(13), toHaveTrait: .italicFontMask), range: NSRange(location: 0, length: value.length))
             return value
         }

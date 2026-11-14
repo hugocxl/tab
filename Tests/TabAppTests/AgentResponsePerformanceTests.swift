@@ -117,4 +117,58 @@ final class AgentResponsePerformanceTests: XCTestCase {
         _ = response.height(for: 640)
         XCTAssertEqual(response.sectionMeasurementCount, afterTheme)
     }
+
+    /// A long answer of plain paragraphs is one prose section; streaming its last
+    /// paragraph must render that paragraph alone and leave the earlier text in place.
+    func testLongProseStreamingRendersOnlyTheTail() throws {
+        _ = NSApplication.shared
+        let theme = AppTheme(systemIsDark: true)
+        let paragraphs = (1...200).map { "Paragraph \($0) with **bold** text and a `code` span that wraps across a line or two." }
+        let response = AgentResponseView(frame: .zero)
+        response.isStreaming = true
+        response.setContent(paragraphs.joined(separator: "\n\n"), theme: theme)
+        _ = response.height(for: 640)
+        let prose = try XCTUnwrap(response.subviews.compactMap { $0 as? AgentResponseProse }.first)
+        XCTAssertEqual(response.subviews.compactMap { $0 as? AgentResponseProse }.count, 1)
+        let before = prose.renderCache.renderedBlocks
+        let start = Date()
+        for token in 1...25 {
+            response.setContent(paragraphs.joined(separator: "\n\n") + String(repeating: " more", count: token), theme: theme)
+            _ = response.height(for: 640)
+        }
+        let elapsed = Date().timeIntervalSince(start)
+        XCTAssertEqual(prose.renderCache.renderedBlocks - before, 25, "Each update renders only the growing paragraph")
+        // About 0.3 s on an M1 in a debug build; a full re-render of every paragraph took 2 s.
+        XCTAssertLessThan(elapsed, 1, "25 updates of a 200-paragraph answer took \(elapsed) s")
+        let streamed = prose.text.attributedString()
+        let fresh = AgentResponseView(frame: .zero)
+        fresh.isStreaming = true
+        fresh.setContent(paragraphs.joined(separator: "\n\n") + String(repeating: " more", count: 25), theme: theme)
+        let reference = try XCTUnwrap(fresh.subviews.compactMap { $0 as? AgentResponseProse }.first).text.attributedString()
+        XCTAssertTrue(streamed.isEqual(to: reference), "Reused blocks must render exactly as a fresh render")
+    }
+
+    func testOnlyTheChangedParagraphsAreReplaced() {
+        let old = NSAttributedString(string: "First\nSecond\nThird")
+        XCTAssertEqual(AgentRichTextView.unchangedParagraphs(old, NSAttributedString(string: "First\nSecond\nThird and more")), 13)
+        XCTAssertEqual(AgentRichTextView.unchangedParagraphs(old, NSAttributedString(string: "First\nSecond\nThird\nFourth")), 13)
+        XCTAssertEqual(AgentRichTextView.unchangedParagraphs(old, NSAttributedString(string: "Other")), 0)
+        let restyled = NSMutableAttributedString(string: "First\nSecond\nThird more")
+        restyled.addAttribute(.foregroundColor, value: NSColor.red, range: NSRange(location: 0, length: 2))
+        XCTAssertEqual(AgentRichTextView.unchangedParagraphs(old, restyled), 0, "Changed attributes in the prefix replace everything")
+    }
+
+    func testTextScaleSizesConversationText() throws {
+        _ = NSApplication.shared
+        defer { AgentTextScale.set(1) }
+        let theme = AppTheme(systemIsDark: true)
+        let normal = AgentMarkdown.render(AgentMarkdown.blocks("Body"), theme: theme)
+        XCTAssertTrue(AgentTextScale.step(larger: true))
+        let larger = AgentMarkdown.render(AgentMarkdown.blocks("Body"), theme: theme)
+        let normalSize = try XCTUnwrap(normal.attribute(.font, at: 0, effectiveRange: nil) as? NSFont).pointSize
+        let largerSize = try XCTUnwrap(larger.attribute(.font, at: 0, effectiveRange: nil) as? NSFont).pointSize
+        XCTAssertGreaterThan(largerSize, normalSize)
+        AgentTextScale.set(AgentTextScale.steps.last ?? 1)
+        XCTAssertFalse(AgentTextScale.step(larger: true), "The scale stops at its largest step")
+    }
 }

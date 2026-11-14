@@ -99,7 +99,12 @@ final class WorkspaceView: ThemedView {
                   self.model.appearance.sidebarGesture == .swipe,
                   !event.modifierFlags.contains(.option), event.hasPreciseScrollingDeltas,
                   event.momentumPhase.isEmpty else { return event }
-            if event.phase.contains(.began) { self.swipeDistance = 0; self.swipeHandled = false }
+            if event.phase.contains(.began) {
+                self.swipeDistance = 0
+                // Wide code, tables and diagrams scroll sideways themselves.
+                self.swipeHandled = Self.scrollsSideways(event, in: self.window)
+            }
+            if self.swipeHandled, self.swipeDistance == 0 { return event }
             guard abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY) else { return event }
             self.swipeDistance += event.scrollingDeltaX
             if !self.swipeHandled, abs(self.swipeDistance) > 65 {
@@ -109,6 +114,17 @@ final class WorkspaceView: ThemedView {
             }
             return nil
         }
+    }
+
+    /// Whether `event` is over a scroll view that has more to show sideways.
+    static func scrollsSideways(_ event: NSEvent, in window: NSWindow?) -> Bool {
+        var view = window?.contentView?.hitTest(event.locationInWindow)
+        while let current = view {
+            if let scroll = current as? NSScrollView, let document = scroll.documentView,
+               document.frame.width > scroll.contentSize.width + 0.5 { return true }
+            view = current.superview
+        }
+        return false
     }
 
     override var wantsUpdateLayer: Bool { true }

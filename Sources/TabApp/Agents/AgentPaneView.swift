@@ -40,6 +40,8 @@ final class AgentPaneView: ThemedView {
     let attachmentStrip = AgentAttachmentStrip(frame: .zero)
     let suggestions = AgentComposerSuggestionsView(frame: .zero)
     let retry = PillButton("Refresh", style: .plain)
+    /// Closes a composer notice; errors offer Refresh instead.
+    let dismissNotice = AgentIconButton(icon: .close, label: "Dismiss message", iconSize: 12)
     let feedback = NSTextField(wrappingLabelWithString: "")
     let transcriptScroll = NSScrollView()
     let composerScroll = NSScrollView()
@@ -79,17 +81,27 @@ final class AgentPaneView: ThemedView {
     private var submitting = false
     private var renderedItems: [AgentChatItem] = []
     private var renderedTurns: [AgentChatTurn] = []
+    private var renderedOmitted = 0
     private var lastViewportWidth: CGFloat = 0
     private var followingEnd = true
     private var scrollMutationDepth = 0
     private var boundsObserver: NSObjectProtocol?
     private let endButton = AgentEndButton()
     var onApproval: ((String, Bool) -> Void)?
+    var onApprovalChoice: ((String, AgentApprovalChoice) -> Void)? {
+        didSet { transcript.onApprovalChoice = { [weak self] id, choice in self?.onApprovalChoice?(id, choice) } }
+    }
     var onRunShellCommand: ((String) -> Void)? { didSet { transcript.onRunShellCommand = onRunShellCommand } }
     var onOpenAttachment: ((String, AgentChatAttachmentDescriptor, Bool) -> Void)? { didSet { transcript.onOpenAttachment = onOpenAttachment } }
     var fetchAttachment: AgentAttachmentCache.Fetch? { didSet { transcript.fetchAttachment = fetchAttachment } }
     var onPreviewAttachments: ((String, [AgentChatAttachmentDescriptor], Int) -> Void)? { didSet { transcript.onPreviewAttachments = onPreviewAttachments } }
     var onOpenFile: ((String, Int?) -> Void)?
+    /// Loads archived items above the oldest shown; nil hides the button.
+    var onLoadEarlier: (() -> Void)? {
+        didSet { transcript.onEarlier = onLoadEarlier == nil ? nil : { [weak self] in self?.onLoadEarlier?() } }
+    }
+    /// Where a new conversation works, such as “Tab on main”, for the empty state.
+    var workspaceDescription: (() -> String?)?
     var workspaceRoot: String? {
         didSet {
             transcript.workspaceRoot = workspaceRoot
@@ -98,6 +110,21 @@ final class AgentPaneView: ThemedView {
     }
     var onOpenToolDiff: ((String, AgentToolActivity) -> Void)?
     var onOpenCheckpoint: ((String, String?) -> Void)?
+    /// Opens the steps of the agent a transcript's Agent tool row started.
+    var onOpenSubagent: ((String) -> Void)? { didSet { transcript.onOpenSubagent = onOpenSubagent } }
+    /// Puts a user message's text in the composer as a new prompt.
+    var onEditPrompt: ((AgentChatItem) -> Void)? { didSet { transcript.onEditPrompt = onEditPrompt } }
+    /// Opens a conversation forked from before a user message.
+    var onForkPrompt: ((AgentChatItem) -> Void)? { didSet { transcript.onForkPrompt = onForkPrompt } }
+    /// Reverts a turn's changed files, all or some.
+    var onRevert: ((AgentTurnCheckpoint, [String]?) -> Void)? { didSet { transcript.onRevert = onRevert } }
+    var onShowFullOutput: ((String) -> Void)? { didSet { transcript.onShowFullOutput = onShowFullOutput } }
+    /// Copies the whole conversation as Markdown.
+    var onCopyConversation: (() -> Void)? { didSet { transcript.conversationMenu = { [weak self] in self?.conversationMenuItems() ?? [] } } }
+    /// Opens a new conversation in place of one that ended.
+    let newConversation = PillButton("New Conversation", style: .plain)
+    /// Submits the failed or stopped turn's prompt again as a new prompt.
+    let retryTurn = PillButton("Retry", style: .plain)
     static let readableWidth: CGFloat = 896
 
     override init(frame frameRect: NSRect) {
@@ -180,11 +207,15 @@ final class AgentPaneView: ThemedView {
         activity.addSubview(activityLabel)
         activityLabel.translatesAutoresizingMaskIntoConstraints = true
         activity.isHidden = true
+        activity.toolTip = "Show what the agent is waiting for"
+        activity.setAccessibilityRole(.button)
+        activity.addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(activityPressed)))
+        NotificationCenter.default.addObserver(self, selector: #selector(textScaleDidChange), name: .agentTextScaleDidChange, object: nil)
         feedback.font = AppFont.small
         feedback.isSelectable = true
         feedback.maximumNumberOfLines = 2
         feedback.lineBreakMode = .byTruncatingTail
-        for child in [feedback, retry] as [NSView] {
+        for child in [feedback, retry, retryTurn, newConversation, dismissNotice] as [NSView] {
             notice.addSubview(child)
             child.translatesAutoresizingMaskIntoConstraints = true
         }
@@ -216,6 +247,9 @@ final class AgentPaneView: ThemedView {
             self.reveal(.item(id))
         }
         retry.isHidden = true
+        retryTurn.isHidden = true
+        newConversation.isHidden = true
+        dismissNotice.isHidden = true
         suggestions.isHidden = true
         selectionToolbar.isHidden = true
         selectionToolbar.onCite = { [weak self] in self?.citeSelection() }
@@ -265,6 +299,12 @@ final class AgentPaneView: ThemedView {
         composer.frame.size.height = max(editorHeight, ceil(usedHeight) + 12)
         emptyTitle.isHidden = !empty
         emptyDetail.isHidden = !empty
+        if empty {
+            let place = workspaceDescription?() ?? ""
+            let detail = place.isEmpty ? "Ask a question or make something new." : "Ask a question or make something new in \(place)."
+            if emptyDetail.stringValue != detail { emptyDetail.stringValue = detail }
+            emptyDetail.toolTip = "Type / for commands, @ for files, or /resume to continue a past conversation."
+        }
         emptyTitle.frame = NSRect(x: left, y: composerCard.frame.minY - 82, width: width, height: 28)
         emptyDetail.frame = NSRect(x: left, y: composerCard.frame.minY - 48, width: width, height: 20)
 
@@ -273,11 +313,15 @@ final class AgentPaneView: ThemedView {
         let gap: CGFloat = 8
         var top = composerCard.frame.minY
         let noticeText = feedback.stringValue
-        notice.isHidden = noticeText.isEmpty && retry.isHidden
+        notice.isHidden = noticeText.isEmpty && retry.isHidden && retryTurn.isHidden && newConversation.isHidden
         feedback.isHidden = notice.isHidden
         if !notice.isHidden {
-            let retryWidth = retry.isHidden ? 0 : ceil(retry.fittingSize.width)
-            let textWidth = max(1, width - 28 - (retryWidth > 0 ? retryWidth + 8 : 0))
+            // One action at a time: Refresh for errors, else Retry for a failed turn.
+            let action = !retry.isHidden ? retry : !retryTurn.isHidden ? retryTurn : newConversation
+            let retryWidth = action.isHidden ? 0 : ceil(action.fittingSize.width)
+            let dismissWidth: CGFloat = dismissNotice.isHidden ? 0 : 24
+            let trailing = (retryWidth > 0 ? retryWidth + 8 : 0) + (dismissWidth > 0 ? dismissWidth + 4 : 0)
+            let textWidth = max(1, width - 28 - trailing)
             let textHeight = min(32, ceil((noticeText as NSString).boundingRect(
                 with: NSSize(width: textWidth, height: .greatestFiniteMagnitude),
                 options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: [.font: AppFont.small]).height))
@@ -285,7 +329,9 @@ final class AgentPaneView: ThemedView {
             top -= gap + height
             notice.frame = NSRect(x: left, y: top, width: width, height: height)
             feedback.frame = NSRect(x: 14, y: floor((height - textHeight) / 2), width: textWidth, height: textHeight)
-            retry.frame = NSRect(x: width - 8 - retryWidth, y: floor((height - 24) / 2), width: retryWidth, height: 24)
+            dismissNotice.frame = NSRect(x: width - 8 - dismissWidth, y: floor((height - 24) / 2), width: dismissWidth, height: 24)
+            let retryRight = width - 8 - (dismissWidth > 0 ? dismissWidth + 4 : 0)
+            action.frame = NSRect(x: retryRight - retryWidth, y: floor((height - 24) / 2), width: retryWidth, height: 24)
         }
         let activityHeight: CGFloat = activity.isHidden ? 0 : 26
         let panelBudget = max(0, top - activityHeight - 64)
@@ -391,8 +437,8 @@ final class AgentPaneView: ThemedView {
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        let point = convert(sender.draggingLocation, from: nil)
-        guard composerCard.frame.contains(point), sender.draggingSourceOperationMask.contains(.copy),
+        // Anywhere in the pane takes a drop, not just the composer.
+        guard sender.draggingSourceOperationMask.contains(.copy),
               sender.draggingPasteboard.availableType(from: [.fileURL, .png, .tiff]) != nil else { return [] }
         composerCard.highlighted = true
         return .copy
@@ -493,7 +539,9 @@ final class AgentPaneView: ThemedView {
         }
     }
 
-    func render(_ snapshot: AgentChatSnapshot) {
+    /// `itemsUnchanged` says the items are those last rendered, as an incremental read
+    /// that changed no item reports, so the transcript skips comparing them.
+    func render(_ snapshot: AgentChatSnapshot, itemsUnchanged: Bool = false) {
         if self.snapshot?.session != snapshot.session { navigationPromptID = nil }
         self.snapshot = snapshot
         taskProgress.update(snapshot)
@@ -511,10 +559,14 @@ final class AgentPaneView: ThemedView {
             let visible = snapshot.items
             let turns = snapshot.turns ?? []
             self.transcript.provider = snapshot.provider
-            if visible != self.renderedItems || turns != self.renderedTurns {
-                self.transcript.update(visible, omittedCount: 0, turns: turns)
+            let omitted = snapshot.omittedItems ?? 0
+            let activityChanged = self.transcript.providerActivity != snapshot.activity
+            self.transcript.providerActivity = snapshot.activity
+            if (!itemsUnchanged && visible != self.renderedItems) || turns != self.renderedTurns || omitted != self.renderedOmitted || activityChanged {
+                self.transcript.update(visible, omittedCount: omitted, turns: turns)
                 self.renderedItems = visible
                 self.renderedTurns = turns
+                self.renderedOmitted = omitted
             }
             self.setActivity(status: snapshot.status, submitting: self.submitting)
             self.layoutSubtreeIfNeeded()
@@ -567,6 +619,45 @@ final class AgentPaneView: ThemedView {
             } catch is CancellationError {
             } catch { self.onActionError?(error.localizedDescription) }
         }
+    }
+
+    @objc private func activityPressed() { revealPendingRequest() }
+
+    var composerHasFocus: Bool { window?.firstResponder === composer }
+
+    /// Scrolls to the next failed tool below the top of the view, wrapping to the first.
+    @discardableResult
+    func revealNextFailure() -> Bool {
+        let failures = (snapshot?.items ?? []).filter { $0.kind == .tool && $0.tool?.status == .failed }.map(\.id)
+        guard !failures.isEmpty else { return false }
+        let top = transcriptScroll.contentView.bounds.minY + 1
+        let below = failures.first { id in
+            guard let entry = transcript.entryID(showing: id), let frame = transcript.frameForEntry(entry) else { return false }
+            return frame.minY > top
+        }
+        return reveal(.item(below ?? failures[0]))
+    }
+
+    /// Page Up and Page Down from the composer page the conversation, not the draft.
+    func scrollTranscriptPage(up: Bool) {
+        let clip = transcriptScroll.contentView
+        let page = max(40, clip.bounds.height - 40)
+        let maxY = max(0, transcript.bounds.height - clip.bounds.height)
+        let y = min(maxY, max(0, clip.bounds.minY + (up ? -page : page)))
+        clip.scroll(to: NSPoint(x: clip.bounds.minX, y: y))
+        transcriptScroll.reflectScrolledClipView(clip)
+    }
+
+    @objc private func textScaleDidChange() {
+        transcript.themeDidChange()
+        needsLayout = true
+    }
+
+    /// Scrolls to the approval or question the agent waits on.
+    @discardableResult
+    func revealPendingRequest() -> Bool {
+        guard let pending = snapshot?.items.first(where: { $0.kind == .approval && !$0.isComplete }) else { return false }
+        return reveal(.item(pending.id))
     }
 
     /// Scrolls to a retained item or turn, expanding its work group if needed.
@@ -666,6 +757,9 @@ final class AgentPaneView: ThemedView {
         modelPicker.chatTheme = theme
         microphone.chatTheme = theme
         retry.setTitleColor(theme.fg)
+        retryTurn.setTitleColor(theme.fg)
+        newConversation.setTitleColor(theme.fg)
+        dismissNotice.chatTheme = theme
         notice.theme = theme
         activity.theme = theme
         promptQueue.theme = theme

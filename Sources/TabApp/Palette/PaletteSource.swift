@@ -219,6 +219,7 @@ final class PaletteSource: PaletteDataSource {
         let agentPane = model.activePane.flatMap { model.controller(for: $0) } is AgentPaneController
         for (id, title) in [(ShortcutId.agentPromptOutline, "Agent: Conversation Prompts…"),
                             (.agentPreviousPrompt, "Agent: Previous Prompt"), (.agentNextPrompt, "Agent: Next Prompt"),
+                            (.agentNextFailure, "Agent: Next Failed Tool"),
                             (.agentHistory, "Agent: Continue Conversation…")] {
             command(id, title, .panes, disabled: !agentPane)
         }

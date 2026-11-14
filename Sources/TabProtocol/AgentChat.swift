@@ -107,6 +107,45 @@ public struct AgentChatItem: Codable, Hashable, Sendable, Identifiable {
     }
 }
 
+extension AgentChatItem {
+    /// `workContext.itemType` of the user-kind row that opens a turn the provider began
+    /// itself, such as Claude answering a background agent that finished. Its text says
+    /// why; nobody typed it. Builds that predate it show it as a user message.
+    public static let providerTurnType = "provider_turn"
+
+    public var isProviderTurn: Bool { kind == .user && workContext?.itemType == Self.providerTurnType }
+}
+
+/// Something holding up the provider that the transcript doesn't show, such as a retry
+/// after an error or a rate limit. Clients that don't know a kind ignore it.
+public struct AgentChatActivity: Codable, Hashable, Sendable {
+    public struct Kind: RawRepresentable, Codable, Hashable, Sendable {
+        public var rawValue: String
+        public init(rawValue: String) { self.rawValue = rawValue }
+        public init(from decoder: Decoder) throws { rawValue = try decoder.singleValueContainer().decode(String.self) }
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.singleValueContainer()
+            try container.encode(rawValue)
+        }
+        /// The provider hit an error and tries again by itself.
+        public static let retrying = Kind(rawValue: "retrying")
+        /// The account's usage limit stops the provider until `resumesAt`.
+        public static let rateLimited = Kind(rawValue: "rateLimited")
+        /// Close to the usage limit; work continues.
+        public static let rateLimitWarning = Kind(rawValue: "rateLimitWarning")
+    }
+
+    public var kind: Kind
+    public var attempt: Int?
+    public var resumesAt: Date?
+    /// What the provider said, one line.
+    public var message: String?
+
+    public init(kind: Kind, attempt: Int? = nil, resumesAt: Date? = nil, message: String? = nil) {
+        self.kind = kind; self.attempt = attempt; self.resumesAt = resumesAt; self.message = message
+    }
+}
+
 /// Server-owned conversation state, including its transcript.
 public struct AgentChatSnapshot: Codable, Hashable, Sendable {
     public var session: SessionId
@@ -129,6 +168,11 @@ public struct AgentChatSnapshot: Codable, Hashable, Sendable {
     public var status: AgentChatStatus
     public var revision: UInt64
     public var items: [AgentChatItem]
+    /// Items the server removed from the start of the transcript to keep it within its
+    /// bounds, over the conversation's life. Absent from servers that predate it.
+    public var omittedItems: Int?
+    /// What holds the provider up now, if anything the transcript doesn't show.
+    public var activity: AgentChatActivity?
 
     public init(session: SessionId, project: ProjectId, provider: AgentChatProvider,
                 providerSession: String? = nil, model: String? = nil,
@@ -154,7 +198,7 @@ public struct AgentChatSnapshot: Codable, Hashable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case session, project, provider, providerSession, model, resolvedModel, contextUsage, subagents, reasoningEffort, accessMode, planMode, queuedPrompts, queuePaused, turns, status, revision, items
+        case session, project, provider, providerSession, model, commands, resolvedModel, contextUsage, subagents, reasoningEffort, accessMode, planMode, queuedPrompts, queuePaused, turns, status, revision, items, omittedItems, activity
     }
 
     public init(from decoder: Decoder) throws {
@@ -167,6 +211,7 @@ public struct AgentChatSnapshot: Codable, Hashable, Sendable {
         provider = try c.decode(AgentChatProvider.self, forKey: .provider)
         providerSession = try c.decodeIfPresent(String.self, forKey: .providerSession)
         model = try c.decodeIfPresent(String.self, forKey: .model)
+        commands = try c.decodeIfPresent([String].self, forKey: .commands)
         resolvedModel = try c.decodeIfPresent(String.self, forKey: .resolvedModel)
         contextUsage = try c.decodeIfPresent(AgentContextUsage.self, forKey: .contextUsage)
         subagents = try c.decodeIfPresent([AgentSubagent].self, forKey: .subagents)
@@ -176,6 +221,8 @@ public struct AgentChatSnapshot: Codable, Hashable, Sendable {
         status = try c.decode(AgentChatStatus.self, forKey: .status)
         revision = try c.decode(UInt64.self, forKey: .revision)
         items = try c.decode([AgentChatItem].self, forKey: .items)
+        omittedItems = try c.decodeIfPresent(Int.self, forKey: .omittedItems)
+        activity = try? c.decodeIfPresent(AgentChatActivity.self, forKey: .activity)
     }
 }
 
@@ -196,7 +243,10 @@ public enum AgentChatRequest: Codable, Hashable, Sendable {
     /// Nil model/effort explicitly restore provider defaults; nil provider keeps the current provider.
     case send(session: SessionId, text: String, model: String?, reasoningEffort: AgentReasoningEffort? = nil,
               provider: AgentChatProvider? = nil, attachments: [AgentChatAttachment]? = nil)
-    case approve(session: SessionId, request: String, allow: Bool)
+    /// `always` also lets the same tool run without asking for the rest of the
+    /// conversation; `reason` tells the agent why it was denied. A server that predates
+    /// them ignores both and answers this request once.
+    case approve(session: SessionId, request: String, allow: Bool, always: Bool? = nil, reason: String? = nil)
     /// Updates host approvals immediately; native provider sandbox policy changes on the next turn.
     case setAccess(session: SessionId, mode: AgentAccessMode)
     /// Selects collaboration mode for the next turn; active turns cannot change mode.
@@ -209,4 +259,12 @@ public enum AgentChatRequest: Codable, Hashable, Sendable {
     /// `from`'s, or else in `from`'s project; a server that predates `project`
     /// ignores it.
     case fork(session: SessionId, from: SessionId, project: ProjectId? = nil)
+}
+
+/// Which Claude tool approvals the user may grant for the rest of a conversation.
+public enum AgentApprovalScope {
+    /// Questions and plan approvals stay the user's to answer each time.
+    public static func canAlwaysAllow(_ tool: String) -> Bool {
+        !tool.isEmpty && tool.utf8.count <= 256 && !["AskUserQuestion", "ExitPlanMode", "Tool approval"].contains(tool)
+    }
 }

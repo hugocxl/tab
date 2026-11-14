@@ -149,7 +149,7 @@ enum AgentMarkdownMath {
             guard (0xE000...0xF8FF).contains(unit), let scalar = UnicodeScalar(unit),
                   let span = spans[Character(scalar)] else { location += 1; continue }
             var attributes = result.attributes(at: location, effectiveRange: nil)
-            let font = attributes[.font] as? NSFont ?? AppFont.system(14)
+            let font = attributes[.font] as? NSFont ?? AgentFont.system(14)
             let color = attributes[.foregroundColor] as? NSColor ?? theme.fg
             attributes[.attachment] = attachment(span, fontSize: font.pointSize, color: color, errorColor: theme.danger, scale: scale)
             attributes[.toolTip] = span.latex
@@ -215,7 +215,7 @@ enum AgentMarkdownMath {
 
     /// remark-math's single-dollar rule: the opening `$` is not followed by whitespace and the
     /// closing `$` is neither preceded by whitespace nor followed by a digit, so prices such as
-    /// "$5 and $6" stay text.
+    /// "$5 and $6" stay text. A closing `$` followed by a letter is a shell variable's.
     private static func singleDollarClose(_ characters: [Character], from start: Int) -> Int? {
         guard start < characters.count, !characters[start].isWhitespace else { return nil }
         var index = start
@@ -226,7 +226,9 @@ enum AgentMarkdownMath {
             if character == "$" {
                 let double = index + 1 < characters.count && characters[index + 1] == "$"
                 let digit = index + 1 < characters.count && characters[index + 1].isNumber
-                if index > start, !characters[index - 1].isWhitespace, !double, !digit { return index }
+                // `$FOO/$BAR`: a `$` that starts another name opens a shell variable, not math.
+                let name = index + 1 < characters.count && (characters[index + 1].isLetter || characters[index + 1] == "_")
+                if index > start, !characters[index - 1].isWhitespace, !double, !digit, !name { return index }
                 if double { return nil }
             }
             index += 1

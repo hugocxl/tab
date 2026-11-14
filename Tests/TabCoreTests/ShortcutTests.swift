@@ -83,7 +83,8 @@ final class ShortcutTests: XCTestCase {
         let keymap = Keymap()
         for action in ShortcutCatalog.keymapActions {
             if [.selectCommandOutput, .detachTerminal, .newAgent, .newClaudeAgent, .newCodexAgent,
-                .agentPromptOutline, .agentPreviousPrompt, .agentNextPrompt, .agentHistory].contains(action) {
+                .agentHistory, .agentNextFailure,
+                .allowAgentApproval, .denyAgentApproval].contains(action) {
                 XCTAssertNil(keymap.chord(action))
                 continue
             }

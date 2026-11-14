@@ -83,13 +83,21 @@ final class AgentWebSearchPanel: NSView, NSTextViewDelegate {
             result.addAttribute(.font, value: font, range: NSRange(location: 0, length: result.length))
             result.addAttribute(.link, value: url, range: NSRange(location: 0, length: result.length))
         }
-        if let snippet = item.snippet.map(collapsedWhitespace), !snippet.isEmpty {
+        if let snippet = item.snippet.map(paragraphs), !snippet.isEmpty {
             result.append(NSAttributedString(string: "\n" + snippet, attributes: [
                 .font: AppFont.system(12), .foregroundColor: theme.fgMuted, .paragraphStyle: paragraph,
             ]))
         }
         result.addAttribute(.paragraphStyle, value: paragraph, range: NSRange(location: 0, length: result.length))
         return result
+    }
+
+    /// A fetched page keeps its paragraphs; whitespace inside each collapses.
+    static func paragraphs(_ text: String) -> String {
+        text.components(separatedBy: CharacterSet.newlines).split { $0.trimmingCharacters(in: .whitespaces).isEmpty }
+            .map { collapsedWhitespace($0.joined(separator: " ")) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n\n")
     }
 
     private static func collapsedWhitespace(_ text: String) -> String {

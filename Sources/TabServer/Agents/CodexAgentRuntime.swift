@@ -68,9 +68,11 @@ internal final class CodexAgentRuntime {
             guard let id = params["itemId"] as? String, let text = params["delta"] as? String else { return }
             var item = items[id] ?? AgentChatItem(id: id, kind: .tool, text: "Command", isComplete: false)
             if item.workContext == nil { item.workContext = .init(providerTurnID: params["turnId"] as? String) }
-            item.detail = (item.detail ?? "") + text
+            // Output streams for as long as a command runs; keep its newest part, bounded,
+            // once, in the tool: a second copy in `detail` would double every update.
+            item.detail = nil
             var activity = item.tool ?? agentToolActivity(name: "commandExecution", input: nil)
-            activity.output = (activity.output ?? "") + text
+            activity.output = Self.bounded((activity.output ?? "") + text)
             item.tool = activity
             items[id] = item
             onEvent(.item(item))
@@ -120,6 +122,10 @@ internal final class CodexAgentRuntime {
             case "mcpToolCall", "dynamicToolCall", "webSearch":
                 item = AgentChatItem(id: id, kind: .tool, text: native["tool"] as? String ?? type,
                                       detail: type == "webSearch" ? agentRuntimeJSON(native) : nil, isComplete: complete)
+            case "exitedReviewMode":
+                // `/review` delivers its findings as the review item's text, not as a message.
+                guard let review = native["review"] as? String, !review.isEmpty else { return }
+                item = AgentChatItem(id: id, kind: .assistant, text: review, isComplete: complete)
             case "collabAgentToolCall":
                 item = AgentChatItem(id: id, kind: .tool, text: native["tool"] as? String ?? "Agent",
                                      detail: agentRuntimeJSON(native["agentsStates"]), isComplete: complete)
@@ -276,11 +282,21 @@ internal final class CodexAgentRuntime {
         }
     }
 
+    /// Command output held per item; the transcript keeps less, so more is never sent.
+    static let maximumCommandOutput = 64 * 1024
+
+    static func bounded(_ output: String) -> String {
+        guard output.utf8.count > maximumCommandOutput else { return output }
+        var tail = output.utf8.suffix(maximumCommandOutput)
+        while let first = tail.first, first & 0xC0 == 0x80 { tail = tail.dropFirst() }
+        return String(decoding: tail, as: UTF8.self)
+    }
+
     private func reasoningID(turnID: String, nativeID: String, stream: String, index: Int) -> String {
         // This is the exact pinned Codex adapter part identity. Summary/content
         // streams and each indexed block must remain independent.
-        let data = try! JSONSerialization.data(withJSONObject: [turnID, nativeID, stream, index], options: [.withoutEscapingSlashes])
-        let id = String(decoding: data, as: UTF8.self)
+        let id = (try? JSONSerialization.data(withJSONObject: [turnID, nativeID, stream, index], options: [.withoutEscapingSlashes]))
+            .map { String(decoding: $0, as: UTF8.self) } ?? "[\(turnID)|\(nativeID)|\(stream)|\(index)]"
         reasoningParts[id] = ReasoningPart(turnID: turnID, nativeID: nativeID, stream: stream, index: index)
         return id
     }

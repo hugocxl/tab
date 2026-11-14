@@ -25,9 +25,12 @@ final class AgentMarkdownMediaTests: XCTestCase {
     }
 
     /// Link services with a loader whose remote fetch is stubbed; `fetched` records each URL.
-    private func services(_ respond: @escaping @Sendable (URL) async throws -> Data) -> (AgentConversationLinkServices, AgentMediaLoader) {
+    /// These tests are about loading, so web images load without a click.
+    private func services(_ respond: @escaping @Sendable (URL) async throws -> Data,
+                          policy: RemoteImagePolicy = .always) -> (AgentConversationLinkServices, AgentMediaLoader) {
         let services = AgentConversationLinkServices()
         let loader = AgentMediaLoader()
+        loader.remotePolicy = { policy }
         loader.fetchRemote = { url, _ in (try await respond(url), "image/png") }
         services.mediaLoader = loader
         return (services, loader)
@@ -228,6 +231,63 @@ final class AgentMarkdownMediaTests: XCTestCase {
         XCTAssertNotNil(entry.image)
     }
 
+    /// The remote-image setting: click to load names the host and fetches on a click;
+    /// never fetches nothing and offers the link; local images load either way.
+    func testRemoteImagePolicyGatesOnlyWebImages() async throws {
+        let bytes = try png(width: 8, height: 8)
+        let fetched = FetchCounter()
+        var opened: [String] = []
+        let (services, loader) = self.services({ _ in fetched.increment(); return bytes }, policy: .clickToLoad)
+        services.openLink = { opened.append($0) }
+        let view = response("![Chart](https://cdn.example.com/chart.png)", services: services)
+        let host = window(with: view)
+        defer { host.close() }
+        let tile = try XCTUnwrap((view.sectionViews.first as? AgentResponseMedia)?.tiles.first as? AgentMediaTile)
+        try await wait { tile.accessibilityLabel() == "Image from cdn.example.com · Click to load" }
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(fetched.value, 0, "Nothing is fetched before the click")
+        XCTAssertTrue(tile.accessibilityPerformPress())
+        try await wait { tile.image != nil }
+        XCTAssertEqual(fetched.value, 1)
+
+        let (neverServices, neverLoader) = self.services({ _ in fetched.increment(); return bytes }, policy: RemoteImagePolicy.never)
+        let never = neverServices
+        never.openLink = { opened.append($0) }
+        let blocked = response("![Chart](https://cdn.example.com/other.png)", services: never)
+        let blockedHost = window(with: blocked)
+        defer { blockedHost.close() }
+        let neverTile = try XCTUnwrap((blocked.sectionViews.first as? AgentResponseMedia)?.tiles.first as? AgentMediaTile)
+        try await wait { neverTile.accessibilityLabel()?.contains("not loaded") == true }
+        XCTAssertTrue(neverTile.accessibilityPerformPress())
+        XCTAssertEqual(opened, ["https://cdn.example.com/other.png"], "Never offers the link only")
+        neverLoader.approve("https://cdn.example.com/other.png")
+        do {
+            _ = try await neverLoader.entry(for: AgentMarkdownMedia(source: "https://cdn.example.com/other.png", kind: .image))
+            XCTFail("Never loads no web image, even for a preview")
+        } catch {}
+        XCTAssertEqual(fetched.value, 1)
+        let local = try await neverLoader.entry(for: AgentMarkdownMedia(source: try dataURI(width: 3, height: 2), kind: .image))
+        XCTAssertEqual(local.pixelSize, CGSize(width: 3, height: 2), "Inline and project images are unaffected")
+        _ = loader
+    }
+
+    func testLinkIconsAreNotFetchedWhileStreamingOrWhenRemoteImagesAreOff() throws {
+        _ = NSApplication.shared
+        var calls = 0
+        let icons = AgentLinkFavicon(fetch: { _ in calls += 1; throw URLError(.badURL) })
+        let url = try XCTUnwrap(URL(string: "https://example.org/page"))
+        XCTAssertNotNil(icons.image(for: url, color: .blue, fetch: false), "A globe stands in while the message streams")
+        icons.policy = { .never }
+        XCTAssertNotNil(icons.image(for: url, color: .blue))
+        XCTAssertEqual(calls, 0)
+    }
+
+    func testRemoteImageSettingIsOptionalAndToleratesNewerValues() throws {
+        XCTAssertEqual(try Settings.decode(Data("{}".utf8)).agents.remoteImages, .clickToLoad)
+        XCTAssertEqual(try Settings.decode(Data(#"{"agents":{"remoteImages":"never"}}"#.utf8)).agents.remoteImages, .never)
+        XCTAssertEqual(try Settings.decode(Data(#"{"agents":{"remoteImages":"askEachTime","future":1}}"#.utf8)).agents.remoteImages, .clickToLoad)
+    }
+
     func testRemoteSessionSendsNoCookiesOrCredentialsAndTimesOut() {
         let configuration = AgentMediaLoader.session.configuration
         XCTAssertFalse(configuration.httpShouldSetCookies)
@@ -388,4 +448,11 @@ private final class Flag: @unchecked Sendable {
     private var value = false
     var isSet: Bool { lock.withLock { value } }
     func set() async { lock.withLock { value = true } }
+}
+
+private final class FetchCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+    var value: Int { lock.withLock { count } }
+    func increment() { lock.withLock { count += 1 } }
 }

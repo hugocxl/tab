@@ -24,6 +24,20 @@ extension AgentPaneController {
         case .agentPreviousPrompt: surface.navigatePrompt(previous: true); return true
         case .agentNextPrompt: surface.navigatePrompt(previous: false); return true
         case .agentHistory: showHistory(); return true
+        case .stopAgent: return performKeyboardStop()
+        case .allowAgentApproval: return performApprovalShortcut(allow: true)
+        case .denyAgentApproval: return performApprovalShortcut(allow: false)
+        // The font-size keys size conversation text here, as they size a terminal's.
+        case .agentNextFailure: return surface.revealNextFailure()
+        case .submitAgentAnswers: return surface.questions.submitAnswers()
+        // The terminal's prompt and scroll keys, while the transcript (not the composer) has the keyboard.
+        case .previousPrompt, .nextPrompt:
+            guard !surface.composerHasFocus else { return false }
+            surface.navigatePrompt(previous: id == .previousPrompt)
+            return true
+        case .scrollToBottom: surface.scrollToEnd(); return true
+        case .increaseFontSize: AgentTextScale.step(larger: true); return true
+        case .decreaseFontSize: AgentTextScale.step(larger: false); return true
         default: break
         }
         if id == .toggleAgentPlan { togglePlanMode(); return true }
@@ -123,6 +137,7 @@ extension AgentPaneView {
     /// The plain text Find searches in `item`: a mounted row's own text, so the matches
     /// map exactly onto what it paints, else an off-screen render of the item.
     func renderedFindText(_ item: AgentChatItem) -> String? {
+        if AgentConversationFindModel.searchesPlainText(item) { return nil }
         if let row = transcript.mountedRow(showing: item) { return row.findText.plainText }
         return findTexts.text(for: item, theme: theme)
     }
@@ -182,6 +197,11 @@ extension AgentPaneView {
         guard let entryID = transcript.entryID(showing: match.itemID) else { return }
         if transcript.mountedRow(entryID) == nil {
             scroll(to: AgentTranscriptAnchor(rowID: entryID, localOffset: 0, fallback: findVisibleRect.minY))
+        }
+        // A tool call's match is in its command or output: open the row and bring it into view.
+        if let row = transcript.mountedRow(entryID), row.revealForFind() {
+            scroll(to: AgentTranscriptAnchor(rowID: entryID, localOffset: 0, fallback: findVisibleRect.minY))
+            return
         }
         if let row = transcript.mountedRow(entryID), let current = currentFindMatch(),
            row.revealFindText(current.view, range: current.range) {

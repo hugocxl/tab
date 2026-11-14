@@ -27,14 +27,26 @@ final class AgentCompletedWorkRow: AgentTimelineRow {
     /// Set when the turn has no answer to show its duration below, so the summary says it.
     var duration: TimeInterval?
     private var toolCount = 0
+    private var failedCount = 0
     private var messageCount = 0
     private var icons: [AppIcon] = []
 
+    /// A call the agent made. Thinking, plans, todo updates and compaction are tool
+    /// items on the wire, but they aren't calls.
+    static func isToolCall(_ item: AgentChatItem) -> Bool {
+        guard item.kind == .tool else { return false }
+        return !["reasoning", "proposed_plan", "todo_list", "compaction", "error"].contains(item.workContext?.itemType ?? "")
+    }
+
     override func update(_ items: [AgentChatItem]) {
-        toolCount = items.filter { $0.kind == .tool }.count
+        let calls = items.filter(Self.isToolCall)
+        toolCount = calls.count
+        failedCount = calls.filter {
+            AgentToolRowPresentation.indicatesFailure($0.tool, status: AgentToolRowPresentation.status($0))
+        }.count
         messageCount = items.filter { $0.kind == .assistant }.count
         var icons: [AppIcon] = []
-        for item in items where item.kind == .tool {
+        for item in calls {
             let icon = Self.icon(item.tool?.category)
             if !icons.contains(icon) { icons.append(icon) }
         }
@@ -42,12 +54,13 @@ final class AgentCompletedWorkRow: AgentTimelineRow {
         updateDisclosure()
     }
 
-    /// `10 tool calls, 4 messages`, naming only what the work holds.
+    /// `10 tool calls, 4 messages · 1 failed`, naming only what the work holds.
     var summary: String {
         var parts: [String] = []
         if toolCount > 0 { parts.append("\(toolCount) tool call" + (toolCount == 1 ? "" : "s")) }
         if messageCount > 0 { parts.append("\(messageCount) message" + (messageCount == 1 ? "" : "s")) }
         var label = parts.isEmpty ? "Completed work" : parts.joined(separator: ", ")
+        if failedCount > 0 { label += " · \(failedCount) failed" }
         if let duration { label += " · " + AgentTurnTime.duration(duration) }
         if turn?.status == .failed { label += " · Failed" }
         return label
@@ -90,6 +103,7 @@ final class AgentCompletedWorkRow: AgentTimelineRow {
         disclosure.attributedTitle = title
         disclosure.contentTintColor = theme.fgDim
         disclosure.setAccessibilityLabel((expanded ? "Collapse " : "Expand ") + label)
+        disclosure.setAccessibilityExpanded(expanded)
     }
 
     override func preferredHeight(for width: CGFloat) -> CGFloat { 30 }

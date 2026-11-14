@@ -4,6 +4,9 @@ import TabProtocol
 
 internal enum AgentRuntimeEvent: Sendable {
     case item(AgentChatItem)
+    /// Replaces an item the conversation still holds; one it no longer has, as after
+    /// trimming, stays gone rather than coming back out of order.
+    case itemUpdate(AgentChatItem)
     case toolItem(AgentChatItem, images: [AgentChatAttachment])
     case textDelta(id: String, text: String)
     case status(AgentChatStatus)
@@ -11,8 +14,18 @@ internal enum AgentRuntimeEvent: Sendable {
     /// The latest message the provider wrote to its conversation, where a fork made now begins.
     case providerMessage(String)
     case contextUsage(AgentContextUsage)
-    /// The agents still running for the conversation, replacing the previous list.
+    /// The agents still running for the conversation, then those finished since the
+    /// user's last prompt, replacing the previous list.
     case subagents([AgentSubagent])
+    /// An agent's own steps so far, keyed by the tool call that started it.
+    case subagentSteps(toolUseID: String, items: [AgentChatItem])
+    /// The provider began a turn nobody sent, such as Claude answering a background
+    /// agent that finished; `reason` says why when it is known.
+    case providerTurn(reason: String)
+    /// What holds the provider up now, or nil when nothing does.
+    case activity(AgentChatActivity?)
+    /// What the turn that just ended used, and why it stopped.
+    case turnUsage(AgentTurnUsage)
     case resolvedModel(String)
     case commands([String])
     case planMode(Bool)
@@ -55,6 +68,14 @@ internal final class AgentRuntime: @unchecked Sendable {
     /// follow-up into the running turn at a tool boundary, or else answers it in
     /// its own turn after the current result; only the echo tells which.
     private var unconsumedClaudeInputs: Set<String> = []
+    /// Retries the provider announced since its last successful output.
+    private var retryAttempts = 0
+    /// The running turn is one the provider began on its own, such as Claude answering
+    /// a background agent that finished.
+    private var providerInitiatedTurn = false
+    /// Sends that arrived during a provider-initiated turn; they start when it ends,
+    /// so a queued prompt's delivery is never refused or folded into that turn.
+    private var deferredSends: [(Error?) -> Void] = []
     private var ready = false
     private var sequence = 0
     private var pending: [String: (Result<[String: Any], Error>) -> Void] = [:]
@@ -119,8 +140,24 @@ internal final class AgentRuntime: @unchecked Sendable {
               attachments: [StagedAgentAttachment]) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             queue.async {
+                self.startSend(text: text, model: model, reasoningEffort: reasoningEffort, attachments: attachments,
+                               continuation: continuation)
+            }
+        }
+    }
+
+    private func startSend(text: String, model: String?, reasoningEffort: AgentReasoningEffort?,
+                           attachments: [StagedAgentAttachment], continuation: CheckedContinuation<Void, Error>) {
                 guard !self.closed, !self.failed else {
                     continuation.resume(throwing: AgentRuntimeError("Agent is closed or failed; open a new agent pane to resume."))
+                    return
+                }
+                if self.busy, self.providerInitiatedTurn {
+                    self.deferredSends.append { error in
+                        if let error { continuation.resume(throwing: error); return }
+                        self.startSend(text: text, model: model, reasoningEffort: reasoningEffort,
+                                       attachments: attachments, continuation: continuation)
+                    }
                     return
                 }
                 guard !self.busy else {
@@ -161,8 +198,6 @@ internal final class AgentRuntime: @unchecked Sendable {
                     self.fail(error.localizedDescription)
                     continuation.resume(throwing: error)
                 }
-            }
-        }
     }
 
     func steer(text: String, attachments: [StagedAgentAttachment]) async throws {
@@ -205,7 +240,10 @@ internal final class AgentRuntime: @unchecked Sendable {
         processGeneration = UUID()
         process?.stop()
         process = nil
-        claude.endProcess()
+        let stopped = claude.endProcess()
+        if stopped > 0 {
+            onEvent(.item(AgentChatItem(kind: .notice, text: Self.stoppedAgents(stopped, because: "the model or reasoning effort changed, which restarts Claude"))))
+        }
         pending.removeAll() // Only non-awaited interrupt acknowledgments can remain after an idle turn.
         resumeSession = session
         ready = false
@@ -298,6 +336,7 @@ internal final class AgentRuntime: @unchecked Sendable {
                 do {
                     _ = try result.get()
                     self.claude.beginTurn()
+                    self.claude.clearFinishedSubagents()
                     try self.write(["type": "user", "message": ["role": "user", "content": AgentAttachments.claudeContent(text: text, attachments: attachments)],
                                      "parent_tool_use_id": NSNull(), "session_id": self.claude.sessionID ?? self.resumeSession ?? ""])
                     self.hasSubmittedTurn = true
@@ -430,6 +469,8 @@ internal final class AgentRuntime: @unchecked Sendable {
     }
 
     private var planMode = false
+    /// Tools the user allowed for the rest of the conversation; never questions or plans.
+    private var alwaysAllowedTools: Set<String> = []
     private var planModeConfigured = false
     private var appliedClaudePlanMode = false
 
@@ -438,11 +479,44 @@ internal final class AgentRuntime: @unchecked Sendable {
     }
 
     func approve(request: String, allow: Bool) async throws {
+        try await approve(request: request, allow: allow, always: false, reason: nil)
+    }
+
+    func approve(request: String, allow: Bool, always: Bool, reason: String?) async throws {
         try await perform {
             // A mode change may have answered the same request while a manual
             // response was in flight. Return the real, already-completed outcome.
             if self.approvals[request] == nil, self.completedApprovals.contains(request) { return }
-            try self.resolveApproval(request, allow: allow)
+            guard let approval = self.approvals[request] else { throw AgentRuntimeError("Approval is no longer pending.") }
+            if reason != nil, self.provider != .claude {
+                throw AgentRuntimeError("Codex can't take a reason with a denial.")
+            }
+            guard always else {
+                try self.resolveApproval(request, allow: allow, reason: reason)
+                return
+            }
+            guard allow, self.provider == .claude, let tool = approval["tool_name"] as? String,
+                  AgentApprovalScope.canAlwaysAllow(tool) else {
+                throw AgentRuntimeError("This request can only be allowed once.")
+            }
+            self.alwaysAllowedTools.insert(tool)
+            try self.resolveApproval(request, allow: true)
+            self.onEvent(.item(AgentChatItem(kind: .notice, text: "\(tool) runs without asking for the rest of this conversation.")))
+            try self.allowPendingAutomatically()
+        }
+    }
+
+    func setAlwaysAllowed(_ tools: Set<String>) async throws {
+        try await perform {
+            self.alwaysAllowedTools = tools
+            try self.allowPendingAutomatically()
+        }
+    }
+
+    private func allowPendingAutomatically() throws {
+        for id in approvals.keys.sorted() {
+            guard let approval = approvals[id], automaticallyAllows(approval) else { continue }
+            try resolveApproval(id, allow: true, automatic: true)
         }
     }
 
@@ -451,16 +525,14 @@ internal final class AgentRuntime: @unchecked Sendable {
     func setAccess(_ mode: AgentAccessMode) async throws {
         try await perform {
             self.accessMode = mode
-            for id in self.approvals.keys.sorted() {
-                guard let approval = self.approvals[id], self.automaticallyAllows(approval) else { continue }
-                try self.resolveApproval(id, allow: true, automatic: true)
-            }
+            try self.allowPendingAutomatically()
         }
     }
 
     private func automaticallyAllows(_ approval: [String: Any]) -> Bool {
         let tool = approval["tool_name"] as? String
         guard tool != "AskUserQuestion", tool != "ExitPlanMode" else { return false }
+        if provider == .claude, let tool, alwaysAllowedTools.contains(tool) { return true }
         switch accessMode {
         case .ask: return false
         case .fullAccess: return true
@@ -470,12 +542,14 @@ internal final class AgentRuntime: @unchecked Sendable {
         }
     }
 
-    private func resolveApproval(_ id: String, allow: Bool, automatic: Bool = false) throws {
+    private func resolveApproval(_ id: String, allow: Bool, automatic: Bool = false, reason: String? = nil) throws {
         guard let approval = approvals[id] else { throw AgentRuntimeError("Approval is no longer pending.") }
         if provider == .claude {
             let input = approval["input"] as? [String: Any] ?? [:]
             var response: [String: Any] = ["behavior": allow ? "allow" : "deny"]
-            if allow { response["updatedInput"] = input } else { response["message"] = "User declined tool execution." }
+            let reason = reason?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if allow { response["updatedInput"] = input }
+            else { response["message"] = reason.isEmpty ? "User declined tool execution." : "User declined tool execution: " + reason }
             if let toolID = approval["tool_use_id"] { response["toolUseID"] = toolID }
             try write(["type": "control_response", "response": ["subtype": "success", "request_id": id, "response": response]])
         } else {
@@ -512,7 +586,10 @@ internal final class AgentRuntime: @unchecked Sendable {
                     self.processGeneration = UUID()
                     self.process?.stop()
                     self.process = nil
-                    self.claude.endProcess()
+                    let stopped = self.claude.endProcess()
+                    if stopped > 0 {
+                        self.onEvent(.item(AgentChatItem(kind: .notice, text: Self.stoppedAgents(stopped, because: "Claude was restarted to stop the response"))))
+                    }
                     self.ready = false
                     let count = self.unconsumedClaudeInputs.count
                     self.unconsumedClaudeInputs.removeAll()
@@ -546,6 +623,7 @@ internal final class AgentRuntime: @unchecked Sendable {
         closed = true
         process?.stop()
         resolvePending(AgentRuntimeError("Agent stopped."))
+        resolveDeferredSends(AgentRuntimeError("Agent stopped."))
         finishApprovals()
         onEvent(.status(.closed))
     }
@@ -646,7 +724,23 @@ internal final class AgentRuntime: @unchecked Sendable {
         if type == "user", message["isReplay"] as? Bool == true, let input = message["uuid"] as? String {
             unconsumedClaudeInputs.remove(input.lowercased())
         }
+        // Output with no turn running is a turn Claude began itself, such as its answer
+        // to a background agent that finished. It gets a turn, so it can be watched and stopped.
+        if !busy, ready, type == "stream_event" || type == "assistant",
+           message["parent_tool_use_id"] == nil || message["parent_tool_use_id"] is NSNull {
+            busy = true
+            providerInitiatedTurn = true
+            interruptRequested = false
+            claude.beginTurn()
+            let reason = claude.lastFinishedBackground.map { "Background agent “\($0.description)” finished" }
+                ?? "Claude continued on its own"
+            onEvent(.providerTurn(reason: reason))
+            onEvent(.status(.working))
+        }
         claude.interrupted = interruptRequested
+        if type == "rate_limit_event", let info = message["rate_limit_info"] as? [String: Any] {
+            onEvent(.activity(Self.rateLimitActivity(info)))
+        }
         claude.receive(message, source: source)
         if type == "result" {
             if message["is_error"] as? Bool == true, !interruptRequested {
@@ -698,6 +792,9 @@ internal final class AgentRuntime: @unchecked Sendable {
                 onEvent(.status(approvals.isEmpty && questions.isEmpty ? (busy ? .working : .idle) : .waiting))
             }
         }
+        // Agents Codex starts run in threads of their own; their notifications must not
+        // end or fill this conversation's turn.
+        if message["id"] == nil, let thread = params["threadId"] as? String, let threadID, thread != threadID { return }
         if method == "thread/tokenUsage/updated", params["threadId"] as? String != threadID { return }
         codex.receive(message, source: source)
         if method == "turn/started", let turn = params["turn"] as? [String: Any] { turnID = turn["id"] as? String }
@@ -707,6 +804,16 @@ internal final class AgentRuntime: @unchecked Sendable {
                 let error = turn["error"] as? [String: Any]
                 fail(error?["message"] as? String ?? "Codex turn failed.")
             } else { completeTurn() }
+        }
+        if method == "error", params["willRetry"] as? Bool == true {
+            retryAttempts += 1
+            let error = params["error"] as? [String: Any]
+            onEvent(.activity(AgentChatActivity(kind: .retrying, attempt: retryAttempts,
+                message: (error?["message"] as? String).flatMap(agentSubagentText))))
+        } else if method != nil, method != "error", retryAttempts > 0 {
+            // The provider got through.
+            retryAttempts = 0
+            onEvent(.activity(nil))
         }
         if method == "error", params["willRetry"] as? Bool != true, !interruptRequested {
             let error = params["error"] as? [String: Any]
@@ -722,11 +829,46 @@ internal final class AgentRuntime: @unchecked Sendable {
             onEvent(.status(.working))
             return
         }
+        let deferred = deferredSends
+        deferredSends.removeAll()
+        providerInitiatedTurn = false
         busy = false
         interruptRequested = false
         turnID = nil
         finishApprovals()
+        // A send that waited for this turn starts now, so its own turn follows without
+        // an idle moment in which the queue could deliver something else.
+        if let next = deferred.first {
+            next(nil)
+            for send in deferred.dropFirst() { send(nil) }
+            return
+        }
         onEvent(.status(.idle))
+    }
+
+    private func resolveDeferredSends(_ error: Error) {
+        let deferred = deferredSends
+        deferredSends.removeAll()
+        providerInitiatedTurn = false
+        for send in deferred { send(error) }
+    }
+
+    /// Claude's `rate_limit_event`: a warning near the limit, a stop at it, else nothing.
+    static func rateLimitActivity(_ info: [String: Any]) -> AgentChatActivity? {
+        let resets = (info["resetsAt"] as? NSNumber).map { Date(timeIntervalSince1970: $0.doubleValue) }
+        switch info["status"] as? String {
+        case "allowed_warning":
+            let used = (info["utilization"] as? NSNumber).map { "\(Int(($0.doubleValue * 100).rounded()))% of the usage limit used" }
+            return AgentChatActivity(kind: .rateLimitWarning, resumesAt: resets, message: used)
+        case "rejected":
+            return AgentChatActivity(kind: .rateLimited, resumesAt: resets, message: "Usage limit reached")
+        default: return nil
+        }
+    }
+
+    /// A transcript note for agents that stopped with their provider process.
+    static func stoppedAgents(_ count: Int, because reason: String) -> String {
+        (count == 1 ? "Stopped 1 running agent" : "Stopped \(count) running agents") + " because " + reason + "."
     }
 
     private func finishApprovals() {
@@ -746,6 +888,7 @@ internal final class AgentRuntime: @unchecked Sendable {
         guard !failed, !closed else { return }
         failed = true
         busy = false
+        resolveDeferredSends(AgentRuntimeError(message))
         process?.stop()
         finishApprovals()
         onEvent(.failure(message))

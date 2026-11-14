@@ -11,6 +11,12 @@ internal enum AgentAttachments {
     static let imageTypes: Set<String> = ["image/png", "image/jpeg", "image/gif", "image/webp"]
 
     static func stage(_ attachments: [AgentChatAttachment], root: URL) throws -> [StagedAgentAttachment] {
+        try validateForStaging(attachments)
+        return try write(attachments, root: root)
+    }
+
+    /// The checks `stage` makes before writing anything, cheap enough for the sessions queue.
+    static func validateForStaging(_ attachments: [AgentChatAttachment]) throws {
         try AgentChatAttachment.validate(attachments)
         // Reject unsupported native images explicitly instead of silently sending them as text.
         for attachment in attachments where attachment.mimeType.lowercased().hasPrefix("image/") {
@@ -18,7 +24,16 @@ internal enum AgentAttachments {
                 throw AgentRuntimeError("Unsupported image type for \(attachment.name): \(attachment.mimeType). Use PNG, JPEG, GIF or WebP.")
             }
         }
-        return try write(attachments, root: root)
+    }
+
+    /// Writes and records `attachments` on a blocking worker, off the sessions queue.
+    static func stageOffQueue(_ attachments: [AgentChatAttachment], root: URL) async throws -> [StagedAgentAttachment] {
+        guard !attachments.isEmpty else { return [] }
+        return try await runBlocking {
+            let staged = try write(attachments, root: root)
+            try record(staged, root: root)
+            return staged
+        }
     }
 
     static func stageToolImages(_ attachments: [AgentChatAttachment], root: URL) throws -> [StagedAgentAttachment] {

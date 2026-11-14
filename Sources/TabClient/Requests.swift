@@ -34,6 +34,12 @@ extension ServerClient {
         return attachment
     }
 
+    public func agentConversation(_ request: AgentConversationRequest) async throws -> AgentConversationReply {
+        let reply = try await self.request(.agentConversation(request), timeout: max(defaultTimeout, 60))
+        guard case .agentConversation(let value) = reply else { throw unexpected(reply) }
+        return value
+    }
+
     public func agentCheckpoint(_ request: AgentCheckpointRequest) async throws -> AgentCheckpointReply {
         let reply = try await self.request(.agentCheckpoint(request), timeout: max(defaultTimeout, 60))
         guard case .agentCheckpoint(let checkpoint) = reply else { throw unexpected(reply) }

@@ -29,6 +29,77 @@ final class AgentChatProtocolTests: XCTestCase {
         }
     }
 
+    func testClaudeSlashCommandsCrossTheWireAndOlderSnapshotsStillDecode() throws {
+        var snapshot = AgentChatSnapshot(session: SessionId(), project: ProjectId(), provider: .claude)
+        snapshot.commands = ["compact", "review"]
+        let encoded = try WireJSON.encode(snapshot)
+        XCTAssertEqual(try WireJSON.decode(AgentChatSnapshot.self, from: encoded).commands, ["compact", "review"])
+        XCTAssertEqual(try WireJSON.decode(AgentChatSnapshot.self, from: encoded), snapshot)
+        snapshot.commands = nil
+        let older = try WireJSON.encode(snapshot)
+        XCTAssertFalse(String(decoding: older, as: UTF8.self).contains("commands"))
+        XCTAssertNil(try WireJSON.decode(AgentChatSnapshot.self, from: older).commands)
+    }
+
+    func testConversationRequestsRoundTripAndAnOlderPeerSeesAnUnknownRequest() throws {
+        let session = SessionId()
+        let steps = AgentSubagentSteps(toolUseID: "toolu_1", items: [AgentChatItem(id: "s", kind: .assistant, text: "DONE")])
+        let messages: [Message] = [
+            .request(RequestId(4), .agentConversation(.subagentSteps(session: session, toolUseID: "toolu_1"))),
+            .reply(RequestId(4), .agentConversation(.subagentSteps(steps))),
+        ]
+        for message in messages {
+            try message.validate()
+            XCTAssertEqual(try WireJSON.decode(Message.self, from: WireJSON.encode(message)), message)
+        }
+        // A request body this build can't read becomes `unknown`, which servers answer `unsupported`.
+        let future = #"{"type":"request","id":5,"body":{"type":"agentConversation","request":{"futureRequest":{"session":"\#(session)"}}}}"#
+        guard case .request(_, .unknown(let type)) = try WireJSON.decode(Message.self, from: Data(future.utf8)) else {
+            return XCTFail("An unreadable conversation request must decode as unknown")
+        }
+        XCTAssertEqual(type, "agentConversation")
+        XCTAssertThrowsError(try AgentConversationRequest.subagentSteps(session: session, toolUseID: "").validate())
+    }
+
+    func testIncrementalReadRoundTripsAndAppliesOnlyToItsBase() throws {
+        let session = SessionId(), project = ProjectId()
+        var base = AgentChatSnapshot(session: session, project: project, provider: .claude, status: .working, revision: 5,
+                                     items: [.init(id: "a", kind: .user, text: "A"), .init(id: "b", kind: .assistant, text: "B")])
+        base.turns = [AgentChatTurn(userItemID: "a", startedAt: Date(timeIntervalSince1970: 1))]
+        var now = base
+        now.revision = 7
+        now.items = [.init(id: "b", kind: .assistant, text: "B, more"), .init(id: "c", kind: .tool, text: "Read")]
+        // Reordered: the server sends every ID in its current order.
+        let delta = AgentChatDelta(snapshot: now, since: 5, itemIDs: ["b", "a", "c"])
+        let messages: [Message] = [
+            .request(RequestId(2), .agentConversation(.readSince(session: session, revision: 5))),
+            .reply(RequestId(2), .agentConversation(.delta(delta))),
+        ]
+        for message in messages {
+            try message.validate()
+            XCTAssertEqual(try WireJSON.decode(Message.self, from: WireJSON.encode(message)), message)
+        }
+        let applied = try XCTUnwrap(delta.applied(to: base))
+        XCTAssertEqual(applied.items.map(\.id), ["b", "a", "c"])
+        XCTAssertEqual(applied.items.map(\.text), ["B, more", "A", "Read"])
+        XCTAssertEqual(applied.revision, 7)
+        var stale = base
+        stale.revision = 4
+        XCTAssertNil(delta.applied(to: stale), "A delta applies only to the revision it was read against")
+        let unknown = AgentChatDelta(snapshot: now, since: 5, itemIDs: ["a", "z"])
+        XCTAssertNil(unknown.applied(to: base), "An ID without an item means a full read")
+    }
+
+    func testFinishedSubagentFieldsAreOptionalOnTheWire() throws {
+        var agent = AgentSubagent(id: "a", toolUseID: "t", description: "Audit", status: .failed,
+                                  startedAt: Date(timeIntervalSince1970: 10), finishedAt: Date(timeIntervalSince1970: 22), steps: 3)
+        XCTAssertEqual(try WireJSON.decode(AgentSubagent.self, from: WireJSON.encode(agent)), agent)
+        agent.finishedAt = nil; agent.steps = nil
+        let older = String(decoding: try WireJSON.encode(agent), as: UTF8.self)
+        XCTAssertFalse(older.contains("finishedAt"))
+        XCTAssertFalse(older.contains("steps"))
+    }
+
     func testAForkWithoutAProjectReadsTheSameOnEitherSide() throws {
         let fork = SessionId(), source = SessionId()
         let encoded = try JSONEncoder().encode(AgentChatRequest.fork(session: fork, from: source))
@@ -143,5 +214,24 @@ final class AgentChatProtocolTests: XCTestCase {
         XCTAssertThrowsError(try invalid.validate())
         invalid.contextUsage = .init(usedTokens: 0, contextWindow: 0)
         XCTAssertThrowsError(try invalid.validate())
+    }
+
+    func testApprovalScopeAndReasonAreOptionalOnTheWire() throws {
+        let session = SessionId()
+        let always = AgentChatRequest.approve(session: session, request: "bash", allow: true, always: true)
+        let denied = AgentChatRequest.approve(session: session, request: "bash", allow: false, reason: "Not now")
+        for request in [always, denied] {
+            let encoded = try WireJSON.encode(request)
+            XCTAssertEqual(try WireJSON.decode(AgentChatRequest.self, from: encoded), request)
+            try request.validate()
+        }
+        // What an older app sends, and what an older server sees, is the plain answer.
+        let plain = try WireJSON.encode(AgentChatRequest.approve(session: session, request: "bash", allow: true))
+        XCTAssertFalse(String(decoding: plain, as: UTF8.self).contains("always"))
+        XCTAssertThrowsError(try AgentChatRequest.approve(session: session, request: "bash", allow: false, always: true).validate())
+        XCTAssertThrowsError(try AgentChatRequest.approve(session: session, request: "bash", allow: true, reason: "Why").validate())
+        XCTAssertFalse(AgentApprovalScope.canAlwaysAllow("AskUserQuestion"))
+        XCTAssertFalse(AgentApprovalScope.canAlwaysAllow("ExitPlanMode"))
+        XCTAssertTrue(AgentApprovalScope.canAlwaysAllow("Bash"))
     }
 }

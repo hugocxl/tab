@@ -5,11 +5,16 @@ import TabProtocol
 enum AgentToolPresentation {
     /// The tool's name as a header shows it: `Bash`, `Read`, or a provider's own tool name.
     static func displayName(_ activity: AgentToolActivity) -> String {
+        // An MCP tool, `mcp__server__tool`, keeps its server's name.
+        if let raw = activity.name, raw.hasPrefix("mcp__") {
+            let parts = raw.components(separatedBy: "__")
+            if parts.count >= 3, !parts[1].isEmpty { return parts[2...].joined(separator: "__") + " (" + parts[1] + ")" }
+        }
         let name = activity.name.map { $0.components(separatedBy: "__").last ?? $0 } ?? ""
         switch activity.category ?? .other {
         case .command: return "Bash"
         case .read: return "Read"
-        case .edit: return "Edit"
+        case .edit: return editTitle(activity, name: name)
         case .search: return isTitleCased(name) ? name : "Search"
         case .web: return isTitleCased(name) ? name : "Web"
         case .subagent: return "Agent"
@@ -19,6 +24,34 @@ enum AgentToolPresentation {
             let words = name.replacingOccurrences(of: "_", with: " ").replacingOccurrences(of: "-", with: " ")
             return words.prefix(1).uppercased() + words.dropFirst()
         }
+    }
+
+    /// An edit's title by what it did: `Create` a new file, `Write` one over, `Delete`, else `Edit`.
+    private static func editTitle(_ activity: AgentToolActivity, name: String) -> String {
+        let kinds = Set((activity.fileChanges ?? []).compactMap { $0.kind?.lowercased() }
+                        + (activity.fileChangeDetails?.operations ?? []).map { $0.operation.lowercased() })
+        if !kinds.isEmpty, kinds.isSubset(of: ["add", "create", "created", "new"]) { return "Create" }
+        if !kinds.isEmpty, kinds.isSubset(of: ["delete", "deleted", "remove"]) { return "Delete" }
+        if name.lowercased() == "write" || kinds == ["write"] { return "Write" }
+        return "Edit"
+    }
+
+    /// Lines an edit added and removed, from the provider's counts or its diffs.
+    static func changeCounts(_ activity: AgentToolActivity) -> (additions: UInt64, deletions: UInt64)? {
+        guard activity.presentation == .fileChange || activity.category == .edit else { return nil }
+        if let details = activity.fileChangeDetails, details.additions != nil || details.deletions != nil {
+            return (details.additions ?? 0, details.deletions ?? 0)
+        }
+        let diffs = (activity.fileChanges ?? []).compactMap(\.diff) + [activity.fileChangeDetails?.diff].compactMap { $0 }
+        guard !diffs.isEmpty else { return nil }
+        var additions: UInt64 = 0, deletions: UInt64 = 0
+        for diff in diffs {
+            for line in diff.split(separator: "\n", omittingEmptySubsequences: false) {
+                if line.hasPrefix("+"), !line.hasPrefix("+++") { additions += 1 }
+                else if line.hasPrefix("-"), !line.hasPrefix("---") { deletions += 1 }
+            }
+        }
+        return (additions, deletions)
     }
 
     /// What the tool operated on, for the header's code chip: a command, a path relative
@@ -49,7 +82,7 @@ enum AgentToolPresentation {
     static func completedOutput(_ activity: AgentToolActivity, theme: AppTheme) -> NSAttributedString {
         let result = output(activity.output, isJSON: activity.outputIsJSON == true, theme: theme)
         guard result.length == 0, activity.status != .running else { return result }
-        let empty = AgentCommandPresentation.text("No output.", color: theme.fgMuted)
+        let empty = AgentCommandPresentation.text(AgentCommandPresentation.emptyOutput(activity.status), color: theme.fgMuted)
         empty.addAttribute(.font, value: NSFontManager.shared.convert(AppFont.mono(13), toHaveTrait: .italicFontMask), range: NSRange(location: 0, length: empty.length))
         return empty
     }

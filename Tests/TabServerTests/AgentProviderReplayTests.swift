@@ -190,7 +190,9 @@ final class AgentProviderReplayTests: XCTestCase {
             if frame["method"] as? String == "item/commandExecution/outputDelta" {
                 let params = try XCTUnwrap(frame["params"] as? [String: Any])
                 streamedOutput += try XCTUnwrap(params["delta"] as? String)
-                XCTAssertEqual(transcript.items[id]?.detail, streamedOutput, "Output must be visible before item/completed")
+                // Streaming output is kept once, in the tool, which is what the row shows.
+                XCTAssertEqual(transcript.items[id]?.tool?.output, streamedOutput, "Output must be visible before item/completed")
+                XCTAssertNil(transcript.items[id]?.detail)
                 XCTAssertEqual(transcript.items[id]?.isComplete, false)
             }
         }

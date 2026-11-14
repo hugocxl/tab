@@ -11,6 +11,8 @@ public struct Settings: Codable, Equatable, Sendable {
     public var openers: OpenerSettings
     public var browser: BrowserSettings
     public var notifications: NotificationSettings
+    /// Agent conversations.
+    public var agents: AgentSettings
     /// Other computers' servers, reached over SSH.
     public var servers: [ServerEntry]
 
@@ -23,6 +25,7 @@ public struct Settings: Codable, Equatable, Sendable {
         openers = OpenerSettings()
         browser = BrowserSettings()
         notifications = NotificationSettings()
+        agents = AgentSettings()
         servers = []
     }
 
@@ -37,6 +40,7 @@ public struct Settings: Codable, Equatable, Sendable {
         openers = try container.value(.openers, defaults.openers)
         browser = try container.value(.browser, defaults.browser)
         notifications = try container.value(.notifications, defaults.notifications)
+        agents = try container.value(.agents, defaults.agents)
         servers = try container.value(.servers, defaults.servers)
     }
 
@@ -92,6 +96,10 @@ public struct Settings: Codable, Equatable, Sendable {
 
     public func saveNotifications(to url: URL) throws {
         try saveSection("notifications", notifications, to: url)
+    }
+
+    public func saveAgents(to url: URL) throws {
+        try saveSection("agents", agents, to: url)
     }
 
     public func saveWorktrees(to url: URL) throws {

@@ -136,6 +136,31 @@ final class AgentRefinementTests: XCTestCase {
         XCTAssertEqual(revealed, "tool")
     }
 
+    /// A label sized from `intrinsicContentSize` came out a few points narrower than its cell
+    /// draws, truncating "18k tokens" and "Needs review" beside empty space.
+    func testRowLabelsWithRoomAreWideEnoughForTheirCells() throws {
+        let row = AgentSubagentRow()
+        row.frame = NSRect(x: 0, y: 0, width: 1000, height: 30)
+        row.show(.init(id: "child", toolUseID: "tool", description: "Check provider replay fixtures",
+                       activity: "Reading fixtures", toolUses: 7, tokens: 18_000))
+        row.layoutSubtreeIfNeeded()
+        let labels = descendants(row).compactMap { $0 as? NSTextField }.filter { !$0.stringValue.isEmpty }
+        XCTAssertEqual(labels.count, 3)
+        for label in labels {
+            XCTAssertGreaterThanOrEqual(label.frame.width, try XCTUnwrap(label.cell).cellSize.width, label.stringValue)
+        }
+        let queue = AgentQueueView(frame: NSRect(x: 0, y: 0, width: 900, height: 160))
+        let prompt = AgentQueuedPrompt(prompt: .init(text: "Retry", model: nil, effort: nil, provider: .codex, planMode: false,
+                                                     attachments: [.init(id: "a", name: "a.txt", mimeType: "text/plain", data: Data("a".utf8))]),
+                                       state: .uncertain)
+        queue.update([prompt], paused: false, enabled: true)
+        queue.layoutSubtreeIfNeeded()
+        for text in ["Needs review", "1 attachment"] {
+            let label = try XCTUnwrap(descendants(queue).compactMap { $0 as? NSTextField }.first { $0.stringValue == text })
+            XCTAssertGreaterThanOrEqual(label.frame.width, try XCTUnwrap(label.cell).cellSize.width, text)
+        }
+    }
+
     func testReviewSelectionSeparatesOldAndNewLinesAndRejectsHunkGaps() throws {
         let document = DiffDocument(.init(rows: [
             .init(kind: .deletion, oldLineNumber: 4, text: "-old"),

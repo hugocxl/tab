@@ -29,6 +29,8 @@ final class AppKeyDispatchTests: XCTestCase {
         XCTAssertEqual(resolve("cmd-c", editing: true), .pass)
         XCTAssertEqual(resolve("cmd-left", editing: true), .pass)
         XCTAssertEqual(resolve("cmd-shift-p", editing: true), .action(.toggleCommandPalette))
+        XCTAssertEqual(resolve("escape", editing: true), .pass, "Escape in another text field stays with it")
+        XCTAssertEqual(resolve("escape"), .action(.stopAgent), "a pane decides whether Escape stops its agent")
     }
 
     func testRebindings() throws {

@@ -303,10 +303,14 @@ final class AgentConversationFindTests: XCTestCase {
         type("haystack", in: pane)
         XCTAssertNotEqual(pane.transcript.rowStates["work:prompt"]?.expanded, true, "Matches outside a group leave it folded")
         type("needle", in: pane)
-        XCTAssertEqual(pane.findBar?.counter, "1 of 1", "Tool output is not searched")
+        XCTAssertEqual(pane.findBar?.counter, "1 of 2", "Tool output is searched too")
         XCTAssertEqual(pane.transcript.rowStates["work:prompt"]?.expanded, true)
         XCTAssertEqual(pane.transcript.entryID(showing: "commentary"), "commentary")
         XCTAssertEqual(painted(pane).flatMap(\.texts), ["needle"])
+        // The tool's match opens its row.
+        XCTAssertTrue(pane.performFind(.next))
+        XCTAssertEqual(pane.findBar?.counter, "2 of 2")
+        XCTAssertEqual(pane.transcript.rowStates["activity:tool"]?.toolExpandedIDs, ["tool"])
     }
 
     func testMatchInAProposedPlanCardIsPaintedAndRevealed() throws {

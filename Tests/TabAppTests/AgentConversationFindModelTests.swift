@@ -85,7 +85,8 @@ final class AgentConversationFindModelTests: XCTestCase {
         XCTAssertEqual(model.matches.map(\.itemID), ["plan", "plan"])
     }
 
-    func testToolOutputNoticesAndApprovalsAreNotSearched() {
+    /// Tool calls are searched by name, what they worked on, input and output; notices and approvals are not.
+    func testToolCallsAreSearchedButNoticesAndApprovalsAreNot() {
         let model = search("secret", [
             .init(id: "tool", kind: .tool, text: "Read secret", detail: "secret output",
                   tool: .init(name: "Read", input: "{\"path\":\"secret\"}", output: "secret")),
@@ -93,7 +94,7 @@ final class AgentConversationFindModelTests: XCTestCase {
             .init(id: "approval", kind: .approval, text: "Allow secret?", isComplete: false),
             .init(id: "answer", kind: .assistant, text: "No secret here… well, one."),
         ])
-        XCTAssertEqual(model.matches.map(\.itemID), ["answer"])
+        XCTAssertEqual(model.matches.map(\.itemID), ["tool", "tool", "tool", "answer"])
     }
 
     func testStreamingKeepsSelectionOnTheSameOccurrence() {

@@ -5,6 +5,38 @@ import TabProtocol
 struct AgentHistoryTranscript: Sendable {
     var items: [AgentChatItem] = []
     var resolvedModel: String?
+    /// Images the person sent, by the ID of their message, to store as its attachments.
+    var images: [String: [AgentChatAttachment]] = [:]
+}
+
+extension AgentHistoryTranscript {
+    /// An image from a saved conversation, when it is one Tab can show and send again.
+    static func image(base64: String, mimeType: String, index: Int) -> AgentChatAttachment? {
+        let type = mimeType.lowercased()
+        guard AgentAttachments.imageTypes.contains(type), base64.utf8.count <= AgentChatAttachment.maxFileBytes * 4 / 3 + 4,
+              let data = Data(base64Encoded: base64), data.count <= AgentChatAttachment.maxFileBytes else { return nil }
+        let ext = type == "image/jpeg" ? "jpg" : String(type.dropFirst(6))
+        return AgentChatAttachment(id: UUID().uuidString, name: "Image \(index + 1).\(ext)", mimeType: type, data: data)
+    }
+
+    /// A model's reasoning, shown as a finished Thinking row as when it streamed.
+    static func thinking(id: String, text: String, date: Date?) -> AgentChatItem {
+        AgentChatItem(id: id, kind: .tool, text: "Thinking", detail: text, isComplete: true, createdAt: date, updatedAt: date,
+                      workContext: .init(itemType: "reasoning", sourceStatus: "completed"))
+    }
+
+    /// One turn for each prompt, from it to the last item before the next, so imported
+    /// answers show how long they took.
+    static func turns(_ items: [AgentChatItem]) -> [AgentChatTurn] {
+        var turns: [AgentChatTurn] = []
+        for (index, item) in items.enumerated() where item.kind == .user {
+            guard let started = item.createdAt else { continue }
+            let next = items[(index + 1)...].firstIndex { $0.kind == .user } ?? items.endIndex
+            let finished = items[(index + 1)..<next].compactMap { $0.updatedAt ?? $0.createdAt }.max()
+            turns.append(AgentChatTurn(userItemID: item.id, startedAt: started, completedAt: finished ?? started, status: .idle))
+        }
+        return Array(turns.suffix(512))
+    }
 }
 
 /// Reads the conversations Claude Code and Codex save on their own, under
@@ -185,10 +217,17 @@ struct AgentHistory: Sendable {
                     transcript.items[at].tool?.status = block["is_error"] as? Bool == true ? .failed : .completed
                     transcript.items[at].tool?.completedAt = date
                 }
-                guard let text = claudeUserText(message["content"]) else { continue }
+                let images = (message["content"] as? [[String: Any]] ?? []).filter { $0["type"] as? String == "image" }
+                    .enumerated().compactMap { index, block -> AgentChatAttachment? in
+                        guard let source = block["source"] as? [String: Any], source["type"] as? String == "base64",
+                              let data = source["data"] as? String, let type = source["media_type"] as? String else { return nil }
+                        return AgentHistoryTranscript.image(base64: data, mimeType: type, index: index)
+                    }
+                guard let text = claudeUserText(message["content"]) ?? (images.isEmpty ? nil : "") else { continue }
                 let interrupted = text.hasPrefix("[Request interrupted by user")
                 append(AgentChatItem(id: id, kind: interrupted ? .notice : .user, text: interrupted ? "Agent interrupted." : text,
                                      createdAt: date, updatedAt: date))
+                if !interrupted, !images.isEmpty { transcript.images[id] = Array(images.prefix(8)) }
                 continue
             }
             guard message["model"] as? String != "<synthetic>" else { continue }
@@ -204,6 +243,10 @@ struct AgentHistory: Sendable {
                         append(AgentChatItem(id: "\(id):\(offset)", kind: .assistant, text: text, createdAt: date, updatedAt: date))
                     }
                     lastMessage = messageID
+                case "thinking":
+                    guard let text = block["thinking"] as? String, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+                    append(AgentHistoryTranscript.thinking(id: "\(messageID):thinking:\(offset)", text: text, date: date))
+                    lastMessage = nil
                 case "tool_use":
                     guard let toolID = block["id"] as? String, let name = block["name"] as? String else { continue }
                     let input = agentRuntimeJSON(block["input"])
@@ -321,8 +364,20 @@ struct AgentHistory: Sendable {
             switch payload["type"] as? String {
             case "message":
                 let role = payload["role"] as? String
-                guard role == "user" || role == "assistant", let text = codexText(payload) else { continue }
+                let images = role != "user" ? [] : (payload["content"] as? [[String: Any]] ?? []).filter { $0["type"] as? String == "input_image" }
+                    .enumerated().compactMap { index, block -> AgentChatAttachment? in
+                        guard let url = block["image_url"] as? String, url.hasPrefix("data:"),
+                              let comma = url.firstIndex(of: ","), url[..<comma].hasSuffix(";base64") else { return nil }
+                        let type = String(url[url.index(url.startIndex, offsetBy: 5)..<comma].dropLast(7))
+                        return AgentHistoryTranscript.image(base64: String(url[url.index(after: comma)...]), mimeType: type, index: index)
+                    }
+                guard role == "user" || role == "assistant", let text = codexText(payload) ?? (images.isEmpty ? nil : "") else { continue }
                 append(AgentChatItem(id: id, kind: role == "user" ? .user : .assistant, text: text, createdAt: date, updatedAt: date))
+                if !images.isEmpty { transcript.images[id] = Array(images.prefix(8)) }
+            case "reasoning":
+                let summary = (payload["summary"] as? [[String: Any]] ?? []).compactMap { $0["text"] as? String }.joined(separator: "\n\n")
+                guard !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+                append(AgentHistoryTranscript.thinking(id: id, text: summary, date: date))
             case "function_call", "custom_tool_call", "local_shell_call", "web_search_call":
                 let type = payload["type"] as? String
                 let name = payload["name"] as? String ?? (type == "web_search_call" ? "web_search" : "shell")
@@ -337,8 +392,22 @@ struct AgentHistory: Sendable {
                 }
             case "function_call_output", "custom_tool_call_output":
                 guard let call = payload["call_id"] as? String, let at = tools[call] else { continue }
-                transcript.items[at].tool?.output = agentToolOutput(payload["output"])
-                transcript.items[at].tool?.completedAt = date
+                // Shell calls save `{"output": …, "metadata": {"exit_code": …, "duration_seconds": …}}`.
+                if let raw = payload["output"] as? String, raw.hasPrefix("{"),
+                   let wrapped = try? JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any],
+                   let output = wrapped["output"] as? String, let metadata = wrapped["metadata"] as? [String: Any] {
+                    transcript.items[at].tool?.output = output
+                    if let code = metadata["exit_code"] as? Int {
+                        transcript.items[at].tool?.exitCode = code
+                        if code != 0 { transcript.items[at].tool?.status = .failed }
+                    }
+                    let started = transcript.items[at].tool?.startedAt
+                    transcript.items[at].tool?.completedAt = (metadata["duration_seconds"] as? Double).flatMap { duration in
+                        started.map { $0.addingTimeInterval(duration) } } ?? date
+                } else {
+                    transcript.items[at].tool?.output = agentToolOutput(payload["output"])
+                    transcript.items[at].tool?.completedAt = date
+                }
             default: continue
             }
         }

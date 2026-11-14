@@ -34,6 +34,8 @@ final class AgentComposerCoordinator {
             .init(id: "next-prompt", title: "/next-prompt", subtitle: "Go to the next prompt", icon: .chevronDown, kind: .action),
             .init(id: "skills", title: "/skills", subtitle: "Browse installed skills", icon: .sparkles, kind: .action),
             .init(id: "status", title: "/status", subtitle: "Show current conversation settings", icon: .info, kind: .action),
+            .init(id: "plan", title: "/plan", subtitle: "Turn plan mode on or off", icon: .listTodo, kind: .action),
+            .init(id: "copy", title: "/copy", subtitle: "Copy the conversation as Markdown", icon: .copy, kind: .action),
             .init(id: "new", title: "/new", subtitle: "Start a new conversation", icon: .conversationAdd, kind: .action),
             .init(id: "resume", title: "/resume", subtitle: "Continue a Claude Code or Codex conversation from this folder",
                   icon: .history, kind: .action),
@@ -62,6 +64,48 @@ final class AgentComposerCoordinator {
         let token = trimmed.dropFirst().prefix { !$0.isWhitespace }
         guard !token.isEmpty, token.allSatisfy({ $0.isLetter || $0.isNumber || "-_:".contains($0) }) else { return nil }
         return String(token)
+    }
+
+    /// What Claude's own commands do, for the ones it lists without a description.
+    static let providerCommandDescriptions: [String: String] = [
+        "compact": "Summarize the conversation to free context",
+        "context": "Show what fills the context window",
+        "cost": "Show what this conversation has cost",
+        "init": "Write a CLAUDE.md that describes this project",
+        "review": "Review a pull request",
+        "pr-comments": "Show a pull request's comments",
+        "security-review": "Review the pending changes for security issues",
+        "release-notes": "Show the release notes",
+        "todos": "List the current to-dos",
+        "insights": "Summarize how you use Claude Code",
+        "statusline": "Set up the status line",
+    ]
+
+    /// Commands chosen from the menu, newest first, so the usual ones lead an empty `/`.
+    /// Shared by every pane for the life of the app.
+    static var recentlyUsed: [String] = []
+
+    static func noteUse(_ id: String) {
+        recentlyUsed.removeAll { $0 == id }
+        recentlyUsed.insert(id, at: 0)
+        if recentlyUsed.count > 24 { recentlyUsed.removeLast() }
+    }
+
+    /// Recently used items first, each group in its original order.
+    static func rankedByUse(_ items: [AgentComposerSuggestion]) -> [AgentComposerSuggestion] {
+        let rank = Dictionary(recentlyUsed.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
+        return items.enumerated().sorted { lhs, rhs in
+            let left = rank[lhs.element.id] ?? Int.max, right = rank[rhs.element.id] ?? Int.max
+            return left != right ? left < right : lhs.offset < rhs.offset
+        }.map(\.element)
+    }
+
+    private func describeProviderCommand(_ name: String) -> String {
+        if let known = Self.providerCommandDescriptions[name] { return known }
+        if let skill = skills?.first(where: { $0.name.lowercased() == name.lowercased() }), !skill.description.isEmpty {
+            return skill.description
+        }
+        return (surface.snapshot?.provider.name ?? "Provider") + " command"
     }
 
     private var visibleProviderCommands: [String] {
@@ -189,7 +233,7 @@ final class AgentComposerCoordinator {
         if trigger.kind == .command {
             let provided = visibleProviderCommands
             let native = provided.map {
-                AgentComposerSuggestion(id: "provider:" + $0, title: "/" + $0, subtitle: "Provider command", icon: .terminal,
+                AgentComposerSuggestion(id: "provider:" + $0, title: "/" + $0, subtitle: describeProviderCommand($0), icon: .terminal,
                                         kind: .providerCommand)
             }
             // The provider already runs its own skills by name; list a file skill once unless
@@ -197,17 +241,19 @@ final class AgentComposerCoordinator {
             let providedNames = Set(provided.map { $0.lowercased() })
             let browsingSkills = query.lowercased().hasPrefix("skill:")
             let fileSkills = (skills ?? []).filter { browsingSkills || !providedNames.contains($0.name.lowercased()) }
-            let candidates = actions + native + fileSkills.map {
-                AgentComposerSuggestion(id: $0.id, title: "/skill:\($0.name)", subtitle: $0.description,
+            // What the provider and skills can do comes first; Tab's own navigation follows.
+            let candidates = native + fileSkills.map {
+                AgentComposerSuggestion(id: $0.id, title: "/skill:\($0.name)", subtitle: $0.description.isEmpty ? "Skill" : $0.description,
                                         icon: .sparkles, kind: .skill)
-            }
-            return query.isEmpty ? Array(candidates.prefix(40))
+            } + actions
+            return query.isEmpty ? Array(Self.rankedByUse(candidates).prefix(40))
                 : Fuzzy.rank(candidates, key: { $0.title }, query: query, limit: 40).map(\.item)
         }
         let threadMatches = query.isEmpty ? Array(threads.prefix(5))
             : Fuzzy.rank(threads, key: { $0.title }, query: query, limit: 8).map(\.item)
         let paths = files ?? []
-        let fileMatches = query.isEmpty ? Array(paths.prefix(30))
+        // With nothing typed yet, the project's top-level files lead rather than whatever came first.
+        let fileMatches = query.isEmpty ? Self.shallowest(paths, limit: 30)
             : Fuzzy.rank(paths, key: { $0 }, query: query, limit: 30).map(\.item)
         return threadMatches.map {
             .init(id: $0.id, title: $0.title, subtitle: "Thread", icon: .conversation, kind: .thread)
@@ -215,6 +261,18 @@ final class AgentComposerCoordinator {
             .init(id: $0, title: ($0 as NSString).lastPathComponent,
                   subtitle: ($0 as NSString).deletingLastPathComponent, icon: .file, kind: .file)
         }
+    }
+
+    /// The `limit` least nested paths, each level in name order; only the levels used are sorted.
+    static func shallowest(_ paths: [String], limit: Int) -> [String] {
+        var levels: [Int: [String]] = [:]
+        for path in paths { levels[path.utf8.reduce(0) { $1 == UInt8(ascii: "/") ? $0 + 1 : $0 }, default: []].append(path) }
+        var result: [String] = []
+        for depth in levels.keys.sorted() where result.count < limit {
+            let level = levels[depth] ?? []
+            result += level.sorted { $0.localizedStandardCompare($1) == .orderedAscending }.prefix(limit - result.count)
+        }
+        return result
     }
 
     private func select(_ item: AgentComposerSuggestion) {
@@ -243,6 +301,7 @@ final class AgentComposerCoordinator {
                 onContext?("Skill-\(skill.name).md", "Use the following skill instructions for this request. Resolve skill-relative resources from \(directory).\n\n\(skill.instructions)")
             }
         }
+        if trigger.kind == .command { Self.noteUse(item.id) }
         if let replacement { surface.composer.insertText(replacement, replacementRange: trigger.range) }
         task?.cancel()
         triggerState.reset()

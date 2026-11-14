@@ -1,4 +1,5 @@
 import AppKit
+import TabCore
 
 /// Lazy shared favicon state, matching the source renderer's blank loading box and sticky globe fallback.
 @MainActor
@@ -10,6 +11,8 @@ final class AgentLinkFavicon {
     private var images: [String: NSImage] = [:]
     private var failed: Set<String> = []
     private let fetch: Fetch
+    /// The remote-image setting: with `never`, no link icon is fetched either.
+    var policy: () -> RemoteImagePolicy = { AgentSettings().remoteImages }
 
     init(fetch: Fetch? = nil) {
         self.fetch = fetch ?? { url in
@@ -63,7 +66,9 @@ final class AgentLinkFavicon {
         return URL(string: "https://www.google.com/s2/favicons?domain=\(encoded)&sz=32")
     }
 
-    func image(for url: URL, color: NSColor, manager: NSLayoutManager? = nil) -> NSImage? {
+    /// The icon for `url`'s host. `fetch` false, as while the message still streams and
+    /// its hosts may be half written, uses only what is already loaded, else a globe.
+    func image(for url: URL, color: NSColor, manager: NSLayoutManager? = nil, fetch allowed: Bool = true) -> NSImage? {
         guard let host = Self.host(for: url) else { return nil }
         if let brand = Self.brand(for: host) {
             return AppIcon(rawValue: brand)?.image(size: 14, theme: AppTheme.shared)
@@ -72,11 +77,13 @@ final class AgentLinkFavicon {
             return AppIcon.globe.image(size: 14, scale: AppIcon.inlineScale, color: color)
         }
         if let image = images[host] { return image }
+        guard allowed, policy() != .never else { return AppIcon.globe.image(size: 14, scale: AppIcon.inlineScale, color: color) }
         if var observers = waiting[host] {
             if let manager, !observers.contains(where: { $0.manager === manager }) {
                 observers.removeAll { $0.manager == nil }; observers.append(Observer(manager: manager)); waiting[host] = observers
             }
-            return nil
+            // A globe holds the icon's place while it loads, so the link never shows a gap.
+            return AppIcon.globe.image(size: 14, scale: AppIcon.inlineScale, color: color)
         }
         waiting[host] = manager.map { [Observer(manager: $0)] } ?? []
         Task { [weak self, fetch] in
@@ -92,6 +99,6 @@ final class AgentLinkFavicon {
                 manager.invalidateDisplay(forCharacterRange: NSRange(location: 0, length: storage.length))
             }
         }
-        return nil
+        return AppIcon.globe.image(size: 14, scale: AppIcon.inlineScale, color: color)
     }
 }

@@ -16,5 +16,10 @@ extension SettingsModel {
         b.note(PrivacyPermission.camera.settingId, "Programs in Tab's terminals ask macOS for access as Tab, so these answers are theirs. macOS asks the first time a program wants one, and you change an answer in System Settings.")
         b.row("privacy-automation", b.button("Open Settings") { PrivacyPermission.openSettings("Privacy_Automation") })
         b.row("privacy-files", b.button("Open Settings") { PrivacyPermission.openSettings("Privacy_AllFiles") })
+        let policy = store.settings.agents.remoteImages
+        b.row("agent-remote-images", b.popUp("agent-remote-images", RemoteImagePolicy.allCases.map { Choice(id: $0.rawValue, title: $0.title) },
+                                             selected: policy.rawValue) { [store] id in
+            store.updateAgents("agent-remote-images") { $0.remoteImages = RemoteImagePolicy(rawValue: id) ?? .clickToLoad }
+        })
     }
 }

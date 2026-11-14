@@ -23,6 +23,8 @@ final class AgentCheckpointDiffWindow: NSWindowController, NSWindowDelegate, NST
         }
     }
     var onDraftReview: (() throws -> Void)?
+    /// Opens the file in the editor at a line of the diff.
+    var onOpenFile: ((String, Int?) -> Void)? { didSet { surface.openInEditor.isHidden = onOpenFile == nil } }
     var reviewComments: [AgentReviewComment] = [] { didSet { surface.updateReviewCount(reviewComments.count) } }
     private var commentEditor: AgentTextEditorSheet?
     private var commentPicker: AgentSearchPicker?
@@ -47,6 +49,7 @@ final class AgentCheckpointDiffWindow: NSWindowController, NSWindowDelegate, NST
             else if let selected = self.selectedPath { self.select(selected) }
         }
         surface.addComment.onPress = { [weak self] in self?.addComment() }
+        surface.openInEditor.onPress = { [weak self] in self?.openSelectionInEditor() }
         surface.reviewComments.onPress = { [weak self] in self?.showComments() }
         surface.draftReview.onPress = { [weak self] in
             do { try self?.onDraftReview?() }
@@ -110,6 +113,18 @@ final class AgentCheckpointDiffWindow: NSWindowController, NSWindowDelegate, NST
             }
         }
     }
+    /// The selected line on the new side, else the diff's first changed line.
+    private func openSelectionInEditor() {
+        guard let path = selectedPath else { return }
+        let document = surface.rows.document
+        var line: UInt64?
+        if let document, let selection = surface.rows.reviewSelection, !selection.old {
+            line = selection.lines(in: document)?.first
+        }
+        line = line ?? document?.rows.first { $0.kind == .addition || $0.kind == .context }?.newLineNumber
+        onOpenFile?(path, line.map { Int(clamping: $0) })
+    }
+
     private func addComment() {
         guard let path = selectedPath, let document = surface.rows.document,
               let selection = surface.rows.reviewSelection, let lines = selection.lines(in: document) else { return }
@@ -187,6 +202,7 @@ private final class AgentCheckpointDiffSurface: ThemedView {
     private let diffScroll = NSScrollView()
     let rows = DiffRowsView()
     let addComment = PillButton("Add comment", style: .plain)
+    let openInEditor = PillButton("Open in Editor", style: .plain)
     let reviewComments = PillButton("Comments", style: .plain)
     let draftReview = PillButton("Add comments to draft", style: .normal)
     private var reviewEnabled = false
@@ -206,7 +222,9 @@ private final class AgentCheckpointDiffSurface: ThemedView {
         }
         diffScroll.hasHorizontalScroller = true
         path.lineBreakMode = .byTruncatingMiddle
-        for child in [fileScroll, diffScroll, path, counts, message, note, mode, retry, addComment, reviewComments, draftReview] {
+        openInEditor.isHidden = true
+        openInEditor.toolTip = "Open this file at the selected line"
+        for child in [fileScroll, diffScroll, path, counts, message, note, mode, retry, addComment, reviewComments, draftReview, openInEditor] {
             child.translatesAutoresizingMaskIntoConstraints = true; addSubview(child)
         }
         mode.onChange = { [weak self] index in
@@ -233,7 +251,7 @@ private final class AgentCheckpointDiffSurface: ThemedView {
         counts.stringValue = ""
     }
     func setDiff(_ diff: GitDiff) {
-        counts.attributedStringValue = AgentChangedFilesRow.stat(diff.additions, diff.deletions, font: AppFont.small)
+        counts.attributedStringValue = AgentChangedFilesRow.stat(diff.additions, diff.deletions, font: AppFont.small, theme: theme)
         if diff.binary { showMessage("Binary file changed."); return }
         message.isHidden = true; retry.isHidden = true
         diffScroll.isHidden = false; note.isHidden = !diff.truncated
@@ -267,7 +285,9 @@ private final class AgentCheckpointDiffSurface: ThemedView {
         files.tableColumns.first?.width = max(1, sidebar - 10)
         let left = sidebar + 12
         let width = max(1, bounds.width - left - 12)
-        path.frame = NSRect(x: left, y: 10, width: max(1, width - 240), height: 20)
+        let editorWidth: CGFloat = openInEditor.isHidden ? 0 : ceil(openInEditor.fittingSize.width)
+        path.frame = NSRect(x: left, y: 10, width: max(1, width - 240 - (editorWidth > 0 ? editorWidth + 8 : 0)), height: 20)
+        openInEditor.frame = NSRect(x: max(left, bounds.width - 258 - editorWidth), y: 5, width: editorWidth, height: 28)
         counts.frame = NSRect(x: max(left, bounds.width - 250), y: 10, width: 90, height: 20)
         mode.frame = NSRect(x: max(left, bounds.width - 152), y: 5, width: 140, height: 28)
         diffScroll.frame = NSRect(x: left, y: 40, width: width, height: max(1, bounds.height - 40 - (note.isHidden ? 0 : 24) - (reviewEnabled ? 40 : 0)))

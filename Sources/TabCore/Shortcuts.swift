@@ -203,14 +203,15 @@ public enum ShortcutCatalog {
         .copy, .paste, .find, .findNext, .findPrevious, .scrollToBottom,
         .previousPrompt, .nextPrompt, .selectCommandOutput,
         .agentPromptOutline, .agentPreviousPrompt, .agentNextPrompt, .agentHistory,
-        .toggleAgentPlan, .increaseFontSize, .decreaseFontSize, .newAgentPane, .newBrowserPane, .newSimulatorPane,
+        .toggleAgentPlan, .stopAgent, .allowAgentApproval, .denyAgentApproval, .agentNextFailure, .submitAgentAnswers,
+        .increaseFontSize, .decreaseFontSize, .newAgentPane, .newBrowserPane, .newSimulatorPane,
         .newAgentPaneBelow, .newBrowserPaneBelow, .newSimulatorPaneBelow,
     ]
 
     /// Built-in defaults that give way to a key a user binding already has,
     /// so a newer default never takes a key someone bound before it existed.
     public static let yielding: [ShortcutId] = [
-        .toggleAgentPlan,
+        .toggleAgentPlan, .stopAgent, .submitAgentAnswers, .agentPromptOutline, .agentPreviousPrompt, .agentNextPrompt,
         .openSettings, .newHomeTab, .newTabInProject, .newAgentInProject, .newWorktree, .switchWorktree,
         .toggleSidebar, .toggleFiles, .toggleSourceControl, .goToFile,
         .findInFiles, .toggleFullScreen, .toggleThemePicker, .toggleCommandPalette,
@@ -650,6 +651,11 @@ public enum ShortcutId: String, CaseIterable, Codable, Sendable {
     case agentNextPrompt = "agent_next_prompt"
     case agentHistory = "agent_history"
     case toggleAgentPlan = "toggle_agent_plan"
+    case stopAgent = "stop_agent"
+    case agentNextFailure = "agent_next_failure"
+    case submitAgentAnswers = "submit_agent_answers"
+    case allowAgentApproval = "allow_agent_approval"
+    case denyAgentApproval = "deny_agent_approval"
     case newAgentPane = "new_agent_pane"
     case newAgentPaneBelow = "new_agent_pane_below"
     case newBrowserPaneBelow = "new_browser_pane_below"
@@ -804,11 +810,20 @@ extension ShortcutCatalog {
         ShortcutDefinition(.commandPaletteActions, keys: ["cmd-k"], contexts: ["CommandPalette"], keyContexts: [["CommandPalette"]], group: .palette),
         ShortcutDefinition(.newBrowserPane, keys: ["cmd-alt-b"], contexts: ["WorkspaceTabs"], keyContexts: [["WorkspaceTabs"]], group: .browser),
         ShortcutDefinition(.newSimulatorPane, keys: ["cmd-alt-s"], contexts: ["WorkspaceTabs"], keyContexts: [["WorkspaceTabs"]], group: .panes),
-        ShortcutDefinition(.agentPromptOutline, keys: [], contexts: ["WorkspaceTabs"], keyContexts: [], group: .panes),
-        ShortcutDefinition(.agentPreviousPrompt, keys: [], contexts: ["WorkspaceTabs"], keyContexts: [], group: .panes),
-        ShortcutDefinition(.agentNextPrompt, keys: [], contexts: ["WorkspaceTabs"], keyContexts: [], group: .panes),
+        // Conversation navigation keys work only in an agent pane, where Command-Up and
+        // Command-Down already move the caret in the composer.
+        ShortcutDefinition(.agentPromptOutline, keys: ["ctrl-cmd-o"], contexts: ["WorkspaceTabs", "AgentPane"], keyContexts: [["AgentPane"]], group: .panes),
+        ShortcutDefinition(.agentPreviousPrompt, keys: ["ctrl-cmd-up"], contexts: ["WorkspaceTabs", "AgentPane"], keyContexts: [["AgentPane"]], group: .panes),
+        ShortcutDefinition(.agentNextPrompt, keys: ["ctrl-cmd-down"], contexts: ["WorkspaceTabs", "AgentPane"], keyContexts: [["AgentPane"]], group: .panes),
         ShortcutDefinition(.agentHistory, keys: [], contexts: ["WorkspaceTabs"], keyContexts: [], group: .panes),
         ShortcutDefinition(.toggleAgentPlan, keys: ["shift-tab"], contexts: ["WorkspaceTabs"], keyContexts: [["WorkspaceTabs"]], group: .panes),
+        // Escape stops only while the agent works and nothing else in the pane wants the key.
+        ShortcutDefinition(.stopAgent, keys: ["escape"], contexts: ["AgentPane"], keyContexts: [["AgentPane"]], group: .panes),
+        ShortcutDefinition(.agentNextFailure, keys: [], contexts: ["WorkspaceTabs"], keyContexts: [], group: .panes),
+        // Sends an agent's question form; without one the key goes on to the composer.
+        ShortcutDefinition(.submitAgentAnswers, keys: ["cmd-enter"], contexts: ["AgentPane"], keyContexts: [["AgentPane"]], group: .panes),
+        ShortcutDefinition(.allowAgentApproval, keys: [], contexts: ["AgentPane"], keyContexts: [], group: .panes),
+        ShortcutDefinition(.denyAgentApproval, keys: [], contexts: ["AgentPane"], keyContexts: [], group: .panes),
         ShortcutDefinition(.newAgentPane, keys: ["cmd-alt-a"], contexts: ["WorkspaceTabs"], keyContexts: [["WorkspaceTabs"]], group: .panes),
         ShortcutDefinition(.newAgentPaneBelow, keys: ["cmd-alt-shift-a"], contexts: ["WorkspaceTabs"], keyContexts: [["WorkspaceTabs"]], group: .panes),
         ShortcutDefinition(.newBrowserPaneBelow, keys: ["cmd-alt-shift-b"], contexts: ["WorkspaceTabs"], keyContexts: [["WorkspaceTabs"]], group: .browser),

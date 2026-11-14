@@ -232,6 +232,8 @@ public enum RequestBody: Hashable, Codable, Sendable {
     case agentAttachment(AgentAttachmentRequest)
     case agentCheckpoint(AgentCheckpointRequest)
     case agentChat(AgentChatRequest)
+    /// Replies `agentConversation`; see `AgentConversationRequest`.
+    case agentConversation(AgentConversationRequest)
     case agentComposerContext(AgentComposerContextRequest)
     /// Conversations the provider CLIs saved for a project outside Tab.
     case agentHistory(AgentHistoryRequest)
@@ -337,6 +339,7 @@ public enum RequestBody: Hashable, Codable, Sendable {
         case "agentAttachment": self = .agentAttachment(try c("request"))
         case "agentCheckpoint": self = .agentCheckpoint(try c("request"))
         case "agentChat": self = .agentChat(try c("request"))
+        case "agentConversation": self = .agentConversation(try c("request"))
         case "agentComposerContext": self = .agentComposerContext(try c("request"))
         case "agentHistory": self = .agentHistory(try c("request"))
         case "importAgentHistory": self = .importAgentHistory(try c("request"))
@@ -420,6 +423,9 @@ public enum RequestBody: Hashable, Codable, Sendable {
             try c(request, "request")
         case .agentChat(let request):
             var c = try TaggedEncoding(encoder, "agentChat")
+            try c(request, "request")
+        case .agentConversation(let request):
+            var c = try TaggedEncoding(encoder, "agentConversation")
             try c(request, "request")
         case .agentComposerContext(let request):
             var c = try TaggedEncoding(encoder, "agentComposerContext")
@@ -600,6 +606,7 @@ public enum ReplyBody: Hashable, Codable, Sendable {
     case agentAttachment(AgentAttachmentReply)
     case agentCheckpoint(AgentCheckpointReply)
     case agentChat(AgentChatSnapshot)
+    case agentConversation(AgentConversationReply)
     case agentComposerContext(AgentComposerContextReply)
     case agentHistory(AgentHistoryReply)
     case hello(HelloReply)
@@ -688,6 +695,7 @@ public enum ReplyBody: Hashable, Codable, Sendable {
         case "agentAttachment": self = .agentAttachment(try c("attachment"))
         case "agentCheckpoint": self = .agentCheckpoint(try c("checkpoint"))
         case "agentChat": self = .agentChat(try c("snapshot"))
+        case "agentConversation": self = .agentConversation(try c("reply"))
         case "agentComposerContext": self = .agentComposerContext(try c("context"))
         case "agentHistory": self = .agentHistory(try c("history"))
         case "pong": self = .pong
@@ -764,6 +772,9 @@ public enum ReplyBody: Hashable, Codable, Sendable {
         case .agentChat(let snapshot):
             var c = try TaggedEncoding(encoder, "agentChat")
             try c(snapshot, "snapshot")
+        case .agentConversation(let reply):
+            var c = try TaggedEncoding(encoder, "agentConversation")
+            try c(reply, "reply")
         case .agentComposerContext(let context):
             var c = try TaggedEncoding(encoder, "agentComposerContext")
             try c(context, "context")

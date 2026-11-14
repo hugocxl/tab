@@ -239,6 +239,131 @@ final class AgentTimelineTests: XCTestCase {
         }
     }
 
+    func testWorkingLineSaysWhatTheAgentIsDoingInWholeSeconds() throws {
+        let document = AgentTranscriptDocument(frame: .zero)
+        document.workspaceRoot = "/repo"
+        var items = [AgentChatItem(id: "user", kind: .user, text: "Build it"),
+                     AgentChatItem(id: "read", kind: .tool, text: "Read", isComplete: true,
+                                   tool: .init(name: "Read", category: .read, input: #"{"file_path":"/repo/a.swift"}"#, status: .completed)),
+                     AgentChatItem(id: "bash", kind: .tool, text: "Bash", isComplete: false,
+                                   tool: .init(name: "Bash", category: .command, input: #"{"command":"swift build"}"#, status: .running))]
+        let turn = AgentChatTurn(userItemID: "user", startedAt: Date().addingTimeInterval(-48.7))
+        func line() throws -> String {
+            document.update(items, omittedCount: 0, turns: [turn])
+            document.reflow(viewportWidth: 700)
+            let row = try XCTUnwrap(document.subviews.first { $0 is AgentWorkingRow })
+            return try XCTUnwrap(row.subviews.compactMap { $0 as? NSTextField }.first).stringValue
+        }
+        XCTAssertTrue(try line().hasPrefix("4"), "Whole seconds, no tenths")
+        XCTAssertFalse(try line().contains("."))
+        func activity() throws -> String? {
+            let text = try line()
+            return text.range(of: " · ").map { String(text[$0.upperBound...]) }
+        }
+        XCTAssertEqual(try activity(), "Bash · swift build")
+        items.append(.init(id: "think", kind: .tool, text: "Thinking", detail: "…", isComplete: false,
+                           workContext: .init(itemType: "reasoning")))
+        XCTAssertEqual(try activity(), "Thinking")
+        items.append(.init(id: "agent", kind: .tool, text: "Task", isComplete: false,
+                           tool: .init(name: "Task", category: .subagent, input: #"{"description":"Audit fixtures","prompt":"…"}"#, status: .running)))
+        XCTAssertEqual(try activity(), "Agent · Audit fixtures")
+        items = items.map { var item = $0; item.isComplete = true; return item }
+        XCTAssertNil(try activity(), "Streaming prose or nothing running shows only the time")
+        XCTAssertEqual(AgentTurnTime.seconds(185.9), "3m 05s")
+        XCTAssertEqual(AgentTurnTime.seconds(3785), "1h 03m 05s")
+    }
+
+    /// Finishing a turn folded the rows being read; an open tool row now keeps its group open.
+    func testFinishingATurnKeepsWorkInUseOpen() throws {
+        func fold(expandTool: Bool) throws -> AgentTranscriptDocument {
+            let document = AgentTranscriptDocument(frame: .zero)
+            let items = [AgentChatItem(id: "user", kind: .user, text: "Fix it"),
+                         AgentChatItem(id: "tool", kind: .tool, text: "Bash", detail: "output",
+                                       tool: .init(name: "Bash", category: .command, input: "ls", output: "a\nb", status: .completed)),
+                         AgentChatItem(id: "answer", kind: .assistant, text: "Done.")]
+            var turn = AgentChatTurn(userItemID: "user", startedAt: Date(timeIntervalSince1970: 100))
+            document.update(items, omittedCount: 0, turns: [turn])
+            document.reflow(viewportWidth: 700)
+            if expandTool { document.rowStates = ["activity:tool": AgentTimelineRowState(toolExpandedIDs: ["tool"])] }
+            turn.completedAt = Date(timeIntervalSince1970: 160)
+            turn.status = .idle
+            document.update(items, omittedCount: 0, turns: [turn])
+            document.reflow(viewportWidth: 700)
+            return document
+        }
+        let open = try fold(expandTool: true)
+        XCTAssertNotNil(open.frameForEntry("work:user"))
+        XCTAssertNotNil(open.frameForEntry("activity:tool"), "The open tool row stays visible under its summary")
+        let folded = try fold(expandTool: false)
+        XCTAssertNotNil(folded.frameForEntry("work:user"))
+        XCTAssertNil(folded.frameForEntry("activity:tool"), "Untouched work folds as before")
+    }
+
+    /// Each TodoWrite added a full card and a raw row; a list updated nine times showed nine cards.
+    func testATurnShowsItsNewestTodoCardAndOneLinePerEarlierUpdate() {
+        let document = AgentTranscriptDocument(frame: .zero)
+        func todo(_ n: Int) -> [AgentChatItem] {
+            [AgentChatItem(id: "toolu_\(n)", kind: .tool, text: "TodoWrite", tool: .init(name: "TodoWrite", status: .completed)),
+             AgentChatItem(id: "todo_list:toolu_\(n)", kind: .tool, text: "Updated plan",
+                           detail: #"{"steps":[{"id":"a","text":"Step","status":"running"}]}"#, workContext: .init(itemType: "todo_list"))]
+        }
+        let items = [AgentChatItem(id: "u", kind: .user, text: "Plan it")] + todo(1) + todo(2) + todo(3)
+        document.update(items, omittedCount: 0, turns: [AgentChatTurn(userItemID: "u", startedAt: Date())])
+        document.reflow(viewportWidth: 700)
+        XCTAssertTrue(document.mountedRow("activity:todo_list:toolu_3") is AgentCardRow, "The newest list is a card")
+        for n in 1...2 {
+            XCTAssertTrue(document.mountedRow("activity:todo_list:toolu_\(n)") is AgentActivityRow, "Earlier updates are one line")
+        }
+        for n in 1...3 { XCTAssertNil(document.frameForEntry("activity:toolu_\(n)"), "The raw TodoWrite row is hidden") }
+    }
+
+    func testANewestProposedPlanStaysVisibleBelowItsFoldedWork() {
+        let document = AgentTranscriptDocument(frame: .zero)
+        let items = [AgentChatItem(id: "u", kind: .user, text: "Plan"),
+                     AgentChatItem(id: "read", kind: .tool, text: "Read", tool: .init(name: "Read", category: .read, status: .completed)),
+                     AgentChatItem(id: "proposed_plan:p", kind: .tool, text: "Proposed plan", detail: "1. Do it",
+                                   workContext: .init(itemType: "proposed_plan")),
+                     AgentChatItem(id: "a", kind: .assistant, text: "Here is the plan.")]
+        document.update(items, omittedCount: 0, turns: [AgentChatTurn(userItemID: "u", startedAt: Date(timeIntervalSince1970: 1),
+                                                                     completedAt: Date(timeIntervalSince1970: 9), status: .idle)])
+        document.reflow(viewportWidth: 700)
+        XCTAssertNotNil(document.frameForEntry("work:u"))
+        XCTAssertNil(document.frameForEntry("activity:read"), "Other work folds")
+        XCTAssertNotNil(document.frameForEntry("activity:proposed_plan:p"), "The plan stays visible")
+    }
+
+    func testDroppedItemsAreNamedHonestlyWithoutALoadButton() {
+        let document = AgentTranscriptDocument(frame: .zero)
+        document.update([AgentChatItem(id: "u", kind: .user, text: "Hi")], omittedCount: 3)
+        document.reflow(viewportWidth: 700)
+        let labels = document.subviews.compactMap { $0 as? NSTextField }.filter { !$0.isHidden }.map(\.stringValue)
+        XCTAssertTrue(labels.contains("3 earlier items aren't shown, to keep this conversation within its size limit"), "\(labels)")
+        XCTAssertFalse(labels.contains { $0.contains("saved") })
+        XCTAssertFalse(document.subviews.contains { ($0 as? NSButton)?.title == "Show earlier messages" && !$0.isHidden },
+                       "Nothing can load them, so no button offers to")
+    }
+
+    func testWorkingLineNamesRetriesAndRateLimitsFirst() {
+        let soon = Calendar.current.date(bySettingHour: 14, minute: 0, second: 0, of: Date()) ?? Date()
+        XCTAssertEqual(AgentWorkingRow.describe(.init(kind: .retrying, attempt: 2, message: "Overloaded"), otherwise: "Bash · ls"),
+                       "Retrying (attempt 2) · Overloaded")
+        XCTAssertTrue(AgentWorkingRow.describe(.init(kind: .rateLimited, resumesAt: soon), otherwise: nil)?.hasPrefix("Rate limited · resumes at ") == true)
+        XCTAssertEqual(AgentWorkingRow.describe(.init(kind: .rateLimitWarning, message: "98% of the usage limit used"), otherwise: "Bash · ls"),
+                       "Bash · ls", "A warning gives way to what is running")
+        XCTAssertEqual(AgentWorkingRow.describe(nil, otherwise: "Thinking"), "Thinking")
+        XCTAssertEqual(AgentWorkingRow.describe(.init(kind: .init(rawValue: "future")), otherwise: "Thinking"), "Thinking")
+    }
+
+    func testSecondTickerRunsOnlyWhileSomethingSubscribes() {
+        let ticker = AgentSecondTicker()
+        let owner = NSObject()
+        XCTAssertFalse(ticker.isRunning)
+        ticker.subscribe(owner) {}
+        XCTAssertTrue(ticker.isRunning)
+        ticker.unsubscribe(owner)
+        XCTAssertFalse(ticker.isRunning)
+    }
+
     func testOnlyTheNewestRunningTurnShowsATimer() throws {
         let document = AgentTranscriptDocument(frame: .zero)
         let items = [AgentChatItem(id: "old", kind: .user, text: "First"),

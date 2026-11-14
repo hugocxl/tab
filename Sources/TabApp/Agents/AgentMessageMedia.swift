@@ -157,6 +157,8 @@ final class AgentMediaTile: NSControl {
     /// Assistant Markdown media keep their alt text as tooltip while loading or failed.
     var keepsNameToolTip = false { didSet { updateToolPlaceholder() } }
     private var failureMessage: String?
+    /// What a click does while the remote-image setting holds the image back.
+    var blockedAction: (() -> Void)?
     private var placeholderColor = NSColor.secondaryLabelColor
     var fitsWholeImage = false
     var transparentBackground = false
@@ -199,7 +201,30 @@ final class AgentMediaTile: NSControl {
         background = isToolResult ? theme.surface.withAlphaComponent(theme.surface.alphaComponent * 0.6) : theme.card
         placeholderColor = theme.fgMuted; label.textColor = theme.fgMuted; needsDisplay = true
     }
+    /// Shows `message` in place of an image the remote-image setting held back; a click runs `action`.
+    func block(_ message: String, action: @escaping () -> Void) {
+        blockedAction = action
+        failureMessage = nil
+        image = nil
+        updateToolPlaceholder()
+        label.stringValue = message
+        label.isHidden = false
+        toolTip = message
+        setAccessibilityRole(.button)
+        setAccessibilityLabel(message)
+        needsDisplay = true
+    }
+
+    /// The held-back image is loading after all.
+    func unblock() {
+        guard blockedAction != nil else { return }
+        blockedAction = nil
+        label.stringValue = name
+        updateToolPlaceholder()
+    }
+
     func fail(_ message: String) {
+        blockedAction = nil
         failureMessage = message
         label.stringValue = "\(name) — \(message). Click to retry"; label.isHidden = false; toolTip = label.stringValue
         updateToolPlaceholder(); needsDisplay = true
@@ -234,6 +259,7 @@ final class AgentMediaTile: NSControl {
     }
     /// Shows an already decoded image now, ending any pending load; GIFs play.
     func show(_ image: NSImage) {
+        blockedAction = nil
         generation += 1
         task?.cancel(); task = nil
         failureMessage = nil
@@ -300,16 +326,23 @@ final class AgentMediaTile: NSControl {
     }
     override func becomeFirstResponder() -> Bool { needsDisplay = true; animatedImage.needsDisplay = true; return acceptsFirstResponder }
     override func resignFirstResponder() -> Bool { needsDisplay = true; animatedImage.needsDisplay = true; return true }
-    override func mouseDown(with event: NSEvent) { guard !isToolResult || image != nil else { return }; window?.makeFirstResponder(self); onPress?() }
+    override func mouseDown(with event: NSEvent) {
+        if let blockedAction { blockedAction(); return }
+        guard !isToolResult || image != nil else { return }; window?.makeFirstResponder(self); onPress?()
+    }
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 109, event.modifierFlags.contains(.shift) {
             imageActions.menu().popUp(positioning: nil, at: NSPoint(x: 0, y: bounds.maxY), in: self)
             return
         }
+        if let blockedAction, event.keyCode == 36 || event.keyCode == 49 { blockedAction(); return }
         guard !isToolResult || image != nil else { return }
         if event.keyCode == 36 || event.keyCode == 49 { onPress?() } else { super.keyDown(with: event) }
     }
-    override func accessibilityPerformPress() -> Bool { guard !isToolResult || image != nil else { return false }; onPress?(); return true }
+    override func accessibilityPerformPress() -> Bool {
+        if let blockedAction { blockedAction(); return true }
+        guard !isToolResult || image != nil else { return false }; onPress?(); return true
+    }
     override func menu(for event: NSEvent) -> NSMenu? { imageActions.menu() }
 }
 

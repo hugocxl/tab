@@ -20,7 +20,13 @@ enum AgentResponseLink: Equatable {
             "lock", "plist", "entitlements", "xcconfig", "xib", "storyboard", "xcassets",
             "svg", "png", "jpg", "jpeg", "webp", "gif", "pdf", "csv", "env", "conf", "ini"
         ]
-        guard path.contains("/") || ext.isEmpty || fileExtensions.contains(ext) else { return nil }
+        if path.contains("/") {
+            // `origin/main`, `application/json` and `@types/node` have slashes but aren't files.
+            let anchored = ["/", "./", "../", "~/"].contains { path.hasPrefix($0) }
+            guard anchored || fileExtensions.contains(ext) else { return nil }
+        } else {
+            guard ext.isEmpty || fileExtensions.contains(ext) else { return nil }
+        }
         return .file(path, line)
     }
 

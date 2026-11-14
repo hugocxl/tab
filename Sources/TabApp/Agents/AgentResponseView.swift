@@ -15,8 +15,9 @@ final class AgentResponseView: NSView, NSTextViewDelegate {
     var isStreaming = false {
         didSet {
             guard oldValue != isStreaming else { return }
-            // The completed source renders as written, so a repaired tail must render again.
-            if completedStreamingTail { source = nil }
+            // The completed source renders as written, so a repaired tail must render again,
+            // including one inside a quote or `<details>`, which this view can't see.
+            if completedStreamingTail || (oldValue && !isStreaming) { source = nil }
             updateCommandAvailability()
         }
     }
@@ -45,6 +46,7 @@ final class AgentResponseView: NSView, NSTextViewDelegate {
     private var source: String?
     private var palette: ChromePalette?
     private var scheme: ColorScheme?
+    private var scale: CGFloat = 1
     private var sections: [AgentResponseSection] = []
     private var sectionGaps: [CGFloat] = []
     private var leadingBlockMargin: CGFloat = 0
@@ -98,17 +100,19 @@ final class AgentResponseView: NSView, NSTextViewDelegate {
     var sectionMeasurementCount: Int { retiredMeasurementCount + sections.reduce(0) { $0 + $1.measurementCount } }
 
     func setContent(_ source: String, theme: AppTheme) {
-        let themeChanged = palette != theme.palette || scheme != theme.scheme
+        let themeChanged = palette != theme.palette || scheme != theme.scheme || scale != AgentTextScale.factor
         guard self.source != source || themeChanged || renderedCardHosts != cardHosts else { return }
         self.source = source
+        scale = AgentTextScale.factor
         preparedBlocks = nil
         palette = theme.palette
         scheme = theme.scheme
-        var blocks = AgentResponseParser.parse(source, parseRawHTML: parseRawHTML)
+        let parsedSource = isStreaming ? AgentStreamingCompletion.holdingBackAmbiguousTail(source) : source
+        var blocks = AgentResponseParser.parse(parsedSource, parseRawHTML: parseRawHTML)
         completedStreamingTail = false
         if isStreaming {
             let completed = AgentStreamingCompletion.completingLastBlock(blocks)
-            completedStreamingTail = completed != blocks
+            completedStreamingTail = completed != blocks || parsedSource != source
             blocks = completed
         }
         let references = inheritedReferences.merging(AgentMarkdownReferences.collect(blocks, parseRawHTML: parseRawHTML)) { inherited, _ in inherited }
@@ -116,7 +120,8 @@ final class AgentResponseView: NSView, NSTextViewDelegate {
     }
 
     func setPreparedContent(_ blocks: [AgentMarkdown.Block], theme: AppTheme) {
-        guard preparedBlocks != blocks || palette != theme.palette || scheme != theme.scheme || source == nil || renderedCardHosts != cardHosts else { return }
+        guard preparedBlocks != blocks || palette != theme.palette || scheme != theme.scheme || scale != AgentTextScale.factor || source == nil || renderedCardHosts != cardHosts else { return }
+        scale = AgentTextScale.factor
         preparedBlocks = blocks
         source = ""
         palette = theme.palette
@@ -189,6 +194,9 @@ final class AgentResponseView: NSView, NSTextViewDelegate {
                 media.onOpenMedia = { [weak self] media in self?.openMedia(media) }
             }
             if let container = section as? AgentResponseContainer {
+                // Before the nested content renders, so a finished message never keeps a
+                // streaming repair inside a quote or `<details>`.
+                container.response.isStreaming = isStreaming
                 container.response.linkServices = linkServices
                 container.response.compactProse = compactProse
                 container.response.lineBreaks = lineBreaks
@@ -201,14 +209,16 @@ final class AgentResponseView: NSView, NSTextViewDelegate {
                 container.response.onOpenMedia = { [weak self] media in self?.openMedia(media) }
             }
             if let notes = section as? AgentResponseFootnotes {
+                notes.isStreaming = isStreaming
                 notes.onOpenFile = { [weak self] path, line in self?.onOpenFile?(path, line) }
                 notes.onOpenFragment = { [weak self] id in self?.openFragment(id) ?? false }
                 notes.onOpenCitation = { [weak self] citation in self?.onOpenCitation?(citation) }
                 notes.onOpenThread = { [weak self] link in self?.onOpenThread?(link) }
             }
             section.apply(part, theme: theme, delegate: self, references: references, compactProse: compactProse, lineBreaks: lineBreaks, rawHTML: parseRawHTML)
-            if let container = section as? AgentResponseContainer, container.response.reapplyIfCardHostsChanged(theme: theme) {
-                container.invalidateMeasurement()
+            if let container = section as? AgentResponseContainer {
+                container.refreshContent(theme: theme)
+                if container.response.reapplyIfCardHostsChanged(theme: theme) { container.invalidateMeasurement() }
             }
         }
         while sections.count > parts.count {
@@ -224,6 +234,7 @@ final class AgentResponseView: NSView, NSTextViewDelegate {
 
     private func updateCommandAvailability() {
         for section in sections {
+            (section as? AgentResponseProse)?.text.fetchesFavicons = !isStreaming
             if let code = section as? AgentResponseCode {
                 code.isStreaming = isStreaming
                 code.onRunShellCommand = onRunShellCommand
@@ -435,7 +446,7 @@ enum AgentResponsePart: Equatable {
     @MainActor
     static func partition(_ blocks: [AgentMarkdown.Block], compact: Bool = false, parseRawHTML: Bool = true,
                           pullRequestHosts: Set<String> = [], templates: Bool = false, media: Bool = false) -> [Self] {
-        let indents = AgentListLayout.indents(blocks, font: AppFont.system(compact ? 12 : 14, weight: .light))
+        let indents = AgentListLayout.indents(blocks, font: AgentFont.system(compact ? 12 : 14, weight: .light))
         var proseIndents: [Int: CGFloat] = [:]
         var result: [Self] = []
         var prose: [AgentMarkdown.Block] = []
@@ -510,9 +521,10 @@ class AgentResponseSection: NSView {
     /// Assistant sections render the sanitized inline-HTML subset.
     private(set) var rawHTML = false
     private(set) var references: [String: String] = [:]
-    private var part: AgentResponsePart?
+    private(set) var part: AgentResponsePart?
     private var palette: ChromePalette?
     private var scheme: ColorScheme?
+    private var scale: CGFloat = 1
     private var measurementWidth: CGFloat?
     private var measurementHeight: CGFloat = 0
     private var childLayoutDirty = true
@@ -522,7 +534,8 @@ class AgentResponseSection: NSView {
     var kind: Int { -1 }
 
     final func apply(_ part: AgentResponsePart, theme: AppTheme, delegate: NSTextViewDelegate, references: [String: String] = [:], compactProse: Bool = false, lineBreaks: Bool = false, rawHTML: Bool = false) {
-        guard self.part != part || palette != theme.palette || scheme != theme.scheme || self.references != references || self.compactProse != compactProse || self.lineBreaks != lineBreaks || self.rawHTML != rawHTML else { return }
+        guard self.part != part || palette != theme.palette || scheme != theme.scheme || scale != AgentTextScale.factor || self.references != references || self.compactProse != compactProse || self.lineBreaks != lineBreaks || self.rawHTML != rawHTML else { return }
+        scale = AgentTextScale.factor
         self.lineBreaks = lineBreaks
         self.rawHTML = rawHTML
         self.compactProse = compactProse
@@ -589,6 +602,7 @@ final class AgentResponseProse: AgentResponseSection {
     private(set) var inlineCells: [AgentInlineMediaCell] = []
     private var inlineAttachments: [String: NSTextAttachment] = [:]
     private var inlineObservations: [AgentLazyRequestObservation] = []
+    let renderCache = AgentMarkdownRenderCache()
     var inlineMedia: [AgentMarkdownMedia] { inlineCells.map(\.media) }
 
     override init(frame frameRect: NSRect) {
@@ -617,6 +631,8 @@ final class AgentResponseProse: AgentResponseSection {
                 case .loading: return
                 case .loaded(let entry): cell.thumbnail = entry.image; cell.failed = entry.image == nil
                 case .failed: cell.thumbnail = nil; cell.failed = true
+                // Held back by the remote-image setting; opening it is the click that loads it.
+                case .blocked: cell.thumbnail = nil; cell.failed = false
                 }
                 self.text.needsDisplay = true
             })
@@ -628,7 +644,7 @@ final class AgentResponseProse: AgentResponseSection {
     override func update(_ part: AgentResponsePart, theme: AppTheme, delegate: NSTextViewDelegate) {
         guard case .prose(let blocks, let listIndents) = part else { return }
         text.delegate = delegate
-        let rendered = AgentMarkdown.render(blocks, theme: theme, fileLinks: true, references: references, compact: compactProse, lineBreaks: lineBreaks, listIndents: listIndents, rawHTML: rawHTML)
+        let rendered = AgentMarkdown.render(blocks, theme: theme, fileLinks: true, references: references, compact: compactProse, lineBreaks: lineBreaks, listIndents: listIndents, rawHTML: rawHTML, cache: renderCache)
         fileIconTheme = theme
         missingColor = AgentMarkdownPalette(theme: theme).muted
         if let services {
@@ -648,8 +664,13 @@ final class AgentResponseProse: AgentResponseSection {
         }
         observeInlineMedia()
         text.setFileLinkServices(services, missingColor: missingColor, theme: fileIconTheme)
-        text.selectedTextAttributes = [.backgroundColor: theme.accent.withAlphaComponent(0.22)]
-        text.linkTextAttributes = [:] // Inline spans already carry their own link or code color.
+        let selection = theme.accent.withAlphaComponent(0.22)
+        if text.selectedTextAttributes[.backgroundColor] as? NSColor != selection {
+            text.selectedTextAttributes = [.backgroundColor: selection]
+        }
+        // Inline spans already carry their own link or code color. Setting this restyles
+        // every link in the text, so it happens once rather than on each streamed update.
+        if text.linkTextAttributes?.isEmpty != true { text.linkTextAttributes = [:] }
     }
 
     override func height(for width: CGFloat) -> CGFloat { text.height(for: width) }
@@ -666,10 +687,21 @@ final class AgentResponseProse: AgentResponseSection {
 final class AgentResponseCode: AgentResponseSection {
     override var kind: Int { 1 }
     let text = AgentRichTextView(frame: .zero)
-    let scroll = NSScrollView()
+    let scroll = AgentPassThroughScrollView()
     let copy = PillButton("", style: .plain)
     let wrap = PillButton("", style: .plain)
     let run = PillButton("", style: .plain)
+    /// Shows a long block whole, or folds it back to its first lines.
+    let more = PillButton("", style: .plain)
+    /// A finished block longer than this folds to `foldedLines` until opened.
+    static let foldThreshold = 40
+    static let foldedLines = 24
+    private(set) var showsAll = false
+    private(set) var lineCount = 0
+    /// True when the block is long enough to fold and has finished streaming.
+    var isFoldable: Bool { fenceClosed && lineCount > Self.foldThreshold }
+    private var lineHeight: CGFloat { 17.875 * AgentTextScale.factor }
+    private var visibleHeight: CGFloat = 0
     var onRunShellCommand: ((String) -> Void)? { didSet { refreshRunAction() } }
     /// Where Copy writes through the conversation actions; unset, it uses the general pasteboard.
     weak var services: AgentConversationLinkServices?
@@ -679,7 +711,7 @@ final class AgentResponseCode: AgentResponseSection {
     private(set) var copyReset: Task<Void, Never>?
     private var controlColor: NSColor = .secondaryLabelColor
     private var wrapBackground: NSColor = .clear
-    private let titleLabel = makeLabel("", font: AppFont.mono(11))
+    private let titleLabel = makeLabel("", font: AgentFont.mono(11))
     private let fileIcon = NSImageView()
     private var highlighter: SyntaxHighlighter?
     private(set) var code = ""
@@ -704,13 +736,23 @@ final class AgentResponseCode: AgentResponseSection {
         text.autoresizingMask = []
         text.isHorizontallyResizable = true
         text.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-        for child in [scroll, titleLabel, fileIcon, wrap, run, copy] {
+        for child in [scroll, titleLabel, fileIcon, wrap, run, copy, more] {
             child.translatesAutoresizingMaskIntoConstraints = true
             addSubview(child)
         }
         titleLabel.lineBreakMode = .byTruncatingTail
         wrap.font = AppFont.footnote
         copy.font = AppFont.footnote
+        more.font = AppFont.footnote
+        more.isHidden = true
+        more.onPress = { [weak self] in
+            guard let self else { return }
+            self.showsAll.toggle()
+            self.refreshFold()
+            self.invalidateMeasurement()
+            self.superview?.needsLayout = true
+            self.onHeightChanged?()
+        }
         for button in [wrap, run, copy] {
             button.imagePosition = .imageOnly
             button.imageScaling = .scaleProportionallyDown
@@ -742,8 +784,21 @@ final class AgentResponseCode: AgentResponseSection {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    override func captureState() -> AgentResponseState { AgentResponseState(wrapped: wrapped) }
-    override func restoreState(_ state: AgentResponseState) { if let wrapped = state.wrapped { setWrapped(wrapped) } }
+    override func captureState() -> AgentResponseState { AgentResponseState(wrapped: wrapped, expanded: showsAll ? true : nil) }
+    override func restoreState(_ state: AgentResponseState) {
+        if let wrapped = state.wrapped { setWrapped(wrapped) }
+        if (state.expanded == true) != showsAll {
+            showsAll = state.expanded == true
+            refreshFold()
+            invalidateMeasurement()
+        }
+    }
+
+    private func refreshFold() {
+        more.isHidden = !isFoldable
+        more.title = showsAll ? "Show less" : "Show all \(lineCount) lines"
+        more.setAccessibilityLabel(more.title)
+    }
 
     /// Silent state restoration; only the actual wrap button action invokes `onHeightChanged`.
     @discardableResult
@@ -767,9 +822,11 @@ final class AgentResponseCode: AgentResponseSection {
         fileIcon.toolTip = metadata.title == nil ? metadata.language : nil
         fileIcon.setAccessibilityElement(metadata.title == nil && !fileIcon.isHidden)
         fileIcon.setAccessibilityLabel(metadata.title == nil ? "Language: \(metadata.language)" : metadata.title)
-        titleLabel.stringValue = metadata.title ?? (fileIcon.isHidden ? (metadata.language.isEmpty ? "text" : metadata.language) : "")
+        // The language is named beside its icon, not left to the icon alone.
+        titleLabel.stringValue = metadata.title ?? (metadata.language.isEmpty ? "text" : metadata.language)
         titleLabel.toolTip = metadata.language
         titleLabel.textColor = theme.fgMuted
+        text.setAccessibilityLabel("Code" + (metadata.title.map { ", " + $0 } ?? (metadata.language.isEmpty ? "" : ", " + metadata.language)))
         let nextLanguage = Self.syntaxLanguage(metadata.language)
         if highlighter == nil || nextLanguage != language {
             language = nextLanguage
@@ -788,21 +845,26 @@ final class AgentResponseCode: AgentResponseSection {
             longestCodeWidth = nil
         }
         code = source
+        let trimmed = source.hasSuffix("\n") ? source.dropLast() : Substring(source)
+        lineCount = trimmed.isEmpty ? 0 : trimmed.reduce(1) { $1 == "\n" ? $0 + 1 : $0 }
+        refreshFold()
+        more.setTitleColor(theme.fgMuted)
         refreshRunAction()
         controlColor = theme.fgMuted
         wrapBackground = theme.fg.withAlphaComponent(0.08)
         for button in [wrap, run, copy] { button.contentTintColor = controlColor }
         refreshWrapAction()
         let paragraph = NSMutableParagraphStyle()
-        paragraph.minimumLineHeight = 17.875
-        paragraph.maximumLineHeight = 17.875
+        paragraph.minimumLineHeight = lineHeight
+        paragraph.maximumLineHeight = lineHeight
         paragraph.lineBreakMode = .byWordWrapping
         let content = NSMutableAttributedString(string: source, attributes: [
-            .font: AppFont.mono(13), .foregroundColor: theme.fg, .paragraphStyle: paragraph,
+            .font: AgentFont.mono(13), .foregroundColor: theme.fg, .paragraphStyle: paragraph,
         ])
         for token in highlighter?.tokens ?? [] where NSMaxRange(token.range) <= content.length {
-            content.addAttributes(theme.syntaxColors.attributes(token.kind, font: AppFont.mono(13)), range: token.range)
+            content.addAttributes(theme.syntaxColors.attributes(token.kind, font: AgentFont.mono(13)), range: token.range)
         }
+        Self.applyHangingIndents(content, base: paragraph, font: AgentFont.mono(13))
         text.setContent(content)
         text.delegate = delegate
         text.selectedTextAttributes = [.backgroundColor: theme.accent.withAlphaComponent(0.22)]
@@ -810,9 +872,40 @@ final class AgentResponseCode: AgentResponseSection {
         layer?.borderColor = theme.border.withAlphaComponent(0.65).cgColor
     }
 
+    /// A wrapped line continues under its own indentation, not at column zero, and its
+    /// indentation never wraps away from the code it indents.
+    static func applyHangingIndents(_ content: NSMutableAttributedString, base: NSParagraphStyle, font: NSFont) {
+        let source = content.string as NSString
+        let space = (" " as NSString).size(withAttributes: [.font: font]).width
+        var styles: [Int: NSParagraphStyle] = [:]
+        var location = 0
+        while location < source.length {
+            let line = source.lineRange(for: NSRange(location: location, length: 0))
+            var indent = 0, columns = 0
+            while indent < line.length {
+                let character = source.character(at: line.location + indent)
+                if character == 0x20 { columns += 1 } else if character == 0x09 { columns += 4 } else { break }
+                indent += 1
+            }
+            let hasCode = indent < line.length && !CharacterSet.newlines.contains(Unicode.Scalar(source.character(at: line.location + indent)) ?? " ")
+            if indent > 0, hasCode {
+                content.addAttribute(.agentCodeIndent, value: true, range: NSRange(location: line.location, length: indent))
+                let style = styles[columns] ?? {
+                    let style = (base.mutableCopy() as? NSMutableParagraphStyle) ?? NSMutableParagraphStyle()
+                    // Deep indentation keeps some room for the code it indents.
+                    style.headIndent = min(CGFloat(columns) * space, 24 * space)
+                    styles[columns] = style
+                    return style
+                }()
+                content.addAttribute(.paragraphStyle, value: style, range: line)
+            }
+            location = NSMaxRange(line)
+        }
+    }
+
     override func height(for width: CGFloat) -> CGFloat {
         let available = max(1, width - 30.8)
-        let font = AppFont.mono(13)
+        let font = AgentFont.mono(13)
         if longestCodeWidth == nil || longestWidthFont != font {
             longestLineScanCount += 1
             longestCodeWidth = AgentMarkdownSource(code).lines.reduce(CGFloat.zero) { longest, line in
@@ -826,8 +919,10 @@ final class AgentResponseCode: AgentResponseSection {
         if code.hasSuffix("\n"), let manager = text.layoutManager, manager.extraLineFragmentTextContainer != nil {
             documentHeight = min(documentHeight, manager.extraLineFragmentRect.minY)
         }
-        documentHeight = max(17.875, documentHeight)
-        return 57.6 + documentHeight + (documentWidth > available ? 10 : 0)
+        documentHeight = max(lineHeight, documentHeight)
+        let folded = isFoldable && !showsAll
+        visibleHeight = folded ? min(documentHeight, lineHeight * CGFloat(Self.foldedLines)) : documentHeight
+        return 57.6 + visibleHeight + (documentWidth > available ? 10 : 0) + (isFoldable ? 26 : 0)
     }
 
     override func layoutSection(width: CGFloat) {
@@ -838,8 +933,10 @@ final class AgentResponseCode: AgentResponseSection {
         fileIcon.frame = NSRect(x: 13, y: 12, width: 14, height: 14)
         let titleX: CGFloat = fileIcon.isHidden ? 13 : 33
         titleLabel.frame = NSRect(x: titleX, y: 11, width: max(0, wrap.frame.minX - titleX - 8), height: 16)
-        scroll.frame = NSRect(x: 15.4, y: 43.8, width: max(1, width - 30.8), height: max(0, bounds.height - 57.6))
+        let footer: CGFloat = isFoldable ? 26 : 0
+        scroll.frame = NSRect(x: 15.4, y: 43.8, width: max(1, width - 30.8), height: max(0, bounds.height - 57.6 - footer))
         text.frame = NSRect(x: 0, y: 0, width: documentWidth, height: documentHeight)
+        more.frame = NSRect(x: 9, y: scroll.frame.maxY + 1, width: max(0, width - 18), height: 24)
     }
 
     private func refreshWrapAction() {

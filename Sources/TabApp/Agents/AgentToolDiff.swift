@@ -9,6 +9,7 @@ enum AgentToolDiff {
         var old: UInt64?, new: UInt64?
         let hasHunks = source.contains("@@ ")
         for line in source.components(separatedBy: "\n") {
+            if line == AgentToolActivity.diffTruncationMarker || line == "[Earlier text truncated]" { result.truncated = true; continue }
             if line.hasPrefix("Binary files ") && line.hasSuffix(" differ") { result.binary = true; continue }
             if line.hasPrefix("@@ ") {
                 let fields = line.split(separator: " ")

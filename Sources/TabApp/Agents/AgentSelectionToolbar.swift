@@ -71,6 +71,11 @@ final class AgentSelectionToolbar: ThemedView {
 // MARK: - Selection actions
 
 extension AgentPaneView: AgentTextSelectionHost {
+    func conversationMenuItems() -> [NSMenuItem] {
+        guard let onCopyConversation, snapshot?.items.isEmpty == false else { return [] }
+        return [ClosureMenuItem("Copy Conversation as Markdown") { onCopyConversation() }]
+    }
+
     /// How long a followed citation stays highlighted before it fades.
     static let citationHighlightDuration: TimeInterval = 1.5
 
@@ -81,6 +86,10 @@ extension AgentPaneView: AgentTextSelectionHost {
         for text in AgentTranscriptSelection.textViews(in: transcript) where text !== view && text.selectedRange().length > 0 {
             text.setSelectedRange(NSRange(location: text.selectedRange().location, length: 0))
         }
+    }
+
+    func textSelectionDidDrag(in view: AgentRichTextView, to windowPoint: NSPoint) {
+        AgentTranscriptSelection.extendDrag(in: transcript, from: view, to: transcript.convert(windowPoint, from: nil))
     }
 
     func textSelectionDidEnd(in view: AgentRichTextView) {

@@ -200,6 +200,17 @@ final class AgentRenderingTests: XCTestCase {
         XCTAssertGreaterThan(try XCTUnwrap(table.scroll.documentView).frame.width, table.scroll.bounds.width)
     }
 
+    /// Inline code with a slash used to be styled as a file link and then struck through as missing.
+    func testSlashedInlineCodeIsAFileOnlyWithAnExtensionOrAnAnchoredPath() {
+        for text in ["origin/main", "application/json", "@types/node", "feature/agent-pane", "Sources/TabApp"] {
+            XCTAssertNil(AgentResponseLink.inferredFile(text), text)
+        }
+        XCTAssertEqual(AgentResponseLink.inferredFile("Sources/App.swift:12"), .file("Sources/App.swift", 12))
+        XCTAssertEqual(AgentResponseLink.inferredFile("./scripts/run"), .file("./scripts/run", nil))
+        XCTAssertEqual(AgentResponseLink.inferredFile("~/notes/todo"), .file("~/notes/todo", nil))
+        XCTAssertEqual(AgentResponseLink.inferredFile("Makefile"), .file("Makefile", nil))
+    }
+
     func testFileLinksAreRoutedWithLineWhileUnsafeSchemesAreNeverOpened() throws {
         XCTAssertEqual(AgentResponseLink.parse("Sources/App.swift:12:3"), .file("Sources/App.swift", 12))
         XCTAssertEqual(AgentResponseLink.parse("Sources/App.swift#L19C4"), .file("Sources/App.swift", 19))

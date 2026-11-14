@@ -31,6 +31,10 @@ final class AgentTranscriptDocument: ThemedView {
         var showsResponseActions = true
         /// Only compaction cards name the provider, so a provider change re-renders them alone.
         var provider: AgentChatProvider? = nil
+        /// What a running turn is doing now, on its working row.
+        var activity: String? = nil
+        /// What the turn an answer ends used.
+        var usage: AgentTurnUsage? = nil
     }
     private struct Height {
         var value: CGFloat
@@ -89,6 +93,8 @@ final class AgentTranscriptDocument: ThemedView {
     var retainedRowCount: Int { cache.count }
     var isUpdatingViewport: Bool { updatingViewport }
     var onApproval: ((String, Bool) -> Void)?
+    /// Allows a tool for the rest of the conversation, or denies it with a reason.
+    var onApprovalChoice: ((String, AgentApprovalChoice) -> Void)?
     var onDisclosure: (() -> Void)?
     var onRunShellCommand: ((String) -> Void)? { didSet { cache.values.forEach { $0.row.onRunShellCommand = onRunShellCommand } } }
     var onOpenAttachment: ((String, AgentChatAttachmentDescriptor, Bool) -> Void)?
@@ -99,7 +105,23 @@ final class AgentTranscriptDocument: ThemedView {
     var workspaceRoot: String?
     var onOpenToolDiff: ((String, AgentToolActivity) -> Void)?
     var onOpenCheckpoint: ((String, String?) -> Void)?
-    var onEarlier: (() -> Void)?
+    var onOpenSubagent: ((String) -> Void)?
+    var onEditPrompt: ((AgentChatItem) -> Void)?
+    var onForkPrompt: ((AgentChatItem) -> Void)?
+    var onRevert: ((AgentTurnCheckpoint, [String]?) -> Void)?
+    /// What holds the provider up, from the snapshot, for the working line.
+    var providerActivity: AgentChatActivity?
+    var onShowFullOutput: ((String) -> Void)?
+    /// Conversation-wide context menu items, for a click between rows.
+    var conversationMenu: (() -> [NSMenuItem])?
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        guard let items = conversationMenu?(), !items.isEmpty else { return super.menu(for: event) }
+        let menu = NSMenu()
+        for item in items { menu.addItem(item) }
+        return menu
+    }
+    var onEarlier: (() -> Void)? { didSet { if (oldValue == nil) != (onEarlier == nil) { layoutHeader() } } }
     /// Saves a plan through the conversation's project actions: `(relativePath, contents, cwd)`.
     var writeProjectFile: ((String, String, String?) async throws -> String)?
     var pasteboard: NSPasteboard = .general
@@ -152,11 +174,36 @@ final class AgentTranscriptDocument: ThemedView {
         // Approval decisions remain in the authoritative audit snapshot, not the chat, and
         // a pending question shows only in its form above the composer.
         let items = sourceItems.filter { $0.kind != .approval || (!$0.isComplete && $0.questionnaire == nil) }
-        let anchor = captureAnchor(at: lastViewport.minY)
+        var anchor = captureAnchor(at: lastViewport.minY)
         captureStates()
         migrateToolGroupStates()
         let previous = Dictionary(uniqueKeysWithValues: entries.map { ($0.id, $0) })
         let grouped = makeEntries(items, turns: turns)
+        // A turn that just finished folds its work, unless that would take away what the
+        // reader is using: an open row, the keyboard focus or the row the view is anchored
+        // to. Folding under the anchor moves it to the summary instead of jumping away.
+        var previousOwner: [String: String] = [:]
+        for entry in entries { for item in entry.items { previousOwner[item.id] = entry.id } }
+        let focused = focusedRowID()
+        for entry in grouped where entry.kind == .work && savedStates[entry.id] == nil {
+            var children: [String: AgentTimelineRowState] = [:]
+            var owners: Set<String> = []
+            for item in entry.items {
+                guard let owner = previousOwner[item.id] else { continue }
+                owners.insert(owner)
+                if let state = savedStates[owner] { children[owner] = state }
+            }
+            let inUse = owners.contains { owner in
+                let state = savedStates[owner]
+                return state?.expanded == true || state?.toolExpandedIDs.isEmpty == false || owner == focused
+            }
+            let anchored = anchor.rowID.map(owners.contains) ?? false
+            if inUse || anchored, !previous.keys.contains(entry.id) {
+                savedStates[entry.id] = AgentTimelineRowState(expanded: true, children: children)
+            } else if !children.isEmpty {
+                savedStates[entry.id] = AgentTimelineRowState(children: children)
+            }
+        }
         // Work history is projected into the same timeline as its answer. Keeping its
         // entries separate gives it the main scrollbar and the normal viewport budget.
         var allIDs = Set(grouped.map(\.id))
@@ -175,15 +222,11 @@ final class AgentTranscriptDocument: ThemedView {
             }
             return savedStates[entry.id]?.expanded == true ? [entry] + children : [entry]
         }
-        // A newly folded work group inherits the disclosure states of its former rows.
-        var previousOwner: [String: String] = [:]
-        for entry in entries { for item in entry.items { previousOwner[item.id] = entry.id } }
-        for entry in next where entry.kind == .work && savedStates[entry.id] == nil {
-            var children: [String: AgentTimelineRowState] = [:]
-            for item in entry.items {
-                if let owner = previousOwner[item.id], let state = savedStates[owner] { children[owner] = state }
-            }
-            if !children.isEmpty { savedStates[entry.id] = AgentTimelineRowState(children: children) }
+        // An anchor row that folded away moves to the summary that now holds it.
+        if let id = anchor.rowID, !next.contains(where: { $0.id == id }),
+           let itemID = previous[id]?.items.first?.id,
+           let group = next.first(where: { $0.kind == .work && $0.items.contains { $0.id == itemID } }) {
+            anchor = AgentTranscriptAnchor(rowID: group.id, localOffset: 0, fallback: anchor.fallback)
         }
         let retained = Set(next.map(\.id))
         for id in Array(cache.keys) where !retained.contains(id) { removeCachedRow(id) }
@@ -196,7 +239,9 @@ final class AgentTranscriptDocument: ThemedView {
         entries = next
         positions = Dictionary(uniqueKeysWithValues: entries.enumerated().map { ($0.element.id, $0.offset) })
         self.omittedCount = omittedCount
-        earlier.stringValue = "Earlier messages are saved · Showing \(items.count) retained entries"
+        // Without a way to load them, the dropped items are simply gone from Tab.
+        earlier.stringValue = (omittedCount == 1 ? "1 earlier item isn't" : "\(omittedCount) earlier items aren't")
+            + " shown, to keep this conversation within its size limit"
         geometry.reset(heights: entries.map { heights[$0.id]?.value ?? 80 },
                        trailingSpaces: entries.enumerated().map { index, entry in
             if case .card = entry.kind { return entry.groupedWork ? 6 : 14 }
@@ -207,6 +252,8 @@ final class AgentTranscriptDocument: ThemedView {
             if entry.kind == .working || entry.kind == .work || entry.kind == .activity { return 10 }
             if entry.items.first?.kind == .assistant, index + 1 < entries.count,
                entries[index + 1].kind == .activity { return 8 }
+            // A user message already reserves room below it for its hover actions.
+            if entry.kind == .message, entry.items.first?.kind == .user { return 10 }
             return 26
         })
         layoutHeader()
@@ -406,9 +453,10 @@ final class AgentTranscriptDocument: ThemedView {
     private func layoutHeader() {
         let left = floor((viewportWidth - rowWidth) / 2)
         let start: CGFloat = isNested ? 0 : 28
-        geometry.leading = start + (omittedCount > 0 ? 66 : 0)
+        let canLoad = onEarlier != nil
+        geometry.leading = start + (omittedCount > 0 ? (canLoad ? 66 : 30) : 0)
         earlier.isHidden = omittedCount == 0
-        showEarlier.isHidden = omittedCount == 0
+        showEarlier.isHidden = omittedCount == 0 || !canLoad
         earlier.frame = NSRect(x: left, y: start, width: rowWidth, height: 18)
         showEarlier.frame = NSRect(x: left - 4, y: start + 22, width: min(rowWidth, 180), height: 26)
     }
@@ -470,9 +518,15 @@ final class AgentTranscriptDocument: ThemedView {
                 else { self.reflow(viewportWidth: self.viewportWidth) }
             }
             row.onApproval = { [weak self] id, allow in self?.onApproval?(id, allow) }
+            row.onApprovalChoice = { [weak self] id, choice in self?.onApprovalChoice?(id, choice) }
             row.workspaceRoot = workspaceRoot
             row.onOpenToolDiff = { [weak self] id, activity in self?.onOpenToolDiff?(id, activity) }
             row.onOpenCheckpoint = { [weak self] id, path in self?.onOpenCheckpoint?(id, path) }
+            if onOpenSubagent != nil { row.onOpenSubagent = { [weak self] id in self?.onOpenSubagent?(id) } }
+            if onEditPrompt != nil, entry.kind == .message { row.onEditPrompt = { [weak self] item in self?.onEditPrompt?(item) } }
+            if onForkPrompt != nil, entry.kind == .message { row.onForkPrompt = { [weak self] item in self?.onForkPrompt?(item) } }
+            if onRevert != nil { row.onRevert = { [weak self] checkpoint, paths in self?.onRevert?(checkpoint, paths) } }
+            if onShowFullOutput != nil { row.onShowFullOutput = { [weak self] id in self?.onShowFullOutput?(id) } }
             row.onOpenAttachment = onOpenAttachment
             row.fetchAttachment = fetchAttachment
             row.onHTMLDocument = onHTMLDocument
@@ -493,11 +547,15 @@ final class AgentTranscriptDocument: ThemedView {
         if cached.rendered != entry {
             if let activity = row as? AgentActivityRow { activity.grouped = entry.groupedWork }
             if let work = row as? AgentCompletedWorkRow { work.turn = entry.turn; work.duration = entry.duration }
-            if let working = row as? AgentWorkingRow { working.turn = entry.turn }
+            if let working = row as? AgentWorkingRow { working.turn = entry.turn; working.activity = entry.activity }
             if let message = row as? AgentMessageRow {
+                // Claude resumes at any message; Codex forks only whole threads.
+                message.forkable = entry.provider == .claude
+                message.alwaysAllowable = entry.provider == .claude
                 message.showsResponseActions = entry.showsResponseActions
                 message.checkpoint = entry.turn?.checkpoint
                 message.duration = entry.duration
+                message.usage = entry.usage
             }
             if let changes = row as? AgentChangedFilesRow { changes.checkpoint = entry.turn?.checkpoint }
             if let compaction = row as? AgentCompactionRow { compaction.provider = entry.provider }
@@ -625,6 +683,7 @@ final class AgentTranscriptDocument: ThemedView {
         }
         var timestamps: [String: Date] = [:]
         var durations: [String: TimeInterval] = [:]
+        var usages: [String: AgentTurnUsage] = [:]
         var groups: [Int: (AgentChatTurn, Int)] = [:]
         for turn in turns {
             timestamps[turn.userItemID] = turn.startedAt
@@ -633,6 +692,7 @@ final class AgentTranscriptDocument: ThemedView {
             if let turnAnswer = turnAnswers[turn.userItemID] {
                 timestamps[items[turnAnswer].id] = endDate
                 durations[items[turnAnswer].id] = turn.workingTime(at: endDate)
+                usages[items[turnAnswer].id] = turn.usage
             }
             guard answer > start + 1, toolCounts[answer] > toolCounts[start + 1],
                   approvalCounts[answer] == approvalCounts[start + 1] else { continue }
@@ -640,13 +700,37 @@ final class AgentTranscriptDocument: ThemedView {
         }
         let runningUserIDs = Set(turns.filter { $0.completedAt == nil }.map(\.userItemID))
         var currentTurnIsRunning = false
+        // Each turn shows its newest todo list as a card; earlier updates are one line each.
+        // A provider's raw tool row for a todo or plan its typed card already shows is hidden.
+        var newestTodos: Set<String> = []
+        var typedNativeIDs: Set<String> = []
+        var segmentTodo: String?
+        for item in items {
+            if item.kind == .user {
+                if let todo = segmentTodo { newestTodos.insert(todo) }
+                segmentTodo = nil
+            } else if item.kind == .tool, item.workContext?.itemType == "todo_list" {
+                segmentTodo = item.id
+            }
+            for prefix in ["todo_list:", "proposed_plan:"] where item.id.hasPrefix(prefix) {
+                typedNativeIDs.insert(String(item.id.dropFirst(prefix.count)))
+            }
+        }
+        if let todo = segmentTodo { newestTodos.insert(todo) }
+        func shadowed(_ item: AgentChatItem) -> Bool {
+            item.kind == .tool && typedNativeIDs.contains(item.id)
+                && item.tool?.name.map({ ["TodoWrite", "ExitPlanMode"].contains($0) }) == true
+        }
         func entry(for item: AgentChatItem) -> Entry {
-            let card = classifier.classify(item)
+            // A turn the agent began itself opens with a note, not a message from the user.
+            var card = item.isProviderTurn ? .notice : classifier.classify(item)
+            if card == .todo, !newestTodos.contains(item.id) { card = nil }
             return Entry(id: item.kind == .tool ? "activity:" + item.id : item.id,
                          kind: card.map { .card($0) } ?? (item.kind == .tool ? .activity : .message),
                          items: [item], timestamp: timestamps[item.id], duration: durations[item.id],
                          showsResponseActions: !currentTurnIsRunning,
-                         provider: card == .compaction ? provider : nil)
+                         provider: card == .compaction || (card == nil && (item.kind == .user || item.kind == .approval)) ? provider : nil,
+                         usage: usages[item.id])
         }
         var result: [Entry] = []
         var index = 0
@@ -656,21 +740,28 @@ final class AgentTranscriptDocument: ThemedView {
             if let (turn, end) = groups[index] {
                 // Failures stay visible below the fold; every other card folds like a tool.
                 let work = items[index..<end]
-                let folded = work.filter { classifier.classify($0)?.folds != false }
+                // The turn's newest proposed plan stays visible below its summary, like a failure.
+                let plan = work.last { classifier.classify($0) == .plan }?.id
+                let visible = { (item: AgentChatItem) in self.classifier.classify(item)?.folds == false || item.id == plan }
+                let folded = work.filter { !visible($0) && !shadowed($0) }
                 let unanswered = turnAnswers[turn.userItemID] == nil
                 result.append(Entry(id: "work:" + turn.userItemID, kind: .work, items: folded, turn: turn,
                                     duration: unanswered ? turn.completedAt.map { turn.workingTime(at: $0) } : nil))
-                result.append(contentsOf: work.filter { classifier.classify($0)?.folds == false }.map(entry(for:)))
+                result.append(contentsOf: work.filter(visible).map(entry(for:)))
                 index = end
                 continue
             }
-            result.append(entry(for: item))
+            if !shadowed(item) { result.append(entry(for: item)) }
             index += 1
         }
         // Only the newest turn can still be running, and its timer is always the
         // conversation's last row, below messages sent while it works.
         if let turn = turns.last, turn.completedAt == nil, itemIndices[turn.userItemID] != nil {
-            result.append(Entry(id: "working:" + turn.userItemID, kind: .working, items: [], turn: turn))
+            let start = itemIndices[turn.userItemID] ?? items.endIndex
+            let current = items[start...].last { $0.kind == .tool && !$0.isComplete }
+            let itemActivity = current.flatMap { AgentWorkingRow.activity(of: $0, root: workspaceRoot) }
+            result.append(Entry(id: "working:" + turn.userItemID, kind: .working, items: [], turn: turn,
+                                activity: AgentWorkingRow.describe(providerActivity, otherwise: itemActivity)))
         }
         var foundAnswer = false
         for position in result.indices.reversed() {

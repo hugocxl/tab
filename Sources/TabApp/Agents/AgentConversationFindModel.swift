@@ -62,13 +62,28 @@ struct AgentConversationFindModel {
     }
 
     /// The Markdown source of what Find searches in `item`, or nil when the item is not
-    /// searchable (tool output, notices and approvals).
+    /// searchable (notices and approvals). A tool call is searched by its name, what it
+    /// worked on, its command and its output, as plain text.
     static func searchableText(_ item: AgentChatItem) -> String? {
         switch item.kind {
         case .user, .assistant: return item.text
         case .tool where item.workContext?.itemType == "proposed_plan": return item.detail
+        case .tool where item.tool != nil: return toolText(item)
         default: return nil
         }
+    }
+
+    /// A tool call's searchable text, bounded.
+    static func toolText(_ item: AgentChatItem) -> String? {
+        guard let tool = item.tool else { return nil }
+        let parts = [tool.name ?? item.text, tool.summary, tool.input, tool.output].compactMap { $0 }.filter { !$0.isEmpty }
+        let text = parts.joined(separator: "\n")
+        return text.utf8.count > 64 * 1024 ? String(text.prefix(64 * 1024)) : text
+    }
+
+    /// Whether `item` is searched as plain text rather than rendered Markdown.
+    static func searchesPlainText(_ item: AgentChatItem) -> Bool {
+        item.kind == .tool && item.tool != nil && item.workContext?.itemType != "proposed_plan"
     }
 
     /// What was searched in `itemID` for the current query; nil when it is not searchable

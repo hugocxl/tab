@@ -36,12 +36,10 @@ final class AgentLinkFaviconTests: XCTestCase {
         var calls = 0
         let icons = AgentLinkFavicon(fetch: { _ in calls += 1; throw URLError(.cannotLoadFromNetwork) })
         let url = try XCTUnwrap(URL(string: "https://example.com"))
-        XCTAssertNil(icons.image(for: url, color: .blue))
-        XCTAssertNil(icons.image(for: url, color: .blue))
-        for _ in 0..<100 {
-            if icons.image(for: url, color: .blue) != nil { break }
-            try await Task.sleep(nanoseconds: 10_000_000)
-        }
+        // A globe holds the place while the icon loads, so the link shows no gap.
+        XCTAssertNotNil(icons.image(for: url, color: .blue))
+        XCTAssertNotNil(icons.image(for: url, color: .blue))
+        try await Task.sleep(nanoseconds: 100_000_000)
         XCTAssertNotNil(icons.image(for: url, color: .blue))
         XCTAssertEqual(calls, 1)
     }
@@ -54,9 +52,10 @@ final class AgentLinkFaviconTests: XCTestCase {
         var calls = 0
         let icons = AgentLinkFavicon(fetch: { _ in calls += 1; return data })
         let url = try XCTUnwrap(URL(string: "https://example.com"))
-        XCTAssertNil(icons.image(for: url, color: .blue))
+        let placeholder = try XCTUnwrap(icons.image(for: url, color: .blue))
         for _ in 0..<100 {
-            if icons.image(for: url, color: .blue) != nil { break }
+            if icons.image(for: url, color: .blue).map({ $0 !== placeholder && $0.size == NSSize(width: 14, height: 14) && calls == 1 }) == true,
+               try XCTUnwrap(icons.image(for: url, color: .blue)) === icons.image(for: url, color: .red) { break }
             try await Task.sleep(nanoseconds: 10_000_000)
         }
         let image = try XCTUnwrap(icons.image(for: url, color: .blue))

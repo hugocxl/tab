@@ -8,8 +8,13 @@ final class AgentVoice: NSObject {
     enum State: Equatable { case idle, authorizing, listening }
     private(set) var state: State = .idle { didSet { onChange?() } }
     var onChange: (() -> Void)?
+    /// The words so far, as they're recognized; then `onText` with the final words.
+    var onPartial: ((String) -> Void)?
     var onText: ((String) -> Void)?
     var onError: ((String) -> Void)?
+    /// Dictation stops on its own at this time.
+    private(set) var stopsAt: Date?
+    static let limit: TimeInterval = 60
     private var generation = UUID()
     private var authorization: Task<Void, Never>?
     private var deadline: Task<Void, Never>?
@@ -61,7 +66,10 @@ final class AgentVoice: NSObject {
             let message = error?.localizedDescription
             Task { @MainActor [weak self] in
                 guard let self, self.generation == token else { return }
-                if let text { self.partial = text }
+                if let text, text != self.partial {
+                    self.partial = text
+                    self.onPartial?(text)
+                }
                 if final || message != nil {
                     let hadText = !self.partial.isEmpty
                     self.stop()
@@ -71,9 +79,10 @@ final class AgentVoice: NSObject {
         }
         engine.prepare()
         try engine.start()
+        stopsAt = Date().addingTimeInterval(Self.limit)
         state = .listening
         deadline = Task { [weak self] in
-            do { try await Task.sleep(for: .seconds(60)) } catch { return }
+            do { try await Task.sleep(for: .seconds(Self.limit)) } catch { return }
             guard let self, self.generation == token else { return }
             self.stop()
         }
@@ -86,7 +95,7 @@ final class AgentVoice: NSObject {
         engine?.stop(); engine?.inputNode.removeTap(onBus: 0); engine = nil
         request?.endAudio(); request = nil
         recognition?.cancel(); recognition = nil; recognizer = nil
-        let text = partial; partial = ""; state = .idle
+        let text = partial; partial = ""; stopsAt = nil; state = .idle
         if !text.isEmpty { onText?(text) }
     }
 }

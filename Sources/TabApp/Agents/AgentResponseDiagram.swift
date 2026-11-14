@@ -107,7 +107,8 @@ final class AgentDiagramCache {
             return .failure(AgentDiagramError(message: "The diagram is empty.", line: nil))
         }
         guard let family = families.first(where: { $0.type.keywords.contains(header.keyword) }) else {
-            return .failure(AgentDiagramError(message: "“\(header.word)” diagrams aren't supported.", line: header.line))
+            return .failure(AgentDiagramError(message: "“\(header.word)” diagrams aren't drawn here, so this shows the source.",
+                                              line: header.line, unsupported: true))
         }
         do {
             let input = family.readsFrontMatter || header.frontMatter.isEmpty ? source : blanking(header.frontMatter, in: source)
@@ -163,7 +164,7 @@ final class AgentResponseDiagram: AgentResponseSection {
     let sourceButton = PillButton("Source", style: .plain)
     let copy = PillButton("", style: .plain)
     let expand = PillButton("", style: .plain)
-    let scroll = AgentDiagramScrollView()
+    let scroll = AgentPassThroughScrollView()
     let canvas = AgentDiagramCanvas()
     let text = AgentRichTextView(frame: .zero)
     let errorLabel = makeLabel("", font: AppFont.system(11))
@@ -278,11 +279,14 @@ final class AgentResponseDiagram: AgentResponseSection {
             titleLabel.stringValue = "mermaid"
             setAccessibilityLabel("Mermaid diagram")
         }
-        if let error {
+        if let error, error.unsupported {
+            // Not the author's mistake: a neutral note, not an error.
+            errorLabel.stringValue = error.message
+        } else if let error {
             errorLabel.stringValue = "Diagram error" + (error.line.map { ", line \($0)" } ?? "") + ": " + error.message
         } else { errorLabel.stringValue = "" }
         errorLabel.toolTip = errorLabel.stringValue
-        errorLabel.textColor = theme.danger
+        errorLabel.textColor = error?.unsupported == true ? theme.fgMuted : theme.danger
         titleLabel.textColor = theme.fgMuted
         let muted = theme.fgMuted
         for button in [diagramButton, sourceButton, copy, expand] { button.contentTintColor = muted }
@@ -512,15 +516,27 @@ final class AgentDiagramCanvas: NSView {
     }
 }
 
-/// Lets vertical scrolling pass through to the conversation; keeps horizontal scrolling.
+/// A scroll view inside the conversation: code blocks, diagrams and tool output. Scrolling
+/// it can't use goes on to the conversation: vertical scrolling when it scrolls only
+/// sideways or has reached its edge, and sideways scrolling when its content fits.
 @MainActor
-final class AgentDiagramScrollView: NSScrollView {
+final class AgentPassThroughScrollView: NSScrollView {
     override func scrollWheel(with event: NSEvent) {
-        let fits = (documentView?.frame.width ?? 0) <= contentSize.width + 0.5
-        if fits || abs(event.scrollingDeltaY) > abs(event.scrollingDeltaX) {
-            nextResponder?.scrollWheel(with: event)
-            return
-        }
+        if Self.passes(event, scroll: self) { nextResponder?.scrollWheel(with: event); return }
         super.scrollWheel(with: event)
+    }
+
+    static func passes(_ event: NSEvent, scroll: NSScrollView) -> Bool {
+        let document = scroll.documentView?.frame.size ?? .zero
+        let visible = scroll.contentView.bounds
+        if abs(event.scrollingDeltaY) > abs(event.scrollingDeltaX) {
+            guard scroll.hasVerticalScroller, document.height > scroll.contentSize.height + 0.5 else { return true }
+            let flipped = scroll.documentView?.isFlipped ?? true
+            let atTop = flipped ? visible.minY <= 0.5 : visible.maxY >= document.height - 0.5
+            let atBottom = flipped ? visible.maxY >= document.height - 0.5 : visible.minY <= 0.5
+            // Positive deltas move toward the top.
+            return (event.scrollingDeltaY > 0 && atTop) || (event.scrollingDeltaY < 0 && atBottom)
+        }
+        return document.width <= scroll.contentSize.width + 0.5
     }
 }

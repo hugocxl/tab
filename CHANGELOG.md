@@ -3,6 +3,102 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.98.0 - 2026-11-14
+
+### Added
+
+- Agent panes show each running agent's type, current step and elapsed time,
+  and keep finished and failed agents listed until your next prompt.
+- Clicking a running or finished agent opens the steps it took.
+- Escape stops a working agent, and Allow and Deny can be given shortcuts.
+- A failed or stopped turn offers Retry, and a message you sent can be edited
+  as a new prompt.
+- A turn's file changes can be reverted, all at once or one file at a time,
+  with a warning when a file has changed since.
+- A Claude conversation can be forked from an earlier message.
+- Approvals offer Always Allow for a tool for the rest of a Claude
+  conversation, and Deny with Reason.
+- Settings → Privacy has Load Remote Images; by default an image the agent
+  names loads only when you click it.
+- Messages a long conversation no longer shows can be loaded back with Show
+  earlier messages.
+- Tool rows show when they are running, interrupted or failed, how long they
+  took, and their whole output on request.
+- Edits show their diff in the conversation, with added and removed line
+  counts.
+- Tool rows have a menu to open the file, copy its path, command or output,
+  and run the command in a terminal.
+- Find also searches tool names, commands and output.
+- Up Arrow in an empty composer recalls earlier prompts.
+- Copy Conversation as Markdown is in the conversation's menu and the `/copy`
+  command.
+- The plan mode switch is always visible in the composer, and `/plan` toggles
+  it.
+- Increase Font Size and Decrease Font Size scale an agent pane's text.
+- Files can be dropped anywhere on an agent pane; files from the project become
+  `@` mentions, and a very long paste becomes an attachment.
+- Agent panes say when the agent is retrying or rate limited, and when their
+  server is older than the app.
+- Hovering an answer's footer shows the turn's tokens, cost and model, and the
+  context window's details offer Compact conversation.
+- Control-Command-Up and Control-Command-Down move between prompts,
+  Control-Command-O opens the prompt outline, Command-Return submits a question
+  form, and Page Up and Page Down scroll the conversation from the composer.
+- Dictation shows your words as you speak and counts down its time limit.
+- A notice says how many background agents a restart or model change stopped,
+  and changing the model asks first when it would stop them.
+
+### Changed
+
+- The line under a working agent names its current step and counts whole
+  seconds.
+- Answers use the full width of a narrow pane.
+- Agent conversations update with only what changed, so long conversations
+  stream more smoothly.
+- The `/` menu lists the agent's commands and skills first, with descriptions.
+- The model and reasoning effort can be changed while the agent works and apply
+  to the next prompt.
+- Code blocks over 40 lines fold behind Show all lines, and every code block
+  names its language.
+- A selection can be dragged across paragraphs, code blocks and tables of one
+  message.
+- A turn shows one task list with its latest state instead of a card for each
+  update.
+- The summary of completed work counts failed tools and no longer counts
+  thinking as tool calls.
+- A turn's changed files are listed open when there are twelve or fewer.
+- Stop is quieter than Send, and an empty conversation names its project and
+  branch.
+- Closed agent conversations untouched for 30 days are deleted with their saved
+  changes, outputs and attachments.
+
+### Fixed
+
+- Claude's slash commands now appear in the `/` menu.
+- Long conversations keep more of their history and say how many earlier
+  messages they no longer show.
+- File names such as `main.rs` in an answer are no longer turned into web
+  links, and text such as `origin/main` is no longer styled as a file.
+- Messages above the composer no longer vanish while the agent responds or
+  linger beside an unrelated Refresh button.
+- Labels of running agents and queued prompts are no longer cut off when there
+  is room.
+- Wrapped code keeps its indentation.
+- Finishing a turn no longer folds rows you had open or moves the conversation.
+- Half-written Markdown no longer flickers as a heading or raw table while it
+  streams.
+- Large diffs keep their beginning and say when they were cut.
+- A turn Claude starts when a background agent finishes shows as working and
+  can be stopped.
+- Codex subagents no longer end their parent's turn early, and a stop that
+  cannot reach the agent ends the turn instead of leaving it working.
+- Scrolling continues through code blocks and tool output, and wide code and
+  tables scroll sideways when the sidebar swipe gesture is on.
+- A command that fails with "permission denied" is no longer shown as denied by
+  you.
+- Composer controls show keyboard focus, and code blocks, tables and tool
+  output are labelled for VoiceOver.
+
 ## 0.97.1 - 2026-11-13
 
 ### Fixed

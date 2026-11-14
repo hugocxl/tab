@@ -9,6 +9,56 @@ enum AgentStreamingCompletion {
     /// Blocks longer than this are left as they are.
     static let maximumBlock = 50_000
 
+    /// `source` without a last line that could still turn into structure: a lone `-` that
+    /// would make the sentence above a heading, `#`, `>`, `1.`, one or two backticks, or a
+    /// table whose separator row hasn't arrived. They render once the next text decides.
+    static func holdingBackAmbiguousTail(_ source: String) -> String {
+        guard !source.isEmpty, !source.hasSuffix("\n\n") else { return source }
+        var lines = source.components(separatedBy: "\n")
+        let endsLine = lines.last == ""
+        if endsLine { lines.removeLast() }
+        guard let last = lines.last else { return source }
+        let trimmed = last.trimmingCharacters(in: .whitespaces)
+        // Inside an open code fence, nothing is structure.
+        let fences = lines.dropLast().filter { $0.trimmingCharacters(in: .whitespaces).hasPrefix("```") }.count
+        guard fences % 2 == 0 else { return source }
+        if isTableLine(trimmed) {
+            var start = lines.count - 1
+            while start > 0, isTableLine(lines[start - 1].trimmingCharacters(in: .whitespaces)) { start -= 1 }
+            let run = lines[start...].map { $0.trimmingCharacters(in: .whitespaces) }
+            if run.count < 2 || !isSeparatorRow(run[run.startIndex + 1], columns: cells(run[run.startIndex]).count) {
+                return lines[..<start].joined(separator: "\n") + (start > 0 ? "\n" : "")
+            }
+            return source
+        }
+        // A finished line has decided what it is.
+        guard !endsLine, isAmbiguous(trimmed) else { return source }
+        return lines.dropLast().joined(separator: "\n") + (lines.count > 1 ? "\n" : "")
+    }
+
+    private static func isAmbiguous(_ line: String) -> Bool {
+        guard !line.isEmpty, line.count <= 8 else { return false }
+        if line.allSatisfy({ $0 == "-" }) || line.allSatisfy({ $0 == "=" }) || line.allSatisfy({ $0 == "#" }) { return true }
+        if ["*", "+", ">", "`", "``"].contains(line) { return true }
+        // A list number with nothing after it yet: `1.` or `12)`.
+        if let mark = line.last, ".)".contains(mark), line.dropLast().allSatisfy(\.isNumber), line.count > 1 { return true }
+        return false
+    }
+
+    private static func isTableLine(_ line: String) -> Bool { line.hasPrefix("|") }
+
+    private static func cells(_ line: String) -> [String] {
+        line.split(separator: "|", omittingEmptySubsequences: true).map { $0.trimmingCharacters(in: .whitespaces) }
+    }
+
+    /// A complete separator row: one dash cell for each of the header's columns.
+    private static func isSeparatorRow(_ line: String, columns: Int) -> Bool {
+        let cells = cells(line)
+        return cells.count == columns && cells.allSatisfy { cell in
+            !cell.isEmpty && cell.allSatisfy { "-:".contains($0) } && cell.contains("-")
+        }
+    }
+
     /// `blocks` with the last paragraph, heading or list item completed.
     static func completingLastBlock(_ blocks: [AgentMarkdown.Block]) -> [AgentMarkdown.Block] {
         guard let last = blocks.last else { return blocks }

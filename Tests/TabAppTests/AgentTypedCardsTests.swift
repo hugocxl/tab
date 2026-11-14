@@ -453,9 +453,11 @@ final class AgentTypedCardsTests: XCTestCase {
                      AgentChatItem(id: "answer", kind: .assistant, text: "Done.")]
         document.update(items, omittedCount: 0, turns: [turn])
         document.reflow(viewportWidth: 700)
-        XCTAssertEqual(document.entryCount, 3, "user, Worked for, answer")
-        XCTAssertNil(document.frameForEntry("activity:plan"))
-        XCTAssertTrue(mounted(AgentPlanCardRow.self, in: document).isEmpty)
+        // The turn's newest plan stays visible below the fold; todos and compaction fold.
+        XCTAssertEqual(document.entryCount, 4, "user, Worked for, the plan, answer")
+        XCTAssertNotNil(document.frameForEntry("activity:plan"))
+        XCTAssertNil(document.frameForEntry("activity:todo"))
+        XCTAssertEqual(mounted(AgentPlanCardRow.self, in: document).count, 1)
         var states = document.rowStates
         states["work:user"] = AgentTimelineRowState(expanded: true)
         document.rowStates = states
@@ -473,7 +475,7 @@ final class AgentTypedCardsTests: XCTestCase {
         document.update([AgentChatItem(id: "user", kind: .user, text: "Plan"), plan("# Only a plan"),
                          AgentChatItem(id: "answer", kind: .assistant, text: "Here it is.")], omittedCount: 0, turns: [turn])
         XCTAssertNotNil(document.frameForEntry("work:user"))
-        XCTAssertNil(document.frameForEntry("activity:plan"))
+        XCTAssertNotNil(document.frameForEntry("activity:plan"), "The plan stays visible below its folded turn")
     }
 
     func testErrorCardsStayVisibleBelowAFoldedTurn() throws {

@@ -274,7 +274,13 @@ final class AgentModelCatalogServiceTests: XCTestCase {
         let project = ProjectId()
         let fresh = try await service.handle(.init(project: project, provider: .codex, forceRefresh: true))
         XCTAssertEqual(fresh.models.map(\.id), ["latest-live"])
-        clock.advance(31)
+        // A found catalog holds for ten minutes, so panes don't start the CLI every minute.
+        let sent = try fixture.messages().count
+        clock.advance(300)
+        let held = try await service.handle(.init(project: project, provider: .codex))
+        XCTAssertEqual(held.models.map(\.id), ["latest-live"])
+        XCTAssertEqual(try fixture.messages().count, sent, "No second discovery within ten minutes")
+        clock.advance(301)
         let expired = try await service.handle(.init(project: project, provider: .codex))
         XCTAssertEqual(expired.models.map(\.id), ["latest-live"])
         XCTAssertEqual(expired.source, "live")

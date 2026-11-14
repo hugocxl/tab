@@ -172,6 +172,13 @@ func makeLabel(_ text: String, font: NSFont = AppFont.body, color: NSColor? = ni
     return label
 }
 
+extension NSTextField {
+    /// The width a single-line label needs to draw its whole string, from its cell.
+    /// `intrinsicContentSize` can come out a few points short of that, which truncates
+    /// text that has room to spare.
+    var singleLineWidth: CGFloat { ceil(cell?.cellSize.width ?? intrinsicContentSize.width) }
+}
+
 private struct ThemeColors: Equatable {
     let palette: ChromePalette
     let scheme: TabCore.ColorScheme

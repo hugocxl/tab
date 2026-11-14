@@ -273,7 +273,8 @@ final class AgentInlineHTMLTests: XCTestCase {
     func testMalformedOrNestedBlockHTMLStaysAsWritten() {
         XCTAssertEqual(AgentResponseParser.parse("<p>unclosed"), [.paragraph("<p>unclosed")])
         XCTAssertEqual(AgentResponseParser.parse("<ul><li>a<ul><li>b</li></ul></li></ul>"), [.paragraph("<ul><li>a<ul><li>b</li></ul></li></ul>")])
-        XCTAssertEqual(AgentResponseParser.parse("<table><tr><td>x</td></tr></table>"), [.paragraph("<table><tr><td>x</td></tr></table>")])
+        // A whole table is a table now; only malformed or nested HTML stays as written.
+        XCTAssertEqual(AgentResponseParser.parse("<table><tr><td>x</td></tr></table>"), [.table(["x"], [], [.left])])
     }
 
     func testHeadingIDBecomesAnchor() {

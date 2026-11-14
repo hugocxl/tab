@@ -10,25 +10,26 @@ final class AgentChangedFilesRowTests: XCTestCase {
         .init(id: UUID().uuidString, files: [.init(path: "Sources/TabApp/Sidebar/SidebarRows.swift", additions: 2, deletions: 2)],
               totalFiles: 1, additions: 2, deletions: 2)
     }
+    /// A dozen changed files or fewer start with their folders open, so the files show.
     func testDirectoryExpansionSurvivesRecreationAndFileOpensHistoricalDiff() throws {
         _ = NSApplication.shared
         let row = AgentChangedFilesRow(frame: .zero)
         let checkpoint = checkpoint()
         row.checkpoint = checkpoint
+        var opened: (String, String?)?
+        row.onOpenCheckpoint = { opened = ($0, $1) }
+        let file = try XCTUnwrap(row.subviews.compactMap { $0 as? PillButton }.first { $0.toolTip == checkpoint.files[0].path })
+        file.perform()
+        XCTAssertEqual(opened?.0, checkpoint.id)
+        XCTAssertEqual(opened?.1, checkpoint.files[0].path)
         let folder = try XCTUnwrap(row.subviews.compactMap { $0 as? PillButton }.first { $0.toolTip == "Sources/TabApp/Sidebar" })
-        let collapsed = row.preferredHeight(for: 700)
+        let expanded = row.preferredHeight(for: 700)
         folder.perform()
-        XCTAssertGreaterThan(row.preferredHeight(for: 700), collapsed)
+        XCTAssertLessThan(row.preferredHeight(for: 700), expanded, "The user's choice wins")
         let restored = AgentChangedFilesRow(frame: .zero)
         restored.checkpoint = checkpoint
         restored.restoreState(row.captureState())
         XCTAssertEqual(restored.preferredHeight(for: 700), row.preferredHeight(for: 700))
-        var opened: (String, String?)?
-        restored.onOpenCheckpoint = { opened = ($0, $1) }
-        let file = try XCTUnwrap(restored.subviews.compactMap { $0 as? PillButton }.first { $0.toolTip == checkpoint.files[0].path })
-        file.perform()
-        XCTAssertEqual(opened?.0, checkpoint.id)
-        XCTAssertEqual(opened?.1, checkpoint.files[0].path)
     }
 
     func testCardFollowsFinalAnswerOutsideCompletedWorkAndRendersReferenceFixture() throws {
