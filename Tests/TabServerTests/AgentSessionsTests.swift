@@ -2131,3 +2131,230 @@ extension AgentSessionsTests {
         XCTAssertNoThrow(try imported.validate())
     }
 }
+
+extension AgentSessionsTests {
+    func testClearTransfersAttachmentsOutputsAndCheckpointOwnershipToArchive() async throws {
+        let storage = try root(), repo = try GitTestRepo(commit: false)
+        try repo.write("file.txt", "before\n")
+        try repo.commit("initial")
+        let directory = repo.path
+        let output = String(repeating: "Tool output\n", count: 3000)
+        let sessions = try AgentSessions(root: storage, projectDirectory: { _ in directory }, factory: { _, _, _, callback in
+            SkillCaptureRuntime(callback) {
+                try "after\n".write(toFile: directory + "/file.txt", atomically: true, encoding: .utf8)
+                callback(.item(.init(id: "read", kind: .tool, text: "Read", tool: .init(name: "Read", category: .read, output: output, status: .completed))))
+            }
+        })
+        let id = SessionId(), archive = SessionId()
+        _ = try await sessions.handle(.create(session: id, project: ProjectId(), provider: .claude))
+        let attachment = AgentChatAttachment(id: "notes", name: "notes.txt", mimeType: "text/plain", data: Data("Notes".utf8))
+        _ = try await sessions.handle(.send(session: id, text: "Change this file", model: nil, attachments: [attachment]))
+        let old = try await waitForQueue(sessions, id) { $0.status == .idle && $0.turns?.first?.checkpoint != nil }
+        let checkpoint = try XCTUnwrap(old.turns?.first?.checkpoint)
+        let user = try XCTUnwrap(old.items.first(where: { $0.kind == .user }))
+        let record = try JSONDecoder().decode(AgentCheckpointRecord.self, from: Data(contentsOf: storage.appendingPathComponent("checkpoints/\(id)/\(checkpoint.id).json")))
+        _ = try await sessions.handle(.clear(session: id, archive: archive, expectedRevision: old.revision))
+        for folder in ["attachments", "outputs", "checkpoints"] {
+            XCTAssertFalse(FileManager.default.fileExists(atPath: storage.appendingPathComponent("\(folder)/\(id)").path))
+            XCTAssertTrue(FileManager.default.fileExists(atPath: storage.appendingPathComponent("\(folder)/\(archive)").path))
+        }
+        _ = try await sessions.handle(.send(session: id, text: "A new conversation", model: nil))
+        sessions.shutdown()
+        // Simulate a crash between committing the clear and retiring an old
+        // checkpoint file. Startup must not mistake its refs for orphaned refs.
+        let duplicate = storage.appendingPathComponent("checkpoints/\(id)/\(checkpoint.id).json")
+        try FileManager.default.createDirectory(at: duplicate.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try JSONEncoder().encode(record).write(to: duplicate)
+        let restored = try AgentSessions(root: storage, projectDirectory: { _ in directory })
+        defer { restored.shutdown() }
+        let file = try await restored.attachment(.init(session: archive, item: user.id, attachment: attachment.id))
+        XCTAssertEqual(file.attachment.data, attachment.data)
+        guard case .toolOutput(let saved) = try await restored.conversation(.toolOutput(session: archive, item: "read")) else { return XCTFail("Missing archived output") }
+        XCTAssertEqual(saved.text, output)
+        let diff = try await restored.checkpoint(.init(session: archive, checkpoint: checkpoint.id, path: "file.txt"))
+        XCTAssertTrue(diff.diff?.rows.contains { $0.text == "+after" } == true)
+        XCTAssertEqual(try GitTestRepo.git(directory, "rev-parse", record.before.reference).trimmingCharacters(in: .whitespacesAndNewlines), record.before.tree)
+        XCTAssertEqual(try GitTestRepo.git(directory, "rev-parse", record.after.reference).trimmingCharacters(in: .whitespacesAndNewlines), record.after.tree)
+    }
+
+    func testClearArchivesInPlaceAndFencesOldRuntimeAcrossRestart() async throws {
+        let root = try root(), box = AgentRuntimeBox(), resumes = AgentRuntimeResumes()
+        let sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, resume, callback in
+            resumes.append(resume)
+            let runtime = FakeAgentRuntime(callback); box.install(runtime); return runtime
+        })
+        let id = SessionId(), archive = SessionId()
+        _ = try await sessions.handle(.create(session: id, project: ProjectId(), provider: .codex))
+        _ = try await sessions.handle(.send(session: id, text: "Keep my history", model: nil))
+        let old = try XCTUnwrap(box.runtime)
+        old.callback(.status(.idle))
+        let previous = try await waitForQueue(sessions, id) { $0.status == .idle }
+        let cleared = try await sessions.handle(.clear(session: id, archive: archive, expectedRevision: previous.revision))
+        XCTAssertEqual(cleared.session, id)
+        XCTAssertEqual(cleared.resetID, archive)
+        XCTAssertNil(cleared.providerSession)
+        XCTAssertTrue(cleared.items.isEmpty)
+        let saved = try await sessions.handle(.read(session: archive))
+        XCTAssertEqual(saved.items.map(\.text), previous.items.map(\.text))
+        let resent = try await sessions.handle(.clear(session: id, archive: archive, expectedRevision: previous.revision))
+        XCTAssertEqual(resent, cleared)
+        old.callback(.item(.init(kind: .assistant, text: "Late old output")))
+        _ = try await sessions.handle(.send(session: id, text: "Fresh context", model: nil))
+        XCTAssertNil(resumes.values.last ?? nil)
+        let current = try await sessions.handle(.read(session: id))
+        XCTAssertFalse(current.items.contains { $0.text == "Late old output" })
+        sessions.shutdown()
+        let reloaded = try AgentSessions(root: root, projectDirectory: { _ in root.path })
+        defer { reloaded.shutdown() }
+        let restored = try await reloaded.handle(.read(session: id))
+        XCTAssertEqual(restored.resetID, archive)
+        XCTAssertFalse(restored.items.contains { $0.text == "Keep my history" })
+        let restoredArchive = try await reloaded.handle(.read(session: archive))
+        XCTAssertEqual(restoredArchive.items.map(\.text), previous.items.map(\.text))
+    }
+
+    func testClearRefusesBusyOrStaleConversationWithoutDiscardingMessages() async throws {
+        let root = try root(), box = AgentRuntimeBox()
+        let sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, callback in
+            let runtime = FakeAgentRuntime(callback); box.install(runtime); return runtime
+        })
+        defer { sessions.shutdown() }
+        let id = SessionId()
+        let initial = try await sessions.handle(.create(session: id, project: ProjectId(), provider: .claude))
+        let working = try await sessions.handle(.send(session: id, text: "Working", model: nil))
+        for revision in [initial.revision, working.revision] {
+            do { _ = try await sessions.handle(.clear(session: id, archive: SessionId(), expectedRevision: revision)); XCTFail("Must refuse") }
+            catch { }
+        }
+        let kept = try await sessions.handle(.read(session: id))
+        XCTAssertEqual(kept.items.map(\.text), working.items.map(\.text))
+        XCTAssertEqual(kept.status, .working)
+    }
+
+    func testProviderCommandValidationDoesNotCreateATurnOrQueueEntry() async throws {
+        let root = try root()
+        let sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path })
+        defer { sessions.shutdown() }
+        let id = SessionId()
+        _ = try await sessions.handle(.create(session: id, project: ProjectId(), provider: .codex))
+        for text in ["/review main", "/compact custom instructions", "/clear name", "/unknown arguments"] {
+            do {
+                _ = try await sessions.handle(.submit(session: id, prompt: AgentPrompt(text: text, model: nil, effort: nil, provider: .codex, planMode: false)))
+                XCTFail("Invalid command accepted: \(text)")
+            } catch { }
+        }
+        let snapshot = try await sessions.handle(.read(session: id))
+        XCTAssertTrue(snapshot.items.isEmpty)
+        XCTAssertTrue(snapshot.queuedPrompts?.isEmpty ?? true)
+    }
+}
+
+private final class SkillCaptureRuntime: AgentSessionRuntime, @unchecked Sendable {
+    private let lock = NSLock()
+    let callback: @Sendable (AgentRuntimeEvent) -> Void
+    let onSend: @Sendable () throws -> Void
+    private var received: [(String, [StagedAgentAttachment])] = []
+    var sends: [(String, [StagedAgentAttachment])] { lock.withLock { received } }
+    init(_ callback: @escaping @Sendable (AgentRuntimeEvent) -> Void, onSend: @escaping @Sendable () throws -> Void = {}) {
+        self.callback = callback; self.onSend = onSend
+    }
+    func send(text: String, model: String?, reasoningEffort: AgentReasoningEffort?) async throws {}
+    func send(text: String, model: String?, reasoningEffort: AgentReasoningEffort?, attachments: [StagedAgentAttachment]) async throws {
+        lock.withLock { received.append((text, attachments)) }
+        try onSend()
+        callback(.status(.idle))
+    }
+    func approve(request: String, allow: Bool) async throws {}
+    func setAccess(_ mode: AgentAccessMode) async throws {}
+    func interrupt() async throws {}
+    func stop() {}
+}
+
+extension AgentSessionsTests {
+    func testNativeClaudeSkillUsesProviderCommandWithoutInstructionMarker() async throws {
+        let root = try root()
+        let capture = SkillCaptureRuntime { _ in }
+        let sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, _ in capture })
+        defer { sessions.shutdown() }
+        sessions.composerCatalog = { _ in
+            var catalog = AgentComposerContextReply(skills: [])
+            catalog.commands = [.init(name: "review", description: "Review", isSkill: true, aliases: ["plugin:review"])]
+            return catalog
+        }
+        let id = SessionId()
+        _ = try await sessions.handle(.create(session: id, project: ProjectId(), provider: .claude))
+        let prompt = AgentPrompt(text: "/skill:plugin:review check this change", model: nil, effort: nil, provider: .claude, planMode: false)
+        _ = try await sessions.handle(.submit(session: id, prompt: prompt))
+        _ = try await waitForQueue(sessions, id) { $0.queuedPrompts?.isEmpty == true }
+        let delivery = try XCTUnwrap(capture.sends.first)
+        XCTAssertEqual(delivery.0, "/plugin:review check this change")
+        XCTAssertTrue(delivery.1.isEmpty)
+        let snapshot = try await sessions.handle(.read(session: id))
+        XCTAssertEqual(snapshot.items.first(where: { $0.kind == .user })?.text, prompt.text)
+        sessions.composerCatalog = { _ in throw AgentRuntimeError("Provider unavailable") }
+        _ = try await sessions.handle(.submit(session: id, prompt: prompt))
+        XCTAssertEqual(capture.sends.count, 1)
+    }
+
+    func testTypedSkillResolvesBeforeAcceptanceAndRetriesDoNotRepeatIt() async throws {
+        let root = try root()
+        let capture = SkillCaptureRuntime { _ in }
+        let sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, _ in capture })
+        defer { sessions.shutdown() }
+        sessions.composerCatalog = { _ in .init(skills: [.init(id: "review", name: "review", description: "Review", path: ServerPath("/skills/review/SKILL.md"), instructions: "Check concurrency.")]) }
+        let id = SessionId()
+        _ = try await sessions.handle(.create(session: id, project: ProjectId(), provider: .codex))
+        let prompt = AgentPrompt(text: "/skill:review check this change", model: nil, effort: nil, provider: .codex, planMode: false)
+        _ = try await sessions.handle(.submit(session: id, prompt: prompt))
+        _ = try await waitForQueue(sessions, id) { $0.queuedPrompts?.isEmpty == true }
+        let delivery = try XCTUnwrap(capture.sends.first)
+        XCTAssertFalse(delivery.0.hasPrefix("/skill:"))
+        XCTAssertTrue(delivery.0.contains("check this change"))
+        let instructions = try XCTUnwrap(delivery.1.first?.attachment)
+        XCTAssertTrue(String(decoding: instructions.data, as: UTF8.self).contains("Check concurrency."))
+        sessions.composerCatalog = { _ in throw AgentRuntimeError("Skill removed") }
+        _ = try await sessions.handle(.submit(session: id, prompt: prompt))
+        XCTAssertEqual(capture.sends.count, 1, "An accepted skill retry must not rediscover or redeliver")
+    }
+
+    func testFailedClearArchiveKeepsOriginalTranscriptAndContext() async throws {
+        let root = try root()
+        let sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path })
+        defer { sessions.shutdown() }
+        let id = SessionId(), archive = SessionId()
+        let original = try await sessions.handle(.create(session: id, project: ProjectId(), provider: .claude))
+        try FileManager.default.createDirectory(at: root.appendingPathComponent(archive.description + ".json"), withIntermediateDirectories: true)
+        do { _ = try await sessions.handle(.clear(session: id, archive: archive, expectedRevision: original.revision)); XCTFail("Must fail saving archive") }
+        catch { }
+        let retained = try await sessions.handle(.read(session: id))
+        XCTAssertEqual(retained, original)
+    }
+}
+
+extension AgentSessionsTests {
+    func testSkillDiscoveryInFlightCannotSendIntoClearedContext() async throws {
+        let root = try root(), gate = AgentSubmissionGate()
+        let started = expectation(description: "Discovery started")
+        let sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, callback in
+            XCTFail("An old prepared prompt must not start a new context")
+            return FakeAgentRuntime(callback)
+        })
+        defer { sessions.shutdown() }
+        sessions.composerCatalog = { _ in
+            started.fulfill()
+            await gate.wait()
+            return .init(skills: [.init(id: "review", name: "review", description: "", path: ServerPath("/skills/review/SKILL.md"), instructions: "Review code")])
+        }
+        let id = SessionId()
+        let initial = try await sessions.handle(.create(session: id, project: ProjectId(), provider: .codex))
+        let delivery = Task {
+            try await sessions.handle(.submit(session: id, prompt: AgentPrompt(text: "/skill:review old context", model: nil, effort: nil, provider: .codex, planMode: false)))
+        }
+        await fulfillment(of: [started], timeout: 5)
+        _ = try await sessions.handle(.clear(session: id, archive: SessionId(), expectedRevision: initial.revision))
+        await gate.release()
+        do { _ = try await delivery.value; XCTFail("Must reject stale prepared message") } catch { }
+        let cleared = try await sessions.handle(.read(session: id))
+        XCTAssertTrue(cleared.items.isEmpty)
+    }
+}

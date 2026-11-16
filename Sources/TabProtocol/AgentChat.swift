@@ -155,6 +155,9 @@ public struct AgentChatSnapshot: Codable, Hashable, Sendable {
     public var model: String?
     /// Actual provider model, independent of the user's optional model override.
     public var commands: [String]?
+    public var commandDescriptors: [AgentCommandDescriptor]?
+    /// Last successful in-place reset, also used to fence client caches.
+    public var resetID: SessionId?
     public var resolvedModel: String?
     public var contextUsage: AgentContextUsage?
     /// Agents the provider's agent started that are still running, oldest first.
@@ -198,7 +201,7 @@ public struct AgentChatSnapshot: Codable, Hashable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case session, project, provider, providerSession, model, commands, resolvedModel, contextUsage, subagents, reasoningEffort, accessMode, planMode, queuedPrompts, queuePaused, turns, status, revision, items, omittedItems, activity
+        case commandDescriptors, resetID, session, project, provider, providerSession, model, commands, resolvedModel, contextUsage, subagents, reasoningEffort, accessMode, planMode, queuedPrompts, queuePaused, turns, status, revision, items, omittedItems, activity
     }
 
     public init(from decoder: Decoder) throws {
@@ -212,6 +215,8 @@ public struct AgentChatSnapshot: Codable, Hashable, Sendable {
         providerSession = try c.decodeIfPresent(String.self, forKey: .providerSession)
         model = try c.decodeIfPresent(String.self, forKey: .model)
         commands = try c.decodeIfPresent([String].self, forKey: .commands)
+        commandDescriptors = try c.decodeIfPresent([AgentCommandDescriptor].self, forKey: .commandDescriptors)
+        resetID = try c.decodeIfPresent(SessionId.self, forKey: .resetID)
         resolvedModel = try c.decodeIfPresent(String.self, forKey: .resolvedModel)
         contextUsage = try c.decodeIfPresent(AgentContextUsage.self, forKey: .contextUsage)
         subagents = try c.decodeIfPresent([AgentSubagent].self, forKey: .subagents)
@@ -232,6 +237,8 @@ public enum AgentChatRequest: Codable, Hashable, Sendable {
     /// Provider seeds new conversations only; reconnect returns the server's selected provider.
     case create(session: SessionId, project: ProjectId, provider: AgentChatProvider)
     case read(session: SessionId)
+    /// Archives the previous conversation and resets this pane in place, while idle.
+    case clear(session: SessionId, archive: SessionId, expectedRevision: UInt64)
     case submit(session: SessionId, prompt: AgentPrompt)
     case editQueued(session: SessionId, id: String, text: String, expectedRevision: UInt64, settings: AgentQueuedSettings? = nil)
     case removeQueued(session: SessionId, id: String, expectedRevision: UInt64)

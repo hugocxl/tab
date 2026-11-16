@@ -84,7 +84,9 @@ public final class Server: @unchecked Sendable {
         tabs = try TabStore(directory: dirs.sessions, home: catalog.homeId,
                             isProject: { (try? catalog.project($0)) != nil }, isLive: { _ in false })
         agentComposerContext = AgentComposerContextService(home: URL(fileURLWithPath: configuration.homeDirectory),
-            projectDirectory: { project in
+            discoverProvider: { provider, directory in
+                await AgentCommandDiscovery.discover(provider: provider, directory: directory, environment: AgentProcess.environment())
+            }, projectDirectory: { project in
                 let directory = try catalog.project(project).directory
                 guard directory.isDirectory else { throw ServiceError(.badPath, "The agent's project folder is unavailable") }
                 return directory.url
@@ -103,6 +105,8 @@ public final class Server: @unchecked Sendable {
             guard directory.isDirectory else { throw ServiceError(.badPath, "The agent's project folder is unavailable") }
             return directory.rawValue
         })
+        let composerService = agentComposerContext
+        agents.composerCatalog = { request in try await composerService.catalog(request) }
         agents.launchEnvironment = ["TAB_SERVER_ID": catalog.serverId.description]
         agents.projectContext = { id in
             guard let project = try? catalog.project(id) else { return nil }

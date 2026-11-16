@@ -160,3 +160,61 @@ private struct ComposerSkillsFixture {
 
     func remove() { try? FileManager.default.removeItem(at: root) }
 }
+
+extension AgentComposerContextServiceTests {
+    func testProviderMetadataPreservesAliasesAndSkillClassification() {
+        let commands = AgentCommandDiscovery.descriptors([
+            ["name": "compact", "description": "Compact context", "builtin": true],
+            ["name": "docs", "description": "Write documents", "aliases": ["plugin:docs", "invalid/name"]]
+        ])
+        XCTAssertEqual(commands.map(\.isSkill), [false, true])
+        XCTAssertEqual(commands.last?.names, ["docs", "plugin:docs"])
+        XCTAssertTrue(commands.allSatisfy(\.isValid))
+    }
+
+    func testDisabledProviderSkillOverridesFilesystemAndRefreshInvalidatesCache() async throws {
+        let fixture = try ComposerSkillsFixture()
+        defer { fixture.remove() }
+        try fixture.write("project/.agents/skills/review/SKILL.md", "Review")
+        let service = fixture.service()
+        await service.setDiscovery { _, _ in .init(available: true) }
+        let project = ProjectId()
+        let initial = try await service.catalog(.init(project: project, provider: .codex))
+        XCTAssertEqual(initial.skills.map(\.name), ["review"])
+        await service.setDiscovery { _, _ in .init(disabledSkills: ["review"], available: true) }
+        let cached = try await service.catalog(.init(project: project, provider: .codex))
+        XCTAssertEqual(cached.skills.map(\.name), ["review"])
+        let refreshed = try await service.catalog(.init(project: project, provider: .codex, forceRefresh: true))
+        XCTAssertTrue(refreshed.skills.isEmpty)
+    }
+
+    func testAncestorAndConfiguredHomeDiscovery() async throws {
+        let fixture = try ComposerSkillsFixture()
+        defer { fixture.remove() }
+        try fixture.write("project/.agents/skills/ancestor/SKILL.md", "Ancestor")
+        try fixture.write("alternate/skills/configured/SKILL.md", "Configured home")
+        try fixture.write("project/child/README", "Child")
+        let project = fixture.root.appendingPathComponent("project/child")
+        let service = AgentComposerContextService(home: fixture.root.appendingPathComponent("home"),
+            environment: ["CODEX_HOME": fixture.root.appendingPathComponent("alternate").path]) { _ in project }
+        let catalog = try await service.handle(.init(project: ProjectId(), provider: .codex))
+        XCTAssertEqual(Set(catalog.skills.map(\.name)), ["ancestor", "configured"])
+    }
+
+    func testProviderMetadataAndPluginSkillsSupplementLocalCatalog() async throws {
+        let fixture = try ComposerSkillsFixture()
+        defer { fixture.remove() }
+        try fixture.write("plugin/review/SKILL.md", "---\nname: review\n---\nCheck behavior")
+        let path = fixture.root.appendingPathComponent("plugin/review/SKILL.md").path
+        let service = fixture.service()
+        await service.setDiscovery { _, _ in
+            .init(commands: [.init(name: "compact", description: "Compact context", argumentHint: "[instructions]")],
+                  skills: [("plugin.review", "Review code", path)], available: true)
+        }
+        let reply = try await service.catalog(.init(project: ProjectId(), provider: .codex))
+        XCTAssertEqual(reply.commands?.first?.argumentHint, "[instructions]")
+        XCTAssertEqual(reply.skills.first?.name, "plugin.review")
+        XCTAssertTrue(reply.skills.first?.instructions.contains("Check behavior") == true)
+        XCTAssertNil(reply.discoveryNotice)
+    }
+}

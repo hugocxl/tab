@@ -4,6 +4,16 @@ import XCTest
 @testable import TabServer
 
 final class AgentReasoningCompactionTests: XCTestCase {
+    func testClaudeCompactionUpdatesUsageWithoutAnotherAssistantTurn() {
+        let recorder = AgentRuntimeRecorder()
+        let runtime = ClaudeAgentRuntime(onEvent: { recorder.receive($0) })
+        runtime.receive(["type": "assistant", "message": ["id": "m", "model": "test", "usage": ["input_tokens": 12000], "content": []]])
+        runtime.receive(["type": "result", "modelUsage": ["test": ["contextWindow": 200000]]])
+        runtime.receive(["type": "system", "subtype": "compact_boundary", "uuid": "compact", "compact_metadata": ["pre_tokens": 12000, "post_tokens": 3200]])
+        XCTAssertEqual(recorder.contextUsage.last?.usedTokens, 3200)
+        XCTAssertEqual(recorder.contextUsage.last?.contextWindow, 200000)
+    }
+
     func testCodexIndexedSummaryAndContentReplaceDeltasWithoutBecomingAnswers() throws {
         let recorder = WorkRecorder()
         let codex = CodexAgentRuntime(onEvent: { recorder.receive($0) })

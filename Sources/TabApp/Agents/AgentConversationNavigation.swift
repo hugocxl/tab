@@ -39,12 +39,14 @@ extension AgentPaneView {
         if let outlineSource, prompts.elementsEqual(outlineSource) { return }
         let source = Array(prompts)
         outlineSource = source
-        picker.update(AgentPromptNavigation.entries(source), note: "Prompts retained in this conversation")
+        picker.update(AgentPromptNavigation.entries(source), note: (snapshot?.omittedItems ?? 0) > 0
+            ? "Prompts currently loaded. Load earlier messages above the transcript to include older prompts." : "All retained conversation prompts")
     }
 
     func closeOutline() { outlinePicker?.close(); outlinePicker = nil; outlineSource = nil }
 
-    func navigatePrompt(previous: Bool) {
+    @discardableResult
+    func navigatePrompt(previous: Bool) -> Bool {
         let prompts = (snapshot?.items ?? []).filter { $0.kind == .user && !$0.isProviderTurn }
         let visibleTop = transcriptScroll.contentView.bounds.minY
         let id: String?
@@ -58,7 +60,9 @@ extension AgentPaneView {
             id = previous ? positions.last(where: { $0.1 < visibleTop - 1 })?.0
                 : positions.first(where: { $0.1 > visibleTop + 1 })?.0
         }
-        if let id { revealPrompt(id) }
+        guard let id else { return false }
+        revealPrompt(id)
+        return true
     }
 
     private func revealPrompt(_ id: String) {

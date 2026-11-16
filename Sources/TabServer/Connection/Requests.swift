@@ -56,7 +56,7 @@ extension ClientConnection {
             }
         case .agentComposerContext(let request):
             Task { [self] in
-                reply(id, await asyncResult { .agentComposerContext(try await server.agentComposerContext.handle(request)) })
+                reply(id, await asyncResult { .agentComposerContext(try await server.agentComposerContext.catalog(request)) })
             }
         case .agentHistory(let request):
             Task { [self] in

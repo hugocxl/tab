@@ -4,10 +4,12 @@ import Foundation
 public struct AgentComposerContextRequest: Hashable, Codable, Sendable {
     public var project: ProjectId
     public var provider: AgentChatProvider
+    public var forceRefresh: Bool?
 
-    public init(project: ProjectId, provider: AgentChatProvider) {
+    public init(project: ProjectId, provider: AgentChatProvider, forceRefresh: Bool? = nil) {
         self.project = project
         self.provider = provider
+        self.forceRefresh = forceRefresh
     }
 }
 
@@ -34,6 +36,8 @@ public struct AgentComposerContextReply: Hashable, Codable, Sendable {
     /// Includes metadata and instructions (before JSON escaping).
     public static let maxCatalogBytes = 128 * 1024
     public var skills: [AgentComposerSkill]
+    public var commands: [AgentCommandDescriptor]?
+    public var discoveryNotice: String?
     /// Some entries were omitted because discovery or content limits were reached.
     public var truncated: Bool
 
@@ -43,6 +47,10 @@ public struct AgentComposerContextReply: Hashable, Codable, Sendable {
     }
 
     public func validate() throws(ErrorCode) {
+        if let commands {
+            guard commands.count <= 256, commands.allSatisfy(\.isValid) else { throw .badRequest }
+        }
+        guard (discoveryNotice?.utf8.count ?? 0) <= 2048 else { throw .badRequest }
         guard skills.count <= Self.maxSkills else { throw .badRequest }
         var total = 0
         var ids = Set<String>()

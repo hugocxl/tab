@@ -199,6 +199,8 @@ final class AgentRuntimeTests: XCTestCase {
 
     func testCodexCompactUsesNativeAPIInsteadOfSendingSlashText() async throws {
         let recorder = AgentRuntimeRecorder()
+        let finished = expectation(description: "Compaction completed")
+        recorder.observe = { if case .status(.idle) = $0 { finished.fulfill() } }
         let fixture = try AgentRuntimeFixture("""
         take
         emit '{"id":1,"result":{}}'
@@ -207,15 +209,44 @@ final class AgentRuntimeTests: XCTestCase {
         emit '{"id":2,"result":{"thread":{"id":"thread"}}}'
         take
         emit '{"id":3,"result":{}}'
+        emit '{"method":"turn/started","params":{"threadId":"thread","turn":{"id":"compact-turn","status":"inProgress"}}}'
+        emit '{"method":"item/started","params":{"threadId":"thread","turnId":"compact-turn","item":{"id":"compact-item","type":"contextCompaction"}}}'
+        emit '{"method":"item/completed","params":{"threadId":"thread","turnId":"compact-turn","item":{"id":"compact-item","type":"contextCompaction"}}}'
+        emit '{"method":"turn/completed","params":{"threadId":"thread","turn":{"id":"compact-turn","status":"completed"}}}'
         hold
         """)
         defer { fixture.remove() }
         let runtime = fixture.runtime(.codex, recorder: recorder, resume: "thread")
         defer { runtime.stop() }
         try await runtime.send(text: "/compact", model: nil)
+        await fulfillment(of: [finished], timeout: 5)
+        XCTAssertEqual(recorder.transcript["compact-item"]?.workContext?.sourceStatus, "completed")
         let messages = try fixture.messages()
         XCTAssertEqual(messages.last?["method"] as? String, "thread/compact/start")
         XCTAssertFalse(messages.contains { $0["method"] as? String == "turn/start" })
+    }
+
+    func testCodexReviewArgumentsChooseNativeTargets() async throws {
+        for (command, kind, key, value) in [("/review branch main", "baseBranch", "branch", "main"), ("/review commit abc123", "commit", "sha", "abc123")] {
+            let fixture = try AgentRuntimeFixture("""
+            take
+            emit '{"id":1,"result":{}}'
+            take
+            take
+            emit '{"id":2,"result":{"thread":{"id":"thread"}}}'
+            take
+            emit '{"id":3,"result":{}}'
+            hold
+            """)
+            defer { fixture.remove() }
+            let runtime = fixture.runtime(.codex, recorder: AgentRuntimeRecorder())
+            defer { runtime.stop() }
+            try await runtime.send(text: command, model: nil)
+            let sent = try XCTUnwrap(fixture.messages().last)
+            XCTAssertEqual(sent["method"] as? String, "review/start")
+            let target = (sent["params"] as? [String: Any])?["target"] as? [String: String]
+            XCTAssertEqual(target?["type"], kind); XCTAssertEqual(target?[key], value)
+        }
     }
 
     func testCodexSteersActiveTurnWithoutStartingAnotherTurn() async throws {

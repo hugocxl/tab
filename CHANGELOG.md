@@ -3,6 +3,26 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.102.0 - 2026-11-17
+
+### Added
+
+- Agent conversations include searchable command help, conversation forks, and
+  complete Markdown exports through `/help`, `/fork`, and `/export`.
+
+### Fixed
+
+- `/clear` resets the conversation in its current pane while preserving an
+  archive of its messages, attachments, tool output, and file checkpoints.
+- Return runs selected commands, and compaction refreshes the context usage
+  indicator when it completes.
+- Commands validate arguments, aliases, attachments, and activity before sending,
+  preserving the draft when a command cannot run.
+- Typed and selected skills use the same execution path, with refreshed provider
+  catalogs, plugin skills, descriptions, and argument hints.
+- Copying a conversation includes its retained older messages, and prompt
+  navigation explains when earlier history needs to load.
+
 ## 0.101.1 - 2026-11-17
 
 ### Fixed

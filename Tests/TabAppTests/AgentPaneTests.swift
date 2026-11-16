@@ -7,6 +7,59 @@ import XCTest
 
 @MainActor
 final class AgentPaneTests: XCTestCase {
+    func testClearUsesSameSessionAndNeverOpensANewPane() async throws {
+        let backend = Backend()
+        backend.snapshot.items = [.init(kind: .user, text: "Old conversation")]
+        let pane = backend.controller()
+        defer { pane.dispose() }
+        pane.onNewConversation = { XCTFail("Clear must keep this pane") }
+        pane.refresh()
+        try await wait { pane.snapshot != nil }
+        pane.surface.composer.string = "/clear"
+        pane.send()
+        try await wait { pane.snapshot?.resetID != nil }
+        XCTAssertEqual(pane.snapshot?.session, backend.session)
+        XCTAssertTrue(pane.snapshot?.items.isEmpty == true)
+        XCTAssertTrue(pane.surface.composer.string.isEmpty)
+        XCTAssertTrue(backend.submissions.isEmpty)
+    }
+
+    func testInvalidLocalArgumentsStayInDraftAndNeverReachProvider() async throws {
+        let backend = Backend()
+        let controller = backend.controller()
+        defer { controller.dispose() }
+        controller.refresh()
+        try await wait { controller.snapshot != nil }
+        for text in ["/clear named", "/plan maybe", "/stop now", "/heapdump", "/effort unsupported"] {
+            controller.surface.composer.string = text
+            controller.send()
+            XCTAssertEqual(controller.surface.composer.string, text)
+        }
+        XCTAssertTrue(backend.submissions.isEmpty)
+    }
+
+    func testCopyFetchesAllEarlierPages() async throws {
+        let backend = Backend()
+        backend.snapshot.items = [.init(id: "latest", kind: .assistant, text: "Latest answer")]
+        backend.snapshot.omittedItems = 2
+        let pane = backend.controller()
+        defer { pane.dispose() }
+        var positions: [Int?] = []
+        pane.conversationRequest = { request in
+            guard case .earlier(_, let before, _) = request else { throw NSError(domain: "Unexpected", code: 1) }
+            positions.append(before)
+            return .earlier(.init(items: [.init(id: before == nil ? "middle" : "first", kind: .user,
+                text: before == nil ? "Middle prompt" : "First prompt")], start: before == nil ? 1 : 0, total: 2))
+        }
+        pane.refresh()
+        try await wait { pane.snapshot != nil }
+        pane.copyConversation()
+        try await wait { pane.notice?.text == "Copied the complete conversation as Markdown." }
+        let copied = NSPasteboard.general.string(forType: .string) ?? ""
+        XCTAssertTrue(copied.contains("First prompt")); XCTAssertTrue(copied.contains("Middle prompt")); XCTAssertTrue(copied.contains("Latest answer"))
+        XCTAssertEqual(positions.count, 2)
+    }
+
     private func modelItems(_ pane: AgentPaneController) -> [NSMenuItem] {
         pane.surface.model.itemArray.flatMap { $0.submenu?.items ?? [$0] }
     }
@@ -76,6 +129,9 @@ final class AgentPaneTests: XCTestCase {
                     snapshot.items.append(AgentChatItem(kind: .notice, text: "The selected model is unavailable."))
                 }
                 snapshot.revision += 1
+            case .clear(_, let archive, _):
+                snapshot.items = []; snapshot.providerSession = nil; snapshot.resetID = archive
+                snapshot.contextUsage = nil; snapshot.omittedItems = nil; snapshot.revision += 1
             case .read:
                 if gateNextRead {
                     gateNextRead = false
@@ -436,7 +492,7 @@ final class AgentPaneTests: XCTestCase {
         defer { pane.dispose() }
         pane.refresh()
         try await wait { pane.snapshot != nil }
-        XCTAssertNil(pane.surface.contextIndicator.onCompact, "No compact command reported")
+        XCTAssertNotNil(pane.surface.contextIndicator.onCompact, "Built-in compaction is available before the first provider turn")
         backend.snapshot.commands = ["compact"]
         backend.snapshot.revision += 1
         pane.refresh()
@@ -843,6 +899,10 @@ final class AgentPaneTests: XCTestCase {
         XCTAssertTrue(pane.surface.send.isHidden, "Stop takes the shared slot while the draft is empty")
         XCTAssertFalse(pane.surface.stop.isHidden)
         XCTAssertTrue(pane.surface.effort.isEnabled, "Effort can change for the next prompt while the agent works")
+        pane.surface.composer.string = "/effort low"
+        pane.send()
+        XCTAssertEqual(pane.reasoningEffort, .low, "The command changes the same next-message setting as the picker")
+        XCTAssertTrue(pane.surface.composer.string.isEmpty)
         pane.selectModel(provider: .claude, model: nil)
         XCTAssertEqual(pane.selection.provider, .codex, "The provider can't change while a turn runs")
     }

@@ -5,25 +5,83 @@ import TabProtocol
 /// Discovers only known provider skill roots on the server, including remote servers.
 actor AgentComposerContextService {
     private let home: URL
+    private let environment: [String: String]
+    var discoverProvider: (@Sendable (AgentChatProvider, String) async -> AgentCommandDiscovery.Result)?
+    private var pending: [AgentComposerContextRequest: Task<AgentCommandDiscovery.Result, Never>] = [:]
+    private var cached: [AgentComposerContextRequest: (Date, AgentComposerContextReply)] = [:]
     private let projectDirectory: @Sendable (ProjectId) throws -> URL
     private static let maxEntries = 2048
     private static let maxDepth = 8
 
-    init(home: URL, projectDirectory: @escaping @Sendable (ProjectId) throws -> URL) {
+    init(home: URL, environment: [String: String] = AgentProcess.environment(),
+         discoverProvider: (@Sendable (AgentChatProvider, String) async -> AgentCommandDiscovery.Result)? = nil, projectDirectory: @escaping @Sendable (ProjectId) throws -> URL) {
         self.home = home
+        self.environment = environment
+        self.discoverProvider = discoverProvider
         self.projectDirectory = projectDirectory
+    }
+
+    func catalog(_ request: AgentComposerContextRequest) async throws -> AgentComposerContextReply {
+        var key = request
+        key.forceRefresh = nil
+        if request.forceRefresh != true, let cached = cached[key], Date().timeIntervalSince(cached.0) < 30 { return cached.1 }
+        var reply = try handle(request)
+        if let discoverProvider {
+            let directory = try projectDirectory(request.project).path
+            let task = pending[key] ?? Task { await discoverProvider(request.provider, directory) }
+            pending[key] = task
+            let native = await task.value
+            pending[key] = nil
+            reply.commands = native.available ? native.commands : nil
+            reply.truncated = reply.truncated || native.truncated
+            reply.skills.removeAll { native.disabledSkills.contains($0.name) }
+            if !native.available { reply.discoveryNotice = "Provider discovery is unavailable. Showing local skills and built-in commands; retry /skills to refresh." }
+            var names = Set(reply.skills.map { $0.name.lowercased() })
+            for item in native.skills where !names.contains(item.name.lowercased()) {
+                let reported = URL(fileURLWithPath: item.path)
+                guard item.path.hasPrefix("/"), let parent = canonicalAnchor(reported.deletingLastPathComponent()) else {
+                    reply.truncated = true; continue
+                }
+                let file = parent.appendingPathComponent(reported.lastPathComponent)
+                guard let instructions = readRegularFile(file, anchor: parent),
+                      !["false", "no", "off", "0"].contains(frontmatter(instructions)["user-invocable"]?.lowercased() ?? "") else {
+                    reply.truncated = true; continue
+                }
+                let skill = AgentComposerSkill(id: item.path, name: item.name, description: String(item.description.prefix(512)),
+                    path: ServerPath(item.path), instructions: instructions)
+                var candidate = reply; candidate.skills.append(skill)
+                guard (try? candidate.validate()) != nil else { reply.truncated = true; continue }
+                reply = candidate; names.insert(item.name.lowercased())
+            }
+        }
+        cached[key] = (Date(), reply)
+        return reply
+    }
+
+    func setDiscovery(_ discovery: @escaping @Sendable (AgentChatProvider, String) async -> AgentCommandDiscovery.Result) {
+        discoverProvider = discovery
     }
 
     func handle(_ request: AgentComposerContextRequest) throws -> AgentComposerContextReply {
         let project = try projectDirectory(request.project)
-        let roots: [(URL, String, Bool)]
+        var ancestors = [project]
+        var parent = project.deletingLastPathComponent()
+        while parent.path != "/", ancestors.count < 32 {
+            ancestors.append(parent)
+            parent.deleteLastPathComponent()
+        }
+        var roots: [(URL, String, Bool)] = []
         switch request.provider {
         case .claude:
-            roots = [(project, ".claude/skills", false), (project, ".claude/commands", true),
-                     (home, ".claude/skills", false), (home, ".claude/commands", true)]
+            roots = ancestors.flatMap { [($0, ".claude/skills", false), ($0, ".claude/commands", true)] }
+            if let configured = environment["CLAUDE_CONFIG_DIR"], !configured.isEmpty {
+                roots += [(URL(fileURLWithPath: configured), "skills", false), (URL(fileURLWithPath: configured), "commands", true)]
+            } else { roots += [(home, ".claude/skills", false), (home, ".claude/commands", true)] }
         case .codex:
-            roots = [(project, ".agents/skills", false), (home, ".agents/skills", false),
-                     (home, ".codex/skills", false)]
+            roots = ancestors.map { ($0, ".agents/skills", false) } + [(home, ".agents/skills", false)]
+            if let configured = environment["CODEX_HOME"], !configured.isEmpty {
+                roots.append((URL(fileURLWithPath: configured), "skills", false))
+            } else { roots.append((home, ".codex/skills", false)) }
         }
         var reply = AgentComposerContextReply(skills: [])
         var names = Set<String>()

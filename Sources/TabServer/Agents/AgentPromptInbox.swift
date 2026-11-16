@@ -15,6 +15,12 @@ struct AgentPromptInbox: Codable {
     var visible: [AgentQueuedPrompt] { records.compactMap(\.display) }
 
     static func fingerprint(_ prompt: AgentPrompt) throws -> String {
+        var prompt = prompt
+        // Generated skill instructions are server-resolved, not part of the client's
+        // delivery identity. A retry must not replay work when a skill file changed.
+        if AgentSlashCommand(text: prompt.text)?.name.hasPrefix("skill:") == true {
+            prompt.attachments.removeAll { $0.id == "skill-instructions" || $0.id == "native-skill" }
+        }
         let encoder = JSONEncoder(); encoder.outputFormatting = .sortedKeys
         return SHA256.hash(data: try encoder.encode(prompt)).map { String(format: "%02x", $0) }.joined()
     }

@@ -579,6 +579,12 @@ internal final class ClaudeAgentRuntime {
         if completed, let metadata = message["compact_metadata"] as? [String: Any] {
             item.workContext?.beforeTokenCount = agentTokenCount(metadata["pre_tokens"]).flatMap { $0 <= 9_007_199_254_740_991 ? $0 : nil }
             item.workContext?.afterTokenCount = agentCompactionAfterTokens(metadata["post_tokens"])
+            if let count = item.workContext?.afterTokenCount {
+                let usage = AgentContextUsage(usedTokens: count, contextWindow: contextUsage?.contextWindow)
+                contextUsage = usage
+                onEvent(.contextUsage(usage))
+                if let before = item.workContext?.beforeTokenCount { item.detail = "Context: \(before) → \(count) tokens" }
+            }
         }
         compaction = completed ? nil : item; onEvent(.item(item))
     }

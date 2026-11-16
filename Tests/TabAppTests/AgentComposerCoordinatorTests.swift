@@ -93,6 +93,27 @@ final class AgentComposerCoordinatorTests: XCTestCase {
         XCTAssertFalse(titles.contains("/__internal"))
     }
 
+    func testRefreshedMetadataReplacesOldCommandNamesAndKeepsDescriptions() async throws {
+        _ = NSApplication.shared
+        let session = SessionId(), project = ProjectId()
+        var snapshot = AgentChatSnapshot(session: session, project: project, provider: .claude, status: .idle, revision: 2)
+        snapshot.commands = ["removed-skill"]
+        snapshot.commandDescriptors = [.init(name: "new-skill", description: "Updated provider skill", argumentHint: "<request>", isSkill: true)]
+        let current = snapshot
+        let controller = AgentPaneController(session: session, project: project, provider: .claude) { _ in current }
+        defer { controller.dispose() }
+        controller.refresh()
+        let deadline = Date().addingTimeInterval(5)
+        while controller.snapshot == nil, Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        let composer = controller.surface.composer
+        composer.string = "/"
+        composer.setSelectedRange(NSRange(location: 1, length: 0))
+        controller.textDidChange(Notification(name: NSText.didChangeNotification, object: composer))
+        let items = controller.surface.suggestions.items
+        XCTAssertFalse(items.contains { $0.title == "/removed-skill" })
+        XCTAssertEqual(items.first { $0.title == "/new-skill" }?.subtitle, "Updated provider skill · <request>")
+    }
+
     func testProviderCommandsAndSkillsComeBeforeNavigation() async throws {
         let surface = AgentPaneView(frame: NSRect(x: 0, y: 0, width: 700, height: 700))
         let coordinator = AgentComposerCoordinator(surface: surface)
@@ -105,6 +126,34 @@ final class AgentComposerCoordinatorTests: XCTestCase {
         let titles = surface.suggestions.items.map(\.title)
         XCTAssertEqual(Array(titles.prefix(3)), ["/review", "/compact", "/skill:notes"])
         XCTAssertEqual(surface.suggestions.items.first { $0.title == "/skill:notes" }?.subtitle, "Take notes")
+    }
+
+    func testReturnSubmitsProviderCommandWhileTabOnlyCompletes() {
+        let surface = AgentPaneView(frame: .zero)
+        let coordinator = AgentComposerCoordinator(surface: surface)
+        coordinator.providerCommands = ["compact"]
+        var submissions = 0
+        coordinator.onSubmit = { submissions += 1 }
+        for selector in [#selector(NSResponder.insertTab(_:)), #selector(NSResponder.insertNewline(_:))] {
+            surface.composer.string = "/comp"
+            surface.composer.setSelectedRange(NSRange(location: 5, length: 0))
+            coordinator.changed()
+            XCTAssertTrue(coordinator.handle(selector))
+            XCTAssertEqual(surface.composer.string, "/compact ")
+        }
+        XCTAssertEqual(submissions, 1)
+    }
+
+    func testLargeProviderCatalogRetainsEveryLocalAction() {
+        let surface = AgentPaneView(frame: .zero)
+        let coordinator = AgentComposerCoordinator(surface: surface)
+        coordinator.providerCommands = (0..<100).map { "command-\($0)" }
+        surface.composer.string = "/"
+        surface.composer.setSelectedRange(NSRange(location: 1, length: 0))
+        coordinator.changed()
+        let titles = Set(surface.suggestions.items.map(\.title))
+        for name in AgentSlashCommand.localNames { XCTAssertTrue(titles.contains("/" + name), name) }
+        XCTAssertEqual(surface.suggestions.items.count, 40)
     }
 
     func testCommandNameIgnoresPaths() {
@@ -134,7 +183,7 @@ final class AgentComposerCoordinatorTests: XCTestCase {
         XCTAssertTrue(surface.suggestions.isHidden)
     }
 
-    func testEscapeDismissesAndSkillsUseRealInstructions() async throws {
+    func testEscapeDismissesAndSkillsResolveOnlyWhenSubmitted() async throws {
         let surface = AgentPaneView(frame: NSRect(x: 0, y: 0, width: 700, height: 700))
         let coordinator = AgentComposerCoordinator(surface: surface)
         coordinator.loadSkills = { [.init(id: "review", name: "review", description: "Review native code",
@@ -146,8 +195,8 @@ final class AgentComposerCoordinatorTests: XCTestCase {
         var context = ""
         coordinator.onContext = { _, value in context = value }
         XCTAssertTrue(coordinator.handle(#selector(NSResponder.insertNewline(_:))))
-        XCTAssertTrue(context.contains("Check layout constraints."))
-        XCTAssertTrue(context.contains("/workspace/.claude/skills/review"))
+        XCTAssertTrue(context.isEmpty, "Completion must not leave detached skill instructions in the draft")
+        XCTAssertEqual(surface.composer.string, "/skill:review ")
         surface.composer.string = "/"
         surface.composer.setSelectedRange(NSRange(location: 1, length: 0))
         coordinator.changed()

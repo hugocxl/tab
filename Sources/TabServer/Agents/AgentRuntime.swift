@@ -28,6 +28,7 @@ internal enum AgentRuntimeEvent: Sendable {
     case turnUsage(AgentTurnUsage)
     case resolvedModel(String)
     case commands([String])
+    case commandDescriptors([AgentCommandDescriptor])
     case planMode(Bool)
     case failure(String)
 }
@@ -294,7 +295,11 @@ internal final class AgentRuntime: @unchecked Sendable {
         })
         if provider == .claude {
             try request("initialize", params: ["hooks": [:]], completion: { result in
-                if case .success = result { self.ready = true }
+                if case .success(let response) = result {
+                    self.ready = true
+                    let descriptors = AgentCommandDiscovery.descriptors(response["commands"] as? [[String: Any]] ?? [])
+                    self.onEvent(.commandDescriptors(Array(descriptors.prefix(256))))
+                }
                 completion(result)
             })
         } else {
@@ -354,12 +359,20 @@ internal final class AgentRuntime: @unchecked Sendable {
             } else { submitUser(.success([:])) }
         } else {
             guard let threadID else { throw AgentRuntimeError("Codex thread is not initialized.") }
-            let command = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if command == "/compact" || command == "/review" {
+            let invocation = AgentSlashCommand(text: text)
+            if let command = invocation, ["compact", "review"].contains(command.name) {
+                if let error = command.validationError(provider: .codex, commands: ["compact", "review"], hasAttachments: !attachments.isEmpty) {
+                    throw AgentRuntimeError(error)
+                }
                 guard attachments.isEmpty else { throw AgentRuntimeError("This command does not accept attachments.") }
-                let method = command == "/compact" ? "thread/compact/start" : "review/start"
+                let method = command.name == "compact" ? "thread/compact/start" : "review/start"
                 var params: [String: Any] = ["threadId": threadID]
-                if command == "/review" { params["target"] = ["type": "uncommittedChanges"]; params["delivery"] = "inline" }
+                if command.name == "review" {
+                    var target = ["type": "uncommittedChanges"]
+                    if command.arguments.hasPrefix("branch ") { target = ["type": "baseBranch", "branch": String(command.arguments.dropFirst(7)).trimmingCharacters(in: .whitespaces)] }
+                    if command.arguments.hasPrefix("commit ") { target = ["type": "commit", "sha": String(command.arguments.dropFirst(7)).trimmingCharacters(in: .whitespaces)] }
+                    params["target"] = target; params["delivery"] = "inline"
+                }
                 try request(method, params: params) { result in
                     do { _ = try result.get(); continuation.resume() }
                     catch { self.fail(error.localizedDescription); continuation.resume(throwing: error) }

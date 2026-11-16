@@ -12,6 +12,10 @@ struct AgentMentionThread: Sendable {
 @MainActor
 final class AgentComposerCoordinator {
     var providerCommands: [String] = []
+    var providerDescriptors: [AgentCommandDescriptor] = []
+    var onSubmit: (() -> Void)?
+    var onCommand: ((AgentSlashCommand) -> Void)?
+    private var completeOnly = false
     var loadFiles: (() async throws -> [String])?
     var loadThreads: (() async throws -> [AgentMentionThread])?
     var loadSkills: (() async throws -> [AgentComposerSkill])?
@@ -29,20 +33,23 @@ final class AgentComposerCoordinator {
     private var loadedAt = Date.distantPast
     private var actions: [AgentComposerSuggestion] {
         [
+            .init(id: "help", title: "/help", subtitle: "Browse commands and their arguments", icon: .info, kind: .action),
+            .init(id: "fork", title: "/fork", subtitle: "Continue a copy in another pane", icon: .conversationAdd, kind: .action),
+            .init(id: "export", title: "/export", subtitle: "Save the complete conversation as Markdown", icon: .file, kind: .action),
             .init(id: "outline", title: "/outline", subtitle: "Search prompts in this conversation", icon: .listTodo, kind: .action),
             .init(id: "previous-prompt", title: "/previous-prompt", subtitle: "Go to the previous prompt", icon: .chevronUp, kind: .action),
             .init(id: "next-prompt", title: "/next-prompt", subtitle: "Go to the next prompt", icon: .chevronDown, kind: .action),
             .init(id: "skills", title: "/skills", subtitle: "Browse installed skills", icon: .sparkles, kind: .action),
             .init(id: "status", title: "/status", subtitle: "Show current conversation settings", icon: .info, kind: .action),
-            .init(id: "plan", title: "/plan", subtitle: "Turn plan mode on or off", icon: .listTodo, kind: .action),
+            .init(id: "plan", title: "/plan", subtitle: "Toggle plan mode · [on | off]", icon: .listTodo, kind: .action),
             .init(id: "copy", title: "/copy", subtitle: "Copy the conversation as Markdown", icon: .copy, kind: .action),
-            .init(id: "new", title: "/new", subtitle: "Start a new conversation", icon: .conversationAdd, kind: .action),
-            .init(id: "resume", title: "/resume", subtitle: "Continue a Claude Code or Codex conversation from this folder",
+            .init(id: "new", title: "/new", subtitle: "Open a new agent pane", icon: .conversationAdd, kind: .action),
+            .init(id: "resume", title: "/resume", subtitle: "Resume here if empty, otherwise open another pane",
                   icon: .history, kind: .action),
-            .init(id: "clear-conversation", title: "/clear", subtitle: "Start a new conversation with a fresh context",
+            .init(id: "clear-conversation", title: "/clear", subtitle: "Clear this pane and keep the previous conversation in history",
                   icon: .conversationAdd, kind: .action),
-            .init(id: "model", title: "/model", subtitle: "Choose the model for this conversation", icon: .cpu, kind: .action),
-            .init(id: "effort", title: "/effort", subtitle: "Change reasoning effort", icon: .brain, kind: .action),
+            .init(id: "model", title: "/model", subtitle: "Choose a model · [model-name | default]", icon: .cpu, kind: .action),
+            .init(id: "effort", title: "/effort", subtitle: "Choose reasoning effort · [level | auto]", icon: .brain, kind: .action),
             .init(id: "attach", title: "/attach", subtitle: "Attach files or images", icon: .paperclip, kind: .action),
             .init(id: "stop", title: "/stop", subtitle: "Stop the current response", icon: .stop, kind: .action),
             .init(id: "clear", title: "/clear-draft", subtitle: "Clear the current draft and attachments", icon: .eraser, kind: .action)
@@ -52,19 +59,9 @@ final class AgentComposerCoordinator {
     /// Claude lists these in headless mode, but they are internal, unavailable outside its
     /// terminal UI, or replaced by a Tab action: its `/clear` would reset the provider's
     /// context underneath a transcript that still shows the old conversation.
-    static let hiddenProviderCommands: Set<String> = [
-        "agents", "auto-mode-setup", "clear", "color", "extra-usage", "fast", "focus", "heapdump", "workflow-launch-exec"
-    ]
+    static let hiddenProviderCommands = AgentSlashCommand.unavailableNames.union(["clear"])
 
-    /// The command a prompt starts with, such as `compact` for `/compact now`. A leading
-    /// path like `/Users/me/App.swift` is a prompt, not a command.
-    static func commandName(in text: String) -> String? {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.hasPrefix("/") else { return nil }
-        let token = trimmed.dropFirst().prefix { !$0.isWhitespace }
-        guard !token.isEmpty, token.allSatisfy({ $0.isLetter || $0.isNumber || "-_:".contains($0) }) else { return nil }
-        return String(token)
-    }
+    static func commandName(in text: String) -> String? { AgentSlashCommand(text: text)?.name }
 
     /// What Claude's own commands do, for the ones it lists without a description.
     static let providerCommandDescriptions: [String: String] = [
@@ -72,7 +69,7 @@ final class AgentComposerCoordinator {
         "context": "Show what fills the context window",
         "cost": "Show what this conversation has cost",
         "init": "Write a CLAUDE.md that describes this project",
-        "review": "Review a pull request",
+        "review": "Review uncommitted changes · [branch <name> | commit <sha>]",
         "pr-comments": "Show a pull request's comments",
         "security-review": "Review the pending changes for security issues",
         "release-notes": "Show the release notes",
@@ -101,6 +98,10 @@ final class AgentComposerCoordinator {
     }
 
     private func describeProviderCommand(_ name: String) -> String {
+        if let descriptor = providerDescriptors.first(where: { $0.names.contains(name) })
+            ?? providerDescriptors.first(where: { name.hasSuffix(":" + $0.name) }) {
+            return descriptor.description + (descriptor.argumentHint.flatMap { $0.isEmpty ? nil : " · " + $0 } ?? "")
+        }
         if let known = Self.providerCommandDescriptions[name] { return known }
         if let skill = skills?.first(where: { $0.name.lowercased() == name.lowercased() }), !skill.description.isEmpty {
             return skill.description
@@ -110,8 +111,9 @@ final class AgentComposerCoordinator {
 
     private var visibleProviderCommands: [String] {
         providerCommands.filter { name in
-            !name.hasPrefix("__") && !Self.hiddenProviderCommands.contains(name)
+            !AgentSlashCommand.unavailable(name) && name != "clear"
                 && !actions.contains { $0.title == "/" + name }
+                && !providerDescriptors.contains { $0.names.contains(name) && (AgentSlashCommand.unavailable($0.name) || AgentSlashCommand.localNames.contains($0.name)) }
         }
     }
 
@@ -185,7 +187,9 @@ final class AgentComposerCoordinator {
         case #selector(NSResponder.moveUp(_:)):
             surface.suggestions.moveSelection(-1)
         case #selector(NSResponder.insertTab(_:)):
+            completeOnly = true
             _ = surface.suggestions.acceptSelection()
+            completeOnly = false
         case #selector(NSResponder.insertNewline(_:)):
             guard !NSEvent.modifierFlags.contains(.shift) else { return false }
             _ = surface.suggestions.acceptSelection()
@@ -198,19 +202,35 @@ final class AgentComposerCoordinator {
 
     func performTypedAction() -> Bool {
         let text = surface.composer.string.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let action = actions.first(where: { $0.title == text }) else { return false }
-        surface.composer.selectAll(nil)
-        surface.composer.insertText("", replacementRange: surface.composer.selectedRange())
-        dismiss()
-        onAction?(action.id)
+        guard let command = AgentSlashCommand(text: text), let action = actions.first(where: { $0.title == "/" + command.name }) else { return false }
+        if let command = AgentSlashCommand(text: text), let onCommand {
+            dismiss()
+            onCommand(command)
+        } else {
+            surface.composer.selectAll(nil)
+            surface.composer.insertText("", replacementRange: surface.composer.selectedRange())
+            dismiss()
+            onAction?(action.id)
+        }
         return true
     }
 
     func browseSkills() {
-        surface.composer.string = "/skill:"
+        skills = nil
+        let current = surface.composer.string
+        let command = AgentSlashCommand(text: current)
+        let suffix = command?.name == "skills" ? command?.arguments ?? "" : current
+        surface.composer.string = "/skill:" + (suffix.isEmpty ? "" : " " + suffix)
         surface.composer.setSelectedRange(NSRange(location: 7, length: 0))
         surface.refreshComposer()
         changed()
+    }
+
+    func refreshCatalog() async throws {
+        let refreshed = try await loadSkills?() ?? []
+        try Task.checkCancellation()
+        skills = refreshed
+        loadedAt = Date()
     }
 
     func dismiss() { triggerState.dismiss(trigger); task?.cancel(); hide() }
@@ -242,11 +262,18 @@ final class AgentComposerCoordinator {
             let browsingSkills = query.lowercased().hasPrefix("skill:")
             let fileSkills = (skills ?? []).filter { browsingSkills || !providedNames.contains($0.name.lowercased()) }
             // What the provider and skills can do comes first; Tab's own navigation follows.
-            let candidates = native + fileSkills.map {
+            let localNames = Set(fileSkills.map { $0.name.lowercased() })
+            let providerSkills = browsingSkills ? providerDescriptors.filter {
+                $0.isSkill == true && !localNames.contains($0.name.lowercased()) && !AgentSlashCommand.unavailable($0.name)
+            }.map {
+                AgentComposerSuggestion(id: "native-skill:" + $0.name, title: "/skill:" + $0.name,
+                    subtitle: $0.description, icon: .sparkles, kind: .skill)
+            } : []
+            let candidates = native + providerSkills + fileSkills.map {
                 AgentComposerSuggestion(id: $0.id, title: "/skill:\($0.name)", subtitle: $0.description.isEmpty ? "Skill" : $0.description,
                                         icon: .sparkles, kind: .skill)
             } + actions
-            return query.isEmpty ? Array(Self.rankedByUse(candidates).prefix(40))
+            return query.isEmpty ? Self.rankedByUse(Array(Self.rankedByUse(candidates.filter { $0.kind != .action }).prefix(40 - actions.count)) + actions)
                 : Fuzzy.rank(candidates, key: { $0.title }, query: query, limit: 40).map(\.item)
         }
         let threadMatches = query.isEmpty ? Array(threads.prefix(5))
@@ -261,6 +288,11 @@ final class AgentComposerCoordinator {
             .init(id: $0, title: ($0 as NSString).lastPathComponent,
                   subtitle: ($0 as NSString).deletingLastPathComponent, icon: .file, kind: .file)
         }
+    }
+
+    var helpEntries: [AgentSearchPicker.Entry] {
+        actions.map { .init(id: $0.title, title: $0.title, detail: $0.subtitle) }
+            + visibleProviderCommands.map { .init(id: "/" + $0, title: "/" + $0, detail: describeProviderCommand($0)) }
     }
 
     /// The `limit` least nested paths, each level in name order; only the levels used are sorted.
@@ -280,7 +312,7 @@ final class AgentComposerCoordinator {
               AgentComposerTrigger.parse(text: surface.composer.string, selection: surface.composer.selectedRange()) == trigger else { return }
         var replacement: String?
         switch item.kind {
-        case .action: replacement = ""
+        case .action: replacement = item.title + " "
         case .providerCommand: replacement = item.title + " "
         case .file:
             replacement = item.id.contains(where: { $0.isWhitespace }) ? "@\"\(item.id)\" " : "@\(item.id) "
@@ -296,10 +328,7 @@ final class AgentComposerCoordinator {
             }
         case .skill:
             replacement = "/skill:\(item.title.replacingOccurrences(of: "/skill:", with: "")) "
-            if let skill = skills?.first(where: { $0.id == item.id }) {
-                let directory = (skill.path.rawValue as NSString).deletingLastPathComponent
-                onContext?("Skill-\(skill.name).md", "Use the following skill instructions for this request. Resolve skill-relative resources from \(directory).\n\n\(skill.instructions)")
-            }
+
         }
         if trigger.kind == .command { Self.noteUse(item.id) }
         if let replacement { surface.composer.insertText(replacement, replacementRange: trigger.range) }
@@ -307,7 +336,10 @@ final class AgentComposerCoordinator {
         triggerState.reset()
         hide()
         surface.refreshComposer()
-        if item.kind == .action { onAction?(item.id) }
-        else { surface.window?.makeFirstResponder(surface.composer) }
+        surface.window?.makeFirstResponder(surface.composer)
+        if !completeOnly, item.kind == .action || item.kind == .providerCommand {
+            if let onSubmit { onSubmit() }
+            else if item.kind == .action { onAction?(item.id) }
+        }
     }
 }

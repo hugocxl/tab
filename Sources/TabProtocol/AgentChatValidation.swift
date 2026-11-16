@@ -39,7 +39,7 @@ extension AgentChatRequest {
                 guard !allow else { throw .badRequest }
                 try Validation.message(reason, limit: 4096)
             }
-        case .fork(let session, let from, _):
+        case .clear(let session, let from, _), .fork(let session, let from, _):
             guard session != from else { throw .badRequest }
         case .create, .read, .interrupt, .close, .setAccess, .setPlan:
             break
@@ -50,6 +50,9 @@ extension AgentChatRequest {
 extension AgentChatSnapshot {
     public func validate() throws(ErrorCode) {
         try reasoningEffort?.validate()
+        if let commandDescriptors {
+            guard commandDescriptors.count <= 256, commandDescriptors.allSatisfy(\.isValid) else { throw .badRequest }
+        }
         guard items.count <= 512,
               items.reduce(0, { $0 + $1.transcriptByteCount }) <= 512 * 1024,
               items.allSatisfy({ $0.id.utf8.count <= 1024 }),

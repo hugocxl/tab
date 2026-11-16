@@ -60,7 +60,7 @@ enum AgentComposerTriggerParser {
         // A second trigger, URL punctuation, or inline code is not a search query.
         guard !query.contains(where: { "@`<>\"'".contains($0) }),
               !query.contains("://"),
-              kind != .command || query.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" || $0 == ":" })
+              kind != .command || query.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" || $0 == ":" || $0 == "." })
         else { return nil }
         var end = caret
         while end < text.endIndex && !text[end].isWhitespace { end = text.index(after: end) }

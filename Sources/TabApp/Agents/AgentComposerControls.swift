@@ -392,11 +392,13 @@ final class AgentModelPicker: AgentComposerButton {
             from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
     }
 
-    @objc private func showMenu() {
+    @objc private func showMenu() { showSelectionMenu(effortOnly: false) }
+
+    func showSelectionMenu(effortOnly: Bool) {
         guard isEnabled else { return }
         let menu = NSMenu()
         menu.autoenablesItems = false
-        if let models = model.menu {
+        if !effortOnly, let models = model.menu {
             for item in models.items {
                 guard let copy = item.copy() as? NSMenuItem else { continue }
                 // Top-level pop-up items act through the pop-up's own action.
@@ -410,7 +412,7 @@ final class AgentModelPicker: AgentComposerButton {
         }
         let efforts = effort.itemArray.enumerated().filter { !$0.element.isSeparatorItem }
         if !efforts.isEmpty {
-            menu.addItem(.separator())
+            if !effortOnly { menu.addItem(.separator()) }
             menu.addItem(.sectionHeader(title: "Reasoning effort"))
             for (index, item) in efforts {
                 let choice = NSMenuItem(title: item.title, action: #selector(chooseEffort(_:)), keyEquivalent: "")
