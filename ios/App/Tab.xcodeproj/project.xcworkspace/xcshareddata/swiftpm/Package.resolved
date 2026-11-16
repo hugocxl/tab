@@ -6,8 +6,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/hugocxl/iconscxl.git",
       "state" : {
-        "revision" : "5186204fca008579aae2ce3db82641fade432ab0",
-        "version" : "0.1.6"
+        "revision" : "36464a111d7dc1e1d6d6f5bd295b75d932daa18e",
+        "version" : "0.1.9"
       }
     }
   ],
