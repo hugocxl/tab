@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.99.2 - 2026-11-16
+
+### Fixed
+
+- Simple line icons, including the add and send arrows, use one consistent
+  color instead of faded sections.
+
 ## 0.99.1 - 2026-11-16
 
 ### Fixed
