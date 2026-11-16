@@ -168,6 +168,8 @@ extension RequestBody {
             try request.validate()
         case .agentChat(let request):
             try request.validate()
+        case .agentConversation(let request):
+            try request.validate()
         case .agentComposerContext, .agentModelCatalog, .agentHistory:
             break
         case .importAgentHistory(let request):
@@ -345,6 +347,8 @@ extension ReplyBody {
             try checkpoint.validate()
         case .agentChat(let snapshot):
             try snapshot.validate()
+        case .agentConversation(let reply):
+            try reply.validate()
         case .agentComposerContext(let context):
             try context.validate()
         case .agentHistory(let history):

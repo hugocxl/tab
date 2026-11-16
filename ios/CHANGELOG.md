@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.28.0 - 2026-11-16
+
+### Changed
+
+- A Mac running Tab 0.99 or later stays awake while this phone is paired, so it
+  can be reached at any time, and the message shown when a Mac can't be reached
+  points to its Keep this Mac awake setting.
+
 ## 0.27.0 - 2026-11-14
 
 ### Added

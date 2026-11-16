@@ -32,8 +32,13 @@ extension AgentChatRequest {
             }
             if let model { try Validation.message(model, limit: 256) }
             try effort?.validate()
-        case .approve(_, let request, _):
+        case .approve(_, let request, let allow, let always, let reason):
             try Validation.message(request, limit: 1024)
+            if always == true, !allow { throw .badRequest }
+            if let reason {
+                guard !allow else { throw .badRequest }
+                try Validation.message(reason, limit: 4096)
+            }
         case .fork(let session, let from, _):
             guard session != from else { throw .badRequest }
         case .create, .read, .interrupt, .close, .setAccess, .setPlan:

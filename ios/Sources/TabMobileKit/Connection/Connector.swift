@@ -17,7 +17,7 @@ public enum ConnectError: Error, Equatable, LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .unreachable(let detail):
-            "Couldn't reach the Mac. Check that it's awake and on the same network. (\(detail))"
+            "Couldn't reach the Mac. Check that it's awake and on the same network or VPN, and that Keep this Mac awake is on in Tab's Mobile settings. (\(detail))"
         case .unauthorized: "This Mac no longer accepts this device. Pair again from Tab's Mobile settings."
         case .pairingRefused: "The pairing code is wrong or expired. Show a new one on the Mac."
         case .incompatible: "This Mac runs a version of Tab this app can't talk to. Update both."

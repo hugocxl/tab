@@ -68,6 +68,8 @@ public struct AgentToolActivity: Codable, Hashable, Sendable {
     public var name: String?
     public var category: Category?
     public var presentation: Presentation?
+    /// The last line of a diff the server cut to fit the transcript.
+    public static let diffTruncationMarker = "[Diff truncated]"
     public var presentsCommand: Bool { presentation == .command || (presentation == nil && (category == .command || name == "commandExecution")) }
     public var input: String?
     public var output: String?
@@ -84,6 +86,9 @@ public struct AgentToolActivity: Codable, Hashable, Sendable {
     public var startedAt: Date?
     public var completedAt: Date?
     public var exitCode: Int?
+    /// The size of the whole output when the transcript keeps only part of it; the server
+    /// holds the rest, read with `AgentConversationRequest.toolOutput`.
+    public var fullOutputBytes: Int?
 
     public init(name: String? = nil, category: Category? = nil, input: String? = nil,
                 output: String? = nil, status: Status? = nil, filePaths: [String]? = nil,
