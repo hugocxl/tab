@@ -17,6 +17,8 @@ final class SplitContainerView: ThemedView {
     private var trackingAreasByDivider: [NSTrackingArea] = []
     private var shownTab: TabId?
     private var animateNextLayout = false
+    /// Another tab came in since the last layout pass, which shows it still.
+    private var switchedTab = false
     private var hasLaidOut = false
 
     /// The sidebar toggle, shown in the top-left card while the sidebar is
@@ -49,10 +51,17 @@ final class SplitContainerView: ThemedView {
     /// Matches the cards to the model's current tab.
     func reload() {
         let tab = self.tab
-        animateNextLayout = hasLaidOut
+        // Another tab shows at once: the panes are already there, so fading
+        // them in would only delay them.
+        let switchingTab = shownTab != nil && tab != nil && shownTab != tab?.id
+        if switchingTab {
+            InterfaceMotion.cancel(in: self)
+            switchedTab = true
+        }
+        animateNextLayout = hasLaidOut && !switchedTab
         let visible = tab?.visiblePanes ?? []
         for (id, card) in cards where !visible.contains(id) {
-            InterfaceMotion.dismiss(card, style: model.appearance.animationStyle)
+            if !switchingTab { InterfaceMotion.dismiss(card, style: model.appearance.animationStyle) }
             card.removeFromSuperview()
             cards[id] = nil
         }
@@ -107,6 +116,7 @@ final class SplitContainerView: ThemedView {
                 }
             }
             animateNextLayout = false
+            switchedTab = false
             hasLaidOut = true
             onLayout?(shouldAnimate)
         }

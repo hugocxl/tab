@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.99.1 - 2026-11-16
+
+### Fixed
+
+- Switching tabs in the sidebar shows the new tab's panes at once instead of
+  fading them in.
+
 ## 0.99.0 - 2026-11-16
 
 ### Added
