@@ -175,7 +175,7 @@ final class AgentSubagentRow: NSView {
         refreshStats()
         updateTicking()
         toolTip = [subagent.agentType.map { "\($0) agent" }, subagent.description, subagent.activity,
-                   "Click to see its steps"].compactMap { $0 }.joined(separator: "\n")
+                   subagent.agentType == "Shell" ? "Click to see its output" : "Click to see its steps"].compactMap { $0 }.joined(separator: "\n")
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
         setAccessibilityLabel("\(subagent.description), \(activity.stringValue), \(stats.stringValue)")
@@ -269,7 +269,7 @@ final class AgentSubagentRow: NSView {
     override func menu(for event: NSEvent) -> NSMenu? {
         guard let subagent else { return nil }
         let menu = NSMenu()
-        menu.addItem(ClosureMenuItem("Show Steps") { [weak self] in self?.onOpen?(subagent) })
+        menu.addItem(ClosureMenuItem(subagent.agentType == "Shell" ? "Show Output" : "Show Steps") { [weak self] in self?.onOpen?(subagent) })
         if let toolUseID = subagent.toolUseID {
             menu.addItem(ClosureMenuItem("Show in Conversation") { [weak self] in self?.onPress?(toolUseID) })
         }
@@ -279,11 +279,11 @@ final class AgentSubagentRow: NSView {
         return menu
     }
 
-    /// Opens the agent's steps; with nothing to show them by, reveals its tool row.
+    /// Opens the agent's steps, or a shell's command and output; with nothing to show
+    /// them by, reveals its tool row.
     override func accessibilityPerformPress() -> Bool {
         guard let subagent else { return false }
-        // A background shell has no steps of its own; its tool row shows its output.
-        if let onOpen, subagent.toolUseID != nil, subagent.agentType != "Shell" { onOpen(subagent); return true }
+        if let onOpen, subagent.toolUseID != nil { onOpen(subagent); return true }
         guard let toolUseID = subagent.toolUseID else { return false }
         onPress?(toolUseID)
         return true

@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.100.0 - 2026-11-16
+
+### Added
+
+- Clicking a shell an agent left running in the background shows its command and
+  its output as it runs.
+
 ## 0.99.2 - 2026-11-16
 
 ### Fixed

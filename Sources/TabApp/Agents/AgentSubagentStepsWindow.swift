@@ -3,7 +3,9 @@ import TabProtocol
 
 /// One agent's own steps, its tool calls and text, in a nested transcript. The pane
 /// reads them again when its snapshot says the agent's step count changed, so a
-/// running agent's window follows it without polling.
+/// running agent's window follows it without polling. A background shell's one step is
+/// its command and the end of its output, which has no step count, so its window reads
+/// it again every few seconds while the shell runs and the window is open.
 @MainActor
 final class AgentSubagentStepsWindow: NSWindowController, NSWindowDelegate {
     typealias Fetch = (String) async throws -> AgentSubagentSteps
@@ -15,6 +17,8 @@ final class AgentSubagentStepsWindow: NSWindowController, NSWindowDelegate {
     private let background = ThemedBackground(color: { $0.paneBackground })
     private var loadTask: Task<Void, Never>?
     private var reloadPending = false
+    private var outputRefresh: Timer?
+    private var isShell = false
     private(set) var items: [AgentChatItem] = []
     /// The step count the shown items were read at.
     private(set) var loadedSteps: Int?
@@ -62,7 +66,22 @@ final class AgentSubagentStepsWindow: NSWindowController, NSWindowDelegate {
     func update(_ subagent: AgentSubagent) {
         let state = subagent.status == .running ? "running" : subagent.status.rawValue
         window?.title = subagent.description + " · " + state
+        isShell = subagent.agentType == "Shell"
+        if isShell {
+            let running = subagent.status == .running
+            // A shell that just ended has its last output to read.
+            if !running, outputRefresh != nil { reload() }
+            followOutput(running)
+        }
         if let steps = subagent.steps, steps != loadedSteps { reload() }
+    }
+
+    private func followOutput(_ running: Bool) {
+        guard running != (outputRefresh != nil) else { return }
+        outputRefresh?.invalidate()
+        outputRefresh = running ? Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.reload() }
+        } : nil
     }
 
     func reload() {
@@ -85,10 +104,14 @@ final class AgentSubagentStepsWindow: NSWindowController, NSWindowDelegate {
     }
 
     private func show(_ items: [AgentChatItem]) {
+        // A shell's output is what its window is for, so it opens expanded.
+        if isShell, self.items.isEmpty, let id = items.first?.id {
+            transcript.rowStates["activity:" + id] = AgentTimelineRowState(toolExpandedIDs: [id])
+        }
         self.items = items
         loadedSteps = items.count
         message.isHidden = !items.isEmpty
-        if items.isEmpty { message.stringValue = "No steps yet. They appear here as the agent works." }
+        if items.isEmpty { message.stringValue = isShell ? "No output yet." : "No steps yet. They appear here as the agent works." }
         let following = scroll.contentView.bounds.maxY >= transcript.frame.height - 24
         transcript.update(items, omittedCount: 0)
         transcript.reflow(viewportWidth: scroll.contentSize.width)
@@ -112,6 +135,8 @@ final class AgentSubagentStepsWindow: NSWindowController, NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         loadTask?.cancel()
+        outputRefresh?.invalidate()
+        outputRefresh = nil
         NotificationCenter.default.removeObserver(self)
         onClose?()
     }

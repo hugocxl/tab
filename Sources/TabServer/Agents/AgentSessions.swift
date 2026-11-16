@@ -318,11 +318,16 @@ final class AgentSessions: @unchecked Sendable {
         try request.validate()
         switch request {
         case .subagentSteps(let session, let toolUseID):
-            let items = try queue.sync { () throws -> [AgentChatItem] in
+            let (items, shell) = try queue.sync { () throws -> ([AgentChatItem], (AgentChatItem, AgentSubagent)?) in
                 guard let entry = entries[session] else { throw ServiceError.unknownSession(session) }
-                return entry.subagentSteps[toolUseID] ?? []
+                if let steps = entry.subagentSteps[toolUseID] { return (steps, nil) }
+                guard let task = entry.snapshot.subagents?.first(where: { $0.toolUseID == toolUseID && $0.agentType == "Shell" }),
+                      let item = entry.snapshot.items.last(where: { $0.id == toolUseID }) else { return ([], nil) }
+                return ([], (item, task))
             }
-            return .subagentSteps(AgentSubagentSteps(toolUseID: toolUseID, items: items))
+            guard let (item, task) = shell else { return .subagentSteps(AgentSubagentSteps(toolUseID: toolUseID, items: items)) }
+            let step = try await runBlocking { AgentBackgroundShell.step(item, task: task) }
+            return .subagentSteps(AgentSubagentSteps(toolUseID: toolUseID, items: [step]))
         case .revert(let session, let checkpoint, let paths, let force):
             return .revert(try await revert(session: session, checkpoint: checkpoint, paths: paths, force: force))
         case .toolOutput(let session, let item):

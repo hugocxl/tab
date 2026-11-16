@@ -762,10 +762,14 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         guard !disposed, let toolUseID = agent.toolUseID, let request = conversationRequest else { return }
         if let existing = subagentWindows[toolUseID] { existing.update(agent); existing.showWindow(nil); return }
         let session = session
-        let window = AgentSubagentStepsWindow(subagent: agent, toolUseID: toolUseID, theme: surface.theme) { id in
+        let window = AgentSubagentStepsWindow(subagent: agent, toolUseID: toolUseID, theme: surface.theme) { [weak self] id in
             do {
                 guard case .subagentSteps(let steps) = try await request(.subagentSteps(session: session, toolUseID: id)) else {
                     throw ModelError("The server sent an unexpected reply.")
+                }
+                // A server that can't read a shell's output still has its tool row.
+                if steps.items.isEmpty, agent.agentType == "Shell", let item = self?.snapshot?.items.last(where: { $0.id == id }) {
+                    return AgentSubagentSteps(toolUseID: id, items: [item])
                 }
                 return steps
             } catch let error as ClientError where error.serverCode == .unsupported {
