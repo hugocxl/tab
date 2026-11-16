@@ -38,6 +38,7 @@ public final class RemoteAccess: RemoteAccessProtocol, @unchecked Sendable {
     private let server: ServerInfo
     private weak var events: ServiceEvents?
     private let bindAddress: String?
+    private let idleSleep: IdleSleepPreventing
     /// Unix seconds; replaced in tests to expire pairing codes.
     var clock: @Sendable () -> UInt64 = { UInt64(Date().timeIntervalSince1970) }
 
@@ -60,11 +61,14 @@ public final class RemoteAccess: RemoteAccessProtocol, @unchecked Sendable {
     ///   - events: Receives `.changed(topic: .remoteAccess, revision:)` on every change.
     ///   - bindAddress: An IPv4 address to listen on instead of every interface,
     ///     such as `127.0.0.1` in tests.
-    public init(file: URL, server: ServerInfo, events: ServiceEvents? = nil, bindAddress: String? = nil) {
+    ///   - idleSleep: Held while phones should be able to reach this Mac.
+    init(file: URL, server: ServerInfo, events: ServiceEvents? = nil, bindAddress: String? = nil,
+         idleSleep: IdleSleepPreventing) {
         self.file = file
         self.server = server
         self.events = events
         self.bindAddress = bindAddress
+        self.idleSleep = idleSleep
         do {
             store = try RemoteStoreFile.load(file)
         } catch {
@@ -73,6 +77,11 @@ public final class RemoteAccess: RemoteAccessProtocol, @unchecked Sendable {
             unreadable = message
             status = .failed(message)
         }
+    }
+
+    public convenience init(file: URL, server: ServerInfo, events: ServiceEvents? = nil, bindAddress: String? = nil) {
+        self.init(file: file, server: server, events: events, bindAddress: bindAddress,
+                  idleSleep: IdleSleepAssertion(reason: "Tab keeps this Mac reachable for paired phones"))
     }
 
     public convenience init(dirs: TabDirs, server: ServerInfo, events: ServiceEvents? = nil) {
@@ -540,10 +549,24 @@ public final class RemoteAccess: RemoteAccessProtocol, @unchecked Sendable {
         }
     }
 
+    /// Whether phones should find this Mac awake: access is on and listening,
+    /// a phone is paired, and the person didn't allow sleep.
+    var keepsAwake: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return keepsAwakeLocked
+    }
+
+    private var keepsAwakeLocked: Bool {
+        store.settings.enabled && !store.settings.allowsSleep && status == .listening && !store.devices.isEmpty
+    }
+
     private func changed() {
         lock.lock()
         revision += 1
         let revision = self.revision
+        // Held under the lock, so concurrent changes apply in order.
+        idleSleep.hold(keepsAwakeLocked)
         lock.unlock()
         events?.broadcast(.changed(topic: .remoteAccess, revision: revision))
     }

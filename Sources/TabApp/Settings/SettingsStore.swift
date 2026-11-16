@@ -479,6 +479,13 @@ public final class SettingsStore {
         writeRemoteAccess("mobile-access", settings)
     }
 
+    public func setMobileKeepAwake(_ keepAwake: Bool) {
+        guard !mobileBusy else { return }
+        guard var settings = remoteAccess?.settings else { return }
+        settings.allowsSleep = !keepAwake
+        writeRemoteAccess("mobile-keep-awake", settings)
+    }
+
     public func setMobilePort(_ text: String) {
         guard !mobileBusy else { return }
         guard var settings = remoteAccess?.settings else { return }

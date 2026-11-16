@@ -57,13 +57,16 @@ enum RemoteStoreFile {
     private struct Document: Codable {
         var enabled: Bool
         var port: UInt16
+        var allowsSleep: Bool
         var certificate: String?
         var privateKey: String?
         var devices: [DocumentDevice]
 
-        init(enabled: Bool, port: UInt16, certificate: String?, privateKey: String?, devices: [DocumentDevice]) {
+        init(enabled: Bool, port: UInt16, allowsSleep: Bool, certificate: String?, privateKey: String?,
+             devices: [DocumentDevice]) {
             self.enabled = enabled
             self.port = port
+            self.allowsSleep = allowsSleep
             self.certificate = certificate
             self.privateKey = privateKey
             self.devices = devices
@@ -73,6 +76,7 @@ enum RemoteStoreFile {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
             port = try c.decodeIfPresent(UInt16.self, forKey: .port) ?? Limits.defaultRemotePort
+            allowsSleep = try c.decodeIfPresent(Bool.self, forKey: .allowsSleep) ?? false
             certificate = try c.decodeIfPresent(String.self, forKey: .certificate)
             privateKey = try c.decodeIfPresent(String.self, forKey: .privateKey)
             devices = try c.decodeIfPresent([DocumentDevice].self, forKey: .devices) ?? []
@@ -101,7 +105,8 @@ enum RemoteStoreFile {
     }
 
     private static func store(from document: Document) -> RemoteStore? {
-        let settings = RemoteAccessSettings(enabled: document.enabled, port: document.port)
+        let settings = RemoteAccessSettings(enabled: document.enabled, port: document.port,
+                                            allowsSleep: document.allowsSleep)
         guard (try? settings.validate()) != nil else { return nil }
         var identity: StoredIdentity?
         switch (document.certificate, document.privateKey) {
@@ -129,6 +134,7 @@ enum RemoteStoreFile {
         let document = Document(
             enabled: store.settings.enabled,
             port: store.settings.port,
+            allowsSleep: store.settings.allowsSleep,
             certificate: store.identity?.certificate.hexString,
             privateKey: store.identity?.privateKey.hexString,
             devices: store.devices.map {

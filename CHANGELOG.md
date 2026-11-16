@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.99.0 - 2026-11-16
+
+### Added
+
+- Tab keeps the Mac awake while a phone is paired, so the phone can reach it
+  at any time; turn off Keep this Mac awake in Mobile settings to let it sleep.
+
 ## 0.98.1 - 2026-11-14
 
 ### Fixed

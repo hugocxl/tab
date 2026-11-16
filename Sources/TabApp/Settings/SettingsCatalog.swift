@@ -216,6 +216,7 @@ public enum SettingsCatalog {
         // Mobile
         SettingItem("mobile-access", "Allow mobile devices", "Let paired phones reach this device's server over the local network or a VPN. A paired phone gets full terminal access.", .mobile, "Access"),
         SettingItem("mobile-port", "Port", "Network port phones connect to, from 1024 to 65535.", .mobile, "Access"),
+        SettingItem("mobile-keep-awake", "Keep this Mac awake", "While a phone is paired, the Mac doesn't sleep when idle, so the phone can always reach it. The display still sleeps, and closing a laptop's lid still sleeps the Mac.", .mobile, "Access"),
         SettingItem("mobile-status", "Status", "Whether phones can reach this device right now.", .mobile, "Access"),
         SettingItem("mobile-pair", "Pair a phone", "Show a one-time code to scan with the Tab app.", .mobile, "Pairing"),
         SettingItem("mobile-devices", "Paired devices", "Phones that can connect. Revoking one disconnects it immediately.", .mobile, "Devices"),

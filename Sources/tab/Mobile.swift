@@ -9,9 +9,10 @@ enum Mobile {
         case .status:
             printState(try await client.remoteAccess())
         case .enable(let port):
-            let current = try await client.remoteAccess().settings
-            let state = try await client.writeRemoteAccess(RemoteAccessSettings(enabled: true,
-                                                                                port: port ?? current.port))
+            var settings = try await client.remoteAccess().settings
+            settings.enabled = true
+            if let port { settings.port = port }
+            let state = try await client.writeRemoteAccess(settings)
             printState(state)
             if case .failed(let message) = state.status {
                 throw CLIError("mobile access could not start: \(message)")

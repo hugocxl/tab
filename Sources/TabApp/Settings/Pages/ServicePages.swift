@@ -146,6 +146,7 @@ extension SettingsModel {
         }
         b.row("mobile-access", b.toggle("mobile-access", state.settings.enabled, enabled: !store.mobileBusy) { [store] in store.setMobileEnabled($0) })
         b.row("mobile-port", b.field("mobile-port", String(state.settings.port), width: 80, enabled: !store.mobileBusy) { [store] in store.setMobilePort($0) })
+        b.row("mobile-keep-awake", b.toggle("mobile-keep-awake", !state.settings.allowsSleep, enabled: !store.mobileBusy) { [store] in store.setMobileKeepAwake($0) })
         let (status, failed) = Self.status(state)
         b.row("mobile-status", .label(status, failed ? .error : .secondary))
         b.row("mobile-pair", pairing(b, state), stacked: store.pairing != nil)

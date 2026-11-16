@@ -4,10 +4,14 @@ import Foundation
 public struct RemoteAccessSettings: Hashable, Codable, Sendable {
     public var enabled: Bool
     public var port: UInt16
+    /// Lets the Mac idle-sleep while access is on. Off by default: the server
+    /// keeps the Mac awake while a phone is paired, so the phone can reach it.
+    public var allowsSleep: Bool
 
-    public init(enabled: Bool = false, port: UInt16 = Limits.defaultRemotePort) {
+    public init(enabled: Bool = false, port: UInt16 = Limits.defaultRemotePort, allowsSleep: Bool = false) {
         self.enabled = enabled
         self.port = port
+        self.allowsSleep = allowsSleep
     }
 }
 

@@ -20,13 +20,15 @@ final class RemoteAccessTests: XCTestCase {
     private var file: URL { folder.appendingPathComponent("remote.json") }
     private let server = ServerInfo(build: BuildInfo(version: "test"), instance: 1, server: ServerId())
 
-    private func makeRemote(events: ServiceEvents? = nil) -> RemoteAccess {
-        RemoteAccess(file: file, server: server, events: events, bindAddress: "127.0.0.1")
+    private func makeRemote(events: ServiceEvents? = nil,
+                            idleSleep: RecordingIdleSleep = RecordingIdleSleep()) -> RemoteAccess {
+        RemoteAccess(file: file, server: server, events: events, bindAddress: "127.0.0.1", idleSleep: idleSleep)
     }
 
     /// Enabled and listening on a free loopback port.
-    private func listening(_ acceptor: RecordingAcceptor) throws -> (RemoteAccess, UInt16) {
-        let remote = makeRemote()
+    private func listening(_ acceptor: RecordingAcceptor,
+                           idleSleep: RecordingIdleSleep = RecordingIdleSleep()) throws -> (RemoteAccess, UInt16) {
+        let remote = makeRemote(idleSleep: idleSleep)
         remote.start(acceptor: acceptor)
         let port = try freePort()
         try remote.write(RemoteAccessSettings(enabled: true, port: port))
@@ -131,6 +133,35 @@ final class RemoteAccessTests: XCTestCase {
         guard case .error = try returning.request(.authenticate(paired.credential)) else {
             return XCTFail("a revoked device must not authenticate")
         }
+    }
+
+    func testTheMacStaysAwakeOnlyWhileAPairedPhoneCanReachIt() throws {
+        let idleSleep = RecordingIdleSleep()
+        let (remote, port) = try listening(RecordingAcceptor(), idleSleep: idleSleep)
+        XCTAssertFalse(idleSleep.held, "nothing to stay awake for before a phone pairs")
+
+        let offer = try remote.startPairing(hosts: ["127.0.0.1"])
+        let paired = try remote.pair(PairRequest(code: offer.code, name: "Phone"))
+        XCTAssertTrue(idleSleep.held)
+
+        try remote.write(RemoteAccessSettings(enabled: true, port: port, allowsSleep: true))
+        XCTAssertFalse(idleSleep.held)
+        try remote.write(RemoteAccessSettings(enabled: true, port: port))
+        XCTAssertTrue(idleSleep.held)
+
+        try remote.write(RemoteAccessSettings(enabled: false, port: port))
+        XCTAssertFalse(idleSleep.held, "access off lets the Mac sleep")
+        try remote.write(RemoteAccessSettings(enabled: true, port: port))
+        XCTAssertTrue(idleSleep.held)
+
+        try remote.revoke(paired.credential.device)
+        XCTAssertFalse(idleSleep.held, "no paired phone lets the Mac sleep")
+
+        let reopened = makeRemote(idleSleep: idleSleep)
+        try reopened.write(RemoteAccessSettings(enabled: true, port: port, allowsSleep: true))
+        XCTAssertTrue(reopened.state().settings.allowsSleep)
+        XCTAssertTrue(try RemoteStoreFile.load(file).settings.allowsSleep, "the choice is saved")
+        remote.stop()
     }
 
     func testDisablingStopsListeningAndDisconnectsEveryone() throws {
@@ -306,6 +337,17 @@ private final class RecordingAcceptor: ConnectionAcceptor, @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return accepted.removeFirst()
+    }
+}
+
+final class RecordingIdleSleep: IdleSleepPreventing, @unchecked Sendable {
+    private let lock = NSLock()
+    private var current = false
+
+    var held: Bool { lock.withLock { current } }
+
+    func hold(_ held: Bool) {
+        lock.withLock { current = held }
     }
 }
 
