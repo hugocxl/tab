@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.101.0 - 2026-11-16
+
+### Changed
+
+- Command palette host names are right-aligned and colored for better legibility.
+
 ## 0.100.0 - 2026-11-16
 
 ### Added

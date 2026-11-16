@@ -141,10 +141,9 @@ public struct PaletteItem {
     /// UTF-16 ranges of `title` drawn in the accent color.
     public var highlights: [Range<Int>] = []
     public var subtitle: String?
-    /// The computer the row belongs to, drawn before the subtitle in a
-    /// heavier muted weight.
+    /// The computer the row belongs to, right-aligned in the accent color.
     public var location: String?
-    /// The muted label at the right edge, such as "Command" or "File".
+    /// The muted trailing label, such as "Command" or "File".
     public var kind: String?
     public var badge: String?
     public var tile: PaletteTile = .none

@@ -769,7 +769,7 @@ final class PaletteSource: PaletteDataSource {
         return path
     }
 
-    /// The computer a project's row names before its subtitle: another
+    /// The computer a project's row names at its right edge: another
     /// computer's name, nil for this Mac.
     func location(_ project: Project) -> String? {
         project.serverId.isLocal ? nil : model.serverName(project.serverId) ?? "Remote"

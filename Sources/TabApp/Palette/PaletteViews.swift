@@ -134,11 +134,12 @@ final class KeycapsView: ThemedView {
 }
 
 /// One palette row: the 40pt item with its tile, title, subtitle and the
-/// badge, keycaps, kind and chevron on the right.
+/// badge, keycaps, kind, host and chevron on the right.
 final class PaletteItemView: NSView {
     private let tile = PaletteTileView()
     private let title = NSTextField(labelWithString: "")
     private let subtitle = NSTextField(labelWithString: "")
+    private let location = NSTextField(labelWithString: "")
     private let check = NSImageView()
     private let badge = BadgePill()
     private let keycaps = KeycapsView()
@@ -151,16 +152,18 @@ final class PaletteItemView: NSView {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        for label in [title, subtitle, kind] {
+        for label in [title, subtitle, location, kind] {
             label.lineBreakMode = .byTruncatingTail
             label.maximumNumberOfLines = 1
             label.cell?.truncatesLastVisibleLine = true
         }
         subtitle.font = AppFont.body
+        location.font = AppFont.system(13, weight: .semibold)
+        location.alignment = .right
         kind.font = AppFont.system(13)
         chevron.image = AppIcon.chevronRight.image(size: 12)
         check.image = AppIcon.check.image(size: 12)
-        for view in [tile, title, subtitle, check, badge, keycaps, kind, chevron] as [NSView] { addSubview(view) }
+        for view in [tile, title, subtitle, location, check, badge, keycaps, kind, chevron] as [NSView] { addSubview(view) }
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -175,8 +178,13 @@ final class PaletteItemView: NSView {
             font: AppFont.system(13, weight: item.current ? .semibold : .medium),
             color: item.disabled ? theme.fgDim : theme.fg, accent: theme.accent
         )
-        subtitle.attributedStringValue = subtitleText(item)
-        subtitle.isHidden = item.subtitle == nil && item.location == nil
+        subtitle.stringValue = item.subtitle ?? ""
+        subtitle.textColor = theme.fgMuted
+        subtitle.isHidden = item.subtitle == nil
+        location.stringValue = item.location ?? ""
+        location.isHidden = item.location == nil
+        location.textColor = theme.accent
+        location.toolTip = item.location
         check.isHidden = !item.current
         check.contentTintColor = theme.accent
         badge.text = item.badge
@@ -190,22 +198,6 @@ final class PaletteItemView: NSView {
         alphaValue = item.disabled ? 0.6 : 1
         needsLayout = true
         needsDisplay = true
-    }
-
-    /// The location in a heavier weight, then the subtitle, both muted.
-    private func subtitleText(_ item: PaletteItem) -> NSAttributedString {
-        let style = NSMutableParagraphStyle()
-        style.lineBreakMode = .byTruncatingTail
-        func run(_ string: String, _ font: NSFont) -> NSAttributedString {
-            NSAttributedString(string: string, attributes: [.font: font, .foregroundColor: theme.fgMuted, .paragraphStyle: style])
-        }
-        let text = NSMutableAttributedString()
-        if let location = item.location {
-            text.append(run(location, AppFont.system(13, weight: .semibold)))
-            if item.subtitle != nil { text.append(run(" · ", AppFont.body)) }
-        }
-        text.append(run(item.subtitle ?? "", AppFont.body))
-        return text
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -228,6 +220,10 @@ final class PaletteItemView: NSView {
             right -= 10
         }
         if !chevron.isHidden { place(chevron, width: 12, height: 12) }
+        if !location.isHidden {
+            place(location, width: min(location.textWidth, max(bounds.width * 0.3, 0)),
+                  height: location.intrinsicContentSize.height)
+        }
         if !kind.isHidden { place(kind, width: kind.textWidth, height: kind.intrinsicContentSize.height) }
         if !keycaps.symbols.isEmpty { place(keycaps, width: keycaps.intrinsicContentSize.width, height: Metrics.keycap) }
         if !badge.isHidden { place(badge, width: badge.intrinsicContentSize.width, height: badge.intrinsicContentSize.height) }
