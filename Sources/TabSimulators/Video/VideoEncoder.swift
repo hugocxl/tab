@@ -1,3 +1,4 @@
+import CoreImage
 import CoreMedia
 import CoreVideo
 import Foundation
@@ -40,8 +41,12 @@ public final class VideoEncoder: @unchecked Sendable {
     public private(set) var bitrate: Int
 
     private let session: VTCompressionSession
-    private let transfer: VTPixelTransferSession
     private var frameIndex: Int64 = 0
+
+    /// Scales on the GPU. `VTPixelTransferSession` uses the display's scaler,
+    /// which never answers while the screen is locked and leaves the encoding
+    /// thread stuck in the kernel.
+    private static let scaler = CIContext(options: [.workingColorSpace: NSNull(), .cacheIntermediates: false])
 
     /// The bitrate a stream starts at, in bits per second.
     public static let startBitrate = 4_000_000
@@ -67,23 +72,16 @@ public final class VideoEncoder: @unchecked Sendable {
         var specification: [CFString: Any] = [:]
         if codec == .h264 { specification[kVTVideoEncoderSpecification_EnableLowLatencyRateControl] = true }
         var created: VTCompressionSession?
-        var status = VTCompressionSessionCreate(
+        let status = VTCompressionSessionCreate(
             allocator: nil, width: Int32(width), height: Int32(height), codecType: type,
             encoderSpecification: specification as CFDictionary, imageBufferAttributes: nil,
             compressedDataAllocator: nil, outputCallback: nil, refcon: nil, compressionSessionOut: &created)
         guard status == noErr, let session = created else { throw VideoError.failed("Creating the encoder", status) }
-        var transfer: VTPixelTransferSession?
-        status = VTPixelTransferSessionCreate(allocator: nil, pixelTransferSessionOut: &transfer)
-        guard status == noErr, let transfer else {
-            VTCompressionSessionInvalidate(session)
-            throw VideoError.failed("Creating the scaler", status)
-        }
         self.codec = codec
         self.width = width
         self.height = height
         self.bitrate = bitrate
         self.session = session
-        self.transfer = transfer
         let properties: [CFString: Any] = [
             kVTCompressionPropertyKey_RealTime: true,
             kVTCompressionPropertyKey_AllowFrameReordering: false,
@@ -99,13 +97,11 @@ public final class VideoEncoder: @unchecked Sendable {
         for (key, value) in properties {
             VTSessionSetProperty(session, key: key, value: value as CFTypeRef)
         }
-        VTSessionSetProperty(transfer, key: kVTPixelTransferPropertyKey_ScalingMode, value: kVTScalingMode_Normal)
         VTCompressionSessionPrepareToEncodeFrames(session)
     }
 
     deinit {
         VTCompressionSessionInvalidate(session)
-        VTPixelTransferSessionInvalidate(transfer)
     }
 
     /// Changes the average bitrate, clamped to the supported range.
@@ -129,10 +125,13 @@ public final class VideoEncoder: @unchecked Sendable {
         var scaled: CVPixelBuffer?
         status = CVPixelBufferPoolCreatePixelBuffer(nil, pool, &scaled)
         guard status == kCVReturnSuccess, let scaled else { throw VideoError.failed("Allocating a frame", status) }
-        surface.lock(options: .readOnly, seed: nil)
-        status = VTPixelTransferSessionTransferImage(transfer, from: source, to: scaled)
-        surface.unlock(options: .readOnly, seed: nil)
-        guard status == noErr else { throw VideoError.failed("Scaling the screen", status) }
+        CVBufferSetAttachment(scaled, kCVImageBufferYCbCrMatrixKey, kCVImageBufferYCbCrMatrix_ITU_R_709_2, .shouldPropagate)
+        let image = CIImage(cvPixelBuffer: source)
+        let scale = CGFloat(height) / image.extent.height
+        let aspectRatio = CGFloat(width) / image.extent.width / scale
+        Self.scaler.render(image.applyingFilter("CILanczosScaleTransform", parameters: [
+            kCIInputScaleKey: scale, kCIInputAspectRatioKey: aspectRatio,
+        ]), to: scaled)
         return try encode(scaled, keyframe: keyframe)
     }
 

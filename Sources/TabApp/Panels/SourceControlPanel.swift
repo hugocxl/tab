@@ -142,7 +142,8 @@ public final class SourceControlController: NSViewController, NSTableViewDataSou
     /// The panel is on screen again, or for the first time: watches the
     /// repository and reads its status.
     public func didShow() {
-        setViewMode(host?.sourceControlTree == true ? .tree : .list, persist: false)
+        let mode: SourceControlModel.ViewMode = host?.sourceControlTree == true ? .tree : .list
+        if mode != model.viewMode { setViewMode(mode, persist: false) }
         host?.watchRepository()
         refresh()
     }
@@ -199,6 +200,9 @@ public final class SourceControlController: NSViewController, NSTableViewDataSou
 
     func received(_ reply: GitReply) {
         guard case .status(let status) = reply else { return }
+        // Showing a project reads its status again; an unchanged answer
+        // keeps the rows as they are.
+        if error == nil, status == model.status { return }
         error = nil
         model.setStatus(status)
         render()
@@ -679,13 +683,14 @@ final class ChangeFileCell: HoverView {
     private let folder = makeLabel("", font: AppFont.body)
     private let added = makeLabel("", font: AppFont.footnote)
     private let removed = makeLabel("", font: AppFont.footnote)
-    private let actions = NSStackView()
+    /// Stage, Unstage and Discard, made on the first hover: sizing buttons
+    /// is costly, and every row the table adds would pay for them.
+    private var actions: (stack: NSStackView, stage: TextGlyphButton, unstage: TextGlyphButton, discard: TextGlyphButton)?
     private var rowLeading: NSLayoutConstraint?
     private let row = NSStackView()
     private var showsTree = false
-    private let stageButton = TextGlyphButton("+", tooltip: "Stage")
-    private let unstageButton = TextGlyphButton("−", tooltip: "Unstage")
-    private let discardButton = TextGlyphButton("↺", tooltip: "Discard")
+    private var group = SourceControlModel.Group.changes
+    private var busy = false
     private var tone = SourceControlModel.Tone.modified
     var onOpen: (() -> Void)?
     var onStage: (() -> Void)?
@@ -694,22 +699,13 @@ final class ChangeFileCell: HoverView {
 
     override init(frame: NSRect) {
         super.init(frame: frame)
-        stageButton.onPress = { [weak self] in self?.onStage?() }
-        unstageButton.onPress = { [weak self] in self?.onUnstage?() }
-        discardButton.onPress = { [weak self] in self?.onDiscard?() }
-        actions.orientation = .horizontal
-        actions.spacing = ChromeButton.gap
-        actions.addArrangedSubview(stageButton)
-        actions.addArrangedSubview(unstageButton)
-        actions.addArrangedSubview(discardButton)
-        actions.isHidden = true
         letter.alignment = .center
         name.lineBreakMode = .byTruncatingMiddle
         folder.lineBreakMode = .byTruncatingHead
         name.setContentCompressionResistancePriority(.defaultHigh - 1, for: .horizontal)
         folder.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         folder.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        for view in [fileIcon, letter, name, folder, added, removed, actions] { row.addArrangedSubview(view) }
+        for view in [fileIcon, letter, name, folder, added, removed] { row.addArrangedSubview(view) }
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = 6
@@ -759,10 +755,9 @@ final class ChangeFileCell: HoverView {
         }
         added.isHidden = added.stringValue.isEmpty
         removed.isHidden = removed.stringValue.isEmpty
-        stageButton.isHidden = group == .staged
-        unstageButton.isHidden = group != .staged
-        discardButton.isHidden = group == .staged || group == .conflicts
-        for button in [stageButton, unstageButton, discardButton] { button.isEnabled = !busy }
+        self.group = group
+        self.busy = busy
+        updateActions()
         alphaValue = 1
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
@@ -787,8 +782,32 @@ final class ChangeFileCell: HoverView {
     }
 
     override func hoverDidChange() {
-        actions.isHidden = !isHovered
+        if isHovered, actions == nil { makeActions() }
+        updateActions()
         needsDisplay = true
+    }
+
+    private func makeActions() {
+        let stage = TextGlyphButton("+", tooltip: "Stage")
+        let unstage = TextGlyphButton("−", tooltip: "Unstage")
+        let discard = TextGlyphButton("↺", tooltip: "Discard")
+        stage.onPress = { [weak self] in self?.onStage?() }
+        unstage.onPress = { [weak self] in self?.onUnstage?() }
+        discard.onPress = { [weak self] in self?.onDiscard?() }
+        let stack = NSStackView(views: [stage, unstage, discard])
+        stack.orientation = .horizontal
+        stack.spacing = ChromeButton.gap
+        row.addArrangedSubview(stack)
+        actions = (stack, stage, unstage, discard)
+    }
+
+    private func updateActions() {
+        guard let actions else { return }
+        actions.stack.isHidden = !isHovered
+        actions.stage.isHidden = group == .staged
+        actions.unstage.isHidden = group != .staged
+        actions.discard.isHidden = group == .staged || group == .conflicts
+        for button in [actions.stage, actions.unstage, actions.discard] { button.isEnabled = !busy }
     }
 
     override func draw(_ dirtyRect: NSRect) {

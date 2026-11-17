@@ -1,3 +1,5 @@
+import CoreGraphics
+import CoreImage
 import CoreVideo
 import IOSurface
 import TabProtocol
@@ -28,6 +30,16 @@ final class VideoCodecTests: XCTestCase {
         return surface
     }
 
+    /// The decoded picture's color a quarter of the way across, beside the bar.
+    private func color(_ picture: CVPixelBuffer) -> (Int, Int, Int) {
+        let image = CIImage(cvPixelBuffer: picture)
+        var pixel = [UInt8](repeating: 0, count: 4)
+        let point = CGRect(x: image.extent.width / 4, y: image.extent.height / 2, width: 1, height: 1)
+        CIContext(options: [.workingColorSpace: NSNull()]).render(
+            image, toBitmap: &pixel, rowBytes: 4, bounds: point, format: .RGBA8, colorSpace: nil)
+        return (Int(pixel[0]), Int(pixel[1]), Int(pixel[2]))
+    }
+
     private func frame(_ encoded: EncodedFrame, seq: UInt32, encoder: VideoEncoder) -> VideoFrame {
         VideoFrame(seq: seq, keyframe: encoded.keyframe, width: UInt16(encoder.width), height: UInt16(encoder.height),
                    parameterSets: encoded.parameterSets, sample: encoded.sample)
@@ -42,23 +54,30 @@ final class VideoCodecTests: XCTestCase {
         XCTAssertEqual(VideoEncoder.size(width: 640, height: 480, maxPixels: 4_000_000).width, 640, "never scaled up")
 
         let encoder = try VideoEncoder(codec: .h264, width: size.width, height: size.height)
-        let decoder = VideoDecoder(codec: .h264)
         let first = try XCTUnwrap(try encoder.encode(surface(width: 1179, height: 2556, color: (200, 30, 30)), keyframe: true))
         XCTAssertTrue(first.keyframe)
         XCTAssertFalse(first.parameterSets.isEmpty, "a keyframe carries what the decoder needs to start")
+        let second = try XCTUnwrap(try encoder.encode(surface(width: 1179, height: 2556, color: (30, 200, 30)), keyframe: false))
+        XCTAssertFalse(second.keyframe)
+        let requested = try XCTUnwrap(try encoder.encode(surface(width: 1179, height: 2556, color: (30, 30, 200)), keyframe: true))
+        XCTAssertTrue(requested.keyframe, "a requested keyframe comes as one")
+
+        // The hardware decoder never answers while the screen is locked.
+        let session = CGSessionCopyCurrentDictionary() as? [String: Any]
+        if session?["CGSSessionScreenIsLocked"] as? Bool == true { throw XCTSkip("Decoding needs an unlocked screen") }
+        let decoder = VideoDecoder(codec: .h264)
         let picture = try decoder.decode(frame(first, seq: 1, encoder: encoder))
         XCTAssertEqual(CVPixelBufferGetWidth(picture), size.width)
         XCTAssertEqual(CVPixelBufferGetHeight(picture), size.height)
         XCTAssertNotNil(CVPixelBufferGetIOSurface(picture), "the screen view shows decoded frames as surfaces")
-
-        let second = try XCTUnwrap(try encoder.encode(surface(width: 1179, height: 2556, color: (30, 200, 30)), keyframe: false))
-        XCTAssertFalse(second.keyframe)
+        let shown = color(picture)
+        XCTAssertGreaterThan(shown.0, 150, "the screen's red survives scaling and encoding: \(shown)")
+        XCTAssertLessThan(shown.1, 80, "\(shown)")
+        XCTAssertLessThan(shown.2, 80, "\(shown)")
         XCTAssertNoThrow(try decoder.decode(frame(second, seq: 2, encoder: encoder)))
 
         let fresh = VideoDecoder(codec: .h264)
         XCTAssertThrowsError(try fresh.decode(frame(second, seq: 2, encoder: encoder)), "a P-frame can't start a stream")
-        let requested = try XCTUnwrap(try encoder.encode(surface(width: 1179, height: 2556, color: (30, 30, 200)), keyframe: true))
-        XCTAssertTrue(requested.keyframe, "a requested keyframe comes as one")
         XCTAssertNoThrow(try fresh.decode(frame(requested, seq: 3, encoder: encoder)))
     }
 

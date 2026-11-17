@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.101.1 - 2026-11-17
+
+### Fixed
+
+- Moving between tabs stays quick while the Source Control sidebar is open.
+- Streaming a simulator from a Mac whose screen is locked no longer gets stuck.
+
 ## 0.101.0 - 2026-11-16
 
 ### Changed
