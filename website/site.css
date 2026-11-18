@@ -1,0 +1,11 @@
+/* Tab site additions to the @hugocxl design system. Only --p9-* properties
+   are used here: no new colors, fonts, sizes, weights, radii, shadows or
+   gradients. */
+
+/* The one button and the changelog index follow sections at section spacing. */
+.p9-opening > .p9-button,
+.p9-opening > .p9-index { margin-top: var(--p9-space-7) }
+
+/* Changelog rows: a version's groups read as separate paragraphs. */
+.p9-index p + p { margin-top: var(--p9-space-2) }
+.p9-index li { scroll-margin-top: var(--p9-space-6) }

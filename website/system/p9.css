@@ -1,0 +1,234 @@
+/* Design system — the only stylesheet a page built with the system loads. Values mirror the DESIGN.md front matter. */
+@font-face {
+  font-family: "Geist Sans";
+  src: url("fonts/Geist-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Geist Mono";
+  src: url("fonts/GeistMono-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+/* ─── Tokens ─────────────────────────────────────────────────────────── */
+:root {
+  /* Palette: Superlogical paper and orange with neutral greys. Muted meets WCAG AA. */
+  --p9-canvas: #f5f5f4;
+  --p9-ink: #171717;
+  --p9-muted: #6e6e6e;
+  --p9-faint: #b3b3b3;
+  --p9-rule: #1717171f;
+  --p9-surface: #ebebea;
+  --p9-accent: #fe9369;
+  --p9-accent-text: #ce7755;
+
+  --p9-sans: "Geist Sans", Helvetica, Arial, sans-serif;
+  --p9-mono: "Geist Mono", ui-monospace, Menlo, monospace;
+
+  --p9-size-reading: min(calc(1rem + .36vw), 1.54rem);
+  --p9-size-title: calc(var(--p9-size-reading) * 1.4);
+  --p9-size-small: calc(var(--p9-size-reading) * .8);
+  --p9-size-control: 1rem;
+  --p9-size-mono: .9375rem;
+  --p9-size-label: .8125rem;
+
+  --p9-space-1: .25rem;
+  --p9-space-2: .5rem;
+  --p9-space-3: .75rem;
+  --p9-space-4: 1rem;
+  --p9-space-5: 1.25rem;
+  --p9-space-6: 2rem;
+  --p9-space-7: 2.5rem;
+  --p9-space-8: 3.5rem;
+  --p9-space-9: 5rem;
+  --p9-space-10: 8rem;
+
+  --p9-radius-control: 6px;
+  --p9-radius-media: 12px;
+  --p9-radius-pill: 999px;
+  --p9-target: 44px;
+  --p9-measure: 30em;
+  --p9-wide: 80rem;
+  --p9-ease: 120ms ease-out;
+
+
+  accent-color: var(--p9-ink);
+  color-scheme: light;
+}
+:root[data-theme=dark] {
+  --p9-canvas: #111111;
+  --p9-ink: #ededed;
+  --p9-muted: #7d7d7d;
+  --p9-faint: #737373;
+  --p9-rule: #ededed24;
+  --p9-surface: #1c1c1c;
+  --p9-accent-text: #fe9369;
+  color-scheme: dark;
+}
+
+/* ─── Shell and layout ───────────────────────────────────────────────── */
+.p9 {
+  --p9-gutter: clamp(1.25rem, 4.5vw, 4rem);
+  --p9-field: 0px;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0 calc(var(--p9-field) + var(--p9-gutter)) 0 var(--p9-gutter);
+  color: var(--p9-ink);
+  background: var(--p9-canvas);
+  font: 300 var(--p9-size-reading)/1.3 var(--p9-sans);
+  letter-spacing: -.01em;
+  -webkit-font-smoothing: antialiased;
+}
+.p9 *, .p9 *::before, .p9 *::after { box-sizing: border-box }
+.p9 main { container-type: inline-size }
+.p9 :where(h1, h2, h3, p, ol, ul, figure, pre, table) { margin: 0 }
+.p9[data-layout=field] { --p9-field: clamp(30vw, calc(100vw - 2 * var(--p9-gutter) - 47.6rem), 40vw) }
+.p9[data-layout=field]::after {
+  content: "";
+  position: fixed;
+  inset: 12px 12px 12px auto;
+  width: calc(var(--p9-field) - 12px);
+  border-radius: var(--p9-radius-media);
+  background: #777 url("images/gray-folds.png") center / cover;
+  pointer-events: none;
+}
+.p9-column { max-width: var(--p9-measure); margin-inline: auto }
+.p9[data-layout=field] .p9-column { margin-inline: 0 }
+.p9-opening { padding-top: clamp(var(--p9-space-9), 8vw, var(--p9-space-10)) }
+.p9-wide {
+  width: min(100cqw, var(--p9-wide));
+  margin-block: var(--p9-space-8);
+  margin-inline: calc((100% - min(100cqw, var(--p9-wide))) / 2);
+}
+.p9[data-layout=field] .p9-wide { margin-inline: 0 }
+@media (max-width: 760px) {
+  .p9[data-layout=field] { --p9-field: 20px }
+  .p9[data-layout=field]::after { inset: 6px 5px 6px auto; width: 12px; border-radius: 5px }
+}
+
+/* ─── Text ───────────────────────────────────────────────────────────── */
+.p9 :where(h1, h2, h3) { font: inherit; letter-spacing: inherit }
+.p9 :where(p, ul, ol, .p9-code, .p9-table, .p9-table-scroll) + :where(p, ul, ol, .p9-code, .p9-table, .p9-table-scroll) { margin-top: var(--p9-space-5) }
+.p9 p { text-wrap: pretty }
+.p9-section :where(ul:not([class]), ol:not([class])) { padding-left: 1.2em }
+.p9-section :where(ul:not([class]), ol:not([class])) > li + li { margin-top: var(--p9-space-2) }
+.p9 strong { font-weight: 500 }
+.p9 a { color: inherit; text-decoration-line: underline; text-decoration-thickness: 1px; text-decoration-color: color-mix(in srgb, currentColor 40%, transparent); text-underline-offset: .2em }
+.p9 a:hover { text-decoration-color: currentColor }
+.p9 :where(code, kbd, samp) { font-family: var(--p9-mono); font-size: .85em; font-weight: 400; letter-spacing: 0 }
+.p9 :focus-visible { outline: 2px solid var(--p9-ink); outline-offset: 3px }
+.p9-muted { color: var(--p9-muted) }
+.p9-accent { color: var(--p9-accent-text) }
+.p9-visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0 }
+
+.p9-title { font-size: var(--p9-size-title); font-weight: 500; line-height: 1.15; letter-spacing: -.02em; text-wrap: balance }
+.p9-title > * { display: block }
+.p9-title > :not(:first-child) { color: var(--p9-muted) }
+.p9-statement { font-size: var(--p9-size-title); font-weight: 500; line-height: 1.15; letter-spacing: -.02em; text-wrap: balance }
+
+.p9-section { margin-top: var(--p9-space-7); scroll-margin-top: var(--p9-space-6) }
+.p9-section > h2 { margin-bottom: var(--p9-space-4); color: var(--p9-muted); font-weight: 400 }
+.p9-section h3 { font-weight: 400 }
+
+.p9-label { font: 400 var(--p9-size-label)/1.5 var(--p9-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--p9-muted) }
+.p9-meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--p9-space-2) var(--p9-space-5); margin-top: var(--p9-space-6); list-style: none; padding: 0 }
+.p9-meta + * { margin-top: var(--p9-space-8) }
+.p9-dot { display: inline-block; width: .5rem; height: .5rem; margin-right: var(--p9-space-2); border-radius: 50%; background: var(--p9-accent); vertical-align: .05em }
+
+/* ─── Masthead and footer ────────────────────────────────────────────── */
+.p9-masthead { display: flex; align-items: center; gap: var(--p9-space-5); padding-top: var(--p9-space-6); font-size: var(--p9-size-small) }
+.p9-masthead a { display: inline-flex; align-items: center; min-height: var(--p9-target); text-decoration: none }
+.p9-masthead a:hover { text-decoration: underline }
+.p9-wordmark { margin-right: auto; font-size: 1.125rem; font-weight: 600; letter-spacing: -.055em }
+.p9-masthead .p9-wordmark:hover { text-decoration: none }
+@media (max-width: 480px) { .p9-masthead { flex-wrap: wrap; gap: 0 var(--p9-space-3) } .p9-wordmark { flex-basis: 100% } }
+.p9-theme { flex: none; width: var(--p9-target); height: var(--p9-target); border: 1px solid var(--p9-rule); border-radius: 50%; color: inherit; background: transparent; font: inherit; cursor: pointer }
+
+.p9-footer { display: flex; align-items: center; gap: var(--p9-space-5); margin-top: var(--p9-space-9); padding-bottom: var(--p9-space-7); font: 400 var(--p9-size-mono)/1.4 var(--p9-mono); letter-spacing: 0 }
+.p9-footer::before { content: ""; order: 1; flex: 1; min-width: var(--p9-space-6); border-top: 1px solid var(--p9-rule) }
+.p9-footer ul { display: flex; flex-wrap: wrap; gap: var(--p9-space-2) var(--p9-space-5); margin: 0; padding: 0; list-style: none }
+.p9-footer ul:last-child { order: 2 }
+.p9-footer li + li { margin-top: 0 }
+.p9-footer a { text-decoration: none }
+.p9-footer a:hover { text-decoration: underline }
+
+/* ─── Figures (vectors from @hugocxl/vectors) ────────────────────────────────────────────────────────── */
+.p9-media { display: grid; place-items: center; aspect-ratio: 3 / 2; overflow: hidden; border-radius: var(--p9-radius-media); background: var(--p9-surface) }
+.p9-media > img { width: 100%; height: 100%; object-fit: cover }
+.p9-caption { display: flex; align-items: center; justify-content: space-between; gap: var(--p9-space-4); min-height: var(--p9-target); margin-top: var(--p9-space-3) }
+
+.p9-grid { display: grid; grid-template-columns: repeat(var(--p9-cols, 3), minmax(0, 1fr)); list-style: none; padding: 0 }
+.p9-grid[data-columns="2"] { --p9-cols: 2 }
+.p9-grid[data-columns="4"] { --p9-cols: 4 }
+.p9-grid > li { display: flex; flex-direction: column; padding: 0 var(--p9-space-6) }
+.p9-grid > li:first-child { padding-left: 0 }
+.p9-grid > li:last-child { padding-right: 0 }
+.p9-grid > li + li { border-left: 1px solid var(--p9-rule) }
+.p9-grid h3 { margin-top: auto; font-weight: 400 }
+.p9-grid p { margin-top: var(--p9-space-2); font-size: var(--p9-size-small); line-height: 1.4; color: var(--p9-muted) }
+@container (max-width: 34rem) {
+  .p9-grid { grid-template-columns: minmax(0, 1fr) }
+  .p9-grid > li { padding: var(--p9-space-5) 0 }
+  .p9-grid > li + li { border-left: 0; border-top: 1px solid var(--p9-rule) }
+}
+
+/* ─── Index list and table ───────────────────────────────────────────── */
+.p9-index { list-style: none; padding: 0; border-bottom: 1px solid var(--p9-rule) }
+.p9-index > li { display: grid; grid-template-columns: 7.5rem minmax(0, 1fr); gap: var(--p9-space-2) var(--p9-space-5); padding-block: var(--p9-space-5); border-top: 1px solid var(--p9-rule) }
+.p9-index .p9-label { padding-top: .35em }
+.p9-index h3 { font-weight: 400 }
+.p9-index p { margin-top: var(--p9-space-2); color: var(--p9-muted) }
+@container (max-width: 30rem) { .p9-index > li { grid-template-columns: minmax(0, 1fr) } }
+
+.p9-table { width: 100%; border-collapse: collapse; font-size: var(--p9-size-small); font-variant-numeric: tabular-nums }
+.p9-table th { font: 400 var(--p9-size-label)/1.5 var(--p9-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--p9-muted); text-align: left }
+.p9-table :where(th, td) { padding: var(--p9-space-3) var(--p9-space-4) var(--p9-space-3) 0; border-bottom: 1px solid var(--p9-rule); vertical-align: top }
+.p9-table tbody th { font: inherit; letter-spacing: inherit; text-transform: none; color: var(--p9-ink) }
+.p9-table-scroll { overflow-x: auto }
+
+/* ─── Controls ───────────────────────────────────────────────────────── */
+.p9-button { display: inline-flex; align-items: center; gap: var(--p9-space-3); min-height: var(--p9-target); padding: 0 var(--p9-space-5); border: 0; border-radius: var(--p9-radius-control); color: var(--p9-canvas); background: var(--p9-ink); font: 400 var(--p9-size-control)/1 var(--p9-sans); letter-spacing: -.01em; text-decoration: none; cursor: pointer }
+.p9 a.p9-button { color: var(--p9-canvas); text-decoration: none }
+.p9-button:hover { opacity: .84 }
+
+.p9-form { margin-top: var(--p9-space-7) }
+.p9-form label { display: block }
+.p9-input { display: flex; align-items: center; max-width: 20em; margin-top: var(--p9-space-4); border-bottom: 1px solid var(--p9-rule) }
+.p9-input:hover, .p9-input:focus-within { border-color: color-mix(in srgb, var(--p9-ink) 40%, transparent) }
+.p9-input input { flex: 1; min-width: 0; min-height: var(--p9-target); padding: 0; border: 0; border-radius: 0; color: inherit; background: transparent; font: inherit; letter-spacing: inherit; appearance: none }
+.p9-input input::placeholder { color: var(--p9-faint) }
+.p9-input input:focus-visible { outline: none }
+.p9-input:has(input:focus-visible) { outline: 2px solid var(--p9-ink); outline-offset: 3px }
+.p9-input input[aria-invalid=true] { text-decoration: underline wavy var(--p9-muted) 1px; text-underline-offset: .25em }
+.p9-input button { flex: none; width: var(--p9-target); height: var(--p9-target); padding: 0; border: 0; color: var(--p9-muted); background: transparent; font: inherit; cursor: pointer }
+.p9-input button:hover { color: var(--p9-ink) }
+.p9-help { margin-top: var(--p9-space-5); color: var(--p9-muted) }
+.p9-feedback { display: block; margin-top: var(--p9-space-3); font-size: var(--p9-size-small) }
+.p9-feedback:empty { display: none }
+
+.p9-code { position: relative; border-radius: var(--p9-radius-control); background: var(--p9-surface) }
+.p9-code pre { padding: var(--p9-space-4) var(--p9-space-5); overflow-x: auto; font: 400 .8125rem/1.6 var(--p9-mono); letter-spacing: 0 }
+.p9-code pre code { font-size: inherit }
+.p9-code button { position: absolute; top: 0; right: 0; min-width: var(--p9-target); min-height: var(--p9-target); padding: 0 var(--p9-space-3); border: 0; border-radius: var(--p9-radius-control); color: var(--p9-ink); background: var(--p9-surface); font: 400 var(--p9-size-label)/1 var(--p9-mono); letter-spacing: .08em; text-transform: uppercase; cursor: pointer }
+.p9-code button:hover { text-decoration: underline }
+
+.p9-pager { display: inline-flex; padding: 2px; border: 1px solid var(--p9-rule); border-radius: var(--p9-radius-pill); background: var(--p9-canvas) }
+.p9-pager button { width: var(--p9-target); height: var(--p9-target); padding: 0; border: 0; border-radius: 50%; color: inherit; background: transparent; font: 400 1.1rem/1 var(--p9-sans); cursor: pointer }
+.p9-pager button:hover { background: var(--p9-surface) }
+
+@media (prefers-reduced-motion: no-preference) {
+  .p9-button, .p9-pager button, .p9-input { transition: transform var(--p9-ease), background-color var(--p9-ease), border-color var(--p9-ease), opacity var(--p9-ease) }
+  .p9-button:active, .p9-pager button:active { transform: scale(.96) }
+}
+
+/* Icons from @hugocxl/icons (Stroke): before the words of a link, button or label, or alone in an icon button. */
+.p9-icon { display: inline-block; width: 1em; height: 1em; margin-inline-end: var(--p9-space-2); vertical-align: -.125em; flex: none }
+:is(.p9-theme, .p9-pager button, .p9-input button) > .p9-icon { margin: 0 }
+
+/* Vectors from @hugocxl/vectors: a 4:3 line illustration in place of a drawing, in ink. */
+.p9-vector { display: block; color: var(--p9-ink) }
+.p9-vector[hidden] { display: none }
+.p9-media > .p9-vector { width: auto; height: 82%; max-width: 92%; aspect-ratio: 4 / 3 }
+.p9-grid .p9-vector { width: 100%; height: auto; aspect-ratio: 4 / 3; margin-block: var(--p9-space-5) }

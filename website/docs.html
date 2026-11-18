@@ -1,0 +1,110 @@
+{{head title="Docs · Tab" canonical="docs.html" description="Install Tab, see what each pane needs, keep terminals running with tabd, work on a remote Mac, drive Tab from the tab command and build it from source."}}
+</head>
+<body class="p9" data-layout="plain">
+{{masthead}}
+  <main>
+    <article class="p9-column p9-opening">
+      <hgroup class="p9-title">
+        <h1>Docs</h1>
+        <p>Install Tab and find your way around</p>
+      </hgroup>
+      <ul class="p9-meta">
+        <li class="p9-label">Version {{version}}</li>
+        <li class="p9-label"><time datetime="{{date}}">{{date-long}}</time></li>
+      </ul>
+      <section class="p9-section">
+        <p>Tab is a native Mac app with a terminal multiplexer, agent panes, simulators and a browser in one workspace. <span class="p9-muted">These pages cover installing it, what each pane needs, how its server keeps your work running and how to build it yourself.</span></p>
+      </section>
+      <section class="p9-section" id="install">
+        <h2>Install</h2>
+        <ol>
+          <li><a href="https://github.com/hugocxl/tab/releases/latest">Download the latest disk image</a> from GitHub.</li>
+          <li>Drag Tab into Applications.</li>
+          <li>Open Tab and open a project folder.</li>
+        </ol>
+        <p>Tab keeps itself up to date. <span class="p9-muted">When a new version is ready, Update downloads it in the background and Restart installs it, asking first if that would end running terminals. Check for Updates looks right away.</span></p>
+      </section>
+      <section class="p9-section" id="requirements">
+        <h2>Requirements</h2>
+        <p>Tab runs on Apple silicon Macs with macOS 14 or later. <span class="p9-muted">Some panes rely on tools you install yourself.</span></p>
+        <div class="p9-table-scroll" tabindex="0">
+          <table class="p9-table">
+            <thead><tr><th scope="col">For</th><th scope="col">You need</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">Tab</th><td>A Mac with Apple silicon and macOS 14 or later</td></tr>
+              <tr><th scope="row">Agent panes</th><td>Claude Code or Codex, installed and signed in on the Mac running your workspace</td></tr>
+              <tr><th scope="row">iOS simulators</th><td>Xcode and a simulator runtime</td></tr>
+              <tr><th scope="row">Android emulators</th><td>The Android SDK and an emulator</td></tr>
+              <tr><th scope="row">A remote Mac</th><td>Tab installed there, reachable over SSH</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>Tab is free and open source. <span class="p9-muted">It doesn’t include an agent subscription: you use your own provider account, and its fees are separate.</span></p>
+      </section>
+      <section class="p9-section" id="tabs-and-panes">
+        <h2>Tabs and panes</h2>
+        <p>A tab is one card in the sidebar, and it holds a split layout of panes. <span class="p9-muted">A project or Git worktree is a single tab, and Home holds one tab per card.</span></p>
+        <p>A pane is one terminal, agent, browser, simulator, editor or diff inside a tab. <span class="p9-muted">New Tab always adds a card, and New Pane adds a pane beside the one you’re in.</span></p>
+      </section>
+      <figure class="p9-wide">
+        <div class="p9-media">{{vector session-management}}</div>
+        <figcaption class="p9-caption"><span class="p9-label">Fig. 01 / Session management</span></figcaption>
+      </figure>
+      <section class="p9-section" id="server">
+        <h2>Terminals that keep running</h2>
+        <p>Tab’s background server, <code>tabd</code>, owns your terminals, agent conversations, projects, tabs and history. The app and the <code>tab</code> command start it when it isn’t running. <span class="p9-muted">Quit the app and your terminals keep going; open it again and it reconnects.</span></p>
+        <p>The Mac running your workspace needs to stay awake. <span class="p9-muted">Closing a terminal pane ends that terminal.</span></p>
+      </section>
+      <figure class="p9-wide">
+        <div class="p9-media">{{vector remote-builds}}</div>
+        <figcaption class="p9-caption"><span class="p9-label">Fig. 02 / Remote builds</span></figcaption>
+      </figure>
+      <section class="p9-section" id="remote-macs">
+        <h2>Remote Macs</h2>
+        <p>Connect to another Mac over SSH and its projects, terminals and simulators open in your app. <span class="p9-muted">Processes, files and network belong to that Mac. Browser panes load its pages through the server’s tunnels, so <code>localhost</code> is the remote Mac’s, and its simulators stream to you as video.</span></p>
+      </section>
+      <section class="p9-section" id="command-line">
+        <h2>The tab command</h2>
+        <p>The app bundle includes the <code>tab</code> command line tool. <span class="p9-muted">Run Install Command Line Tool from the command palette to link it at <code>~/.local/bin/tab</code>.</span></p>
+        <div class="p9-code"><pre tabindex="0"><code>tab --help</code></pre><button type="button">Copy</button></div>
+        <div class="p9-table-scroll" tabindex="0">
+          <table class="p9-table">
+            <thead><tr><th scope="col">Command</th><th scope="col">What it does</th></tr></thead>
+            <tbody>
+              <tr><th scope="row"><code>tab session</code></th><td>Terminals that keep running, with or without the app</td></tr>
+              <tr><th scope="row"><code>tab agent</code></th><td>Read, wait for and message Tab’s agent conversations</td></tr>
+              <tr><th scope="row"><code>tab project</code></th><td>The folders Tab works in</td></tr>
+              <tr><th scope="row"><code>tab worktree</code></th><td>Git worktrees, each a project of its own</td></tr>
+              <tr><th scope="row"><code>tab simulator</code></th><td>The server’s iOS simulators and Android emulators</td></tr>
+              <tr><th scope="row"><code>tab forward</code></th><td>Reach a server’s port from this computer</td></tr>
+              <tr><th scope="row"><code>tab pane</code></th><td>Add, list, focus, close, move and resize panes in the app</td></tr>
+              <tr><th scope="row"><code>tab browser</code></th><td>Drive a browser pane: read, click, type and wait</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>Add <code>--host</code> to work with another Mac’s server over SSH. <span class="p9-muted"><code>tab help</code> followed by a command explains it in full.</span></p>
+      </section>
+      <section class="p9-section" id="agent-integrations">
+        <h2>Teach your agents to use Tab</h2>
+        <p>One command installs the <code>tab-cli</code> skill into Claude Code, Codex, OpenCode and Pi, and hooks into Claude Code and Codex. <span class="p9-muted">Agents then know how to open panes, read terminals and drive the browser, and Tab sees whether each one is working, blocked or idle.</span></p>
+        <div class="p9-code"><pre tabindex="0"><code>tab integrations install</code></pre><button type="button">Copy</button></div>
+        <p><code>tab integrations remove</code> takes them out again. <span class="p9-muted">Codex runs a new hook only after you approve it with <code>/hooks</code>.</span></p>
+      </section>
+      <section class="p9-section" id="build">
+        <h2>Build from source</h2>
+        <p>You’ll need Xcode’s Swift 6 toolchain and Zig 0.17 to build the vendored terminal framework. <span class="p9-muted">Build GhosttyVT once, then validate the app.</span></p>
+        <div class="p9-code"><pre tabindex="0"><code>scripts/build-ghostty.sh
+scripts/validate.sh</code></pre><button type="button">Copy</button></div>
+        <p>Validation builds with warnings as errors, runs the tests and creates <code>build/debug/Tab Dev.app</code>. <span class="p9-muted">For faster iteration use <code>swift build</code>, and to bundle and launch the development app with this checkout’s profile:</span></p>
+        <div class="p9-code"><pre tabindex="0"><code>scripts/run-dev.sh</code></pre><button type="button">Copy</button></div>
+        <p><a href="https://github.com/hugocxl/tab/blob/main/AGENTS.md">AGENTS.md</a> describes the architecture and the contribution rules.</p>
+      </section>
+      <section class="p9-section" id="license">
+        <h2>License</h2>
+        <p>Tab is <a href="https://github.com/hugocxl/tab/blob/main/LICENSE">MIT licensed</a>. <span class="p9-muted">The third-party code and artwork it includes, such as the Ghostty terminal engine, keep their own licenses, listed in <a href="https://github.com/hugocxl/tab/blob/main/THIRD_PARTY_NOTICES.md">THIRD_PARTY_NOTICES.md</a>.</span></p>
+      </section>
+    </article>
+  </main>
+{{footer}}
+</body>
+</html>

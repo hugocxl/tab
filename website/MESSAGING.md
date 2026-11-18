@@ -98,18 +98,18 @@ A small centered mascot, a short name, and compact links establish identity with
 a large promotional banner. The body quickly answers what the tool is and how to
 start using it.
 
-**Apply:** show Tab's existing mascot alone on transparency at the top, followed by
-its name, category, useful links, and a direct explanation.
+**Apply:** a short name, the category, useful links and a direct explanation come
+first. The README follows the shape shared by every @hugocxl project instead of a
+mascot banner.
 
 ## Voice and visual direction
 
-Plain, specific, developer-facing. Warm off-white, charcoal, warm ochre-brown
-accents, Junicode serif H1/H2 headings, and small monospace labels. Body text and
-H3 headings retain the system sans serif. The Junicode Regular Latin font is
-self-hosted from [Peek](https://peek.zone/) at the user’s request; its SIL Open Font
-License ships alongside the asset. Use the mascot as the brand
-anchor and an actual screenshot as evidence. Four equal pane columns reinforce the
-product model. Keep the browser-native site lightweight and usable without scripts.
+Plain, specific, developer-facing, in sentence case. The site uses only the
+[@hugocxl design system](https://hugocxl.github.io/design-system/), vendored in
+`system/`: Geist type, warm paper, neutral greys and at most two orange accents per
+page, icons from [@hugocxl/icons](https://hugocxl.github.io/icons/) and figures
+from [@hugocxl/vectors](https://hugocxl.github.io/vectors/). The real screenshot
+is the product evidence. Name the four panes with the same weight.
 
 ## Claim boundaries
 

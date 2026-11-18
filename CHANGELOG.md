@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.103.1 - 2026-11-18
+
+### Changed
+
+- The website has a new design, with docs that cover installing Tab, what each
+  pane needs, remote Macs and the `tab` command, and the full changelog.
+
 ## 0.103.0 - 2026-11-18
 
 ### Added

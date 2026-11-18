@@ -1,54 +1,50 @@
 # Tab website
 
-A static website for **https://hugocxl.github.io/tab/**. Plain HTML and CSS, with
-local assets, a bundled heading font, and no JavaScript, dependencies, analytics, or build
-step. Relative asset paths support GitHub Pages' `/tab/` project path.
+The site at **https://hugocxl.github.io/tab/**, built strictly from the
+[@hugocxl design system](https://hugocxl.github.io/design-system/) with icons from
+[@hugocxl/icons](https://hugocxl.github.io/icons/) and figures from
+[@hugocxl/vectors](https://hugocxl.github.io/vectors/). Every page uses the
+`plain` layout.
 
-## Preview
+| Page | Recipe | Source |
+| --- | --- | --- |
+| `index.html` | `home` | Product copy, the screenshot and the download button |
+| `docs.html` | `docs` | Install, requirements, the server, remote Macs, the `tab` command, building |
+| `changelog.html` | `changelog` | Generated from `CHANGELOG.md` |
 
-From the repository root:
+## Build and check
+
+From the repository root, with Node 22:
 
 ```sh
-python3 -m http.server 8765 --bind 127.0.0.1
+npm ci
+npm run build:site   # website/ → _site/
+npm run check:site   # links, anchors, assets, design system markup and recipe order
+python3 -m http.server 8765 --bind 127.0.0.1 --directory _site
 ```
 
-Open `http://127.0.0.1:8765/website/`. Inside Tab, keep the preview server in a
-session or terminal pane with `tab session new -- python3 -m http.server 8765
---bind 127.0.0.1`.
+## Files
 
-## Publish with GitHub Pages
+- `index.html`, `docs.html`, `changelog.html`: page templates. `{{head …}}`,
+  `{{masthead}}` and `{{footer}}` come from `partials/`, `{{icon NAME}}` and
+  `{{vector NAME}}` inline artwork from `art/`, and `{{version}}` and
+  `{{changelog}}` come from `CHANGELOG.md`.
+- `site.css`: the few site additions, using only `--p9-*` tokens.
+- `system/`: the design system, copied verbatim by
+  `npm run sync:design-system` from a `design-system` checkout next to this one.
+- `art/`: the Stroke icons and vectors the templates use, copied by
+  `npm run sync:artwork` from `icons` and `vectors` checkouts next to this one.
+  Both sync scripts take `--check`.
+- `assets/tab-window.png`: the product screenshot. `assets/favicon.svg`: the
+  small app icon.
+- `MESSAGING.md`: positioning, reusable descriptions and claim boundaries.
 
-1. In the repository's **Settings → Pages**, select **GitHub Actions** as the
-   source. This repository is configured to use GitHub Actions; repeat this
-   one-time setup only for a new fork.
-2. Commit and push the website and `.github/workflows/website.yml` to `main`
-   following the repository's changelog and validation rules. Pushing to `main`
-   also triggers the app's existing release workflow.
-3. The **Website** workflow uploads only `index.html`, `styles.css`, and `assets/`
-   and deploys them to the `github-pages` environment. It runs for website changes
-   on `main` and can also be dispatched manually on `main`.
-4. Verify the deployed URL before announcing it, then set the repository homepage
-   to `https://hugocxl.github.io/tab/`.
+Download links go to the latest GitHub release rather than a versioned disk image
+that would become stale.
 
-No custom domain or `CNAME` file is needed. Deployment follows GitHub's
-[custom Pages workflow documentation](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages).
+## Publish
 
-## Content and assets
-
-- `index.html`: product copy, metadata, links, and native HTML FAQ disclosure.
-- `styles.css`: responsive layouts, visible keyboard focus, reduced-motion support.
-- `assets/mascot.svg`: the existing mascot from `packaging/AppIcon.svg`, with its
-  app-icon tile removed and its view box fitted to the character. The root README
-  uses this same asset.
-- `assets/fonts/`: Junicode Regular Latin, downloaded from Peek for H1/H2 headings,
-  with its SIL Open Font License. Body text and smaller headings use system fonts.
-- `assets/favicon.svg`: the existing small app icon.
-- Pane icons: copied from Tab’s own `Sources/TabApp/Resources/TabIcons` set.
-- `assets/tab-window.png`: the supplied product screenshot, also stored in
-  `media/tab-window.png`; replace both together when updating the screenshot.
-- `MESSAGING.md`: positioning, reusable descriptions, and reference analysis.
-
-Download links go to the latest GitHub release, rather than a versioned DMG that
-would become stale. Native agent panes require the user's installed, authenticated
-provider CLI. Avoid claims about bundled subscriptions or work continuing while
-the host Mac sleeps.
+The **Pages** workflow (`.github/workflows/pages.yml`) builds and checks the site
+and deploys `_site/` to GitHub Pages for pushes to `main` that touch the site or
+`CHANGELOG.md`, and can be dispatched manually. The repository's Pages source is
+**GitHub Actions**.

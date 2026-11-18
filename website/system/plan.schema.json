@@ -1,0 +1,189 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hugocxl.github.io/design-system/system/plan.schema.json",
+  "title": "Design system page plan",
+  "description": "One page as data. Render each block by copying its component markup from DESIGN.md and replacing only the slot values.",
+  "type": "object",
+  "required": ["designRevision", "recipe", "layout", "blocks"],
+  "additionalProperties": false,
+  "properties": {
+    "designRevision": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+    "recipe": { "enum": ["home", "article", "docs", "changelog", "pricing", "contact"] },
+    "layout": { "enum": ["field", "plain"] },
+    "lang": { "type": "string", "default": "en" },
+    "pageTitle": { "type": "string", "maxLength": 70 },
+    "description": { "type": "string", "maxLength": 160 },
+    "blocks": { "type": "array", "minItems": 3, "items": { "$ref": "#/$defs/block" } }
+  },
+  "allOf": [
+    { "if": { "properties": { "recipe": { "const": "home" } } }, "then": { "properties": { "layout": { "description": "plain by default; field only on a personal home page." } } }, "else": { "properties": { "layout": { "const": "plain" } } } }
+  ],
+  "$defs": {
+    "text": { "type": "string", "minLength": 1 },
+    "link": {
+      "type": "object", "required": ["label", "href"], "additionalProperties": false,
+      "properties": { "label": { "$ref": "#/$defs/text" }, "href": { "$ref": "#/$defs/text" }, "icon": { "$ref": "#/$defs/icon" } }
+    },
+    "icon": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "description": "A Stroke icon from @hugocxl/icons, rendered before the words with class p9-icon." },
+    "vector": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "description": "An illustration from @hugocxl/vectors, inlined with class p9-vector." },
+    "paragraph": {
+      "type": "object", "required": ["text"], "additionalProperties": false,
+      "description": "Inline links use Markdown [label](href). 'muted' is appended in the muted color after 'text'.",
+      "properties": { "text": { "$ref": "#/$defs/text" }, "muted": { "type": "string" } }
+    },
+    "block": {
+      "type": "object",
+      "required": ["component"],
+      "properties": {
+        "component": { "enum": ["masthead", "title", "statement", "meta", "section", "figure-wide", "figure-grid", "index", "table", "button", "form", "code", "footer"] }
+      },
+      "oneOf": [
+        { "$ref": "#/$defs/masthead" }, { "$ref": "#/$defs/title" }, { "$ref": "#/$defs/statement" },
+        { "$ref": "#/$defs/meta" }, { "$ref": "#/$defs/section" }, { "$ref": "#/$defs/figure-wide" },
+        { "$ref": "#/$defs/figure-grid" }, { "$ref": "#/$defs/index" }, { "$ref": "#/$defs/table" },
+        { "$ref": "#/$defs/button" }, { "$ref": "#/$defs/form" }, { "$ref": "#/$defs/code" },
+        { "$ref": "#/$defs/footer" }
+      ]
+    },
+    "masthead": {
+      "type": "object", "required": ["component", "wordmark"], "additionalProperties": false,
+      "properties": {
+        "component": { "const": "masthead" },
+        "wordmark": { "$ref": "#/$defs/text" },
+        "links": { "type": "array", "maxItems": 3, "items": { "$ref": "#/$defs/link" } }
+      }
+    },
+    "title": {
+      "type": "object", "required": ["component", "heading"], "additionalProperties": false,
+      "properties": {
+        "component": { "const": "title" },
+        "heading": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "byline": { "type": "string", "maxLength": 80 }
+      }
+    },
+    "statement": {
+      "type": "object", "required": ["component", "text"], "additionalProperties": false,
+      "properties": {
+        "component": { "const": "statement" },
+        "text": { "type": "string", "minLength": 1, "maxLength": 90 },
+        "accent": { "type": "string", "maxLength": 30, "description": "Two or three words appended after 'text' in the accent color." }
+      }
+    },
+    "meta": {
+      "type": "object", "required": ["component", "items"], "additionalProperties": false,
+      "properties": {
+        "component": { "const": "meta" },
+        "status": { "type": "string", "maxLength": 20, "description": "Rendered first, with the accent dot." },
+        "items": { "type": "array", "minItems": 1, "maxItems": 3, "items": { "type": "string", "maxLength": 30 } }
+      }
+    },
+    "section": {
+      "type": "object", "required": ["component", "content"], "additionalProperties": false,
+      "properties": {
+        "component": { "const": "section" },
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+        "heading": { "type": "string", "maxLength": 40 },
+        "content": {
+          "type": "array", "minItems": 1,
+          "items": {
+            "oneOf": [
+              { "$ref": "#/$defs/paragraph" },
+              { "type": "object", "required": ["list"], "additionalProperties": false, "properties": { "list": { "type": "array", "minItems": 2, "items": { "$ref": "#/$defs/text" } }, "ordered": { "type": "boolean" } } },
+              { "$ref": "#/$defs/code" },
+              { "$ref": "#/$defs/table" }
+            ]
+          }
+        }
+      }
+    },
+    "figure-wide": {
+      "type": "object", "required": ["component", "caption"], "additionalProperties": false,
+      "properties": {
+        "component": { "const": "figure-wide" },
+        "vector": { "$ref": "#/$defs/vector" },
+        "image": { "type": "object", "required": ["src", "alt"], "additionalProperties": false, "properties": { "src": { "$ref": "#/$defs/text" }, "alt": { "$ref": "#/$defs/text" } } },
+                "caption": { "type": "string", "pattern": "^Fig\\. [0-9]{2} / .+$" }
+      },
+      "oneOf": [{ "required": ["vector"] }, { "required": ["image"] }]
+    },
+    "figure-grid": {
+      "type": "object", "required": ["component", "items"], "additionalProperties": false,
+      "properties": {
+        "component": { "const": "figure-grid" },
+        "items": {
+          "type": "array", "minItems": 2, "maxItems": 4,
+          "items": {
+            "type": "object", "required": ["vector", "label", "title", "text"], "additionalProperties": false,
+            "properties": {
+              "vector": { "$ref": "#/$defs/vector" },
+              "label": { "type": "string", "pattern": "^Fig 0\\.[1-4]$", "description": "Figure label, Fig 0.N." },
+              "title": { "type": "string", "maxLength": 32 },
+              "text": { "type": "string", "maxLength": 90 }
+            }
+          }
+        }
+      }
+    },
+    "index": {
+      "type": "object", "required": ["component", "items"], "additionalProperties": false,
+      "properties": {
+        "component": { "const": "index" },
+        "items": {
+          "type": "array", "minItems": 1,
+          "items": {
+            "type": "object", "required": ["label", "title"], "additionalProperties": false,
+            "properties": {
+              "label": { "type": "string", "maxLength": 16, "description": "Number, date or price." },
+              "datetime": { "type": "string", "format": "date" },
+              "title": { "$ref": "#/$defs/text" },
+              "text": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "table": {
+      "type": "object", "required": ["component", "columns", "rows"], "additionalProperties": false,
+      "properties": {
+        "component": { "const": "table" },
+        "columns": { "type": "array", "minItems": 2, "items": { "$ref": "#/$defs/text" } },
+        "rows": { "type": "array", "minItems": 1, "items": { "type": "array", "minItems": 2, "items": { "type": "string" } } }
+      }
+    },
+    "button": {
+      "type": "object", "required": ["component", "label"], "additionalProperties": false,
+      "properties": {
+        "component": { "const": "button" },
+        "label": { "type": "string", "maxLength": 32 },
+        "icon": { "$ref": "#/$defs/icon" },
+        "href": { "type": "string", "description": "Present for navigation (anchor); absent for an in-place action (button)." }
+      }
+    },
+    "form": {
+      "type": "object", "required": ["component", "id", "label", "type", "action", "submitLabel"], "additionalProperties": false,
+      "properties": {
+        "component": { "const": "form" },
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+        "label": { "$ref": "#/$defs/text" },
+        "type": { "enum": ["email", "text", "search", "url", "tel"] },
+        "name": { "type": "string" },
+        "placeholder": { "type": "string" },
+        "action": { "$ref": "#/$defs/text" },
+        "submitLabel": { "type": "string", "description": "Accessible name of the icon submit button." },
+        "help": { "type": "string" }
+      }
+    },
+    "code": {
+      "type": "object", "required": ["component", "code"], "additionalProperties": false,
+      "properties": { "component": { "const": "code" }, "code": { "$ref": "#/$defs/text" } }
+    },
+    "footer": {
+      "type": "object", "required": ["component", "start", "end"], "additionalProperties": false,
+      "properties": {
+        "component": { "const": "footer" },
+        "start": { "type": "array", "maxItems": 3, "items": { "$ref": "#/$defs/link" } },
+        "end": { "type": "array", "maxItems": 3, "items": { "$ref": "#/$defs/link" } }
+      }
+    }
+  }
+}

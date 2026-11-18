@@ -1,0 +1,17 @@
+{
+  "name": "tab-website",
+  "private": true,
+  "description": "Build and check tools for the Tab website. The app itself is a Swift package.",
+  "scripts": {
+    "build:site": "node scripts/build-site.mjs",
+    "check:site": "node scripts/check-site.mjs",
+    "sync:design-system": "node scripts/sync-design-system.mjs",
+    "sync:artwork": "node scripts/sync-artwork.mjs"
+  },
+  "devDependencies": {
+    "jsdom": "26.1.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
