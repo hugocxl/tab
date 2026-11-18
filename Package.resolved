@@ -2,12 +2,12 @@
   "originHash" : "11a18dbaddec7b0c610b53ae20a3a15c42e859d49dfaa3b4e5199b8c41212608",
   "pins" : [
     {
-      "identity" : "iconscxl",
+      "identity" : "icons",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/hugocxl/iconscxl.git",
+      "location" : "https://github.com/hugocxl/icons.git",
       "state" : {
-        "revision" : "36464a111d7dc1e1d6d6f5bd295b75d932daa18e",
-        "version" : "0.1.9"
+        "revision" : "491b3cdc2f017b595173fef9d3a1d2654475cf92",
+        "version" : "0.2.0"
       }
     }
   ],

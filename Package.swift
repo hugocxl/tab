@@ -14,7 +14,7 @@ let package = Package(
         .executable(name: "tab", targets: ["tab"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/hugocxl/iconscxl.git", from: "0.1.6"),
+        .package(url: "https://github.com/hugocxl/icons.git", from: "0.2.0"),
     ],
     targets: [
         // Ghostty's VT library, built by scripts/build-ghostty.sh.
@@ -62,7 +62,7 @@ let package = Package(
         .target(
             name: "TabApp",
             dependencies: ["TabClient", "TabCore", "TabSimulators", "TabProtocol",
-                           .product(name: "IconsCXL", package: "iconscxl")],
+                           .product(name: "Icons", package: "icons")],
             resources: [.copy("Resources/TabIcons")],
             swiftSettings: swift5
         ),
