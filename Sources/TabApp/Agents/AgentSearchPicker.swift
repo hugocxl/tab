@@ -2,7 +2,7 @@ import AppKit
 
 /// A searchable native list shared by conversation history, prompt navigation and review comments.
 @MainActor
-final class AgentSearchPicker: NSWindowController, NSWindowDelegate, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate {
+final class AgentSearchPicker: NSWindowController, NSWindowDelegate, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate, NSMenuDelegate {
     struct Entry: Equatable {
         var id: String
         var title: String
@@ -10,6 +10,10 @@ final class AgentSearchPicker: NSWindowController, NSWindowDelegate, NSTableView
     }
     var onSelect: ((String) -> Void)?
     var onClose: (() -> Void)?
+    /// More actions for an entry, by its ID: shown on right-click and from the Actions
+    /// button for the selected entry. Nil hides the button.
+    var entryActions: ((String) -> [NSMenuItem])? { didSet { actions.isHidden = entryActions == nil } }
+    private let actions = PillButton("Actions", style: .plain)
     private let search = NSSearchField()
     private let table = NSTableView()
     private let note = NSTextField(wrappingLabelWithString: "")
@@ -54,7 +58,13 @@ final class AgentSearchPicker: NSWindowController, NSWindowDelegate, NSTableView
         let open = PillButton("Open", style: .normal)
         panel.defaultButtonCell = open.cell as? NSButtonCell
         open.onPress = { [weak self] in self?.choose() }
-        for view in [search, scroll, note, open] as [NSView] {
+        actions.isHidden = true
+        actions.setAccessibilityLabel("Actions for the selected conversation")
+        actions.onPress = { [weak self] in self?.showActions() }
+        let rowMenu = NSMenu()
+        rowMenu.delegate = self
+        table.menu = rowMenu
+        for view in [search, scroll, note, open, actions] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             content.addSubview(view)
         }
@@ -67,7 +77,10 @@ final class AgentSearchPicker: NSWindowController, NSWindowDelegate, NSTableView
             scroll.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
             scroll.bottomAnchor.constraint(equalTo: note.topAnchor, constant: -10),
             note.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 12),
-            note.trailingAnchor.constraint(equalTo: open.leadingAnchor, constant: -12),
+            note.trailingAnchor.constraint(equalTo: actions.leadingAnchor, constant: -12),
+            actions.trailingAnchor.constraint(equalTo: open.leadingAnchor, constant: -8),
+            actions.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -12),
+            actions.heightAnchor.constraint(equalToConstant: 28),
             note.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -12),
             note.heightAnchor.constraint(greaterThanOrEqualToConstant: 30),
             open.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
@@ -138,6 +151,23 @@ final class AgentSearchPicker: NSWindowController, NSWindowDelegate, NSTableView
         let action = onSelect
         close()
         action?(id)
+    }
+
+    private func items(row: Int) -> [NSMenuItem] {
+        guard filtered.indices.contains(row), let entryActions else { return [] }
+        return entryActions(filtered[row].id)
+    }
+
+    private func showActions() {
+        let menu = NSMenu()
+        for item in items(row: table.selectedRow) { menu.addItem(item) }
+        guard !menu.items.isEmpty else { return }
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: actions.bounds.height + 4), in: actions)
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        for item in items(row: table.clickedRow >= 0 ? table.clickedRow : table.selectedRow) { menu.addItem(item) }
     }
 
     func numberOfRows(in tableView: NSTableView) -> Int { filtered.count }

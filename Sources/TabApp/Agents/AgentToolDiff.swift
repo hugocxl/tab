@@ -61,6 +61,8 @@ enum AgentToolDiff {
             return .init(checkpoint: checkpoint, files: files, totalFiles: files.count, path: request.path, diff: diff)
         }
         window.window?.title = "Tool changes"
+        // A tool's recorded patch holds only the lines it sent.
+        window.expandsContext = false
         return window
     }
 }

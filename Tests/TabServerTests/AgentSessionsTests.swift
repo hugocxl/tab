@@ -44,6 +44,11 @@ private final class FakeAgentRuntime: AgentSessionRuntime, @unchecked Sendable {
         try await approve(request: request, allow: allow)
     }
     func setAlwaysAllowed(_ tools: Set<String>) async throws { lock.withLock { allowedTools = tools } }
+    private var chosen: [String] = []
+    var decisions: [String] { lock.withLock { chosen } }
+    func decide(request: String, decision: String, answers: [String: [String]]?) async throws {
+        lock.withLock { chosen.append(request + ":" + decision) }
+    }
     func setAccess(_ mode: AgentAccessMode) async throws {
         lock.withLock { currentAccess = mode }
         if let onAccess { try await onAccess(mode) }
@@ -1547,6 +1552,44 @@ final class AgentSessionsTests: XCTestCase {
         XCTAssertNoThrow(try AgentConversationReply.earlier(first).validate())
     }
 
+    /// T3: Find searches the archive with the app's semantics, page by page from the newest,
+    /// returning candidates with their archive positions.
+    func testArchiveSearchFindsCandidatesWithTheSharedSemanticsPageByPage() async throws {
+        let root = try root(), box = AgentRuntimeBox()
+        let sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, callback in
+            let runtime = FakeAgentRuntime(callback); box.install(runtime); return runtime
+        })
+        defer { sessions.shutdown() }
+        let session = SessionId()
+        let body = String(repeating: "r", count: 15 * 1024)
+        _ = try await sessions.handle(.create(session: session, project: ProjectId(), provider: .claude))
+        _ = try await sessions.handle(.send(session: session, text: "read everything", model: nil))
+        for index in 0..<40 {
+            let output = index == 3 ? "Résumé of the archived needle\n" + body : body
+            box.runtime?.callback(.item(AgentChatItem(id: "read-\(index)", kind: .tool, text: "Read",
+                tool: AgentToolActivity(name: "Read", category: .read, input: "{}", output: output, status: .completed))))
+        }
+        box.runtime?.callback(.status(.idle))
+        let idle = try await waitForQueue(sessions, session) { $0.status == .idle }
+        XCTAssertGreaterThan(idle.omittedItems ?? 0, 4)
+        guard case .archiveSearch(let page) = try await sessions.conversation(.searchEarlier(session: session, query: "resume NEEDLE",
+                                                                                              before: nil)) else {
+            return XCTFail("Unexpected reply")
+        }
+        XCTAssertNoThrow(try AgentConversationReply.archiveSearch(page).validate())
+        XCTAssertEqual(page.items.map(\.id), ["read-3"], "Case and accents are ignored, as in the app")
+        XCTAssertEqual(page.positions, [3])
+        XCTAssertEqual(page.start, 0)
+        XCTAssertEqual(page.total, idle.omittedItems)
+        guard case .archiveSearch(let none) = try await sessions.conversation(.searchEarlier(session: session, query: "needle absent",
+                                                                                              before: 3)) else {
+            return XCTFail("Unexpected reply")
+        }
+        XCTAssertTrue(none.items.isEmpty)
+        XCTAssertEqual(none.end, 3, "A search continues before the position it was given")
+        XCTAssertThrowsError(try AgentConversationRequest.searchEarlier(session: session, query: "", before: nil).validate())
+    }
+
     /// Claude repeats each assistant message at the end of a turn. One already trimmed
     /// must not come back at the end, out of order.
     /// Output kept only its last 16 KiB with no way to see the rest; a file read lost its start.
@@ -1711,7 +1754,15 @@ final class AgentSessionsTests: XCTestCase {
         try await Task.sleep(nanoseconds: 50_000_000)
         XCTAssertEqual(box.runtime?.models.count, 0)
         let read = try await sessions.handle(.read(session: session))
-        XCTAssertEqual(read, stopped)
+        // Only the turn's recording status may arrive since: this folder isn't in Git.
+        var expected = stopped
+        expected.revision = read.revision
+        expected.turns = stopped.turns?.map { turn in
+            var turn = turn
+            turn.checkpointStatus = read.turns?.first { $0.userItemID == turn.userItemID }?.checkpointStatus
+            return turn
+        }
+        XCTAssertEqual(read, expected)
         XCTAssertNil(read.providerSession)
     }
 
@@ -2080,34 +2131,109 @@ extension AgentSessionsTests {
         XCTAssertEqual(box.runtime?.alwaysAllowed, [])
     }
 
-    func testConversationsClosedLongAgoArePrunedWithTheirFiles() async throws {
-        let root = try root()
-        let closed = SessionId(), open = SessionId()
+    /// T1 and T5: an agent's steps publish a content revision when they change in place,
+    /// survive the provider and the server, keep older steps in pages up to a retention
+    /// limit that is counted, and go with the conversation.
+    func testChildStepsRevisePersistPageAndGoWithTheirConversation() async throws {
+        let root = try root(), box = AgentRuntimeBox()
+        let id = SessionId(), project = ProjectId()
+        func step(_ index: Int) -> AgentChatItem { AgentChatItem(id: "s\(index)", kind: .assistant, text: "Step \(index)") }
         do {
-            let sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, callback in FakeAgentRuntime(callback) })
-            _ = try await sessions.handle(.create(session: closed, project: ProjectId(), provider: .claude))
-            _ = try await sessions.handle(.create(session: open, project: ProjectId(), provider: .claude))
-            _ = try await sessions.handle(.close(session: closed))
+            let sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, callback in
+                let runtime = FakeAgentRuntime(callback); box.install(runtime); return runtime
+            })
+            _ = try await sessions.handle(.create(session: id, project: project, provider: .claude))
+            _ = try await sessions.handle(.send(session: id, text: "Launch", model: nil))
+            let agent = AgentSubagent(id: "a1", toolUseID: "toolu_child", description: "Audit")
+            box.runtime?.callback(.subagents([agent]))
+            var tool = AgentChatItem(id: "t1", kind: .tool, text: "Bash", isComplete: false,
+                                     tool: .init(name: "Bash", category: .command, input: "ls", status: .running))
+            box.runtime?.callback(.subagentSteps(toolUseID: "toolu_child", items: [tool]))
+            let first = try await waitForQueue(sessions, id) { $0.subagents?.first?.stepsRevision != nil }
+            let r1 = try XCTUnwrap(first.subagents?.first?.stepsRevision)
+            // The running tool becomes a completed one: same ID, same count.
+            tool.isComplete = true
+            tool.tool?.status = .completed
+            tool.tool?.output = "Package.swift"
+            box.runtime?.callback(.subagentSteps(toolUseID: "toolu_child", items: [tool]))
+            let second = try await waitForQueue(sessions, id) { ($0.subagents?.first?.stepsRevision ?? 0) > r1 }
+            XCTAssertEqual(second.subagents?.first?.steps, 1, "The count didn't change; the revision did")
+            guard case .subagentSteps(let live) = try await sessions.conversation(.subagentSteps(session: id, toolUseID: "toolu_child")) else {
+                return XCTFail("Unexpected reply")
+            }
+            XCTAssertEqual(live.items.first?.tool?.output, "Package.swift")
+            XCTAssertEqual(live.revision, second.subagents?.first?.stepsRevision)
+
+            // The kept window rolls over three times; the archive keeps 1000 and counts the rest.
+            box.runtime?.callback(.subagentSteps(toolUseID: "toolu_child", items: (0..<600).map(step)))
+            box.runtime?.callback(.subagentSteps(toolUseID: "toolu_child", items: (600..<1200).map(step)))
+            box.runtime?.callback(.subagentSteps(toolUseID: "toolu_child", items: (1200..<1300).map(step)))
+            let rolled = try await waitForQueue(sessions, id) { $0.subagents?.first?.steps == 100 }
+            XCTAssertGreaterThan(rolled.subagents?.first?.stepsRevision ?? 0, second.subagents?.first?.stepsRevision ?? 0)
+            var finished = agent
+            finished.status = .completed
+            box.runtime?.callback(.subagents([finished]))
+            box.runtime?.callback(.status(.idle))
+            _ = try await waitForQueue(sessions, id) { $0.status == .idle }
             sessions.shutdown()
         }
-        let outputs = root.appendingPathComponent("outputs/" + closed.description, isDirectory: true)
-        try FileManager.default.createDirectory(at: outputs, withIntermediateDirectories: true)
-        let old = Date().addingTimeInterval(-AgentSessions.closedRetention - 86_400)
-        for id in [closed, open] {
-            try FileManager.default.setAttributes([.modificationDate: old], ofItemAtPath: root.appendingPathComponent(id.description + ".json").path)
+
+        let restarted = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, callback in
+            FakeAgentRuntime(callback)
+        })
+        guard case .subagentSteps(let saved) = try await restarted.conversation(.subagentSteps(session: id, toolUseID: "toolu_child")) else {
+            return XCTFail("Unexpected reply")
         }
-        let restarted = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, callback in FakeAgentRuntime(callback) })
-        defer { restarted.shutdown() }
-        _ = try await restarted.handle(.read(session: open))
-        do {
-            _ = try await restarted.handle(.read(session: closed))
-            XCTFail("A conversation closed long ago is gone")
-        } catch {}
+        XCTAssertEqual(saved.items.map(\.id), (1200..<1300).map { "s\($0)" }, "A completed agent reopens after a restart")
+        XCTAssertNil(saved.unavailable)
+        XCTAssertEqual(saved.earlierSteps, 1000)
+        XCTAssertEqual(saved.omittedSteps, 201, "Steps past the retention limit are counted")
+        XCTAssertNoThrow(try AgentConversationReply.subagentSteps(saved).validate())
+        guard case .earlier(let page) = try await restarted.conversation(.subagentEarlier(session: id, toolUseID: "toolu_child",
+                                                                                          before: nil, limit: 100)) else {
+            return XCTFail("Unexpected reply")
+        }
+        XCTAssertEqual(page.start, 900)
+        XCTAssertEqual(page.total, 1000)
+        XCTAssertEqual(page.items.first?.id, "s899", "The archive holds the oldest steps in order")
+        guard case .earlier(let oldest) = try await restarted.conversation(.subagentEarlier(session: id, toolUseID: "toolu_child",
+                                                                                            before: 2, limit: 100)) else {
+            return XCTFail("Unexpected reply")
+        }
+        XCTAssertEqual(oldest.items.map(\.id), ["t1", "s0"])
+        XCTAssertEqual(oldest.items.first?.tool?.status, .completed)
+        // An agent from before steps were saved.
+        guard case .subagentSteps(let old) = try await restarted.conversation(.subagentSteps(session: id, toolUseID: "toolu_old")) else {
+            return XCTFail("Unexpected reply")
+        }
+        XCTAssertEqual(old.unavailable, true)
+        XCTAssertTrue(old.items.isEmpty)
+
+        // Clearing in place moves the steps to the archived conversation.
+        let current = try await restarted.handle(.read(session: id))
+        let archive = SessionId()
+        let cleared = try await restarted.handle(.clear(session: id, archive: archive, expectedRevision: current.revision))
+        XCTAssertEqual(cleared.resetID, archive)
+        guard case .subagentSteps(let moved) = try await restarted.conversation(.subagentSteps(session: archive, toolUseID: "toolu_child")),
+              case .subagentSteps(let fresh) = try await restarted.conversation(.subagentSteps(session: id, toolUseID: "toolu_child")) else {
+            return XCTFail("Unexpected reply")
+        }
+        XCTAssertEqual(moved.items.count, 100)
+        XCTAssertEqual(fresh.unavailable, true, "The cleared conversation starts without them")
+
+        // A conversation's cleanup removes its agents' steps: when its chosen retention runs out.
+        guard case .conversation = try await restarted.conversation(.setRetention(session: archive, retention: .init(deleteAfterDays: 7))) else {
+            return XCTFail("Unexpected reply")
+        }
+        _ = try await restarted.handle(.close(session: archive))
         restarted.shutdown()
-        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent(closed.description + ".json").path))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: outputs.path))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent(open.description + ".json").path),
-                      "An open conversation stays however old")
+        let folder = root.appendingPathComponent("subagents/" + archive.description, isDirectory: true)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: folder.path))
+        let later = Date().addingTimeInterval(8 * 86_400)
+        let pruned = try AgentSessions(root: root, projectDirectory: { _ in root.path }, clock: { later },
+                                       factory: { _, _, _, callback in FakeAgentRuntime(callback) })
+        pruned.shutdown()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: folder.path))
     }
 
     func testImportedImagesBecomeAttachmentsAndTurnsAreTimed() async throws {
@@ -2152,7 +2278,8 @@ extension AgentSessionsTests {
         let old = try await waitForQueue(sessions, id) { $0.status == .idle && $0.turns?.first?.checkpoint != nil }
         let checkpoint = try XCTUnwrap(old.turns?.first?.checkpoint)
         let user = try XCTUnwrap(old.items.first(where: { $0.kind == .user }))
-        let record = try JSONDecoder().decode(AgentCheckpointRecord.self, from: Data(contentsOf: storage.appendingPathComponent("checkpoints/\(id)/\(checkpoint.id).json")))
+        let recordData = try Data(contentsOf: storage.appendingPathComponent("checkpoints/\(id)/\(checkpoint.id).json"))
+        let record = try JSONDecoder().decode(AgentCheckpointRecord.self, from: recordData)
         _ = try await sessions.handle(.clear(session: id, archive: archive, expectedRevision: old.revision))
         for folder in ["attachments", "outputs", "checkpoints"] {
             XCTAssertFalse(FileManager.default.fileExists(atPath: storage.appendingPathComponent("\(folder)/\(id)").path))
@@ -2164,7 +2291,8 @@ extension AgentSessionsTests {
         // checkpoint file. Startup must not mistake its refs for orphaned refs.
         let duplicate = storage.appendingPathComponent("checkpoints/\(id)/\(checkpoint.id).json")
         try FileManager.default.createDirectory(at: duplicate.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try JSONEncoder().encode(record).write(to: duplicate)
+        // The crash leaves the original bytes behind; JSON key order isn't stable across encodes.
+        try FileManager.default.copyItem(at: storage.appendingPathComponent("checkpoints/\(archive)/\(checkpoint.id).json"), to: duplicate)
         let restored = try AgentSessions(root: storage, projectDirectory: { _ in directory })
         defer { restored.shutdown() }
         let file = try await restored.attachment(.init(session: archive, item: user.id, attachment: attachment.id))
@@ -2356,5 +2484,266 @@ extension AgentSessionsTests {
         do { _ = try await delivery.value; XCTFail("Must reject stale prepared message") } catch { }
         let cleared = try await sessions.handle(.read(session: id))
         XCTAssertTrue(cleared.items.isEmpty)
+    }
+}
+
+/// A server clock tests move forward by days.
+private final class TestClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var current = Date(timeIntervalSince1970: 1_900_000_000)
+    var now: Date { lock.withLock { current } }
+    func advance(days: Double) { lock.withLock { current = current.addingTimeInterval(days * 86_400) } }
+}
+
+/// L1: closing keeps a reopenable conversation; only an explicit retention or delete removes it.
+extension AgentSessionsTests {
+    func testClosedConversationOutlivesThirtyDaysAndReopensWithItsResourcesAfterRestart() async throws {
+        let storage = try root(), repo = try GitTestRepo(commit: false), clock = TestClock()
+        try repo.write("file.txt", "before\n")
+        try repo.commit("initial")
+        let directory = repo.path
+        let output = String(repeating: "Tool output\n", count: 3000)
+        let factory: AgentSessions.Factory = { _, _, _, callback in
+            SkillCaptureRuntime(callback) {
+                try "after\n".write(toFile: directory + "/file.txt", atomically: true, encoding: .utf8)
+                callback(.providerSession("claude-session"))
+                callback(.item(.init(id: "read", kind: .tool, text: "Read", tool: .init(name: "Read", category: .read, output: output, status: .completed))))
+            }
+        }
+        let project = ProjectId(), id = SessionId()
+        let sessions = try AgentSessions(root: storage, projectDirectory: { _ in directory }, clock: { clock.now }, factory: factory)
+        _ = try await sessions.handle(.create(session: id, project: project, provider: .claude))
+        let attachment = AgentChatAttachment(id: "notes", name: "notes.txt", mimeType: "text/plain", data: Data("Notes".utf8))
+        _ = try await sessions.handle(.send(session: id, text: "Change this file", model: nil, attachments: [attachment]))
+        let finished = try await waitForQueue(sessions, id) { $0.status == .idle && $0.turns?.first?.checkpoint != nil }
+        let checkpoint = try XCTUnwrap(finished.turns?.first?.checkpoint)
+        let user = try XCTUnwrap(finished.items.first { $0.kind == .user })
+        let closed = try await sessions.handle(.close(session: id))
+        XCTAssertEqual(closed.status, .closed)
+        sessions.shutdown()
+        // A record an older build closed: no close date, no retention, an old file date.
+        let legacy = SessionId()
+        let legacySnapshot = AgentChatSnapshot(session: legacy, project: project, provider: .codex, status: .closed,
+                                               items: [AgentChatItem(kind: .user, text: "Legacy question")])
+        let legacyFile = storage.appendingPathComponent(legacy.description + ".json")
+        try JSONSerialization.data(withJSONObject: ["snapshot": try JSONSerialization.jsonObject(with: JSONEncoder().encode(legacySnapshot)),
+                                                    "directory": directory]).write(to: legacyFile)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 1_000_000_000)], ofItemAtPath: legacyFile.path)
+
+        clock.advance(days: 45)
+        let restarted = try AgentSessions(root: storage, projectDirectory: { _ in directory }, clock: { clock.now }, factory: factory)
+        defer { restarted.shutdown() }
+        let listed = restarted.savedConversations(project: project)
+        XCTAssertEqual(Set(listed.map(\.session)), [id, legacy], "Closed conversations stay listed however old")
+        XCTAssertEqual(listed.first { $0.session == id }?.title, "Change this file")
+        XCTAssertNil(listed.first { $0.session == id }?.expiresAt)
+        guard case .conversation(let reopened) = try await restarted.conversation(.reopen(session: id)) else { return XCTFail("No conversation") }
+        XCTAssertEqual(reopened.session, id)
+        XCTAssertEqual(reopened.status, .idle)
+        XCTAssertEqual(reopened.turns?.first?.checkpoint?.id, checkpoint.id)
+        guard case .conversation(let again) = try await restarted.conversation(.reopen(session: id)) else { return XCTFail("No conversation") }
+        XCTAssertEqual(again.revision, reopened.revision, "Reopening is idempotent")
+        let file = try await restarted.attachment(.init(session: id, item: user.id, attachment: attachment.id))
+        XCTAssertEqual(file.attachment.data, attachment.data)
+        guard case .toolOutput(let saved) = try await restarted.conversation(.toolOutput(session: id, item: "read")) else { return XCTFail("Missing output") }
+        XCTAssertEqual(saved.text, output, "Closing no longer discards whole tool outputs")
+        let diff = try await restarted.checkpoint(.init(session: id, checkpoint: checkpoint.id, path: "file.txt"))
+        XCTAssertTrue(diff.diff?.rows.contains { $0.text == "+after" } == true)
+        XCTAssertFalse(restarted.savedConversations(project: project).contains { $0.session == id })
+        let next = try await restarted.handle(.send(session: id, text: "Carry on", model: nil))
+        XCTAssertEqual(next.items.filter { $0.kind == .user }.map(\.text), ["Change this file", "Carry on"])
+        _ = try await restarted.handle(.read(session: legacy))
+    }
+
+    func testCloseKeepsUncertainDeliveryForReviewAndReopenNeverResendsIt() async throws {
+        let root = try root(), box = AgentRuntimeBox()
+        let factory: AgentSessions.Factory = { _, _, _, callback in
+            let runtime = FakeAgentRuntime(callback)
+            runtime.onSend = { try await Task.sleep(for: .seconds(30)) }
+            box.install(runtime); return runtime
+        }
+        let sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: factory)
+        let id = SessionId(), project = ProjectId()
+        _ = try await sessions.handle(.create(session: id, project: project, provider: .claude))
+        let prompt = AgentPrompt(text: "Maybe delivered", model: nil, effort: nil, provider: .claude, planMode: false)
+        _ = try await sessions.handle(.submit(session: id, prompt: prompt))
+        _ = try await waitForQueue(sessions, id) { $0.queuedPrompts?.first?.state == .delivering }
+        _ = try await sessions.handle(.close(session: id))
+        let closed = try await waitForQueue(sessions, id) { $0.queuedPrompts?.first?.state == .uncertain }
+        XCTAssertEqual(closed.queuePaused, true)
+        sessions.shutdown()
+        let restarted = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: factory)
+        defer { restarted.shutdown() }
+        XCTAssertEqual(restarted.savedConversations(project: project).first?.needsReview, true)
+        guard case .conversation(let reopened) = try await restarted.conversation(.reopen(session: id)) else { return XCTFail("No conversation") }
+        XCTAssertEqual(reopened.queuedPrompts?.map(\.id), [prompt.id])
+        XCTAssertEqual(reopened.queuedPrompts?.first?.state, .uncertain)
+        XCTAssertEqual(reopened.queuePaused, true)
+        _ = try await restarted.handle(.submit(session: id, prompt: prompt))
+        try await Task.sleep(for: .milliseconds(100))
+        let after = try await restarted.handle(.read(session: id))
+        XCTAssertEqual(after.items.filter { $0.text == "Maybe delivered" }.count, 1, "The ledger still refuses a second delivery")
+    }
+
+    func testRetentionChoiceDeletesAfterItsDaysAndDeleteSparesCheckpointsSharedWithAnArchive() async throws {
+        let storage = try root(), repo = try GitTestRepo(commit: false), clock = TestClock()
+        try repo.write("file.txt", "before\n")
+        try repo.commit("initial")
+        let directory = repo.path
+        let factory: AgentSessions.Factory = { _, _, _, callback in
+            SkillCaptureRuntime(callback) { try "after\n".write(toFile: directory + "/file.txt", atomically: true, encoding: .utf8) }
+        }
+        let project = ProjectId(), id = SessionId(), archive = SessionId(), other = SessionId(), expiring = SessionId()
+        var sessions = try AgentSessions(root: storage, projectDirectory: { _ in directory }, clock: { clock.now }, factory: factory)
+        let cleaned = AgentRuntimeResumes()
+        sessions.registerDeletionCleanup { cleaned.append($0.session.description) }
+        _ = try await sessions.handle(.create(session: id, project: project, provider: .claude))
+        _ = try await sessions.handle(.send(session: id, text: "Change this file", model: nil))
+        let finished = try await waitForQueue(sessions, id) { $0.status == .idle && $0.turns?.first?.checkpoint != nil }
+        let checkpoint = try XCTUnwrap(finished.turns?.first?.checkpoint)
+        _ = try await sessions.handle(.clear(session: id, archive: archive, expectedRevision: finished.revision))
+        let archived = storage.appendingPathComponent("checkpoints/\(archive)/\(checkpoint.id).json")
+        let record = try JSONDecoder().decode(AgentCheckpointRecord.self, from: Data(contentsOf: archived))
+        // Another closed conversation whose checkpoint names the archive's snapshots.
+        _ = try await sessions.handle(.create(session: other, project: project, provider: .claude))
+        _ = try await sessions.handle(.close(session: other))
+        try FileManager.default.createDirectory(at: storage.appendingPathComponent("checkpoints/\(other)"), withIntermediateDirectories: true)
+        try FileManager.default.copyItem(at: archived, to: storage.appendingPathComponent("checkpoints/\(other)/\(checkpoint.id).json"))
+        do {
+            _ = try await sessions.conversation(.delete(session: id))
+            XCTFail("An open conversation can't be deleted")
+        } catch {}
+        guard case .deleted(let deletion) = try await sessions.conversation(.delete(session: other)) else { return XCTFail("Not deleted") }
+        XCTAssertEqual(deletion.removedCheckpoints, 0)
+        XCTAssertEqual(deletion.sharedCheckpoints, 2)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: storage.appendingPathComponent("\(other).json").path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: storage.appendingPathComponent("checkpoints/\(other)").path))
+        XCTAssertEqual(try GitTestRepo.git(directory, "rev-parse", record.before.reference).trimmingCharacters(in: .whitespacesAndNewlines), record.before.tree)
+        let diff = try await sessions.checkpoint(.init(session: archive, checkpoint: checkpoint.id, path: "file.txt"))
+        XCTAssertTrue(diff.diff?.rows.contains { $0.text == "+after" } == true, "The archive keeps its checkpoint")
+        let kept = try await sessions.handle(.read(session: id))
+        XCTAssertEqual(kept.session, id, "Only the selected conversation goes")
+
+        // An explicit retention deletes once its days pass, across restarts.
+        _ = try await sessions.handle(.create(session: expiring, project: project, provider: .claude))
+        guard case .conversation = try await sessions.conversation(.setRetention(session: expiring, retention: .init(deleteAfterDays: 30))) else { return XCTFail() }
+        _ = try await sessions.handle(.close(session: expiring))
+        XCTAssertNotNil(sessions.savedConversations(project: project).first { $0.session == expiring }?.expiresAt)
+        sessions.shutdown()
+        clock.advance(days: 29)
+        sessions = try AgentSessions(root: storage, projectDirectory: { _ in directory }, clock: { clock.now }, factory: factory)
+        _ = try await sessions.handle(.read(session: expiring))
+        _ = try await sessions.handle(.read(session: archive))
+        sessions.shutdown()
+        clock.advance(days: 2)
+        sessions = try AgentSessions(root: storage, projectDirectory: { _ in directory }, clock: { clock.now }, factory: factory)
+        sessions.shutdown()
+        do {
+            _ = try await sessions.handle(.read(session: expiring))
+            XCTFail("Its retention ran out")
+        } catch {}
+        XCTAssertFalse(FileManager.default.fileExists(atPath: storage.appendingPathComponent("\(expiring).json").path))
+        sessions = try AgentSessions(root: storage, projectDirectory: { _ in directory }, clock: { clock.now }, factory: factory)
+        defer { sessions.shutdown() }
+        _ = try await sessions.handle(.read(session: archive))
+        guard case .deleted(let last) = try await sessions.conversation(.delete(session: archive)) else { return XCTFail("Not deleted") }
+        XCTAssertEqual(last.removedCheckpoints, 2, "Once nothing else uses them, the snapshots go too")
+        XCTAssertThrowsError(try GitTestRepo.git(directory, "rev-parse", "--verify", record.before.reference))
+        XCTAssertEqual(cleaned.values, [other.description], "Registered cleanups ran for the deletion they saw")
+    }
+}
+
+/// L3 and L4 through the sessions store.
+extension AgentSessionsTests {
+    func testDecisionMustBeOneTheRequestOfferedAndIsRecordedOnce() async throws {
+        let root = try root(), box = AgentRuntimeBox()
+        let sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, callback in
+            let runtime = FakeAgentRuntime(callback); box.install(runtime); return runtime
+        })
+        defer { sessions.shutdown() }
+        let id = SessionId()
+        _ = try await sessions.handle(.create(session: id, project: ProjectId(), provider: .codex))
+        _ = try await sessions.handle(.send(session: id, text: "Go", model: nil))
+        let offered = AgentApprovalRequest(kind: "command", decisions: [
+            .init(id: "acceptForSession", kind: .allowForSession, title: "Allow for this session"),
+            .init(id: "decline", kind: .decline, title: "Decline"),
+        ])
+        box.runtime?.callback(.item(AgentChatItem(id: "r1", kind: .approval, text: "make", isComplete: false, approval: offered)))
+        box.runtime?.callback(.status(.waiting))
+        _ = try await waitForQueue(sessions, id) { $0.status == .waiting }
+        do {
+            _ = try await sessions.handle(.decide(session: id, request: "r1", decision: "accept"))
+            XCTFail("Only offered decisions are sent")
+        } catch {}
+        let decided = try await sessions.handle(.decide(session: id, request: "r1", decision: "decline"))
+        XCTAssertEqual(decided.items.first { $0.id == "r1" }?.isComplete, true)
+        XCTAssertEqual(box.runtime?.decisions, ["r1:decline"])
+        do {
+            _ = try await sessions.handle(.decide(session: id, request: "r1", decision: "acceptForSession"))
+            XCTFail("A settled request takes no other decision")
+        } catch {}
+        XCTAssertEqual(box.runtime?.decisions, ["r1:decline"])
+    }
+
+    func testUsageLimitStopKeepsItsResetAndRetriesAreDeliveredTheIntendedNumberOfTimes() async throws {
+        let root = try root(), sent = AgentRuntimeResumes()
+        let reset = Date(timeIntervalSince1970: 1_950_000_000)
+        let factory: AgentSessions.Factory = { _, _, _, callback in
+            let runtime = FakeAgentRuntime(callback)
+            runtime.onSend = {
+                sent.append("send")
+                if sent.values.count == 1 {
+                    callback(.activity(AgentChatActivity(kind: .rateLimited, resumesAt: reset, message: "Usage limit reached")))
+                    callback(.failure("You've hit your usage limit."))
+                } else {
+                    callback(.status(.idle))
+                }
+            }
+            return runtime
+        }
+        let id = SessionId()
+        var sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: factory)
+        _ = try await sessions.handle(.create(session: id, project: ProjectId(), provider: .claude))
+        _ = try await sessions.handle(.send(session: id, text: "Long task", model: nil))
+        let failed = try await waitForQueue(sessions, id) { $0.status == .failed }
+        XCTAssertEqual(failed.turns?.last?.rateLimit, AgentRateLimitStop(resetsAt: reset, message: "Usage limit reached"))
+        XCTAssertEqual(failed.turns?.last?.outcome, .failed)
+        sessions.shutdown()
+        sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: factory)
+        let reconnected = try await sessions.handle(.read(session: id))
+        XCTAssertEqual(reconnected.turns?.last?.rateLimit?.resetsAt, reset, "The reset survives reconnects and restarts")
+
+        // A cancelled schedule delivers nothing.
+        let later = AgentPrompt(text: "Long task", model: nil, effort: nil, provider: .claude, planMode: false)
+        let scheduled = try await sessions.handle(.schedule(session: id, prompt: later, at: Date().addingTimeInterval(3600)))
+        XCTAssertEqual(scheduled.queuedPrompts?.first?.scheduledAt.map { $0 > Date() }, true)
+        XCTAssertEqual(scheduled.queuePaused, false)
+        sessions.shutdown()
+        sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: factory)
+        let restored = try await sessions.handle(.read(session: id))
+        XCTAssertEqual(restored.queuedPrompts?.first?.id, later.id, "The schedule is kept on the server")
+        XCTAssertEqual(restored.queuePaused, false)
+        let revision = try XCTUnwrap(restored.queuedPrompts?.first?.revision)
+        _ = try await sessions.handle(.removeQueued(session: id, id: later.id, expectedRevision: revision))
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(sent.values.count, 1)
+
+        // A scheduled retry racing a reconnect that sends the schedule again runs once.
+        let soon = AgentPrompt(text: "Long task", model: nil, effort: nil, provider: .claude, planMode: false)
+        _ = try await sessions.handle(.schedule(session: id, prompt: soon, at: Date().addingTimeInterval(0.3)))
+        _ = try await sessions.handle(.schedule(session: id, prompt: soon, at: Date().addingTimeInterval(0.3)))
+        _ = try await waitForQueue(sessions, id) { $0.status == .idle && ($0.queuedPrompts ?? []).isEmpty }
+        _ = try await sessions.handle(.schedule(session: id, prompt: soon, at: Date()))
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(sent.values.count, 2)
+
+        // A manual retry, resent after a dropped reply, also runs once.
+        let manual = AgentPrompt(text: "Long task", model: nil, effort: nil, provider: .claude, planMode: false)
+        _ = try await sessions.handle(.submit(session: id, prompt: manual))
+        _ = try await sessions.handle(.submit(session: id, prompt: manual))
+        _ = try await waitForQueue(sessions, id) { $0.status == .idle && ($0.queuedPrompts ?? []).isEmpty }
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(sent.values.count, 3)
+        sessions.shutdown()
     }
 }

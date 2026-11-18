@@ -13,6 +13,8 @@ protocol AgentSessionRuntime: Sendable {
     /// Answers an approval, with `always` letting the same tool run unasked from now on
     /// and `reason` telling the agent why it was denied.
     func approve(request: String, allow: Bool, always: Bool, reason: String?) async throws
+    /// Answers a pending request with one of the decisions it offered.
+    func decide(request: String, decision: String, answers: [String: [String]]?) async throws
     /// The tools this conversation lets run without asking, held with its access mode.
     func setAlwaysAllowed(_ tools: Set<String>) async throws
     func setPlan(_ enabled: Bool) async throws
@@ -64,6 +66,10 @@ extension AgentSessionRuntime {
     }
 
     func setAlwaysAllowed(_ tools: Set<String>) async throws {}
+
+    func decide(request: String, decision: String, answers: [String: [String]]?) async throws {
+        throw AgentRuntimeError("This agent can't answer with the request's own options.")
+    }
 }
 
 extension AgentRuntime: AgentSessionRuntime {}
@@ -73,9 +79,12 @@ final class AgentSessions: @unchecked Sendable {
     typealias Factory = @Sendable (AgentChatProvider, String, String?,
                                   @escaping @Sendable (AgentRuntimeEvent) -> Void) -> any AgentSessionRuntime
     /// All mutable fields are confined to `queue`, including completion callbacks.
-    private final class Entry: @unchecked Sendable {
+    final class Entry: @unchecked Sendable {
         var resetting = false
         var archived = false
+        /// When the conversation was closed; nil while open and for records older builds closed.
+        var closedAt: Date?
+        var retention = AgentConversationRetention.keep
         var inbox = AgentPromptInbox()
         var inboxError: String?
         var deliveryCancelled = false
@@ -96,6 +105,10 @@ final class AgentSessions: @unchecked Sendable {
         var accessTask: Task<Void, Error>?
         var baselineTask: Task<AgentCheckpointStore.Snapshot?, Never>?
         var checkpointTask: Task<Void, Never>?
+        /// Checkpoint captures in flight in this conversation's folder.
+        var capturing = 0
+        /// Reverts and rewinds of this conversation admitted and not yet finished.
+        var reverts = 0
         var stagingToolImages = false
         var deferredEvents: [AgentRuntimeEvent] = []
         var deferredEventBytes = 0
@@ -134,7 +147,7 @@ final class AgentSessions: @unchecked Sendable {
         var message: String
     }
 
-    private struct Saved: Codable {
+    struct Saved: Codable {
         var turnForkPoints: [String: ForkPoint]?
         var alwaysAllowedTools: [String]?
         var snapshot: AgentChatSnapshot
@@ -144,11 +157,13 @@ final class AgentSessions: @unchecked Sendable {
         var forkPoint: String?
         var lastProviderMessage: String?
         var archived: Bool?
+        var closedAt: Date?
+        var retention: AgentConversationRetention?
     }
 
     /// Where a request's snapshot goes: a waiting caller, or a queued delivery that
     /// must begin on `queue` before the reply to the submit that started it.
-    private struct Reply: Sendable {
+    struct Reply: Sendable {
         let complete: @Sendable (Result<AgentChatSnapshot, Error>) -> Void
 
         init(_ complete: @escaping @Sendable (Result<AgentChatSnapshot, Error>) -> Void) { self.complete = complete }
@@ -160,7 +175,7 @@ final class AgentSessions: @unchecked Sendable {
         func resume(throwing error: Error) { complete(.failure(error)) }
     }
 
-    private final class PendingReply: @unchecked Sendable {
+    final class PendingReply: @unchecked Sendable {
         var finished = false // Confined to queue.
         let continuation: Reply
         var task: Task<Void, Never>?
@@ -170,10 +185,24 @@ final class AgentSessions: @unchecked Sendable {
         }
     }
 
-    private let queue = DispatchQueue(label: "tab.agents.sessions", qos: .userInitiated)
-    private let writer = DispatchQueue(label: "tab.agents.persistence", qos: .utility)
-    private var retainedCheckpointIDs: [SessionId: Set<String>] = [:] // writer queue only
-    private let root: URL
+    let queue = DispatchQueue(label: "tab.agents.sessions", qos: .userInitiated)
+    let writer = DispatchQueue(label: "tab.agents.persistence", qos: .utility)
+    var retainedCheckpointIDs: [SessionId: Set<String>] = [:] // writer queue only
+    let root: URL
+    /// The server's clock, injected so retention can be tested across days.
+    let now: @Sendable () -> Date
+    /// Cleanups other stores register for a conversation's permanent deletion; see
+    /// `registerDeletionCleanup`. Writer queue only.
+    var deletionCleanups: [@Sendable (AgentDeletedConversation) -> Void] = []
+    /// Restores being applied, each holding back work that may change its files. Confined to `queue`.
+    var restoring: [UUID: AgentRestoreReservation] = [:]
+    /// Applies restores on Dispatch, so shutdown can wait for them without a task worker.
+    let restoreQueue = DispatchQueue(label: "tab.agents.restores", qos: .userInitiated)
+    /// Restores admitted and not yet finished; shutdown waits for them.
+    let restoreWork = DispatchGroup()
+    let checkpointStore: AgentCheckpointStore
+    /// Each agent's saved steps; see `AgentSubagentStore`.
+    let subagentStore: AgentSubagentStore
     private let factory: Factory
     private let projectDirectory: @Sendable (ProjectId) throws -> String
     private let submissionTimeout: TimeInterval
@@ -192,27 +221,31 @@ final class AgentSessions: @unchecked Sendable {
         let staged = try AgentAttachments.stageToolImages(images, root: directory)
         try AgentAttachments.record(staged, root: directory)
     }
-    private var entries: [SessionId: Entry] = [:]
+    var entries: [SessionId: Entry] = [:]
     var composerCatalog: (@Sendable (AgentComposerContextRequest) async throws -> AgentComposerContextReply)?
-    private var stopping = false
+    var stopping = false
 
     init(root: URL, projectDirectory: @escaping @Sendable (ProjectId) throws -> String,
          changed: @escaping @Sendable (SessionId, UInt64) -> Void = { _, _ in },
          submissionTimeout: TimeInterval = 120,
          interruptTimeout: TimeInterval = 15,
-         closedRetention: TimeInterval = AgentSessions.closedRetention,
+         checkpointStore: AgentCheckpointStore = AgentCheckpointStore(),
+         clock: @escaping @Sendable () -> Date = { Date() },
          factory: @escaping Factory = { provider, directory, resume, callback in
              AgentRuntime(provider: provider, directory: directory, resumeSession: resume, onEvent: callback)
          }) throws {
         self.root = root
+        self.checkpointStore = checkpointStore
+        subagentStore = AgentSubagentStore(root: root, writer: writer)
         self.factory = factory
         self.projectDirectory = projectDirectory
         self.submissionTimeout = submissionTimeout
         self.interruptTimeout = interruptTimeout
         self.changed = changed
+        now = clock
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        let now = Date()
-        for file in try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey])
+        let started = clock()
+        for file in try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: [.fileSizeKey])
             where file.pathExtension == "json" {
             do {
                 guard (try file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0) <= Limits.maxFrame else {
@@ -222,11 +255,10 @@ final class AgentSessions: @unchecked Sendable {
                 guard file.deletingPathExtension().lastPathComponent == saved.snapshot.session.description else {
                     continue
                 }
-                // A conversation closed long ago goes, with everything kept for it.
-                if saved.snapshot.status == .closed,
-                   let modified = try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate,
-                   now.timeIntervalSince(modified) > closedRetention {
-                    writer.async { self.removeConversation(saved, file: file) }
+                // Only a retention the user chose deletes a closed conversation. Records
+                // older builds closed carry no close date or choice and are kept.
+                if Self.expired(saved, at: started) {
+                    writer.async { _ = self.deleteConversationFiles(saved) }
                     continue
                 }
                 let entry = Entry(saved.snapshot, directory: saved.directory)
@@ -252,6 +284,8 @@ final class AgentSessions: @unchecked Sendable {
                 }
                 entry.hasSuccessfulTurn = saved.hasSuccessfulTurn ?? entry.hasSuccessfulTurn
                 entry.archived = saved.archived == true
+                entry.closedAt = saved.closedAt
+                entry.retention = saved.retention ?? .keep
                 entry.forkSource = saved.forkSource
                 entry.forkPoint = saved.forkPoint
                 entry.lastProviderMessage = saved.lastProviderMessage
@@ -378,6 +412,7 @@ final class AgentSessions: @unchecked Sendable {
 
     func attachment(_ request: AgentAttachmentRequest) async throws -> AgentAttachmentReply {
         try request.validate()
+        if let queued = queuedAttachment(request) { return queued }
         let descriptor = queue.sync {
             entries[request.session]?.snapshot.items.first { $0.id == request.item }?.attachments?.first { $0.id == request.attachment }
         }
@@ -394,24 +429,42 @@ final class AgentSessions: @unchecked Sendable {
         try request.validate()
         switch request {
         case .subagentSteps(let session, let toolUseID):
-            let (items, shell) = try queue.sync { () throws -> ([AgentChatItem], (AgentChatItem, AgentSubagent)?) in
+            let (items, shell, project, revision, listed) = try queue.sync { () throws -> ([AgentChatItem]?, (AgentChatItem, AgentSubagent)?, ProjectId, UInt64?, Bool) in
                 guard let entry = entries[session] else { throw ServiceError.unknownSession(session) }
-                if let steps = entry.subagentSteps[toolUseID] { return (steps, nil) }
+                let project = entry.snapshot.project
+                let revision = subagentStore.revision(session: session, toolUseID: toolUseID)
+                let listed = entry.snapshot.subagents?.contains { $0.toolUseID == toolUseID } == true
+                if let steps = entry.subagentSteps[toolUseID] { return (steps, nil, project, revision, listed) }
                 guard let task = entry.snapshot.subagents?.first(where: { $0.toolUseID == toolUseID && $0.agentType == "Shell" }),
-                      let item = entry.snapshot.items.last(where: { $0.id == toolUseID }) else { return ([], nil) }
-                return ([], (item, task))
+                      let item = entry.snapshot.items.last(where: { $0.id == toolUseID }) else { return (nil, nil, project, revision, listed) }
+                return (nil, (item, task), project, revision, listed)
             }
-            guard let (item, task) = shell else { return .subagentSteps(AgentSubagentSteps(toolUseID: toolUseID, items: items)) }
+            guard let (item, task) = shell else {
+                let store = subagentStore
+                var steps = try await runBlocking {
+                    store.steps(session: session, project: project, toolUseID: toolUseID, live: items, listed: listed)
+                }
+                // The provider's own steps are newer than the record being written.
+                if items != nil, let revision { steps.revision = revision }
+                return .subagentSteps(steps)
+            }
             let step = try await runBlocking { AgentBackgroundShell.step(item, task: task) }
             return .subagentSteps(AgentSubagentSteps(toolUseID: toolUseID, items: [step]))
         case .revert(let session, let checkpoint, let paths, let force):
             return .revert(try await revert(session: session, checkpoint: checkpoint, paths: paths, force: force))
+        case .rewind(let session, let at, let archive, let revision, let restoreFiles, let force):
+            return .rewound(try await rewind(session: session, at: at, archive: archive, revision: revision,
+                                             restoreFiles: restoreFiles, force: force))
+        case .retryCheckpoint(let session, let turn):
+            return .snapshot(try await retryCheckpoint(session: session, turn: turn))
         case .toolOutput(let session, let item):
             let known = queue.sync { entries[session]?.snapshot.items.contains { $0.id == item && $0.tool?.fullOutputBytes != nil } }
             guard let known else { throw ServiceError.unknownSession(session) }
             guard known else { throw ServiceError(.badRequest, "This tool's whole output isn't kept.") }
             let file = outputFile(session: session, item: item)
+            let writer = writer
             return .toolOutput(try await runBlocking {
+                writer.sync {} // The output is written by the persistence queue.
                 let data = try Data(contentsOf: file)
                 return AgentToolOutput(item: item, text: String(decoding: data, as: UTF8.self),
                                        truncated: data.count >= AgentToolOutput.maximumBytes)
@@ -421,50 +474,134 @@ final class AgentSessions: @unchecked Sendable {
         case .earlier(let session, let before, let limit):
             guard queue.sync(execute: { entries[session] != nil }) else { throw ServiceError.unknownSession(session) }
             return .earlier(try await earlierItems(session: session, before: before, limit: limit))
+        case .subagentEarlier(let session, let toolUseID, let before, let limit):
+            guard let project = queue.sync(execute: { entries[session]?.snapshot.project }) else { throw ServiceError.unknownSession(session) }
+            let store = subagentStore
+            return .earlier(try await runBlocking {
+                store.earlier(session: session, project: project, toolUseID: toolUseID, before: before, limit: limit)
+            })
+        case .searchEarlier(let session, let query, let before):
+            guard queue.sync(execute: { entries[session] != nil }) else { throw ServiceError.unknownSession(session) }
+            let file = queue.sync { earlierFile(session: session) }
+            let writer = writer
+            return .archiveSearch(try await runBlocking {
+                writer.sync {}
+                return AgentArchiveSearch.search(file: file, query: query, before: before)
+            })
         case .readSince(let session, let revision):
             return .delta(try queue.sync { () throws -> AgentChatDelta in
                 guard let entry = entries[session] else { throw ServiceError.unknownSession(session) }
                 return delta(entry, since: revision)
             })
+        case .reopen(let session):
+            return .conversation(try queue.sync { try reopen(session) })
+        case .setRetention(let session, let retention):
+            return .conversation(try queue.sync { try setRetention(session, retention) })
+        case .delete(let session):
+            return .deleted(try await delete(session))
         }
     }
 
-    /// Restores files a turn changed to their state before it, on a blocking worker so
-    /// the sessions queue keeps serving. Refuses, changing nothing, when a target file was
-    /// changed since the turn, unless `force`.
+    /// Restores files a turn changed to their state before it, on the restore queue so the
+    /// sessions queue keeps serving. Admitted only while nothing Tab runs may change those
+    /// files, and holds back work that would until it ends; see `admitRestore`. Refuses,
+    /// changing nothing, when a target file was changed since the turn, unless `force`.
     private func revert(session: SessionId, checkpoint: String, paths: [String]?, force: Bool) async throws -> AgentRevertReply {
-        let known = queue.sync { entries[session]?.snapshot.turns?.contains { $0.checkpoint?.id == checkpoint } ?? false }
-        guard known else { throw ServiceError(.badRequest, "Checkpoint not found in this conversation") }
         let file = root.appendingPathComponent("checkpoints", isDirectory: true)
             .appendingPathComponent(session.description, isDirectory: true)
             .appendingPathComponent(checkpoint + ".json")
-        let reply = try await runBlocking { () throws -> AgentRevertReply in
-            let record = try JSONDecoder().decode(AgentCheckpointRecord.self, from: Data(contentsOf: file))
-            let changed = Set(record.files.map(\.path))
-            let targets = paths ?? record.files.map(\.path)
-            guard !targets.isEmpty, targets.allSatisfy(changed.contains) else {
-                throw ServiceError(.badRequest, "Only files this turn changed can be reverted")
-            }
-            let store = AgentCheckpointStore()
-            if !force {
-                let conflicts = try store.changedSince(record.after, paths: targets)
-                if !conflicts.isEmpty { return AgentRevertReply(conflicts: conflicts) }
-            }
-            try store.restore(record.before, paths: targets)
-            return AgentRevertReply(reverted: targets)
-        }
-        if !reply.reverted.isEmpty {
+        let folders = try await workspaceFolders(session)
+        let store = checkpointStore
+        return try await withCheckedThrowingContinuation { continuation in
             queue.async { [self] in
-                guard let entry = entries[session], entry.snapshot.status != .closed else { return }
-                let count = reply.reverted.count
-                entry.snapshot.items.append(observedItem(AgentChatItem(kind: .notice,
-                    text: "Reverted \(count == 1 ? "1 file" : "\(count) files") to before a turn."), entry: entry))
-                touch(entry)
-                persist(entry)
+                do {
+                    guard let entry = entries[session], entry.snapshot.turns?.contains(where: { $0.checkpoint?.id == checkpoint }) == true else {
+                        throw ServiceError(.badRequest, "Checkpoint not found in this conversation")
+                    }
+                    let token = try admitRestore(entry, folders: folders, restoresFiles: true)
+                    restoreQueue.async { [self] in
+                        let result = Result { () throws -> AgentRevertReply in
+                            let record = try JSONDecoder().decode(AgentCheckpointRecord.self, from: Data(contentsOf: file))
+                            return try AgentRestoreWork.revert(record, paths: paths, force: force, store: store)
+                        }
+                        queue.sync {
+                            if case .success(let reply) = result, !reply.reverted.isEmpty,
+                               entries[session] === entry, entry.snapshot.status != .closed {
+                                let count = reply.reverted.count
+                                entry.snapshot.items.append(observedItem(AgentChatItem(kind: .notice,
+                                    text: "Reverted \(count == 1 ? "1 file" : "\(count) files") to before a turn."), entry: entry))
+                                touch(entry)
+                                persist(entry)
+                            }
+                            finishRestore(token, entry: entry)
+                        }
+                        restoreWork.leave()
+                        continuation.resume(with: result)
+                    }
+                } catch { continuation.resume(throwing: error) }
             }
         }
-        return reply
     }
+
+    /// Every conversation's folder as the disk has it now, read off the sessions queue, with
+    /// the folder of `session` first checked to exist.
+    private func workspaceFolders(_ session: SessionId) async throws -> [String: AgentWorkspaceFolder] {
+        let directories = try queue.sync { () throws -> Set<String> in
+            guard entries[session] != nil else { throw ServiceError.unknownSession(session) }
+            return Set(entries.values.map(\.directory))
+        }
+        return await (try? runBlocking { Dictionary(uniqueKeysWithValues: directories.map { ($0, AgentWorkspaceFolder($0)) }) }) ?? [:]
+    }
+
+    /// Reserves `entry`'s folder for a restore, or says why it can't be: the server is stopping,
+    /// another restore is changing the same files, or work Tab runs there, in this conversation
+    /// or another, may change them. While reserved, no conversation in the folder starts a turn,
+    /// steers one, delivers from its queue or clears. Call on `queue`; the caller must call
+    /// `finishRestore` on `queue` and then leave `restoreWork`.
+    private func admitRestore(_ entry: Entry, folders: [String: AgentWorkspaceFolder], restoresFiles: Bool) throws -> UUID {
+        guard !stopping else { throw ServiceError(.badRequest, "The server is stopping") }
+        var folder: AgentWorkspaceFolder?
+        if restoresFiles {
+            guard let read = folders[entry.directory] else { throw AgentRuntimeError("This conversation's folder couldn't be read. Try again.") }
+            folder = read
+        }
+        if entry.reverts > 0 || restoring.values.contains(where: { $0.blocks(entry.snapshot.session, directory: entry.directory) })
+            || folder.map({ mine in restoring.values.contains { $0.folder?.overlaps(mine) == true } }) == true {
+            throw AgentRuntimeError("Another revert is being applied in this folder. Try again when it finishes.")
+        }
+        var holds: Set<SessionId> = [entry.snapshot.session]
+        // This conversation's own work explains itself first.
+        for other in [entry] + entries.values.filter({ $0 !== entry }) where other === entry || folder.map({ mine in
+            folders[other.directory].map(mine.overlaps) ?? mine.overlaps(path: other.directory) }) == true {
+            let own = other === entry
+            if !own, other.snapshot.status == .closed, other.runtime == nil { continue }
+            if let reason = AgentRestoreWork.blocker(own: own, submitting: other.submitting, delivering: other.deliveryID != nil,
+                    status: other.snapshot.status, runningAgents: other.snapshot.subagents?.contains(where: { $0.status == .running }) == true,
+                    capturing: other.capturing > 0, resetting: other.resetting) {
+                throw AgentRuntimeError(reason)
+            }
+            holds.insert(other.snapshot.session)
+        }
+        let token = UUID()
+        restoring[token] = AgentRestoreReservation(folder: folder, holds: holds)
+        entry.reverts += 1
+        restoreWork.enter()
+        return token
+    }
+
+    /// Releases a restore's reservation and lets the work it held back go on. Call on `queue`.
+    private func finishRestore(_ token: UUID, entry: Entry) {
+        let held = restoring.removeValue(forKey: token)?.holds ?? []
+        entry.reverts -= 1
+        for session in held { if let other = entries[session] { drainInbox(other) } }
+    }
+
+    /// Why `entry` may not start work that changes files now: a restore is changing its folder.
+    private func restoreHoldsWork(_ entry: Entry) -> Bool {
+        entry.reverts > 0 || restoring.values.contains { $0.blocks(entry.snapshot.session, directory: entry.directory) }
+    }
+
+    private static let restoreHoldMessage = "Files are being restored in this folder. Your message wasn't sent; send it again when the restore finishes."
 
     func checkpoint(_ request: AgentCheckpointRequest) async throws -> AgentCheckpointReply {
         try request.validate()
@@ -475,6 +612,7 @@ final class AgentSessions: @unchecked Sendable {
         let file = root.appendingPathComponent("checkpoints", isDirectory: true)
             .appendingPathComponent(request.session.description, isDirectory: true)
             .appendingPathComponent(request.checkpoint + ".json")
+        let store = checkpointStore
         return try await runBlocking {
             let record = try JSONDecoder().decode(AgentCheckpointRecord.self, from: Data(contentsOf: file))
             guard request.offset <= record.files.count else { throw ServiceError(.badRequest, "Invalid checkpoint page") }
@@ -485,7 +623,7 @@ final class AgentSessions: @unchecked Sendable {
                 guard let file = record.files.first(where: { $0.path == path }) else {
                     throw ServiceError(.badRequest, "File is not part of this checkpoint")
                 }
-                var content = try AgentCheckpointStore().diff(from: record.before, to: record.after, path: path)
+                var content = try store.diff(from: record.before, to: record.after, path: path, context: request.context ?? 3)
                 content.additions = file.additions ?? 0
                 content.deletions = file.deletions ?? 0
                 content.binary = file.additions == nil || file.deletions == nil
@@ -496,7 +634,8 @@ final class AgentSessions: @unchecked Sendable {
                 diff = content
             }
             let reply = AgentCheckpointReply(checkpoint: request.checkpoint, files: files,
-                totalFiles: record.files.count, nextOffset: end < record.files.count ? end : nil, path: request.path, diff: diff)
+                totalFiles: record.files.count, nextOffset: end < record.files.count ? end : nil, path: request.path, diff: diff,
+                context: request.path == nil ? nil : request.context ?? 3)
             try reply.validate()
             return reply
         }
@@ -531,7 +670,9 @@ final class AgentSessions: @unchecked Sendable {
         case .clear(let session, _, _), .read(let session), .send(let session, _, _, _, _, _), .approve(let session, _, _, _, _),
              .interrupt(let session), .close(let session), .setAccess(let session, _), .setPlan(let session, _): id = session
         case .submit(let session, _), .editQueued(let session, _, _, _, _), .removeQueued(let session, _, _),
-             .deliverQueued(let session, _, _), .moveQueued(let session, _, _, _), .resumeQueue(let session), .answer(let session, _, _, _): id = session
+             .deliverQueued(let session, _, _), .moveQueued(let session, _, _, _), .resumeQueue(let session), .answer(let session, _, _, _),
+             .editQueuedPrompt(let session, _, _, _),
+             .decide(let session, _, _, _), .schedule(let session, _, _): id = session
         case .create, .fork: throw ServiceError(.badRequest, "Unexpected create")
         }
         guard let entry = entries[id] else { throw ServiceError.unknownSession(id) }
@@ -630,6 +771,7 @@ final class AgentSessions: @unchecked Sendable {
             guard entry.deliveryID == nil || entry.deliveryID == deliveryID else {
                 throw ServiceError(.badRequest, "A queued prompt is being delivered.")
             }
+            if restoreHoldsWork(entry) { throw AgentRuntimeError(Self.restoreHoldMessage) }
             _ = try projectDirectory(entry.snapshot.project)
             try checkDirectory(entry.directory)
             if !entry.submitting, entry.snapshot.status == .working, let runtime = entry.runtime {
@@ -745,30 +887,51 @@ final class AgentSessions: @unchecked Sendable {
             entry.snapshot.provider = provider
             let user = AgentChatItem(id: userID, kind: .user, text: text,
                                      attachments: attachments?.map(\.descriptor))
+            let firstMessage = !entry.snapshot.items.contains { $0.kind == .user && !$0.isProviderTurn }
             entry.snapshot.items.append(observedItem(user, entry: entry))
-            entry.snapshot.turns = (entry.snapshot.turns ?? []) + [AgentChatTurn(userItemID: user.id, startedAt: Date())]
             if let session = entry.snapshot.providerSession, let message = entry.lastProviderMessage {
                 entry.turnForkPoints[user.id] = ForkPoint(session: session, message: message)
             }
+            // A turn begun since makes an earlier failed recording's result include its work.
+            for index in (entry.snapshot.turns ?? []).indices where entry.snapshot.turns?[index].checkpointStatus?.retryable == true {
+                entry.snapshot.turns?[index].checkpointStatus?.retryable = false
+            }
+            var turn = AgentChatTurn(userItemID: user.id, startedAt: Date())
+            turn.checkpointStatus = AgentChatTurn.checkpointCapturing
+            turn.rewindable = provider == .claude && (firstMessage || entry.turnForkPoints[user.id] != nil)
+            entry.snapshot.turns = (entry.snapshot.turns ?? []) + [turn]
             let priorCheckpoint = entry.checkpointTask
             let captureDirectory = entry.directory
             let pendingDirectory = root.appendingPathComponent("checkpoints", isDirectory: true)
                 .appendingPathComponent(id.description, isDirectory: true)
-            entry.baselineTask = Task {
+            let store = checkpointStore
+            entry.capturing += 1
+            entry.baselineTask = Task { [weak self] in
                 await priorCheckpoint?.value
-                return try? await runBlocking {
-                    let store = AgentCheckpointStore()
-                    let before = try store.capture(directory: captureDirectory)
-                    do {
-                        try FileManager.default.createDirectory(at: pendingDirectory, withIntermediateDirectories: true)
-                        try JSONEncoder().encode(AgentCheckpointPending(turnID: user.id, before: before))
-                            .write(to: pendingDirectory.appendingPathComponent("pending-" + user.id + ".json"), options: .atomic)
-                        return before
-                    } catch {
-                        try? store.remove(before)
-                        throw error
-                    }
+                let result: Result<AgentCheckpointStore.Snapshot, Error>
+                do {
+                    result = .success(try await runBlocking {
+                        let before = try store.capture(directory: captureDirectory)
+                        do {
+                            try FileManager.default.createDirectory(at: pendingDirectory, withIntermediateDirectories: true)
+                            try JSONEncoder().encode(AgentCheckpointPending(turnID: user.id, before: before))
+                                .write(to: pendingDirectory.appendingPathComponent("pending-" + user.id + ".json"), options: .atomic)
+                            return before
+                        } catch {
+                            try? store.remove(before)
+                            throw error
+                        }
+                    })
+                } catch { result = .failure(error) }
+                self?.queue.async { [weak self] in
+                    entry.capturing -= 1
+                    guard case .failure(let error) = result else { return }
+                    ServerLog.error("agent checkpoint baseline unavailable: \(error)")
+                    let untracked = error as? AgentCheckpointUnavailable == .notRepository
+                    self?.setCheckpointStatus(entry, turnID: user.id, .init(state: untracked ? .untracked : .unavailable,
+                        reason: error.localizedDescription, retryable: false))
                 }
+                return try? result.get()
             }
             entry.snapshot.model = model
             entry.snapshot.reasoningEffort = effort
@@ -803,6 +966,27 @@ final class AgentSessions: @unchecked Sendable {
                 alwaysTool = item.text
             }
         }
+        if case .decide(_, let request, let decision, let answers) = request {
+            // A retry of a decision that already landed gets the conversation as it is.
+            if entry.snapshot.items.contains(where: { $0.id == request && $0.isComplete && $0.approval?.outcome?.decision == decision }) {
+                continuation.resume(returning: entry.snapshot)
+                return
+            }
+            guard !entry.submitting, entry.snapshot.status == .waiting, !entry.approving.contains(request), entry.runtime != nil,
+                  let item = entry.snapshot.items.first(where: { $0.id == request && $0.kind == .approval && !$0.isComplete }),
+                  let offered = item.approval?.decision(decision) else {
+                throw ServiceError(.badRequest, "This request is no longer pending, or that option isn't offered.")
+            }
+            if offered.kind == .submit {
+                guard let form = item.questionnaire else { throw ServiceError(.badRequest, "This request has no form.") }
+                try form.validate(answers: answers ?? [:], cancelled: false)
+            } else if answers != nil {
+                throw ServiceError(.badRequest, "Only a form's submit takes answers.")
+            }
+            if offered.kind == .allowAlways, entry.snapshot.provider == .claude, AgentApprovalScope.canAlwaysAllow(item.text) {
+                alwaysTool = item.text
+            }
+        }
         if entry.runtime == nil {
             guard case .send = request else {
                 continuation.resume(returning: entry.snapshot)
@@ -832,6 +1016,7 @@ final class AgentSessions: @unchecked Sendable {
         let accessTask = entry.accessTask
         let baselineTask = entry.baselineTask
         if case .approve(_, let request, _, _, _) = request { entry.approving.insert(request) }
+        if case .decide(_, let request, _, _) = request { entry.approving.insert(request) }
         if case .interrupt = request {
             guard entry.interrupting == nil else { throw ServiceError(.badRequest, "An interrupt is already pending") }
             entry.interrupting = UUID()
@@ -879,6 +1064,8 @@ final class AgentSessions: @unchecked Sendable {
                 case .approve(_, let request, let allow, let always, let reason):
                     try await runtime.approve(request: request, allow: allow, always: always == true, reason: reason)
                 case .answer(_, let request, let answers, let cancelled): try await runtime.answer(request: request, answers: answers, cancelled: cancelled)
+                case .decide(_, let request, let decision, let answers):
+                    try await runtime.decide(request: request, decision: decision, answers: answers)
                 case .interrupt: try await runtime.interrupt()
                 default: break
                 }
@@ -893,6 +1080,7 @@ final class AgentSessions: @unchecked Sendable {
                     if case .send = request { entry.submitting = false }
                     if case .approve(_, let request, _, _, _) = request { entry.approving.remove(request) }
                     if case .answer(_, let request, _, _) = request { entry.approving.remove(request) }
+                    if case .decide(_, let request, _, _) = request { entry.approving.remove(request) }
                     if let failure {
                         if case .interrupt = request {
                             // The provider refused or couldn't take the stop, so its process is
@@ -925,7 +1113,7 @@ final class AgentSessions: @unchecked Sendable {
                             }
                             touch(entry)
                         }
-                    } else if case .approve(_, let approval, _, _, _) = request {
+                    } else if let approval = Self.answeredRequest(request) {
                         if let alwaysTool { entry.alwaysAllowedTools.insert(alwaysTool) }
                         if let index = entry.snapshot.items.firstIndex(where: { $0.id == approval }) {
                             entry.snapshot.items[index].isComplete = true
@@ -1069,6 +1257,8 @@ final class AgentSessions: @unchecked Sendable {
             let listed = subagents.isEmpty ? nil : subagents.prefix(AgentSubagent.maxCount).map { agent in
                 var agent = agent
                 agent.steps = agent.toolUseID.flatMap { entry.subagentSteps[$0]?.count }
+                agent.stepsRevision = agent.toolUseID.flatMap { subagentStore.revision(session: session, toolUseID: $0) }
+                subagentStore.update(session: session, agent: agent)
                 return agent
             }
             guard entry.snapshot.subagents != listed else { return }
@@ -1081,10 +1271,16 @@ final class AgentSessions: @unchecked Sendable {
                }) {
                 entry.subagentSteps.removeValue(forKey: oldest)
             }
+            let previous = entry.subagentSteps[toolUseID]
             entry.subagentSteps[toolUseID] = items
-            guard let index = entry.snapshot.subagents?.firstIndex(where: { $0.toolUseID == toolUseID }),
-                  entry.snapshot.subagents?[index].steps != items.count else { return }
+            let index = entry.snapshot.subagents?.firstIndex(where: { $0.toolUseID == toolUseID })
+            // Steps that changed in place leave their count alone; the revision tells clients.
+            guard let revision = subagentStore.record(session: session, project: entry.snapshot.project, toolUseID: toolUseID,
+                                                      agent: index.flatMap { entry.snapshot.subagents?[$0] },
+                                                      previous: previous, items: items, revision: entry.snapshot.revision &+ 1),
+                  let index else { return }
             entry.snapshot.subagents?[index].steps = items.count
+            entry.snapshot.subagents?[index].stepsRevision = revision
         case .turnUsage(let usage):
             guard let index = entry.snapshot.turns?.indices.last, entry.snapshot.turns?[index].completedAt == nil else { return }
             entry.snapshot.turns?[index].usage = usage
@@ -1118,6 +1314,7 @@ final class AgentSessions: @unchecked Sendable {
             entry.snapshot.resolvedModel = model
         case .failure(let message):
             entry.snapshot.status = .failed
+            noteRateLimit(entry)
             updateTurn(entry, status: .failed, outcome: .failed)
             entry.snapshot.items.append(observedItem(AgentChatItem(kind: .notice, text: message,
                 workContext: .init(itemType: "error", sourceStatus: "failed")), entry: entry))
@@ -1331,14 +1528,19 @@ final class AgentSessions: @unchecked Sendable {
         entry.deliveryCancelled = true
         if !entry.inbox.visible.isEmpty {
             do {
+                // Queued prompts the user agreed to cancel go; ones that may have reached
+                // the agent stay, held for review when the conversation is reopened.
                 try mutateInbox(entry) { inbox in
                     inbox.paused = true
-                    for index in inbox.records.indices { inbox.records[index].prompt = nil; inbox.records[index].display = nil }
+                    for index in inbox.records.indices where inbox.records[index].display?.state == .queued {
+                        inbox.records[index].prompt = nil; inbox.records[index].display = nil
+                    }
                 }
             } catch { entry.snapshot.items.append(AgentChatItem(kind: .notice, text: "Could not save queue cancellation: " + error.localizedDescription)) }
         }
         retireRuntime(entry)
         entry.snapshot.status = .closed
+        entry.closedAt = now()
         updateTurn(entry, status: .closed, outcome: .cancelled)
         Self.finishItems(&entry.snapshot.items)
         touch(entry)
@@ -1352,6 +1554,9 @@ final class AgentSessions: @unchecked Sendable {
         guard !stopping, entry.snapshot.revision == revision, entries[id] == nil else {
             throw AgentRuntimeError("The conversation changed. Review it before clearing.")
         }
+        guard !restoreHoldsWork(entry) else {
+            throw AgentRuntimeError("Files are being restored for this conversation. Clear it when the restore finishes.")
+        }
         guard !entry.submitting, entry.deliveryID == nil,
               entry.snapshot.status == .idle || entry.snapshot.status == .failed || entry.snapshot.status == .closed,
               entry.inbox.visible.isEmpty,
@@ -1364,7 +1569,8 @@ final class AgentSessions: @unchecked Sendable {
         archived.session = id; archived.status = .closed; archived.resetID = nil
         let saved = Saved(turnForkPoints: entry.turnForkPoints, snapshot: archived, directory: entry.directory,
             hasSuccessfulTurn: entry.hasSuccessfulTurn, forkSource: entry.forkSource, forkPoint: entry.forkPoint,
-            lastProviderMessage: entry.lastProviderMessage, archived: true)
+            lastProviderMessage: entry.lastProviderMessage, archived: true, closedAt: now(),
+            retention: entry.retention == .keep ? nil : entry.retention)
         var fresh = AgentChatSnapshot(session: session, project: archived.project, provider: archived.provider,
             model: archived.model, reasoningEffort: archived.reasoningEffort, accessMode: archived.accessMode,
             revision: archived.revision + 1)
@@ -1378,7 +1584,8 @@ final class AgentSessions: @unchecked Sendable {
         writer.async { [self] in
             do {
                 // Copy before committing: a failed archive leaves the original readable.
-                for folder in ["attachments", "outputs", "checkpoints"] {
+                subagentStore.release(session)
+                for folder in ["attachments", "outputs", "checkpoints", AgentSubagentStore.folder] {
                     let source = root.appendingPathComponent(folder + "/" + session.description)
                     let target = root.appendingPathComponent(folder + "/" + id.description)
                     if FileManager.default.fileExists(atPath: source.path), !FileManager.default.fileExists(atPath: target.path) {
@@ -1395,7 +1602,7 @@ final class AgentSessions: @unchecked Sendable {
                 retainedCheckpointIDs[session] = []
                 // The archive now owns these files and Git refs. Retiring the old
                 // session's checkpoints later must not delete the archive's refs.
-                let originals = ["attachments", "outputs", "checkpoints"].map { root.appendingPathComponent($0 + "/" + session.description) } + [oldEarlier]
+                let originals = ["attachments", "outputs", "checkpoints", AgentSubagentStore.folder].map { root.appendingPathComponent($0 + "/" + session.description) } + [oldEarlier]
                 for original in originals where FileManager.default.fileExists(atPath: original.path) {
                     do { try FileManager.default.removeItem(at: original) }
                     catch { ServerLog.error("cleared conversation files could not be retired: \(error)") }
@@ -1406,6 +1613,8 @@ final class AgentSessions: @unchecked Sendable {
                     replacement.inbox = entry.inbox
                     let archive = Entry(previous, directory: entry.directory)
                     archive.archived = true
+                    archive.closedAt = saved.closedAt
+                    archive.retention = entry.retention
                     archive.turnForkPoints = entry.turnForkPoints
                     archive.forkSource = entry.forkSource; archive.forkPoint = entry.forkPoint
                     archive.lastProviderMessage = entry.lastProviderMessage
@@ -1510,6 +1719,7 @@ final class AgentSessions: @unchecked Sendable {
             entry.snapshot.items.append(AgentChatItem(kind: .notice, text: AgentRuntime.stoppedAgents(running, because: reason)))
         }
         entry.subagentSteps.removeAll()
+        subagentStore.providerEnded(session: entry.snapshot.session)
         entry.pendingSubmission?.task?.cancel()
         entry.generation = UUID()
         let runtime = entry.runtime
@@ -1627,7 +1837,7 @@ final class AgentSessions: @unchecked Sendable {
         return item
     }
 
-    private func updateTurn(_ entry: Entry, status: AgentChatStatus, outcome: AgentChatTurn.Outcome? = nil) {
+    func updateTurn(_ entry: Entry, status: AgentChatStatus, outcome: AgentChatTurn.Outcome? = nil) {
         guard var turns = entry.snapshot.turns, let index = turns.indices.last,
               turns[index].completedAt == nil else { return }
         let now = Date()
@@ -1653,11 +1863,20 @@ final class AgentSessions: @unchecked Sendable {
             if let data = try? Data(contentsOf: directory.appendingPathComponent(id + ".json")),
                let record = try? JSONDecoder().decode(AgentCheckpointRecord.self, from: data) {
                 turns[index].checkpoint = record.summary(id: id)
+                turns[index].checkpointStatus = AgentChatTurn.checkpointReady
             } else if index == turns.indices.last,
                       let data = try? Data(contentsOf: directory.appendingPathComponent("pending-" + id + ".json")),
                       let value = try? JSONDecoder().decode(AgentCheckpointPending.self, from: data),
                       value.turnID == id, value.before.directory == entry.directory {
                 pending = value
+                turns[index].checkpointStatus = AgentChatTurn.checkpointCapturing
+            } else if turns[index].checkpointStatus?.state == .capturing {
+                // The server stopped before the turn's baseline was saved, or after a later
+                // turn began; what the turn changed can't be told apart now.
+                turns[index].checkpointStatus = .init(state: .unavailable,
+                    reason: "Tab stopped before this turn's file changes were recorded.", retryable: false)
+            } else if turns[index].checkpointStatus?.retryable == true, index != turns.indices.last {
+                turns[index].checkpointStatus?.retryable = false
             }
         }
         entry.snapshot.turns = turns
@@ -1674,11 +1893,16 @@ final class AgentSessions: @unchecked Sendable {
         let directory = entry.directory
         let destination = root.appendingPathComponent("checkpoints", isDirectory: true)
             .appendingPathComponent(entry.snapshot.session.description, isDirectory: true)
+        let store = checkpointStore
+        entry.capturing += 1
         entry.checkpointTask = Task { [weak self] in
-            guard let before = await baseline.value else { return }
+            guard let before = await baseline.value else {
+                self?.queue.async { entry.capturing -= 1 }
+                return
+            }
+            let result: Result<AgentTurnCheckpoint, Error>
             do {
-                let summary = try await runBlocking {
-                    let store = AgentCheckpointStore()
+                result = .success(try await runBlocking {
                     let after = try store.capture(directory: directory)
                     do {
                         let files = try store.files(from: before, to: after)
@@ -1691,17 +1915,304 @@ final class AgentSessions: @unchecked Sendable {
                         try? store.remove(after)
                         throw error
                     }
-                }
-                self?.queue.async { [weak self] in
-                    guard let self, !self.stopping, !entry.resetting, self.entries[entry.snapshot.session] === entry,
-                          let index = entry.snapshot.turns?.firstIndex(where: { $0.userItemID == turnID }) else { return }
+                })
+            } catch {
+                // Keep the durable baseline pinned so a retry or restart recovery can try again.
+                ServerLog.error("agent checkpoint unavailable: \(error)")
+                result = .failure(error)
+            }
+            self?.queue.async { [weak self] in
+                entry.capturing -= 1
+                guard let self, !self.stopping, !entry.resetting, self.entries[entry.snapshot.session] === entry,
+                      let index = entry.snapshot.turns?.firstIndex(where: { $0.userItemID == turnID }) else { return }
+                switch result {
+                case .success(let summary):
                     entry.snapshot.turns?[index].checkpoint = summary
-                    self.touch(entry)
-                    self.persist(entry)
+                    entry.snapshot.turns?[index].checkpointStatus = AgentChatTurn.checkpointReady
+                case .failure(let error):
+                    let latest = index == (entry.snapshot.turns?.count ?? 0) - 1
+                    entry.snapshot.turns?[index].checkpointStatus = .init(state: .unavailable,
+                        reason: error.localizedDescription, retryable: latest)
+                }
+                self.touch(entry)
+                self.persist(entry)
+            }
+        }
+    }
+
+    /// Sets the checkpoint status of the turn `turnID` began, unless it has its checkpoint.
+    private func setCheckpointStatus(_ entry: Entry, turnID: String, _ status: AgentTurnCheckpointStatus) {
+        guard !stopping, !entry.resetting, entries[entry.snapshot.session] === entry,
+              let index = entry.snapshot.turns?.firstIndex(where: { $0.userItemID == turnID }),
+              entry.snapshot.turns?[index].checkpoint == nil else { return }
+        entry.snapshot.turns?[index].checkpointStatus = status
+        touch(entry)
+        persist(entry)
+    }
+
+    /// Records the turn's file changes again from its saved baseline, after recording them
+    /// failed. Only the latest turn, once it ended, while its baseline is still pinned.
+    private func retryCheckpoint(session: SessionId, turn: String) async throws -> AgentChatSnapshot {
+        let pendingFile = root.appendingPathComponent("checkpoints", isDirectory: true)
+            .appendingPathComponent(session.description, isDirectory: true)
+            .appendingPathComponent("pending-" + turn + ".json")
+        let directory = try queue.sync { () throws -> String in
+            guard let entry = entries[session] else { throw ServiceError.unknownSession(session) }
+            return entry.directory
+        }
+        let pending: AgentCheckpointPending? = try await runBlocking {
+            guard let data = try? Data(contentsOf: pendingFile),
+                  let value = try? JSONDecoder().decode(AgentCheckpointPending.self, from: data),
+                  value.turnID == turn, value.before.directory == directory,
+                  GitCommand().optionalText(directory, ["rev-parse", "--verify", "--quiet", value.before.reference]) != nil else { return nil }
+            return value
+        }
+        return try queue.sync { () throws -> AgentChatSnapshot in
+            guard !stopping, let entry = entries[session], !entry.resetting else {
+                throw ServiceError(.badRequest, "The agent session is closed or the server is stopping")
+            }
+            guard let index = entry.snapshot.turns?.firstIndex(where: { $0.userItemID == turn }),
+                  let status = entry.snapshot.turns?[index].checkpointStatus, status.state == .unavailable,
+                  entry.snapshot.turns?[index].checkpoint == nil else {
+                throw ServiceError(.badRequest, "This turn's file changes aren't waiting to be recorded again.")
+            }
+            guard status.retryable == true, index == (entry.snapshot.turns?.count ?? 0) - 1,
+                  entry.snapshot.turns?[index].completedAt != nil, entry.baselineTask == nil, entry.capturing == 0 else {
+                throw AgentRuntimeError("Recording can be tried again only for the latest finished turn.")
+            }
+            guard let pending else {
+                entry.snapshot.turns?[index].checkpointStatus = .init(state: .unavailable,
+                    reason: "The turn's original baseline is gone, so its file changes can't be recorded.", retryable: false)
+                touch(entry)
+                persist(entry)
+                throw AgentRuntimeError("The turn's original baseline is gone, so its file changes can't be recorded.")
+            }
+            entry.snapshot.turns?[index].checkpointStatus = AgentChatTurn.checkpointCapturing
+            entry.baselineTask = Task { pending.before }
+            captureCompletedTurn(entry, turnID: turn)
+            touch(entry)
+            return entry.snapshot
+        }
+    }
+
+    /// Edit from Here; see `AgentConversationRequest.rewind`. Files are restored first, under a
+    /// reservation like a revert's; only once that succeeds is the conversation archived whole
+    /// and rewound, so a refusal or failure leaves the transcript, provider context and files
+    /// as they were, or says exactly which files changed.
+    private func rewind(session: SessionId, at: String, archive id: SessionId, revision: UInt64,
+                        restoreFiles: Bool, force: Bool) async throws -> AgentRewindReply {
+        let folders = restoreFiles ? try await workspaceFolders(session) : [:]
+        let directory = root.appendingPathComponent("checkpoints", isDirectory: true)
+            .appendingPathComponent(session.description, isDirectory: true)
+        let store = checkpointStore
+        return try await withCheckedThrowingContinuation { continuation in
+            queue.async { [self] in
+                do {
+                    guard let entry = entries[session] else { throw ServiceError.unknownSession(session) }
+                    let affected = try rewindTurns(entry, at: at, archive: id, revision: revision)
+                    if restoreFiles, let missing = affected.first(where: { $0.checkpoint == nil }) {
+                        let number = (entry.snapshot.turns?.firstIndex(of: missing) ?? 0) + 1
+                        throw AgentRuntimeError("Turn \(number) has no recorded file changes, so files can't be restored. Rewind and keep the files instead.")
+                    }
+                    let token = try admitRestore(entry, folders: folders, restoresFiles: restoreFiles)
+                    let checkpoints = restoreFiles ? affected.compactMap { $0.checkpoint?.id } : []
+                    restoreQueue.async { [self] in
+                        let files = Result { () throws -> AgentRevertReply in
+                            let records = try checkpoints.map {
+                                try JSONDecoder().decode(AgentCheckpointRecord.self, from: Data(contentsOf: directory.appendingPathComponent($0 + ".json")))
+                            }
+                            return try AgentRestoreWork.rewind(records, force: force, store: store)
+                        }
+                        queue.async { [self] in
+                            defer { restoreWork.leave() }
+                            let reply = Reply { result in
+                                continuation.resume(with: result.map { AgentRewindReply(snapshot: $0, files: (try? files.get()) ?? AgentRevertReply()) })
+                            }
+                            do {
+                                let restored = try files.get()
+                                guard restored.conflicts.isEmpty else {
+                                    finishRestore(token, entry: entry)
+                                    continuation.resume(returning: AgentRewindReply(snapshot: nil, files: restored))
+                                    return
+                                }
+                                do {
+                                    _ = try rewindTurns(entry, at: at, archive: id, revision: revision, restoring: true)
+                                } catch {
+                                    finishRestore(token, entry: entry)
+                                    guard restored.reverted.isEmpty else {
+                                        throw AgentRuntimeError("Restored \(restored.reverted.joined(separator: ", ")), but the conversation changed meanwhile, so it wasn't rewound: \(error.localizedDescription)")
+                                    }
+                                    throw error
+                                }
+                                commitRewind(entry, at: at, archive: id, token: token, restoredFiles: restored.reverted, reply: reply)
+                            } catch {
+                                if restoring[token] != nil { finishRestore(token, entry: entry) }
+                                continuation.resume(throwing: error)
+                            }
+                        }
+                    }
+                } catch { continuation.resume(throwing: error) }
+            }
+        }
+    }
+
+    /// The turns rewinding `entry` to before its user message `at` removes, oldest first, or
+    /// why it can't be rewound there now. With `restoring`, its own restore is under way.
+    private func rewindTurns(_ entry: Entry, at: String, archive id: SessionId, revision: UInt64,
+                             restoring: Bool = false) throws -> [AgentChatTurn] {
+        guard !stopping else { throw ServiceError(.badRequest, "The server is stopping") }
+        guard !entry.resetting else { throw AgentRuntimeError("The conversation is being cleared. Try again shortly.") }
+        guard entry.snapshot.status != .closed else { throw ServiceError(.badRequest, "The agent session is closed") }
+        guard entry.snapshot.revision == revision, entries[id] == nil else {
+            throw AgentRuntimeError("The conversation changed. Review it before editing from here.")
+        }
+        guard entry.snapshot.provider == .claude else {
+            throw ServiceError(.badRequest, "\(entry.snapshot.provider.name) can't continue from an earlier message. Use Edit as New Prompt or start a new conversation.")
+        }
+        guard entry.snapshot.items.contains(where: { $0.id == at && $0.kind == .user && !$0.isProviderTurn }),
+              let index = entry.snapshot.turns?.firstIndex(where: { $0.userItemID == at }),
+              entry.snapshot.turns?[index].rewindable == true else {
+            throw ServiceError(.badRequest, "This conversation can't be rewound to that message.")
+        }
+        guard !entry.submitting, entry.deliveryID == nil,
+              entry.snapshot.status == .idle || entry.snapshot.status == .failed,
+              entry.inbox.visible.isEmpty,
+              entry.snapshot.subagents?.contains(where: { $0.status == .running }) != true else {
+            throw AgentRuntimeError("Stop active work and remove queued prompts before editing from here. Your conversation is kept.")
+        }
+        guard restoring || !restoreHoldsWork(entry) else {
+            throw AgentRuntimeError("Files are being restored for this conversation. Try again when it finishes.")
+        }
+        guard entry.capturing == 0 else { throw AgentRuntimeError("Tab is still recording the last turn's changes. Try again shortly.") }
+        return Array(entry.snapshot.turns?[index...] ?? [])
+    }
+
+    /// Archives `entry` whole as `id`, as a clear does, and leaves it holding only what came
+    /// before its message `at`, its provider continuing from the message before it. The
+    /// archive owns the removed turns' checkpoints; the conversation keeps the rest.
+    private func commitRewind(_ entry: Entry, at: String, archive id: SessionId, token: UUID,
+                              restoredFiles: [String], reply: Reply) {
+        let session = entry.snapshot.session
+        guard let cut = entry.snapshot.items.firstIndex(where: { $0.id == at }),
+              let turnIndex = entry.snapshot.turns?.firstIndex(where: { $0.userItemID == at }) else {
+            finishRestore(token, entry: entry)
+            reply.resume(throwing: ServiceError(.badRequest, "This conversation can't be rewound to that message."))
+            return
+        }
+        let turns = entry.snapshot.turns ?? []
+        let removed = Set(turns[turnIndex...].map(\.userItemID))
+        let first = !entry.snapshot.items[..<cut].contains { $0.kind == .user && !$0.isProviderTurn }
+        let point = first ? nil : entry.turnForkPoints[at]
+        var archived = entry.snapshot
+        archived.session = id; archived.status = .closed; archived.resetID = nil
+        // The conversation keeps its earlier turns' checkpoints, so the archive doesn't show them.
+        archived.turns = turns.map { turn in
+            guard !removed.contains(turn.userItemID) else { return turn }
+            var kept = turn
+            kept.checkpoint = nil; kept.checkpointStatus = nil
+            return kept
+        }
+        let saved = Saved(turnForkPoints: entry.turnForkPoints, snapshot: archived, directory: entry.directory,
+            hasSuccessfulTurn: entry.hasSuccessfulTurn, forkSource: entry.forkSource, forkPoint: entry.forkPoint,
+            lastProviderMessage: entry.lastProviderMessage, archived: true, closedAt: now(),
+            retention: entry.retention == .keep ? nil : entry.retention)
+        var fresh = entry.snapshot
+        fresh.items = Array(entry.snapshot.items[..<cut])
+        fresh.turns = Array(turns[..<turnIndex])
+        fresh.revision = archived.revision + 1
+        fresh.status = .idle
+        fresh.resetID = id
+        fresh.providerSession = point?.session
+        fresh.contextUsage = nil
+        fresh.activity = nil
+        fresh.subagents = nil
+        let kept = Set(fresh.items.lazy.filter { $0.kind == .user }.map(\.id))
+        let forkPoints = entry.turnForkPoints.filter { kept.contains($0.key) }
+        fresh.items.append(AgentChatItem(kind: .notice, text: restoredFiles.isEmpty
+            ? "Rewound to before a message. The full conversation is kept in history."
+            : "Rewound to before a message and restored \(restoredFiles.count == 1 ? "1 file" : "\(restoredFiles.count) files"). The full conversation is kept in history."))
+        let replacement = Saved(turnForkPoints: forkPoints, alwaysAllowedTools: entry.alwaysAllowedTools.isEmpty ? nil : entry.alwaysAllowedTools.sorted(),
+            snapshot: fresh, directory: entry.directory, hasSuccessfulTurn: !first,
+            forkSource: point?.session, forkPoint: point?.message, lastProviderMessage: point?.message)
+        let oldEarlier = earlierFile(session: session)
+        let newEarlier = root.appendingPathComponent("earlier", isDirectory: true)
+            .appendingPathComponent(session.description + "-" + id.description + ".jsonl")
+        entry.resetting = true
+        retireRuntime(entry)
+        let next = fresh
+        let previous = archived
+        writer.async { [self] in
+            do {
+                // Copy before committing: a failed archive leaves the original readable. The
+                // conversation keeps its agents' steps too, since its earlier turns still show them.
+                subagentStore.release(session)
+                for folder in ["attachments", "outputs", AgentSubagentStore.folder] {
+                    let source = root.appendingPathComponent(folder + "/" + session.description)
+                    let target = root.appendingPathComponent(folder + "/" + id.description)
+                    if FileManager.default.fileExists(atPath: source.path), !FileManager.default.fileExists(atPath: target.path) {
+                        try FileManager.default.copyItem(at: source, to: target)
+                    }
+                }
+                let checkpoints = root.appendingPathComponent("checkpoints/" + session.description)
+                let archivedCheckpoints = root.appendingPathComponent("checkpoints/" + id.description)
+                var moved: [URL] = []
+                for file in (try? FileManager.default.contentsOfDirectory(at: checkpoints, includingPropertiesForKeys: nil)) ?? []
+                    where file.pathExtension == "json" {
+                    let name = file.deletingPathExtension().lastPathComponent
+                    guard removed.contains(name.hasPrefix("pending-") ? String(name.dropFirst(8)) : name) else { continue }
+                    try FileManager.default.createDirectory(at: archivedCheckpoints, withIntermediateDirectories: true)
+                    let target = archivedCheckpoints.appendingPathComponent(file.lastPathComponent)
+                    if !FileManager.default.fileExists(atPath: target.path) { try FileManager.default.copyItem(at: file, to: target) }
+                    moved.append(file)
+                }
+                let archivedEarlier = root.appendingPathComponent("earlier/" + id.description + ".jsonl")
+                if FileManager.default.fileExists(atPath: oldEarlier.path) {
+                    for target in [archivedEarlier, newEarlier] where !FileManager.default.fileExists(atPath: target.path) {
+                        try FileManager.default.copyItem(at: oldEarlier, to: target)
+                    }
+                }
+                try JSONEncoder().encode(saved).write(to: root.appendingPathComponent(id.description + ".json"), options: .atomic)
+                try JSONEncoder().encode(replacement).write(to: root.appendingPathComponent(session.description + ".json"), options: .atomic)
+                retainedCheckpointIDs[id] = removed
+                retainedCheckpointIDs[session] = (retainedCheckpointIDs[session] ?? []).subtracting(removed)
+                // The archive now owns the removed turns' records and Git refs.
+                for original in moved + (oldEarlier == newEarlier ? [] : [oldEarlier]) where FileManager.default.fileExists(atPath: original.path) {
+                    do { try FileManager.default.removeItem(at: original) }
+                    catch { ServerLog.error("rewound conversation files could not be retired: \(error)") }
+                }
+                queue.async { [self] in
+                    let replacementEntry = Entry(next, directory: entry.directory)
+                    replacementEntry.inbox = entry.inbox
+                    replacementEntry.hasSuccessfulTurn = !first
+                    replacementEntry.turnForkPoints = forkPoints
+                    replacementEntry.alwaysAllowedTools = entry.alwaysAllowedTools
+                    replacementEntry.forkSource = point?.session
+                    replacementEntry.forkPoint = point?.message
+                    replacementEntry.lastProviderMessage = point?.message
+                    // The reservation moves to the conversation that replaces this one.
+                    replacementEntry.reverts = entry.reverts
+                    let archiveEntry = Entry(previous, directory: entry.directory)
+                    archiveEntry.archived = true
+                    archiveEntry.closedAt = saved.closedAt
+                    archiveEntry.retention = entry.retention
+                    archiveEntry.turnForkPoints = entry.turnForkPoints
+                    archiveEntry.forkSource = entry.forkSource; archiveEntry.forkPoint = entry.forkPoint
+                    archiveEntry.lastProviderMessage = entry.lastProviderMessage
+                    entries[id] = archiveEntry
+                    entries[session] = replacementEntry
+                    finishRestore(token, entry: replacementEntry)
+                    recordItemRevisions(replacementEntry)
+                    changed(session, next.revision)
+                    activityChanged(next, entry.directory)
+                    reply.resume(returning: next)
                 }
             } catch {
-                // Keep the durable baseline pinned so restart recovery can retry.
-                ServerLog.error("agent checkpoint unavailable: \(error)")
+                queue.async { [self] in
+                    entry.resetting = false
+                    finishRestore(token, entry: entry)
+                    let files = restoredFiles.isEmpty ? "" : " Restored files stay restored: " + restoredFiles.joined(separator: ", ") + "."
+                    reply.resume(throwing: AgentRuntimeError("The conversation couldn't be rewound: " + error.localizedDescription + files))
+                }
             }
         }
     }
@@ -1740,7 +2251,9 @@ final class AgentSessions: @unchecked Sendable {
             return runtimes
         }
         for runtime in runtimes { runtime.stop() }
-        writer.sync {}
+        // A restore under way finishes, and records what it did, before the store is let go.
+        restoreWork.wait()
+        writer.sync { subagentStore.flush() }
     }
 
     func refuseNewRequests() { queue.sync { stopping = true } }
@@ -1758,7 +2271,7 @@ final class AgentSessions: @unchecked Sendable {
         }
     }
 
-    private func touch(_ entry: Entry) {
+    func touch(_ entry: Entry) {
         guard !entry.resetting, entries[entry.snapshot.session] === entry else { return }
         activityChanged(entry.snapshot, entry.directory)
         bound(entry)
@@ -2069,38 +2582,10 @@ final class AgentSessions: @unchecked Sendable {
         let directory = root.appendingPathComponent("outputs", isDirectory: true)
             .appendingPathComponent(saved.snapshot.session.description, isDirectory: true)
         guard let files = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else { return }
-        let kept = saved.snapshot.status == .closed && saved.archived != true ? [] : Set(saved.snapshot.items.lazy
+        // A closed conversation can be reopened, so its outputs stay with their items.
+        let kept = Set(saved.snapshot.items.lazy
             .filter { $0.tool?.fullOutputBytes != nil }.map { AgentToolImages.directoryName(item: $0.id) + ".txt" })
         for file in files where !kept.contains(file.lastPathComponent) { try? FileManager.default.removeItem(at: file) }
-    }
-
-    /// How long a closed conversation is kept after it last changed.
-    static let closedRetention: TimeInterval = 30 * 24 * 60 * 60
-
-    /// Deletes a conversation's file and everything kept beside it: checkpoints and their
-    /// refs, tool outputs, attachments, archived items and its prompt inbox.
-    private func removeConversation(_ saved: Saved, file: URL) {
-        let session = saved.snapshot.session.description
-        let checkpoints = root.appendingPathComponent("checkpoints", isDirectory: true).appendingPathComponent(session, isDirectory: true)
-        let store = AgentCheckpointStore()
-        for record in (try? FileManager.default.contentsOfDirectory(at: checkpoints, includingPropertiesForKeys: nil)) ?? []
-            where record.pathExtension == "json" {
-            guard let data = try? Data(contentsOf: record) else { continue }
-            if let pending = try? JSONDecoder().decode(AgentCheckpointPending.self, from: data) {
-                try? store.remove(pending.before)
-            } else if let finished = try? JSONDecoder().decode(AgentCheckpointRecord.self, from: data) {
-                try? store.remove(finished.before)
-                try? store.remove(finished.after)
-            }
-        }
-        for path in [checkpoints,
-                     root.appendingPathComponent("outputs", isDirectory: true).appendingPathComponent(session, isDirectory: true),
-                     root.appendingPathComponent("attachments", isDirectory: true).appendingPathComponent(session, isDirectory: true),
-                     root.appendingPathComponent("earlier/" + saved.snapshot.session.description + (saved.snapshot.resetID.map { "-" + $0.description } ?? "") + ".jsonl"),
-                     root.appendingPathComponent("inbox/" + session + ".json"),
-                     file] {
-            try? FileManager.default.removeItem(at: path)
-        }
     }
 
     /// Recover ownership if clear committed before removing duplicate checkpoint files.
@@ -2135,7 +2620,7 @@ final class AgentSessions: @unchecked Sendable {
         let previous = retainedCheckpointIDs[saved.snapshot.session] ?? retained
         let retired = previous.subtracting(retained)
         retainedCheckpointIDs[saved.snapshot.session] = retained
-        let store = AgentCheckpointStore()
+        let store = checkpointStore
         for file in files where file.pathExtension == "json" {
             let name = file.deletingPathExtension().lastPathComponent
             do {
@@ -2155,14 +2640,15 @@ final class AgentSessions: @unchecked Sendable {
         }
     }
 
-    private func persist(_ entry: Entry) {
+    func persist(_ entry: Entry) {
         guard !entry.resetting, entries[entry.snapshot.session] === entry else { return }
         let retained = Set(entry.snapshot.items.lazy.filter { $0.kind == .user }.map(\.id))
         let saved = Saved(turnForkPoints: entry.turnForkPoints.filter { retained.contains($0.key) },
                           alwaysAllowedTools: entry.alwaysAllowedTools.isEmpty ? nil : entry.alwaysAllowedTools.sorted(),
                           snapshot: entry.snapshot, directory: entry.directory, hasSuccessfulTurn: entry.hasSuccessfulTurn,
                           forkSource: entry.forkSource, forkPoint: entry.forkPoint,
-                          lastProviderMessage: entry.lastProviderMessage, archived: entry.archived ? true : nil)
+                          lastProviderMessage: entry.lastProviderMessage, archived: entry.archived ? true : nil,
+                          closedAt: entry.closedAt, retention: entry.retention == .keep ? nil : entry.retention)
         let file = root.appendingPathComponent(entry.snapshot.session.description + ".json")
         writer.async {
             do {
@@ -2180,7 +2666,7 @@ struct AgentDeliveryNotStarted: LocalizedError {
 }
 
 extension AgentSessions {
-    private func mutateInbox(_ entry: Entry, _ change: (inout AgentPromptInbox) throws -> Void) throws {
+    func mutateInbox(_ entry: Entry, _ change: (inout AgentPromptInbox) throws -> Void) throws {
         if let error = entry.inboxError { throw AgentRuntimeError("Queue storage is unavailable: " + error) }
         var next = entry.inbox
         try change(&next)
@@ -2228,6 +2714,25 @@ extension AgentSessions {
                 }
             }
             drainInbox(entry)
+        case .schedule(_, let prompt, let at):
+            guard prompt.provider == entry.snapshot.provider || entry.snapshot.providerSession == nil else {
+                throw AgentRuntimeError("An established conversation cannot switch providers.")
+            }
+            try mutateInbox(entry) { inbox in
+                // A reconnect resending the schedule changes nothing, even once delivered.
+                guard !inbox.records.contains(where: { $0.id == prompt.id }) else { try inbox.submit(prompt); return }
+                try inbox.submit(prompt)
+                let index = inbox.records.count - 1
+                inbox.records[index].notBefore = at
+                inbox.records[index].display?.scheduledAt = at
+                // Choosing when to resume is the user carrying on, as a new message is.
+                inbox.paused = false
+                if let first = inbox.records.firstIndex(where: { $0.display?.state == .queued }), first < index {
+                    inbox.records.insert(inbox.records.removeLast(), at: first)
+                    for i in inbox.records.indices where inbox.records[i].display != nil { inbox.records[i].display?.revision += 1 }
+                }
+            }
+            drainInbox(entry)
         case .editQueued(_, let id, let text, let revision, let settings):
             try mutateInbox(entry) { inbox in
                 let index = try inbox.index(id, revision: revision)
@@ -2258,6 +2763,8 @@ extension AgentSessions {
                 inbox.records[index].prompt = nil
                 inbox.records[index].display = nil
             }
+        case .editQueuedPrompt(_, let id, let revision, let edit):
+            try mutateInbox(entry) { try $0.edit(id, revision: revision, edit) }
         case .resumeQueue:
             try mutateInbox(entry) { $0.paused = false }
             drainInbox(entry)
@@ -2269,12 +2776,26 @@ extension AgentSessions {
         return true
     }
 
-    private func drainInbox(_ entry: Entry) {
+    /// An attachment of a prompt still waiting in the queue, which the queued editor previews.
+    /// Its bytes live in the durable queue until the prompt is delivered.
+    fileprivate func queuedAttachment(_ request: AgentAttachmentRequest) -> AgentAttachmentReply? {
+        queue.sync {
+            entries[request.session]?.inbox.records.first { $0.id == request.item && $0.display != nil }?
+                .prompt?.attachments.first { $0.id == request.attachment }
+        }.map(AgentAttachmentReply.init(attachment:))
+    }
+
+    func drainInbox(_ entry: Entry) {
         // A failed turn pauses the queue, so only the user resuming it delivers after one.
         guard !stopping, entry.snapshot.status == .idle || entry.snapshot.status == .failed,
-              !entry.submitting, entry.deliveryID == nil,
+              !entry.submitting, entry.deliveryID == nil, !restoreHoldsWork(entry),
               entry.interrupting == nil, !entry.inbox.paused,
               let index = entry.inbox.records.firstIndex(where: { $0.display?.state == .queued }) else { return }
+        // A prompt scheduled for later holds the queue behind it until its time.
+        if let due = entry.inbox.records[index].notBefore, due > now() {
+            wakeInbox(entry, at: due)
+            return
+        }
         do { try deliverInbox(entry, index: index) }
         catch {
             try? mutateInbox(entry) { $0.paused = true }
@@ -2289,6 +2810,7 @@ extension AgentSessions {
               let prompt = entry.inbox.records[index].prompt else {
             throw AgentRuntimeError("Wait for the current interaction before delivering this prompt.")
         }
+        if restoreHoldsWork(entry) { throw AgentRuntimeError("Files are being restored in this folder. The prompt waits until the restore finishes.") }
         if entry.snapshot.status == .working {
             guard prompt.model == entry.snapshot.model, prompt.effort == entry.snapshot.reasoningEffort,
                   prompt.provider == entry.snapshot.provider, prompt.planMode == (entry.snapshot.planMode == true) else {
@@ -2297,6 +2819,8 @@ extension AgentSessions {
         } else { entry.snapshot.planMode = prompt.planMode }
         try mutateInbox(entry) { inbox in
             inbox.records[index].display?.state = .delivering
+            inbox.records[index].notBefore = nil
+            inbox.records[index].display?.scheduledAt = nil
             inbox.records[index].display?.error = nil
             inbox.records[index].display?.revision += 1
         }

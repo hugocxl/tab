@@ -25,12 +25,14 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     var onTitleChange: ((String) -> Void)?
     private let voice = AgentVoice()
     private var draftStore: AgentDraftStore?
+    /// Imports, stashed drafts, queued-prompt edits and Send Now, kept apart from the conversation.
+    let composerWork = AgentComposerWork()
     private var draftRestoreTask: Task<Void, Never>?
     private var draftSaveTask: Task<Void, Never>?
     private var draftRevision: UInt64 = 0
-    private var restoringDraft = false
-    private var lastSubmission: AgentPrompt?
-    private var reviewComments: [AgentReviewComment] = []
+    private(set) var restoringDraft = false
+    var lastSubmission: AgentPrompt?
+    var reviewComments: [AgentReviewComment] = []
     private var questionDrafts: [String: [String: [String]]] = [:]
     private var initialPreferences: AgentComposerPreferences?
     private var savePreferences: ((AgentComposerPreferences?) -> Void)?
@@ -51,10 +53,9 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     private var discoveredCommands: [TabCore.AgentChatProvider: [AgentCommandDescriptor]] = [:]
     private var historyTask: Task<Void, Never>?
     private var historyPicker: AgentSearchPicker?
-    private var queueEditor: AgentTextEditorSheet?
     var titleDidChange: (() -> Void)?
 
-    private let request: (AgentChatRequest) async throws -> AgentChatSnapshot
+    let request: (AgentChatRequest) async throws -> AgentChatSnapshot
     private let attachmentCache = AgentAttachmentCache()
     private var filePreview: AgentFilePreviewWindow?
     private var mediaPreview: AgentMediaPreviewWindow?
@@ -63,14 +64,19 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     var loadCheckpoint: AgentCheckpointDiffWindow.Fetch?
     /// Conversation requests that reply with something other than the snapshot.
     var conversationRequest: ((AgentConversationRequest) async throws -> AgentConversationReply)? {
-        didSet { surface.onLoadEarlier = conversationRequest == nil ? nil : { [weak self] in self?.loadEarlier() } }
+        didSet { updateEarlierLoader(); connectArchiveFind() }
     }
-    /// Archived items loaded above the retained ones, the archive position of the first,
-    /// and the omitted count they were loaded against.
-    private(set) var earlierItems: [AgentChatItem] = []
-    private var earlierStart = 0
-    private var earlierBasis: Int?
-    private var earlierTask: Task<Void, Never>?
+    /// Archived items loaded above the retained ones; see `AgentEarlierTimeline`.
+    private(set) var earlier = AgentEarlierTimeline()
+    var earlierItems: [AgentChatItem] { earlier.items }
+    /// The server can't page its archive: it predates paging, or kept nothing.
+    private var earlierUnavailable = false
+    private(set) var earlierTask: Task<Void, Never>?
+    /// Find's search of the server's archive, and loading an archived match to show it.
+    var archiveSearchTask: Task<Void, Never>?
+    var archiveRevealTask: Task<Void, Never>?
+    /// Speaks approvals, failures and finished turns to VoiceOver.
+    let announcer = AgentConversationAnnouncer()
     /// The version of the Tab running this conversation's server, from its handshake.
     var serverVersion: (() -> String?)?
     /// This app's version, compared with the server's.
@@ -81,19 +87,20 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     private var readSinceUnsupported = false
     private(set) var subagentWindows: [String: AgentSubagentStepsWindow] = [:]
     private var refreshTask: Task<Void, Never>?
-    private var commandTask: Task<Void, Never>?
+    private(set) var commandTask: Task<Void, Never>?
     private var helpTask: Task<Void, Never>?
     private var approvalToken: UUID?
     private var approvalInFlight: Bool { approvalToken != nil }
     private var stopTask: Task<Void, Never>?
     private var retryTask: Task<Void, Never>?
+    private var rewindTask: Task<Void, Never>?
     /// The failed turn whose attachments could no longer be read, and why, so Retry stays off.
     private var unretryable: (item: String, reason: String)?
     private var refreshPending = false
-    private var created = false
-    private var disposed = false
+    private(set) var created = false
+    private(set) var disposed = false
     private var selectionEdited = false
-    private var submitting = false
+    private(set) var submitting = false
     private var stopRequested = false
     private(set) var selection: AgentModelSelection {
         didSet { if selection.provider != oldValue.provider { onProviderChange?() } }
@@ -109,8 +116,8 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         var lockedProvider: TabCore.AgentChatProvider?
         var resolvedModel: String?
     }
-    private var connectionGeneration: UInt64 = 0
-    private var needsAuthoritativeSnapshot = false
+    private(set) var connectionGeneration: UInt64 = 0
+    private(set) var needsAuthoritativeSnapshot = false
     private(set) var snapshot: AgentChatSnapshot?
     private var authoritativeProject: ProjectId?
     /// A failed request or lost connection; the next accepted snapshot clears it, and Refresh retries.
@@ -120,9 +127,9 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     private var noticeExpiry: Task<Void, Never>?
     /// How long an informational notice stays before it goes away by itself.
     var infoNoticeLifetime: Duration = .seconds(8)
-    private(set) var draftAttachments: [AgentDraftAttachment] = []
-    private var attachmentTask: Task<Void, Never>?
-    private var preparingAttachments = 0
+    var draftAttachments: [AgentDraftAttachment] = []
+    var attachmentTask: Task<Void, Never>?
+    var preparingAttachments = 0
     private var attachmentPreview: NSPopover?
     private lazy var composerCoordinator = AgentComposerCoordinator(surface: surface)
     var loadModelCatalog: ((TabProtocol.AgentChatProvider, Bool) async throws -> [AgentModelDescriptor])?
@@ -172,7 +179,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
             guard let model, model.settings.window.confirmRunningProcess else { return true }
             return await model.presenter?.confirm(
                 title: "Close this agent pane?",
-                message: "Closing this pane stops its current work and cancels any queued prompts.",
+                message: "Closing this pane stops its current work and cancels queued prompts. Prompts that may have reached the agent stay for review, and you can reopen the conversation from Continue Conversation.",
                 confirm: "Close",
                 destructive: true
             ) ?? true
@@ -388,19 +395,27 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
             guard let self, self.commandTask == nil else { return }
             self.run(.answer(session: self.session, request: id, answers: answers, cancelled: cancelled))
         }
+        surface.questions.onDecision = { [weak self] id, decision in
+            guard let self, self.commandTask == nil else { return }
+            self.decide(id, decision: decision)
+        }
         surface.questions.onChange = { [weak self] in self?.saveDraft() }
         surface.plan.onPress = { [weak self] in self?.togglePlanMode() }
         surface.send.onPress = { [weak self] in self?.send() }
         surface.stop.onPress = { [weak self] in try? self?.surface.actions.interrupt() }
         surface.retry.onPress = { [weak self] in self?.refresh() }
         surface.retryTurn.onPress = { [weak self] in self?.retryLastTurn() }
-        surface.onEditPrompt = { [weak self] item in self?.editAsNewPrompt(item) }
+        surface.resumeAtReset.onPress = { [weak self] in self?.toggleResumeAtReset() }
+        surface.onEditPrompt = { [weak self] item in self?.chooseEdit(item) }
+        surface.onRetryCheckpoint = { [weak self] turn in self?.retryCheckpoint(turn) }
         surface.onForkPrompt = { [weak self] item in self?.fork(before: item) }
         surface.onRevert = { [weak self] checkpoint, paths in self?.revertTurn(checkpoint, paths: paths) }
         surface.onShowFullOutput = { [weak self] item in self?.showFullOutput(item) }
         surface.onCopyConversation = { [weak self] in self?.copyConversation() }
         surface.newConversation.onPress = { [weak self] in self?.onNewConversation?() }
-        surface.dismissNotice.onPress = { [weak self] in self?.dismissNotice() }
+        surface.dismissNotice.onPress = { [weak self] in self?.dismissNoticePressed() }
+        surface.sendNow.onPress = { [weak self] in self?.sendNow() }
+        surface.composer.extraMenuItems = { [weak self] in self?.composerMenuItems() ?? [] }
         surface.onOpenToolDiff = { [weak self] id, activity in
             guard let self else { return }
             if let existing = self.toolDiffWindows[id], existing.activity == activity { existing.window.showWindow(nil); return }
@@ -516,6 +531,12 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
               let pending = snapshot?.items.first(where: { $0.kind == .approval && !$0.isComplete && $0.questionnaire == nil }) else {
             return false
         }
+        if let request = pending.approval, !request.decisions.isEmpty {
+            // Only when the request offers exactly that action; the key does nothing otherwise.
+            guard let decision = AgentApprovalPresentation.shortcutDecision(request, allow: allow) else { return false }
+            decide(pending.id, decision: decision.id)
+            return true
+        }
         surface.onApproval?(pending.id, allow)
         return true
     }
@@ -532,8 +553,15 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     }
 
     /// Sends the failed or stopped turn's prompt again through the normal submit path, as
-    /// a new prompt with its own identity, attachments and all.
-    func retryLastTurn() {
+    /// a new prompt with its own identity, attachments and all. With `at`, the server holds
+    /// it until then. When a retry is already scheduled, Retry sends that one now instead,
+    /// so the prompt goes once.
+    func retryLastTurn(at date: Date? = nil) {
+        if date == nil, let scheduled = snapshot?.scheduledRetry {
+            guard !disposed, commandTask == nil else { return }
+            run(.deliverQueued(session: session, id: scheduled.id, expectedRevision: scheduled.revision))
+            return
+        }
         guard !disposed, retryTask == nil, commandTask == nil, created, canSend, let item = retryableTurnItem else { return }
         let descriptors = item.attachments ?? []
         let fetch = surface.fetchAttachment
@@ -559,9 +587,27 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
                                      attachments: attachments)
             self.composerCoordinator.dismiss()
             self.surface.scrollToEnd()
-            self.run(.submit(session: self.session, prompt: prompt))
+            if let date { self.run(.schedule(session: self.session, prompt: prompt, at: date)) }
+            else { self.run(.submit(session: self.session, prompt: prompt)) }
         }
         updateControls()
+    }
+
+    /// The usage limit the last turn stopped at, while Retry can send its prompt again.
+    var rateLimitStop: AgentRateLimitStop? {
+        guard retryableTurnItem != nil, let turn = snapshot?.turns?.last, turn.outcome == .failed else { return nil }
+        return turn.rateLimit
+    }
+
+    /// Resume at Reset schedules the retry; once scheduled, the same button cancels it.
+    func toggleResumeAtReset() {
+        if let scheduled = snapshot?.scheduledRetry {
+            guard !disposed, commandTask == nil else { return }
+            run(.removeQueued(session: session, id: scheduled.id, expectedRevision: scheduled.revision))
+            return
+        }
+        guard let resets = rateLimitStop?.resetsAt, resets > Date() else { return }
+        retryLastTurn(at: resets)
     }
 
     /// Asks before a destructive action; nil asks with a sheet on the pane's window.
@@ -585,6 +631,10 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     /// user confirms. Files changed since the turn need a second, explicit confirmation.
     func revertTurn(_ checkpoint: AgentTurnCheckpoint, paths: [String]?) {
         guard !disposed, let request = conversationRequest else { return }
+        if let reason = AgentRevertAvailability.reason(snapshot, submitting: submitting) {
+            showNotice("Revert is unavailable. " + reason, kind: .warning)
+            return
+        }
         let session = session
         let count = paths?.count ?? checkpoint.totalFiles
         let files = count == 1 ? (paths?.first.map { "“\(($0 as NSString).lastPathComponent)”" } ?? "1 file") : "\(count) files"
@@ -602,7 +652,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
                     reply = try await Self.revertReply(request, .revert(session: session, checkpoint: checkpoint.id, paths: paths, force: true))
                 }
                 guard !self.disposed else { return }
-                self.showNotice(reply.reverted.count == 1 ? "Reverted 1 file." : "Reverted \(reply.reverted.count) files.", kind: .info)
+                self.showNotice(AgentRevertAvailability.outcome(reply), kind: .info)
             } catch let error as ClientError where error.serverCode == .unsupported {
                 self.showNotice("This server can't revert a turn's changes. Update Tab on it, then restart it.", kind: .warning)
             } catch {
@@ -696,46 +746,75 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         }
     }
 
-    /// The snapshot with any loaded earlier items above its own.
+    /// The snapshot with any loaded earlier items above its own. Items the server trimmed
+    /// since the pages loaded stay in place; a gap left by a reconnect is filled.
     private func displayed(_ result: AgentChatSnapshot) -> AgentChatSnapshot {
-        // More items were dropped since the pages loaded, so they no longer join up.
-        if earlierBasis != nil, earlierBasis != result.omittedItems {
-            earlierItems = []; earlierBasis = nil; earlierStart = 0
-        }
-        guard !earlierItems.isEmpty else { return result }
-        var shown = result
-        let retained = Set(result.items.map(\.id))
-        shown.items = earlierItems.filter { !retained.contains($0.id) } + result.items
-        shown.omittedItems = max(0, (result.omittedItems ?? 0) - earlierItems.count)
-        return shown
+        let shown = earlier.observe(result.items, omitted: result.omittedItems ?? 0, resetID: result.resetID)
+        if earlier.needsGapFill, earlierTask == nil { loadEarlier() }
+        updateEarlierLoader()
+        guard earlier.isLoaded else { return result }
+        var snapshot = result
+        snapshot.items = shown.items
+        snapshot.omittedItems = shown.omitted
+        return snapshot
     }
 
-    /// Loads the page of archived items before those shown.
+    /// Offers Show Earlier while the archive has more to load, or a gap to fill.
+    private func updateEarlierLoader() {
+        let available = conversationRequest != nil && !earlierUnavailable && (!earlier.isLoaded || earlier.canLoadMore)
+        guard available != (surface.onLoadEarlier != nil) else { return }
+        surface.onLoadEarlier = available ? { [weak self] in self?.loadEarlier() } : nil
+    }
+
+    /// Loads the page of archived items before those shown, or first fills a gap between
+    /// them and the retained items. A page that arrives after the conversation trimmed
+    /// more still applies: archive positions don't move until the conversation is cleared.
     func loadEarlier() {
         guard !disposed, earlierTask == nil, let request = conversationRequest, let snapshot else { return }
         let session = session
-        let before = earlierItems.isEmpty ? nil : earlierStart
-        let basis = snapshot.omittedItems
+        let resetID = snapshot.resetID
+        let gap = earlier.needsGapFill
+        let before = earlier.olderCursor
+        let omitted = snapshot.omittedItems ?? 0
         earlierTask = Task { [weak self] in
-            defer { self?.earlierTask = nil }
+            defer {
+                self?.earlierTask = nil
+                // A gap opened while this page loaded; a failed fill waits for Show Earlier.
+                if !gap, let self, !self.disposed, self.earlier.needsGapFill { self.loadEarlier() }
+            }
             do {
-                guard case .earlier(let page) = try await request(.earlier(session: session, before: before, limit: AgentEarlierItems.maxItems)) else {
-                    throw ModelError("The server sent an unexpected reply.")
+                func page(before: Int?) async throws -> AgentEarlierItems {
+                    guard case .earlier(let page) = try await request(.earlier(session: session, before: before, limit: AgentEarlierItems.maxItems)) else {
+                        throw ModelError("The server sent an unexpected reply.")
+                    }
+                    try Task.checkCancellation()
+                    return page
                 }
-                guard let self, !self.disposed, self.snapshot?.omittedItems == basis else { return }
-                guard !page.items.isEmpty else {
-                    self.surface.onLoadEarlier = nil
-                    self.showNotice("The earlier messages of this conversation weren't kept.", kind: .info)
-                    if let current = self.snapshot { self.surface.render(self.displayed(current)) }
-                    return
+                var pages: [AgentEarlierItems] = []
+                if gap {
+                    pages = [try await page(before: nil)]
+                    while let last = pages.last, self?.earlier.gapReached(last) == false, pages.count < 64 {
+                        pages.append(try await page(before: last.start))
+                    }
+                } else {
+                    pages = [try await page(before: before)]
                 }
-                self.earlierItems = page.items + self.earlierItems
-                self.earlierStart = page.start
-                self.earlierBasis = basis
-                if page.start == 0 { self.surface.onLoadEarlier = nil }
+                guard let self, !self.disposed else { return }
+                if gap {
+                    self.earlier.fillGap(pages, resetID: resetID)
+                } else if let result = pages.first {
+                    guard !result.items.isEmpty else {
+                        self.earlierUnavailable = true
+                        self.updateEarlierLoader()
+                        self.showNotice("The earlier messages of this conversation weren't kept.", kind: .info)
+                        return
+                    }
+                    guard self.earlier.accept(result, before: before, resetID: resetID, omittedWhenRequested: omitted) else { return }
+                }
                 if let current = self.snapshot { self.surface.render(self.displayed(current)) }
             } catch let error as ClientError where error.serverCode == .unsupported {
-                self?.surface.onLoadEarlier = nil
+                self?.earlierUnavailable = true
+                self?.updateEarlierLoader()
                 self?.showNotice("This server can't show earlier messages. Update Tab on it, then restart it.", kind: .warning)
             } catch is CancellationError {
             } catch { self?.showComposerError(error.localizedDescription) }
@@ -781,19 +860,209 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         }
     }
 
-    /// Puts a sent message's text in the composer to edit and send as a new prompt. It
-    /// never rewinds the conversation, and adds to a draft rather than replacing it.
+    /// Puts a sent message's text and attachments in the composer to edit and send as a new
+    /// prompt. It never rewinds the conversation, and adds to a draft rather than replacing
+    /// it. The text arrives at once; attachments as the server returns them, and any it no
+    /// longer has are named.
     func editAsNewPrompt(_ item: AgentChatItem) {
-        guard !disposed, !restoringDraft, item.kind == .user, !item.text.isEmpty else { return }
+        guard !disposed, !restoringDraft, item.kind == .user, !item.text.isEmpty || item.attachments?.isEmpty == false else { return }
+        appendToDraft(item.text)
+        guard item.attachments?.isEmpty == false else { return }
+        let fetch = surface.fetchAttachment
+        preparingAttachments += 1
+        updateControls()
+        Task { [weak self] in
+            let restored = await AgentRestoredPrompt.load(item, fetch: fetch)
+            guard let self else { return }
+            self.preparingAttachments -= 1
+            guard !self.disposed else { return }
+            self.addRestoredAttachments(restored)
+        }
+    }
+
+    private func appendToDraft(_ text: String) {
+        guard !text.isEmpty else { return }
         let editor = surface.composer
         let separator = editor.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "" : "\n\n"
         if separator.isEmpty { editor.string = "" }
-        editor.insertText(separator + item.text, replacementRange: NSRange(location: editor.textStorage?.length ?? 0, length: 0))
+        editor.insertText(separator + text, replacementRange: NSRange(location: editor.textStorage?.length ?? 0, length: 0))
         lastSubmission = nil
         surface.refreshComposer()
         saveDraft()
         updateControls()
         focusContent()
+    }
+
+    private func addRestoredAttachments(_ restored: AgentRestoredPrompt) {
+        if !restored.attachments.isEmpty {
+            lastSubmission = nil
+            addAttachments(restored.attachments)
+        } else { updateControls() }
+        if let missing = restored.missingNotice { showNotice(missing, kind: .warning) }
+    }
+
+    /// Asks the user what an edit of a sent message should do; nil shows a menu at the pointer.
+    var chooseEditMode: ((AgentChatItem, _ rewindUnavailable: String?) async -> AgentEditMode?)?
+    /// Asks how to edit from here; nil asks with a sheet on the pane's window.
+    var chooseRewind: ((AgentRewindPlan) async -> AgentRewindChoice?)?
+
+    /// The pencil on a sent message: Edit as New Prompt, or, where the conversation can be
+    /// rewound to it, Edit from Here.
+    func chooseEdit(_ item: AgentChatItem) {
+        guard !disposed, item.kind == .user else { return }
+        let rewindUnavailable: String?
+        switch rewindPlan(item) {
+        case .success: rewindUnavailable = nil
+        case .failure(let unavailable): rewindUnavailable = unavailable.reason
+        }
+        if let chooseEditMode {
+            Task { [weak self] in
+                switch await chooseEditMode(item, rewindUnavailable) {
+                case .asNewPrompt: self?.editAsNewPrompt(item)
+                case .fromHere: self?.editFromHere(item)
+                case nil: break
+                }
+            }
+            return
+        }
+        let menu = NSMenu()
+        let asNew = NSMenuItem(title: "Edit as New Prompt", action: #selector(editMenuChosen(_:)), keyEquivalent: "")
+        asNew.target = self
+        asNew.representedObject = AgentEditMenuChoice(item: item, rewind: false)
+        asNew.toolTip = "Put this message in the composer; the conversation stays as it is"
+        menu.addItem(asNew)
+        let fromHere = NSMenuItem(title: "Edit from Here…", action: rewindUnavailable == nil ? #selector(editMenuChosen(_:)) : nil, keyEquivalent: "")
+        fromHere.target = self
+        fromHere.representedObject = AgentEditMenuChoice(item: item, rewind: true)
+        fromHere.isEnabled = rewindUnavailable == nil
+        fromHere.toolTip = rewindUnavailable ?? "Go back to before this message and edit it; the whole conversation is kept in history"
+        menu.addItem(fromHere)
+        if let rewindUnavailable {
+            let reason = NSMenuItem(title: rewindUnavailable, action: nil, keyEquivalent: "")
+            reason.isEnabled = false
+            menu.addItem(reason)
+        }
+        guard let window = surface.window else { editAsNewPrompt(item); return }
+        let point = surface.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+        menu.popUp(positioning: nil, at: point, in: surface)
+    }
+
+    @objc private func editMenuChosen(_ sender: NSMenuItem) {
+        guard let choice = sender.representedObject as? AgentEditMenuChoice else { return }
+        if choice.rewind { editFromHere(choice.item) } else { editAsNewPrompt(choice.item) }
+    }
+
+    private func rewindPlan(_ item: AgentChatItem) -> Result<AgentRewindPlan, AgentRewindUnavailable> {
+        guard let snapshot else { return .failure(.init("The conversation isn't loaded yet.")) }
+        guard conversationRequest != nil else { return .failure(.init("This connection can't rewind a conversation.")) }
+        guard commandTask == nil, !submitting else { return .failure(.init("Wait for the current request to finish.")) }
+        return AgentRewindPlan.make(snapshot, item: item)
+    }
+
+    /// Edit from Here: after the user sees which turns go and chooses whether to keep or
+    /// restore their files, the server archives the whole conversation, puts files back if
+    /// asked and rewinds it to before `item`; then the message joins the draft. Nothing
+    /// changes until the server has done all of it, and a draft already there is kept.
+    func editFromHere(_ item: AgentChatItem) {
+        guard !disposed, let request = conversationRequest else { return }
+        var plan: AgentRewindPlan
+        switch rewindPlan(item) {
+        case .success(let made): plan = made
+        case .failure(let unavailable):
+            showNotice("Edit from Here is unavailable. " + unavailable.reason, kind: .warning)
+            return
+        }
+        let session = session, fetch = surface.fetchAttachment
+        guard let revision = snapshot?.revision else { return }
+        rewindTask?.cancel()
+        rewindTask = Task { [weak self] in
+            // The message's attachments are read first: once rewound, it is only in the archive.
+            let restored = await AgentRestoredPrompt.load(item, fetch: fetch)
+            plan.missingAttachments = restored.missing
+            guard let self, !Task.isCancelled, !self.disposed else { return }
+            defer { self.rewindTask = nil; self.updateControls() }
+            guard let choice = await self.askRewind(plan), !self.disposed else { return }
+            let archive = SessionId()
+            do {
+                var reply = try await Self.rewindReply(request, .rewind(session: session, at: item.id, archive: archive, revision: revision,
+                                                                       restoreFiles: choice == .restoreFiles, force: false))
+                if !reply.files.conflicts.isEmpty {
+                    let list = reply.files.conflicts.prefix(8).joined(separator: "\n") + (reply.files.conflicts.count > 8 ? "\n…" : "")
+                    guard !self.disposed, await self.confirm(
+                        reply.files.conflicts.count == 1 ? "1 file changed after these turns" : "\(reply.files.conflicts.count) files changed after these turns",
+                        "\(list)\n\nRestoring discards those later changes too.", "Restore Anyway") else { return }
+                    reply = try await Self.rewindReply(request, .rewind(session: session, at: item.id, archive: archive, revision: revision,
+                                                                       restoreFiles: true, force: true))
+                }
+                guard let rewound = reply.snapshot, !self.disposed else { return }
+                let kept = Set((rewound.turns ?? []).compactMap { $0.checkpoint?.id })
+                let comments = self.reviewComments.filter { kept.contains($0.checkpoint) }
+                self.accept(rewound, generation: self.connectionGeneration)
+                self.reviewComments = comments
+                self.refreshReviewComments()
+                self.appendToDraft(restored.text)
+                self.addRestoredAttachments(restored)
+                self.saveDraft(immediate: true)
+                if restored.missing.isEmpty {
+                    let files = reply.files.reverted.count
+                    self.showNotice(files == 0 ? "Rewound. The message is in the composer; the earlier conversation is in history."
+                        : "Rewound and restored \(files == 1 ? "1 file" : "\(files) files"). The message is in the composer.", kind: .info)
+                }
+            } catch let error as ClientError where error.serverCode == .unsupported {
+                self.showNotice("This server can't rewind a conversation. Update Tab on it, then restart it. Nothing was changed.", kind: .warning)
+            } catch {
+                guard !self.disposed else { return }
+                self.showNotice("Couldn't edit from here: " + error.localizedDescription, kind: .warning)
+                self.refresh()
+            }
+        }
+        updateControls()
+    }
+
+    private func askRewind(_ plan: AgentRewindPlan) async -> AgentRewindChoice? {
+        if let chooseRewind { return await chooseRewind(plan) }
+        guard let window = surface.window else { return nil }
+        let alert = NSAlert()
+        alert.window.appearance = surface.theme.nsAppearance
+        alert.messageText = "Edit from this message?"
+        alert.informativeText = plan.summary
+        alert.addButton(withTitle: plan.canRestoreFiles ? "Rewind and Keep Files" : "Rewind").hasDestructiveAction = true
+        if plan.canRestoreFiles { alert.addButton(withTitle: "Rewind and Restore Files").hasDestructiveAction = true }
+        alert.addButton(withTitle: "Cancel")
+        let response = await withCheckedContinuation { continuation in
+            alert.beginSheetModal(for: window) { continuation.resume(returning: $0) }
+        }
+        switch response {
+        case .alertFirstButtonReturn: return .keepFiles
+        case .alertSecondButtonReturn where plan.canRestoreFiles: return .restoreFiles
+        default: return nil
+        }
+    }
+
+    private static func rewindReply(_ request: (AgentConversationRequest) async throws -> AgentConversationReply,
+                                    _ body: AgentConversationRequest) async throws -> AgentRewindReply {
+        guard case .rewound(let reply) = try await request(body) else { throw ModelError("The server sent an unexpected reply.") }
+        return reply
+    }
+
+    /// Records a turn's file changes again, from where it began, after recording failed.
+    func retryCheckpoint(_ turn: String) {
+        guard !disposed, let request = conversationRequest else { return }
+        let session = session, generation = connectionGeneration
+        Task { [weak self] in
+            do {
+                guard case .snapshot(let snapshot) = try await request(.retryCheckpoint(session: session, turn: turn)) else {
+                    throw ModelError("The server sent an unexpected reply.")
+                }
+                self?.accept(snapshot, generation: generation)
+            } catch let error as ClientError where error.serverCode == .unsupported {
+                self?.showNotice("This server can't record a turn's changes again. Update Tab on it, then restart it.", kind: .warning)
+            } catch {
+                guard let self, !self.disposed else { return }
+                self.showNotice("Couldn't record the changes: " + error.localizedDescription, kind: .warning)
+                self.refresh()
+            }
+        }
     }
 
     /// Says once per connection when the server runs an older Tab than this app: `tabd`
@@ -833,13 +1102,19 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
             } catch let error as ClientError where error.serverCode == .unsupported {
                 throw ModelError("This server can't show an agent's steps. Update Tab on it, then restart it.")
             }
+        } fetchEarlier: { id, before in
+            guard case .earlier(let page) = try await request(.subagentEarlier(session: session, toolUseID: id, before: before,
+                                                                                limit: AgentEarlierItems.maxItems)) else {
+                throw ModelError("The server sent an unexpected reply.")
+            }
+            return page
         }
         window.onClose = { [weak self] in self?.subagentWindows.removeValue(forKey: toolUseID) }
         subagentWindows[toolUseID] = window
         window.showWindow(nil)
     }
 
-    private func refreshReviewComments() {
+    func refreshReviewComments() {
         for controller in checkpointWindows.values {
             controller.reviewComments = reviewComments.filter { $0.checkpoint == controller.checkpointID }
         }
@@ -877,11 +1152,12 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
 
     func dispose() {
         voice.stop()
+        cancelArchiveSearch(nil)
         historyPicker?.close()
         helpPicker?.close()
         helpTask?.cancel()
         exportTask?.cancel()
-        queueEditor?.close()
+        composerWork.dispose()
         surface.closeOutline()
         saveDraft(immediate: true)
         attachmentCache.cancel()
@@ -902,6 +1178,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         stopTask?.cancel()
         historyTask?.cancel()
         retryTask?.cancel()
+        rewindTask?.cancel()
         retryTask = nil
         refreshTask = nil
         commandTask = nil
@@ -909,7 +1186,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         historyTask = nil
         submitting = false
         stopRequested = false
-        attachmentTask?.cancel()
+        invalidateDraftImports()
         attachmentPreview?.close()
         composerCoordinator.invalidate()
         modelCatalogTask?.cancel()
@@ -931,6 +1208,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         menuState = nil
         composerCoordinator.invalidate()
         needsAuthoritativeSnapshot = true
+        restartArchiveSearch(afterReset: false)
         refreshTask?.cancel()
         commandTask?.cancel()
         stopTask?.cancel()
@@ -1012,7 +1290,9 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         }
     }
 
-    func send() {
+    /// Sends the draft, or queues it while the agent works. `now` asks to steer it into
+    /// the running turn instead, through the same queue identity; see `sendNow`.
+    func send(now: Bool = false) {
         if composerCoordinator.performTypedAction() { return }
         guard !approvalInFlight else { return }
         let sentDraft = NSAttributedString(attributedString: surface.composer.attributedString())
@@ -1043,7 +1323,8 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
             prompt = previous
         }
         lastSubmission = prompt
-        run(.submit(session: session, prompt: prompt)) { [weak self] in
+        let steer: ((AgentChatSnapshot) -> AgentChatRequest?)? = now ? { [weak self] in self?.sendNowRequest(prompt.id, after: $0) } : nil
+        run(.submit(session: session, prompt: prompt), onSuccess: { [weak self] in
             self?.lastSubmission = nil
             self?.dismissNotice()
             self?.saveDraft()
@@ -1059,7 +1340,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
             self.surface.composer.string = ""
             self.surface.refreshComposer()
             self.saveDraft()
-        }
+        }, then: steer, onFollowUp: { [weak self] in self?.sendNowDispatched(prompt.id, $0) })
     }
 
     func approve(_ id: String, allow: Bool, always: Bool = false, reason: String? = nil) {
@@ -1069,11 +1350,21 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         run(.approve(session: session, request: id, allow: allow, always: always ? true : nil, reason: reason))
     }
 
+    /// Sends one of the decisions the request offered, exactly as offered.
+    func decide(_ id: String, decision: String, answers: [String: [String]]? = nil) {
+        guard !disposed, !needsAuthoritativeSnapshot, !approvalInFlight, commandTask == nil,
+              let item = snapshot?.items.first(where: { $0.id == id && $0.kind == .approval && !$0.isComplete }),
+              item.approval?.decision(decision) != nil else { return }
+        run(.decide(session: session, request: id, decision: decision, answers: answers))
+    }
+
     /// Asks for a denial's reason in a sheet; nil when the user cancels.
     var askDenialReason: ((String) async -> String?)?
 
     func choose(_ choice: AgentApprovalChoice, approval id: String) {
         switch choice {
+        case .decision(let decision):
+            decide(id, decision: decision)
         case .allowAlways: approve(id, allow: true, always: true)
         case .denyWithReason:
             let tool = snapshot?.items.first { $0.id == id }?.text ?? "this tool"
@@ -1143,18 +1434,6 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         }
     }
 
-    /// A paste this long goes in as a text file, so the draft stays readable and editable.
-    static let longPasteCharacters = 10_000
-    static let longPasteLines = 200
-
-    func attachLongPaste(_ text: String) -> Bool {
-        let lines = text.reduce(1) { $1 == "\n" ? $0 + 1 : $0 }
-        guard !disposed, text.count >= Self.longPasteCharacters || lines >= Self.longPasteLines else { return false }
-        addAttachments([AgentDraftAttachment(name: "Pasted text (\(lines) lines).txt", mimeType: "text/plain", data: Data(text.utf8))])
-        showNotice("The long paste was attached as a text file.", kind: .info)
-        return true
-    }
-
     /// The project's folder when it's on this Mac, so its files can be named rather than copied.
     var localProjectRoot: String?
 
@@ -1173,7 +1452,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         }
         let attach = split.attachments
         guard !attach.isEmpty else { return }
-        prepareAttachments { try await AgentAttachmentImporter.load(urls: attach) }
+        prepareAttachments { try await AgentAttachmentImporter.intake(urls: attach) }
     }
 
     /// Files inside `root` that aren't images become `@path` mentions; the rest are attached.
@@ -1193,54 +1472,32 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         return (mentions, attachments)
     }
 
-    private func prepareAttachments(_ load: @escaping @Sendable () async throws -> [AgentDraftAttachment]) {
-        let previous = attachmentTask
-        preparingAttachments += 1
-        updateControls()
-        attachmentTask = Task { [weak self] in
-            await previous?.value
-            guard let self else { return }
-            defer {
-                self.preparingAttachments -= 1
-                if self.preparingAttachments == 0 { self.attachmentTask = nil }
-                self.updateControls()
-            }
-            do {
-                try Task.checkCancellation()
-                guard !self.disposed else { return }
-                let loaded = try await load()
-                try Task.checkCancellation()
-                guard !self.disposed else { return }
-                self.addAttachments(loaded)
-            } catch is CancellationError { }
-            catch { self.showComposerError(error.localizedDescription) }
-        }
-    }
-
     private func attachImage(_ data: Data, mimeType: String) {
         guard !disposed else { return }
         prepareAttachments {
             try await Task.detached(priority: .userInitiated) {
-                [try AgentAttachmentImporter.fromImage(data: data, mimeType: mimeType)]
+                try AgentAttachmentImporter.imageIntake(data: data, mimeType: mimeType)
             }.value
         }
     }
 
-    private func addAttachments(_ attachments: [AgentDraftAttachment]) {
+    /// Adds what fits; false, with the reason shown, when the draft's limits refuse them.
+    @discardableResult
+    func addAttachments(_ attachments: [AgentDraftAttachment]) -> Bool {
         let additions = attachments.filter { candidate in
             !draftAttachments.contains { $0.name == candidate.name && $0.data == candidate.data }
         }
-        guard draftAttachments.count + additions.count <= AgentChatAttachment.maxCount,
-              (draftAttachments + additions).reduce(0, { $0 + $1.data.count }) <= AgentChatAttachment.maxTotalBytes else {
-            showComposerError("Attach up to \(AgentChatAttachment.maxCount) files, totaling at most \(AgentChatAttachment.maxTotalBytes / 1024 / 1024) MB.")
-            return
+        if let reason = attachmentCapacityError(adding: additions) {
+            showComposerError(reason)
+            return false
         }
         draftAttachments += additions
         dismissNotice()
         updateAttachments()
+        return true
     }
 
-    private func updateAttachments() {
+    func updateAttachments() {
         saveDraft()
         surface.attachmentStrip.update(draftAttachments, theme: surface.theme)
         surface.needsLayout = true
@@ -1296,7 +1553,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         popover.show(relativeTo: surface.attachmentStrip.bounds, of: surface.attachmentStrip, preferredEdge: .minY)
     }
 
-    private func showComposerError(_ message: String) {
+    func showComposerError(_ message: String) {
         showNotice(message, kind: .warning)
     }
 
@@ -1330,7 +1587,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     private func executeLocalCommand(_ command: AgentSlashCommand) {
         guard !disposed else { return }
         let name = command.name, arguments = command.arguments
-        let offlineActions: Set<String> = ["help", "status", "copy", "export", "outline", "previous-prompt", "next-prompt", "attach", "clear-draft"]
+        let offlineActions: Set<String> = ["help", "status", "copy", "export", "outline", "previous-prompt", "next-prompt", "attach", "clear-draft", "stashes"]
         guard offlineActions.contains(name) || (!needsAuthoritativeSnapshot && created) else {
             showComposerError("Wait for the conversation to connect before running commands."); return
         }
@@ -1388,6 +1645,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
             }
             return
         case "copy", "export": exportConversation(saveFile: name == "export", onSuccess: consume); return
+        case "stashes": consume(); showStashedDrafts(); return
         case "skills": composerCoordinator.browseSkills(); return
         case "attach":
             surface.composer.string = arguments
@@ -1413,8 +1671,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
             }
             stop()
         default:
-            let id = name == "clear-draft" ? "clear" : name
-            performComposerAction(id)
+            performComposerAction(name)
         }
         consume()
     }
@@ -1447,7 +1704,10 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         case "model": control = surface.modelPicker
         case "attach": chooseAttachments(); return
         case "stop": stop(); return
-        case "clear":
+        case "stashes": showStashedDrafts(); return
+        case "clear-draft":
+            // Imports still running belonged to the draft being cleared.
+            invalidateDraftImports()
             surface.composer.string = ""
             draftAttachments = []
             updateAttachments()
@@ -1489,17 +1749,101 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         let picker = AgentSearchPicker(title: "Continue conversation", placeholder: "Search titles or providers…", theme: surface.theme)
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .short
-        picker.update(reply.entries.map { entry in
+        let saved = reply.conversations ?? []
+        let tabEntries: [AgentSearchPicker.Entry] = saved.map { conversation in
+            .init(id: Self.savedConversationPrefix + conversation.session.description, title: conversation.title,
+                  detail: AgentSavedConversationText.detail(conversation, formatter: formatter))
+        }
+        picker.update(tabEntries + reply.entries.map { entry in
             .init(id: entry.id, title: entry.title, detail: entry.provider.name + " · " + formatter.localizedString(for: entry.updatedAt, relativeTo: Date()))
         }, note: reply.truncated ? "Showing the newest 200 conversations. Older results were omitted by the server."
-            : reply.entries.isEmpty ? "No other saved conversations in this folder." : "Conversations saved for this folder")
+            : reply.entries.isEmpty && saved.isEmpty ? "No other saved conversations in this folder."
+            : saved.isEmpty ? "Conversations saved for this folder" : "Closed Tab conversations first, then ones saved by the agents' own apps")
         picker.onSelect = { [weak self] id in
+            if let conversation = saved.first(where: { Self.savedConversationPrefix + $0.session.description == id }) {
+                self?.reopenConversation(conversation.session)
+                return
+            }
             guard let entry = reply.entries.first(where: { $0.id == id }) else { return }
             self?.resumeHistory(entry)
+        }
+        if !saved.isEmpty {
+            picker.entryActions = { [weak self] id in
+                guard let conversation = saved.first(where: { Self.savedConversationPrefix + $0.session.description == id }) else { return [] }
+                return self?.savedConversationActions(conversation) ?? []
+            }
         }
         picker.onClose = { [weak self] in self?.historyPicker = nil }
         historyPicker = picker
         picker.present(in: surface.window)
+    }
+
+    private static let savedConversationPrefix = "tab:"
+
+    /// Reopen, keep or delete a closed conversation: retention is the user's explicit choice,
+    /// and deleting asks first.
+    func savedConversationActions(_ conversation: AgentSavedConversation) -> [NSMenuItem] {
+        var items: [NSMenuItem] = [ClosureMenuItem("Reopen") { [weak self] in
+            self?.historyPicker?.close()
+            self?.reopenConversation(conversation.session)
+        }, .separator()]
+        for days in AgentConversationRetention.choices {
+            let retention = AgentConversationRetention(deleteAfterDays: days)
+            let item = ClosureMenuItem(retention.title) { [weak self] in
+                self?.historyPicker?.close()
+                self?.conversationAction(.setRetention(session: conversation.session, retention: retention), doing: "change how long it is kept")
+            }
+            item.state = conversation.retention == retention ? .on : .off
+            items.append(item)
+        }
+        items.append(.separator())
+        items.append(ClosureMenuItem("Delete Permanently…") { [weak self] in
+            guard let self else { return }
+            self.historyPicker?.close()
+            Task { [weak self] in
+                guard let self else { return }
+                let review = conversation.needsReview == true ? " Prompts in it that may have reached the agent are deleted too." : ""
+                guard await self.confirm("Delete “\(conversation.title)”?",
+                                         "Its transcript, attachments and file checkpoints are removed from this server. Checkpoints another conversation still uses stay.\(review) This can't be undone.",
+                                         "Delete"), !self.disposed else { return }
+                self.conversationAction(.delete(session: conversation.session), doing: "delete that conversation")
+            }
+        })
+        return items
+    }
+
+    /// Opens a closed conversation in a pane again, as it was.
+    func reopenConversation(_ session: SessionId) {
+        conversationAction(.reopen(session: session), doing: "reopen that conversation")
+    }
+
+    private func conversationAction(_ request: AgentConversationRequest, doing action: String) {
+        guard !disposed, historyTask == nil, let conversationRequest else { return }
+        let generation = connectionGeneration
+        historyTask = Task { [weak self] in
+            defer {
+                self?.historyTask = nil
+                self?.updateControls()
+            }
+            do {
+                let reply = try await conversationRequest(request)
+                guard let self, !Task.isCancelled, !self.disposed else { return }
+                switch (request, reply) {
+                case (.reopen, .conversation(let snapshot)):
+                    if snapshot.session == self.session { self.accept(snapshot, generation: generation, authoritative: true) }
+                    else { self.showConversation?(snapshot) }
+                case (.setRetention, .conversation), (.delete, .deleted):
+                    self.historyTask = nil
+                    self.showHistory()
+                default: break
+                }
+            } catch is CancellationError {
+            } catch {
+                guard let self, !Task.isCancelled, !self.disposed else { return }
+                self.showHistoryError(error, doing: action)
+            }
+        }
+        updateControls()
     }
 
     private func resumeHistory(_ entry: AgentHistoryEntry) {
@@ -1576,7 +1920,12 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         updateControls()
     }
 
-    private func run(_ command: AgentChatRequest, onSuccess: (() -> Void)? = nil) {
+    /// Sends `command` as the pane's one request in flight. `onReply` sees every accepted
+    /// reply and `onFailure` takes a failure in place of the usual error; `then` may name a
+    /// second request sent before another can start, whose outcome goes to `onFollowUp`.
+    func run(_ command: AgentChatRequest, onSuccess: (() -> Void)? = nil, onReply: ((AgentChatSnapshot) -> Void)? = nil,
+             onFailure: ((Error) -> Void)? = nil, then followUp: ((AgentChatSnapshot) -> AgentChatRequest?)? = nil,
+             onFollowUp: ((Result<AgentChatSnapshot, Error>) -> Void)? = nil) {
         guard !approvalInFlight, commandTask == nil, !disposed else { return }
         let generation = connectionGeneration
         if case .send = command { submitting = true }
@@ -1600,9 +1949,21 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
                 if case .submit = command { onSuccess?() }
                 else if result.status != .failed { onSuccess?() }
                 self.accept(result, generation: generation)
+                onReply?(result)
+                guard let next = followUp?(result) else { return }
+                do {
+                    let followed = try await self.request(next)
+                    guard !Task.isCancelled, !self.disposed, generation == self.connectionGeneration else { return }
+                    self.accept(followed, generation: generation)
+                    onFollowUp?(.success(followed))
+                } catch {
+                    guard !Task.isCancelled, !self.disposed, generation == self.connectionGeneration else { return }
+                    onFollowUp?(.failure(error))
+                }
             } catch {
                 guard !Task.isCancelled, !self.disposed, generation == self.connectionGeneration else { return }
-                if case .clear = command, (error as? ClientError)?.serverCode == .unsupported {
+                if let onFailure { onFailure(error) }
+                else if case .clear = command, (error as? ClientError)?.serverCode == .unsupported {
                     self.showComposerError("Update Tab on this server to clear a conversation in place. Your conversation is unchanged.")
                 } else { self.showError(error) }
             }
@@ -1639,7 +2000,8 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
             guard result.revision >= (snapshot?.revision ?? 0) else { return }
         }
         if snapshot?.resetID != result.resetID {
-            earlierTask?.cancel(); earlierItems = []; earlierBasis = nil; earlierStart = 0
+            earlierTask?.cancel(); earlierTask = nil; earlier = AgentEarlierTimeline(); earlierUnavailable = false
+            restartArchiveSearch(afterReset: true)
             lastSubmission = nil; questionDrafts = [:]; reviewComments = []
             surface.closeOutline(); attachmentCache.cancel()
             composerCoordinator.invalidate()
@@ -1660,6 +2022,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
             selectionEdited = false
         }
         surface.render(displayed(result), itemsUnchanged: itemsUnchanged)
+        announcer.observe(result, in: surface)
         for (toolUseID, window) in subagentWindows {
             if let agent = result.subagents?.first(where: { $0.toolUseID == toolUseID }) { window.update(agent) }
         }
@@ -1667,6 +2030,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
             surface.actions.project?.refreshProjectMetadata()
             noteOlderServer()
         }
+        composerWorkAccepted(result)
         updateControls()
         if stopRequested && (result.status == .working || result.status == .waiting || hasActiveQueue) { stop() }
         titleDidChange?()
@@ -1717,7 +2081,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         return !restoringDraft && (snapshot.status == .idle || snapshot.status == .failed || snapshot.status == .working || snapshot.status == .waiting)
     }
 
-    private func updateControls() {
+    func updateControls() {
         let descriptors = discoveredCommands[selection.provider] ?? (snapshot?.provider == selection.provider ? snapshot?.commandDescriptors ?? [] : [])
         composerCoordinator.providerDescriptors = descriptors
         let names = selection.provider == .codex ? ["compact", "review"]
@@ -1726,6 +2090,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         var seen = Set<String>()
         composerCoordinator.providerCommands = (names + (selection.provider == .claude ? ["compact", "context", "usage", "cost"] : [])).filter { seen.insert($0).inserted }
         let interactionsEnabled = !disposed && !needsAuthoritativeSnapshot && commandTask == nil && !approvalInFlight
+        surface.promptQueue.unsavedEdits = Set(composerWork.queueEdits.keys)
         surface.promptQueue.update(snapshot?.queuedPrompts ?? [], paused: snapshot?.queuePaused == true, enabled: interactionsEnabled)
         surface.subagents.update(snapshot?.subagents ?? [])
         surface.questions.update(snapshot?.items.first { $0.questionnaire != nil && !$0.isComplete }, enabled: interactionsEnabled)
@@ -1770,7 +2135,9 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         let blockedRetry = retryable.flatMap { item in unretryable?.item == item.id ? unretryable?.reason : nil }
         surface.retryTurn.isEnabled = retryTask == nil && commandTask == nil && canSend && blockedRetry == nil
         surface.retryTurn.toolTip = blockedRetry ?? "Send that prompt again as a new message"
+        updateRateLimitControls(blocked: blockedRetry)
         surface.newConversation.isHidden = errorMessage != nil || notice != nil || snapshot?.status != .closed || onNewConversation == nil
+        updateComposerWorkControls()
         surface.refreshComposer()
         surface.needsLayout = true
     }
@@ -1820,7 +2187,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         }
     }
 
-    private var canSendDraft: Bool {
+    var canSendDraft: Bool {
         !approvalInFlight && !disposed && created && commandTask == nil && canSend && preparingAttachments == 0
             && (!surface.composer.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !draftAttachments.isEmpty)
     }
@@ -1830,6 +2197,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         // A keystroke changes only what depends on the draft; the conversation's own
         // controls wait for the conversation to change.
         surface.send.isEnabled = canSendDraft
+        surface.sendNow.isEnabled = canSendDraft && sendNowUnavailableReason == nil
         surface.refreshComposer()
         composerCoordinator.changed()
     }
@@ -1881,7 +2249,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         }
     }
 
-    private var effectiveModel: String? {
+    var effectiveModel: String? {
         selection.model ?? (selection.provider == snapshot?.provider ? snapshot?.resolvedModel : nil)
             ?? modelCatalogs[selection.provider]?.first(where: \.isDefault)?.id
     }
@@ -1894,7 +2262,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
 
     /// The model and effort can change at any time: a choice made while the agent works
     /// applies to the next prompt, including one sent to the queue now.
-    private var canEditSelection: Bool {
+    var canEditSelection: Bool {
         !disposed && commandTask == nil && snapshot != nil && snapshot?.status != .closed
     }
 
@@ -2093,7 +2461,8 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
 /// A composer message with its own lifetime: snapshots leave it alone, the user can
 /// dismiss it, and an informational one goes away by itself.
 struct AgentComposerNotice: Equatable {
-    enum Kind: Equatable { case warning, info }
+    /// `progress` stays until its work ends; dismissing it cancels that work.
+    enum Kind: Equatable { case warning, info, progress }
     var text: String
     var kind: Kind
 }
@@ -2104,10 +2473,11 @@ private enum AgentPaneError: LocalizedError {
 }
 
 extension AgentPaneController {
-    private func configureDraftStore(_ url: URL) {
+    func configureDraftStore(_ url: URL) {
         let store = AgentDraftStore(url: url)
         draftStore = store; restoringDraft = true
-        Task { @MainActor [weak self] in
+        composerWork.stash = AgentDraftStash(draftURL: url)
+        draftRestoreTask = Task { @MainActor [weak self] in
             guard let self else { return }
             defer { self.restoringDraft = false; self.updateControls() }
             do {
@@ -2130,7 +2500,7 @@ extension AgentPaneController {
         }
     }
 
-    private func captureDraft() -> AgentSavedDraft {
+    func captureDraft() -> AgentSavedDraft {
         questionDrafts.merge(surface.questions.savedAnswers) { _, latest in latest }
         if let snapshot {
             let pending = Set(snapshot.items.filter { !$0.isComplete && $0.questionnaire != nil }.map(\.id))
@@ -2139,7 +2509,7 @@ extension AgentPaneController {
         return AgentSavedDraft(text: surface.composer.attributedString(), attachments: draftAttachments,
                                submission: lastSubmission, answers: questionDrafts, reviewComments: reviewComments)
     }
-    private func saveDraft(immediate: Bool = false) {
+    func saveDraft(immediate: Bool = false) {
         guard !restoringDraft, let store = draftStore else { return }
         draftSaveTask?.cancel()
         let draft = captureDraft()
@@ -2164,22 +2534,6 @@ extension AgentPaneController {
         try await store.write(captureDraft(), revision: draftRevision)
     }
 
-    private func editQueued(_ prompt: AgentQueuedPrompt) {
-        guard commandTask == nil, queueEditor == nil, let window = surface.window else { return }
-        let editor = AgentTextEditorSheet(title: "Edit queued prompt",
-            detail: prompt.state == .uncertain
-                ? "The earlier delivery may have reached the agent. Editing does not send it again. Attachments stay with the prompt."
-                : "Attachments stay with this prompt. Saving does not send it immediately.",
-            text: prompt.text, theme: surface.theme, showsSettings: true)
-        queueEditor = editor
-        editor.present(in: window) { [weak self] response, text, useSettings in
-            guard let self else { return }
-            self.queueEditor = nil
-            guard response == .alertFirstButtonReturn, !self.disposed else { return }
-            self.run(.editQueued(session: self.session, id: prompt.id, text: text, expectedRevision: prompt.revision,
-                settings: useSettings ? .init(model: self.effectiveModel, effort: self.reasoningEffort, planMode: self.snapshot?.planMode == true) : nil))
-        }
-    }
     private func deliverQueued(_ prompt: AgentQueuedPrompt) {
         guard commandTask == nil else { return }
         guard prompt.state == .uncertain || prompt.state == .failed else {

@@ -90,12 +90,16 @@ public struct AgentChatItem: Codable, Hashable, Sendable, Identifiable {
     public var createdAt: Date?
     public var updatedAt: Date?
     public var workContext: AgentChatWorkContext?
+    /// An approval's request and the decisions offered; see `AgentApprovalRequest`.
+    public var approval: AgentApprovalRequest?
 
     public init(id: String = UUID().uuidString, kind: Kind, text: String,
                 detail: String? = nil, isComplete: Bool = true, tool: AgentToolActivity? = nil,
                 attachments: [AgentChatAttachmentDescriptor]? = nil, createdAt: Date? = nil,
-                updatedAt: Date? = nil, workContext: AgentChatWorkContext? = nil, questionnaire: AgentQuestionnaire? = nil) {
+                updatedAt: Date? = nil, workContext: AgentChatWorkContext? = nil, questionnaire: AgentQuestionnaire? = nil,
+                approval: AgentApprovalRequest? = nil) {
         self.questionnaire = questionnaire
+        self.approval = approval
         self.id = id
         self.kind = kind
         self.text = text
@@ -245,7 +249,18 @@ public enum AgentChatRequest: Codable, Hashable, Sendable {
     case deliverQueued(session: SessionId, id: String, expectedRevision: UInt64)
     case moveQueued(session: SessionId, id: String, beforeID: String, expectedRevision: UInt64)
     case resumeQueue(session: SessionId)
+    /// Replaces a queued prompt's text, settings and attachments together, against
+    /// `expectedRevision`. Older servers reply `unsupported` and keep the prompt as it was.
+    case editQueuedPrompt(session: SessionId, id: String, expectedRevision: UInt64, edit: AgentQueuedEdit)
     case answer(session: SessionId, request: String, answers: [String: [String]], cancelled: Bool)
+    /// Answers a pending request with one of the decisions its `AgentApprovalRequest`
+    /// offered, and a form's answers for a submit decision. Servers that predate it
+    /// reply `unsupported`; they never offer decisions, so clients use `approve`.
+    case decide(session: SessionId, request: String, decision: String, answers: [String: [String]]? = nil)
+    /// Accepts `prompt` like `submit`, but the server delivers it no earlier than `at`,
+    /// such as when a usage limit resets. Remove or deliver it like a queued prompt.
+    /// Idempotent by prompt ID. Servers that predate it reply `unsupported`.
+    case schedule(session: SessionId, prompt: AgentPrompt, at: Date)
 
     /// Nil model/effort explicitly restore provider defaults; nil provider keeps the current provider.
     case send(session: SessionId, text: String, model: String?, reasoningEffort: AgentReasoningEffort? = nil,

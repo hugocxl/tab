@@ -204,14 +204,14 @@ public enum ShortcutCatalog {
         .previousPrompt, .nextPrompt, .selectCommandOutput,
         .agentPromptOutline, .agentPreviousPrompt, .agentNextPrompt, .agentHistory,
         .toggleAgentPlan, .stopAgent, .allowAgentApproval, .denyAgentApproval, .agentNextFailure, .submitAgentAnswers,
-        .increaseFontSize, .decreaseFontSize, .newAgentPane, .newBrowserPane, .newSimulatorPane,
+        .sendAgentPromptNow, .increaseFontSize, .decreaseFontSize, .newAgentPane, .newBrowserPane, .newSimulatorPane,
         .newAgentPaneBelow, .newBrowserPaneBelow, .newSimulatorPaneBelow,
     ]
 
     /// Built-in defaults that give way to a key a user binding already has,
     /// so a newer default never takes a key someone bound before it existed.
     public static let yielding: [ShortcutId] = [
-        .toggleAgentPlan, .stopAgent, .submitAgentAnswers, .agentPromptOutline, .agentPreviousPrompt, .agentNextPrompt,
+        .toggleAgentPlan, .stopAgent, .submitAgentAnswers, .sendAgentPromptNow, .agentPromptOutline, .agentPreviousPrompt, .agentNextPrompt,
         .openSettings, .newHomeTab, .newTabInProject, .newAgentInProject, .newWorktree, .switchWorktree,
         .toggleSidebar, .toggleFiles, .toggleSourceControl, .goToFile,
         .findInFiles, .toggleFullScreen, .toggleThemePicker, .toggleCommandPalette,
@@ -654,6 +654,7 @@ public enum ShortcutId: String, CaseIterable, Codable, Sendable {
     case stopAgent = "stop_agent"
     case agentNextFailure = "agent_next_failure"
     case submitAgentAnswers = "submit_agent_answers"
+    case sendAgentPromptNow = "send_agent_prompt_now"
     case allowAgentApproval = "allow_agent_approval"
     case denyAgentApproval = "deny_agent_approval"
     case newAgentPane = "new_agent_pane"
@@ -822,6 +823,8 @@ extension ShortcutCatalog {
         ShortcutDefinition(.agentNextFailure, keys: [], contexts: ["WorkspaceTabs"], keyContexts: [], group: .panes),
         // Sends an agent's question form; without one the key goes on to the composer.
         ShortcutDefinition(.submitAgentAnswers, keys: ["cmd-enter"], contexts: ["AgentPane"], keyContexts: [["AgentPane"]], group: .panes),
+        // Steers the draft into the running turn; Return keeps queueing it.
+        ShortcutDefinition(.sendAgentPromptNow, keys: ["cmd-alt-enter"], contexts: ["AgentPane"], keyContexts: [["AgentPane"]], group: .panes),
         ShortcutDefinition(.allowAgentApproval, keys: [], contexts: ["AgentPane"], keyContexts: [], group: .panes),
         ShortcutDefinition(.denyAgentApproval, keys: [], contexts: ["AgentPane"], keyContexts: [], group: .panes),
         ShortcutDefinition(.newAgentPane, keys: ["cmd-alt-a"], contexts: ["WorkspaceTabs"], keyContexts: [["WorkspaceTabs"]], group: .panes),

@@ -10,14 +10,27 @@ struct AgentDraftAttachment: Identifiable, @unchecked Sendable {
     let mimeType: String
     let data: Data
     let thumbnail: NSImage?
+    /// The size of bytes another owner holds, such as a queued prompt's attachment on its server.
+    let storedByteCount: Int?
 
-    init(id: String = UUID().uuidString, name: String, mimeType: String, data: Data, thumbnail: NSImage? = nil) {
+    init(id: String = UUID().uuidString, name: String, mimeType: String, data: Data, thumbnail: NSImage? = nil,
+         storedByteCount: Int? = nil) {
         self.id = id
         self.name = name
         self.mimeType = mimeType
         self.data = data
         self.thumbnail = thumbnail
+        self.storedByteCount = storedByteCount
     }
+
+    var byteCount: Int { storedByteCount ?? data.count }
+}
+
+/// What an import produced: attachments ready for the draft, and images too large to
+/// attach as they are, which the user may choose to attach as optimized copies.
+struct AgentAttachmentIntake: Sendable {
+    var attachments: [AgentDraftAttachment] = []
+    var oversizedImages: [AgentOversizedImage] = []
 }
 
 enum AgentAttachmentImportError: LocalizedError {
@@ -41,10 +54,19 @@ enum AgentAttachmentImporter {
 
     /// Atomic import, bounded even if a file grows after its metadata was checked.
     static func load(urls: [URL], maximumFileSize: Int = maximumFileSize) async throws -> [AgentDraftAttachment] {
+        let intake = try await intake(urls: urls, maximumFileSize: maximumFileSize)
+        if let image = intake.oversizedImages.first { throw AgentAttachmentImportError.tooLarge(image.name) }
+        return intake.attachments
+    }
+
+    /// Like `load`, but sets aside images over the size limit instead of failing, so the
+    /// user can be offered optimized copies of them.
+    static func intake(urls: [URL], maximumFileSize: Int = maximumFileSize) async throws -> AgentAttachmentIntake {
         guard urls.count <= maximumFileCount else { throw AgentAttachmentImportError.tooManyFiles }
         guard maximumFileSize > 0 else { throw AgentAttachmentImportError.batchTooLarge }
         let worker = Task.detached(priority: .userInitiated) {
             var attachments: [AgentDraftAttachment] = []
+            var oversized: [AgentOversizedImage] = []
             var total = 0
             for url in urls {
                 try Task.checkCancellation()
@@ -55,6 +77,12 @@ enum AgentAttachmentImporter {
                 let info = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey, .contentTypeKey])
                 guard info.isRegularFile == true, info.isSymbolicLink != true else {
                     throw AgentAttachmentImportError.notRegularFile(name)
+                }
+                let declaredType = info.contentType ?? UTType(filenameExtension: url.pathExtension)
+                if (info.fileSize ?? 0) > maximumFileSize, declaredType?.conforms(to: .image) == true,
+                   (info.fileSize ?? 0) <= AgentImageOptimizer.maximumSourceBytes {
+                    oversized.append(.file(url, name: name, bytes: info.fileSize ?? 0))
+                    continue
                 }
                 guard (info.fileSize ?? 0) <= maximumFileSize else { throw AgentAttachmentImportError.tooLarge(name) }
                 let handle = try FileHandle(forReadingFrom: url)
@@ -67,15 +95,26 @@ enum AgentAttachmentImporter {
                     guard data.count + chunk.count <= maximumFileSize else { throw AgentAttachmentImportError.tooLarge(name) }
                     data.append(chunk)
                 }
-                let type = info.contentType ?? UTType(filenameExtension: url.pathExtension)
+                let type = declaredType
                 let attachment = try prepare(data: data, name: name, type: type, limit: maximumFileSize)
                 total += attachment.data.count
                 guard total <= maximumBatchSize else { throw AgentAttachmentImportError.batchTooLarge }
                 attachments.append(attachment)
             }
-            return attachments
+            return AgentAttachmentIntake(attachments: attachments, oversizedImages: oversized)
         }
         return try await withTaskCancellationHandler(operation: { try await worker.value }, onCancel: { worker.cancel() })
+    }
+
+    /// A clipboard image, or one set aside as oversized when it is a readable image over
+    /// the size limit. Invoke off-main; normalization can decode image data.
+    static func imageIntake(data: Data, mimeType: String) throws -> AgentAttachmentIntake {
+        if data.count > maximumFileSize, data.count <= AgentImageOptimizer.maximumSourceBytes,
+           UTType(mimeType: mimeType)?.conforms(to: .image) == true, AgentImageOptimizer.isImage(data) {
+            let type = UTType(mimeType: mimeType)
+            return AgentAttachmentIntake(oversizedImages: [.data(data, name: "Pasted image.\(type?.preferredFilenameExtension ?? "png")")])
+        }
+        return AgentAttachmentIntake(attachments: [try fromImage(data: data, mimeType: mimeType)])
     }
 
     /// Invoke off-main for clipboard images; normalization can decode image data.
@@ -217,6 +256,8 @@ enum AgentAttachmentPasteboard {
 final class AgentAttachmentStrip: NSView {
     var onRemove: ((String) -> Void)?
     var onPreview: ((String) -> Void)? { didSet { rebuild() } }
+    /// Offers Replace in each chip's menu when set.
+    var onReplace: ((String) -> Void)? { didSet { rebuild() } }
     private(set) var hasAttachments = false
     private var chatTheme: AppTheme = .shared
     private let scroll = NSScrollView()
@@ -267,6 +308,7 @@ final class AgentAttachmentStrip: NSView {
             chip.chatTheme = chatTheme
             chip.onRemove = { [weak self] in self?.onRemove?(attachment.id) }
             if onPreview != nil { chip.onPreview = { [weak self] in self?.onPreview?(attachment.id) } }
+            if onReplace != nil { chip.onReplace = { [weak self] in self?.onReplace?(attachment.id) } }
             content.addSubview(chip)
             return chip
         }
@@ -290,6 +332,7 @@ final class AgentAttachmentStrip: NSView {
 private final class AgentAttachmentChip: NSView {
     var onRemove: (() -> Void)?
     var onPreview: (() -> Void)? { didSet { preview.isEnabled = onPreview != nil } }
+    var onReplace: (() -> Void)?
     var chatTheme: AppTheme = .shared { didSet { applyTheme() } }
     private let image = NSImageView()
     private let name = NSTextField(labelWithString: "")
@@ -308,7 +351,7 @@ private final class AgentAttachmentChip: NSView {
         name.stringValue = attachment.name
         name.font = AppFont.small
         name.lineBreakMode = .byTruncatingMiddle
-        size.stringValue = ByteCountFormatter.string(fromByteCount: Int64(attachment.data.count), countStyle: .file)
+        size.stringValue = ByteCountFormatter.string(fromByteCount: Int64(attachment.byteCount), countStyle: .file)
         size.font = AppFont.system(10)
         remove.image = AppIcon.close.image(size: 12, scale: AppIcon.inlineScale)
         remove.isBordered = false
@@ -347,6 +390,15 @@ private final class AgentAttachmentChip: NSView {
         preview.frame = NSRect(x: 0, y: 0, width: max(0, bounds.width - 28), height: max(0, bounds.height))
         remove.frame = NSRect(x: max(0, bounds.width - 27), y: 5, width: 22, height: 22)
     }
+    override func menu(for event: NSEvent) -> NSMenu? {
+        guard onReplace != nil || onPreview != nil else { return super.menu(for: event) }
+        let menu = NSMenu()
+        if let onPreview { menu.addItem(ClosureMenuItem("Preview") { onPreview() }) }
+        if let onReplace { menu.addItem(ClosureMenuItem("Replace…") { onReplace() }) }
+        menu.addItem(ClosureMenuItem("Remove") { [weak self] in self?.onRemove?() })
+        return menu
+    }
+
     @objc private func removePressed() { onRemove?() }
     @objc private func previewPressed() { onPreview?() }
 }

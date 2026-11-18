@@ -54,7 +54,15 @@ extension AgentChatSnapshot {
     /// Prompts the server will send on its own. One that needs review waits for the user,
     /// so it keeps nothing busy.
     var hasActiveQueue: Bool {
-        queuePaused != true && queuedPrompts?.contains { $0.state == .queued || $0.state == .delivering } == true
+        // A prompt scheduled for later, such as a retry at a usage limit's reset, keeps nothing busy until then.
+        queuePaused != true && queuedPrompts?.contains { prompt in
+            prompt.state == .delivering || (prompt.state == .queued && (prompt.scheduledAt.map { $0 <= Date() } ?? true))
+        } == true
+    }
+
+    /// The retry the server holds for a usage limit's reset, if one is scheduled.
+    var scheduledRetry: AgentQueuedPrompt? {
+        queuedPrompts?.first { $0.state == .queued && $0.scheduledAt != nil }
     }
 }
 
@@ -66,6 +74,8 @@ final class AgentQueueView: ThemedView {
     var onDeliver: ((AgentQueuedPrompt) -> Void)?
     var onMove: ((AgentQueuedPrompt, String) -> Void)?
     var onResume: (() -> Void)?
+    /// Prompts with an edit the server hasn't saved; their editor brings it back.
+    var unsavedEdits: Set<String> = []
     private static let inset: CGFloat = 8
     private static let headerHeight: CGFloat = 30
     private static let rowHeight: CGFloat = 32
@@ -108,7 +118,7 @@ final class AgentQueueView: ThemedView {
         let prompts = queued.filter { $0.state != .delivering }
         // Resume only means something while a prompt waits to be sent.
         let paused = paused && prompts.contains { $0.state == .queued }
-        let signature = prompts.map { "\($0.id):\($0.revision):\($0.state)" }.joined(separator: ",") + "|\(paused)|\(enabled)"
+        let signature = prompts.map { "\($0.id):\($0.revision):\($0.state):\(unsavedEdits.contains($0.id))" }.joined(separator: ",") + "|\(paused)|\(enabled)"
         guard self.signature != signature else { return }
         self.signature = signature
         self.prompts = prompts
@@ -149,7 +159,9 @@ final class AgentQueueView: ThemedView {
             row.text.toolTip = prompt.error ?? prompt.text
             row.detail.stringValue = prompt.text.isEmpty ? "" : attachmentText
             row.needsReview = prompt.state == .uncertain || prompt.state == .failed
-            row.status.stringValue = row.needsReview ? "Needs review" : ""
+            row.status.stringValue = row.needsReview ? "Needs review"
+                : unsavedEdits.contains(prompt.id) ? "Edit not saved"
+                : prompt.scheduledAt.map { "Sends " + AgentTurnTime.moment($0) } ?? ""
             row.status.toolTip = prompt.error
             row.status.setAccessibilityHelp(prompt.error)
             let earlier = prompt.state == .queued ? prompts.prefix(offset).last(where: { $0.state == .queued }) : nil
@@ -290,6 +302,9 @@ private final class AgentQueueRow: NSView {
 @MainActor
 final class AgentQuestionView: ThemedView, NSTextFieldDelegate {
     var onAnswer: ((String, [String: [String]], Bool) -> Void)?
+    /// Sends one of the request's own decisions other than submit and cancel, such as an
+    /// MCP form's Decline: the request's ID and the decision's.
+    var onDecision: ((String, String) -> Void)?
     var onChange: (() -> Void)?
     private static let inset: CGFloat = 16
     private static let footerHeight: CGFloat = 48
@@ -298,6 +313,10 @@ final class AgentQuestionView: ThemedView, NSTextFieldDelegate {
     private let content = AgentFlippedView()
     private let submit = PillButton("Submit answers", style: .primary)
     private let cancel = PillButton("Cancel", style: .plain)
+    private let decline = PillButton("Decline", style: .normal)
+    private var declineDecision: String?
+    /// The request whose saved answers were put back; later snapshots never overwrite edits.
+    private var restoredRequest: String?
     private let error = makeLabel("", font: AppFont.footnote)
     private var blocks: [AgentQuestionBlock] = []
     private var requestID: String?
@@ -319,12 +338,17 @@ final class AgentQuestionView: ThemedView, NSTextFieldDelegate {
         scroll.scrollerStyle = .overlay
         error.lineBreakMode = .byTruncatingTail
         addSubview(card)
-        for view in [scroll, submit, cancel, error] as [NSView] {
+        decline.isHidden = true
+        for view in [scroll, submit, cancel, decline, error] as [NSView] {
             card.addSubview(view)
             view.translatesAutoresizingMaskIntoConstraints = true
         }
         submit.onPress = { [weak self] in self?.answer(cancelled: false) }
         cancel.onPress = { [weak self] in self?.answer(cancelled: true) }
+        decline.onPress = { [weak self] in
+            guard let self, let requestID = self.requestID, let decision = self.declineDecision else { return }
+            self.onDecision?(requestID, decision)
+        }
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -338,10 +362,21 @@ final class AgentQuestionView: ThemedView, NSTextFieldDelegate {
     func update(_ item: AgentChatItem?, enabled: Bool) {
         submit.isEnabled = enabled
         cancel.isEnabled = enabled
+        decline.isEnabled = enabled
         blocks.forEach { $0.isEnabled = enabled }
         guard requestID != item?.id || form != item?.questionnaire else { return }
         requestID = item?.id
         form = item?.questionnaire
+        // An MCP form offers its own submit, decline and cancel; a question form the usual two.
+        let offered = item?.approval
+        declineDecision = offered?.first(.decline)?.id
+        decline.title = offered?.first(.decline)?.title ?? "Decline"
+        decline.toolTip = offered?.first(.decline)?.consequence
+        decline.isHidden = declineDecision == nil
+        submit.title = offered?.first(.submit)?.title ?? "Submit answers"
+        submit.toolTip = offered?.first(.submit)?.consequence
+        cancel.title = offered?.first(.cancel)?.title ?? "Cancel"
+        cancel.toolTip = offered?.first(.cancel)?.consequence
         blocks.forEach { $0.removeFromSuperview() }
         blocks = []
         error.stringValue = ""
@@ -375,18 +410,25 @@ final class AgentQuestionView: ThemedView, NSTextFieldDelegate {
         return [requestID: answers.filter { !secrets.contains($0.key) }]
     }
 
+    /// Puts a form's saved answers back once, when it is first shown; edits made since
+    /// are never replaced by an older draft.
     func restore(_ saved: [String: [String: [String]]]) {
-        guard let requestID, let values = saved[requestID] else { return }
+        guard let requestID, restoredRequest != requestID, let values = saved[requestID] else { return }
+        restoredRequest = requestID
         for (id, answers) in values {
-            let buttons = choices[id] ?? []
-            buttons.forEach { $0.state = answers.contains($0.title) ? .on : .off }
-            let labels = Set(buttons.map(\.title))
-            fields[id]?.stringValue = answers.filter { !labels.contains($0) }.joined(separator: ", ")
+            guard let block = blocks.first(where: { $0.question.id == id }) else { continue }
+            let labels = Set(block.choices.map(\.title))
+            let written = answers.filter { !labels.contains($0) }.joined(separator: ", ")
+            // A single choice is either an option or a written answer, never both.
+            let chosen = block.question.multiple || written.isEmpty ? answers : []
+            block.choices.forEach { $0.state = chosen.contains($0.title) ? .on : .off }
+            block.field.stringValue = written
         }
     }
 
     @objc private func choiceChanged(_ sender: NSButton) {
         guard let block = blocks.first(where: { $0.choices.contains(sender) }) else { return }
+        restoredRequest = requestID
         if !block.question.multiple, sender.state == .on {
             block.choices.filter { $0 !== sender }.forEach { $0.state = .off }
             block.field.stringValue = ""
@@ -396,6 +438,13 @@ final class AgentQuestionView: ThemedView, NSTextFieldDelegate {
     }
 
     func controlTextDidChange(_ obj: Notification) {
+        // Writing an answer to a single-choice question replaces the chosen option, so
+        // what the form shows is what it sends.
+        restoredRequest = requestID
+        if let field = obj.object as? NSTextField, let block = blocks.first(where: { $0.field === field }),
+           !block.question.multiple, !field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            block.choices.forEach { $0.state = .off }
+        }
         error.stringValue = ""
         needsLayout = true
         onChange?()
@@ -448,7 +497,10 @@ final class AgentQuestionView: ThemedView, NSTextFieldDelegate {
         let cancelWidth = ceil(cancel.fittingSize.width)
         submit.frame = NSRect(x: bounds.width - inset - submitWidth, y: buttonY, width: submitWidth, height: 28)
         cancel.frame = NSRect(x: submit.frame.minX - 6 - cancelWidth, y: buttonY, width: cancelWidth, height: 28)
-        error.frame = NSRect(x: inset, y: buttonY + 6, width: max(0, cancel.frame.minX - inset - 8), height: 16)
+        let declineWidth = decline.isHidden ? 0 : ceil(decline.fittingSize.width) + 8
+        decline.frame = NSRect(x: cancel.frame.minX - 6 - declineWidth, y: buttonY, width: declineWidth, height: 28)
+        let leading = decline.isHidden ? cancel.frame.minX : decline.frame.minX
+        error.frame = NSRect(x: inset, y: buttonY + 6, width: max(0, leading - inset - 8), height: 16)
         scroll.frame = NSRect(x: 0, y: inset, width: bounds.width, height: max(0, buttonY - inset - 8))
         var y: CGFloat = 0
         for block in blocks {
@@ -462,6 +514,7 @@ final class AgentQuestionView: ThemedView, NSTextFieldDelegate {
     private func applyColors() {
         error.textColor = theme.danger
         cancel.setTitleColor(theme.fgMuted)
+        decline.setTitleColor(theme.fg)
         blocks.forEach { $0.apply(theme) }
     }
 

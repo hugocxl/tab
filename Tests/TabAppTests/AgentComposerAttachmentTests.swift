@@ -1,5 +1,6 @@
 import AppKit
 import ImageIO
+import TabProtocol
 import UniformTypeIdentifiers
 import XCTest
 @testable import TabApp
@@ -237,4 +238,113 @@ final class AgentAttachmentPasteboardTests: XCTestCase {
     }
 
     private func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap { descendants($0) } }
+}
+
+final class AgentImageOptimizerTests: XCTestCase {
+    /// An opaque image of random pixels, which compresses badly, like a busy screenshot.
+    private func noise(width: Int, height: Int, alpha: Bool = false) throws -> Data {
+        var generator = SystemRandomNumberGenerator()
+        var pixels = [UInt8](repeating: 255, count: width * height * 4)
+        for index in pixels.indices where alpha || index % 4 != 3 { pixels[index] = UInt8.random(in: 0...255, using: &generator) }
+        let info = alpha ? CGImageAlphaInfo.premultipliedLast.rawValue : CGImageAlphaInfo.noneSkipLast.rawValue
+        let image = try pixels.withUnsafeMutableBytes { buffer -> CGImage in
+            let context = try XCTUnwrap(CGContext(data: buffer.baseAddress, width: width, height: height, bitsPerComponent: 8,
+                                                  bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: info))
+            return try XCTUnwrap(context.makeImage())
+        }
+        let data = NSMutableData()
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithData(data, UTType.png.identifier as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, image, nil)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        return data as Data
+    }
+
+    private func pixelSize(_ data: Data) throws -> (Int, Int) {
+        let source = try XCTUnwrap(CGImageSourceCreateWithData(data as CFData, nil))
+        let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any])
+        return (try XCTUnwrap(properties[kCGImagePropertyPixelWidth] as? Int), try XCTUnwrap(properties[kCGImagePropertyPixelHeight] as? Int))
+    }
+
+    func testAnOversizedScreenshotIsSetAsideAndFitsAfterOptimization() throws {
+        let screenshot = try noise(width: 1800, height: 1700)
+        XCTAssertGreaterThan(screenshot.count, AgentAttachmentImporter.maximumFileSize)
+        let intake = try AgentAttachmentImporter.imageIntake(data: screenshot, mimeType: "image/png")
+        XCTAssertTrue(intake.attachments.isEmpty, "Too large to attach as it is")
+        let oversized = try XCTUnwrap(intake.oversizedImages.first)
+        XCTAssertEqual(oversized.byteCount, screenshot.count)
+        let copy = try AgentImageOptimizer.optimize(oversized, budget: AgentChatAttachment.maxFileBytes)
+        XCTAssertLessThanOrEqual(copy.data.count, AgentChatAttachment.maxFileBytes)
+        XCTAssertEqual(copy.mimeType, "image/jpeg")
+        XCTAssertEqual(copy.name, "Pasted image (optimized).jpeg")
+        XCTAssertNotNil(copy.thumbnail)
+        // A tighter budget shrinks it further, keeping the aspect ratio.
+        let small = try AgentImageOptimizer.optimize(data: screenshot, name: "Shot.png", budget: 250_000)
+        XCTAssertLessThanOrEqual(small.data.count, 250_000)
+        let (width, height) = try pixelSize(small.data)
+        XCTAssertLessThan(width, 1800)
+        XCTAssertEqual(Double(width) / Double(height), 1800.0 / 1700.0, accuracy: 0.02)
+    }
+
+    func testTransparentImagesStayPNG() throws {
+        let image = try noise(width: 1200, height: 900, alpha: true)
+        let copy = try AgentImageOptimizer.optimize(data: image, name: "Overlay.png", budget: image.count / 3)
+        XCTAssertEqual(copy.mimeType, "image/png")
+        XCTAssertLessThanOrEqual(copy.data.count, image.count / 3)
+    }
+
+    func testOversizedDimensionsAndUndecodableDataFailClearly() throws {
+        let wide = try noise(width: AgentImageOptimizer.maximumSourceDimension + 1, height: 2)
+        XCTAssertThrowsError(try AgentImageOptimizer.optimize(data: wide, name: "Wide.png", budget: 1_000)) { error in
+            XCTAssertEqual(error as? AgentImageOptimizationError,
+                           .dimensionsTooLarge("Wide.png", width: AgentImageOptimizer.maximumSourceDimension + 1, height: 2))
+            XCTAssertTrue(error.localizedDescription.contains("Wide.png"))
+        }
+        XCTAssertThrowsError(try AgentImageOptimizer.optimize(data: Data("not an image".utf8), name: "Broken.png", budget: 1_000)) { error in
+            XCTAssertEqual(error as? AgentImageOptimizationError, .undecodable("Broken.png"))
+        }
+        XCTAssertThrowsError(try AgentImageOptimizer.optimize(data: Data(count: AgentImageOptimizer.maximumSourceBytes + 1),
+                                                              name: "Huge.png", budget: 1_000)) { error in
+            XCTAssertEqual(error as? AgentImageOptimizationError, .sourceTooLarge("Huge.png"))
+        }
+        let busy = try noise(width: 800, height: 800)
+        XCTAssertThrowsError(try AgentImageOptimizer.optimize(data: busy, name: "Busy.png", budget: 2_000)) { error in
+            XCTAssertEqual(error as? AgentImageOptimizationError, .cannotFit("Busy.png"))
+        }
+        // Undecodable bytes over the limit stay a plain size error, never an offer to optimize.
+        let intake = try? AgentAttachmentImporter.imageIntake(data: Data(count: AgentAttachmentImporter.maximumFileSize + 1), mimeType: "image/png")
+        XCTAssertNil(intake)
+    }
+
+    func testOrdinaryImagesKeepTheirOriginalPixels() throws {
+        let image = try noise(width: 64, height: 48)
+        let intake = try AgentAttachmentImporter.imageIntake(data: image, mimeType: "image/png")
+        XCTAssertEqual(intake.attachments.first?.data, image)
+        XCTAssertTrue(intake.oversizedImages.isEmpty)
+    }
+
+    func testAnOversizedImageFileIsSetAsideWhileOtherFilesImport() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("optimizer-" + UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let large = directory.appendingPathComponent("Large.png")
+        try noise(width: 1800, height: 1700).write(to: large)
+        let note = directory.appendingPathComponent("Note.txt")
+        try Data("hello".utf8).write(to: note)
+        let intake = try await AgentAttachmentImporter.intake(urls: [large, note])
+        XCTAssertEqual(intake.attachments.map(\.name), ["Note.txt"])
+        XCTAssertEqual(intake.oversizedImages.map(\.name), ["Large.png"])
+        do {
+            _ = try await AgentAttachmentImporter.load(urls: [large])
+            XCTFail("The atomic import still refuses it")
+        } catch AgentAttachmentImportError.tooLarge {}
+        let copy = try AgentImageOptimizer.optimize(try XCTUnwrap(intake.oversizedImages.first), budget: AgentChatAttachment.maxFileBytes)
+        XCTAssertEqual(copy.name, "Large (optimized).jpeg")
+    }
+
+    func testOptimizationStopsWhenCancelled() async throws {
+        let image = try noise(width: 400, height: 400)
+        let task = Task.detached { try AgentImageOptimizer.optimize(data: image, name: "Shot.png", budget: 1_000_000) }
+        task.cancel()
+        do { _ = try await task.value; XCTFail("A cancelled optimization must not produce a copy") } catch is CancellationError {}
+    }
 }

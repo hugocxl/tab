@@ -30,6 +30,7 @@ extension AgentPaneController {
         // The font-size keys size conversation text here, as they size a terminal's.
         case .agentNextFailure: return surface.revealNextFailure()
         case .submitAgentAnswers: return surface.questions.submitAnswers()
+        case .sendAgentPromptNow: return performSendNowShortcut()
         // The terminal's prompt and scroll keys, while the transcript (not the composer) has the keyboard.
         case .previousPrompt, .nextPrompt:
             guard !surface.composerHasFocus else { return false }
@@ -73,13 +74,14 @@ extension AgentPaneView {
         let bar = findBar ?? makeFindBar()
         if findModel == nil {
             var model = AgentConversationFindModel { [weak self] item in self?.renderedFindText(item) }
-            model.search(bar.query, in: snapshot?.items ?? [])
+            onFindQueryChange?(bar.query)
+            model.search(bar.query, in: findItems)
             findModel = model
             findHighlighter.setTheme(theme)
             transcript.onViewportSettled = { [weak self] in self?.paintFindMatches() }
             bar.frame = NSRect(x: 0, y: 0, width: bounds.width, height: AgentConversationFindBar.height)
             bar.isHidden = false
-            bar.counter = model.counter
+            showFindCounter()
             paintFindMatches()
         }
         bar.focus()
@@ -99,6 +101,7 @@ extension AgentPaneView {
 
     private func closeFind() {
         findModel = nil
+        onFindQueryChange?("")
         transcript.onViewportSettled = nil
         findHighlighter.clear()
         findBar?.isHidden = true
@@ -106,8 +109,12 @@ extension AgentPaneView {
     }
 
     private func findQueryDidChange(_ query: String) {
+        guard findModel != nil else { return }
+        // A new query starts a new search of the archive first, so it searches the items
+        // that query found.
+        onFindQueryChange?(query)
         guard var model = findModel else { return }
-        model.search(query, in: snapshot?.items ?? [])
+        model.search(query, in: findItems)
         findModel = model
         findSelectionDidChange()
     }
@@ -120,7 +127,7 @@ extension AgentPaneView {
     }
 
     private func findSelectionDidChange() {
-        findBar?.counter = findModel?.counter ?? ""
+        showFindCounter()
         paintFindMatches()
         revealFindSelection()
     }
@@ -128,9 +135,9 @@ extension AgentPaneView {
     /// A new snapshot: keep the selection on its occurrence and repaint, without scrolling.
     func findTranscriptDidChange() {
         guard var model = findModel else { return }
-        model.update(snapshot?.items ?? [])
+        model.update(findItems)
         findModel = model
-        findBar?.counter = model.counter
+        showFindCounter()
         paintFindMatches()
     }
 
@@ -189,8 +196,10 @@ extension AgentPaneView {
 
     /// Scrolls the current match into view, below the bar. A folded work group, a folded
     /// `<details>` block or a collapsed message opens only when the match is inside it.
-    private func revealFindSelection() {
+    func revealFindSelection() {
         guard let match = findModel?.selected else { return }
+        // An archived match shows once its page loads; the owner reveals it then.
+        if isArchivedFindItem(match.itemID), let reveal = onRevealArchivedFind { return reveal(match.itemID) }
         if transcript.entryID(showing: match.itemID) == nil {
             guard transcript.anchor(revealing: .item(match.itemID)) != nil else { return }
         }

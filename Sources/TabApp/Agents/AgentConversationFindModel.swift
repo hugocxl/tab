@@ -33,7 +33,7 @@ struct AgentConversationFindModel {
         var ranges: [NSRange]
     }
 
-    static let options: NSString.CompareOptions = [.caseInsensitive, .diacriticInsensitive]
+    static let options = AgentTranscriptSearch.options
 
     private(set) var query = ""
     private(set) var matches: [Match] = []
@@ -61,25 +61,9 @@ struct AgentConversationFindModel {
         return "\(selectedIndex + 1) of \(matches.count)"
     }
 
-    /// The Markdown source of what Find searches in `item`, or nil when the item is not
-    /// searchable (notices and approvals). A tool call is searched by its name, what it
-    /// worked on, its command and its output, as plain text.
-    static func searchableText(_ item: AgentChatItem) -> String? {
-        switch item.kind {
-        case .user, .assistant: return item.text
-        case .tool where item.workContext?.itemType == "proposed_plan": return item.detail
-        case .tool where item.tool != nil: return toolText(item)
-        default: return nil
-        }
-    }
-
-    /// A tool call's searchable text, bounded.
-    static func toolText(_ item: AgentChatItem) -> String? {
-        guard let tool = item.tool else { return nil }
-        let parts = [tool.name ?? item.text, tool.summary, tool.input, tool.output].compactMap { $0 }.filter { !$0.isEmpty }
-        let text = parts.joined(separator: "\n")
-        return text.utf8.count > 64 * 1024 ? String(text.prefix(64 * 1024)) : text
-    }
+    /// The Markdown source of what Find searches in `item`; the server's archive search
+    /// reads the same text.
+    static func searchableText(_ item: AgentChatItem) -> String? { AgentTranscriptSearch.searchableText(item) }
 
     /// Whether `item` is searched as plain text rather than rendered Markdown.
     static func searchesPlainText(_ item: AgentChatItem) -> Bool {
@@ -90,14 +74,9 @@ struct AgentConversationFindModel {
     /// or there is no query.
     func searched(_ itemID: String) -> Searched? { searched[itemID] }
 
-    /// False when `source` cannot render to text that contains `query`, because a word of
-    /// the query is missing from it. Rendering removes Markdown syntax around and between
-    /// words but never makes up a word, so items that cannot match are not rendered.
+    /// False when `source` cannot render to text that contains `query`.
     static func mayMatch(_ query: String, renderedFrom source: String) -> Bool {
-        let string = source as NSString
-        return query.components(separatedBy: CharacterSet.alphanumerics.inverted).allSatisfy { word in
-            word.isEmpty || string.range(of: word, options: options).location != NSNotFound
-        }
+        AgentTranscriptSearch.mayMatch(query, renderedFrom: source)
     }
 
     /// Every occurrence of `query` in `text`, in order.

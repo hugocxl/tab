@@ -19,9 +19,9 @@ enum AgentStreamingCompletion {
         if endsLine { lines.removeLast() }
         guard let last = lines.last else { return source }
         let trimmed = last.trimmingCharacters(in: .whitespaces)
-        // Inside an open code fence, nothing is structure.
-        let fences = lines.dropLast().filter { $0.trimmingCharacters(in: .whitespaces).hasPrefix("```") }.count
-        guard fences % 2 == 0 else { return source }
+        // Inside an open code fence, nothing is structure. The fence is read as the parser
+        // reads it: a tilde fence, or a longer backtick fence holding shorter runs, stays open.
+        guard AgentMarkdownFence.openFence(after: lines.dropLast(), inContainers: true) == nil else { return source }
         if isTableLine(trimmed) {
             var start = lines.count - 1
             while start > 0, isTableLine(lines[start - 1].trimmingCharacters(in: .whitespaces)) { start -= 1 }
@@ -39,7 +39,7 @@ enum AgentStreamingCompletion {
     private static func isAmbiguous(_ line: String) -> Bool {
         guard !line.isEmpty, line.count <= 8 else { return false }
         if line.allSatisfy({ $0 == "-" }) || line.allSatisfy({ $0 == "=" }) || line.allSatisfy({ $0 == "#" }) { return true }
-        if ["*", "+", ">", "`", "``"].contains(line) { return true }
+        if ["*", "+", ">", "`", "``", "~", "~~"].contains(line) { return true }
         // A list number with nothing after it yet: `1.` or `12)`.
         if let mark = line.last, ".)".contains(mark), line.dropLast().allSatisfy(\.isNumber), line.count > 1 { return true }
         return false

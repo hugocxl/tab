@@ -52,7 +52,9 @@ final class AgentComposerCoordinator {
             .init(id: "effort", title: "/effort", subtitle: "Choose reasoning effort · [level | auto]", icon: .brain, kind: .action),
             .init(id: "attach", title: "/attach", subtitle: "Attach files or images", icon: .paperclip, kind: .action),
             .init(id: "stop", title: "/stop", subtitle: "Stop the current response", icon: .stop, kind: .action),
-            .init(id: "clear", title: "/clear-draft", subtitle: "Clear the current draft and attachments", icon: .eraser, kind: .action)
+            .init(id: "stashes", title: "/stashes", subtitle: "Restore a stashed draft; right-click the message box to stash one",
+                  icon: .history, kind: .action),
+            .init(id: "clear-draft", title: "/clear-draft", subtitle: "Clear the current draft and attachments", icon: .eraser, kind: .action)
         ]
     }
 

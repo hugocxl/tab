@@ -75,7 +75,8 @@ final class AgentSubagentPaneTests: XCTestCase {
         let pane = AgentPaneController(session: session, project: project, provider: .claude) { _ in snapshot }
         defer { pane.dispose() }
         pane.conversationRequest = { request in
-            guard case .subagentSteps(_, let id) = request else { throw ModelError("unexpected") }
+            // Incremental reads fall back to full ones, so the snapshot reaches the window.
+            guard case .subagentSteps(_, let id) = request else { throw ClientError.server(ErrorReply(code: .unsupported, message: "")) }
             reads += 1
             return .subagentSteps(AgentSubagentSteps(toolUseID: id, items: steps))
         }
@@ -102,6 +103,106 @@ final class AgentSubagentPaneTests: XCTestCase {
             self.all(try! XCTUnwrap(old.window?.contentView)).contains { ($0 as? NSTextField)?.stringValue.contains("Update Tab") == true }
         }
         old.close()
+    }
+
+    /// T1: a step that changes in place, and a kept window that rolls over, change the
+    /// agent's content revision but not its count; the window follows the revision and
+    /// coalesces what arrives while a read is in flight.
+    func testStepsWindowFollowsContentRevisionsAndCoalescesReadsInFlight() async throws {
+        _ = NSApplication.shared
+        var tool = AgentChatItem(id: "t1", kind: .tool, text: "Bash", isComplete: false,
+                                 tool: .init(name: "Bash", category: .command, input: #"{"command":"swift test"}"#, status: .running))
+        var steps = AgentSubagentSteps(toolUseID: "tool", items: [tool], revision: 1)
+        var gate: CheckedContinuation<Void, Never>?
+        var gated = false
+        var agent = AgentSubagent(id: "a", toolUseID: "tool", description: "Audit", steps: 1, stepsRevision: 1)
+        let window = AgentSubagentStepsWindow(subagent: agent, toolUseID: "tool", theme: .shared) { _ in
+            if gated { await withCheckedContinuation { gate = $0 } }
+            return steps
+        }
+        defer { window.close() }
+        try await wait { window.loadedRevision == 1 }
+        XCTAssertEqual(window.fetchCount, 1)
+
+        tool.isComplete = true
+        tool.tool?.status = .completed
+        tool.tool?.output = "Executed 12 tests"
+        steps = AgentSubagentSteps(toolUseID: "tool", items: [tool], revision: 2)
+        agent.stepsRevision = 2
+        window.update(agent)
+        try await wait { window.items.first?.tool?.output == "Executed 12 tests" }
+        XCTAssertEqual(window.items.count, 1, "One running tool became one completed tool")
+        XCTAssertEqual(window.fetchCount, 2)
+        window.update(agent)
+        try await Task.sleep(for: .milliseconds(30))
+        XCTAssertEqual(window.fetchCount, 2, "An unchanged revision reads nothing")
+
+        // The kept window is full and rolls over: same count, new revision each time.
+        let full = (0..<AgentSubagentSteps.maxItems).map { AgentChatItem(id: "s\($0)", kind: .assistant, text: "Step \($0)") }
+        steps = AgentSubagentSteps(toolUseID: "tool", items: full, revision: 3)
+        agent.steps = full.count
+        agent.stepsRevision = 3
+        window.update(agent)
+        try await wait { window.loadedRevision == 3 }
+        steps = AgentSubagentSteps(toolUseID: "tool", items: Array(full.dropFirst()) + [AgentChatItem(id: "next", kind: .assistant, text: "Next")],
+                                   revision: 4)
+        agent.stepsRevision = 4
+        window.update(agent)
+        try await wait { window.items.last?.id == "next" }
+        XCTAssertEqual(agent.steps, AgentSubagentSteps.maxItems)
+
+        // Three updates while a read is in flight become one more read.
+        gated = true
+        agent.stepsRevision = 5
+        window.update(agent)
+        try await wait { gate != nil }
+        let reads = window.fetchCount
+        for revision in 6...8 {
+            agent.stepsRevision = UInt64(revision)
+            window.update(agent)
+        }
+        gated = false
+        steps.revision = 8
+        gate?.resume()
+        try await wait { window.loadedRevision == 8 }
+        try await Task.sleep(for: .milliseconds(30))
+        XCTAssertEqual(window.fetchCount, reads + 1)
+
+        // Finishing reads once more even with the same revision.
+        agent.status = .completed
+        window.update(agent)
+        try await wait { window.fetchCount == reads + 2 }
+    }
+
+    /// T5: older steps load in pages above the newest, and steps past the retention limit
+    /// or never saved say so.
+    func testStepsWindowPagesSavedStepsAndNamesWhatWasNotKept() async throws {
+        _ = NSApplication.shared
+        let window = AgentSubagentStepsWindow(subagent: AgentSubagent(id: "a", toolUseID: "tool", description: "Audit", status: .completed),
+                                              toolUseID: "tool", theme: .shared) { _ in
+            AgentSubagentSteps(toolUseID: "tool", items: [AgentChatItem(id: "new", kind: .assistant, text: "Newest")],
+                               revision: 9, earlierSteps: 3, omittedSteps: 2)
+        } fetchEarlier: { _, before in
+            XCTAssertNil(before)
+            return AgentEarlierItems(items: (0..<3).map { AgentChatItem(id: "old\($0)", kind: .assistant, text: "Old \($0)") }, start: 0, total: 3)
+        }
+        defer { window.close() }
+        try await wait { window.loadedRevision == 9 }
+        let content = try XCTUnwrap(window.window?.contentView)
+        let labels = { self.all(content).compactMap { ($0 as? NSTextField)?.stringValue } }
+        XCTAssertTrue(labels().contains("3 earlier steps aren't shown, and 2 earlier steps weren't kept, past this agent's step limit"),
+                      "\(labels())")
+        window.loadEarlier()
+        try await wait { window.items.count == 4 }
+        XCTAssertEqual(window.items.map(\.id), ["old0", "old1", "old2", "new"])
+        XCTAssertTrue(labels().contains("2 earlier steps weren't kept, past this agent's step limit"), "\(labels())")
+
+        let old = AgentSubagentStepsWindow(subagent: AgentSubagent(id: "b", toolUseID: "old", description: "Old", status: .completed),
+                                           toolUseID: "old", theme: .shared) { _ in
+            AgentSubagentSteps(toolUseID: "old", items: [], unavailable: true)
+        }
+        defer { old.close() }
+        try await wait { (try? XCTUnwrap(old.window?.contentView)).map { self.all($0).contains { ($0 as? NSTextField)?.stringValue.contains("weren't saved") == true } } == true }
     }
 
     func testAgentReportRendersAsMarkdown() throws {

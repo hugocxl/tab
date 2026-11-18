@@ -109,6 +109,7 @@ final class AgentTranscriptDocument: ThemedView {
     var onEditPrompt: ((AgentChatItem) -> Void)?
     var onForkPrompt: ((AgentChatItem) -> Void)?
     var onRevert: ((AgentTurnCheckpoint, [String]?) -> Void)?
+    var onRetryCheckpoint: ((String) -> Void)?
     /// What holds the provider up, from the snapshot, for the working line.
     var providerActivity: AgentChatActivity?
     var onShowFullOutput: ((String) -> Void)?
@@ -121,6 +122,8 @@ final class AgentTranscriptDocument: ThemedView {
         for item in items { menu.addItem(item) }
         return menu
     }
+    /// Says why `omittedCount` earlier items aren't shown, in place of the conversation's note.
+    var earlierNote: ((Int) -> String)?
     var onEarlier: (() -> Void)? { didSet { if (oldValue == nil) != (onEarlier == nil) { layoutHeader() } } }
     /// Saves a plan through the conversation's project actions: `(relativePath, contents, cwd)`.
     var writeProjectFile: ((String, String, String?) async throws -> String)?
@@ -240,7 +243,8 @@ final class AgentTranscriptDocument: ThemedView {
         positions = Dictionary(uniqueKeysWithValues: entries.enumerated().map { ($0.element.id, $0.offset) })
         self.omittedCount = omittedCount
         // Without a way to load them, the dropped items are simply gone from Tab.
-        earlier.stringValue = (omittedCount == 1 ? "1 earlier item isn't" : "\(omittedCount) earlier items aren't")
+        earlier.stringValue = earlierNote?(omittedCount)
+            ?? (omittedCount == 1 ? "1 earlier item isn't" : "\(omittedCount) earlier items aren't")
             + " shown, to keep this conversation within its size limit"
         geometry.reset(heights: entries.map { heights[$0.id]?.value ?? 80 },
                        trailingSpaces: entries.enumerated().map { index, entry in
@@ -526,6 +530,7 @@ final class AgentTranscriptDocument: ThemedView {
             if onEditPrompt != nil, entry.kind == .message { row.onEditPrompt = { [weak self] item in self?.onEditPrompt?(item) } }
             if onForkPrompt != nil, entry.kind == .message { row.onForkPrompt = { [weak self] item in self?.onForkPrompt?(item) } }
             if onRevert != nil { row.onRevert = { [weak self] checkpoint, paths in self?.onRevert?(checkpoint, paths) } }
+            if onRetryCheckpoint != nil { row.onRetryCheckpoint = { [weak self] turn in self?.onRetryCheckpoint?(turn) } }
             if onShowFullOutput != nil { row.onShowFullOutput = { [weak self] id in self?.onShowFullOutput?(id) } }
             row.onOpenAttachment = onOpenAttachment
             row.fetchAttachment = fetchAttachment
@@ -553,11 +558,17 @@ final class AgentTranscriptDocument: ThemedView {
                 message.forkable = entry.provider == .claude
                 message.alwaysAllowable = entry.provider == .claude
                 message.showsResponseActions = entry.showsResponseActions
+                message.turnID = entry.turn?.userItemID
+                message.checkpointPhase = entry.turn?.reviewPhase ?? .unknown
                 message.checkpoint = entry.turn?.checkpoint
                 message.duration = entry.duration
                 message.usage = entry.usage
             }
-            if let changes = row as? AgentChangedFilesRow { changes.checkpoint = entry.turn?.checkpoint }
+            if let changes = row as? AgentChangedFilesRow {
+                changes.turnID = entry.turn?.userItemID
+                changes.phase = entry.turn?.reviewPhase ?? .unknown
+                changes.checkpoint = entry.turn?.checkpoint
+            }
             if let compaction = row as? AgentCompactionRow { compaction.provider = entry.provider }
             row.update(entry.items)
             row.invalidateFindText()
@@ -775,7 +786,9 @@ final class AgentTranscriptDocument: ThemedView {
         var owners: [String: String] = [:]
         for entry in result { for item in entry.items { owners[item.id] = entry.id } }
         var cards: [String: AgentChatTurn] = [:]
-        for turn in turns where turn.checkpoint?.totalFiles ?? 0 > 0 {
+        // A folder outside Git says so once, on its latest turn, rather than on every answer.
+        for turn in turns where turn.reviewPhase.showsCard {
+            if case .untracked = turn.reviewPhase, turn.userItemID != turns.last?.userItemID { continue }
             guard let end = userEnds[turn.userItemID], let answer = answers[turn.userItemID],
                   let start = itemIndices[turn.userItemID], end > start + 1 else { continue }
             let target = answer < end ? answer : end - 1

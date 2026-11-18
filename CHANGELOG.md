@@ -3,6 +3,55 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.103.0 - 2026-11-18
+
+### Added
+
+- Agent panes have a Send Now button and Cmd-Option-Return to deliver a prompt
+  into the running turn, while Return still queues it.
+- Queued prompts can be edited with their attachments, and an edit that can't be
+  saved stays available to retry, copy or stash.
+- Drafts can be stashed and restored later with `/stashes` or the message box
+  menu, keeping citations, review comments, settings and attachments.
+- Oversized images can be attached as an optimized copy.
+- Find searches a conversation's earlier history on the server and opens the
+  message that matches.
+- An agent's steps are saved, so a finished agent's steps still open after a
+  restart.
+- Closed conversations can be reopened, kept for a chosen time or deleted
+  permanently from the conversation history.
+- Codex permission requests and MCP forms appear as cards that offer exactly the
+  provider's choices.
+- A turn stopped by a usage limit shows when the limit resets, with Retry and
+  Resume at Reset.
+- Edit from Here rewinds a Claude conversation to an earlier message, keeping
+  the full conversation in history and restoring files only when asked.
+- Each turn shows whether its file changes are still being recorded, recorded,
+  unavailable or outside Git, with Retry when recording failed.
+- VoiceOver announces approvals, questions, failures and finished turns once.
+
+### Changed
+
+- Closing an agent pane keeps its conversation until you delete it or choose a
+  retention period, instead of removing it after 30 days.
+- Reverting files waits for other agents working in the same folder and puts
+  every file back or none of them.
+- Review windows show more context and saved comments from the checkpoint
+  itself, not from the current files.
+
+### Fixed
+
+- Long pastes, clearing the draft and Edit as New Prompt now keep the draft's
+  attachments accurate, including attachment-only messages.
+- Loaded earlier messages stay in place when history is trimmed or the
+  connection drops.
+- Code blocks that use tildes or longer fences stay visible while a response
+  streams.
+- An agent's steps window updates when a step changes without adding new ones.
+- Choosing an option in a question clears typed text, and typing clears the
+  option.
+- Requests from an agent that has ended are expired instead of answered.
+
 ## 0.102.0 - 2026-11-17
 
 ### Added

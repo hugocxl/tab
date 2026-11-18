@@ -30,6 +30,8 @@ public struct AgentQueuedPrompt: Codable, Hashable, Sendable, Identifiable {
     public var state: State
     public var revision: UInt64
     public var error: String?
+    /// The server holds it until then, as a retry when a usage limit resets.
+    public var scheduledAt: Date?
     public init(prompt: AgentPrompt, state: State = .queued, revision: UInt64 = 0, error: String? = nil) {
         id = prompt.id; text = prompt.text; attachments = prompt.attachments.map(\.descriptor)
         self.state = state; self.revision = revision; self.error = error

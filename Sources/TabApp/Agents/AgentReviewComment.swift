@@ -13,6 +13,9 @@ struct AgentReviewComment: Codable, Equatable, Identifiable, Sendable {
 
     var location: String { "\(path) · \(old ? "old" : "new") lines \(firstLine)–\(lastLine)" }
 
+    /// Where the comment is drawn in its file's diff.
+    var mark: DiffReviewMark { DiffReviewMark(old: old, lines: min(firstLine, lastLine)...max(firstLine, lastLine)) }
+
     static func prompt(_ comments: [Self]) -> String {
         "Please address these comments on the recorded turn changes:\n\n" + comments.map { comment in
             "File: \(comment.path)\nCheckpoint: \(comment.checkpoint)\nSide: \(comment.old ? "old" : "new")\nLines: \(comment.firstLine)–\(comment.lastLine)\n"
@@ -20,6 +23,12 @@ struct AgentReviewComment: Codable, Equatable, Identifiable, Sendable {
                 + "\n\nComment:\n\(comment.text)"
         }.joined(separator: "\n\n---\n\n")
     }
+}
+
+/// A saved comment's side and lines, as a diff draws it.
+struct DiffReviewMark: Equatable {
+    var old: Bool
+    var lines: ClosedRange<UInt64>
 }
 
 struct DiffReviewSelection: Equatable {

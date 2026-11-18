@@ -29,6 +29,16 @@ final class AgentConversationFindBar: ThemedView, FindBarDelegate {
         }
     }
 
+    /// How much of the conversation the search covered, when that isn't all of it; the
+    /// bar's help tag and VoiceOver help say it.
+    var scope: String? {
+        didSet {
+            guard scope != oldValue else { return }
+            bar.toolTip = scope
+            bar.setAccessibilityHelp(scope)
+        }
+    }
+
     /// True while the field has the keyboard.
     var isEditing: Bool { bar.isEditing }
 

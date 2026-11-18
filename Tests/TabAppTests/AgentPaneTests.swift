@@ -111,7 +111,7 @@ final class AgentPaneTests: XCTestCase {
             } else { operation = request }
             requests.append(operation)
             switch operation {
-            case .submit, .editQueued, .moveQueued, .removeQueued, .deliverQueued, .resumeQueue, .answer: break
+            case .submit, .editQueued, .editQueuedPrompt, .moveQueued, .removeQueued, .deliverQueued, .resumeQueue, .answer, .schedule: break
             case .create, .fork:
                 if failCreate { throw NSError(domain: "Offline", code: 1) }
             case .send(_, let text, let model, let effort, let provider, _):
@@ -139,6 +139,14 @@ final class AgentPaneTests: XCTestCase {
                     await withCheckedContinuation { readGate = $0 }
                     return beforeReconnect
                 }
+            case .decide(_, let id, let decision, _):
+                if let index = snapshot.items.firstIndex(where: { $0.id == id }) {
+                    snapshot.items[index].isComplete = true
+                    let chosen = snapshot.items[index].approval?.decision(decision)
+                    snapshot.items[index].approval?.outcome = .init(decision: decision, kind: chosen?.kind, title: chosen?.title ?? decision, source: .user)
+                }
+                snapshot.status = .working
+                snapshot.revision += 1
             case .approve(_, let id, _, _, _):
                 if gateNextApproval {
                     gateNextApproval = false
@@ -1472,6 +1480,96 @@ final class AgentPaneTests: XCTestCase {
         XCTAssertEqual(AgentComposerCoordinator.shallowest(paths, limit: 3), ["Package.swift", "README.md", "a/one.swift"])
     }
 
+    /// T6: VoiceOver hears each approval, failure and finished turn once, while the
+    /// keyboard is in the pane; never streaming text, a refresh, a reconnect or a return
+    /// to the pane.
+    func testVoiceOverHearsEachTransitionOnceWhileTheConversationHasTheKeyboard() async throws {
+        let backend = Backend()
+        let date = Date()
+        backend.snapshot.items = [AgentChatItem(id: "u0", kind: .user, text: "Earlier"), AgentChatItem(id: "a0", kind: .assistant, text: "Done")]
+        backend.snapshot.turns = [AgentChatTurn(userItemID: "u0", startedAt: date, completedAt: date, status: .idle, outcome: .completed)]
+        backend.snapshot.status = .idle
+        backend.snapshot.revision = 2
+        let pane = backend.controller()
+        defer { pane.dispose() }
+        var spoken: [String] = []
+        var keyboard = true
+        pane.announcer.post = { text, _ in spoken.append(text) }
+        pane.announcer.hasKeyboard = { _ in keyboard }
+        func publish(_ change: (inout AgentChatSnapshot) -> Void) async throws {
+            change(&backend.snapshot)
+            backend.snapshot.revision += 1
+            pane.sessionChanged(session: backend.session, revision: backend.snapshot.revision)
+            try await wait { pane.snapshot?.revision == backend.snapshot.revision }
+        }
+        pane.refresh()
+        try await wait { pane.snapshot != nil }
+        XCTAssertEqual(spoken, [], "Opening a pane replays nothing")
+
+        try await publish {
+            $0.items.append(AgentChatItem(id: "u1", kind: .user, text: "Run the tests"))
+            $0.turns?.append(AgentChatTurn(userItemID: "u1", startedAt: date))
+            $0.status = .waiting
+            $0.items.append(AgentChatItem(id: "perm", kind: .approval, text: "Run swift test", isComplete: false))
+        }
+        XCTAssertEqual(spoken, ["The agent needs your approval: Run swift test"])
+        // Streaming, refreshing and reconnecting repeat the same state.
+        try await publish { $0.items.append(AgentChatItem(id: "a1", kind: .assistant, text: "Tok", isComplete: false)) }
+        for token in ["en", " by", " token"] { try await publish { $0.items[$0.items.count - 1].text += token } }
+        pane.connectionChanged()
+        try await wait { pane.snapshot?.revision == backend.snapshot.revision }
+        try await Task.sleep(for: .milliseconds(120))
+        XCTAssertEqual(spoken.count, 1)
+
+        try await publish {
+            $0.items[$0.items.firstIndex { $0.id == "perm" } ?? 0].isComplete = true
+            $0.turns?[1].completedAt = date
+            $0.turns?[1].outcome = .completed
+            $0.status = .idle
+        }
+        XCTAssertEqual(spoken.last, "The agent finished.")
+        try await publish {
+            $0.items.append(AgentChatItem(id: "u2", kind: .user, text: "Again"))
+            $0.items.append(AgentChatItem(id: "err", kind: .notice, text: "Rate limited", workContext: .init(itemType: "error", sourceStatus: "failed")))
+            $0.turns?.append(AgentChatTurn(userItemID: "u2", startedAt: date, completedAt: date, status: .failed, outcome: .failed))
+            $0.status = .failed
+        }
+        XCTAssertEqual(spoken.last, "The agent's turn failed: Rate limited")
+        XCTAssertEqual(spoken.count, 3)
+
+        // With the keyboard in another pane, a question passes silently and isn't replayed later.
+        keyboard = false
+        try await publish {
+            $0.items.append(AgentChatItem(id: "q", kind: .approval, text: "Which branch?", isComplete: false,
+                                          questionnaire: AgentQuestionnaire(questions: [.init(id: "b", title: "Which branch?",
+                                                                                              options: [.init(label: "main")])])))
+        }
+        keyboard = true
+        try await publish { $0.items.append(AgentChatItem(id: "a3", kind: .assistant, text: "Waiting")) }
+        XCTAssertEqual(spoken.count, 3)
+    }
+
+    func testTheConversationHasTheKeyboardOnlyInItsComposerOrTranscript() throws {
+        let backend = Backend()
+        let pane = backend.controller()
+        defer { pane.dispose() }
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 500), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        let outside = NSTextField(frame: NSRect(x: 0, y: 0, width: 10, height: 10))
+        let container = NSView(frame: window.contentLayoutRect)
+        pane.surface.frame = container.bounds
+        container.addSubview(pane.surface)
+        container.addSubview(outside)
+        window.contentView = container
+        window.makeFirstResponder(pane.surface.composer)
+        XCTAssertTrue(pane.surface.keyboardInConversation)
+        window.makeFirstResponder(pane.surface.transcript)
+        XCTAssertTrue(pane.surface.keyboardInConversation)
+        window.makeFirstResponder(outside)
+        XCTAssertFalse(pane.surface.keyboardInConversation)
+    }
+
     func testEarlierItemsLoadAboveTheRetainedOnes() async throws {
         let backend = Backend()
         backend.snapshot.items = [AgentChatItem(id: "now", kind: .user, text: "Latest")]
@@ -1496,3 +1594,121 @@ final class AgentPaneTests: XCTestCase {
         XCTAssertEqual(pane.snapshot?.items.count, 1, "The conversation itself is unchanged")
     }
 }
+
+/// L1, L3 and L4 in the pane.
+extension AgentPaneTests {
+    func testShortcutsBindOnlyToTheExactOfferedDecisionAndButtonsSendTheirOwn() async throws {
+        let backend = Backend()
+        backend.snapshot.status = .waiting
+        let noOneTime = AgentApprovalRequest(kind: "command", decisions: [
+            .init(id: "acceptForSession", kind: .allowForSession, title: "Allow for this session"),
+            .init(id: "cancel", kind: .cancel, title: "Decline and stop"),
+        ])
+        backend.snapshot.items = [AgentChatItem(id: "r1", kind: .approval, text: "make", isComplete: false, approval: noOneTime)]
+        let pane = backend.controller()
+        defer { pane.dispose() }
+        pane.refresh()
+        try await wait { pane.snapshot?.items.count == 1 }
+        XCTAssertFalse(pane.performConversationShortcut(.allowAgentApproval), "No one-time approval is offered")
+        XCTAssertFalse(pane.performConversationShortcut(.denyAgentApproval), "Cancel stops the turn; Deny never sends it")
+        XCTAssertFalse(backend.requests.contains { if case .decide = $0 { true } else if case .approve = $0 { true } else { false } })
+        pane.choose(.decision("acceptForSession"), approval: "r1")
+        try await wait { backend.requests.contains(.decide(session: backend.session, request: "r1", decision: "acceptForSession")) }
+        try await wait { pane.snapshot?.items.first?.approval?.outcome?.decision == "acceptForSession" }
+
+        backend.snapshot.status = .waiting
+        let pair = AgentApprovalRequest(kind: "command", decisions: [
+            .init(id: "accept", kind: .allowOnce, title: "Allow once"), .init(id: "decline", kind: .decline, title: "Decline"),
+        ])
+        backend.snapshot.items.append(AgentChatItem(id: "r2", kind: .approval, text: "ls", isComplete: false, approval: pair))
+        backend.snapshot.revision += 1
+        pane.refresh()
+        try await wait { pane.snapshot?.items.count == 2 }
+        XCTAssertTrue(pane.performConversationShortcut(.denyAgentApproval))
+        try await wait { backend.requests.contains(.decide(session: backend.session, request: "r2", decision: "decline")) }
+        pane.choose(.decision("not-offered"), approval: "r2")
+        XCTAssertFalse(backend.requests.contains(.decide(session: backend.session, request: "r2", decision: "not-offered")))
+    }
+
+    func testUsageLimitShowsItsResetAndResumeAtResetSchedulesOnceThenCancels() async throws {
+        let backend = Backend()
+        let reset = Date().addingTimeInterval(3600)
+        let user = AgentChatItem(id: "u1", kind: .user, text: "Long task")
+        backend.snapshot.items = [user, AgentChatItem(kind: .notice, text: "You've hit your usage limit.")]
+        var turn = AgentChatTurn(userItemID: "u1", startedAt: Date().addingTimeInterval(-10), completedAt: Date(), status: .failed, outcome: .failed)
+        turn.rateLimit = AgentRateLimitStop(resetsAt: reset, message: "Usage limit reached")
+        backend.snapshot.turns = [turn]
+        backend.snapshot.status = .failed
+        let pane = backend.controller()
+        defer { pane.dispose() }
+        pane.refresh()
+        try await wait { pane.snapshot?.turns?.count == 1 }
+        XCTAssertFalse(pane.surface.retryTurn.isHidden)
+        XCTAssertFalse(pane.surface.resumeAtReset.isHidden)
+        XCTAssertTrue(pane.surface.feedback.stringValue.contains("Resets"), pane.surface.feedback.stringValue)
+        pane.toggleResumeAtReset()
+        try await wait { backend.requests.contains { if case .schedule(_, _, let at) = $0 { at == reset } else { false } } }
+        // The server now holds the retry for the reset.
+        guard case .schedule(_, let prompt, _)? = backend.requests.last(where: { if case .schedule = $0 { true } else { false } }) else { return XCTFail() }
+        var queued = AgentQueuedPrompt(prompt: prompt)
+        queued.scheduledAt = reset
+        backend.snapshot.queuedPrompts = [queued]
+        backend.snapshot.revision += 1
+        pane.refresh()
+        try await wait { pane.snapshot?.queuedPrompts?.count == 1 }
+        XCTAssertEqual(pane.surface.resumeAtReset.title, "Cancel Resume")
+        XCTAssertEqual(pane.surface.retryTurn.title, "Retry Now")
+        pane.retryLastTurn()
+        try await wait { backend.requests.contains(.deliverQueued(session: backend.session, id: prompt.id, expectedRevision: 0)) }
+        XCTAssertEqual(backend.submissions.count, 0, "Retry sends the scheduled prompt, not another one")
+        pane.toggleResumeAtReset()
+        try await wait { backend.requests.contains(.removeQueued(session: backend.session, id: prompt.id, expectedRevision: 0)) }
+    }
+
+    private func fire(_ item: NSMenuItem?) {
+        guard let item, let action = item.action else { return XCTFail("No menu action") }
+        NSApp.sendAction(action, to: item.target, from: item)
+    }
+
+    func testClosedConversationsReopenAndDeleteOnlyAfterConfirming() async throws {
+        let backend = Backend()
+        let pane = backend.controller()
+        defer { pane.dispose() }
+        let closed = SessionId()
+        var conversationRequests: [AgentConversationRequest] = []
+        pane.conversationRequest = { request in
+            conversationRequests.append(request)
+            switch request {
+            case .reopen(let session): return .conversation(AgentChatSnapshot(session: session, project: backend.project, provider: .codex))
+            case .delete(let session): return .deleted(AgentConversationDeletion(session: session))
+            default: return .conversation(AgentChatSnapshot(session: closed, project: backend.project, provider: .codex))
+            }
+        }
+        var shown: [SessionId] = []
+        pane.showConversation = { shown.append($0.session) }
+        pane.reopenConversation(closed)
+        try await wait { shown == [closed] }
+        let saved = AgentSavedConversation(session: closed, project: backend.project, provider: .codex, title: "Old work",
+                                           updatedAt: nil, closedAt: Date(), archived: false, retention: .keep, expiresAt: nil, needsReview: true)
+        let items = pane.savedConversationActions(saved)
+        XCTAssertEqual(items.filter { !$0.isSeparatorItem }.map(\.title),
+                       ["Reopen", "Keep until deleted", "Delete 7 days after closing", "Delete 30 days after closing",
+                        "Delete 90 days after closing", "Delete Permanently…"])
+        XCTAssertEqual(items.first { $0.title == "Keep until deleted" }?.state, .on)
+        var confirmations: [String] = []
+        pane.confirmDestructive = { title, message, _ in confirmations.append(message); return false }
+        fire(items.last)
+        try await wait { confirmations.count == 1 }
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertFalse(conversationRequests.contains(.delete(session: closed)), "Nothing is deleted without confirming")
+        XCTAssertTrue(confirmations[0].contains("may have reached the agent"), "Deleting says it drops prompts that need review")
+        pane.confirmDestructive = { _, _, _ in true }
+        fire(items.last)
+        try await wait { conversationRequests.contains(.delete(session: closed)) }
+        let thirty = items.first { $0.title == "Delete 30 days after closing" }
+        try await Task.sleep(for: .milliseconds(100))
+        fire(thirty)
+        try await wait { conversationRequests.contains(.setRetention(session: closed, retention: .init(deleteAfterDays: 30))) }
+    }
+}
+

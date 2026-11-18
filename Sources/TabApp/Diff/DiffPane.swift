@@ -236,7 +236,12 @@ public final class DiffPaneController: NSViewController {
 /// markers and syntax-colored source text in the code font, clipped to the
 /// visible columns.
 final class DiffRowsView: ThemedView {
-    var document: DiffDocument? { didSet { reviewSelection = nil; reviewAnchor = nil; reviewHead = nil; needsDisplay = true } }
+    var document: DiffDocument? { didSet { reviewSelection = nil; reviewAnchor = nil; reviewHead = nil; markReviewedRows(); needsDisplay = true } }
+    /// Saved review comments, drawn on the side and lines each was made on.
+    var reviewMarks: [DiffReviewMark] = [] { didSet { if oldValue != reviewMarks { markReviewedRows(); needsDisplay = true } } }
+    /// Rows a comment covers on their old or new side, by index into the document's rows.
+    private(set) var markedOld = IndexSet()
+    private(set) var markedNew = IndexSet()
     var reviewEnabled = false
     var onReviewSelection: (() -> Void)?
     var reviewSelection: DiffReviewSelection? { didSet { needsDisplay = true; onReviewSelection?() } }
@@ -347,6 +352,44 @@ final class DiffRowsView: ThemedView {
         }
     }
 
+    private func markReviewedRows() {
+        markedOld = IndexSet(); markedNew = IndexSet()
+        guard let document, !reviewMarks.isEmpty else { return }
+        for (index, row) in document.rows.enumerated() where row.kind != .hunk {
+            if let line = row.oldLineNumber, reviewMarks.contains(where: { $0.old && $0.lines.contains(line) }) { markedOld.insert(index) }
+            if let line = row.newLineNumber, reviewMarks.contains(where: { !$0.old && $0.lines.contains(line) }) { markedNew.insert(index) }
+        }
+    }
+
+    /// The rows `mark` covers, or nil when the document doesn't show all of its lines.
+    func rows(for mark: DiffReviewMark) -> ClosedRange<Int>? {
+        guard let document else { return nil }
+        let covered = document.rows.indices.filter { index in
+            let row = document.rows[index]
+            guard row.kind != .hunk, let line = mark.old ? row.oldLineNumber : row.newLineNumber else { return false }
+            return mark.lines.contains(line)
+        }
+        guard let first = covered.first, let last = covered.last,
+              let start = mark.old ? document.rows[first].oldLineNumber : document.rows[first].newLineNumber,
+              let end = mark.old ? document.rows[last].oldLineNumber : document.rows[last].newLineNumber,
+              start == mark.lines.lowerBound, end == mark.lines.upperBound else { return nil }
+        return first...last
+    }
+
+    /// Selects `rows` on one side and scrolls them into view, as a reader choosing them would.
+    func reveal(_ rows: ClosedRange<Int>, old: Bool) {
+        guard let document, document.rows.indices.contains(rows.upperBound) else { return }
+        reviewAnchor = rows.lowerBound
+        reviewHead = rows.upperBound
+        reviewSelection = .init(rows: rows, old: old)
+        let visual = { (row: Int) -> Int in
+            self.split ? document.split.firstIndex(where: { (old ? $0.left : $0.right) == row }) ?? row : row
+        }
+        let top = CGFloat(visual(rows.lowerBound)) * cell.height
+        let bottom = CGFloat(visual(rows.upperBound) + 1) * cell.height
+        scrollToVisible(NSRect(x: visibleRect.minX, y: max(0, top - cell.height * 3), width: 1, height: bottom - top + cell.height * 6))
+    }
+
     /// Sizes the view to its rows and widest line, at least `width` wide.
     func fitWidth(_ width: CGFloat) {
         visibleWidth = width
@@ -395,6 +438,12 @@ final class DiffRowsView: ThemedView {
             frame.intersection(dirty).fill()
         default:
             break
+        }
+        if (old ? markedOld : markedNew).contains(index) || (unified && (markedOld.contains(index) || markedNew.contains(index))) {
+            theme.accent.withAlphaComponent(0.08).setFill()
+            frame.intersection(dirty).fill()
+            theme.accent.setFill()
+            NSRect(x: frame.minX, y: frame.minY, width: 3, height: frame.height).intersection(dirty).fill()
         }
         if reviewEnabled, let selection = reviewSelection, selection.rows.contains(index),
            unified || selection.old == old {

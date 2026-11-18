@@ -15,6 +15,8 @@ final class AgentComposerTextView: NSTextView {
     var onPasteContext: ((NSPasteboard) -> Bool)?
     /// Takes a long pasted text as an attachment; false pastes it inline.
     var onPasteLongText: ((String) -> Bool)?
+    /// Items added to the message box's context menu, such as stashing the draft.
+    var extraMenuItems: (() -> [NSMenuItem])?
     var planning = false { didSet { needsDisplay = true } }
     var placeholderColor = NSColor.secondaryLabelColor
     private var acceptingAttachmentDrop = false { didSet { needsDisplay = true } }
@@ -54,6 +56,15 @@ final class AgentComposerTextView: NSTextView {
         if onPasteContext?(.general) == true { return }
         if let text = NSPasteboard.general.string(forType: .string), onPasteLongText?(text) == true { return }
         pasteAsPlainText(sender)
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let menu = super.menu(for: event)
+        guard let items = extraMenuItems?(), !items.isEmpty else { return menu }
+        let result = menu ?? NSMenu()
+        result.addItem(.separator())
+        items.forEach(result.addItem)
+        return result
     }
 
     override func mouseDown(with event: NSEvent) {

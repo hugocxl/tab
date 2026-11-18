@@ -64,7 +64,9 @@ extension ClientConnection {
                     let directory = try server.agentDirectory(request.project)
                     let open = server.agents.openProviderSessions()
                     let history = server.agentHistory
-                    return .agentHistory(try await runBlocking { history.list(directory: directory, excluding: open) })
+                    var reply = try await runBlocking { history.list(directory: directory, excluding: open) }
+                    reply.conversations = server.agents.savedConversations(project: request.project)
+                    return .agentHistory(reply)
                 })
             }
         case .importAgentHistory(let request):

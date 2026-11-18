@@ -4,6 +4,14 @@ import TabProtocol
 @MainActor
 final class AgentChangedFilesRow: AgentTimelineRow {
     var checkpoint: AgentTurnCheckpoint? { didSet { rebuild() } }
+    /// Where recording the turn's changes stands; anything but `.changed` shows why there
+    /// are no files to list, with Retry when the server can record them again.
+    var phase: AgentChatTurn.CheckpointPhase = .changed { didSet { if oldValue != phase { rebuild() } } }
+    /// The turn's user message, for Retry.
+    var turnID: String?
+    /// Why recording failed, under the heading.
+    private let statusNote = makeLabel("", font: AppFont.small)
+    private let retryCapture = PillButton("Retry", style: .plain)
     private let heading = makeLabel("", font: AppFont.small)
     private let totals = makeLabel("", font: AppFont.small)
     private let openDiff = PillButton("Open diff", style: .plain)
@@ -21,7 +29,7 @@ final class AgentChangedFilesRow: AgentTimelineRow {
         super.init(frame: frameRect)
         wantsLayer = true
         layer?.cornerRadius = 8
-        for view in [heading, totals, openDiff, revert, toggleAll, more] {
+        for view in [heading, totals, openDiff, revert, toggleAll, more, statusNote, retryCapture] {
             view.translatesAutoresizingMaskIntoConstraints = true
             addSubview(view)
         }
@@ -47,10 +55,20 @@ final class AgentChangedFilesRow: AgentTimelineRow {
         }
         more.font = AppFont.small
         more.onPress = { [weak self] in self?.open(nil) }
+        statusNote.lineBreakMode = .byTruncatingTail
+        statusNote.isHidden = true
+        retryCapture.font = AppFont.small
+        retryCapture.isHidden = true
+        retryCapture.toolTip = "Record this turn's file changes again from where it began"
+        retryCapture.setAccessibilityLabel("Retry recording this turn's file changes")
+        retryCapture.onPress = { [weak self] in
+            guard let self, let turnID = self.turnID else { return }
+            self.onRetryCheckpoint?(turnID)
+        }
         themeDidChange()
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-    override func revertHandlerDidChange() { rebuildRows() }
+    override func revertHandlerDidChange() { rebuild() }
 
     private func directoryPaths(_ nodes: [AgentChangedFilesTree.Node]) -> Set<String> {
         Set(nodes.filter(\.isDirectory).map(\.path)).union(nodes.reduce(into: Set<String>()) { $0.formUnion(directoryPaths($1.children)) })
@@ -59,7 +77,30 @@ final class AgentChangedFilesRow: AgentTimelineRow {
         guard let checkpoint else { return }
         onOpenCheckpoint?(checkpoint.id, path)
     }
+    /// The heading and reason for a turn without files to list, or nil to list them.
+    private var status: (heading: String, note: String?, retry: Bool)? {
+        switch phase {
+        case .changed, .unchanged, .unknown: nil
+        case .capturing: ("Recording file changes…", nil, false)
+        case .unavailable(let reason, let retryable): ("File changes unavailable", reason, retryable && onRetryCheckpoint != nil)
+        case .untracked(let reason): ("File changes aren't recorded", reason, false)
+        }
+    }
+
     private func rebuild() {
+        let status = status
+        statusNote.isHidden = status?.note == nil
+        statusNote.stringValue = status?.note ?? ""
+        statusNote.toolTip = status?.note
+        retryCapture.isHidden = status?.retry != true
+        for view in [openDiff, totals] { view.isHidden = status != nil }
+        if let status {
+            heading.stringValue = status.heading
+            more.isHidden = true
+            nodes = []
+            rebuildRows()
+            return
+        }
         guard let checkpoint else { return }
         nodes = AgentChangedFilesTree.build(checkpoint.files)
         // A dozen files or fewer show at once, not as folder names.
@@ -153,7 +194,10 @@ final class AgentChangedFilesRow: AgentTimelineRow {
         }
         return value
     }
-    override func preferredHeight(for width: CGFloat) -> CGFloat { 44 + CGFloat(rows.count) * 28 + (more.isHidden ? 8 : 32) }
+    override func preferredHeight(for width: CGFloat) -> CGFloat {
+        if let status { return status.note == nil ? 40 : 62 }
+        return 44 + CGFloat(rows.count) * 28 + (more.isHidden ? 8 : 32)
+    }
     override func layoutRow(width: CGFloat) {
         let narrow = width < 384
         openDiff.title = narrow ? "" : "Open diff"
@@ -162,8 +206,12 @@ final class AgentChangedFilesRow: AgentTimelineRow {
         openDiff.image = AppIcon.diff.image(size: 12, theme: theme)
         toggleAll.contentTintColor = theme.fgDim
         openDiff.frame = NSRect(x: width - (narrow ? 40 : 104), y: 6, width: narrow ? 28 : 92, height: 28)
-        revert.isHidden = onRevert == nil
+        revert.isHidden = onRevert == nil || status != nil
         revert.setTitleColor(theme.fgDim)
+        retryCapture.setTitleColor(theme.fgDim)
+        let retryWidth: CGFloat = retryCapture.isHidden ? 0 : ceil(retryCapture.fittingSize.width)
+        retryCapture.frame = NSRect(x: width - 12 - retryWidth, y: 6, width: retryWidth, height: 28)
+        statusNote.frame = NSRect(x: 12, y: 36, width: max(0, width - 24), height: 18)
         let revertWidth: CGFloat = revert.isHidden ? 0 : ceil(revert.fittingSize.width)
         revert.frame = NSRect(x: openDiff.frame.minX - 4 - revertWidth, y: 6, width: revertWidth, height: 28)
         toggleAll.frame = NSRect(x: (revert.isHidden ? openDiff.frame.minX : revert.frame.minX) - 30, y: 6, width: 28, height: 28)
@@ -181,6 +229,7 @@ final class AgentChangedFilesRow: AgentTimelineRow {
     override func themeDidChange() {
         layer?.backgroundColor = theme.fg.withAlphaComponent(0.035).cgColor
         heading.textColor = theme.fg
+        statusNote.textColor = theme.fgMuted
         openDiff.setTitleColor(theme.fgDim); more.setTitleColor(theme.fgDim)
         rebuildRows()
     }

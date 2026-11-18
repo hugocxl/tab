@@ -271,31 +271,11 @@ enum AgentResponseParser {
         (try? NSRegularExpression(pattern: expression))?.numberOfMatches(in: source, range: NSRange(source.startIndex..., in: source)) ?? 0
     }
 
-    private struct Fence {
-        let marker: Character
-        let count: Int
-        let info: String
-        let indent: Int
-    }
+    private typealias Fence = AgentMarkdownFence
 
-    private static func openingFence(_ line: String) -> Fence? {
-        let indent = indentation(line)
-        guard indent < 4 else { return nil }
-        let text = line.drop { $0 == " " || $0 == "\t" }
-        guard let first = text.first, first == "`" || first == "~" else { return nil }
-        let count = text.prefix { $0 == first }.count
-        guard count >= 3 else { return nil }
-        let info = String(text.dropFirst(count)).trimmingCharacters(in: CharacterSet(charactersIn: " \t"))
-        guard first != "`" || !info.contains("`") else { return nil }
-        return Fence(marker: first, count: count, info: info, indent: indent)
-    }
+    private static func openingFence(_ line: String) -> Fence? { AgentMarkdownFence.opening(line) }
 
-    private static func closesFence(_ line: String, fence: Fence) -> Bool {
-        guard indentation(line) < 4 else { return false }
-        let text = line.drop { $0 == " " || $0 == "\t" }
-        let count = text.prefix { $0 == fence.marker }.count
-        return count >= fence.count && text.dropFirst(count).allSatisfy { $0 == " " || $0 == "\t" }
-    }
+    private static func closesFence(_ line: String, fence: Fence) -> Bool { fence.isClosed(by: line) }
 
     private static func removingIndent(_ line: String, columns: Int) -> String {
         var column = 0

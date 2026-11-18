@@ -14,9 +14,16 @@ struct AgentCheckpointStore: Sendable {
     private let git = GitCommand()
     private let config = ["-c", "core.fsmonitor=false", "-c", "core.splitIndex=false",
                           "-c", "core.untrackedCache=false", "-c", "core.sparseCheckout=false"]
+    /// Tests delay or fail a capture here, before it reads anything.
+    var willCapture: (@Sendable (String) throws -> Void)?
+    /// Tests fail a restore here, before it changes the file at a path.
+    var willRestore: (@Sendable (String) throws -> Void)?
 
     func capture(directory: String) throws -> Snapshot {
-        let root = try git.text(directory, ["rev-parse", "--show-toplevel"])
+        try willCapture?(directory)
+        guard let root = git.optionalText(directory, ["rev-parse", "--show-toplevel"]) else {
+            throw AgentCheckpointUnavailable.notRepository
+        }
         let index = try git.text(directory, ["rev-parse", "--path-format=absolute", "--git-path", "index"])
         let temporary = URL(fileURLWithPath: index).deletingLastPathComponent()
             .appendingPathComponent("tab-checkpoint-index-" + UUID().uuidString)
@@ -72,11 +79,13 @@ struct AgentCheckpointStore: Sendable {
         }
     }
 
-    func diff(from before: Snapshot, to after: Snapshot, path: String) throws -> GitDiff {
+    /// `path`'s change between the snapshots' trees, with `context` unchanged lines around
+    /// each change, read from the trees alone so later edits never show.
+    func diff(from before: Snapshot, to after: Snapshot, path: String, context: Int = 3) throws -> GitDiff {
         guard before.directory == after.directory else { throw gitError("Checkpoint directories differ") }
         let (data, truncated) = try git.diff(before.directory,
             ["diff", "--no-ext-diff", "--no-textconv", "--no-renames", "--relative",
-             "--src-prefix=a/", "--dst-prefix=b/", "--unified=3", before.tree, after.tree, "--", path], noIndex: false)
+             "--src-prefix=a/", "--dst-prefix=b/", "--unified=\(max(0, context))", before.tree, after.tree, "--", path], noIndex: false)
         return GitParsing.diff(GitRawDiff(diff: String(decoding: data, as: UTF8.self), truncated: truncated))
     }
 
@@ -121,11 +130,21 @@ struct AgentCheckpointStore: Sendable {
         }
     }
 
+    /// The paths among `paths` already as the `before` snapshot has them, absent ones included.
+    func matching(_ before: Snapshot, paths: [String]) throws -> [String] {
+        try paths.filter { path in
+            let expected = try entry(in: before.tree, path: path, directory: before.directory)
+            let now = try current(path: path, directory: before.directory)
+            return expected?.blob == now?.blob && Self.executable(expected) == Self.executable(now)
+        }
+    }
+
     /// Puts each of `paths` back as the `before` snapshot had it: its content and mode, or
     /// removes a file the turn added. Only the working copies of those paths change; the
-    /// index, branches and every other file are left alone.
+    /// index, branches and every other file are left alone. Every path is checked and read
+    /// before any changes; a failure part way puts the files already changed back as they
+    /// were, and says which, if any, couldn't be.
     func restore(_ before: Snapshot, paths: [String]) throws {
-        // Check every path before changing any, so a refusal leaves nothing half reverted.
         let targets = try paths.map { path -> (path: String, url: URL) in
             let url = try Self.file(path, in: before.directory)
             if (try? FileManager.default.attributesOfItem(atPath: url.path))?[.type] as? FileAttributeType == .typeDirectory {
@@ -133,21 +152,51 @@ struct AgentCheckpointStore: Sendable {
             }
             return (path, url)
         }
-        for (path, url) in targets {
-            let entry = try entry(in: before.tree, path: path, directory: before.directory)
-            if (try? FileManager.default.attributesOfItem(atPath: url.path)) != nil {
-                try FileManager.default.removeItem(at: url)
+        let plans = try targets.map { target -> (path: String, url: URL, entry: Entry?, data: Data) in
+            let entry = try entry(in: before.tree, path: target.path, directory: before.directory)
+            if let entry, entry.mode != "120000", !entry.mode.hasPrefix("100") {
+                throw gitError("\(target.path) can't be restored from this checkpoint")
             }
-            guard let entry else { continue }
-            let data = try git.run(before.directory, ["cat-file", "blob", entry.blob])
-            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            if entry.mode == "120000" {
-                try FileManager.default.createSymbolicLink(atPath: url.path, withDestinationPath: String(decoding: data, as: UTF8.self))
-                continue
+            let data = try entry.map { try git.run(before.directory, ["cat-file", "blob", $0.blob]) } ?? Data()
+            return (target.path, target.url, entry, data)
+        }
+        let backup = FileManager.default.temporaryDirectory.appendingPathComponent("tab-restore-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: backup) }
+        var touched: [(path: String, url: URL, saved: URL?)] = []
+        for plan in plans {
+            do {
+                try willRestore?(plan.path)
+                var saved: URL?
+                if (try? FileManager.default.attributesOfItem(atPath: plan.url.path)) != nil {
+                    try FileManager.default.createDirectory(at: backup, withIntermediateDirectories: true)
+                    let copy = backup.appendingPathComponent(String(touched.count))
+                    try FileManager.default.copyItem(at: plan.url, to: copy)
+                    saved = copy
+                }
+                touched.append((plan.path, plan.url, saved))
+                if saved != nil { try FileManager.default.removeItem(at: plan.url) }
+                guard let entry = plan.entry else { continue }
+                try FileManager.default.createDirectory(at: plan.url.deletingLastPathComponent(), withIntermediateDirectories: true)
+                if entry.mode == "120000" {
+                    try FileManager.default.createSymbolicLink(atPath: plan.url.path, withDestinationPath: String(decoding: plan.data, as: UTF8.self))
+                    continue
+                }
+                try plan.data.write(to: plan.url)
+                try FileManager.default.setAttributes([.posixPermissions: entry.mode == "100755" ? 0o755 : 0o644], ofItemAtPath: plan.url.path)
+            } catch {
+                var rolledBack: [String] = [], changed: [String] = []
+                for file in touched.reversed() {
+                    do {
+                        if (try? FileManager.default.attributesOfItem(atPath: file.url.path)) != nil {
+                            try FileManager.default.removeItem(at: file.url)
+                        }
+                        if let saved = file.saved { try FileManager.default.copyItem(at: saved, to: file.url) }
+                        if file.path != plan.path { rolledBack.append(file.path) }
+                    } catch { changed.append(file.path) }
+                }
+                throw AgentRestoreFailure(path: plan.path, reason: error.localizedDescription,
+                                          rolledBack: rolledBack.reversed(), changed: changed.reversed())
             }
-            guard entry.mode.hasPrefix("100") else { throw gitError("\(path) can't be restored from this checkpoint") }
-            try data.write(to: url)
-            try FileManager.default.setAttributes([.posixPermissions: entry.mode == "100755" ? 0o755 : 0o644], ofItemAtPath: url.path)
         }
     }
 
@@ -180,6 +229,37 @@ struct AgentCheckpointStore: Sendable {
         guard git.optionalText(snapshot.directory, ["rev-parse", "--verify", snapshot.reference]) != nil else { return }
         // Expected-value deletion cannot remove a ref somebody replaced.
         try git.run(snapshot.directory, ["update-ref", "-d", snapshot.reference, snapshot.tree])
+    }
+}
+
+/// Why a checkpoint can't be taken in a folder.
+enum AgentCheckpointUnavailable: LocalizedError {
+    case notRepository
+
+    var errorDescription: String? {
+        switch self {
+        case .notRepository: "This folder isn't in a Git repository, so Tab can't record the files a turn changes."
+        }
+    }
+}
+
+/// A restore that stopped part way: which file it stopped at, and the files it had already
+/// changed, put back as they were or, in `changed`, left reverted.
+struct AgentRestoreFailure: LocalizedError, Equatable {
+    var path: String
+    var reason: String
+    var rolledBack: [String]
+    var changed: [String]
+
+    var errorDescription: String? {
+        var text = "Couldn't restore \(path): \(reason)"
+        if changed.isEmpty {
+            text += " No files were changed."
+        } else {
+            text += " These files were already restored and couldn't be put back: " + changed.joined(separator: ", ") + "."
+            if !rolledBack.isEmpty { text += " Put back as they were: " + rolledBack.joined(separator: ", ") + "." }
+        }
+        return text
     }
 }
 

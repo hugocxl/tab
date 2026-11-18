@@ -99,5 +99,94 @@ final class AgentInteractionTests: XCTestCase {
         }
     }
 
+    /// L6: a single choice is an option or a written answer, never both, as it is edited.
+    func testSingleChoiceOptionAndWrittenAnswerStayExclusiveWhileEditing() throws {
+        let form = AgentQuestionnaire(questions: [
+            .init(id: "choice", title: "Pick", options: [.init(label: "One"), .init(label: "Two")]),
+            .init(id: "many", title: "Also", options: [.init(label: "A"), .init(label: "B")], multiple: true, required: false),
+            .init(id: "note", title: "Note", required: false),
+            .init(id: "secret", title: "Token", secret: true, required: false)
+        ])
+        let item = AgentChatItem(id: "form", kind: .approval, text: "Questions", isComplete: false, questionnaire: form)
+        let view = AgentQuestionView(frame: NSRect(x: 0, y: 0, width: 360, height: 480))
+        view.update(item, enabled: true)
+        let buttons = descendants(view).compactMap { $0 as? NSButton }.filter { !($0 is PillButton) }
+        let one = try XCTUnwrap(buttons.first { $0.title == "One" }), two = try XCTUnwrap(buttons.first { $0.title == "Two" })
+        let a = try XCTUnwrap(buttons.first { $0.title == "A" })
+        let fields = descendants(view).compactMap { $0 as? NSTextField }.filter { $0.isEditable }
+        let choiceField = fields[0], manyField = fields[1], secretField = try XCTUnwrap(fields.first { $0 is NSSecureTextField })
+        func type(_ text: String, in field: NSTextField) {
+            field.stringValue = text
+            view.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: field))
+        }
+        one.performClick(nil)
+        XCTAssertEqual(view.answers["choice"], ["One"])
+        type("Something else", in: choiceField)
+        XCTAssertEqual(one.state, .off, "Writing an answer clears the chosen option")
+        XCTAssertEqual(view.answers["choice"], ["Something else"])
+        type("", in: choiceField)
+        XCTAssertEqual(view.answers["choice"], [], "Nothing shows, so nothing is sent")
+        two.performClick(nil)
+        XCTAssertEqual(two.state, .on)
+        XCTAssertEqual(choiceField.stringValue, "")
+        a.performClick(nil)
+        type("C", in: manyField)
+        XCTAssertEqual(a.state, .on, "Multiple choice keeps options beside a written answer")
+        XCTAssertEqual(view.answers["many"], ["A", "C"])
+        type("hunter2", in: secretField)
+        // An older draft never replaces what was edited since.
+        view.restore(["form": ["choice": ["One"]]])
+        XCTAssertEqual(two.state, .on)
+        XCTAssertEqual(one.state, .off)
+        XCTAssertNil(view.savedAnswers["form"]?["secret"], "Secret text stays out of drafts")
+        var sent: [String: [String]]?
+        view.onAnswer = { _, answers, _ in sent = answers }
+        XCTAssertTrue(view.submitAnswers())
+        XCTAssertEqual(sent?["choice"], ["Two"])
+        XCTAssertEqual(sent?["secret"], ["hunter2"])
+    }
+
+    func testRestoredWrittenAnswerLeavesOptionsClear() throws {
+        let form = AgentQuestionnaire(questions: [.init(id: "choice", title: "Pick", options: [.init(label: "One")])])
+        let item = AgentChatItem(id: "form", kind: .approval, text: "Questions", isComplete: false, questionnaire: form)
+        let view = AgentQuestionView(frame: NSRect(x: 0, y: 0, width: 360, height: 280))
+        view.update(item, enabled: true)
+        view.restore(["form": ["choice": ["Mine"]]])
+        let one = try XCTUnwrap(descendants(view).compactMap { $0 as? NSButton }.first { $0.title == "One" })
+        XCTAssertEqual(one.state, .off)
+        XCTAssertEqual(view.answers["choice"], ["Mine"])
+    }
+
+    /// L2: an MCP form shows the server's own Submit, Decline and Dismiss.
+    func testElicitationFormOffersTheProvidersDecisions() throws {
+        let form = AgentQuestionnaire(questions: [.init(id: "plan", title: "Plan", options: [.init(label: "Pro")])])
+        let offered = AgentApprovalRequest(kind: "elicitation", decisions: [
+            .init(id: "accept", kind: .submit, title: "Submit"), .init(id: "decline", kind: .decline, title: "Decline"),
+            .init(id: "cancel", kind: .cancel, title: "Dismiss"),
+        ])
+        let item = AgentChatItem(id: "elic", kind: .approval, text: "Pick a plan", isComplete: false, questionnaire: form, approval: offered)
+        let view = AgentQuestionView(frame: NSRect(x: 0, y: 0, width: 360, height: 280))
+        view.update(item, enabled: true)
+        let pills = descendants(view).compactMap { $0 as? PillButton }.filter { !$0.isHidden }
+        XCTAssertEqual(Set(pills.map(\.title)), ["Submit", "Decline", "Dismiss"])
+        var decided: (String, String)?
+        view.onDecision = { decided = ($0, $1) }
+        pills.first { $0.title == "Decline" }?.onPress?()
+        XCTAssertEqual(decided?.0, "elic")
+        XCTAssertEqual(decided?.1, "decline")
+    }
+
+    func testApprovalDetailsNameTheChildAgentAndWhatWasAsked() {
+        let request = AgentApprovalRequest(kind: "permissions", summary: "Needs the network",
+            requested: [.init(label: "Network", value: "Internet access")],
+            decisions: [.init(id: "turn", kind: .allowOnce, title: "Allow for this turn")],
+            origin: .init(providerRequestID: "22", threadID: "child-b", childAgentID: "child-b", childToolUseID: "spawn-b", childTitle: "Run the tests"))
+        let text = AgentApprovalPresentation.details(request)
+        XCTAssertTrue(text.contains("Asked by agent: Run the tests"))
+        XCTAssertTrue(text.contains("Network: Internet access"))
+        XCTAssertEqual(AgentApprovalPresentation.pendingTitle(request), "Approval needed · agent “Run the tests”")
+        XCTAssertNil(AgentApprovalPresentation.shortcutDecision(request, allow: false))
+    }
+
     private func descendants(_ view: NSView) -> [NSView] { view.subviews.flatMap { [$0] + descendants($0) } }
 }

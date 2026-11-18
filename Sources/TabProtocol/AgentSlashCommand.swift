@@ -22,7 +22,7 @@ public struct AgentSlashCommand: Equatable, Sendable {
 
     public static let localNames: Set<String> = [
         "clear", "new", "resume", "skills", "status", "plan", "copy", "export", "help", "fork",
-        "outline", "previous-prompt", "next-prompt", "model", "effort", "attach", "stop", "clear-draft"
+        "outline", "previous-prompt", "next-prompt", "model", "effort", "attach", "stop", "clear-draft", "stashes"
     ]
 
     /// Commands whose terminal UI or settings are not represented by an agent pane.

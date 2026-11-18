@@ -41,10 +41,14 @@ public struct AgentHistoryReply: Hashable, Codable, Sendable {
     public var entries: [AgentHistoryEntry]
     /// Older conversations were left out.
     public var truncated: Bool
+    /// Tab's own conversations for the project that no pane shows, newest first.
+    /// Absent from servers that predate reopening them.
+    public var conversations: [AgentSavedConversation]?
 
-    public init(entries: [AgentHistoryEntry], truncated: Bool = false) {
+    public init(entries: [AgentHistoryEntry], truncated: Bool = false, conversations: [AgentSavedConversation]? = nil) {
         self.entries = entries
         self.truncated = truncated
+        self.conversations = conversations
     }
 
     public func validate() throws(ErrorCode) {
@@ -52,6 +56,11 @@ public struct AgentHistoryReply: Hashable, Codable, Sendable {
         for entry in entries {
             try AgentHistoryEntry.validate(providerSession: entry.providerSession)
             guard entry.title.utf8.count <= Self.maxTitleBytes else { throw .badRequest }
+        }
+        guard (conversations?.count ?? 0) <= Self.maxEntries else { throw .badRequest }
+        for conversation in conversations ?? [] {
+            guard conversation.title.utf8.count <= Self.maxTitleBytes else { throw .badRequest }
+            try conversation.retention.validate()
         }
     }
 }

@@ -61,6 +61,47 @@ final class AgentChatProtocolTests: XCTestCase {
         XCTAssertThrowsError(try AgentConversationRequest.subagentSteps(session: session, toolUseID: "").validate())
     }
 
+    /// T1, T3 and T5 add requests and optional fields only: new peers read old records,
+    /// old peers read new ones, and an old server answers the new requests `unsupported`.
+    func testTranscriptAdditionsAreOptionalAndNewRequestsAreUnknownToOlderPeers() throws {
+        let session = SessionId()
+        let steps = AgentSubagentSteps(toolUseID: "toolu_1", items: [AgentChatItem(id: "s", kind: .assistant, text: "DONE")],
+                                       revision: 9, earlierSteps: 3, omittedSteps: 2)
+        let item = AgentChatItem(id: "a", kind: .assistant, text: "needle")
+        let page = AgentArchiveSearchPage(query: "needle", items: [item], positions: [4], start: 0, end: 10, total: 10)
+        let messages: [Message] = [
+            .request(RequestId(6), .agentConversation(.subagentEarlier(session: session, toolUseID: "toolu_1", before: 3, limit: 50))),
+            .request(RequestId(7), .agentConversation(.searchEarlier(session: session, query: "needle", before: nil))),
+            .reply(RequestId(6), .agentConversation(.subagentSteps(steps))),
+            .reply(RequestId(7), .agentConversation(.archiveSearch(page))),
+        ]
+        for message in messages {
+            try message.validate()
+            XCTAssertEqual(try WireJSON.decode(Message.self, from: WireJSON.encode(message)), message)
+        }
+        // An older build reads the new steps reply, ignoring what it doesn't know.
+        struct OlderSteps: Decodable { var toolUseID: String; var items: [AgentChatItem] }
+        XCTAssertEqual(try WireJSON.decode(OlderSteps.self, from: WireJSON.encode(steps)).items.map(\.text), ["DONE"])
+        // This build reads an older server's steps and agents without the new fields.
+        let older = #"{"toolUseID":"toolu_1","items":[]}"#
+        let decoded = try WireJSON.decode(AgentSubagentSteps.self, from: Data(older.utf8))
+        XCTAssertNil(decoded.revision); XCTAssertNil(decoded.unavailable); XCTAssertNil(decoded.earlierSteps)
+        var agent = AgentSubagent(id: "a", toolUseID: "t", description: "Audit", steps: 200, stepsRevision: 41)
+        XCTAssertEqual(try WireJSON.decode(AgentSubagent.self, from: WireJSON.encode(agent)), agent)
+        agent.stepsRevision = nil
+        XCTAssertFalse(String(decoding: try WireJSON.encode(agent), as: UTF8.self).contains("stepsRevision"))
+        // An older server can't read the new requests, so it answers `unsupported`.
+        let encoded = String(decoding: try WireJSON.encode(messages[1]), as: UTF8.self)
+            .replacingOccurrences(of: "searchEarlier", with: "laterRequest")
+        guard case .request(_, .unknown) = try WireJSON.decode(Message.self, from: Data(encoded.utf8)) else {
+            return XCTFail("An unreadable request decodes as unknown")
+        }
+        XCTAssertThrowsError(try AgentConversationRequest.subagentEarlier(session: session, toolUseID: "t", before: nil, limit: 0).validate())
+        var unordered = page
+        unordered.positions = [12]
+        XCTAssertThrowsError(try unordered.validate(), "Positions stay inside the scanned range")
+    }
+
     func testIncrementalReadRoundTripsAndAppliesOnlyToItsBase() throws {
         let session = SessionId(), project = ProjectId()
         var base = AgentChatSnapshot(session: session, project: project, provider: .claude, status: .working, revision: 5,

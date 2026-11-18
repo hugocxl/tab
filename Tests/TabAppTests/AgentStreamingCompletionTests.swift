@@ -210,4 +210,79 @@ final class AgentStreamingCompletionTests: XCTestCase {
         response.setContent("Literal **stars", theme: theme)
         XCTAssertEqual(response.textViews.first?.string, "Literal **stars")
     }
+
+    // MARK: Fences in the streaming tail
+
+    /// A tilde fence's `| a | b |` line was held back as a table header, and a ```` fence
+    /// holding a ``` line flipped the fence parity, so code lines vanished mid-stream.
+    func testStreamedFencesKeepEveryCodeLineVisibleAndFinishLikeANonstreamedResponse() throws {
+        _ = NSApplication.shared
+        let source = """
+        Table-like code:
+
+        ~~~text
+        | a | b |
+        | --- |
+        ```
+        -
+        ~~~
+
+        Nested fences:
+
+        ````markdown
+        ```swift
+        let x = 1
+        ```
+        | pipe |
+        ``
+        ````
+
+        - item
+          ~~~
+          | in a list |
+          ~~~
+
+        Done.
+        """
+        let codeLines = ["| a | b |", "| --- |", "```", "-", "```swift", "let x = 1", "| pipe |", "``", "| in a list |"]
+        var prefix = ""
+        for character in source {
+            prefix.append(character)
+            let held = AgentStreamingCompletion.holdingBackAmbiguousTail(prefix)
+            let shown = Self.codeText(AgentStreamingCompletion.completingLastBlock(AgentResponseParser.parse(held)))
+            // Every code line that has fully arrived is visible as code.
+            let arrived = prefix.components(separatedBy: "\n").dropLast().map { $0.trimmingCharacters(in: .whitespaces) }
+            for line in codeLines where arrived.contains(line) {
+                XCTAssertTrue(shown.contains(line), "“\(line)” disappeared after \(prefix.count) characters:\n\(held)")
+            }
+        }
+        XCTAssertEqual(AgentMarkdownFence.openFence(after: ["~~~", "```", "```"]), AgentMarkdownFence.opening("~~~"),
+                       "A backtick run never closes a tilde fence")
+        XCTAssertNil(AgentMarkdownFence.openFence(after: ["````", "```", "`````"]), "A longer run closes it")
+        XCTAssertNotNil(AgentMarkdownFence.openFence(after: ["````", "``` swift"]), "A run with text after it is code")
+
+        let streamed = AgentResponseView(frame: NSRect(x: 0, y: 0, width: 600, height: 400))
+        streamed.isStreaming = true
+        prefix = ""
+        for character in source { prefix.append(character); streamed.setContent(prefix, theme: theme) }
+        streamed.isStreaming = false
+        streamed.setContent(source, theme: theme)
+        let fresh = AgentResponseView(frame: NSRect(x: 0, y: 0, width: 600, height: 400))
+        fresh.setContent(source, theme: theme)
+        XCTAssertEqual(streamed.textViews.map(\.string), fresh.textViews.map(\.string))
+        XCTAssertEqual(streamed.sectionViews.map { String(describing: type(of: $0)) },
+                       fresh.sectionViews.map { String(describing: type(of: $0)) })
+        XCTAssertEqual(AgentResponseParser.parse(source).filter { if case .code = $0 { return true }; return false }.count, 2,
+                       "The two top-level fences parse as code")
+    }
+
+    private static func codeText(_ blocks: [AgentMarkdown.Block]) -> String {
+        blocks.map { block -> String in
+            switch block {
+            case .code(_, let text, _): return text
+            case .list(_, let text, _, _), .listBlock(_, let text, _, _): return codeText(AgentResponseParser.parse(text))
+            default: return ""
+            }
+        }.joined(separator: "\n")
+    }
 }

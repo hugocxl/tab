@@ -1,4 +1,5 @@
 import AppKit
+import TabClient
 import TabCore
 import TabProtocol
 import XCTest
@@ -563,5 +564,196 @@ final class AgentConversationFindTests: XCTestCase {
         pane.transcript.keyDown(with: try escape(pane.window))
         XCTAssertFalse(pane.isFindOpen)
         XCTAssertTrue(pane.window?.firstResponder === pane.composer)
+    }
+}
+
+/// T3: Find across the server's archive of items the conversation dropped, as well as the
+/// retained ones, revealing an archived hit by loading its page and unfolding it.
+@MainActor
+final class AgentConversationArchiveFindTests: XCTestCase {
+    private final class Server {
+        let session = SessionId()
+        let project = ProjectId()
+        var archive: [AgentChatItem]
+        var retained: [AgentChatItem]
+        var notKept = 0
+        var searchError: Error?
+        var searchGate: CheckedContinuation<Void, Never>?
+        var gateNextSearch = false
+        var searches = 0
+
+        init() {
+            let date = Date()
+            archive = (0..<30).map { index in
+                index == 7
+                    ? AgentChatItem(id: "tool7", kind: .tool, text: "Bash",
+                                    tool: .init(name: "Bash", category: .command, input: #"{"command":"grep -r token"}"#,
+                                                output: "src/a.swift: the archived needle sits here", status: .completed))
+                    : AgentChatItem(id: "a\(index)", kind: .assistant, text: "Archived answer \(index)", createdAt: date)
+            }
+            retained = [AgentChatItem(id: "u", kind: .user, text: "Latest question"),
+                        AgentChatItem(id: "r", kind: .assistant, text: "Latest answer")]
+        }
+
+        var snapshot: AgentChatSnapshot {
+            var snapshot = AgentChatSnapshot(session: session, project: project, provider: .claude, status: .idle,
+                                             revision: 3, items: retained)
+            snapshot.omittedItems = archive.count + notKept
+            return snapshot
+        }
+
+        func reply(_ request: AgentConversationRequest) async throws -> AgentConversationReply {
+            switch request {
+            case .earlier(_, let before, _):
+                let end = min(before ?? archive.count, archive.count)
+                let start = max(0, end - 10)
+                return .earlier(AgentEarlierItems(items: Array(archive[start..<end]), start: start, total: archive.count))
+            case .searchEarlier(_, let query, let before):
+                searches += 1
+                if gateNextSearch {
+                    gateNextSearch = false
+                    await withCheckedContinuation { searchGate = $0 }
+                }
+                if let searchError { throw searchError }
+                // Scans ten archived items per page, newest first, like the server.
+                let end = min(before ?? archive.count, archive.count)
+                let start = max(0, end - 10)
+                let found = (start..<end).filter { AgentTranscriptSearch.mayMatch(query, item: archive[$0]) }
+                return .archiveSearch(AgentArchiveSearchPage(query: query, items: found.map { archive[$0] }, positions: found,
+                                                             start: start, end: end, total: archive.count))
+            default:
+                throw ClientError.server(ErrorReply(code: .unsupported, message: ""))
+            }
+        }
+    }
+
+    private var windows: [NSWindow] = []
+
+    override func tearDown() {
+        for window in windows { window.close() }
+        windows.removeAll()
+        super.tearDown()
+    }
+
+    private func wait(_ condition: () -> Bool, file: StaticString = #filePath, line: UInt = #line) async throws {
+        for _ in 0..<300 {
+            if condition() { return }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTFail("Condition not met", file: file, line: line)
+    }
+
+    private func pane(_ server: Server) async throws -> AgentPaneController {
+        _ = NSApplication.shared
+        let pane = AgentPaneController(session: server.session, project: server.project, provider: .claude) { _ in server.snapshot }
+        pane.conversationRequest = { try await server.reply($0) }
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 680, height: 700), styleMask: [.borderless],
+                              backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = pane.surface
+        windows.append(window)
+        pane.surface.layoutSubtreeIfNeeded()
+        pane.refresh()
+        try await wait { pane.snapshot != nil }
+        return pane
+    }
+
+    private func find(_ query: String, in pane: AgentPaneController) {
+        pane.surface.performFind(.open)
+        guard let bar = pane.surface.findBar else { return XCTFail("The find bar is not open") }
+        bar.query = query
+        bar.findBar(bar.bar, didChangeQuery: query)
+    }
+
+    func testAMatchOnlyInAnArchivedToolResultIsFoundAndRevealedByLoadingItsPage() async throws {
+        let server = Server()
+        let pane = try await pane(server)
+        defer { pane.dispose() }
+        XCTAssertNil(pane.surface.snapshot?.items.first { $0.id == "tool7" })
+        find("archived needle", in: pane)
+        XCTAssertEqual(pane.surface.findBar?.counter, "No results · searching")
+        try await wait { pane.surface.archiveFind.state == .complete }
+        XCTAssertEqual(pane.surface.findBar?.counter, "1 of 1")
+        XCTAssertEqual(pane.surface.findBar?.scope, "Searched every loaded message and 30 earlier messages on the server.")
+        XCTAssertEqual(server.searches, 3, "The archive is searched page by page to its start")
+
+        // Next reveals it: its page loads, and the tool row opens on the match.
+        XCTAssertTrue(pane.surface.performFind(.next))
+        try await wait { pane.surface.snapshot?.items.contains { $0.id == "tool7" } == true && pane.archiveRevealTask == nil }
+        XCTAssertEqual(pane.surface.findBar?.counter, "1 of 1", "The match stays selected as its page loads")
+        try await wait { pane.surface.transcript.rowStates["activity:tool7"]?.toolExpandedIDs == ["tool7"] }
+        pane.surface.layoutSubtreeIfNeeded()
+        let entry = pane.surface.transcript.entryID(showing: "tool7")
+        XCTAssertNotNil(entry)
+        XCTAssertNotNil(entry.flatMap { pane.surface.transcript.mountedRow($0) }, "The row is mounted")
+        // A tool's match is in its command or output, which its opened row shows in view.
+        let frame = try XCTUnwrap(entry.flatMap { pane.surface.transcript.frameForEntry($0) })
+        XCTAssertTrue(frame.intersects(pane.surface.findVisibleRect), "\(frame) \(pane.surface.findVisibleRect)")
+        XCTAssertEqual(pane.earlier.olderCursor, 0, "Pages load only as far as the match")
+        // Previous wraps back to the same, only match, which is now loaded.
+        XCTAssertTrue(pane.surface.performFind(.previous))
+        XCTAssertEqual(pane.surface.findBar?.counter, "1 of 1")
+    }
+
+    func testFailedUnsupportedPartialAndStoppedSearchesDescribeTheirScope() async throws {
+        let server = Server()
+        server.searchError = ModelError("Archive unreadable")
+        var pane = try await pane(server)
+        find("archived needle", in: pane)
+        try await wait { if case .failed = pane.surface.archiveFind.state { return true }; return false }
+        XCTAssertEqual(pane.surface.findBar?.counter, "No results · loaded only")
+        XCTAssertEqual(pane.surface.findBar?.scope?.hasPrefix("Searched only the loaded messages; searching earlier messages failed"), true)
+        pane.dispose()
+
+        server.searchError = ClientError.server(ErrorReply(code: .unsupported, message: ""))
+        pane = try await self.pane(server)
+        find("Latest", in: pane)
+        try await wait { pane.surface.archiveFind.state == .unsupported }
+        XCTAssertEqual(pane.surface.findBar?.counter, "1 of 2 · loaded only", "Loaded matches still count")
+        XCTAssertEqual(pane.surface.findBar?.scope?.contains("can't search earlier messages"), true)
+        pane.dispose()
+
+        server.searchError = nil
+        server.notKept = 12
+        pane = try await self.pane(server)
+        find("archived needle", in: pane)
+        try await wait { pane.surface.archiveFind.state == .complete }
+        XCTAssertEqual(pane.surface.findBar?.counter, "1 of 1 · partial")
+        XCTAssertEqual(pane.surface.findBar?.scope,
+                       "Searched every loaded message and 30 earlier messages on the server. 12 older messages weren't kept by the server, so it wasn't searched.")
+        pane.dispose()
+
+        // The connection drops mid-search: it says so, then searches again on reconnect.
+        server.notKept = 0
+        server.gateNextSearch = true
+        pane = try await self.pane(server)
+        defer { pane.dispose() }
+        find("archived needle", in: pane)
+        try await wait { server.searchGate != nil }
+        server.searchError = ClientError.disconnected
+        server.searchGate?.resume()
+        server.searchGate = nil
+        try await wait { pane.surface.archiveFind.state == .cancelled }
+        XCTAssertEqual(pane.surface.findBar?.counter, "No results · loaded only")
+        XCTAssertEqual(pane.surface.findBar?.scope?.contains("the search of earlier messages stopped"), true)
+        server.searchError = nil
+        pane.connectionChanged()
+        try await wait { pane.surface.archiveFind.state == .complete }
+        XCTAssertEqual(pane.surface.findBar?.counter, "1 of 1")
+    }
+
+    func testCopyStillIncludesArchivedHistoryAndMarksWhatWasNotKept() async throws {
+        let server = Server()
+        server.notKept = 4
+        let pane = try await pane(server)
+        defer { pane.dispose() }
+        let restore = preserveAgentTestClipboard()
+        defer { restore() }
+        pane.copyConversation()
+        try await wait { pane.notice?.text.contains("Exported retained messages") == true }
+        let markdown = try XCTUnwrap(NSPasteboard.general.string(forType: .string))
+        XCTAssertTrue(markdown.hasPrefix("> 4 older messages were not retained by the server and cannot be exported."))
+        XCTAssertTrue(markdown.contains("Archived answer 0"))
+        XCTAssertTrue(markdown.contains("Latest answer"))
     }
 }
