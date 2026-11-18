@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.28.1 - 2026-11-18
+
+### Changed
+
+- Refer to the app's icon library by its package name, @hugocxl/icons.
+
 ## 0.28.0 - 2026-11-16
 
 ### Changed
@@ -66,7 +72,7 @@
 
 ### Changed
 
-- Tab icons now use the same Icons library as the Mac app.
+- Tab icons now use the same @hugocxl/icons library as the Mac app.
 
 ## 0.23.0 - 2026-11-10
 

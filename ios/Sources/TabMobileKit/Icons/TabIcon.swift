@@ -1,6 +1,6 @@
 import TabProtocol
 
-/// Tab icons by their Icons resource names. The two view-mode icons still
+/// Tab icons by their @hugocxl/icons resource names. The two view-mode icons still
 /// ship in the app catalog. Mirrors `AppIcon` in Tab: keep cases and hues in step.
 public enum TabIcon: String, CaseIterable, Sendable {
     case agents
