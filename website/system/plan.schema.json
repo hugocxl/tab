@@ -24,8 +24,8 @@
       "type": "object", "required": ["label", "href"], "additionalProperties": false,
       "properties": { "label": { "$ref": "#/$defs/text" }, "href": { "$ref": "#/$defs/text" }, "icon": { "$ref": "#/$defs/icon" } }
     },
-    "icon": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "description": "A Stroke icon from @hugocxl/icons, rendered before the words with class p9-icon." },
-    "vector": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "description": "An illustration from @hugocxl/vectors, inlined with class p9-vector." },
+    "icon": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "description": "A Stroke icon from @hugocxl/icons, rendered before the words with class ds-icon." },
+    "vector": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "description": "An illustration from @hugocxl/vectors, inlined with class ds-vector." },
     "paragraph": {
       "type": "object", "required": ["text"], "additionalProperties": false,
       "description": "Inline links use Markdown [label](href). 'muted' is appended in the muted color after 'text'.",

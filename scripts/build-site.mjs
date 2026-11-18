@@ -13,11 +13,11 @@ const escape = (text) =>
 // ─── Artwork: Stroke icons and vectors, inlined per DESIGN.md ──────────
 const inner = (svg) => svg.replace(/^[\s\S]*?<svg[^>]*>/, "").replace(/<\/svg>\s*$/, "").trim();
 const icon = (name) =>
-  `<svg class="p9-icon" data-icon="${name}" viewBox="0 0 16 16" fill="none" aria-hidden="true">${inner(read(`website/art/icons/${name}.svg`)).replace(/\n\s*/g, "")}</svg>`;
+  `<svg class="ds-icon" data-icon="${name}" viewBox="0 0 16 16" fill="none" aria-hidden="true">${inner(read(`website/art/icons/${name}.svg`)).replace(/\n\s*/g, "")}</svg>`;
 const vector = (name) =>
   read(`website/art/vectors/${name}.svg`)
     .trim()
-    .replace(/ xmlns="[^"]*"/, ` class="p9-vector" data-vector="${name}"`)
+    .replace(/ xmlns="[^"]*"/, ` class="ds-vector" data-vector="${name}"`)
     .replace(/ color="[^"]*"/, "")
     .replace(/\n\s*/g, "");
 
@@ -45,13 +45,13 @@ if (!versions.length) throw new Error("No versions in CHANGELOG.md");
 const longDate = (iso, month = "long") =>
   new Date(`${iso}T00:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month, year: "numeric", timeZone: "UTC" });
 const changelog = [
-  '      <ol class="p9-index">',
+  '      <ol class="ds-index">',
   ...versions.map(({ number, date, groups }) => {
     const text = groups
       .filter((group) => group.entries.length)
       .map((group) => `<p><strong>${escape(group.name)}.</strong> ${group.entries.map(inline).join(" ")}</p>`)
       .join("");
-    return `        <li id="v${number}"><span class="p9-label"><time datetime="${date}">${longDate(date, "short")}</time></span><div><h3>${number}</h3>${text}</div></li>`;
+    return `        <li id="v${number}"><span class="ds-label"><time datetime="${date}">${longDate(date, "short")}</time></span><div><h3>${number}</h3>${text}</div></li>`;
   }),
   "      </ol>",
 ].join("\n");

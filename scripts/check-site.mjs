@@ -37,23 +37,23 @@ const glyphs = /[←-⇿⌀-⏿■-➿⤀-⥿⬀-⯿\u{1F300}-\u{1FAFF}]/u;
 for (const name of Object.keys(pages)) {
   const doc = docs.get(name);
   const body = doc.body;
-  assert.ok(body.classList.contains("p9"), `${name}: body.p9`);
+  assert.ok(body.classList.contains("ds"), `${name}: body.ds`);
   assert.equal(body.dataset.layout, "plain", `${name}: plain layout`);
   assert.ok(!doc.querySelector('[data-layout="field"], [src*="gray-folds"]'), `${name}: no field layout`);
-  assert.ok(doc.querySelector('head link[rel=stylesheet][href="system/p9.css"]'), `${name}: p9.css`);
+  assert.ok(doc.querySelector('head link[rel=stylesheet][href="system/ds.css"]'), `${name}: ds.css`);
   assert.ok(doc.querySelector('head script[src="system/theme.js"]:not([type])'), `${name}: theme.js`);
-  assert.ok(doc.querySelector('head script[type=module][src="system/p9.js"]'), `${name}: p9.js`);
-  assert.equal(body.firstElementChild.className, "p9-masthead", `${name}: masthead first`);
-  assert.equal(body.lastElementChild.className, "p9-footer", `${name}: footer last`);
-  assert.deepEqual(linkList(doc.querySelector(".p9-masthead")), [
+  assert.ok(doc.querySelector('head script[type=module][src="system/ds.js"]'), `${name}: ds.js`);
+  assert.equal(body.firstElementChild.className, "ds-masthead", `${name}: masthead first`);
+  assert.equal(body.lastElementChild.className, "ds-footer", `${name}: footer last`);
+  assert.deepEqual(linkList(doc.querySelector(".ds-masthead")), [
     "Tab ./",
     "Docs docs.html",
     "Changelog changelog.html",
     "GitHub https://github.com/hugocxl/tab",
   ]);
-  const theme = doc.querySelector(".p9-masthead > button.p9-theme[data-p9-theme][aria-label]");
-  assert.ok(theme?.querySelector('svg.p9-icon[data-icon="contrast"]'), `${name}: theme button`);
-  assert.deepEqual(linkList(doc.querySelector(".p9-footer")), [
+  const theme = doc.querySelector(".ds-masthead > button.ds-theme[data-ds-theme][aria-label]");
+  assert.ok(theme?.querySelector('svg.ds-icon[data-icon="contrast"]'), `${name}: theme button`);
+  assert.deepEqual(linkList(doc.querySelector(".ds-footer")), [
     "Tab https://hugocxl.github.io/tab/",
     "Quickshot https://hugocxl.github.io/quickshot/",
     "AgentKit https://hugocxl.github.io/agentkit/",
@@ -61,47 +61,47 @@ for (const name of Object.keys(pages)) {
     "License https://github.com/hugocxl/tab/blob/main/LICENSE",
     "@hugocxl https://github.com/hugocxl",
   ]);
-  assert.ok(doc.querySelectorAll(".p9-accent, .p9-dot").length <= 2, `${name}: accent budget`);
-  assert.ok(doc.querySelectorAll(".p9-button").length <= 1, `${name}: one filled button`);
-  assert.equal(doc.querySelectorAll("main > article.p9-column.p9-opening").length, 1, `${name}: one column`);
+  assert.ok(doc.querySelectorAll(".ds-accent, .ds-dot").length <= 2, `${name}: accent budget`);
+  assert.ok(doc.querySelectorAll(".ds-button").length <= 1, `${name}: one filled button`);
+  assert.equal(doc.querySelectorAll("main > article.ds-column.ds-opening").length, 1, `${name}: one column`);
   assert.equal(doc.querySelectorAll("main").length, 1, `${name}: one main`);
 
   // Artwork: Stroke icons and vectors only, no glyphs standing in for icons.
   for (const svg of doc.querySelectorAll("svg")) {
-    const icon = svg.matches('.p9-icon[data-icon][viewBox="0 0 16 16"][aria-hidden="true"]');
-    const vector = svg.matches('.p9-vector[data-vector][role="img"]') && svg.querySelector(":scope > title") && svg.closest(".p9-media, .p9-grid");
+    const icon = svg.matches('.ds-icon[data-icon][viewBox="0 0 16 16"][aria-hidden="true"]');
+    const vector = svg.matches('.ds-vector[data-vector][role="img"]') && svg.querySelector(":scope > title") && svg.closest(".ds-media, .ds-grid");
     assert.ok(icon || vector, `${name}: svg that is neither an icon nor a vector`);
-    assert.ok(!svg.closest(".p9-accent, h1, h2, h3"), `${name}: artwork in a heading or accent`);
+    assert.ok(!svg.closest(".ds-accent, h1, h2, h3"), `${name}: artwork in a heading or accent`);
     assert.ok(!svg.hasAttribute("color") && !svg.hasAttribute("xmlns"), `${name}: unprocessed svg`);
   }
-  for (const element of doc.querySelectorAll("a, button, .p9-label, h1, h2, h3")) {
+  for (const element of doc.querySelectorAll("a, button, .ds-label, h1, h2, h3")) {
     assert.doesNotMatch(element.textContent, glyphs, `${name}: symbol character in "${element.textContent.trim()}"`);
   }
   for (const img of doc.querySelectorAll("img")) {
     assert.ok(img.getAttribute("alt"), `${name}: image without alt`);
-    assert.ok(img.closest("figure.p9-wide > .p9-media"), `${name}: image outside figure-wide`);
+    assert.ok(img.closest("figure.ds-wide > .ds-media"), `${name}: image outside figure-wide`);
   }
-  for (const figure of doc.querySelectorAll("figure.p9-wide")) {
-    assert.match(figure.querySelector("figcaption.p9-caption > .p9-label")?.textContent ?? "", /^Fig\. \d{2} \/ \S/, `${name}: caption`);
+  for (const figure of doc.querySelectorAll("figure.ds-wide")) {
+    assert.match(figure.querySelector("figcaption.ds-caption > .ds-label")?.textContent ?? "", /^Fig\. \d{2} \/ \S/, `${name}: caption`);
   }
   for (const table of doc.querySelectorAll("table")) {
-    assert.ok(table.classList.contains("p9-table") && table.parentElement.matches(".p9-table-scroll[tabindex]"), `${name}: table`);
+    assert.ok(table.classList.contains("ds-table") && table.parentElement.matches(".ds-table-scroll[tabindex]"), `${name}: table`);
   }
   for (const pre of doc.querySelectorAll("pre")) {
-    assert.ok(pre.matches(".p9-code > pre[tabindex]") && pre.nextElementSibling?.matches("button[type=button]"), `${name}: code`);
+    assert.ok(pre.matches(".ds-code > pre[tabindex]") && pre.nextElementSibling?.matches("button[type=button]"), `${name}: code`);
   }
 }
 
 // Recipe order per page (DESIGN.md › Page recipes).
 const kind = (el) =>
-  el.matches(".p9-statement") ? "statement"
-  : el.matches(".p9-title") ? "title"
-  : el.matches(".p9-meta") ? "meta"
-  : el.matches(".p9-section") ? "section"
-  : el.matches("figure.p9-wide") ? "figure-wide"
-  : el.matches(".p9-grid") ? "figure-grid"
-  : el.matches(".p9-index") ? "index"
-  : el.matches(".p9-button") ? "button"
+  el.matches(".ds-statement") ? "statement"
+  : el.matches(".ds-title") ? "title"
+  : el.matches(".ds-meta") ? "meta"
+  : el.matches(".ds-section") ? "section"
+  : el.matches("figure.ds-wide") ? "figure-wide"
+  : el.matches(".ds-grid") ? "figure-grid"
+  : el.matches(".ds-index") ? "index"
+  : el.matches(".ds-button") ? "button"
   : `?${el.tagName}`;
 const recipes = {
   home: /^statement( meta)? section (figure-wide|figure-grid)( section)*( button)?$/,
@@ -112,30 +112,30 @@ for (const [name, recipe] of Object.entries(pages)) {
   const doc = docs.get(name);
   const sequence = [...doc.querySelector("main > article").children].map(kind).join(" ");
   assert.match(sequence, recipes[recipe], `${name} (${recipe}) order: ${sequence}`);
-  const lead = doc.querySelector("main > article > .p9-section");
+  const lead = doc.querySelector("main > article > .ds-section");
   assert.ok(!lead.querySelector(":scope > h2"), `${name}: lead section has no heading`);
-  for (const section of [...doc.querySelectorAll("main > article > .p9-section")].slice(1)) {
+  for (const section of [...doc.querySelectorAll("main > article > .ds-section")].slice(1)) {
     assert.ok(section.querySelector(":scope > h2"), `${name}: section without heading`);
   }
 }
 
 // Home: one accent phrase, one status dot, the download button.
 const home = docs.get("index.html");
-assert.equal(home.querySelectorAll(".p9-statement .p9-accent").length, 1);
-assert.equal(home.querySelectorAll(".p9-meta > li:first-child > .p9-dot").length, 1);
-assert.equal(home.querySelector(".p9-button").getAttribute("href"), "https://github.com/hugocxl/tab/releases/latest");
+assert.equal(home.querySelectorAll(".ds-statement .ds-accent").length, 1);
+assert.equal(home.querySelectorAll(".ds-meta > li:first-child > .ds-dot").length, 1);
+assert.equal(home.querySelector(".ds-button").getAttribute("href"), "https://github.com/hugocxl/tab/releases/latest");
 
 // Changelog: one row per version in CHANGELOG.md, newest first.
 const changelog = readFileSync("CHANGELOG.md", "utf8");
 const versions = [...changelog.matchAll(/^## (\d+\.\d+\.\d+) - /gm)].map((m) => m[1]);
-const rows = [...docs.get("changelog.html").querySelectorAll(".p9-index > li h3")].map((h) => h.textContent);
+const rows = [...docs.get("changelog.html").querySelectorAll(".ds-index > li h3")].map((h) => h.textContent);
 assert.deepEqual(rows, versions, "changelog rows");
-assert.match(home.querySelector(".p9-meta").textContent, new RegExp(`Version ${versions[0].replaceAll(".", "\\.")}`));
+assert.match(home.querySelector(".ds-meta").textContent, new RegExp(`Version ${versions[0].replaceAll(".", "\\.")}`));
 
 // Site CSS stays inside the design system's tokens.
 const css = readFileSync("website/site.css", "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
 assert.doesNotMatch(css, /#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(|oklch\(/i, "site.css: literal color");
 assert.doesNotMatch(css, /box-shadow|text-shadow|gradient|font-family|font-weight|font-size|border-radius:\s*\d|\d+px/i, "site.css: off-token style");
-for (const [, property] of css.matchAll(/var\((--[\w-]+)/g)) assert.match(property, /^--p9-/, `site.css: ${property}`);
+for (const [, property] of css.matchAll(/var\((--[\w-]+)/g)) assert.match(property, /^--ds-/, `site.css: ${property}`);
 
 console.log(`Site verified: ${docs.size} pages, ${links} local links, ${versions.length} changelog versions.`);

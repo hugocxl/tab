@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.103.2 - 2026-11-18
+
+### Changed
+
+- The README introduces Tab with a preview of the app and links to the new
+  docs.
+
 ## 0.103.1 - 2026-11-18
 
 ### Changed

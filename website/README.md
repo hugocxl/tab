@@ -29,7 +29,7 @@ python3 -m http.server 8765 --bind 127.0.0.1 --directory _site
   `{{masthead}}` and `{{footer}}` come from `partials/`, `{{icon NAME}}` and
   `{{vector NAME}}` inline artwork from `art/`, and `{{version}}` and
   `{{changelog}}` come from `CHANGELOG.md`.
-- `site.css`: the few site additions, using only `--p9-*` tokens.
+- `site.css`: the few site additions, using only `--ds-*` tokens.
 - `system/`: the design system, copied verbatim by
   `npm run sync:design-system` from a `design-system` checkout next to this one.
 - `art/`: the Stroke icons and vectors the templates use, copied by

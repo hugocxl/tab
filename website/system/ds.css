@@ -1,0 +1,234 @@
+/* Design system — the only stylesheet a page built with the system loads. Values mirror the DESIGN.md front matter. */
+@font-face {
+  font-family: "Geist Sans";
+  src: url("fonts/Geist-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Geist Mono";
+  src: url("fonts/GeistMono-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+/* ─── Tokens ─────────────────────────────────────────────────────────── */
+:root {
+  /* Palette: Superlogical paper and orange with neutral greys. Muted meets WCAG AA. */
+  --ds-canvas: #f5f5f4;
+  --ds-ink: #171717;
+  --ds-muted: #6e6e6e;
+  --ds-faint: #b3b3b3;
+  --ds-rule: #1717171f;
+  --ds-surface: #ebebea;
+  --ds-accent: #fe9369;
+  --ds-accent-text: #ce7755;
+
+  --ds-sans: "Geist Sans", Helvetica, Arial, sans-serif;
+  --ds-mono: "Geist Mono", ui-monospace, Menlo, monospace;
+
+  --ds-size-reading: min(calc(1rem + .36vw), 1.54rem);
+  --ds-size-title: calc(var(--ds-size-reading) * 1.4);
+  --ds-size-small: calc(var(--ds-size-reading) * .8);
+  --ds-size-control: 1rem;
+  --ds-size-mono: .9375rem;
+  --ds-size-label: .8125rem;
+
+  --ds-space-1: .25rem;
+  --ds-space-2: .5rem;
+  --ds-space-3: .75rem;
+  --ds-space-4: 1rem;
+  --ds-space-5: 1.25rem;
+  --ds-space-6: 2rem;
+  --ds-space-7: 2.5rem;
+  --ds-space-8: 3.5rem;
+  --ds-space-9: 5rem;
+  --ds-space-10: 8rem;
+
+  --ds-radius-control: 6px;
+  --ds-radius-media: 12px;
+  --ds-radius-pill: 999px;
+  --ds-target: 44px;
+  --ds-measure: 30em;
+  --ds-wide: 80rem;
+  --ds-ease: 120ms ease-out;
+
+
+  accent-color: var(--ds-ink);
+  color-scheme: light;
+}
+:root[data-theme=dark] {
+  --ds-canvas: #111111;
+  --ds-ink: #ededed;
+  --ds-muted: #7d7d7d;
+  --ds-faint: #737373;
+  --ds-rule: #ededed24;
+  --ds-surface: #1c1c1c;
+  --ds-accent-text: #fe9369;
+  color-scheme: dark;
+}
+
+/* ─── Shell and layout ───────────────────────────────────────────────── */
+.ds {
+  --ds-gutter: clamp(1.25rem, 4.5vw, 4rem);
+  --ds-field: 0px;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0 calc(var(--ds-field) + var(--ds-gutter)) 0 var(--ds-gutter);
+  color: var(--ds-ink);
+  background: var(--ds-canvas);
+  font: 300 var(--ds-size-reading)/1.3 var(--ds-sans);
+  letter-spacing: -.01em;
+  -webkit-font-smoothing: antialiased;
+}
+.ds *, .ds *::before, .ds *::after { box-sizing: border-box }
+.ds main { container-type: inline-size }
+.ds :where(h1, h2, h3, p, ol, ul, figure, pre, table) { margin: 0 }
+.ds[data-layout=field] { --ds-field: clamp(30vw, calc(100vw - 2 * var(--ds-gutter) - 47.6rem), 40vw) }
+.ds[data-layout=field]::after {
+  content: "";
+  position: fixed;
+  inset: 12px 12px 12px auto;
+  width: calc(var(--ds-field) - 12px);
+  border-radius: var(--ds-radius-media);
+  background: #777 url("images/gray-folds.png") center / cover;
+  pointer-events: none;
+}
+.ds-column { max-width: var(--ds-measure); margin-inline: auto }
+.ds[data-layout=field] .ds-column { margin-inline: 0 }
+.ds-opening { padding-top: clamp(var(--ds-space-9), 8vw, var(--ds-space-10)) }
+.ds-wide {
+  width: min(100cqw, var(--ds-wide));
+  margin-block: var(--ds-space-8);
+  margin-inline: calc((100% - min(100cqw, var(--ds-wide))) / 2);
+}
+.ds[data-layout=field] .ds-wide { margin-inline: 0 }
+@media (max-width: 760px) {
+  .ds[data-layout=field] { --ds-field: 20px }
+  .ds[data-layout=field]::after { inset: 6px 5px 6px auto; width: 12px; border-radius: 5px }
+}
+
+/* ─── Text ───────────────────────────────────────────────────────────── */
+.ds :where(h1, h2, h3) { font: inherit; letter-spacing: inherit }
+.ds :where(p, ul, ol, .ds-code, .ds-table, .ds-table-scroll) + :where(p, ul, ol, .ds-code, .ds-table, .ds-table-scroll) { margin-top: var(--ds-space-5) }
+.ds p { text-wrap: pretty }
+.ds-section :where(ul:not([class]), ol:not([class])) { padding-left: 1.2em }
+.ds-section :where(ul:not([class]), ol:not([class])) > li + li { margin-top: var(--ds-space-2) }
+.ds strong { font-weight: 500 }
+.ds a { color: inherit; text-decoration-line: underline; text-decoration-thickness: 1px; text-decoration-color: color-mix(in srgb, currentColor 40%, transparent); text-underline-offset: .2em }
+.ds a:hover { text-decoration-color: currentColor }
+.ds :where(code, kbd, samp) { font-family: var(--ds-mono); font-size: .85em; font-weight: 400; letter-spacing: 0 }
+.ds :focus-visible { outline: 2px solid var(--ds-ink); outline-offset: 3px }
+.ds-muted { color: var(--ds-muted) }
+.ds-accent { color: var(--ds-accent-text) }
+.ds-visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0 }
+
+.ds-title { font-size: var(--ds-size-title); font-weight: 500; line-height: 1.15; letter-spacing: -.02em; text-wrap: balance }
+.ds-title > * { display: block }
+.ds-title > :not(:first-child) { color: var(--ds-muted) }
+.ds-statement { font-size: var(--ds-size-title); font-weight: 500; line-height: 1.15; letter-spacing: -.02em; text-wrap: balance }
+
+.ds-section { margin-top: var(--ds-space-7); scroll-margin-top: var(--ds-space-6) }
+.ds-section > h2 { margin-bottom: var(--ds-space-4); color: var(--ds-muted); font-weight: 400 }
+.ds-section h3 { font-weight: 400 }
+
+.ds-label { font: 400 var(--ds-size-label)/1.5 var(--ds-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--ds-muted) }
+.ds-meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--ds-space-2) var(--ds-space-5); margin-top: var(--ds-space-6); list-style: none; padding: 0 }
+.ds-meta + * { margin-top: var(--ds-space-8) }
+.ds-dot { display: inline-block; width: .5rem; height: .5rem; margin-right: var(--ds-space-2); border-radius: 50%; background: var(--ds-accent); vertical-align: .05em }
+
+/* ─── Masthead and footer ────────────────────────────────────────────── */
+.ds-masthead { display: flex; align-items: center; gap: var(--ds-space-5); padding-top: var(--ds-space-6); font-size: var(--ds-size-small) }
+.ds-masthead a { display: inline-flex; align-items: center; min-height: var(--ds-target); text-decoration: none }
+.ds-masthead a:hover { text-decoration: underline }
+.ds-wordmark { margin-right: auto; font-size: 1.125rem; font-weight: 600; letter-spacing: -.055em }
+.ds-masthead .ds-wordmark:hover { text-decoration: none }
+@media (max-width: 480px) { .ds-masthead { flex-wrap: wrap; gap: 0 var(--ds-space-3) } .ds-wordmark { flex-basis: 100% } }
+.ds-theme { flex: none; width: var(--ds-target); height: var(--ds-target); border: 1px solid var(--ds-rule); border-radius: 50%; color: inherit; background: transparent; font: inherit; cursor: pointer }
+
+.ds-footer { display: flex; align-items: center; gap: var(--ds-space-5); margin-top: var(--ds-space-9); padding-bottom: var(--ds-space-7); font: 400 var(--ds-size-mono)/1.4 var(--ds-mono); letter-spacing: 0 }
+.ds-footer::before { content: ""; order: 1; flex: 1; min-width: var(--ds-space-6); border-top: 1px solid var(--ds-rule) }
+.ds-footer ul { display: flex; flex-wrap: wrap; gap: var(--ds-space-2) var(--ds-space-5); margin: 0; padding: 0; list-style: none }
+.ds-footer ul:last-child { order: 2 }
+.ds-footer li + li { margin-top: 0 }
+.ds-footer a { text-decoration: none }
+.ds-footer a:hover { text-decoration: underline }
+
+/* ─── Figures (vectors from @hugocxl/vectors) ────────────────────────────────────────────────────────── */
+.ds-media { display: grid; place-items: center; aspect-ratio: 3 / 2; overflow: hidden; border-radius: var(--ds-radius-media); background: var(--ds-surface) }
+.ds-media > img { width: 100%; height: 100%; object-fit: cover }
+.ds-caption { display: flex; align-items: center; justify-content: space-between; gap: var(--ds-space-4); min-height: var(--ds-target); margin-top: var(--ds-space-3) }
+
+.ds-grid { display: grid; grid-template-columns: repeat(var(--ds-cols, 3), minmax(0, 1fr)); list-style: none; padding: 0 }
+.ds-grid[data-columns="2"] { --ds-cols: 2 }
+.ds-grid[data-columns="4"] { --ds-cols: 4 }
+.ds-grid > li { display: flex; flex-direction: column; padding: 0 var(--ds-space-6) }
+.ds-grid > li:first-child { padding-left: 0 }
+.ds-grid > li:last-child { padding-right: 0 }
+.ds-grid > li + li { border-left: 1px solid var(--ds-rule) }
+.ds-grid h3 { margin-top: auto; font-weight: 400 }
+.ds-grid p { margin-top: var(--ds-space-2); font-size: var(--ds-size-small); line-height: 1.4; color: var(--ds-muted) }
+@container (max-width: 34rem) {
+  .ds-grid { grid-template-columns: minmax(0, 1fr) }
+  .ds-grid > li { padding: var(--ds-space-5) 0 }
+  .ds-grid > li + li { border-left: 0; border-top: 1px solid var(--ds-rule) }
+}
+
+/* ─── Index list and table ───────────────────────────────────────────── */
+.ds-index { list-style: none; padding: 0; border-bottom: 1px solid var(--ds-rule) }
+.ds-index > li { display: grid; grid-template-columns: 7.5rem minmax(0, 1fr); gap: var(--ds-space-2) var(--ds-space-5); padding-block: var(--ds-space-5); border-top: 1px solid var(--ds-rule) }
+.ds-index .ds-label { padding-top: .35em }
+.ds-index h3 { font-weight: 400 }
+.ds-index p { margin-top: var(--ds-space-2); color: var(--ds-muted) }
+@container (max-width: 30rem) { .ds-index > li { grid-template-columns: minmax(0, 1fr) } }
+
+.ds-table { width: 100%; border-collapse: collapse; font-size: var(--ds-size-small); font-variant-numeric: tabular-nums }
+.ds-table th { font: 400 var(--ds-size-label)/1.5 var(--ds-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--ds-muted); text-align: left }
+.ds-table :where(th, td) { padding: var(--ds-space-3) var(--ds-space-4) var(--ds-space-3) 0; border-bottom: 1px solid var(--ds-rule); vertical-align: top }
+.ds-table tbody th { font: inherit; letter-spacing: inherit; text-transform: none; color: var(--ds-ink) }
+.ds-table-scroll { overflow-x: auto }
+
+/* ─── Controls ───────────────────────────────────────────────────────── */
+.ds-button { display: inline-flex; align-items: center; gap: var(--ds-space-3); min-height: var(--ds-target); padding: 0 var(--ds-space-5); border: 0; border-radius: var(--ds-radius-control); color: var(--ds-canvas); background: var(--ds-ink); font: 400 var(--ds-size-control)/1 var(--ds-sans); letter-spacing: -.01em; text-decoration: none; cursor: pointer }
+.ds a.ds-button { color: var(--ds-canvas); text-decoration: none }
+.ds-button:hover { opacity: .84 }
+
+.ds-form { margin-top: var(--ds-space-7) }
+.ds-form label { display: block }
+.ds-input { display: flex; align-items: center; max-width: 20em; margin-top: var(--ds-space-4); border-bottom: 1px solid var(--ds-rule) }
+.ds-input:hover, .ds-input:focus-within { border-color: color-mix(in srgb, var(--ds-ink) 40%, transparent) }
+.ds-input input { flex: 1; min-width: 0; min-height: var(--ds-target); padding: 0; border: 0; border-radius: 0; color: inherit; background: transparent; font: inherit; letter-spacing: inherit; appearance: none }
+.ds-input input::placeholder { color: var(--ds-faint) }
+.ds-input input:focus-visible { outline: none }
+.ds-input:has(input:focus-visible) { outline: 2px solid var(--ds-ink); outline-offset: 3px }
+.ds-input input[aria-invalid=true] { text-decoration: underline wavy var(--ds-muted) 1px; text-underline-offset: .25em }
+.ds-input button { flex: none; width: var(--ds-target); height: var(--ds-target); padding: 0; border: 0; color: var(--ds-muted); background: transparent; font: inherit; cursor: pointer }
+.ds-input button:hover { color: var(--ds-ink) }
+.ds-help { margin-top: var(--ds-space-5); color: var(--ds-muted) }
+.ds-feedback { display: block; margin-top: var(--ds-space-3); font-size: var(--ds-size-small) }
+.ds-feedback:empty { display: none }
+
+.ds-code { position: relative; border-radius: var(--ds-radius-control); background: var(--ds-surface) }
+.ds-code pre { padding: var(--ds-space-4) var(--ds-space-5); overflow-x: auto; font: 400 .8125rem/1.6 var(--ds-mono); letter-spacing: 0 }
+.ds-code pre code { font-size: inherit }
+.ds-code button { position: absolute; top: 0; right: 0; min-width: var(--ds-target); min-height: var(--ds-target); padding: 0 var(--ds-space-3); border: 0; border-radius: var(--ds-radius-control); color: var(--ds-ink); background: var(--ds-surface); font: 400 var(--ds-size-label)/1 var(--ds-mono); letter-spacing: .08em; text-transform: uppercase; cursor: pointer }
+.ds-code button:hover { text-decoration: underline }
+
+.ds-pager { display: inline-flex; padding: 2px; border: 1px solid var(--ds-rule); border-radius: var(--ds-radius-pill); background: var(--ds-canvas) }
+.ds-pager button { width: var(--ds-target); height: var(--ds-target); padding: 0; border: 0; border-radius: 50%; color: inherit; background: transparent; font: 400 1.1rem/1 var(--ds-sans); cursor: pointer }
+.ds-pager button:hover { background: var(--ds-surface) }
+
+@media (prefers-reduced-motion: no-preference) {
+  .ds-button, .ds-pager button, .ds-input { transition: transform var(--ds-ease), background-color var(--ds-ease), border-color var(--ds-ease), opacity var(--ds-ease) }
+  .ds-button:active, .ds-pager button:active { transform: scale(.96) }
+}
+
+/* Icons from @hugocxl/icons (Stroke): before the words of a link, button or label, or alone in an icon button. */
+.ds-icon { display: inline-block; width: 1em; height: 1em; margin-inline-end: var(--ds-space-2); vertical-align: -.125em; flex: none }
+:is(.ds-theme, .ds-pager button, .ds-input button) > .ds-icon { margin: 0 }
+
+/* Vectors from @hugocxl/vectors: a 4:3 line illustration in place of a drawing, in ink. */
+.ds-vector { display: block; color: var(--ds-ink) }
+.ds-vector[hidden] { display: none }
+.ds-media > .ds-vector { width: auto; height: 82%; max-width: 92%; aspect-ratio: 4 / 3 }
+.ds-grid .ds-vector { width: 100%; height: auto; aspect-ratio: 4 / 3; margin-block: var(--ds-space-5) }

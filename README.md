@@ -1,84 +1,32 @@
-<p align="center">
-  <img src="website/assets/mascot.svg" alt="Tab mascot" height="170">
-</p>
+# Tab
 
-<h1 align="center">Tab</h1>
+### Your terminal. Your agents. Your whole dev loop.
 
-<p align="center"><strong>A fully native terminal multiplexer + agent development environment for Mac.</strong></p>
+**A fully native terminal multiplexer and agent development environment for the Mac.** Terminal, agent, simulator and browser panes sit side by side in one workspace, with its own background server included.
 
-<p align="center">
-  <a href="https://github.com/hugocxl/tab/releases/latest">Download for Mac</a> ·
-  <a href="https://hugocxl.github.io/tab/">Website</a> ·
-  <a href="CHANGELOG.md">Changelog</a> ·
-  <a href="#build-from-source">Build from source</a>
-</p>
+[Download for macOS](https://github.com/hugocxl/tab/releases/latest) · [Read the docs](https://hugocxl.github.io/tab/docs.html) · [Visit the website](https://hugocxl.github.io/tab/)
 
-## Your terminal. Your agents. Your whole dev loop.
-
-**Terminal, agent, simulator, and browser panes.** First-class citizens. One fully native workspace.
-
-Tab combines a terminal multiplexer with an **agent development environment (ADE)**: a workspace for coding agents and the tools you use to run, inspect, and test their changes. Written in Swift and AppKit, with its own background server included.
-
-**macOS 14+ · Apple silicon · Free & open source**
-
-<a href="media/tab-window.png"><img src="media/tab-window.png" alt="Tab workspace with agent conversations, terminals, an iPhone simulator, a browser pane, and the file explorer" width="100%"></a>
-
-*Four panes. One workspace. Arrange yours your way.*
+[![A Tab workspace with agent conversations, terminals, an iPhone simulator, a browser pane and the file explorer](.github/preview.png)](https://hugocxl.github.io/tab/)
 
 ## Four panes. Equal footing.
 
-Your shell, your coding agent, and the app you're building belong together. Give each one the space it needs.
+Your shell, your coding agent and the app you're building belong together. **Terminal** panes run commands, logs and development servers. **Agent** panes hold your Claude Code or Codex conversations. **Simulator** panes show iOS simulators and Android emulators. **Browser** panes keep your local app or the docs in view while you change the code behind them.
 
-| Pane | What you can do |
-| --- | --- |
-| **Terminal** | Run commands, watch logs, and keep development servers going with the Ghostty terminal engine. Split, resize, and arrange your sessions. |
-| **Agent** | Work with Claude Code or Codex in a native conversation pane. Keep the tools to inspect and test their changes right beside them. |
-| **Simulator** | See your mobile app where you're working. Interact with iOS simulators and Android emulators in their own panes. |
-| **Browser** | Open your local app, a preview, or the docs. Keep the page in view while you change the code that powers it. |
+Give each project or Git worktree its own tab, arrange the panes inside it, and keep parallel tasks apart with their files and Git diffs close at hand.
 
-## Fully native. Right down to the feel.
+## Close the app. Keep your terminals.
 
-Written in **Swift**. Built with **AppKit**. Native keyboard shortcuts, flexible split panes, and macOS glass surfaces. A workspace made for the Mac you're using, with the vendored Ghostty terminal engine and no Electron runtime.
+Tab's own server keeps your terminal sessions and workspace running when you quit, so you can come back later and pick up where you left off. Connect to another Mac over SSH and its projects, terminals and simulators feel just as local.
 
-## One project. As many angles as you need.
+## Made to feel at home
 
-- **A tab for the task.** Give each project or Git worktree its own sidebar tab. Arrange panes inside it. Keep parallel tasks separate, with files and Git diffs close at hand.
-- **Your agents. Your way of working.** Use your installed and authenticated Claude Code or Codex CLI in native agent panes. Prefer another CLI agent? Run it in a terminal pane.
-- **Local feel. Remote Mac.** Connect to another Mac over SSH. Work with its projects, terminals, and simulators. Browser pages travel through the server's tunnels, so `localhost` stays with the workspace.
-
-## Close the app. Keep your terminals running.
-
-Tab's own background server, **`tabd`**, owns your terminal sessions and workspace state. Quit the desktop app, come back later, and reconnect to your work.
-
-The Mac running your workspace needs to stay awake. Closing a terminal pane ends that session.
-
-The native desktop app, `tab` command-line tool, and `tabd` server ship together in one Mac app bundle.
-
-## Get Tab
-
-1. [Download the latest DMG](https://github.com/hugocxl/tab/releases/latest) for macOS 14+ on Apple silicon.
-2. Drag Tab into Applications.
-3. Open a project. Make it yours.
-
-Native agent conversations use an installed, authenticated Claude Code or Codex CLI on the Mac running your workspace. Tab is free and open source; agent-provider accounts and fees are separate. iOS simulators need Xcode and a simulator runtime; Android emulators need the Android SDK and an emulator.
-
-## Build from source
-
-You'll need Xcode's Swift 6 toolchain and Zig 0.17 to build the vendored terminal framework. Build GhosttyVT once, then validate the app:
-
-```sh
-scripts/build-ghostty.sh
-scripts/validate.sh
-```
-
-Validation builds with warnings as errors, runs the tests, and creates `build/debug/Tab Dev.app`. For a faster iteration, use `swift build`. To bundle and launch the development app with this checkout's profile:
-
-```sh
-scripts/run-dev.sh
-```
-
-See [AGENTS.md](AGENTS.md) for architecture and contribution rules, [`scripts/release.sh`](scripts/release.sh) for release packaging, and [`website/README.md`](website/README.md) for the website and GitHub Pages setup.
+- **Fully native.** Written in Swift and built with AppKit, with native shortcuts, split panes and macOS glass surfaces. No Electron.
+- **Your agents, your way.** Native panes for the Claude Code or Codex you already use, and a terminal pane for any other agent.
+- **Easy to drive.** The `tab` command lets you, and your agents, open panes, read terminals and drive the browser from a shell.
+- **Free to use.** Open source, for macOS 14 or later on Apple silicon.
 
 ## License
 
-[MIT](LICENSE) © Hugo Corta
+Tab is [MIT licensed](LICENSE). The third-party code and artwork it includes keep their own licenses, listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+Made by [Hugo](https://github.com/hugocxl). Ideas and contributions are welcome: [open an issue](https://github.com/hugocxl/tab/issues).

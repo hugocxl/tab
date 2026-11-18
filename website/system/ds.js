@@ -1,9 +1,9 @@
-// Design system runtime: wires .p9-code copy buttons.
+// Design system runtime: wires .ds-code copy buttons.
 document.addEventListener('click', async event => {
-  const button = event.target.closest('.p9-code button');
+  const button = event.target.closest('.ds-code button');
   if (!button) return;
   try {
-    await navigator.clipboard.writeText(button.closest('.p9-code').querySelector('pre').textContent);
+    await navigator.clipboard.writeText(button.closest('.ds-code').querySelector('pre').textContent);
     button.textContent = 'Copied';
   } catch {
     button.textContent = 'Select to copy';
