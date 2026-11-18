@@ -1,6 +1,6 @@
 import TabMobileKit
 import UIKit
-import IconsCXL
+import Icons
 
 extension TabIcon.Hue {
     /// The hue as Tab's themes draw icons: shade 600 on light backgrounds,

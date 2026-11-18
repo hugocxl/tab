@@ -11,7 +11,7 @@ let package = Package(
         .library(name: "TabMobileUI", targets: ["TabMobileUI"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/hugocxl/iconscxl.git", from: "0.1.6"),
+        .package(url: "https://github.com/hugocxl/icons.git", from: "0.2.0"),
     ],
     targets: [
         // Synced from Tab by scripts/sync-tab.sh; never edited here.
@@ -27,7 +27,7 @@ let package = Package(
         .target(name: "TabMobileKit", dependencies: ["TabProtocol", "TabShared"], swiftSettings: swift5),
         // The UIKit app: tab list, terminal and agent panes, pairing.
         .target(name: "TabMobileUI", dependencies: ["TabMobileKit", "TabProtocol", "TabShared",
-                                                     .product(name: "IconsCXL", package: "iconscxl")], swiftSettings: swift5),
+                                                     .product(name: "Icons", package: "icons")], swiftSettings: swift5),
         .testTarget(name: "TabMobileKitTests", dependencies: ["TabMobileKit"], swiftSettings: swift5),
         .testTarget(name: "TabMobileUITests", dependencies: ["TabMobileUI"], swiftSettings: swift5),
     ]

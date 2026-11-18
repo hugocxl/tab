@@ -57,7 +57,7 @@ port 7431.
 - The home screen is the desktop sidebar's Open Tabs layout (`TabCard`,
   `TabCardCell`). Keep it in step with `ActivityCardData` and `SidebarRows` in
   Tab.
-- Tab icons use IconsCXL through `TabIcon`; the two view-mode icons remain local.
+- Tab icons use Icons through `TabIcon`; the two view-mode icons remain local.
 - Tabs and panes keep Tab's words in code, docs and UI:
   - A **tab** is one card in the list. It holds a split layout of panes.
   - A **pane** is one terminal or agent inside a tab. Browser, simulator, editor
@@ -97,7 +97,7 @@ port 7431.
 - Persistent files are JSON through `Codable`, and decoders tolerate unknown keys
   and missing optional keys.
 - Follow the existing patterns, and fix root causes rather than symptoms.
-- Use no third-party packages beyond Apple frameworks, IconsCXL and the vendored Tab code.
+- Use no third-party packages beyond Apple frameworks, Icons and the vendored Tab code.
   Code from other apps is never copied: Blink and VVTerm are GPL, and rootshell is
   only a reference. Third-party artwork or code goes in `THIRD_PARTY_NOTICES.md`.
 
