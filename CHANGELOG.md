@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.103.4 - 2026-11-18
+
+### Changed
+
+- Refer to Tab's icon library by its package name, @hugocxl/icons.
+
 ## 0.103.3 - 2026-11-18
 
 ### Changed
