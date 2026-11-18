@@ -1,21 +1,38 @@
 // Build the GitHub Pages site from website/ into _site/.
-// Pages follow the @hugocxl design system vendored in website/system
-// (scripts/sync-design-system.mjs), with icons and vectors vendored in
-// website/art (scripts/sync-artwork.mjs). The changelog page and the version
+// Pages follow the @hugocxl design system, copied from the @hugocxl/design-system
+// package, with Stroke icons from @hugocxl/icons and vectors from
+// @hugocxl/vectors inlined at build time. The changelog page and the version
 // come from CHANGELOG.md.
-import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 
 const out = "_site";
 const read = (path) => readFileSync(path, "utf8");
 const escape = (text) =>
   String(text).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 
+const designSystem = dirname(createRequire(import.meta.url).resolve("@hugocxl/design-system/package.json"));
+
 // ─── Artwork: Stroke icons and vectors, inlined per DESIGN.md ──────────
+// The names come from {{icon NAME}} and {{vector NAME}} in the templates.
+const templates = [
+  ...readdirSync("website").filter((name) => name.endsWith(".html")).map((name) => `website/${name}`),
+  ...readdirSync("website/partials").map((name) => `website/partials/${name}`),
+];
+const artwork = { icon: new Map(), vector: new Map() };
+for (const path of templates) {
+  for (const [, kind, name] of read(path).matchAll(/\{\{(icon|vector) ([\w-]+)\}\}/g)) {
+    if (artwork[kind].has(name)) continue;
+    const module = kind === "icon" ? `@hugocxl/icons/js/stroke/${name}` : `@hugocxl/vectors/js/${name}`;
+    artwork[kind].set(name, Object.values(await import(module))[0]);
+  }
+}
 const inner = (svg) => svg.replace(/^[\s\S]*?<svg[^>]*>/, "").replace(/<\/svg>\s*$/, "").trim();
 const icon = (name) =>
-  `<svg class="ds-icon" data-icon="${name}" viewBox="0 0 16 16" fill="none" aria-hidden="true">${inner(read(`website/art/icons/${name}.svg`)).replace(/\n\s*/g, "")}</svg>`;
+  `<svg class="ds-icon" data-icon="${name}" viewBox="0 0 16 16" fill="none" aria-hidden="true">${inner(artwork.icon.get(name)).replace(/\n\s*/g, "")}</svg>`;
 const vector = (name) =>
-  read(`website/art/vectors/${name}.svg`)
+  artwork.vector.get(name)
     .trim()
     .replace(/ xmlns="[^"]*"/, ` class="ds-vector" data-vector="${name}"`)
     .replace(/ color="[^"]*"/, "")
@@ -84,7 +101,7 @@ function render(template) {
 
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
-cpSync("website/system", `${out}/system`, { recursive: true, filter: (path) => !path.endsWith(".DS_Store") });
+cpSync(join(designSystem, "system"), `${out}/system`, { recursive: true, filter: (path) => !path.endsWith(".DS_Store") });
 cpSync("website/assets", `${out}/assets`, { recursive: true, filter: (path) => !path.endsWith(".DS_Store") });
 cpSync("website/site.css", `${out}/site.css`);
 for (const page of ["index.html", "docs.html", "changelog.html"]) {

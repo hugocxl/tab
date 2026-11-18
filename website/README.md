@@ -27,14 +27,13 @@ python3 -m http.server 8765 --bind 127.0.0.1 --directory _site
 
 - `index.html`, `docs.html`, `changelog.html`: page templates. `{{head …}}`,
   `{{masthead}}` and `{{footer}}` come from `partials/`, `{{icon NAME}}` and
-  `{{vector NAME}}` inline artwork from `art/`, and `{{version}}` and
+  `{{vector NAME}}` inline Stroke icons from the `@hugocxl/icons` package and
+  vectors from `@hugocxl/vectors` at build time, and `{{version}}` and
   `{{changelog}}` come from `CHANGELOG.md`.
 - `site.css`: the few site additions, using only `--ds-*` tokens.
-- `system/`: the design system, copied verbatim by
-  `npm run sync:design-system` from a `design-system` checkout next to this one.
-- `art/`: the Stroke icons and vectors the templates use, copied by
-  `npm run sync:artwork` from `icons` and `vectors` checkouts next to this one.
-  Both sync scripts take `--check`.
+- The design system isn't committed here: the build copies `system/` from the
+  `@hugocxl/design-system` package (a dev dependency) into `_site/system/`, and
+  the check compares it and every inlined icon and vector with the packages.
 - `assets/tab-window.png`: the product screenshot. `assets/favicon.svg`: the
   small app icon.
 - `MESSAGING.md`: positioning, reusable descriptions and claim boundaries.
@@ -46,5 +45,7 @@ that would become stale.
 
 The **Pages** workflow (`.github/workflows/pages.yml`) builds and checks the site
 and deploys `_site/` to GitHub Pages for pushes to `main` that touch the site or
-`CHANGELOG.md`, and can be dispatched manually. The repository's Pages source is
-**GitHub Actions**.
+`CHANGELOG.md`, and can be dispatched manually. A design system release
+dispatches it too. Each run installs the newest `@hugocxl/design-system`,
+`@hugocxl/icons` and `@hugocxl/vectors` over the locked versions before
+building. The repository's Pages source is **GitHub Actions**.

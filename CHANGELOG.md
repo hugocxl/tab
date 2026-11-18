@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.103.3 - 2026-11-18
+
+### Changed
+
+- The website always uses the newest @hugocxl design system, icons and figures,
+  and updates when the design system has a new release.
+
 ## 0.103.2 - 2026-11-18
 
 ### Changed

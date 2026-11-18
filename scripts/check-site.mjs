@@ -1,8 +1,11 @@
 // Check the built site in _site/: links, anchors, assets and the design system's
 // page contract (DS markup, recipe order, accent budget, one filled button,
-// icons from @hugocxl/icons only, plain layout only).
-import { existsSync, readFileSync } from "node:fs";
+// icons from @hugocxl/icons only, plain layout only). The design system, icons
+// and vectors are checked against the @hugocxl packages in node_modules.
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
+import { dirname, join, relative } from "node:path";
 import { JSDOM } from "jsdom";
 
 const site = "_site";
@@ -92,6 +95,35 @@ for (const name of Object.keys(pages)) {
   }
 }
 
+// The design system is the package's system/ folder, copied verbatim.
+const system = join(dirname(createRequire(import.meta.url).resolve("@hugocxl/design-system/package.json")), "system");
+const files = (dir) =>
+  readdirSync(dir, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name !== ".DS_Store")
+    .map((entry) => relative(dir, join(entry.parentPath, entry.name)))
+    .sort();
+const systemFiles = files(system);
+assert.deepEqual(files(`${site}/system`), systemFiles, "system/ files match @hugocxl/design-system");
+for (const file of systemFiles) {
+  assert.ok(readFileSync(`${site}/system/${file}`).equals(readFileSync(join(system, file))), `system/${file} matches the package`);
+}
+
+// Every icon and vector is the package's artwork, inlined per DESIGN.md.
+const body = (svg) => svg.replace(/^[\s\S]*?<svg[^>]*>/, "").replace(/<\/svg>\s*$/, "").replace(/\n\s*/g, "").trim();
+let artwork = 0;
+for (const [name, doc] of docs) {
+  for (const svg of doc.querySelectorAll("svg.ds-icon[data-icon], svg.ds-vector[data-vector]")) {
+    const icon = svg.classList.contains("ds-icon");
+    const id = icon ? svg.dataset.icon : svg.dataset.vector;
+    const module = icon ? `@hugocxl/icons/js/stroke/${id}` : `@hugocxl/vectors/js/${id}`;
+    const source = Object.values(await import(module))[0];
+    const host = new JSDOM(`<svg>${body(source)}</svg>`).window.document.body.firstElementChild;
+    assert.equal(svg.innerHTML, host.innerHTML, `${name}: ${icon ? "icon" : "vector"} ${id} matches ${module}`);
+    if (!icon) assert.equal(svg.getAttribute("viewBox"), source.match(/viewBox="([^"]*)"/)[1], `${name}: vector ${id} viewBox`);
+    artwork++;
+  }
+}
+
 // Recipe order per page (DESIGN.md › Page recipes).
 const kind = (el) =>
   el.matches(".ds-statement") ? "statement"
@@ -138,4 +170,4 @@ assert.doesNotMatch(css, /#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(|oklch\(/i, "site.css:
 assert.doesNotMatch(css, /box-shadow|text-shadow|gradient|font-family|font-weight|font-size|border-radius:\s*\d|\d+px/i, "site.css: off-token style");
 for (const [, property] of css.matchAll(/var\((--[\w-]+)/g)) assert.match(property, /^--ds-/, `site.css: ${property}`);
 
-console.log(`Site verified: ${docs.size} pages, ${links} local links, ${versions.length} changelog versions.`);
+console.log(`Site verified: ${docs.size} pages, ${links} local links, ${artwork} inlined icons and vectors, ${systemFiles.length} design system files, ${versions.length} changelog versions.`);

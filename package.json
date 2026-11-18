@@ -4,11 +4,12 @@
   "description": "Build and check tools for the Tab website. The app itself is a Swift package.",
   "scripts": {
     "build:site": "node scripts/build-site.mjs",
-    "check:site": "node scripts/check-site.mjs",
-    "sync:design-system": "node scripts/sync-design-system.mjs",
-    "sync:artwork": "node scripts/sync-artwork.mjs"
+    "check:site": "node scripts/check-site.mjs"
   },
   "devDependencies": {
+    "@hugocxl/design-system": "^0.2.7",
+    "@hugocxl/icons": "^0.2.0",
+    "@hugocxl/vectors": "^0.1.0",
     "jsdom": "26.1.0"
   },
   "engines": {

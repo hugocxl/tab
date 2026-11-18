@@ -144,10 +144,10 @@ SOFTWARE.
 ## Geist (website)
 
 The website uses Geist and Geist Mono through the @hugocxl design system, which
-it vendors in `website/system/`.
+the site build copies from the `@hugocxl/design-system` npm package.
 
 Source: https://github.com/vercel/geist-font
 
 The fonts are distributed under the SIL Open Font License 1.1. The full
-copyright and license text accompanies them in
-`website/system/fonts/Geist-LICENSE.txt`.
+copyright and license text accompanies them in `system/fonts/Geist-LICENSE.txt`
+in that package and on the published site.
