@@ -14,7 +14,7 @@ let package = Package(
         .executable(name: "tab", targets: ["tab"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/hugocxl/stack.git", from: "0.1.0"),
+        .package(url: "https://github.com/hugocxl/stack.git", from: "0.1.4"),
     ],
     targets: [
         // Ghostty's VT library, built by scripts/build-ghostty.sh.

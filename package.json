@@ -7,9 +7,9 @@
     "check:site": "node scripts/check-site.mjs"
   },
   "devDependencies": {
-    "@hugocxl/design-system": "^0.2.7",
-    "@hugocxl/icons": "^0.2.0",
-    "@hugocxl/vectors": "^0.1.0",
+    "@hugocxl/design-system": "^0.2.14",
+    "@hugocxl/icons": "^0.2.36",
+    "@hugocxl/vectors": "^0.1.19",
     "jsdom": "26.1.0"
   },
   "engines": {
