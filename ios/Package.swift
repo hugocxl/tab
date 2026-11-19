@@ -11,7 +11,7 @@ let package = Package(
         .library(name: "TabMobileUI", targets: ["TabMobileUI"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/hugocxl/stack.git", from: "0.1.0"),
+        .package(url: "https://github.com/hugocxl/stack.git", from: "0.1.4"),
     ],
     targets: [
         // Synced from Tab by scripts/sync-tab.sh; never edited here.
