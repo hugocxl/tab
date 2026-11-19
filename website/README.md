@@ -1,9 +1,9 @@
 # Tab website
 
 The site at **https://hugocxl.github.io/tab/**, built strictly from the
-[@hugocxl design system](https://hugocxl.github.io/design-system/) with icons from
-[@hugocxl/icons](https://hugocxl.github.io/icons/) and figures from
-[@hugocxl/vectors](https://hugocxl.github.io/vectors/). Every page uses the
+[@hugocxl design system](https://hugocxl.github.io/stack/design-system/) with icons from
+[@hugocxl/icons](https://hugocxl.github.io/stack/icons/) and figures from
+[@hugocxl/vectors](https://hugocxl.github.io/stack/vectors/). Every page uses the
 `plain` layout.
 
 | Page | Recipe | Source |

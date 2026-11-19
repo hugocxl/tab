@@ -105,10 +105,10 @@ mascot banner.
 ## Voice and visual direction
 
 Plain, specific, developer-facing, in sentence case. The site uses only the
-[@hugocxl design system](https://hugocxl.github.io/design-system/), vendored in
+[@hugocxl design system](https://hugocxl.github.io/stack/design-system/), vendored in
 `system/`: Geist type, warm paper, neutral greys and at most two orange accents per
-page, icons from [@hugocxl/icons](https://hugocxl.github.io/icons/) and figures
-from [@hugocxl/vectors](https://hugocxl.github.io/vectors/). The real screenshot
+page, icons from [@hugocxl/icons](https://hugocxl.github.io/stack/icons/) and figures
+from [@hugocxl/vectors](https://hugocxl.github.io/stack/vectors/). The real screenshot
 is the product evidence. Name the four panes with the same weight.
 
 ## Claim boundaries
