@@ -3,7 +3,7 @@ import SwiftUI
 import TabCore
 import Icons
 
-/// Tab Icons: signature marks carry their theme hue; UI templates inherit the caller's tint.
+/// Tab's icons, from @hugocxl/icons: signature marks carry their theme hue; UI templates inherit the caller's tint.
 public enum AppIcon: String, CaseIterable, Sendable {
     case trash
     case microphone
@@ -196,8 +196,8 @@ public enum AppIcon: String, CaseIterable, Sendable {
     case triangleAlert = "triangle-alert"
     case triangleAlertFill = "triangle-alert-fill"
     case typescript
-    case viewList = "view-list"
-    case viewTree = "view-tree"
+    case viewList = "list"
+    case viewTree = "list-tree"
     case video
     case vim
     case vite
@@ -359,8 +359,7 @@ public enum AppIcon: String, CaseIterable, Sendable {
     public func image(size: CGFloat = Metrics.glyph, scale: CGFloat = 1) -> NSImage? {
         let key = "template-\(rawValue)-\(size)-\(scale)"
         if let cached = IconCache.images[key] { return cached }
-        let source = Icon(rawValue: rawValue)?.nsImage ?? BundledImage.loadTabIcon(rawValue)
-        guard let source, source.size.width > 0, source.size.height > 0 else { return nil }
+        guard let source = Icon(rawValue: rawValue)?.nsImage, source.size.width > 0, source.size.height > 0 else { return nil }
         let fit = min(size * scale / source.size.width, size * scale / source.size.height)
         let fitted = NSSize(width: source.size.width * fit, height: source.size.height * fit)
         let image = NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
@@ -456,20 +455,7 @@ extension NSImage {
     }
 }
 
-/// Images shipped with the app.
-public enum BundledImage {
-    /// The URL of an SVG in the Tab Icons set.
-    public static func tabIconURL(_ name: String) -> URL? {
-        Bundle.module.url(forResource: name, withExtension: "svg", subdirectory: "TabIcons")
-    }
-
-    /// Loads an SVG from the Tab Icons set at its intrinsic aspect ratio.
-    public static func loadTabIcon(_ name: String) -> NSImage? {
-        tabIconURL(name).flatMap(NSImage.init(contentsOf:))
-    }
-}
-
-/// Provider marks from Tab Icons, colored in the provider's theme hue.
+/// Provider marks from @hugocxl/icons, colored in the provider's theme hue.
 public enum AgentLogo {
     /// The provider's mark on a 64-point square canvas, including a generic
     /// agent mark for unknown providers.

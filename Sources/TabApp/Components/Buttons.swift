@@ -65,15 +65,13 @@ public final class IconButton: NSButton {
 class CircleButton: NSButton {
     enum Glyph {
         case icon(AppIcon)
-        case symbol(SystemSymbol)
-        case headerControl(HeaderControl)
+        case chrome(ChromeIcon)
 
         @MainActor
         func image(size: CGFloat) -> NSImage? {
             switch self {
             case .icon(let icon): return icon.image(size: size, theme: .shared)
-            case .symbol(let symbol): return symbol.image(size: size)
-            case .headerControl(let control): return SystemSymbol.image(named: control.rawValue, size: size)
+            case .chrome(let icon): return icon.image(size: size)
             }
         }
 
@@ -81,7 +79,7 @@ class CircleButton: NSButton {
         func image(size: CGFloat, color: NSColor) -> NSImage? {
             switch self {
             case .icon(let icon): return icon.image(size: size, theme: .shared, tint: color)
-            case .symbol, .headerControl: return image(size: size)?.tinted(color)
+            case .chrome: return image(size: size)?.tinted(color)
             }
         }
     }
@@ -238,15 +236,6 @@ class CircleButton: NSButton {
     @objc func pressed() {}
 }
 
-/// Fixed pane-header controls keep their original SF artwork.
-enum HeaderControl: String {
-    case columns = "square.split.2x1"
-    case rows = "square.split.1x2"
-    case maximize = "arrow.up.left.and.arrow.down.right"
-    case restore = "arrow.down.right.and.arrow.up.left"
-    case close = "xmark"
-}
-
 /// A glyph button for the sidebars' chrome rows: a 30pt circle that fills
 /// while hovered, and stays filled while its panel is open (`isOn`).
 final class ChromeButton: CircleButton {
@@ -259,9 +248,9 @@ final class ChromeButton: CircleButton {
         super.init(glyph: .icon(icon), label: label, side: side, glyph: glyph)
     }
 
-    init(_ symbol: SystemSymbol, label: String, side: CGFloat = ChromeButton.side, glyph: CGFloat = ChromeButton.glyph, action: ((ChromeButton) -> Void)? = nil) {
+    init(_ icon: ChromeIcon, label: String, side: CGFloat = ChromeButton.side, glyph: CGFloat = ChromeButton.glyph, action: ((ChromeButton) -> Void)? = nil) {
         onPress = action
-        super.init(glyph: .symbol(symbol), label: label, side: side, glyph: glyph)
+        super.init(glyph: .chrome(icon), label: label, side: side, glyph: glyph)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -294,18 +283,13 @@ final class HeaderButton: CircleButton {
     /// The header button's circle.
     static let side: CGFloat = 22
 
-    init(_ symbol: SystemSymbol, label: String, action: (() -> Void)? = nil) {
+    init(_ icon: ChromeIcon, label: String, action: (() -> Void)? = nil) {
         onPress = action
-        super.init(glyph: .symbol(symbol), label: label, side: Self.side, glyph: Metrics.glyph)
+        super.init(glyph: .chrome(icon), label: label, side: Self.side, glyph: Metrics.glyph)
     }
 
-    init(control: HeaderControl, label: String, action: (() -> Void)? = nil) {
-        onPress = action
-        super.init(glyph: .headerControl(control), label: label, side: Self.side, glyph: Metrics.glyph)
-    }
-
-    func show(_ control: HeaderControl) {
-        setGlyph(.headerControl(control))
+    func show(_ icon: ChromeIcon) {
+        setGlyph(.chrome(icon))
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }

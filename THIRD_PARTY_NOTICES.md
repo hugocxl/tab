@@ -65,27 +65,12 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-## Tab Icons
+## @hugocxl/icons
 
-Tab Icons is Tab's own icon set, adapted and extended from two foundations:
-
-- `@pierre/icons` 0.9.0, under Apache 2.0:
-  https://github.com/pierrecomputer/icons
-- Pierre's file icon library, `pierrecomputer/vscode-icons`, under MIT:
-  https://github.com/pierrecomputer/vscode-icons
-
-Both license texts are bundled in `Sources/TabApp/Resources/TabIcons/LICENSE`.
-
-The set's brand marks (agent providers, Git hosts, runtimes, languages and
-tools) are simplified adaptations of the brands' own marks, taken from:
-
-- Simple Icons 16.37.0 (CC0 1.0): https://github.com/simple-icons/simple-icons.
-  Brand marks remain the trademarks of their owners; see its DISCLAIMER.
-- LobeHub Icons 1.102.0, `@lobehub/icons-static-svg`, under MIT:
-  https://github.com/lobehub/lobe-icons
-- Devicon 2.18.0, under MIT: https://github.com/devicons/devicon
-
-Their license texts are bundled in `Sources/TabApp/Resources/TabIcons/LICENSE`.
+Tab's icons come from @hugocxl/icons, the `Icons` library of the hugocxlStack
+Swift package: https://github.com/hugocxl/stack. The set adapts `@pierre/icons`,
+Pierre's file icons, Simple Icons, LobeHub Icons and Devicon; its `NOTICE` and
+`THIRD_PARTY_LICENSES.md` ship inside the package's resource bundle.
 
 ## herdr
 

@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.104.0 - 2026-11-19
+
+### Changed
+
+- The sidebar buttons and pane headers use outlined icons from @hugocxl/icons instead
+  of system symbols, so every icon in Tab now comes from one set.
+
 ## 0.103.4 - 2026-11-18
 
 ### Changed

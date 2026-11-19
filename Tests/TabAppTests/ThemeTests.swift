@@ -115,15 +115,8 @@ final class ThemeTests: XCTestCase {
 
     func testEveryIconHasAnImage() {
         for icon in AppIcon.allCases {
-            XCTAssertNotNil(icon.image(), "\(icon.rawValue).svg did not load")
+            XCTAssertNotNil(icon.image(), "\(icon.rawValue) did not load")
         }
-    }
-
-    func testEveryLocalSVGHasAnIconCase() throws {
-        let folder = try XCTUnwrap(BundledImage.tabIconURL("view-list")).deletingLastPathComponent()
-        let files = try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
-        let names = Set(files.filter { $0.pathExtension == "svg" }.map { $0.deletingPathExtension().lastPathComponent })
-        XCTAssertEqual(names, Set(["view-list", "view-tree"]))
     }
 
     /// Wide and narrow icons come back on the same square canvas as the rest,

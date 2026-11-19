@@ -63,7 +63,7 @@ final class PaneCardView: HoverView {
     init(pane: PaneId, model: AppModel) {
         self.pane = pane
         self.model = model
-        zoomButton = HeaderButton(control: .maximize, label: "Zoom Pane")
+        zoomButton = HeaderButton(.maximize, label: "Zoom Pane")
         super.init(frame: .zero)
         wantsLayer = true
         layer?.cornerRadius = Metrics.cardRadius
@@ -83,13 +83,13 @@ final class PaneCardView: HoverView {
         addSubview(header)
         for view in [glyph, titleLabel, suffixLabel, progressGlyph] as [NSView] { header.addSubview(view) }
 
-        let split = HeaderButton(control: .columns, label: "Split Right") { [weak self] in self?.run { $0.split(.right) } }
-        let down = HeaderButton(control: .rows, label: "Split Down") { [weak self] in self?.run { $0.split(.down) } }
+        let split = HeaderButton(.columns, label: "Split Right") { [weak self] in self?.run { $0.split(.right) } }
+        let down = HeaderButton(.rows, label: "Split Down") { [weak self] in self?.run { $0.split(.down) } }
         zoomButton.onPress = { [weak self] in
             guard let self else { return }
             self.model?.toggleZoom(self.pane)
         }
-        let close = HeaderButton(control: .close, label: "Close Pane") { [weak self] in
+        let close = HeaderButton(.close, label: "Close Pane") { [weak self] in
             guard let self else { return }
             self.model?.closePane(self.pane)
         }

@@ -83,12 +83,11 @@ runs the same script.
 - Use AppKit throughout. SwiftUI is allowed only for Settings forms and static
   dialogs, never on the terminal rendering path.
 - Shortcuts come only from `ShortcutCatalog`, and colors only from `AppTheme`.
-- Icons come from `AppIcon`, backed by @hugocxl/icons and two local view-mode SVGs in `Resources/TabIcons`
-  (one kebab-case file per case; `scripts/icons/STYLE.md` says how to draw one,
-  and `scripts/icons/` normalizes and previews them). Only the sidebar's header
-  and footer buttons and the pane header draw SF Symbols, through
-  `SystemSymbol`. Agent logos, Git host logos, command marks and file types are
-  icons too, each with its signature hue.
+- Every icon comes from @hugocxl/icons; draw no SF Symbols and ship no local
+  SVGs. `AppIcon` uses the default (duotone) set, and the sidebar's header and
+  footer buttons and the pane header use its stroke set through `ChromeIcon`.
+  Agent logos, Git host logos, command marks and file types are icons too, each
+  with its signature hue.
 - Glass surfaces use `GlassView` (Liquid Glass on macOS 26, frosted material
   before). Add a `GlassView.Style` preset for a new use rather than creating effect
   views directly.

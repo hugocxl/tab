@@ -7,7 +7,7 @@ final class ChromeButtonTests: XCTestCase {
     /// Buttons side by side in the sidebars show the same space between
     /// their glyphs, however wide each glyph is.
     func testGlyphsSideBySideKeepTheSameVisibleGap() {
-        let rows: [[SystemSymbol]] = [[.command, .plusCircle], [.addProject, .globeBadgePlus]]
+        let rows: [[ChromeIcon]] = [[.command, .plusCircle], [.addProject, .globeBadgePlus]]
         for icons in rows {
             let buttons = icons.map { ChromeButton($0, label: $0.rawValue) }
             CircleButton.layOut(buttons, trailingAt: 300, y: 0)
@@ -25,13 +25,11 @@ final class ChromeButtonTests: XCTestCase {
         XCTAssertEqual(gap, CircleButton.glyphSpacing, accuracy: 0.75)
     }
 
-    /// The composed globe badge sticks out of the globe instead of eating
-    /// into it, so the globe stays as large as the plain glyph.
-    func testBadgedGlobeKeepsTheGlobeFullSize() throws {
-        let globe = try XCTUnwrap(SystemSymbol.globe.image(size: ChromeButton.glyph))
-        let badged = try XCTUnwrap(SystemSymbol.globeBadgePlus.image(size: ChromeButton.glyph))
-        XCTAssertGreaterThan(badged.size.width, globe.size.width)
-        XCTAssertGreaterThan(badged.inkBounds.width, globe.inkBounds.width)
-        XCTAssertGreaterThan(badged.inkBounds.height, globe.inkBounds.height)
+    func testEveryChromeIconHasAnImage() {
+        for icon in ChromeIcon.allCases {
+            let image = icon.image(size: ChromeButton.glyph)
+            XCTAssertNotNil(image, "\(icon.stroke.rawValue) did not load")
+            XCTAssertEqual(image?.size, NSSize(width: ChromeButton.glyph, height: ChromeButton.glyph))
+        }
     }
 }

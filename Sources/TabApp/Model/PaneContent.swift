@@ -5,13 +5,13 @@ import TabCore
 /// buttons every card has.
 public struct PaneAction {
     public var id: String
-    public var icon: SystemSymbol
+    public var icon: ChromeIcon
     public var label: String
     /// Draws the icon in the accent color, for a toggle that is on.
     public var isActive: Bool
     public var perform: @MainActor () -> Void
 
-    public init(id: String, icon: SystemSymbol, label: String, isActive: Bool = false, perform: @escaping @MainActor () -> Void) {
+    public init(id: String, icon: ChromeIcon, label: String, isActive: Bool = false, perform: @escaping @MainActor () -> Void) {
         self.id = id
         self.icon = icon
         self.label = label
@@ -110,8 +110,8 @@ public enum PaneKind: Hashable, Sendable, CaseIterable {
         }
     }
 
-    /// The original SF glyph used by the pane header.
-    public var symbol: SystemSymbol {
+    /// The stroke glyph the pane header shows.
+    public var symbol: ChromeIcon {
         switch self {
         case .terminal: return .terminal
         case .agent: return .code
