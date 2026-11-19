@@ -128,6 +128,10 @@ port 7431.
     features or visible changes.
   - If the rebase conflicts there, renumber your section above theirs. Never add
     to an older section.
+- Every push to `main` runs the Release workflow. It tags each new version
+  `vX.Y.Z` at the commit that adds it and publishes a GitHub release with its
+  changelog section. Don't tag versions by hand; TestFlight uploads still go
+  through `scripts/release.sh`, only when asked.
 - Group entries under `### Added`, `### Changed`, `### Fixed` or `### Removed` as
   `- ` items, with wrapped lines indented two spaces and inline Markdown only.
 - Write one sentence per entry for someone using the app. Don't mention file

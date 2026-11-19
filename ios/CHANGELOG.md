@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.28.2 - 2026-11-19
+
+### Changed
+
+- Publish every version as a tagged GitHub release with its changelog notes.
+
 ## 0.28.1 - 2026-11-18
 
 ### Changed
