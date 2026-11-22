@@ -454,26 +454,107 @@ extension AppModel {
         }
     }
 
+    /// Closes a worktree's tab for `tab tab close`, whose user may be at
+    /// another computer and never see a question here. Anything closing
+    /// would lose fails the command, saying what, unless `force` says the
+    /// user agreed. The panes close and the worktree goes after the reply,
+    /// which the caller couldn't hear once its pane closes. Panes in
+    /// `approved` already agreed to close.
+    func closeWorktreeOnRequest(_ project: ProjectId, approved: Set<PaneId>, force: Bool) async throws {
+        guard let target = state.project(project), target.kind == .worktree else {
+            throw ModelError("that tab isn't a worktree's")
+        }
+        guard target.status == .available, sideClient(for: project) != nil else {
+            throw ModelError("the worktree's server or folder is unavailable")
+        }
+        guard pendingWorktreeRemovals.insert(project).inserted else { throw ModelError("the worktree is already closing") }
+        var closing = false
+        defer { if !closing { pendingWorktreeRemovals.remove(project) } }
+        let inspection = try await inspectRemoval(project)
+        let losses = Self.losses(inspection)
+        if !force, !losses.isEmpty {
+            throw ModelError("closing \(target.name) removes the worktree and deletes its folder, and "
+                + losses.joined(separator: "; ")
+                + ". Its branch stays. Ask the user, and with their yes run tab tab close --force")
+        }
+        let panes = target.tabs.flatMap(\.panes).map(\.id)
+        guard await panesWillClose(panes.filter { !approved.contains($0) }) else {
+            throw ModelError("the user kept the tab open")
+        }
+        closing = true
+        Task {
+            defer { pendingWorktreeRemovals.remove(project) }
+            let hooks = (try? inspection.hooks.get()).flatMap { $0.isEmpty ? nil : $0 }
+            guard case .failed(let message) = await performRemoval(project, inspection.removal, hooks: hooks, closing: panes) else {
+                return
+            }
+            report("The worktree stays on disk: \(message)")
+            await commitClose(state.project(project)?.tabs.flatMap(\.panes).map(\.id) ?? [])
+        }
+    }
+
     private enum RemovalOutcome { case removed, cancelled, failed(String) }
+
+    /// What removing a worktree would do: Git's view of it, and its teardown hooks.
+    struct RemovalInspection {
+        var removal: WorktreeRemoval
+        var hooks: Result<[WorktreeHook], ModelError>
+    }
+
+    private func inspectRemoval(_ project: ProjectId) async throws -> RemovalInspection {
+        guard let side = sideClient(for: project) else { throw ModelError("The server is not connected.") }
+        let reply: GitReply
+        do {
+            reply = try await side.git(GitRequest(project: project, action: .inspectRemoval))
+        } catch {
+            throw ModelError(error.message)
+        }
+        guard case .removal(let removal) = reply else { throw ModelError("The server gave an unexpected reply.") }
+        return RemovalInspection(removal: removal, hooks: await worktreeHooks(parent: project, teardown: true))
+    }
+
+    /// What removing a worktree loses beyond what a build makes again, or
+    /// can't be told, each as a clause; empty when nothing is.
+    static func losses(_ inspection: RemovalInspection) -> [String] {
+        let removal = inspection.removal
+        var losses: [String] = []
+        if removal.dirty { losses.append("its uncommitted changes are discarded") }
+        if removal.branch == nil { losses.append("it isn't on a branch, so commits made in it may be lost") }
+        let ignored = removal.ignoredPaths ?? []
+        let lost = ignored.filter { !isRebuildable($0) }
+        if !lost.isEmpty {
+            losses.append("files Git ignores are deleted: " + lost.prefix(5).joined(separator: ", ")
+                + (lost.count > 5 ? " and more" : ""))
+        } else if removal.ignoredPaths == nil || ignored.count >= 50 {
+            // The server lists at most 50 ignored paths, so a full list may hide more.
+            losses.append("files Git ignores may be deleted")
+        }
+        switch inspection.hooks {
+        case .success(let hooks) where !hooks.isEmpty:
+            losses.append("teardown commands run: " + hooks.map(\.command).joined(separator: ", "))
+        case .success:
+            break
+        case .failure(let error):
+            losses.append("its teardown hooks couldn't be loaded (\(error.message)), so none run")
+        }
+        return losses
+    }
 
     /// Removes a worktree after inspecting it. `closing` holds the panes of
     /// a tab being closed, closed just before the files go; nil is Remove
     /// Worktree, which always asks.
     private func removeWorktree(_ project: ProjectId, closing: [PaneId]?, requiresConfirmation: Bool = false) async -> RemovalOutcome {
-        guard let target = state.project(project), target.kind == .worktree, let side = sideClient(for: project) else {
+        guard let target = state.project(project), target.kind == .worktree else {
             return .failed("The server is not connected.")
         }
-        let removal: WorktreeRemoval
+        let inspection: RemovalInspection
         do {
-            guard case .removal(let found) = try await side.git(GitRequest(project: project, action: .inspectRemoval)) else {
-                return .failed("The server gave an unexpected reply.")
-            }
-            removal = found
+            inspection = try await inspectRemoval(project)
         } catch {
             if closing == nil { report(error.message) }
             return .failed(error.message)
         }
-        let hooks = await worktreeHooks(parent: project, teardown: true)
+        let removal = inspection.removal
         let kept = removal.branch.map { " Its branch “\($0)” is kept." } ?? ""
         var message: String
         if closing != nil {
@@ -495,26 +576,33 @@ extension AppModel {
         }
         if removal.branch == nil { message += "\n\nIt isn't on a branch, so commits made in it may be lost." }
         var approved: [WorktreeHook]?
-        // The server lists at most 50 ignored paths, so a full list may hide more.
-        var mustAsk = requiresConfirmation || closing == nil || removal.dirty || removal.branch == nil || removal.ignoredPaths == nil
-            || (removal.ignoredPaths?.count ?? 0) >= 50 || !lost.isEmpty || git[project]?.summary?.base == nil
-        switch hooks {
+        switch inspection.hooks {
         case .success(let list) where !list.isEmpty:
             message += "\n\nTeardown commands that will run:\n" + Self.hookList(list)
             approved = list
-            mustAsk = true
         case .success:
             approved = nil
         case .failure(let error):
             message += "\n\nTeardown hooks could not be loaded: \(error)"
-            mustAsk = true
         }
+        let mustAsk = requiresConfirmation || closing == nil || !Self.losses(inspection).isEmpty
+            || git[project]?.summary?.base == nil
         if mustAsk {
             let confirmed = await presenter?.confirm(
                 title: closing != nil ? "Close Worktree?" : "Remove Worktree and Files?", message: message,
                 confirm: closing != nil ? "Close and Remove" : "Remove", destructive: true
             ) ?? false
             guard confirmed else { return .cancelled }
+        }
+        return await performRemoval(project, removal, hooks: approved, closing: closing)
+    }
+
+    /// Closes `closing`, the worktree's panes, then removes the worktree as
+    /// `removal` found it, running the teardown `hooks`.
+    private func performRemoval(_ project: ProjectId, _ removal: WorktreeRemoval, hooks: [WorktreeHook]?,
+                                closing: [PaneId]?) async -> RemovalOutcome {
+        guard let target = state.project(project), let side = sideClient(for: project) else {
+            return .failed("The server is not connected.")
         }
         worktreeRemovals.insert(project)
         notify(.state)
@@ -530,7 +618,7 @@ extension AppModel {
             }
         }
         let sessions = target.tabs.flatMap(\.panes).compactMap(\.content.session)
-        let intent = WorktreeIntent(action: .remove(expected: removal), options: WorktreeOptions(hooks: approved))
+        let intent = WorktreeIntent(action: .remove(expected: removal), options: WorktreeOptions(hooks: hooks))
         do {
             _ = try await side.git(GitRequest(project: project, action: .worktree(intent)))
             endSessions(sessions, on: target.serverId)

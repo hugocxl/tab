@@ -3,6 +3,14 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.105.1 - 2026-11-22
+
+### Fixed
+
+- An agent asked to close its worktree's tab now closes it, or tells you what closing would
+  lose so you can confirm in the conversation, instead of leaving a question on another
+  computer's screen.
+
 ## 0.105.0 - 2026-11-22
 
 ### Added

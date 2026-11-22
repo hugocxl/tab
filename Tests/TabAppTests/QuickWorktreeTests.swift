@@ -58,10 +58,16 @@ final class QuickWorktreeTests: XCTestCase {
         XCTAssertNotNil(model.state.pane(pane.id))
         XCTAssertEqual(presenter.confirmations.count, 1, "Closing a split must not remove its worktree")
 
-        _ = try await model.control(AppPaneControl(.close, pane: pane.id.description))
-        let askedFromCLI = await ModelFixtures.wait { presenter.confirmations.count == 2 }
-        XCTAssertTrue(askedFromCLI)
+        // The command line may be at another computer than this window, so it
+        // never leaves a question here: its last pane points at tab tab close.
+        do {
+            _ = try await model.control(AppPaneControl(.close, pane: pane.id.description))
+            XCTFail("closed a worktree's last pane from the command line")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("tab tab close"))
+        }
         XCTAssertNotNil(model.state.pane(pane.id))
+        XCTAssertEqual(presenter.confirmations.count, 1)
 
         presenter.confirms = true
         model.closePane(pane.id)
@@ -73,7 +79,64 @@ final class QuickWorktreeTests: XCTestCase {
         }
         XCTAssertTrue(removed)
         XCTAssertNil(model.state.pane(pane.id))
-        XCTAssertEqual(presenter.confirmations.count, 3)
+        XCTAssertEqual(presenter.confirmations.count, 2)
+    }
+
+    /// An agent told to close its worktree's tab, with the user at another
+    /// computer: what would be lost fails the command instead of a question
+    /// nobody sees, and `--force` closes it without asking here.
+    func testCommandClosesWorktreeTabWithoutAQuestionHere() async throws {
+        let parent = ProjectDescriptor(directory: ServerPath(try ModelFixtures.folder("parent")), name: "parent")
+        let worktree = ProjectDescriptor(directory: ServerPath(try ModelFixtures.folder("feature")),
+                                         name: "feature", kind: .worktree, parentId: parent.id)
+        try Data("gitdir: ../parent/.git/worktrees/feature\n".utf8)
+            .write(to: URL(fileURLWithPath: worktree.directory.rawValue + "/.git"))
+        let home = ProjectDescriptor.home(directory: "/tmp")
+        let identity = ServerId()
+        let server = ModelFakeServer(identity: identity, catalog: CatalogPage(
+            server: identity, home: home.id, revision: 1, projects: [home, parent, worktree]
+        ))
+        server.gitReply = { request in
+            switch request.action {
+            case .inspectRemoval:
+                return .removal(WorktreeRemoval(directory: worktree.directory, device: 1, inode: 1, dirty: true,
+                                               branch: "feature", ignoredPaths: []))
+            case .worktreeHooks:
+                return .worktreeHooks([])
+            default:
+                return .summary(GitSummary(branch: "feature", base: nil))
+            }
+        }
+        let model = ModelFixtures.model(try ModelFixtures.profile(), server: server)
+        let presenter = ModelTestPresenter()
+        model.presenter = presenter
+        model.start()
+        defer { model.connection(.local)?.disconnect() }
+        let ready = await ModelFixtures.wait { model.state.project(worktree.id) != nil }
+        XCTAssertTrue(ready)
+        let pane = Pane(content: .browser(BrowserPane(url: "about:blank")))
+        XCTAssertTrue(model.edit { try $0.openPane(worktree.id, pane) })
+        func removed() -> Bool {
+            server.gitRequests.contains {
+                if case .worktree = $0.action { return true }
+                return false
+            }
+        }
+
+        do {
+            _ = try await model.control(AppPaneControl(.closeTab, pane: pane.id.description))
+            XCTFail("closed a worktree with uncommitted changes without --force")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("uncommitted changes"))
+        }
+        XCTAssertNotNil(model.state.pane(pane.id))
+        XCTAssertFalse(removed())
+
+        let forced = try await model.control(AppPaneControl(.closeTab, pane: pane.id.description, force: true))
+        XCTAssertEqual(forced, .bool(true))
+        let gone = await ModelFixtures.wait { removed() && model.state.pane(pane.id) == nil }
+        XCTAssertTrue(gone)
+        XCTAssertEqual(presenter.confirmations, [])
     }
 
     /// The setup line is typed into a shell, so a worktree name or path with
@@ -139,6 +202,25 @@ final class QuickWorktreeTests: XCTestCase {
         XCTAssertFalse(AppModel.isRebuildable("node_modules"))
         XCTAssertFalse(AppModel.isRebuildable("secrets/"))
         XCTAssertFalse(AppModel.isRebuildable("data/"))
+    }
+
+    /// `tab tab close` can't ask the user, so it closes a worktree without
+    /// `--force` only when nothing is lost; anything else stops it.
+    func testCommandCloseStopsAtAnythingLost() {
+        func losses(dirty: Bool = false, branch: String? = "task", ignored: [String]? = [],
+                    hooks: Result<[WorktreeHook], ModelError> = .success([])) -> [String] {
+            let removal = WorktreeRemoval(directory: ServerPath("/w"), device: 1, inode: 1, dirty: dirty,
+                                          branch: branch, ignoredPaths: ignored)
+            return AppModel.losses(AppModel.RemovalInspection(removal: removal, hooks: hooks))
+        }
+        XCTAssertEqual(losses(ignored: [".build/", "node_modules/"]), [])
+        XCTAssertEqual(losses(dirty: true).count, 1)
+        XCTAssertEqual(losses(branch: nil).count, 1)
+        XCTAssertTrue(losses(ignored: [".build/", "vendor/Lib.xcframework/"])[0].contains("vendor/Lib.xcframework/"))
+        XCTAssertEqual(losses(ignored: nil).count, 1)
+        XCTAssertEqual(losses(ignored: Array(repeating: ".build/", count: 50)).count, 1)
+        XCTAssertEqual(losses(hooks: .success([WorktreeHook(command: "make clean", project: true)])).count, 1)
+        XCTAssertEqual(losses(hooks: .failure(ModelError("offline"))).count, 1)
     }
 
     func testOnlyAHashAndAPositiveNumberNameAPullRequest() {

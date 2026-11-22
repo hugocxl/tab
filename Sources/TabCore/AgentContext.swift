@@ -110,7 +110,8 @@ public struct AgentContext: Hashable, Sendable {
         `tab pane close|focus|zoom|move|swap|resize|equalize <pane>`.
         - "close this tab", "close the card": `tab tab close <tab or pane>`, such as `self` for yours. Closing your \
         own pane or tab ends you once the command returns, so finish your reply first; a worktree's tab removes \
-        the worktree.
+        the worktree. If that would lose anything, the command fails and says what: ask the user, and with their \
+        yes add `--force`.
         """
     }
 

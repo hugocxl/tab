@@ -712,9 +712,9 @@ enum CLICommands {
                            words: 0 ... 1, place: .app) { a in
                 .pane(CLIPane(placement: .tab, project: nil, content: .simulator(simulator: a.optional(0))), json: a.json)
             },
-            CLICommandSpec("tab close", ["TAB"], "Close a tab and its panes, as Close Tab does", words: 1 ... 1,
-                           place: .app) { a in
-                .paneControl(AppPaneControl(.closeTab, pane: a.word(0)), json: false)
+            CLICommandSpec("tab close", ["TAB [--force]"], "Close a tab and its panes, as Close Tab does", words: 1 ... 1,
+                           flags: ["--force"], place: .app) { a in
+                .paneControl(AppPaneControl(.closeTab, pane: a.word(0), force: a.flag("--force") ? true : nil), json: false)
             },
         ],
         notes: """
@@ -725,9 +725,11 @@ enum CLICommands {
         TAB is a tab's ID or a unique start of one from tab pane list --all, or
         any PANE in it as tab pane names panes, such as self for the tab you run
         in. Its panes ask the user first as tab pane close does, except your own.
-        Closing a worktree's tab removes the worktree, asking the user when
-        anything would be lost; its branch stays. Closing your own tab happens
-        just after the command returns, ending you.
+        Closing a worktree's tab removes the worktree; its branch stays. When
+        that would lose anything, such as uncommitted changes or files Git
+        ignores, the command fails and says what: ask the user, then run it
+        again with --force. Closing your own tab happens just after the command
+        returns, ending you.
         """)
 
     /// The options that place a new pane.

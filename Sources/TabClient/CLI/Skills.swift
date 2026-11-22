@@ -194,7 +194,9 @@ public enum AgentSkill {
       terminal ends it. Close only panes and tabs you opened unless the user asks.
     - `tab tab close` takes a tab ID from `tab pane list --all --json` or any pane
       in the tab, and closes all its panes. A worktree's card closes by removing
-      the worktree, asking the user when anything would be lost.
+      the worktree. When that would lose anything, such as uncommitted changes
+      or files Git ignores, it fails and says what: ask the user in your reply,
+      and only with their yes run it again with `--force`.
     - Closing your own pane or card (`self`) ends you just after the command
       returns, without asking: do it last, once your reply is written.
     - `move` and `swap` work within one tab.

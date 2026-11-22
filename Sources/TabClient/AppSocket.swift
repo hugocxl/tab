@@ -261,7 +261,9 @@ public struct AppPaneControl: Hashable, Sendable, Codable {
         /// Gives every row and column of the pane's tab equal shares.
         case equalize
         /// Closes a tab as Close Tab does: `pane` names the tab by its ID or by
-        /// one of its panes. A worktree's tab removes the worktree.
+        /// one of its panes. A worktree's tab removes the worktree, which the
+        /// app refuses without `force` when anything would be lost, since the
+        /// user may be at another computer and never see its question.
         case closeTab
     }
 
@@ -279,12 +281,15 @@ public struct AppPaneControl: Hashable, Sendable, Codable {
     public var all: Bool?
     /// `zoom`: false shows the whole tab again.
     public var zoomed: Bool?
+    /// `closeTab`: closes a worktree's tab even when that loses work, which
+    /// the user agreed to where the command came from.
+    public var force: Bool?
     /// The Tab terminal or agent the command runs in.
     public var caller: SessionId?
 
     public init(_ action: Action, pane: String? = nil, other: String? = nil, edge: Direction? = nil,
                 percent: Int? = nil, axis: Axis? = nil, all: Bool? = nil, zoomed: Bool? = nil,
-                caller: SessionId? = nil) {
+                force: Bool? = nil, caller: SessionId? = nil) {
         self.action = action
         self.pane = pane
         self.other = other
@@ -293,6 +298,7 @@ public struct AppPaneControl: Hashable, Sendable, Codable {
         self.axis = axis
         self.all = all
         self.zoomed = zoomed
+        self.force = force
         self.caller = caller
     }
 }

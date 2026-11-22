@@ -22,9 +22,8 @@ extension AppModel {
             presenter?.bringToFront()
         case .close:
             let pane = try selector.resolve(request.pane)
-            if let project = worktreeClosingLastPane(pane) {
-                closeWorktree(project, approved: pane == caller ? [pane] : [], requiresConfirmation: true)
-                return .bool(true)
+            if worktreeClosingLastPane(pane) != nil {
+                throw ModelError("it's the worktree's last pane, and closing it removes the worktree; use tab tab close")
             }
             guard pane != caller else {
                 Task { await commitClose([pane]) }
@@ -39,7 +38,8 @@ extension AppModel {
             let panes = tab.panes.map(\.id)
             let own = caller.map(panes.contains) ?? false
             if project.kind == .worktree {
-                closeWorktree(project.id, approved: caller.map { [$0] } ?? [])
+                try await closeWorktreeOnRequest(project.id, approved: Set([caller].compactMap { $0 }),
+                                                 force: request.force ?? false)
                 return .bool(true)
             }
             guard await panesWillClose(panes.filter { $0 != caller }) else { throw ModelError("the user kept the tab open") }
