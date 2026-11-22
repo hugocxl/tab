@@ -15,12 +15,14 @@ func makeShortTemporaryFolder() throws -> URL {
 final class CoreTestServer {
     let root: URL
     let configuration: ServerConfiguration
+    private let services: ServerServices
     private(set) var server: Server
     private(set) var runner: ServerRunner?
 
     /// - Parameter shell: written to `server.json` before the server starts,
     ///   so tests don't depend on the user's shell configuration.
-    init(root: URL? = nil, shell: String = "/bin/sh", start: Bool = true) throws {
+    /// - Parameter services: such as an agent detector, which tests leave out unless they need it.
+    init(root: URL? = nil, shell: String = "/bin/sh", start: Bool = true, services: ServerServices = ServerServices()) throws {
         let root = try root ?? makeShortTemporaryFolder()
         self.root = root
         let dirs = TabDirs(root: root)
@@ -30,7 +32,9 @@ final class CoreTestServer {
         }
         configuration = ServerConfiguration(dirs: dirs, uploads: root.appendingPathComponent("uploads"),
                                             homeDirectory: root.path)
+        self.services = services
         server = try Server(configuration: configuration)
+        server.install(services)
         if start { runner = try server.start() }
     }
 
@@ -45,6 +49,7 @@ final class CoreTestServer {
     func restart() throws {
         stop()
         server = try Server(configuration: configuration)
+        server.install(services)
         runner = try server.start()
     }
 

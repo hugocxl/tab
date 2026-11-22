@@ -7,7 +7,7 @@ public enum ActivityStatus: String, Codable, Sendable, CaseIterable {
     case working
     /// An agent is waiting for you.
     case blocked
-    /// A program reported an error.
+    /// A program reported an error, or an agent's turn failed.
     case error
     /// A program or agent finished, or a program sent a notification.
     case done
@@ -26,7 +26,7 @@ public enum ActivityStatus: String, Codable, Sendable, CaseIterable {
         switch self {
         case .working: return "Shown when a program is busy or reports progress"
         case .blocked: return "Shown when an agent is waiting for you"
-        case .error: return "Shown when a program reports an error"
+        case .error: return "Shown when a program reports an error or an agent stops with one"
         case .done: return "Shown when a program finishes a task"
         }
     }

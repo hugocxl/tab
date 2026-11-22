@@ -27,6 +27,8 @@ struct ActivityCardData: Equatable {
         case working
         case error
         case paused
+        /// Idle, with shells an agent left running in the background.
+        case background
         case idle
     }
 
@@ -53,17 +55,20 @@ struct ActivityCardData: Equatable {
             case done
             case error
             case paused
+            /// Idle, with shells the agent left running in the background.
+            case background
 
             /// How much the status asks for the user's eye, for the card's
             /// title row to show the most pressing of its panes'.
             var urgency: Int {
                 switch self {
                 case .idle: return 0
-                case .done: return 1
-                case .paused: return 2
-                case .working, .progress: return 3
-                case .error: return 4
-                case .blocked: return 5
+                case .background: return 1
+                case .done: return 2
+                case .paused: return 3
+                case .working, .progress: return 4
+                case .error: return 5
+                case .blocked: return 6
                 }
             }
         }
@@ -209,29 +214,18 @@ struct ActivityCardData: Equatable {
         )
     }
 
+    /// The most pressing of the card's panes' statuses, by the same rules.
     @MainActor
     private static func status(tabs: [Tab], server: ServerId, model: AppModel) -> Status {
-        let panes = tabs.flatMap(\.panes)
-        let sessions = panes.compactMap(\.content.activitySession)
-        guard let connection = model.connections[server] else { return .idle }
-        let notifications = model.settings.notifications
-        let agents = connection.activity.agents.filter { sessions.contains($0.session) }
-        if notifications.showsInTabs(.blocked) && agents.contains(where: { $0.state == .blocked }) { return .attention }
-        for session in sessions {
-            guard let progress = connection.progress[session]?.progress else { continue }
-            switch progress.state {
-            case .error where notifications.showsInTabs(.error): return .error
-            case .error: continue
-            case .paused where notifications.showsInTabs(.working): return .paused
-            case _ where notifications.showsInTabs(.working): return .working
-            default: continue
-            }
+        let rows = tabs.flatMap(\.panes).map { paneStatus($0, server: server, model: model) }
+        switch rows.max(by: { $0.urgency < $1.urgency }) ?? .idle {
+        case .blocked, .done: return .attention
+        case .error: return .error
+        case .working, .progress: return .working
+        case .paused: return .paused
+        case .background: return .background
+        case .idle: return .idle
         }
-        if connection.activity.events.contains(where: {
-            !$0.read && sessions.contains($0.session) && model.reports($0) && notifications.showsInTabs($0.kind.status)
-        }) { return .attention }
-        if notifications.showsInTabs(.working) && agents.contains(where: { $0.state == .working }) { return .working }
-        return .idle
     }
 
     /// An agent chat's provider: the composer's choice, as the pane's header
@@ -302,8 +296,8 @@ struct ActivityCardData: Equatable {
                 topic = title.isEmpty ? nil : .command(text)
             }
         }
-        let status = paneStatus(session: session, agent: agent, connection: connection, model: model)
-        let since = status == .working || status == .blocked ? agent?.workingSince.map { Date(timeIntervalSince1970: TimeInterval($0) / 1000) } : nil
+        let status = paneStatus(pane, server: server, model: model)
+        let since = status == .working || status == .blocked || status == .paused ? agent?.workingSince.map { Date(timeIntervalSince1970: TimeInterval($0) / 1000) } : nil
         return PaneRow(id: pane.id, icon: icon, title: text, detail: detail, status: status, workingSince: since, active: active, topic: topic)
     }
 
@@ -314,7 +308,7 @@ struct ActivityCardData: Equatable {
     static func title(rows: [PaneRow], customTitle: String?, branch: String?) -> String {
         if let customTitle = customTitle?.trimmingCharacters(in: .whitespaces), !customTitle.isEmpty { return customTitle }
         let agents = rows.filter { if case .task = $0.topic { return true } else { return false } }
-        let lead = agents.first { $0.status == .blocked } ?? agents.first { $0.status == .working } ?? agents.first
+        let lead = agents.first { $0.status == .blocked || $0.status == .error } ?? agents.first { $0.status == .working } ?? agents.first
         if let lead = lead?.topic { return lead.text }
         if let branch { return branch }
         let topics = rows.compactMap(\.topic)
@@ -361,13 +355,21 @@ struct ActivityCardData: Equatable {
         return text.prefix(1).uppercased() + text.dropFirst()
     }
 
-    /// What one pane is doing, by the same rules and Notifications settings
-    /// as the card's status.
+    /// What one pane is doing, by Notifications settings: a failed turn is
+    /// an error rather than a wait for you, a message on its way already
+    /// counts as work, and a usage limit or a paused queue holds an agent up.
     @MainActor
-    private static func paneStatus(session: SessionId?, agent: AgentActivity?, connection: ServerConnection?, model: AppModel) -> PaneRow.Status {
-        guard let session, let connection else { return .idle }
+    static func paneStatus(_ pane: Pane, server: ServerId, model: AppModel) -> PaneRow.Status {
+        guard let session = pane.content.activitySession, let connection = model.connections[server] else { return .idle }
         let notifications = model.settings.notifications
-        if agent?.state == .blocked && notifications.showsInTabs(.blocked) { return .blocked }
+        let agent = connection.agent(session)
+        let sending = (model.panes.controller(for: pane.id) as? AgentPaneController)?.submitting == true
+        if sending && notifications.showsInTabs(.working) { return .working }
+        if agent?.condition == .failed {
+            if notifications.showsInTabs(.error) { return .error }
+        } else if agent?.state == .blocked && notifications.showsInTabs(.blocked) {
+            return .blocked
+        }
         if let progress = connection.progress[session]?.progress {
             switch progress.state {
             case .error where notifications.showsInTabs(.error): return .error
@@ -377,12 +379,21 @@ struct ActivityCardData: Equatable {
             default: break
             }
         }
-        if agent?.state == .working && notifications.showsInTabs(.working) { return .working }
+        if notifications.showsInTabs(.working) {
+            if agent?.condition == .paused { return .paused }
+            if agent?.state == .working { return .working }
+        }
         let event = connection.activity.events.first {
             !$0.read && $0.session == session && model.reports($0) && notifications.showsInTabs($0.kind.status)
         }
-        guard let event else { return .idle }
-        return event.kind == .attention ? .blocked : .done
+        switch event?.kind {
+        case .attention?: return .blocked
+        case .failed?: return .error
+        case .some: return .done
+        case nil: break
+        }
+        if agent?.condition == .background && notifications.showsInTabs(.working) { return .background }
+        return .idle
     }
 
     /// How long a turn has run: `43s` under a minute, `3m` under an hour,

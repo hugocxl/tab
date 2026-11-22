@@ -3,9 +3,16 @@ import TabCore
 import TabProtocol
 
 extension EventKind {
-    /// The status an event reports: an agent waiting for you is blocked;
-    /// a finished turn or a program's own notification is done.
-    var status: ActivityStatus { self == .attention ? .blocked : .done }
+    /// The status an event reports: an agent waiting for you is blocked, a
+    /// failed turn an error, and a finished turn or a program's own
+    /// notification done.
+    var status: ActivityStatus {
+        switch self {
+        case .attention: .blocked
+        case .failed: .error
+        case .completed, .notification, .unknown: .done
+        }
+    }
 }
 
 extension AppModel {
@@ -55,12 +62,14 @@ extension AppModel {
             let referenced = Set(state.projects.filter { $0.serverId == server }.flatMap(\.tabs).flatMap(\.panes)
                 .compactMap(\.content.activitySession))
             for session in referenced {
-                let agent = connection.activity.agents.first { $0.session == session }?.state
+                let activity = connection.activity.agents.first { $0.session == session }
+                let agent = activity?.state
+                let failed = activity?.condition == .failed
                 let progress = connection.progress[session]?.progress?.state
                 let unread = connection.activity.events.filter { !$0.read && $0.session == session && reports($0) }
                 if unread.contains(where: { notifications.badges($0.kind.status) })
-                    || agent == .blocked && notifications.badges(.blocked)
-                    || progress == .error && notifications.badges(.error)
+                    || agent == .blocked && !failed && notifications.badges(.blocked)
+                    || (progress == .error || failed) && notifications.badges(.error)
                     || (agent == .working || progress == .running || progress == .indeterminate) && notifications.badges(.working) {
                     count += 1
                 }

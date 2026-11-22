@@ -20,6 +20,8 @@ final class SessionOwner: @unchecked Sendable {
     /// How long a hook's report outranks the screen when the two disagree,
     /// since agents run no hook when you interrupt them.
     static let reportedAgentTrust: TimeInterval = 30
+    /// How long a turn's reported end waits for the screen to show background work.
+    static let backgroundCheckDelay: TimeInterval = 1
     static let notificationInterval: TimeInterval = 1
 
     let info: SessionInfo
@@ -462,10 +464,28 @@ final class SessionOwner: @unchecked Sendable {
             }
             let previous = reportedAgent?.provider == provider ? reportedAgent?.state
                 : tracker.provider == provider ? tracker.state : nil
-            reportedAgent = (provider, state, now)
+            let at = now
+            reportedAgent = (provider, state, at)
+            if previous == .working, state == .idle, agent == provider {
+                // An agent ends its turn while agents it started run on in the background,
+                // which its screen shows a moment later; detection then keeps it working.
+                queue.asyncAfter(deadline: .now() + Self.backgroundCheckDelay) { [weak self] in
+                    self?.finishReportedTurn(provider, at: at)
+                }
+                return
+            }
             activity.update(AgentActivity(session: info.id, project: info.project, provider: provider, state: state),
                             completed: previous == .working && state == .idle)
         }
+    }
+
+    /// The agent reported its turn finished and its screen shows no background work
+    /// since, so it finished.
+    private func finishReportedTurn(_ provider: AgentProvider, at: TimeInterval) {
+        guard !finishing, let reported = reportedAgent, reported.provider == provider, reported.at == at,
+              reported.state == .idle else { return }
+        activity.update(AgentActivity(session: info.id, project: info.project, provider: provider, state: .idle),
+                        completed: true)
     }
 
     /// A program asked for a desktop notification. Agents already notify

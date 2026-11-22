@@ -100,7 +100,12 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     private(set) var created = false
     private(set) var disposed = false
     private var selectionEdited = false
-    private(set) var submitting = false
+    /// A message is on its way to the server, so the sidebar shows the pane working
+    /// before the server says so.
+    private(set) var submitting = false {
+        didSet { if submitting != oldValue { onSubmittingChange?() } }
+    }
+    var onSubmittingChange: (() -> Void)?
     private var stopRequested = false
     private(set) var selection: AgentModelSelection {
         didSet { if selection.provider != oldValue.provider { onProviderChange?() } }
@@ -186,6 +191,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         }
         configureDraftStore(model.dirs.root.appendingPathComponent("agent-drafts/" + pane.description + ".json"))
         onProviderChange = { [weak model] in model?.notify(.activity) }
+        onSubmittingChange = { [weak model] in model?.notify(.activity) }
         restorePreferences(defaults: model.state.agentComposerDefaults, draft: model.state.agentComposerDrafts[pane]) { [weak model] preferences in
             model?.edit { $0.setAgentComposerDraft(preferences, for: pane) }
         }

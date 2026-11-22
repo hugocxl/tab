@@ -3,6 +3,27 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.105.0 - 2026-11-22
+
+### Added
+
+- An agent that hit its usage limit or has paused queued messages shows a pause icon in
+  the sidebar and its pane header.
+- An agent whose shells still run in the background, such as a dev server, shows a dim
+  spinner once its turn ends.
+
+### Changed
+
+- An agent whose turn failed shows an error mark and sends an error notification,
+  rather than looking like it waits for your answer.
+- An agent pane shows as working as soon as you send a message.
+
+### Fixed
+
+- Agents keep showing as working in the sidebar while agents they started run in the
+  background, and say they finished only once, after answering them.
+- Stopping an agent no longer reports it as finished.
+
 ## 0.104.0 - 2026-11-19
 
 ### Changed
