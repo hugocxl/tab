@@ -132,6 +132,7 @@ final class PluginSystemTests: XCTestCase {
             "CFBundleIdentifier": "com.hugocorta.tab.plugin.explorer",
             "NSPrincipalClass": "TabExplorerPluginFactory",
             "TabPluginId": "explorer",
+            "TabPluginVersion": Release.version,
         ]
         let plistData = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
         try plistData.write(to: fakeBundle.appendingPathComponent("Contents/Info.plist"))
@@ -145,5 +146,135 @@ final class PluginSystemTests: XCTestCase {
 
         try installer.remove(.explorer)
         XCTAssertFalse(installer.isBundlePresent(.explorer))
+    }
+
+    func testInstallerRejectsMismatchedPluginVersion() async throws {
+        let dirs = try ModelFixtures.profile()
+        addTeardownBlock { try? FileManager.default.removeItem(at: dirs.root) }
+
+        let sourceDir = dirs.root.appendingPathComponent("source-plugins", isDirectory: true)
+        try writeFakeBundle(id: "explorer", executable: "TabExplorerPlugin", principal: "TabExplorerPluginFactory",
+                            version: "0.122.0", into: sourceDir)
+
+        let staleInstaller = PluginInstaller(dirs: dirs, version: "0.129.0", isDebugBuild: true, localSearchDirectories: [sourceDir])
+        do {
+            _ = try await staleInstaller.install(PluginCatalog.explorer)
+            XCTFail("Expected version mismatch error")
+        } catch let error as PluginError {
+            guard case .invalidBundle(let message) = error else {
+                return XCTFail("Expected invalidBundle, got \(error)")
+            }
+            XCTAssertTrue(message.contains("0.122.0"))
+            XCTAssertTrue(message.contains("0.129.0"))
+        }
+
+        // Installing under the matching version succeeds, and becomes incompatible once Tab updates.
+        let matchingInstaller = PluginInstaller(dirs: dirs, version: "0.122.0", isDebugBuild: true, localSearchDirectories: [sourceDir])
+        _ = try await matchingInstaller.install(PluginCatalog.explorer)
+        XCTAssertTrue(matchingInstaller.isBundleCompatible(.explorer))
+        XCTAssertEqual(matchingInstaller.installedBundleVersion(.explorer), "0.122.0")
+        XCTAssertFalse(staleInstaller.isBundleCompatible(.explorer))
+    }
+
+    func testLoadInstalledRefusesStaleBundleVersion() async throws {
+        let dirs = try ModelFixtures.profile()
+        addTeardownBlock { try? FileManager.default.removeItem(at: dirs.root) }
+
+        var settings = Settings()
+        settings.plugins.markInstalled(.explorer)
+        try settings.savePlugins(to: dirs.settings)
+
+        // Place an outdated 0.122.0 bundle on disk in TAB_DIR/Plugins/.
+        try writeFakeBundle(id: "explorer", executable: "TabExplorerPlugin", principal: "TabExplorerPluginFactory",
+                            version: "0.122.0", into: dirs.plugins)
+
+        let model = AppModel(dirs: dirs, theme: AppTheme(systemIsDark: true)) { _, _ in nil }
+        model.plugins.installer = PluginInstaller(
+            dirs: dirs,
+            version: "0.129.0",
+            isDebugBuild: false,
+            localSearchDirectories: [],
+            download: { _ in throw PluginError.downloadFailed("offline") }
+        )
+
+        model.plugins.loadInstalled()
+        XCTAssertFalse(model.plugins.isActive(.explorer))
+        await settle {
+            if case .failed = model.plugins.state(of: .explorer) { return true }
+            return false
+        }
+        XCTAssertFalse(model.plugins.isActive(.explorer))
+    }
+
+    func testChromeButtonDrawsSignatureIconsMonochrome() throws {
+        // Icons like .git (vermilion) and .folder (gray) carry signature hues for file trees
+        // and brand marks, but ChromeButton must always tint them with the chrome foreground.
+        let theme = AppTheme.shared
+        let expected = theme.fgMuted.usingColorSpace(.sRGB)!
+        for icon in [AppIcon.folder, .file, .git, .gitBranch, .gitGraph, .chartLine] {
+            let button = ChromeButton(icon, label: icon.rawValue)
+            let image = try XCTUnwrap(button.image)
+            let color = try XCTUnwrap(dominantOpaqueColor(of: image))
+            XCTAssertEqual(color.redComponent, expected.redComponent, accuracy: 0.05, "\(icon) red mismatch")
+            XCTAssertEqual(color.greenComponent, expected.greenComponent, accuracy: 0.05, "\(icon) green mismatch")
+            XCTAssertEqual(color.blueComponent, expected.blueComponent, accuracy: 0.05, "\(icon) blue mismatch")
+        }
+    }
+
+    private func writeFakeBundle(
+        id: String,
+        executable: String,
+        principal: String,
+        version: String,
+        into directory: URL
+    ) throws {
+        let bundle = directory.appendingPathComponent("\(id).bundle", isDirectory: true)
+        let macOSDir = bundle.appendingPathComponent("Contents/MacOS", isDirectory: true)
+        try FileManager.default.createDirectory(at: macOSDir, withIntermediateDirectories: true)
+        let exec = macOSDir.appendingPathComponent(executable)
+        try Data("#!/bin/sh\n".utf8).write(to: exec)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: exec.path)
+        let plist: [String: Any] = [
+            "CFBundleExecutable": executable,
+            "CFBundleIdentifier": "com.hugocorta.tab.plugin.\(id)",
+            "NSPrincipalClass": principal,
+            "TabPluginId": id,
+            "TabPluginVersion": version,
+        ]
+        let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+        try data.write(to: bundle.appendingPathComponent("Contents/Info.plist"))
+    }
+
+    private func dominantOpaqueColor(of image: NSImage) -> NSColor? {
+        let size = NSSize(width: 34, height: 34)
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: Int(size.width),
+            pixelsHigh: Int(size.height),
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .calibratedRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else { return nil }
+        rep.size = size
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        image.draw(in: NSRect(origin: .zero, size: size))
+        NSGraphicsContext.restoreGraphicsState()
+        var best: NSColor?
+        for y in 0..<rep.pixelsHigh {
+            for x in 0..<rep.pixelsWide {
+                guard let pixel = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB), pixel.alphaComponent > 0.1 else {
+                    continue
+                }
+                if best == nil || pixel.alphaComponent > best!.alphaComponent {
+                    best = pixel
+                }
+            }
+        }
+        return best
     }
 }

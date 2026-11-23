@@ -102,7 +102,7 @@ public class CircleButton: NSButton {
         @MainActor
         func image(size: CGFloat) -> NSImage? {
             switch self {
-            case .icon(let icon): return icon.image(size: size, theme: .shared)
+            case .icon(let icon): return icon.image(size: size)
             case .chrome(let icon): return icon.image(size: size)
             }
         }
@@ -110,7 +110,7 @@ public class CircleButton: NSButton {
         @MainActor
         func image(size: CGFloat, color: NSColor) -> NSImage? {
             switch self {
-            case .icon(let icon): return icon.image(size: size, theme: .shared, tint: color)
+            case .icon(let icon): return icon.image(size: size, color: color)
             case .chrome: return image(size: size)?.tinted(color)
             }
         }

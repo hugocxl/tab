@@ -52,9 +52,9 @@ public final class FilesPanelController: NSViewController, NSTableViewDataSource
         view = card
         footer.title = shownProject?.name ?? "Files"
         let buttons: [(AppIcon, String, () -> Void)] = [
-            (.file, "New File", { [weak self] in self?.beginNewItem(folder: false) }),
-            (.folder, "New Folder", { [weak self] in self?.beginNewItem(folder: true) }),
-            (.chevronUp, "Collapse All", { [weak self] in self?.collapseAll() }),
+            (.filePlus, "New File", { [weak self] in self?.beginNewItem(folder: false) }),
+            (.folderPlus, "New Folder", { [weak self] in self?.beginNewItem(folder: true) }),
+            (.foldVertical, "Collapse All", { [weak self] in self?.collapseAll() }),
             (.refresh, "Refresh", { [weak self] in self?.refreshAll() }),
         ]
         for (icon, label, action) in buttons {

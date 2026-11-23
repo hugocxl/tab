@@ -31,6 +31,31 @@ public struct PluginInstaller: Sendable {
         FileManager.default.fileExists(atPath: dirs.pluginBundle(id).path)
     }
 
+    /// The `TabPluginVersion` recorded in an installed bundle's `Info.plist`, if any.
+    public func installedBundleVersion(_ id: PluginId) -> String? {
+        bundleVersion(at: dirs.pluginBundle(id))
+    }
+
+    /// Whether the installed bundle for `id` was built for this exact Tab version
+    /// (and, in debug builds, is at least as fresh as any local build output).
+    /// Plugin bundles dynamically link against `TabDesktop`'s Swift ABI without
+    /// library evolution, so a bundle from another build must be refreshed before loading.
+    public func isBundleCompatible(_ id: PluginId) -> Bool {
+        guard isBundlePresent(id) else { return false }
+        if version != Release.sourceVersion, installedBundleVersion(id) != version {
+            return false
+        }
+        if isDebugBuild,
+           let descriptor = PluginCatalog.descriptor(for: id),
+           let local = findLocalBundle(for: descriptor),
+           let localDate = executableModificationDate(of: local),
+           let installedDate = executableModificationDate(of: dirs.pluginBundle(id)),
+           localDate > installedDate {
+            return false
+        }
+        return true
+    }
+
     /// Installs `descriptor`'s `.bundle` into `dirs.pluginBundle(descriptor.id)`.
     /// In debug builds (or when `TAB_PLUGINS_SOURCE_DIR` is set), checks local
     /// plugin build folders first; otherwise downloads from GitHub Releases.
@@ -49,7 +74,7 @@ public struct PluginInstaller: Sendable {
             return destination
         }
 
-        if isDebugBuild && version == "0.0.0-dev" {
+        if isDebugBuild && version == Release.sourceVersion {
             throw PluginError.bundleNotFound(
                 "Plugin “\(descriptor.name)” wasn't found locally. Run scripts/build-plugins.sh debug first."
             )
@@ -153,6 +178,33 @@ public struct PluginInstaller: Sendable {
         if let declaredId = plist["TabPluginId"] as? String, declaredId != descriptor.id.rawValue {
             throw PluginError.invalidBundle("Expected plugin “\(descriptor.id.rawValue)”, found “\(declaredId)”.")
         }
+        if version != Release.sourceVersion {
+            let bundleVersion = plist["TabPluginVersion"] as? String
+            guard bundleVersion == version else {
+                throw PluginError.invalidBundle(
+                    "Plugin “\(descriptor.name)” (\(bundleVersion ?? "unknown")) does not match Tab \(version)."
+                )
+            }
+        }
+    }
+
+    private func bundleVersion(at url: URL) -> String? {
+        let plistURL = url.appendingPathComponent("Contents/Info.plist")
+        guard let data = try? Data(contentsOf: plistURL),
+              let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+        else { return nil }
+        return plist["TabPluginVersion"] as? String
+    }
+
+    private func executableModificationDate(of bundleURL: URL) -> Date? {
+        let plistURL = bundleURL.appendingPathComponent("Contents/Info.plist")
+        guard let data = try? Data(contentsOf: plistURL),
+              let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+              let executable = plist["CFBundleExecutable"] as? String,
+              !executable.isEmpty
+        else { return nil }
+        let binary = bundleURL.appendingPathComponent("Contents/MacOS/\(executable)")
+        return (try? FileManager.default.attributesOfItem(atPath: binary.path))?[.modificationDate] as? Date
     }
 
     private func verifyCodeSignature(_ bundleURL: URL) throws {

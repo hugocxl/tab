@@ -3,6 +3,16 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.130.0 - 2026-11-23
+
+### Changed
+
+- The Explorer's New File, New Folder and Collapse All buttons use clearer icons.
+
+### Fixed
+
+- Plugins installed for an older version of Tab are refreshed after an update instead of loading a mismatched build.
+
 ## 0.129.0 - 2026-11-23
 
 ### Changed

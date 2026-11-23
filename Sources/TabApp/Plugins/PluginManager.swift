@@ -83,7 +83,9 @@ public final class PluginManager {
     // MARK: Startup
 
     /// Loads and activates every plugin listed in `settings.plugins.installed`
-    /// whose `.bundle` is present in `TAB_DIR/Plugins/`.
+    /// whose `.bundle` is present in `TAB_DIR/Plugins/`. Bundles built for a
+    /// different Tab version are refreshed before loading so stale Swift ABI
+    /// binaries are never loaded into `TabDesktop`.
     public func loadInstalled() {
         for id in model.settings.plugins.installed {
             guard activePlugins[id] == nil else { continue }
@@ -92,12 +94,43 @@ public final class PluginManager {
                 states[id] = .notInstalled
                 continue
             }
+            guard installer.isBundleCompatible(id) else {
+                let found = installer.installedBundleVersion(id) ?? "unknown"
+                let expected = installer.version
+                Log.app.info("Refreshing plugin \(id.rawValue) (\(found) → \(expected))")
+                states[id] = .installing
+                Task { [weak self] in
+                    await self?.updateInstalledPlugin(id)
+                }
+                continue
+            }
             do {
                 try loadAndActivateBundle(for: id)
             } catch {
                 Log.app.error("Failed to load plugin \(id.rawValue): \(error)")
                 states[id] = .failed(error.localizedDescription)
             }
+        }
+    }
+
+    private func updateInstalledPlugin(_ id: PluginId) async {
+        guard activePlugins[id] == nil else { return }
+        guard let descriptor = PluginCatalog.descriptor(for: id) else {
+            states[id] = .failed(PluginError.unknownPlugin(id).localizedDescription)
+            model.notify(.settings)
+            return
+        }
+        do {
+            _ = try await installer.install(descriptor)
+            try loadAndActivateBundle(for: id)
+            states[id] = .installed
+            model.notify(.panel)
+            model.notify(.settings)
+            model.notify(.state)
+        } catch {
+            Log.app.error("Failed to refresh plugin \(id.rawValue): \(error)")
+            states[id] = .failed(error.localizedDescription)
+            model.notify(.settings)
         }
     }
 
@@ -215,6 +248,12 @@ public final class PluginManager {
         if let cached = loadedFactories[id] {
             factoryType = cached
         } else {
+            guard installer.isBundleCompatible(id) else {
+                let found = installer.installedBundleVersion(id) ?? "unknown"
+                throw PluginError.invalidBundle(
+                    "Plugin “\(id.rawValue)” (\(found)) does not match Tab \(installer.version)."
+                )
+            }
             let bundleURL = model.dirs.pluginBundle(id)
             guard let bundle = Bundle(url: bundleURL) else {
                 throw PluginError.invalidBundle("Could not open bundle at \(bundleURL.path).")
