@@ -14,6 +14,8 @@ final class SettingsModel: ObservableObject {
         var subpage: SettingsSubpage?
         /// The coding agent an `agentProvider` page shows.
         var provider: String?
+        /// The plugin a `pluginConfig` page shows.
+        var pluginId: PluginId?
     }
 
     let store: SettingsStore
@@ -21,6 +23,8 @@ final class SettingsModel: ObservableObject {
     private(set) var subpage: SettingsSubpage?
     /// The coding agent the open provider page shows.
     private(set) var provider: String?
+    /// The plugin the open plugin config page shows.
+    private(set) var pluginId: PluginId?
     private(set) var query = ""
     private(set) var backStack: [Location] = []
     private(set) var forwardStack: [Location] = []
@@ -62,9 +66,12 @@ final class SettingsModel: ObservableObject {
     var title: String {
         if isSearching { return "Search" }
         if subpage == .agentProvider { return shownProvider.title }
+        if subpage == .pluginConfig, let pluginId {
+            return PluginCatalog.descriptor(for: pluginId)?.name ?? pluginId.rawValue
+        }
         return subpage?.title ?? category.title
     }
-    private var location: Location { Location(category: category, subpage: subpage, provider: provider) }
+    private var location: Location { Location(category: category, subpage: subpage, provider: provider, pluginId: pluginId) }
 
     /// The provider the open provider page shows, or the first while none is chosen.
     var shownProvider: AgentProviderConfig {
@@ -93,6 +100,11 @@ final class SettingsModel: ObservableObject {
         go(to: Location(category: .agents, subpage: .agentProvider, provider: id))
     }
 
+    /// Opens an installed plugin's configuration page.
+    func openPlugin(_ id: PluginId) {
+        go(to: Location(category: .plugins, subpage: .pluginConfig, pluginId: id))
+    }
+
     private func go(to next: Location) {
         if next != location {
             backStack.append(location)
@@ -117,6 +129,7 @@ final class SettingsModel: ObservableObject {
         category = location.category
         subpage = location.subpage
         provider = location.provider
+        pluginId = location.pluginId
         query = ""
         if category == .server || category == .terminal { store.loadServerSettings() }
         if category == .mobile { store.loadRemoteAccess() }

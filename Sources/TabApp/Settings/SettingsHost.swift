@@ -1,4 +1,5 @@
 import Foundation
+import struct SwiftUI.AnyView
 import TabClient
 import TabCore
 import TabProtocol
@@ -139,6 +140,10 @@ public protocol SettingsHost: AnyObject {
     func installPlugin(_ id: PluginId) async throws
     /// Deactivates and removes `id` from disk.
     func uninstallPlugin(_ id: PluginId) throws
+    /// Whether `id` is active and provides a Settings configuration page.
+    func hasPluginSettings(_ id: PluginId) -> Bool
+    /// Builds `id`'s Settings configuration view, if registered.
+    func pluginSettingsView(for id: PluginId, store: SettingsStore) -> AnyView?
 
     // MARK: Backup
 
@@ -158,6 +163,8 @@ public extension SettingsHost {
     func pluginState(_ id: PluginId) -> PluginInstallState { .notInstalled }
     func installPlugin(_ id: PluginId) async throws {}
     func uninstallPlugin(_ id: PluginId) throws {}
+    func hasPluginSettings(_ id: PluginId) -> Bool { false }
+    func pluginSettingsView(for id: PluginId, store: SettingsStore) -> AnyView? { nil }
 }
 
 /// A host with no app behind it: a running server with default settings,
@@ -254,6 +261,7 @@ public final class PreviewSettingsHost: SettingsHost {
     public func openAgent(prompt: String) throws { agentPrompts.append(prompt) }
 
     public var installedPlugins: Set<PluginId> = []
+    public var pluginSettingsViews: [PluginId: @MainActor (SettingsStore) -> AnyView] = [:]
     public func pluginState(_ id: PluginId) -> PluginInstallState {
         installedPlugins.contains(id) ? .installed : .notInstalled
     }
@@ -262,6 +270,13 @@ public final class PreviewSettingsHost: SettingsHost {
     }
     public func uninstallPlugin(_ id: PluginId) throws {
         installedPlugins.remove(id)
+    }
+    public func hasPluginSettings(_ id: PluginId) -> Bool {
+        installedPlugins.contains(id) && pluginSettingsViews[id] != nil
+    }
+    public func pluginSettingsView(for id: PluginId, store: SettingsStore) -> AnyView? {
+        guard installedPlugins.contains(id) else { return nil }
+        return pluginSettingsViews[id]?(store)
     }
 
     public func backupState() throws -> Data {

@@ -58,6 +58,10 @@ env -u TAB_DIR "$APP/Contents/MacOS/tab" server stop --force --yes
   - `TabExplorerPlugin`, `TabDiffPlugin` (TabApp, TabCore, TabProtocol): optional
     lazy-loaded right-sidebar plugins built as `.bundle`s by
     `scripts/build-plugins.sh` and never linked into `TabDesktop`.
+  - `TabQuickShotPlugin` (TabApp, TabCore): the optional QuickShot screenshot
+    plugin, built and loaded the same way. Plugins that need settings register
+    a configuration page with `PluginContext.registerSettingsView` and keep
+    their values in `settings.plugins.config`.
   - Keep `Package.swift` and this list in sync.
 - Each server keeps its projects' tabs and their split layouts in
   `sessions/tabs.json`, so every app connected to it shows the same tabs. Apps
