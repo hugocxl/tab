@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.113.2 - 2026-11-23
+
+### Fixed
+
+- New versions are released again after a change to the website's build stopped them at 0.107.0.
+
 ## 0.113.1 - 2026-11-23
 
 ### Fixed
@@ -16,6 +22,7 @@ Changelog.
 
 - Tool calls in agent conversations say what they did in plain words, such as Run, Search web,
   Fetch, Find files and Load tools, instead of the tool's internal name.
+
 ## 0.112.0 - 2026-11-23
 
 ### Changed

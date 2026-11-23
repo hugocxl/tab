@@ -136,7 +136,14 @@ jobs:
           set -euo pipefail
           TAG="$RELEASE_TAG"
           if [ "$RELEASE_CHANNEL" = stable ]; then
-            git push origin --tags
+            git push origin "refs/tags/$TAG"
+            # GITHUB_TOKEN can't push a tag whose workflow files differ from
+            # main's, so an older version's tag may be refused; it still
+            # ships in this release.
+            REMOTE_TAGS="$(git ls-remote --tags --refs origin | sed 's#.*refs/tags/##' | sort)"
+            for OLDER in $(comm -23 <(git tag --list | sort) <(printf '%s\n' "$REMOTE_TAGS")); do
+              git push origin "refs/tags/$OLDER" || echo "::warning::GitHub refused tag $OLDER; push it with a token that may change workflows"
+            done
           fi
           # The changelog since the latest release, so a push of several
           # commits lists them all.
