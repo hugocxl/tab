@@ -246,6 +246,20 @@ final class SidebarListingTests: XCTestCase {
         XCTAssertNil(ActivityCardData.chatTopic("hi"))
     }
 
+    func testSubtasksListAFewThenCountTheRest() {
+        func pane(_ count: Int) -> ActivityCardData.PaneRow {
+            var row = ActivityCardData.PaneRow(id: PaneId(), icon: .agent(.claude), title: "Agent", detail: nil,
+                                               status: .working, workingSince: nil, active: true, topic: nil)
+            row.subtasks = (0..<count).map { .init(id: "\($0)", title: "Task \($0)", shell: false, since: nil) }
+            return row
+        }
+        XCTAssertEqual(SubtaskRowView.rows(for: pane(4)).count, 4, "a count row only when it saves a line")
+        let rows = SubtaskRowView.rows(for: pane(6))
+        XCTAssertEqual(rows.count, SubtaskRowView.maxShown + 1)
+        XCTAssertEqual(rows.last?.toolTip, "3 more running")
+        XCTAssertNil(rows.last?.since)
+    }
+
     func testCardTitleFollowsTheLeadAgentWhicheverPaneIsFocused() {
         func row(_ topic: ActivityCardData.PaneRow.Topic?, _ status: ActivityCardData.PaneRow.Status = .idle,
                  active: Bool = false) -> ActivityCardData.PaneRow {

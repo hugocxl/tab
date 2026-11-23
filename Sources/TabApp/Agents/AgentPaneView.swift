@@ -11,7 +11,8 @@ final class AgentPaneView: ThemedView {
     let composer = AgentComposerTextView()
     let promptQueue = AgentQueueView(frame: .zero)
     let subagents = AgentSubagentsView(frame: .zero)
-    let taskProgressButton = PillButton("", style: .plain)
+    /// The agent's task list: how much is done and the step it is on; pressing it shows the list.
+    let taskProgressLine = AgentPanelLine(accessibilityLabel: "Task progress")
     private var taskProgress = AgentTaskProgress()
     let panelScroll = NSScrollView()
     private let panelDocument = AgentPanelDocument()
@@ -89,9 +90,9 @@ final class AgentPaneView: ThemedView {
     private let notice = AgentSurfaceCard(style: .agentPanel)
     private let emptyTitle = makeLabel("What can I help with?", font: AppFont.system(21, weight: .medium))
     private let emptyDetail = makeLabel("Ask a question or make something new.", font: AppFont.body)
-    private let activity = AgentSurfaceCard(style: .agentActivity)
+    /// What the agent waits for; pressing it scrolls to the request.
+    private let activity = AgentPanelLine(accessibilityLabel: "Agent activity")
     private var busy = false
-    private let activityLabel = makeLabel("", font: AppFont.body)
     private var activityStatus: AgentChatStatus = .idle
     private var submitting = false
     private var renderedItems: [AgentChatItem] = []
@@ -222,13 +223,7 @@ final class AgentPaneView: ThemedView {
         sendNow.isHidden = true
         model.toolTip = "Choose the provider and model for the next message"
         effort.toolTip = "Choose the reasoning effort for the next message"
-        activityLabel.setAccessibilityLabel("Agent activity")
-        activity.addSubview(activityLabel)
-        activityLabel.translatesAutoresizingMaskIntoConstraints = true
-        activity.isHidden = true
-        activity.toolTip = "Show what the agent is waiting for"
-        activity.setAccessibilityRole(.button)
-        activity.addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(activityPressed)))
+        activity.onPress = { [weak self] in self?.revealPendingRequest() }
         NotificationCenter.default.addObserver(self, selector: #selector(textScaleDidChange), name: .agentTextScaleDidChange, object: nil)
         feedback.font = AppFont.body
         feedback.isSelectable = true
@@ -236,7 +231,7 @@ final class AgentPaneView: ThemedView {
         feedback.maximumNumberOfLines = Self.noticeMaximumLines
         feedback.lineBreakMode = .byWordWrapping
         feedback.cell?.truncatesLastVisibleLine = true
-        noticeIcon.glyphSize = 15
+        noticeIcon.glyphSize = AgentPanelMetrics.glyphSize
         for child in [noticeIcon, feedback, retry, retryTurn, resumeAtReset, newConversation, dismissNotice] as [NSView] {
             notice.addSubview(child)
             child.translatesAutoresizingMaskIntoConstraints = true
@@ -256,15 +251,11 @@ final class AgentPaneView: ThemedView {
         panelScroll.hasVerticalScroller = true
         panelScroll.autohidesScrollers = true
         panelScroll.scrollerStyle = .overlay
-        for panel in [subagents, promptQueue, questions, taskProgressButton] as [NSView] {
+        for panel in [subagents, promptQueue, questions, taskProgressLine] as [NSView] {
             panel.translatesAutoresizingMaskIntoConstraints = true
             panelDocument.addSubview(panel)
         }
-        taskProgressButton.font = AppFont.body
-        taskProgressButton.alignment = .left
-        taskProgressButton.lineBreakMode = .byTruncatingTail
-        taskProgressButton.isHidden = true
-        taskProgressButton.onPress = { [weak self] in
+        taskProgressLine.onPress = { [weak self] in
             guard let self, let id = self.taskProgress.target else { return }
             self.reveal(.item(id))
         }
@@ -332,8 +323,9 @@ final class AgentPaneView: ThemedView {
         emptyDetail.frame = NSRect(x: left, y: composerCard.frame.minY - 48, width: width, height: 20)
 
         // Glass cards stack above the composer, each the composer's width: a notice,
-        // then questions, then the queue, then running agents, then the activity capsule.
-        let gap: CGFloat = 8
+        // then questions, then the queue, then running agents, then task progress, then
+        // what the agent waits for.
+        let gap = AgentPanelMetrics.gap
         var top = composerCard.frame.minY
         let noticeText = feedback.stringValue
         notice.isHidden = noticeText.isEmpty && retry.isHidden && retryTurn.isHidden && newConversation.isHidden
@@ -341,11 +333,11 @@ final class AgentPaneView: ThemedView {
             top -= gap + layoutNotice(text: noticeText, width: width)
             notice.frame.origin = NSPoint(x: left, y: top)
         }
-        let activityHeight: CGFloat = activity.isHidden ? 0 : Self.activityHeight
+        let activityHeight: CGFloat = activity.isHidden ? 0 : AgentPanelMetrics.compactHeight
         let panelBudget = max(0, top - activityHeight - 64)
         let questionHeight = questions.isHidden ? 0 : min(questions.preferredHeight(for: width), max(160, panelBudget))
         let panels: [(NSView, CGFloat)] = [
-            (taskProgressButton, taskProgressButton.isHidden ? 0 : 28),
+            (taskProgressLine, taskProgressLine.isHidden ? 0 : AgentPanelMetrics.compactHeight),
             (subagents, subagents.isHidden ? 0 : subagents.preferredHeight),
             (promptQueue, promptQueue.isHidden ? 0 : promptQueue.preferredHeight),
             (questions, questionHeight)
@@ -363,13 +355,8 @@ final class AgentPaneView: ThemedView {
         panelScroll.frame = NSRect(x: left, y: top, width: width, height: panelHeight)
         panelDocument.frame = NSRect(x: 0, y: 0, width: width, height: panelY)
         if activityHeight > 0 {
-            // The capsule hugs its label, but never outgrows the composer's width.
-            let padding: CGFloat = 14
-            let labelWidth = max(0, min(activityLabel.singleLineWidth, width - padding * 2))
-            let labelHeight = ceil(activityLabel.intrinsicContentSize.height)
             top -= gap + activityHeight
-            activity.frame = NSRect(x: left, y: top, width: labelWidth + padding * 2, height: activityHeight)
-            activityLabel.frame = NSRect(x: padding, y: floor((activityHeight - labelHeight) / 2), width: labelWidth, height: labelHeight)
+            activity.frame = NSRect(x: left, y: top, width: width, height: activityHeight)
         }
         // The conversation runs under the floating cards and ends where the composer does;
         // its last row can scroll clear of the topmost card.
@@ -392,12 +379,12 @@ final class AgentPaneView: ThemedView {
     }
 
     private static let controlSize: CGFloat = 32
-    private static let activityHeight: CGFloat = 28
     /// The notice wraps to this many lines before truncating; its tooltip keeps the rest.
     private static let noticeMaximumLines = 3
-    private static let noticeMinimumHeight: CGFloat = 40
-    private static let noticeIconSide: CGFloat = 16
-    private static let noticeInset: CGFloat = 14
+    private static let noticeMinimumHeight = AgentPanelMetrics.compactHeight
+    private static let noticeIconSide = AgentPanelMetrics.iconSide
+    /// The notice's icon sits in the other panels' icon column.
+    private static let noticeInset = AgentPanelMetrics.inset + AgentPanelMetrics.iconX
     private static let noticeControlHeight: CGFloat = 24
     /// The height of one line of the notice's text, as its label lays it out.
     private static let noticeLineHeight = ceil(NSLayoutManager().defaultLineHeight(for: AppFont.body))
@@ -428,7 +415,7 @@ final class AgentPaneView: ThemedView {
         let textRight = controls.isEmpty ? width - Self.noticeInset : trailing + controlGap - 12
         let font = AppFont.body
         let lineHeight = Self.noticeLineHeight
-        let textX = Self.noticeInset + Self.noticeIconSide + 8
+        let textX = AgentPanelMetrics.inset + AgentPanelMetrics.textX
         let textWidth = max(0, textRight - textX)
         var lines = 0
         if !text.isEmpty, textWidth >= 24 {
@@ -444,9 +431,9 @@ final class AgentPaneView: ThemedView {
         let height = max(Self.noticeMinimumHeight, textHeight + 24)
         notice.frame.size = NSSize(width: width, height: height)
         let textY = floor((height - textHeight) / 2)
-        // A label's cell insets its text by 2 points on each side; the frame reaches past
-        // that so the text itself starts at `textX`.
-        feedback.frame = NSRect(x: textX - 2, y: textY, width: textWidth + 4, height: textHeight)
+        // A label's cell insets its text by 2 points on each side, as the other panels'
+        // labels do, so the text lines up with theirs; the frame keeps the measured width.
+        feedback.frame = NSRect(x: textX, y: textY, width: textWidth + 4, height: textHeight)
         // The card is flipped, so the first line is the top one.
         let firstLineMid = textY + lineHeight / 2
         noticeIcon.frame = NSRect(x: Self.noticeInset, y: round(firstLineMid - Self.noticeIconSide / 2),
@@ -574,13 +561,14 @@ final class AgentPaneView: ThemedView {
         let busy = submitting || status == .working || status == .waiting || snapshot?.hasActiveQueue == true
         self.busy = busy
         updatePrimaryAction()
-        // Only a wait on the user earns a capsule; sending and working show in the
-        // conversation and the stop button, so a send never flashes a card.
-        activity.isHidden = status != .waiting
-        activityLabel.stringValue = status != .waiting ? ""
-            : snapshot?.items.contains { $0.questionnaire != nil && !$0.isComplete } == true ? "Waiting for your answers" : "Waiting for approval"
-        activityLabel.setAccessibilityValue(activityLabel.stringValue)
-        guard changed else { return }
+        // Only a wait on the user earns a card; sending and working show in the
+        // conversation and the stop button, so a send never flashes one.
+        let hidden = activity.isHidden
+        let answering = snapshot?.items.contains { $0.questionnaire != nil && !$0.isComplete } == true
+        activity.show(status != .waiting ? nil : answering ? "Waiting for your answers" : "Waiting for approval",
+                      detail: status != .waiting ? nil : answering ? "The questions are below" : "Click to see the request",
+                      icon: .icon(.hand), tone: .accent)
+        guard changed || hidden != activity.isHidden else { return }
         needsLayout = true
     }
 
@@ -647,13 +635,10 @@ final class AgentPaneView: ThemedView {
         if self.snapshot?.session != snapshot.session { navigationPromptID = nil }
         self.snapshot = snapshot
         taskProgress.update(snapshot)
-        if taskProgressButton.title != taskProgress.title {
-            taskProgressButton.title = taskProgress.title
-            taskProgressButton.setTitleColor(theme.fgDim)
-            taskProgressButton.toolTip = taskProgress.title
-            taskProgressButton.setAccessibilityLabel(taskProgress.title)
-        }
-        taskProgressButton.isHidden = taskProgress.target == nil
+        let progressHidden = taskProgressLine.isHidden
+        taskProgressLine.show(taskProgress.target == nil ? nil : taskProgress.title, detail: taskProgress.step,
+                              icon: .progress(taskProgress.fraction), tone: taskProgress.paused ? .muted : .accent)
+        if progressHidden != taskProgressLine.isHidden { needsLayout = true }
         updateOutline()
         preserveScroll {
             // Keep every retained entry as lightweight data. Native row views are
@@ -722,8 +707,6 @@ final class AgentPaneView: ThemedView {
             } catch { self.onActionError?(error.localizedDescription) }
         }
     }
-
-    @objc private func activityPressed() { revealPendingRequest() }
 
     var composerHasFocus: Bool { window?.firstResponder === composer }
 
@@ -853,7 +836,7 @@ final class AgentPaneView: ThemedView {
     }
 
     override func themeDidChange() {
-        taskProgressButton.setTitleColor(theme.fgDim)
+        taskProgressLine.theme = theme
         appearance = theme.nsAppearance
         attach.chatTheme = theme
         modelPicker.chatTheme = theme
@@ -877,7 +860,6 @@ final class AgentPaneView: ThemedView {
         composer.placeholderColor = theme.fgDim
         plan.chatTheme = theme
         composer.selectedTextAttributes = [.backgroundColor: theme.accent.withAlphaComponent(0.25)]
-        activityLabel.textColor = theme.fgMuted
         emptyTitle.textColor = theme.fg
         emptyDetail.textColor = theme.fgDim
         noticeIcon.theme = theme

@@ -47,7 +47,9 @@ final class AgentRefinementTests: XCTestCase {
                                 workContext: .init(itemType: "todo_list"))]
         model.update(snapshot)
         XCTAssertEqual(model.target, "todo")
-        XCTAssertEqual(model.title, "0 of 1 done · Test changes")
+        XCTAssertEqual(model.title, "0 of 1 done")
+        XCTAssertEqual(model.step, "Test changes")
+        XCTAssertEqual(model.fraction, 0)
         snapshot.status = .failed
         model.update(snapshot)
         XCTAssertTrue(model.title.hasPrefix("Paused"))

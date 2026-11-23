@@ -50,6 +50,10 @@ final class SidebarCardView: HoverView {
     private let location: [(text: String, tone: LocationTone)]
     private enum LocationTone { case name, detail, link }
     private let paneRows: [PaneRowView]
+    /// Each listed pane's background agents and shells, below it.
+    private let subtaskRows: [SubtaskRowView]
+    /// The list in reading order: each pane, then what its agent runs.
+    private let listRows: [NSView]
     private var elapsedTimer: Timer?
     /// Only the selected card has glass; the sidebar rebuilds its cards often.
     private let glass: GlassView?
@@ -143,6 +147,17 @@ final class SidebarCardView: HoverView {
         paneRows = data.panes.count > 1 ? data.panes.map { PaneRowView(row: $0) } : []
         // With several panes no one pane stands for the card while they idle.
         titleRow = data.lead.map { PaneRowView(row: $0, title: data.title, showsIcon: data.panes.count == 1, idleCircle: data.panes.count > 1) }
+        // A lone pane's subtasks follow the title; listed panes' follow each pane.
+        var list: [NSView] = []
+        var subtasks: [SubtaskRowView] = []
+        for pane in data.panes.count > 1 ? data.panes : Array(data.panes.prefix(1)) {
+            if let row = paneRows.first(where: { $0.row.id == pane.id }) { list.append(row) }
+            let rows = SubtaskRowView.rows(for: pane)
+            list += rows
+            subtasks += rows
+        }
+        subtaskRows = subtasks
+        listRows = list
         // Skip a name the title or the project row already shows.
         let name = data.name.flatMap { $0 == header?.title || $0 == data.title ? nil : $0 }
         showsLocation = name != nil || data.branch != nil || data.pullRequest != nil
@@ -169,7 +184,7 @@ final class SidebarCardView: HoverView {
         titleLabel.isHidden = titleRow != nil
         Self.wrap(titleLabel)
         let views: [NSView?] = [headerIcon, headerLabel, hintBadge, titleLabel, titleRow, locationIcon, locationLabel]
-        for view in views.compactMap({ $0 }) + paneRows {
+        for view in views.compactMap({ $0 }) + listRows {
             view.translatesAutoresizingMaskIntoConstraints = true
             addSubview(view)
         }
@@ -183,8 +198,9 @@ final class SidebarCardView: HoverView {
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
         let parts = [headerLabel?.stringValue, titleLabel.stringValue, data.name, data.branch, data.primary ? "primary" : nil,
-                     data.pullRequest.map { "pull request \($0)" }, data.offline ? "not connected" : nil] + data.panes.map(\.title)
-        setAccessibilityLabel(parts.compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", "))
+                     data.pullRequest.map { "pull request \($0)" }, data.offline ? "not connected" : nil]
+        let paneTitles: [String] = data.panes.flatMap { [$0.title] + $0.subtasks.map(\.title) }
+        setAccessibilityLabel((parts.compactMap { $0 } + paneTitles).filter { !$0.isEmpty }.joined(separator: ", "))
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -202,7 +218,7 @@ final class SidebarCardView: HoverView {
 
     override var intrinsicContentSize: NSSize {
         NSSize(width: NSView.noIntrinsicMetric,
-               height: Self.height(header: headerLabel != nil, location: showsLocation, panes: paneRows.count, titleLines: titleLines))
+               height: Self.height(header: headerLabel != nil, location: showsLocation, panes: listRows.count, titleLines: titleLines))
     }
 
     /// The title's lines at the card's current width.
@@ -271,6 +287,12 @@ final class SidebarCardView: HoverView {
             row.elapsed = ActivityCardData.elapsedText(elapsed)
             next = min(next ?? .infinity, ActivityCardData.secondsUntilElapsedChanges(elapsed))
         }
+        for row in subtaskRows {
+            guard let since = row.since else { continue }
+            let elapsed = now.timeIntervalSince(since)
+            row.elapsed = ActivityCardData.elapsedText(elapsed)
+            next = min(next ?? .infinity, ActivityCardData.secondsUntilElapsedChanges(elapsed))
+        }
         guard let next else { return }
         let timer = Timer(timeInterval: next + 0.01, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated { self?.updateElapsed() }
@@ -326,12 +348,12 @@ final class SidebarCardView: HoverView {
         titleRow?.hidesStatus = !closeButton.isHidden
         titleRow?.frame = CGRect(x: x, y: top, width: max(right - x, 0), height: titleBlock)
         top += titleBlock
-        if !paneRows.isEmpty { top += Line.sectionGap }
-        for row in paneRows {
+        if !listRows.isEmpty { top += Line.sectionGap }
+        for row in listRows {
             row.frame = CGRect(x: left, y: top, width: max(right - left, 0), height: Line.row)
             top += Line.row
         }
-        if !paneRows.isEmpty, showsLocation { top += Line.sectionGap }
+        if !listRows.isEmpty, showsLocation { top += Line.sectionGap }
         if showsLocation {
             layoutIconRow(icon: locationIcon, label: locationLabel, top: top, left: left, right: right)
         }
@@ -359,6 +381,8 @@ final class SidebarCardView: HoverView {
         guard !data.unavailable, bounds.contains(point) else { return }
         if let row = paneRows.first(where: { $0.frame.contains(point) }), let onPaneClick {
             onPaneClick(row.row.id)
+        } else if let row = subtaskRows.first(where: { $0.frame.contains(point) }), let onPaneClick {
+            onPaneClick(row.pane)
         } else {
             onClick?()
         }
@@ -504,6 +528,84 @@ final class PaneRowView: ThemedView {
 
     /// Whether the title may wrap: a folder after it keeps it to one line.
     var wrapsTitle: Bool { isTitle && detailLabel.isHidden }
+}
+
+/// An agent or shell a pane's agent runs in the background, below the pane:
+/// a dim spinner under the pane's icon column's text, its task and how long it
+/// has run, lined up with the panes' running times. A last row counts the rest.
+final class SubtaskRowView: ThemedView {
+    /// Each pane lists this many before counting the rest.
+    static let maxShown = 3
+    let pane: PaneId
+    let since: Date?
+    var elapsed = "" {
+        didSet {
+            guard elapsed != oldValue else { return }
+            elapsedLabel.stringValue = elapsed
+            elapsedLabel.isHidden = elapsed.isEmpty
+            needsLayout = true
+        }
+    }
+
+    private let spinner: ActivityGlyph?
+    private let titleLabel: NSTextField
+    private let elapsedLabel = makeLabel("", font: .monospacedDigitSystemFont(ofSize: 11, weight: .regular))
+
+    /// The rows for a pane's subtasks: up to `maxShown`, then one that counts the rest.
+    static func rows(for pane: ActivityCardData.PaneRow) -> [SubtaskRowView] {
+        let tasks = pane.subtasks
+        // A count row only when it saves a line.
+        let shown = tasks.count > maxShown + 1 ? Array(tasks.prefix(maxShown)) : tasks
+        var rows = shown.map { SubtaskRowView(pane: pane.id, title: $0.title, since: $0.since, spins: true) }
+        let rest = tasks.count - shown.count
+        if rest > 0 { rows.append(SubtaskRowView(pane: pane.id, title: "\(rest) more running", since: nil, spins: false)) }
+        return rows
+    }
+
+    private init(pane: PaneId, title: String, since: Date?, spins: Bool) {
+        self.pane = pane
+        self.since = since
+        titleLabel = makeLabel(title, font: AppFont.system(11))
+        titleLabel.lineBreakMode = .byTruncatingTail
+        spinner = spins ? ActivityGlyph() : nil
+        super.init(frame: .zero)
+        for view in [spinner, titleLabel, elapsedLabel].compactMap({ $0 }) as [NSView] {
+            view.translatesAutoresizingMaskIntoConstraints = true
+            addSubview(view)
+        }
+        elapsedLabel.isHidden = true
+        toolTip = title
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override var isFlipped: Bool { true }
+
+    override func themeDidChange() {
+        titleLabel.textColor = theme.fgDim
+        elapsedLabel.textColor = theme.fgDim
+        spinner?.style = .spinner(theme.fgDim)
+    }
+
+    override func layout() {
+        super.layout()
+        let center = PaneRowView.height / 2
+        let side = SidebarCardView.iconSide
+        // Under the pane's title, so the list reads as the pane's children.
+        let x = SidebarCardView.textInset
+        spinner?.frame = SidebarCardView.iconBox(x: x, centerY: center).insetBy(dx: 2, dy: 2)
+        let textX = x + side + 6
+        // Running times line up with the panes', left of their status column.
+        var trailing = bounds.width - side - 6
+        let height = titleLabel.intrinsicContentSize.height
+        let y = (center - height / 2).rounded()
+        if !elapsedLabel.isHidden {
+            let width = elapsedLabel.textWidth
+            elapsedLabel.frame = CGRect(x: trailing - width, y: y, width: width, height: height)
+            trailing -= width + 6
+        }
+        titleLabel.frame = CGRect(x: textX, y: y, width: max(trailing - textX, 0), height: height)
+    }
 }
 
 /// The hairline between two cards, as wide as a card. Beside a selected or

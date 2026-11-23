@@ -154,6 +154,39 @@ final class NativeAgentActivityTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(AgentEvent.self, from: JSONEncoder().encode(event)).kind, .failed)
     }
 
+    func testRunningSubtasksReachTheSidebarWithoutProgressChurn() throws {
+        let activity = Activity()
+        var chat = claudeChat(status: .working)
+        let started = Date(timeIntervalSince1970: 1_800_000_000)
+        var shell = AgentSubagent(id: "s", description: "Build the Debug app", agentType: "Shell", background: true, startedAt: started)
+        chat.subagents = [shell, agent("a"), agent("done", .completed)]
+        activity.updateChat(chat)
+        let subtasks = try XCTUnwrap(activity.snapshot().agents.first?.subtasks)
+        XCTAssertEqual(subtasks.map(\.id), ["s", "a"], "finished agents leave the list")
+        XCTAssertEqual(subtasks.first, AgentSubtask(id: "s", title: "Build the Debug app", shell: true, startedAt: 1_800_000_000_000))
+        // Progress inside a running agent doesn't change what the sidebar lists.
+        let revision = activity.currentRevision
+        shell.activity = "Linking"
+        shell.toolUses = 3
+        chat.subagents?[0] = shell
+        activity.updateChat(chat)
+        XCTAssertEqual(activity.currentRevision, revision)
+        chat.subagents = []
+        activity.updateChat(chat)
+        XCTAssertNil(activity.snapshot().agents.first?.subtasks)
+    }
+
+    func testActivityFromAnOlderServerDecodesWithoutSubtasks() throws {
+        let current = AgentActivity(session: SessionId(), project: ProjectId(), provider: .claude, state: .working,
+                                    subtasks: [AgentSubtask(id: "x", title: "Build")])
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(current)) as? [String: Any])
+        object["subtasks"] = nil
+        let decoded = try JSONDecoder().decode(AgentActivity.self, from: JSONSerialization.data(withJSONObject: object))
+        XCTAssertNil(decoded.subtasks)
+        let task = try JSONDecoder().decode(AgentSubtask.self, from: Data(#"{"id":"x","future":1}"#.utf8))
+        XCTAssertEqual(task, AgentSubtask(id: "x", title: ""))
+    }
+
     private func claudeChat(status: AgentChatStatus) -> AgentChatSnapshot {
         AgentChatSnapshot(session: SessionId(), project: ProjectId(), provider: .claude, status: status,
                           items: [.init(kind: .user, text: "Audit the app")])

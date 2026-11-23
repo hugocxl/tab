@@ -94,8 +94,21 @@ final class Activity: @unchecked Sendable {
         let stopped = outcome == .interrupted || outcome == .cancelled || wasBackground && held == nil && !agentsFinished
         return record(AgentActivity(session: session, project: snapshot.project,
                                     provider: snapshot.provider == .claude ? .claude : .codex, state: state, title: title,
-                                    condition: condition),
+                                    condition: condition, subtasks: Self.subtasks(snapshot)),
                       completed: previous?.state == .working && state == .idle && !stopped)
+    }
+
+    /// A chat's running agents and shells, as the sidebar lists them. Only what
+    /// starts or ends one changes it, so progress never bumps the revision.
+    static func subtasks(_ snapshot: AgentChatSnapshot) -> [AgentSubtask]? {
+        let running = (snapshot.subagents ?? []).filter { $0.status == .running }
+        guard !running.isEmpty else { return nil }
+        return running.prefix(AgentSubtask.maxCount).map { subagent in
+            let title = subagent.description.trimmingCharacters(in: .whitespacesAndNewlines)
+            return AgentSubtask(id: subagent.id, title: title.isEmpty ? subagent.agentType ?? "Agent" : title,
+                                shell: isShell(subagent),
+                                startedAt: subagent.startedAt.map { UInt64(max(0, $0.timeIntervalSince1970 * 1000)) })
+        }
     }
 
     private func settle(_ session: SessionId, token: UUID) {

@@ -108,6 +108,14 @@ struct ActivityCardData: Equatable {
             }
         }
 
+        /// An agent or shell the pane's agent started that still runs.
+        struct Subtask: Equatable {
+            var id: String
+            var title: String
+            var shell: Bool
+            var since: Date?
+        }
+
         var id: PaneId
         var icon: Icon
         var title: String
@@ -119,6 +127,8 @@ struct ActivityCardData: Equatable {
         /// The pane its tab shows focused.
         var active: Bool
         var topic: Topic?
+        /// What the pane's agent runs in the background, oldest first.
+        var subtasks: [Subtask] = []
     }
 
     var headline: Headline
@@ -303,6 +313,7 @@ struct ActivityCardData: Equatable {
             }
         }
         let status = paneStatus(pane, server: server, model: model)
+        let notifications = model.settings.notifications
         let started: UInt64?
         switch status {
         case .working, .blocked, .paused: started = agent?.workingSince
@@ -310,7 +321,12 @@ struct ActivityCardData: Equatable {
         default: started = nil
         }
         let since = started.map { Date(timeIntervalSince1970: TimeInterval($0) / 1000) }
-        return PaneRow(id: pane.id, icon: icon, title: text, detail: detail, status: status, workingSince: since, active: active, topic: topic)
+        let subtasks = (agent?.subtasks ?? []).map { task in
+            PaneRow.Subtask(id: task.id, title: task.title, shell: task.shell,
+                            since: task.startedAt.map { Date(timeIntervalSince1970: TimeInterval($0) / 1000) })
+        }
+        return PaneRow(id: pane.id, icon: icon, title: text, detail: detail, status: status, workingSince: since, active: active,
+                       topic: topic, subtasks: notifications.showsInTabs(.working) ? subtasks : [])
     }
 
     /// What a tab is about, the same whichever pane is focused: its custom

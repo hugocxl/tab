@@ -3,6 +3,17 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.114.0 - 2026-11-23
+
+### Added
+
+- The sidebar lists the agents and shells an agent runs in the background under its pane, with how long each has run.
+
+### Changed
+
+- The messages above an agent's message box share one glass style, with their icons and text lined up, and task
+  progress and what the agent waits for now show as cards of their own.
+
 ## 0.113.3 - 2026-11-23
 
 ### Changed

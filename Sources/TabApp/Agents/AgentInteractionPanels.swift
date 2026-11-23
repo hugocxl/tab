@@ -33,8 +33,10 @@ final class AgentSurfaceCard: ThemedView {
         layer.borderWidth = Metrics.border
         layer.borderColor = (highlighted ? theme.accent : theme.fg.withAlphaComponent(theme.palette.isLight ? 0.10 : 0.12)).cgColor
         // Enough of the theme's composer color to keep text legible over a busy transcript,
-        // while the conversation still reads through the glass.
-        fill.layer?.backgroundColor = theme.agentComposer.withAlphaComponent(theme.glassEnabled ? 0.45 : 0.82).cgColor
+        // while the conversation still reads through the glass. The panels above the
+        // composer let more of it through, so they read as messages over the conversation.
+        let glassOpacity: CGFloat = style.cornerRadius == GlassView.Style.agentComposer.cornerRadius ? 0.45 : 0.3
+        fill.layer?.backgroundColor = theme.agentComposer.withAlphaComponent(theme.glassEnabled ? glassOpacity : 0.82).cgColor
     }
 
     override func layout() {
@@ -47,6 +49,143 @@ final class AgentSurfaceCard: ThemedView {
         appearance = theme.nsAppearance
         glass.appearance = theme.nsAppearance
         needsDisplay = true
+    }
+}
+
+/// The shared measures of the glass panels stacked above the agent composer, so the
+/// notice, activity, task progress, agents and queue line up as one column.
+enum AgentPanelMetrics {
+    /// Between a card's edge and its rows.
+    static let inset: CGFloat = 6
+    static let rowHeight: CGFloat = 32
+    /// A card of one row.
+    static let compactHeight: CGFloat = rowHeight + inset * 2
+    /// A row's hover fill, concentric with its card's corners.
+    static let rowRadius: CGFloat = GlassView.Style.agentPanel.cornerRadius - inset
+    static let iconSide: CGFloat = 16
+    static let glyphSize: CGFloat = 15
+    /// A row's leading icon and text, from the row's edge.
+    static let iconX: CGFloat = 8
+    static let textX: CGFloat = iconX + iconSide + 8
+    /// Between a row's title, its detail and its trailing facts.
+    static let textGap: CGFloat = 8
+    /// Between stacked cards.
+    static let gap: CGFloat = 8
+    static let titleFont = AppFont.body
+    static let detailFont = AppFont.small
+    /// Running times and counts, in digits that keep their width as they tick.
+    static let metaFont = NSFont.monospacedDigitSystemFont(ofSize: AppFont.small.pointSize, weight: .regular)
+}
+
+/// A glass card of one row above the composer, such as what the agent waits for or
+/// its task list's progress: an icon, a title, a dimmer detail. The whole card presses.
+@MainActor
+final class AgentPanelLine: ThemedView {
+    /// How the icon reads: the accent asks for the user, muted only informs.
+    enum Tone { case accent, muted }
+    var onPress: (() -> Void)?
+    private let card = AgentSurfaceCard(style: .agentPanel)
+    private let highlight = NSView()
+    private let icon = NoticeIcon()
+    private let title = makeLabel("", font: AgentPanelMetrics.titleFont)
+    private let detail = makeLabel("", font: AgentPanelMetrics.detailFont)
+    private var tone = Tone.muted
+    private var hovered = false { didSet { if hovered != oldValue { applyColors() } } }
+    private var tracking: NSTrackingArea?
+
+    override var isFlipped: Bool { true }
+
+    init(accessibilityLabel: String) {
+        super.init(frame: .zero)
+        isHidden = true
+        highlight.wantsLayer = true
+        highlight.layer?.cornerRadius = AgentPanelMetrics.rowRadius
+        highlight.layer?.cornerCurve = .continuous
+        icon.glyphSize = AgentPanelMetrics.glyphSize
+        title.lineBreakMode = .byTruncatingTail
+        detail.lineBreakMode = .byTruncatingTail
+        addSubview(card)
+        for view in [highlight, icon, title, detail] as [NSView] {
+            view.translatesAutoresizingMaskIntoConstraints = true
+            card.addSubview(view)
+        }
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+        setAccessibilityLabel(accessibilityLabel)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// Shows `title` and `detail`; nil hides the card.
+    func show(_ title: String?, detail: String? = nil, icon: Notice.Icon, tone: Tone) {
+        isHidden = title == nil
+        guard let title else { return }
+        let detail = detail ?? ""
+        guard self.title.stringValue != title || self.detail.stringValue != detail || self.icon.icon != icon || self.tone != tone else { return }
+        self.title.stringValue = title
+        self.detail.stringValue = detail
+        self.icon.icon = icon
+        self.tone = tone
+        toolTip = detail.isEmpty ? title : title + " · " + detail
+        setAccessibilityValue(toolTip)
+        applyColors()
+        needsLayout = true
+    }
+
+    override func layout() {
+        super.layout()
+        card.frame = bounds
+        let metrics = AgentPanelMetrics.self
+        let row = bounds.insetBy(dx: metrics.inset, dy: metrics.inset)
+        highlight.frame = row
+        icon.frame = NSRect(x: row.minX + metrics.iconX, y: floor(row.midY - metrics.iconSide / 2),
+                            width: metrics.iconSide, height: metrics.iconSide)
+        let x = row.minX + metrics.textX
+        let right = row.maxX - metrics.iconX
+        let titleHeight = ceil(title.intrinsicContentSize.height)
+        // The title keeps its whole width first; the detail takes what's left.
+        let titleWidth = min(title.singleLineWidth, max(0, right - x))
+        title.frame = NSRect(x: x, y: floor(row.midY - titleHeight / 2), width: titleWidth, height: titleHeight)
+        let detailX = x + titleWidth + metrics.textGap
+        let detailHeight = ceil(detail.intrinsicContentSize.height)
+        detail.isHidden = detail.stringValue.isEmpty || right - detailX < 24
+        detail.frame = NSRect(x: detailX, y: floor(row.midY - detailHeight / 2), width: max(0, right - detailX), height: detailHeight)
+    }
+
+    private func applyColors() {
+        icon.color = tone == .accent ? theme.accent : theme.fgDim
+        title.textColor = theme.fg
+        detail.textColor = theme.fgDim
+        highlight.layer?.backgroundColor = hovered ? theme.fg.withAlphaComponent(0.05).cgColor : nil
+    }
+
+    override func themeDidChange() {
+        appearance = theme.nsAppearance
+        card.theme = theme
+        icon.theme = theme
+        applyColors()
+    }
+
+    override func updateTrackingAreas() {
+        if let tracking { removeTrackingArea(tracking) }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect], owner: self, userInfo: nil)
+        addTrackingArea(area)
+        tracking = area
+        super.updateTrackingAreas()
+    }
+
+    override func mouseEntered(with event: NSEvent) { hovered = true }
+    override func mouseExited(with event: NSEvent) { hovered = false }
+    override func mouseDown(with event: NSEvent) {}
+    override func mouseUp(with event: NSEvent) {
+        guard bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
+        onPress?()
+    }
+
+    override func accessibilityPerformPress() -> Bool {
+        guard let onPress else { return false }
+        onPress()
+        return true
     }
 }
 
@@ -76,12 +215,14 @@ final class AgentQueueView: ThemedView {
     var onResume: (() -> Void)?
     /// Prompts with an edit the server hasn't saved; their editor brings it back.
     var unsavedEdits: Set<String> = []
-    private static let inset: CGFloat = 8
-    private static let headerHeight: CGFloat = 30
-    private static let rowHeight: CGFloat = 32
+    private static let inset = AgentPanelMetrics.inset
+    private static let headerHeight = AgentPanelMetrics.rowHeight
+    private static let rowHeight = AgentPanelMetrics.rowHeight
     private static let visibleRows = 4
     private let card = AgentSurfaceCard(style: .agentPanel)
-    private let title = makeLabel("", font: AppFont.small)
+    /// The paused queue's header: a pause mark in the rows' icon column, then why.
+    private let pauseIcon = NSImageView()
+    private let title = makeLabel("", font: AgentPanelMetrics.detailFont)
     private let resume = PillButton("Resume", style: .plain)
     private let scroll = NSScrollView()
     private let rows = AgentFlippedView()
@@ -102,7 +243,7 @@ final class AgentQueueView: ThemedView {
         scroll.documentView = rows
         resume.onPress = { [weak self] in self?.onResume?() }
         addSubview(card)
-        for view in [title, resume, scroll] as [NSView] {
+        for view in [pauseIcon, title, resume, scroll] as [NSView] {
             card.addSubview(view)
             view.translatesAutoresizingMaskIntoConstraints = true
         }
@@ -129,6 +270,7 @@ final class AgentQueueView: ThemedView {
         preferredHeight = prompts.isEmpty ? 0 : headerHeight + visible * Self.rowHeight + Self.inset * 2
         title.stringValue = "Paused · Queued prompts wait until you resume"
         title.isHidden = !paused
+        pauseIcon.isHidden = !paused
         resume.isHidden = !paused
         resume.isEnabled = enabled
         rebuildRows()
@@ -182,9 +324,15 @@ final class AgentQueueView: ThemedView {
         super.layout()
         card.frame = bounds
         let inset = Self.inset
+        let metrics = AgentPanelMetrics.self
+        let headerMid = inset + Self.headerHeight / 2
         let resumeWidth = resume.isHidden ? 0 : ceil(resume.fittingSize.width)
-        resume.frame = NSRect(x: bounds.width - inset - 4 - resumeWidth, y: inset + 3, width: resumeWidth, height: 24)
-        title.frame = NSRect(x: inset + 8, y: inset + 7, width: max(0, bounds.width - inset * 2 - resumeWidth - 20), height: 16)
+        resume.frame = NSRect(x: bounds.width - inset - 4 - resumeWidth, y: floor(headerMid - 12), width: resumeWidth, height: 24)
+        pauseIcon.frame = NSRect(x: inset + metrics.iconX, y: floor(headerMid - metrics.iconSide / 2), width: metrics.iconSide, height: metrics.iconSide)
+        let titleX = inset + metrics.textX
+        let titleHeight = ceil(title.intrinsicContentSize.height)
+        title.frame = NSRect(x: titleX, y: floor(headerMid - titleHeight / 2),
+                             width: max(0, resume.frame.minX - metrics.textGap - titleX), height: titleHeight)
         let top = inset + headerHeight
         scroll.frame = NSRect(x: 0, y: top, width: bounds.width, height: max(0, bounds.height - top - inset))
         let width = max(1, scroll.contentSize.width)
@@ -197,6 +345,7 @@ final class AgentQueueView: ThemedView {
 
     private func applyColors() {
         title.textColor = theme.fgMuted
+        pauseIcon.image = AppIcon.pauseCircleFill.image(size: AgentPanelMetrics.glyphSize, color: theme.warning)
         resume.setTitleColor(theme.fg)
         for case let row as AgentQueueRow in rows.subviews { row.apply(theme) }
     }
@@ -213,9 +362,9 @@ final class AgentQueueView: ThemedView {
 @MainActor
 private final class AgentQueueRow: NSView {
     let icon = NSImageView()
-    let text = makeLabel("", font: AppFont.body)
-    let detail = makeLabel("", font: AppFont.small)
-    let status = makeLabel("", font: AppFont.small)
+    let text = makeLabel("", font: AgentPanelMetrics.titleFont)
+    let detail = makeLabel("", font: AgentPanelMetrics.detailFont)
+    let status = makeLabel("", font: AgentPanelMetrics.detailFont)
     var needsReview = false
     var actionFocused = false { didSet { updateHover() } }
     var actions: [AgentIconButton] = [] {
@@ -234,7 +383,7 @@ private final class AgentQueueRow: NSView {
     init() {
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.cornerRadius = 8
+        layer?.cornerRadius = AgentPanelMetrics.rowRadius
         layer?.cornerCurve = .continuous
         text.lineBreakMode = .byTruncatingTail
         for view in [icon, text, detail, status] as [NSView] {
@@ -267,7 +416,7 @@ private final class AgentQueueRow: NSView {
 
     func apply(_ theme: AppTheme) {
         self.theme = theme
-        icon.image = AppIcon.history.image(size: 14, color: theme.fgDim)
+        icon.image = AppIcon.history.image(size: AgentPanelMetrics.glyphSize, color: theme.fgDim)
         text.textColor = theme.fg
         detail.textColor = theme.fgDim
         status.textColor = needsReview ? theme.warning : theme.fgMuted
@@ -285,16 +434,19 @@ private final class AgentQueueRow: NSView {
         }
         // Hidden actions give their room back to the prompt's text.
         right = showsActions ? right - 6 : bounds.width - 10
+        let metrics = AgentPanelMetrics.self
         for label in [status, detail] where !label.stringValue.isEmpty {
             let width = label.singleLineWidth
+            let height = ceil(label.intrinsicContentSize.height)
             right -= width
-            label.frame = NSRect(x: right, y: floor((bounds.height - 16) / 2), width: width, height: 16)
-            right -= 10
+            label.frame = NSRect(x: right, y: floor((bounds.height - height) / 2), width: width, height: height)
+            right -= metrics.textGap
         }
         status.isHidden = status.stringValue.isEmpty
         detail.isHidden = detail.stringValue.isEmpty
-        icon.frame = NSRect(x: 8, y: floor((bounds.height - 14) / 2), width: 14, height: 14)
-        text.frame = NSRect(x: 30, y: floor((bounds.height - 17) / 2), width: max(0, right - 30), height: 17)
+        icon.frame = NSRect(x: metrics.iconX, y: floor((bounds.height - metrics.iconSide) / 2), width: metrics.iconSide, height: metrics.iconSide)
+        let textHeight = ceil(text.intrinsicContentSize.height)
+        text.frame = NSRect(x: metrics.textX, y: floor((bounds.height - textHeight) / 2), width: max(0, right - metrics.textX), height: textHeight)
     }
 }
 
@@ -306,7 +458,8 @@ final class AgentQuestionView: ThemedView, NSTextFieldDelegate {
     /// MCP form's Decline: the request's ID and the decision's.
     var onDecision: ((String, String) -> Void)?
     var onChange: (() -> Void)?
-    private static let inset: CGFloat = 16
+    /// Lines the form's text up with the other panels' icon column.
+    private static let inset = AgentPanelMetrics.inset + AgentPanelMetrics.iconX
     private static let footerHeight: CGFloat = 48
     private let card = AgentSurfaceCard(style: .agentPanel)
     private let scroll = NSScrollView()

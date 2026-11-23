@@ -105,9 +105,12 @@ public struct AgentActivity: Hashable, Codable, Sendable {
     public var workingSince: UInt64?
     /// Older servers leave it out.
     public var condition: AgentCondition?
+    /// The agents and shells it started that still run, oldest first. Older
+    /// servers and terminal agents leave it out.
+    public var subtasks: [AgentSubtask]?
 
     public init(session: SessionId, project: ProjectId, provider: AgentProvider, state: AgentState, title: String? = nil,
-                workingSince: UInt64? = nil, condition: AgentCondition? = nil) {
+                workingSince: UInt64? = nil, condition: AgentCondition? = nil, subtasks: [AgentSubtask]? = nil) {
         self.session = session
         self.project = project
         self.provider = provider
@@ -115,7 +118,39 @@ public struct AgentActivity: Hashable, Codable, Sendable {
         self.title = title
         self.workingSince = workingSince
         self.condition = condition
+        self.subtasks = subtasks
     }
+}
+
+/// An agent or shell an agent started that still runs, as the sidebar lists it.
+public struct AgentSubtask: Hashable, Codable, Sendable, Identifiable {
+    /// The provider's task ID.
+    public var id: String
+    public var title: String
+    /// Whether it is a shell, such as a build or a server, rather than an agent.
+    public var shell: Bool
+    /// Unix milliseconds when it started, when the provider says.
+    public var startedAt: UInt64?
+
+    public init(id: String, title: String, shell: Bool = false, startedAt: UInt64? = nil) {
+        self.id = id
+        self.title = title
+        self.shell = shell
+        self.startedAt = startedAt
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, title, shell, startedAt }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
+        shell = try c.decodeIfPresent(Bool.self, forKey: .shell) ?? false
+        startedAt = try c.decodeIfPresent(UInt64.self, forKey: .startedAt)
+    }
+
+    /// How many a chat's activity lists; the sidebar shows fewer.
+    public static let maxCount = 8
 }
 
 public enum EventKind: OpenEnum {

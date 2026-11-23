@@ -84,6 +84,12 @@ struct AgentTaskProgress {
     private var list: AgentTodoList?
     private var status: AgentChatStatus?
     private(set) var title = ""
+    /// The current or next step, beside the title.
+    private(set) var step: String?
+    /// How much of the list is done, 0...1.
+    private(set) var fraction: CGFloat = 0
+    /// The agent isn't working through the list now.
+    private(set) var paused = false
     private(set) var target: String?
 
     mutating func update(_ snapshot: AgentChatSnapshot) {
@@ -97,11 +103,12 @@ struct AgentTaskProgress {
             list = AgentTodoList(detail: item?.detail)
         }
         guard let list, !list.steps.isEmpty, list.completedCount < list.steps.count else {
-            target = nil; title = ""; return
+            target = nil; title = ""; step = nil; fraction = 0; return
         }
         target = itemID
-        let step = list.steps.first { $0.status == .running } ?? list.steps.first { $0.status == .pending }
-        let paused = snapshot.status != .working && snapshot.status != .waiting
-        title = (paused ? "Paused · " : "") + list.progress + (step.map { " · " + $0.text } ?? "")
+        paused = snapshot.status != .working && snapshot.status != .waiting
+        step = (list.steps.first { $0.status == .running } ?? list.steps.first { $0.status == .pending })?.text
+        fraction = CGFloat(list.completedCount) / CGFloat(list.steps.count)
+        title = (paused ? "Paused · " : "") + list.progress
     }
 }

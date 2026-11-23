@@ -11,8 +11,8 @@ final class AgentSubagentsView: ThemedView {
     var onOpen: ((AgentSubagent) -> Void)?
     /// Reveals the transcript's tool row that started an agent.
     var onReveal: ((String) -> Void)?
-    private static let inset: CGFloat = 6
-    private static let rowHeight: CGFloat = 30
+    private static let inset = AgentPanelMetrics.inset
+    private static let rowHeight = AgentPanelMetrics.rowHeight
     private static let visibleRows = 3
     private let card = AgentSurfaceCard(style: .agentPanel)
     private let scroll = NSScrollView()
@@ -119,12 +119,12 @@ final class AgentSubagentRow: NSView {
     /// Reveals the tool row that started the agent.
     var onPress: ((String) -> Void)?
     var onDismiss: ((String) -> Void)?
-    private let spinner = NSProgressIndicator()
-    private let outcome = NSImageView()
-    private let title = makeLabel("", font: AppFont.body)
-    private let activity = makeLabel("", font: AppFont.small)
-    private let stats = makeLabel("", font: AppFont.small)
-    private let close = AgentIconButton(icon: .close, label: "Dismiss", iconSize: 11)
+    /// A spinning ring while it runs, then its outcome, as the notice's icon draws them.
+    private let icon = NoticeIcon()
+    private let title = makeLabel("", font: AgentPanelMetrics.titleFont)
+    private let activity = makeLabel("", font: AgentPanelMetrics.detailFont)
+    private let stats = makeLabel("", font: AgentPanelMetrics.metaFont)
+    private let close = AgentIconButton(icon: .close, label: "Dismiss", iconSize: 13)
     private(set) var subagent: AgentSubagent?
     private var theme: AppTheme = .shared
     private var hovered = false { didSet { if hovered != oldValue { updateHover() } } }
@@ -136,22 +136,19 @@ final class AgentSubagentRow: NSView {
     init() {
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.cornerRadius = 8
+        layer?.cornerRadius = AgentPanelMetrics.rowRadius
         layer?.cornerCurve = .continuous
-        spinner.style = .spinning
-        spinner.controlSize = .small
-        spinner.isDisplayedWhenStopped = false
+        icon.glyphSize = AgentPanelMetrics.glyphSize
         title.lineBreakMode = .byTruncatingTail
         activity.lineBreakMode = .byTruncatingTail
         close.onPress = { [weak self] in
             guard let id = self?.subagent?.id else { return }
             self?.onDismiss?(id)
         }
-        for view in [spinner, outcome, title, activity, stats, close] as [NSView] {
+        for view in [icon, title, activity, stats, close] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = true
             addSubview(view)
         }
-        spinner.startAnimation(nil)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -169,8 +166,6 @@ final class AgentSubagentRow: NSView {
         case .failed: activity.stringValue = type + (subagent.activity.map { "Failed · " + $0 } ?? "Failed")
         case .stopped: activity.stringValue = type + "Stopped"
         }
-        spinner.isHidden = !running
-        outcome.isHidden = running
         close.isHidden = running
         refreshStats()
         updateTicking()
@@ -187,7 +182,8 @@ final class AgentSubagentRow: NSView {
     private func refreshStats() {
         guard let subagent else { return }
         var parts: [String] = []
-        if subagent.background { parts.append("Background") }
+        // "Working in the background" already says so while it has nothing newer to report.
+        if subagent.background, !(running && subagent.activity == nil) { parts.append("Background") }
         if let uses = subagent.toolUses, uses > 0 { parts.append(uses == 1 ? "1 tool" : "\(uses) tools") }
         if let tokens = subagent.tokens, tokens > 0 { parts.append(Self.tokens(tokens)) }
         if let started = subagent.startedAt {
@@ -224,13 +220,13 @@ final class AgentSubagentRow: NSView {
         title.textColor = theme.fg
         activity.textColor = failed ? theme.danger : theme.fgDim
         stats.textColor = theme.fgMuted
-        spinner.appearance = theme.nsAppearance
         close.chatTheme = theme
+        icon.theme = theme
         switch subagent?.status {
-        case .completed: outcome.image = AppIcon.circleCheckFill.image(size: 14, color: theme.success)
-        case .failed: outcome.image = AppIcon.circleXFill.image(size: 14, color: theme.danger)
-        case .stopped: outcome.image = AppIcon.minusCircle.image(size: 14, color: theme.fgDim)
-        default: outcome.image = nil
+        case .completed: (icon.icon, icon.color) = (.icon(.circleCheckFill), theme.success)
+        case .failed: (icon.icon, icon.color) = (.icon(.circleXFill), theme.danger)
+        case .stopped: (icon.icon, icon.color) = (.icon(.minusCircle), theme.fgDim)
+        case .running, nil: (icon.icon, icon.color) = (.spinner, theme.fgDim)
         }
         updateHover()
     }
@@ -257,7 +253,8 @@ final class AgentSubagentRow: NSView {
     override func draw(_ dirtyRect: NSRect) {
         guard window?.firstResponder === self else { return }
         theme.accent.withAlphaComponent(0.7).setStroke()
-        let ring = NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 1), xRadius: 7, yRadius: 7)
+        let radius = AgentPanelMetrics.rowRadius - 1
+        let ring = NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 1), xRadius: radius, yRadius: radius)
         ring.lineWidth = 2
         ring.stroke()
     }
@@ -295,28 +292,30 @@ final class AgentSubagentRow: NSView {
 
     override func layout() {
         super.layout()
-        let middle = floor((bounds.height - 16) / 2)
-        spinner.frame = NSRect(x: 8, y: floor((bounds.height - 14) / 2), width: 14, height: 14)
-        outcome.frame = spinner.frame
-        var right = bounds.width - 10
+        let metrics = AgentPanelMetrics.self
+        func centered(_ label: NSTextField) -> CGFloat { floor((bounds.height - ceil(label.intrinsicContentSize.height)) / 2) }
+        icon.frame = NSRect(x: metrics.iconX, y: floor((bounds.height - metrics.iconSide) / 2), width: metrics.iconSide, height: metrics.iconSide)
+        var right = bounds.width - metrics.iconX
         if !close.isHidden {
-            right -= 18
-            close.frame = NSRect(x: right, y: floor((bounds.height - 22) / 2), width: 22, height: 22)
-            right -= 8
+            // The same button the queue's rows end with.
+            right = bounds.width - 3 - 26
+            close.frame = NSRect(x: right, y: floor((bounds.height - 26) / 2), width: 26, height: 26)
+            right -= 6
         }
         stats.isHidden = stats.stringValue.isEmpty
         if !stats.isHidden {
             let width = stats.singleLineWidth
             right -= width
-            stats.frame = NSRect(x: right, y: middle, width: width, height: 16)
-            right -= 12
+            stats.frame = NSRect(x: right, y: centered(stats), width: width, height: ceil(stats.intrinsicContentSize.height))
+            right -= metrics.textGap
         }
-        let x: CGFloat = 30
+        let x = metrics.textX
         // The task keeps at least half the room; what it's doing now takes the rest.
         let available = max(0, right - x)
-        let titleWidth = min(title.singleLineWidth, max(available / 2, available - activity.singleLineWidth - 10))
-        title.frame = NSRect(x: x, y: floor((bounds.height - 17) / 2), width: titleWidth, height: 17)
-        let activityX = x + titleWidth + 10
-        activity.frame = NSRect(x: activityX, y: middle, width: max(0, right - activityX), height: 16)
+        let titleWidth = min(title.singleLineWidth, max(available / 2, available - activity.singleLineWidth - metrics.textGap))
+        title.frame = NSRect(x: x, y: centered(title), width: titleWidth, height: ceil(title.intrinsicContentSize.height))
+        let activityX = x + titleWidth + metrics.textGap
+        activity.frame = NSRect(x: activityX, y: centered(activity), width: max(0, right - activityX),
+                                height: ceil(activity.intrinsicContentSize.height))
     }
 }
