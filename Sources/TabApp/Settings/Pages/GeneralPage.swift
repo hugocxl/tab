@@ -17,6 +17,30 @@ extension SettingsModel {
         b.row("worktree-folder", b.field("worktree-folder", settings.worktrees.defaultLocation.parentPath, placeholder: TabDirs.defaultWorktreeFolder) { [store] in
             store.setWorktreeLocation("worktree-folder", $0)
         })
+        let summary = store.updaterSummary
+        let actionControl: SettingControl
+        let primary = SettingControl.button(ButtonSpec(
+            title: summary.buttonTitle,
+            style: summary.action == .install ? .primary : .normal,
+            enabled: summary.buttonEnabled
+        ) { [store] in
+            store.performUpdaterAction(summary.action)
+        })
+        if summary.canRelaunchWhenIdle && !summary.relaunchWhenIdle {
+            let idle = SettingControl.button(ButtonSpec(title: "Relaunch when Idle") { [store] in
+                store.scheduleRelaunchWhenIdle()
+            })
+            actionControl = .row([idle, primary])
+        } else {
+            actionControl = primary
+        }
+        b.row("update-status", actionControl, description: summary.detail)
+        b.row("update-auto-download", b.toggle("update-auto-download", settings.updates.automaticDownloads) { [store] in
+            store.setAutomaticDownloads($0)
+        })
+        b.row("update-auto-install", b.toggle("update-auto-install", settings.updates.automaticInstall, enabled: settings.updates.automaticDownloads) { [store] in
+            store.setAutomaticInstall($0)
+        })
     }
 
     static let choosingApplication = "choose.application"

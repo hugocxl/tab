@@ -275,8 +275,64 @@ final class UpdaterTests: XCTestCase {
 
     /// Every sample in the debug preview still produces its chip.
     func testUpdateChipPreviewCoversEveryState() {
-        XCTAssertEqual(UpdateChip.previews.count, 21)
-        XCTAssertEqual(Set(UpdateChip.previews.map(\.message)).count, 21)
+        XCTAssertEqual(UpdateChip.previews.count, 24)
+        XCTAssertEqual(Set(UpdateChip.previews.map(\.message)).count, 24)
+    }
+
+    func testDownloadHoldAndRelaunchWhenIdleChipStates() throws {
+        let lowData = try XCTUnwrap(UpdateChip.make(
+            status: .available(version: "1.2.0"), notice: nil, checking: false, showsDownload: true,
+            available: "1.2.0", downloadHold: .lowDataMode, ready: nil, outdatedServer: nil, sessions: 0))
+        XCTAssertTrue(lowData.message.contains("Low Data Mode"))
+        XCTAssertEqual(lowData.button?.title, "Download")
+        XCTAssertEqual(lowData.button?.action, .download)
+
+        let hotspot = try XCTUnwrap(UpdateChip.make(
+            status: .available(version: "1.2.0"), notice: nil, checking: false, showsDownload: true,
+            available: "1.2.0", downloadHold: .hotspot, ready: nil, outdatedServer: nil, sessions: 0))
+        XCTAssertTrue(hotspot.message.contains("hotspot"))
+        XCTAssertEqual(hotspot.button?.title, "Download")
+
+        let idleReady = try XCTUnwrap(UpdateChip.make(
+            status: .ready(version: "1.2.0"), notice: nil, checking: false, showsDownload: true,
+            ready: .init(version: "1.2.0", compatible: true), relaunchWhenIdle: true, outdatedServer: nil, sessions: 2))
+        XCTAssertTrue(idleReady.message.contains("when hidden"))
+        XCTAssertTrue(idleReady.message.contains("terminals and agents keep running"))
+        XCTAssertEqual(idleReady.button?.title, "Restart Now")
+        XCTAssertEqual(idleReady.button?.action, .update)
+    }
+
+    func testQuietRelaunchMarkerIsConsumedOnce() {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("quiet-relaunch-\(UUID().uuidString)")
+        XCTAssertFalse(QuietRelaunchMarker.take(url))
+        QuietRelaunchMarker.save(to: url)
+        XCTAssertTrue(QuietRelaunchMarker.take(url))
+        XCTAssertFalse(QuietRelaunchMarker.take(url))
+    }
+
+    func testAutomaticInstallObstacles() {
+        let hidden = AutomaticInstallEnvironment(isWindowVisible: false)
+        XCTAssertEqual(AutomaticUpdateInstaller.obstacle(enabled: false, hasReadyUpdate: true, serverCompatible: true, environment: hidden), .automationOff)
+        XCTAssertEqual(AutomaticUpdateInstaller.obstacle(enabled: true, hasReadyUpdate: false, serverCompatible: true, environment: hidden), .noUpdateReady)
+        XCTAssertEqual(AutomaticUpdateInstaller.obstacle(enabled: true, hasReadyUpdate: true, serverCompatible: false, environment: hidden), .incompatibleServer)
+        XCTAssertEqual(AutomaticUpdateInstaller.obstacle(enabled: true, hasReadyUpdate: true, serverCompatible: true,
+                                                         environment: .init(isWindowVisible: false, hasFullScreenWindow: true)), .fullScreen)
+        XCTAssertEqual(AutomaticUpdateInstaller.obstacle(enabled: true, hasReadyUpdate: true, serverCompatible: true,
+                                                         environment: .init(isWindowVisible: false, hasModalOrSheet: true)), .modalPresented)
+        XCTAssertEqual(AutomaticUpdateInstaller.obstacle(enabled: true, hasReadyUpdate: true, serverCompatible: true,
+                                                         environment: .init(isWindowVisible: false, hasUnsavedEditors: true)), .unsavedWork)
+        XCTAssertEqual(AutomaticUpdateInstaller.obstacle(enabled: true, hasReadyUpdate: true, serverCompatible: true,
+                                                         environment: .init(isWindowVisible: true)), .windowVisible)
+        XCTAssertNil(AutomaticUpdateInstaller.obstacle(enabled: true, hasReadyUpdate: true, serverCompatible: true, environment: hidden))
+    }
+
+    func testUpdateSettingsDecodesMissingAndUnknownKeys() throws {
+        let empty = try Settings.decode(Data("{}".utf8))
+        XCTAssertTrue(empty.updates.automaticDownloads)
+        XCTAssertFalse(empty.updates.automaticInstall)
+        let custom = try Settings.decode(Data(#"{"updates":{"automaticDownloads":false,"automaticInstall":true,"futureKey":1}}"#.utf8))
+        XCTAssertFalse(custom.updates.automaticDownloads)
+        XCTAssertTrue(custom.updates.automaticInstall)
     }
 
     func testUpdatedMarkerAnnouncesOnlyTheInstalledBuildOnce() throws {

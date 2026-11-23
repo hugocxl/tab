@@ -122,6 +122,15 @@ public protocol SettingsHost: AnyObject {
     /// Opens an agent tab in Home with `prompt` in its composer, not yet sent.
     func openAgent(prompt: String) throws
 
+    // MARK: Updates
+
+    /// Current updater status and primary action for Settings → General.
+    var updaterSummary: UpdaterSummary { get }
+    /// Runs the updater's primary action from Settings.
+    func performUpdaterAction(_ action: UpdaterSummary.Action)
+    /// Arms a one-shot quiet relaunch for the ready update once Tab is hidden.
+    func scheduleRelaunchWhenIdle()
+
     // MARK: Backup
 
     /// The local projects with their layouts and workspaces, as the backup
@@ -134,6 +143,9 @@ public extension SettingsHost {
     var serverRestarting: Bool { false }
     var canRestartServer: Bool { true }
     var serverRestartFailure: String? { nil }
+    var updaterSummary: UpdaterSummary { UpdaterSummary(detail: "\(Release.appName) \(Release.version)") }
+    func performUpdaterAction(_ action: UpdaterSummary.Action) {}
+    func scheduleRelaunchWhenIdle() {}
 }
 
 /// A host with no app behind it: a running server with default settings,

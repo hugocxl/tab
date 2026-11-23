@@ -313,6 +313,21 @@ final class PaletteSource: PaletteDataSource {
         command(.installCommandLineTool, "Install Command Line Tool…", .window)
         commands.append(RootCommand(id: "check_for_updates", title: "Check for Updates…", category: .window,
                                     target: .run { [weak self] in self?.model.updater.checkForUpdates() }))
+        if let available = model.updater.available, model.updater.prepared == nil {
+            commands.append(RootCommand(id: "download_update", title: "Download \(Release.appName) \(available.version)",
+                                        keywords: "update download release", category: .window,
+                                        target: .run { [weak self] in self?.model.updater.handle(.download) }))
+        }
+        if let prepared = model.updater.prepared {
+            commands.append(RootCommand(id: "install_update", title: "Restart to Update to \(prepared.version)",
+                                        keywords: "update restart install relaunch", category: .window,
+                                        target: .run { [weak self] in self?.model.updater.handle(.update) }))
+            if model.updater.canRelaunchWhenIdle && !model.updater.relaunchWhenIdle && !model.settings.updates.automaticInstall {
+                commands.append(RootCommand(id: "relaunch_when_idle", title: "Relaunch when Idle",
+                                            keywords: "update install background hidden automatic", category: .window,
+                                            target: .run { [weak self] in self?.model.updater.scheduleRelaunchWhenIdle() }))
+            }
+        }
         if Release.isDebugBuild {
             commands.append(RootCommand(id: "preview_update_chips", title: "Preview Update Chips", category: .window,
                                         target: .run { [weak self] in self?.model.updater.previewNextChip() }))

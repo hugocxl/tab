@@ -213,23 +213,27 @@ public struct PreparedUpdate: Equatable, Sendable {
 
     /// Swaps the staged app in, keeping the old one in the staging folder
     /// until its server exits, and starts the new app once this one quits.
-    /// On failure the installed app is left as it was.
-    public func install(processIdentifier: pid_t = getpid()) throws {
+    /// When `quiet` is true, the relaunched app starts hidden in the background
+    /// without stealing focus. On failure the installed app is left as it was.
+    public func install(quiet: Bool = false, processIdentifier: pid_t = getpid()) throws {
         let lock = try installation.replacementLock()
         defer { lock.unlock() }
         try validate()
         try BundleReplacement.replace(current: installation.bundle, next: candidate, backup: backup) {
-            try Self.relaunch(installation.bundle, after: processIdentifier)
+            try Self.relaunch(installation.bundle, after: processIdentifier, quiet: quiet)
         }
     }
 
     /// Starts `bundle` once the process `pid` has exited.
-    static func relaunch(_ bundle: URL, after pid: pid_t) throws {
+    static func relaunch(_ bundle: URL, after pid: pid_t, quiet: Bool = false) throws {
+        let script = quiet
+            ? "while /bin/kill -0 \"$1\" 2>/dev/null; do /bin/sleep 0.1; done; /usr/bin/open -n -g -j -a \"$2\""
+            : "while /bin/kill -0 \"$1\" 2>/dev/null; do /bin/sleep 0.1; done; /usr/bin/open -n -a \"$2\""
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         process.arguments = [
             "-c",
-            "while /bin/kill -0 \"$1\" 2>/dev/null; do /bin/sleep 0.1; done; /usr/bin/open -n \"$2\"",
+            script,
             "tab-relaunch", String(pid), bundle.path,
         ]
         process.standardInput = FileHandle.nullDevice

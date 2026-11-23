@@ -16,7 +16,10 @@ public final class SettingsHostImpl: SettingsHost {
         self.model = model
         subscription = model.changes.sink { [weak self] changes in
             guard let self else { return }
-            if changes.contains(.activity) { self.store?.updateServerState(self.serverState) }
+            if changes.contains(.activity) {
+                self.store?.updateServerState(self.serverState)
+                self.store?.updateUpdaterSummary(self.updaterSummary)
+            }
             if changes.contains(.remoteAccess) { self.refreshRemoteAccess() }
         }
     }
@@ -143,6 +146,22 @@ public final class SettingsHostImpl: SettingsHost {
     public func openAgent(prompt: String) throws {
         guard let pane = model.newTab(.agent) else { throw ModelError("Tab couldn't open an agent tab.") }
         model.draftAgentPrompt(prompt, in: pane)
+    }
+
+    // MARK: Updates
+
+    public var updaterSummary: UpdaterSummary { model.updater.summary }
+
+    public func performUpdaterAction(_ action: UpdaterSummary.Action) {
+        switch action {
+        case .check: model.updater.checkForUpdates()
+        case .download: model.updater.handle(.download)
+        case .install: model.updater.handle(.update)
+        }
+    }
+
+    public func scheduleRelaunchWhenIdle() {
+        model.updater.scheduleRelaunchWhenIdle()
     }
 
     // MARK: Backup

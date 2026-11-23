@@ -24,6 +24,7 @@ public final class SettingsStore {
 
     public private(set) var serverState: ServerConnectionState
     public private(set) var serverSettings: ServerSettingsDoc?
+    public private(set) var updaterSummary: UpdaterSummary
     public var serverRestarting: Bool { host?.serverRestarting ?? false }
     public var serverBusy: Bool { serverControlBusy || serverRestarting }
     private var serverControlBusy = false
@@ -69,6 +70,7 @@ public final class SettingsStore {
         self.host = host
         self.theme = theme ?? .shared
         serverState = host?.serverState ?? .stopped
+        updaterSummary = host?.updaterSummary ?? UpdaterSummary(detail: "\(Release.appName) \(Release.version)")
         var errors: [String: String] = [:]
         do {
             settings = try Settings.load(dirs.settings)
@@ -164,6 +166,44 @@ public final class SettingsStore {
             settings = next
             applySettings()
         }
+    }
+
+    public func updateUpdaterSummary(_ summary: UpdaterSummary) {
+        guard summary != updaterSummary else { return }
+        updaterSummary = summary
+        changed()
+    }
+
+    public func setAutomaticDownloads(_ enabled: Bool) {
+        attempt("update-auto-download") {
+            var next = settings
+            next.updates.automaticDownloads = enabled
+            if !enabled { next.updates.automaticInstall = false }
+            try next.saveUpdates(to: dirs.settings)
+            settings = next
+            applySettings()
+        }
+    }
+
+    public func setAutomaticInstall(_ enabled: Bool) {
+        attempt("update-auto-install") {
+            var next = settings
+            next.updates.automaticInstall = enabled
+            if enabled { next.updates.automaticDownloads = true }
+            try next.saveUpdates(to: dirs.settings)
+            settings = next
+            applySettings()
+        }
+    }
+
+    public func performUpdaterAction(_ action: UpdaterSummary.Action) {
+        host?.performUpdaterAction(action)
+        if let summary = host?.updaterSummary { updateUpdaterSummary(summary) }
+    }
+
+    public func scheduleRelaunchWhenIdle() {
+        host?.scheduleRelaunchWhenIdle()
+        if let summary = host?.updaterSummary { updateUpdaterSummary(summary) }
     }
 
     // MARK: Integrations

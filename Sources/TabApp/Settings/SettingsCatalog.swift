@@ -138,6 +138,9 @@ public enum SettingsCatalog {
         SettingItem("file-opener", "Open files with", "Opens files you click in a terminal. Files open in the Tab editor or another application.", .general, "Files"),
         SettingItem("worktree-template", "Default worktree path template", "For example ../{base-dir}.{branch}. Must include {branch}; also supports {project-name}. Relative paths start in the project folder. Overrides the default folder.", .general, "Worktrees"),
         SettingItem("worktree-folder", "Default worktree folder", "Worktrees go in <folder>/<project>/<name>. Leave both location settings empty to use ~/.tab/worktrees.", .general, "Worktrees"),
+        SettingItem("update-status", "Software updates", "Check for new versions of Tab.", .general, "Updates"),
+        SettingItem("update-auto-download", "Download new updates when available", "Download updates in the background, except on a Low Data Mode or hotspot network, and ask before restarting.", .general, "Updates"),
+        SettingItem("update-auto-install", "Install updates automatically", "Relaunch into the new version while Tab is not visible. Your terminals and agents keep running.", .general, "Updates"),
         // Appearance
         SettingItem("light-theme", "Light theme", "Colors for the interface and terminals when macOS uses light appearance.", .appearance, "Themes"),
         SettingItem("dark-theme", "Dark theme", "Colors for the interface and terminals when macOS uses dark appearance.", .appearance, "Themes"),

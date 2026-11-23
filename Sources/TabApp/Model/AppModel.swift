@@ -160,7 +160,7 @@ public final class AppModel {
     public private(set) lazy var proxyController = ProxyController(model: proxy, host: self)
     /// AI commit and pull request actions.
     /// Updates from GitHub Releases.
-    public private(set) lazy var updater = UpdaterController(host: self, dirs: dirs, configuration: proxy.sessionConfiguration())
+    public private(set) lazy var updater = UpdaterController(host: self, dirs: dirs, settings: settings.updates, configuration: proxy.sessionConfiguration())
     /// Icons of this computer's project folders, by path.
     public let iconCache = ProjectIconCache()
     /// Icons of other computers' projects, by project id.
@@ -491,6 +491,7 @@ public final class AppModel {
         if showsSidebar, activeTab?.zoomed != nil { toggleZoom() }
         browserProfiles.defaultProfileId = settings.browser.defaultProfile
         for controller in browserProfiles.panes.all { controller.apply(settings: settings.browser) }
+        updater.setSettings(settings.updates)
         savedAppearance = settings.appearance
         theme.setInterface(settings.appearance)
         theme.setThemes(dark: settings.appearance.darkTheme, light: settings.appearance.lightTheme)

@@ -3,6 +3,15 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.121.0 - 2026-11-23
+
+### Added
+
+- Settings › General includes an Updates section showing the current version, last check time, live update status, and toggles for automatic background downloads and automatic installation while Tab is hidden.
+- Tab downloads updates in the background by default, pauses automatically on Low Data Mode or hotspot networks until back on an unconstrained connection, and resumes automatically.
+- Ready updates that stay compatible with your running server can install and relaunch quietly while Tab is hidden without stealing focus, either automatically or on demand via Relaunch when Idle.
+- The Command Palette offers contextual Download, Restart to Update, and Relaunch when Idle actions when an update is available or ready.
+
 ## 0.120.0 - 2026-11-23
 
 ### Changed

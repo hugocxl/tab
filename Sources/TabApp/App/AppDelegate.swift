@@ -52,11 +52,17 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             exit(1)
         }
         self.socket = socket
+        let quietRelaunch = QuietRelaunchMarker.take(dirs.root.appendingPathComponent("quiet-relaunch"))
         model.start()
-        controller.show()
-        for folder in pendingFolders { model.addProject(folder) }
-        pendingFolders = []
-        NSApp.activate(ignoringOtherApps: true)
+        if quietRelaunch, pendingFolders.isEmpty {
+            controller.window?.orderBack(nil)
+            NSApp.hide(nil)
+        } else {
+            controller.show()
+            for folder in pendingFolders { model.addProject(folder) }
+            pendingFolders = []
+            NSApp.activate(ignoringOtherApps: true)
+        }
     }
 
     /// What this build can offer in its menus.

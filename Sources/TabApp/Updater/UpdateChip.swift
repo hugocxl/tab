@@ -122,7 +122,9 @@ public struct UpdateChip: Equatable, Sendable {
         checking: Bool,
         showsDownload: Bool,
         available: String? = nil,
+        downloadHold: UpdateDownloadHold? = nil,
         ready: Ready?,
+        relaunchWhenIdle: Bool = false,
         outdatedServer: String?,
         sessions: Int,
         agents: Int = 0,
@@ -204,22 +206,44 @@ public struct UpdateChip: Equatable, Sendable {
         }
 
         if let available {
-            return UpdateChip(tone: .info, icon: .icon(.circleArrowDown), message: "\(app) \(available) is available.",
-                              button: Button(title: "Update", action: .download), dismissal: .available(available))
+            let message: String
+            let buttonTitle: String
+            switch downloadHold {
+            case .lowDataMode?:
+                message = "\(app) \(available) is available. Download paused in Low Data Mode."
+                buttonTitle = "Download"
+            case .hotspot?:
+                message = "\(app) \(available) is available. Download paused on hotspot."
+                buttonTitle = "Download"
+            case nil:
+                message = "\(app) \(available) is available."
+                buttonTitle = "Update"
+            }
+            return UpdateChip(tone: .info, icon: .icon(.circleArrowDown), message: message,
+                              button: Button(title: buttonTitle, action: .download), dismissal: .available(available))
         }
 
         if let ready {
             let message: String
+            let buttonTitle: String
             switch UpdateDecision.step(compatible: ready.compatible, sessions: sessions, agents: agents) {
+            case .install where relaunchWhenIdle:
+                message = sessions > 0 || agents > 0
+                    ? "\(app) \(ready.version) is ready. It will install when hidden; your terminals and agents keep running."
+                    : "\(app) \(ready.version) is ready. It will install when hidden."
+                buttonTitle = "Restart Now"
             case .install where sessions > 0 || agents > 0:
                 message = "\(app) \(ready.version) is ready. Restart to finish updating; your terminals and agents keep running."
+                buttonTitle = "Restart"
             case .install, .installStoppingIdleServer:
                 message = "\(app) \(ready.version) is ready. Restart to finish updating."
+                buttonTitle = "Restart"
             case .confirmEndingTerminals:
                 message = "\(app) \(ready.version) is ready. It needs a new server, so restarting ends running terminals and agents."
+                buttonTitle = "Restart"
             }
             return UpdateChip(tone: .info, icon: .icon(.refreshCircle), message: message,
-                              button: Button(title: "Restart", action: .update), dismissal: .ready(ready.version))
+                              button: Button(title: buttonTitle, action: .update), dismissal: .ready(ready.version))
         }
 
         if let version = waitingForServer {
@@ -254,33 +278,37 @@ public struct UpdateChip: Equatable, Sendable {
         let compatible = Ready(version: version, compatible: true)
         let incompatible = Ready(version: version, compatible: false)
         typealias Sample = (status: UpdaterStatus, notice: UpdateNotice?, checking: Bool, available: String?,
-                            ready: Ready?, server: String?, sessions: Int)
+                            hold: UpdateDownloadHold?, ready: Ready?, idle: Bool, server: String?, sessions: Int)
         let samples: [Sample] = [
-            (.checking, nil, true, nil, nil, nil, 0),
-            (.idle, .upToDate(version: Release.version), false, nil, nil, nil, 0),
-            (.available(version: version), nil, false, version, nil, nil, 0),
-            (.downloading(version: version, progress: 0.42), nil, false, nil, nil, nil, 0),
-            (.preparing(version: version), nil, false, nil, nil, nil, 0),
-            (.ready(version: version), nil, false, nil, compatible, nil, 0),
-            (.ready(version: version), nil, false, nil, compatible, nil, 2),
-            (.ready(version: version), nil, false, nil, incompatible, nil, 2),
-            (.ready(version: version), .confirmUpdate, false, nil, incompatible, nil, 2),
-            (.ready(version: version), .unsavedEditors, false, nil, incompatible, nil, 2),
-            (.installing(version: version), nil, false, nil, incompatible, nil, 2),
-            (.idle, .updated(version: version), false, nil, nil, nil, 0),
-            (.idle, nil, false, nil, nil, "1.4.2", 2),
-            (.idle, .confirmServerRestart, false, nil, nil, "1.4.2", 2),
-            (.restartingServer, nil, false, nil, nil, "1.4.2", 2),
-            (.idle, .serverRestarted(version: version), false, nil, nil, nil, 0),
-            (.idle, .checkFailed("You’re offline."), false, nil, nil, nil, 0),
-            (.idle, .downloadFailed(version: version, reason: "The update download doesn't match its checksum."), false, nil, nil, nil, 0),
-            (.ready(version: version), .installFailed("Can't write next to Tab.app."), false, nil, compatible, nil, 0),
-            (.idle, .serverRestartFailed("The server didn’t come back in time."), false, nil, nil, "1.4.2", 2),
-            (.idle, .unavailable("Move \(Release.appName).app to Applications and reopen it before updating."), false, nil, nil, nil, 0),
+            (.checking, nil, true, nil, nil, nil, false, nil, 0),
+            (.idle, .upToDate(version: Release.version), false, nil, nil, nil, false, nil, 0),
+            (.available(version: version), nil, false, version, nil, nil, false, nil, 0),
+            (.available(version: version), nil, false, version, .lowDataMode, nil, false, nil, 0),
+            (.available(version: version), nil, false, version, .hotspot, nil, false, nil, 0),
+            (.downloading(version: version, progress: 0.42), nil, false, nil, nil, nil, false, nil, 0),
+            (.preparing(version: version), nil, false, nil, nil, nil, false, nil, 0),
+            (.ready(version: version), nil, false, nil, nil, compatible, false, nil, 0),
+            (.ready(version: version), nil, false, nil, nil, compatible, false, nil, 2),
+            (.ready(version: version), nil, false, nil, nil, compatible, true, nil, 2),
+            (.ready(version: version), nil, false, nil, nil, incompatible, false, nil, 2),
+            (.ready(version: version), .confirmUpdate, false, nil, nil, incompatible, false, nil, 2),
+            (.ready(version: version), .unsavedEditors, false, nil, nil, incompatible, false, nil, 2),
+            (.installing(version: version), nil, false, nil, nil, incompatible, false, nil, 2),
+            (.idle, .updated(version: version), false, nil, nil, nil, false, nil, 0),
+            (.idle, nil, false, nil, nil, nil, false, "1.4.2", 2),
+            (.idle, .confirmServerRestart, false, nil, nil, nil, false, "1.4.2", 2),
+            (.restartingServer, nil, false, nil, nil, nil, false, "1.4.2", 2),
+            (.idle, .serverRestarted(version: version), false, nil, nil, nil, false, nil, 0),
+            (.idle, .checkFailed("You’re offline."), false, nil, nil, nil, false, nil, 0),
+            (.idle, .downloadFailed(version: version, reason: "The update download doesn't match its checksum."), false, nil, nil, nil, false, nil, 0),
+            (.ready(version: version), .installFailed("Can't write next to Tab.app."), false, nil, nil, compatible, false, nil, 0),
+            (.idle, .serverRestartFailed("The server didn’t come back in time."), false, nil, nil, nil, false, "1.4.2", 2),
+            (.idle, .unavailable("Move \(Release.appName).app to Applications and reopen it before updating."), false, nil, nil, nil, false, nil, 0),
         ]
         return samples.compactMap {
             make(status: $0.status, notice: $0.notice, checking: $0.checking, showsDownload: true,
-                 available: $0.available, ready: $0.ready, outdatedServer: $0.server, sessions: $0.sessions)
+                 available: $0.available, downloadHold: $0.hold, ready: $0.ready, relaunchWhenIdle: $0.idle,
+                 outdatedServer: $0.server, sessions: $0.sessions)
         }
     }()
 

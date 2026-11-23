@@ -26,8 +26,48 @@ public protocol UpdaterHost: AnyObject {
     /// Quits the app. The new version is already in place and starts once
     /// this process exits.
     func quitForUpdate()
+    /// Whether Tab's UI is in a state that allows a quiet idle relaunch.
+    var automaticInstallEnvironment: AutomaticInstallEnvironment { get }
     /// The updater's status or chip changed.
     func updaterDidChange()
+}
+
+public extension UpdaterHost {
+    var automaticInstallEnvironment: AutomaticInstallEnvironment {
+        AutomaticInstallEnvironment(isWindowVisible: true)
+    }
+}
+
+/// Snapshot of the updater's state for Settings and the Command Palette.
+public struct UpdaterSummary: Equatable, Sendable {
+    public enum Action: Equatable, Sendable {
+        case check
+        case download
+        case install
+    }
+
+    public var detail: String
+    public var buttonTitle: String
+    public var buttonEnabled: Bool
+    public var action: Action
+    public var canRelaunchWhenIdle: Bool
+    public var relaunchWhenIdle: Bool
+
+    public init(
+        detail: String,
+        buttonTitle: String = "Check for Updates",
+        buttonEnabled: Bool = true,
+        action: Action = .check,
+        canRelaunchWhenIdle: Bool = false,
+        relaunchWhenIdle: Bool = false
+    ) {
+        self.detail = detail
+        self.buttonTitle = buttonTitle
+        self.buttonEnabled = buttonEnabled
+        self.action = action
+        self.canRelaunchWhenIdle = canRelaunchWhenIdle
+        self.relaunchWhenIdle = relaunchWhenIdle
+    }
 }
 
 /// Where the updater is.
@@ -72,6 +112,18 @@ public final class UpdaterController {
     public private(set) var prepared: PreparedUpdate?
     /// A release newer than `prepared`, not downloaded yet.
     public private(set) var available: UpdateManifest?
+    /// The last time an update check completed.
+    public private(set) var lastCheckDate: Date?
+    /// Why an automatic background download is paused, if it is.
+    public private(set) var downloadHold: UpdateDownloadHold?
+    /// Whether the person asked to install the ready update once Tab is hidden.
+    public private(set) var relaunchWhenIdle = false
+
+    /// Whether the current ready update can be scheduled for quiet idle relaunch.
+    public var canRelaunchWhenIdle: Bool {
+        guard let prepared, let server = host?.localServerBuild else { return false }
+        return UpdateDecision.isCompatible(prepared.manifest, with: server)
+    }
 
     /// The window's update chip, if it has something to say.
     public var chip: UpdateChip? {
@@ -90,17 +142,78 @@ public final class UpdaterController {
         }
         let checking = manualCheck && (status == .checking || installation == nil)
         let offered = available.map(\.version).flatMap { $0 == dismissedAvailable ? nil : $0 }
-        return UpdateChip.make(status: status, notice: notice, checking: checking, showsDownload: downloadingVersion != dismissedDownload,
-                               available: downloadingVersion == nil ? offered : nil, ready: ready, outdatedServer: outdatedServer,
-                               sessions: sessions, agents: host.runningAgentCount, waitingForServer: server == nil && prepared?.version != dismissedReady ? prepared?.version : nil)
+        let showsDownload = downloadingVersion != dismissedDownload && !backgroundDownload
+        return UpdateChip.make(status: status, notice: notice, checking: checking, showsDownload: showsDownload,
+                               available: downloadingVersion == nil ? offered : nil, downloadHold: downloadHold,
+                               ready: ready, relaunchWhenIdle: relaunchWhenIdle || settings.automaticInstall,
+                               outdatedServer: outdatedServer, sessions: sessions, agents: host.runningAgentCount,
+                               waitingForServer: server == nil && prepared?.version != dismissedReady ? prepared?.version : nil)
     }
+
+    /// Status and primary action for Settings → General → Updates.
+    public var summary: UpdaterSummary {
+        let app = Release.appName
+        let current = "\(app) \(Release.version)"
+        let idleReady = canRelaunchWhenIdle
+        let idleArmed = relaunchWhenIdle || settings.automaticInstall
+        switch status {
+        case .unavailable(let reason):
+            return UpdaterSummary(detail: "\(current) · \(reason)", buttonTitle: "Check for Updates", buttonEnabled: false)
+        case .checking:
+            return UpdaterSummary(detail: "\(current) · Checking for updates…", buttonTitle: "Checking…", buttonEnabled: false)
+        case let .downloading(version, progress):
+            let percent = progress.map { " \(Int(($0 * 100).rounded(.down)))%" } ?? ""
+            return UpdaterSummary(detail: "Downloading \(app) \(version)…\(percent)", buttonTitle: "Downloading…", buttonEnabled: false)
+        case .preparing(let version):
+            return UpdaterSummary(detail: "Verifying \(app) \(version)…", buttonTitle: "Verifying…", buttonEnabled: false)
+        case .installing(let version):
+            return UpdaterSummary(detail: "Installing \(app) \(version)…", buttonTitle: "Installing…", buttonEnabled: false)
+        case .installed(let version):
+            return UpdaterSummary(detail: "\(app) \(version) is installed. Restart to open it.",
+                                  buttonTitle: "Restart", buttonEnabled: true, action: .install)
+        case .restartingServer:
+            return UpdaterSummary(detail: "Restarting the local server…", buttonTitle: "Restarting…", buttonEnabled: false)
+        case .ready(let version):
+            let note = idleReady && idleArmed
+                ? "\(app) \(version) is ready and will install when \(app) is hidden."
+                : "\(app) \(version) is ready to install."
+            return UpdaterSummary(detail: note, buttonTitle: "Restart to Update", buttonEnabled: host?.localServerBuild != nil,
+                                  action: .install, canRelaunchWhenIdle: idleReady, relaunchWhenIdle: idleArmed)
+        case .available(let version):
+            let note: String
+            switch downloadHold {
+            case .lowDataMode?: note = "\(app) \(version) is available. Download paused in Low Data Mode."
+            case .hotspot?: note = "\(app) \(version) is available. Download paused on hotspot."
+            case nil: note = "\(app) \(version) is available."
+            }
+            return UpdaterSummary(detail: note, buttonTitle: "Download", buttonEnabled: true, action: .download)
+        case .idle:
+            if let lastCheckDate {
+                let formatted = Self.relativeDateFormatter.localizedString(for: lastCheckDate, relativeTo: Date())
+                return UpdaterSummary(detail: "\(current) · Last checked \(formatted).")
+            }
+            return UpdaterSummary(detail: current)
+        }
+    }
+
+    private static let relativeDateFormatter: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        return formatter
+    }()
 
     private weak var host: UpdaterHost?
     private let record: URL
     private let updatedMarker: URL
+    private let quietRelaunchMarker: URL
+    private let checkStateURL: URL
     private let serverStartupLock: URL
     private var downloader: UpdateDownloader
     private var installation: Installation?
+    private var settings: UpdateSettings
+    private var networkState = UpdateNetworkState.unconstrained
+    private var networkMonitor: UpdateNetworkMonitor?
+    private var automaticInstaller: AutomaticUpdateInstaller?
     private var timer: Timer?
     private var task: Task<Void, Never>?
     private var replacingServer = false
@@ -113,6 +226,11 @@ public final class UpdaterController {
     }
     /// A check the person asked for is running or waits for the updater to start.
     private var manualCheck = false
+    /// Whether the active download started automatically in the background.
+    private var backgroundDownload = false
+    /// Whether the last background check failed while offline, so coming back
+    /// online should retry once automatically.
+    private var needsOnlineCheck = false
     /// Server controls wait while an update is being installed or downloaded.
     var canRestartServer: Bool { !isBusy }
 
@@ -141,26 +259,78 @@ public final class UpdaterController {
 
     /// - Parameters:
     ///   - dirs: the profile, which keeps the pending update record.
+    ///   - settings: automatic download and idle install preferences.
     ///   - configuration: the session configuration for downloads, carrying
     ///     the app's proxy when it is used for the whole app.
-    public init(host: UpdaterHost, dirs: TabDirs, configuration: URLSessionConfiguration = .ephemeral) {
+    public init(
+        host: UpdaterHost,
+        dirs: TabDirs,
+        settings: UpdateSettings = UpdateSettings(),
+        configuration: URLSessionConfiguration = .ephemeral
+    ) {
         self.host = host
+        self.settings = settings
         record = dirs.root.appendingPathComponent("pending-update.json")
         updatedMarker = dirs.root.appendingPathComponent("updated-to")
+        quietRelaunchMarker = dirs.root.appendingPathComponent("quiet-relaunch")
+        checkStateURL = dirs.root.appendingPathComponent("update-check-state.json")
         serverStartupLock = dirs.root.appendingPathComponent("server.startup-lock")
         downloader = UpdateDownloader(configuration: configuration)
+        lastCheckDate = UpdateCheckState.load(from: checkStateURL)
+        configureAutomation(settleDelay: AutomaticUpdateInstaller.defaultSettleDelay)
     }
 
-    init(host: UpdaterHost, dirs: TabDirs, prepared: PreparedUpdate, operations: UpdaterOperations) {
+    init(
+        host: UpdaterHost,
+        dirs: TabDirs,
+        prepared: PreparedUpdate? = nil,
+        installation: Installation? = nil,
+        settings: UpdateSettings = UpdateSettings(),
+        settleDelay: TimeInterval = AutomaticUpdateInstaller.defaultSettleDelay,
+        operations: UpdaterOperations
+    ) {
         self.host = host
+        self.settings = settings
         record = dirs.root.appendingPathComponent("pending-update.json")
         updatedMarker = dirs.root.appendingPathComponent("updated-to")
+        quietRelaunchMarker = dirs.root.appendingPathComponent("quiet-relaunch")
+        checkStateURL = dirs.root.appendingPathComponent("update-check-state.json")
         serverStartupLock = dirs.root.appendingPathComponent("server.startup-lock")
         downloader = UpdateDownloader()
-        installation = prepared.installation
+        self.installation = installation ?? prepared?.installation
         self.prepared = prepared
         self.operations = operations
-        status = .ready(version: prepared.version)
+        if let prepared { status = .ready(version: prepared.version) }
+        configureAutomation(settleDelay: settleDelay)
+    }
+
+    private func configureAutomation(settleDelay: TimeInterval) {
+        automaticInstaller = AutomaticUpdateInstaller(
+            settleDelay: settleDelay,
+            evaluate: { [weak self] in
+                guard let self else { return .noUpdateReady }
+                return self.automaticInstallObstacle()
+            },
+            onTrigger: { [weak self] in self?.installQuietly() }
+        )
+    }
+
+    /// Applies updated automation preferences from Settings.
+    public func setSettings(_ newSettings: UpdateSettings) {
+        guard newSettings != settings else { return }
+        settings = newSettings
+        maybeStartAutomaticDownload()
+        automaticInstaller?.reevaluate()
+        host?.updaterDidChange()
+    }
+
+    /// Arms a one-shot quiet relaunch for the ready update once Tab is hidden.
+    public func scheduleRelaunchWhenIdle() {
+        guard canRelaunchWhenIdle, !isBusy else { return }
+        relaunchWhenIdle = true
+        automaticInstaller?.startObserving()
+        automaticInstaller?.reevaluate()
+        host?.updaterDidChange()
     }
 
     /// Uses a new session configuration, such as after the proxy changed.
@@ -203,6 +373,7 @@ public final class UpdaterController {
                 self.prepared = pending
                 if let updated { self.notice = .updated(version: updated) }
                 self.refreshStatus()
+                self.startMonitors()
                 self.check()
                 self.timer = Timer.scheduledTimer(withTimeInterval: Self.checkInterval, repeats: true) { [weak self] _ in
                     MainActor.assumeIsolated { self?.check() }
@@ -213,7 +384,19 @@ public final class UpdaterController {
         }
     }
 
-    /// Stops background checks.
+    private func startMonitors() {
+        if networkMonitor == nil {
+            let monitor = UpdateNetworkMonitor { [weak self] state in
+                self?.networkStateDidChange(state)
+            }
+            networkMonitor = monitor
+            monitor.start()
+        }
+        automaticInstaller?.startObserving()
+        automaticInstaller?.reevaluate()
+    }
+
+    /// Stops background checks and observers.
     public func stop() {
         timer?.invalidate()
         timer = nil
@@ -221,6 +404,28 @@ public final class UpdaterController {
         task = nil
         noticeTimer?.invalidate()
         serverRestartTimer?.invalidate()
+        networkMonitor?.stop()
+        networkMonitor = nil
+        automaticInstaller?.stop()
+    }
+
+    /// Reacts to network changes: resumes paused background downloads once the
+    /// network is unconstrained, and retries a failed offline check when online.
+    func networkStateDidChange(_ state: UpdateNetworkState) {
+        let wasOnline = networkState.isOnline
+        guard state != networkState else { return }
+        networkState = state
+        if state.isOnline, !wasOnline, needsOnlineCheck, !isBusy, installation != nil {
+            needsOnlineCheck = false
+            check()
+            return
+        }
+        maybeStartAutomaticDownload()
+    }
+
+    /// Re-evaluates whether an armed quiet relaunch can start now.
+    func reevaluateAutomaticInstall() {
+        automaticInstaller?.reevaluate()
     }
 
     /// Check for Updates…: checks now and reports on the chip, bringing
@@ -232,6 +437,7 @@ public final class UpdaterController {
         dismissedServer = nil
         switch status {
         case .installing, .installed, .restartingServer, .downloading, .preparing:
+            backgroundDownload = false
             host?.updaterDidChange()
             return
         case .unavailable(let reason):
@@ -330,7 +536,10 @@ public final class UpdaterController {
         guard !isBusy, host.localServerBuild != nil, !replacingServer, host.runningAgentCount == 0,
               UpdateDecision.shouldReplaceServer(serverVersion: host.localServerBuild?.version, appVersion: Release.version,
                                                  sessions: host.runningSessionCount)
-        else { return }
+        else {
+            automaticInstaller?.reevaluate()
+            return
+        }
         replacingServer = true
         Task { [weak self] in
             _ = await host.stopLocalServerIfIdle()
@@ -387,39 +596,88 @@ public final class UpdaterController {
         switch result {
         case .failure(let error):
             Log.updates.error("update check failed: \(String(describing: error), privacy: .public)")
+            if !networkState.isOnline || Self.isOfflineError(error) { needsOnlineCheck = true }
             refreshStatus()
             if manual { notice = .checkFailed(UpdateChip.reason(error)) }
         case .success(let latest):
+            needsOnlineCheck = false
+            let now = Date()
+            lastCheckDate = now
+            UpdateCheckState.save(now, to: checkStateURL)
             if case .checkFailed = notice { notice = nil }
             available = Self.newerRelease(latest, than: prepared?.version)
             refreshStatus()
             if manual, available == nil, prepared == nil { notice = .upToDate(version: Release.version) }
+            if available != nil { maybeStartAutomaticDownload() }
         }
         host?.updaterDidChange()
         reconcile()
     }
 
-    /// Update: downloads and verifies the available release in the background.
-    private func download() {
+    private static func isOfflineError(_ error: Error) -> Bool {
+        guard let urlError = error as? URLError else { return false }
+        switch urlError.code {
+        case .notConnectedToInternet, .networkConnectionLost, .dataNotAllowed: return true
+        default: return false
+        }
+    }
+
+    private var wantsAutomaticDownload: Bool {
+        settings.automaticDownloads || settings.automaticInstall
+    }
+
+    /// Starts downloading `available` in the background when enabled and the
+    /// network is neither in Low Data Mode nor on a hotspot; records the hold
+    /// otherwise.
+    private func maybeStartAutomaticDownload() {
+        guard available != nil, installation != nil, !isBusy else {
+            if available == nil, downloadHold != nil {
+                downloadHold = nil
+                host?.updaterDidChange()
+            }
+            return
+        }
+        guard wantsAutomaticDownload else {
+            if downloadHold != nil {
+                downloadHold = nil
+                host?.updaterDidChange()
+            }
+            return
+        }
+        if let hold = networkState.hold {
+            if downloadHold != hold {
+                downloadHold = hold
+                host?.updaterDidChange()
+            }
+            return
+        }
+        guard networkState.isOnline else { return }
+        downloadHold = nil
+        download(automatic: true)
+    }
+
+    /// Downloads and verifies the available release in the background.
+    /// Manual downloads always show progress and bypass Low Data Mode / hotspot
+    /// holds; automatic downloads stay quiet until ready.
+    private func download(automatic: Bool = false) {
         guard let manifest = available, let installation, !isBusy else { return }
         let downloader = downloader
+        let operations = operations
         let version = manifest.version
-        notice = nil
+        downloadHold = nil
+        backgroundDownload = automatic
+        if !automatic { notice = nil }
         status = .downloading(version: version, progress: manifest.size == nil ? nil : 0)
         task = Task { [weak self] in
             let result: Result<PreparedUpdate, Error>
             do {
-                let folder = FileManager.default.temporaryDirectory.appendingPathComponent("tab-update-\(UUID().uuidString)")
-                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-                defer { try? FileManager.default.removeItem(at: folder) }
-                let archive = try await downloader.download(manifest, into: folder) { fraction in
-                    Task { @MainActor in self?.downloadProgressed(version, fraction) }
-                }
+                let prepared = try await operations.downloadAndPrepare(
+                    downloader, manifest, installation,
+                    { fraction in Task { @MainActor in self?.downloadProgressed(version, fraction) } },
+                    { Task { @MainActor in self?.downloadPreparing(version) } }
+                )
                 try Task.checkCancellation()
-                self?.status = .preparing(version: version)
-                result = .success(try await Task.detached(priority: .utility) {
-                    try installation.prepare(archive: archive, manifest: manifest)
-                }.value)
+                result = .success(prepared)
             } catch {
                 result = .failure(error)
             }
@@ -427,7 +685,7 @@ public final class UpdaterController {
                 if case .success(let update) = result { Task.detached(priority: .utility) { update.discard() } }
                 return
             }
-            self?.finishDownload(result, version: version)
+            self?.finishDownload(result, version: version, automatic: automatic)
         }
     }
 
@@ -436,13 +694,22 @@ public final class UpdaterController {
         status = .downloading(version: version, progress: fraction)
     }
 
-    private func finishDownload(_ result: Result<PreparedUpdate, Error>, version: String) {
+    private func downloadPreparing(_ version: String) {
+        guard case .downloading(version, _) = status else { return }
+        status = .preparing(version: version)
+    }
+
+    private func finishDownload(_ result: Result<PreparedUpdate, Error>, version: String, automatic: Bool) {
         task = nil
+        let wasBackground = backgroundDownload
+        backgroundDownload = false
         switch result {
         case .failure(let error):
             Log.updates.error("update download failed: \(String(describing: error), privacy: .public)")
             refreshStatus()
-            notice = .downloadFailed(version: version, reason: UpdateChip.reason(error))
+            if !automatic || !wasBackground {
+                notice = .downloadFailed(version: version, reason: UpdateChip.reason(error))
+            }
         case .success(let update):
             if let previous = prepared, previous.staging != update.staging {
                 Task.detached(priority: .utility) { previous.discard() }
@@ -452,6 +719,7 @@ public final class UpdaterController {
             dismissedReady = nil
             PendingUpdateRecord.save(update, to: record)
             refreshStatus()
+            automaticInstaller?.reevaluate()
         }
         host?.updaterDidChange()
         reconcile()
@@ -502,13 +770,34 @@ public final class UpdaterController {
         }
     }
 
+    private func automaticInstallObstacle() -> AutomaticInstallObstacle? {
+        guard !isBusy else { return .noUpdateReady }
+        guard let host else { return .noUpdateReady }
+        let enabled = settings.automaticInstall || relaunchWhenIdle
+        let hasReady = prepared != nil
+        let compatible = prepared.map { UpdateDecision.isCompatible($0.manifest, with: host.localServerBuild) } ?? false
+        return AutomaticUpdateInstaller.obstacle(
+            enabled: enabled,
+            hasReadyUpdate: hasReady,
+            serverCompatible: compatible,
+            environment: host.automaticInstallEnvironment
+        )
+    }
+
+    private func installQuietly() {
+        guard automaticInstallObstacle() == nil else { return }
+        install(.keepServer, quiet: true)
+    }
+
     /// Replaces the app and relaunches.
-    private func install(_ mode: InstallMode) {
+    private func install(_ mode: InstallMode, quiet: Bool = false) {
         guard let prepared, let host, !isBusy, host.localServerBuild != nil else { return }
+        automaticInstaller?.cancelSettle()
         notice = nil
         status = .installing(version: prepared.version)
         let record = record
         let updatedMarker = updatedMarker
+        let quietRelaunchMarker = quietRelaunchMarker
         let serverStartupLock = serverStartupLock
         let operations = operations
         task = Task { [weak self] in
@@ -516,7 +805,7 @@ public final class UpdaterController {
                 guard try await host.prepareToQuitForUpdate() else {
                     self?.task = nil
                     self?.refreshStatus()
-                    self?.notice = .unsavedEditors
+                    if !quiet { self?.notice = .unsavedEditors }
                     return
                 }
                 try Task.checkCancellation()
@@ -556,12 +845,19 @@ public final class UpdaterController {
                     }
                 }
                 try await Task.detached(priority: .userInitiated) {
-                    try operations.install(prepared)
+                    if quiet { QuietRelaunchMarker.save(to: quietRelaunchMarker) }
+                    do {
+                        try operations.install(prepared, quiet)
+                    } catch {
+                        if quiet { try? FileManager.default.removeItem(at: quietRelaunchMarker) }
+                        throw error
+                    }
                     try? FileManager.default.removeItem(at: record)
                     UpdatedMarker.save(prepared.version, to: updatedMarker)
                 }.value
                 self?.prepared = nil
                 self?.available = nil
+                self?.relaunchWhenIdle = false
                 self?.task = nil
                 self?.status = .installed(version: prepared.version)
                 host.quitForUpdate()
@@ -570,7 +866,9 @@ public final class UpdaterController {
                 self.task = nil
                 Log.updates.error("could not install the update: \(String(describing: error), privacy: .public)")
                 self.refreshStatus()
-                self.notice = .installFailed(UpdateChip.reason(error))
+                if !quiet {
+                    self.notice = .installFailed(UpdateChip.reason(error))
+                }
             }
         }
     }
@@ -670,9 +968,58 @@ enum PendingUpdateRecord {
     }
 }
 
+/// `quiet-relaunch`: written right before an automatic idle relaunch so the
+/// next launch stays hidden in the background instead of stealing focus.
+public enum QuietRelaunchMarker {
+    public static func save(to url: URL) {
+        try? AtomicFile.write(Data("1".utf8), to: url)
+    }
+
+    /// Returns whether this launch was a quiet relaunch and removes the marker.
+    public static func take(_ url: URL) -> Bool {
+        guard FileManager.default.fileExists(atPath: url.path) else { return false }
+        try? FileManager.default.removeItem(at: url)
+        return true
+    }
+}
+
+/// `update-check-state.json`: remembers when Tab last checked for updates so
+/// Settings can show it across launches.
+enum UpdateCheckState {
+    struct Stored: Codable {
+        var lastCheckDate: Date
+    }
+
+    static func save(_ date: Date, to url: URL) {
+        guard let data = try? JSONEncoder().encode(Stored(lastCheckDate: date)) else { return }
+        try? AtomicFile.write(data, to: url)
+    }
+
+    static func load(from url: URL) -> Date? {
+        guard let data = try? Data(contentsOf: url),
+              let stored = try? JSONDecoder().decode(Stored.self, from: data)
+        else { return nil }
+        return stored.lastCheckDate
+    }
+}
+
 /// External work, separated from orchestration for failure-path tests.
 struct UpdaterOperations {
     var latest: @Sendable (UpdateDownloader) async throws -> UpdateManifest? = { try await $0.latest() }
+    var downloadAndPrepare: @Sendable (
+        UpdateDownloader, UpdateManifest, Installation,
+        @escaping @Sendable (Double) -> Void, @escaping @Sendable () -> Void
+    ) async throws -> PreparedUpdate = { downloader, manifest, installation, onProgress, onPreparing in
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("tab-update-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let archive = try await downloader.download(manifest, into: folder, progress: onProgress)
+        try Task.checkCancellation()
+        onPreparing()
+        return try await Task.detached(priority: .utility) {
+            try installation.prepare(archive: archive, manifest: manifest)
+        }.value
+    }
     var validate: @Sendable (PreparedUpdate) throws -> Void = { try $0.validate() }
-    var install: @Sendable (PreparedUpdate) throws -> Void = { try $0.install() }
+    var install: @Sendable (PreparedUpdate, Bool) throws -> Void = { try $0.install(quiet: $1) }
 }

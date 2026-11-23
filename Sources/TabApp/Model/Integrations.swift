@@ -192,6 +192,10 @@ extension AppModel: UpdaterHost {
         NSApp.terminate(nil)
     }
 
+    public var automaticInstallEnvironment: AutomaticInstallEnvironment {
+        AutomaticInstallEnvironment.current(hasUnsavedEditors: openEditors.contains(where: \.isDirty))
+    }
+
     public func updaterDidChange() {
         notify(.activity)
     }
