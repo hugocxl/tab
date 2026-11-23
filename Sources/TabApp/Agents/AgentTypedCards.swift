@@ -416,8 +416,9 @@ final class AgentCompactionRow: AgentCardRow {
     }
 
     override func layoutRow(width: CGFloat) {
-        header.frame = NSRect(x: 0, y: 0, width: header.naturalWidth(maximum: width), height: 28)
-        summary.frame = NSRect(x: 32, y: 32, width: max(1, width - 40), height: summaryHeight)
+        let inset = AgentToolHeader.leadingInset
+        header.frame = NSRect(x: -inset, y: 0, width: header.naturalWidth(maximum: width + inset), height: 28)
+        summary.frame = NSRect(x: 32 - inset, y: 32, width: max(1, width - 40), height: summaryHeight)
         summary.layoutSubtreeIfNeeded()
     }
 

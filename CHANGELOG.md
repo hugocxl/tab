@@ -3,6 +3,14 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.106.0 - 2026-11-23
+
+### Changed
+
+- An agent's working timer shows only the time, without repeating the command already shown
+  in the row above it.
+- Tool calls in an agent conversation line up with the text of its replies.
+
 ## 0.105.1 - 2026-11-22
 
 ### Fixed

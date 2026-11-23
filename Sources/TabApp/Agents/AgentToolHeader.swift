@@ -27,6 +27,9 @@ final class AgentToolHeader: NSButton {
 
     static let chipFont = AppFont.mono(12)
     static let maximumChipWidth: CGFloat = 560
+    /// The gap before the icon, inside the hover plate. Rows place the header this far
+    /// left of their edge so the icon lines up with the transcript's text.
+    static let leadingInset: CGFloat = 9
     private static let iconWidth: CGFloat = 30
 
     private func updateTimestamp() {

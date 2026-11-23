@@ -239,36 +239,17 @@ final class AgentTimelineTests: XCTestCase {
         }
     }
 
-    func testWorkingLineSaysWhatTheAgentIsDoingInWholeSeconds() throws {
+    func testWorkingLineShowsOnlyTheTimeInWholeSeconds() throws {
         let document = AgentTranscriptDocument(frame: .zero)
-        document.workspaceRoot = "/repo"
-        var items = [AgentChatItem(id: "user", kind: .user, text: "Build it"),
-                     AgentChatItem(id: "read", kind: .tool, text: "Read", isComplete: true,
-                                   tool: .init(name: "Read", category: .read, input: #"{"file_path":"/repo/a.swift"}"#, status: .completed)),
+        let items = [AgentChatItem(id: "user", kind: .user, text: "Build it"),
                      AgentChatItem(id: "bash", kind: .tool, text: "Bash", isComplete: false,
                                    tool: .init(name: "Bash", category: .command, input: #"{"command":"swift build"}"#, status: .running))]
         let turn = AgentChatTurn(userItemID: "user", startedAt: Date().addingTimeInterval(-48.7))
-        func line() throws -> String {
-            document.update(items, omittedCount: 0, turns: [turn])
-            document.reflow(viewportWidth: 700)
-            let row = try XCTUnwrap(document.subviews.first { $0 is AgentWorkingRow })
-            return try XCTUnwrap(row.subviews.compactMap { $0 as? NSTextField }.first).stringValue
-        }
-        XCTAssertTrue(try line().hasPrefix("4"), "Whole seconds, no tenths")
-        XCTAssertFalse(try line().contains("."))
-        func activity() throws -> String? {
-            let text = try line()
-            return text.range(of: " · ").map { String(text[$0.upperBound...]) }
-        }
-        XCTAssertEqual(try activity(), "Bash · swift build")
-        items.append(.init(id: "think", kind: .tool, text: "Thinking", detail: "…", isComplete: false,
-                           workContext: .init(itemType: "reasoning")))
-        XCTAssertEqual(try activity(), "Thinking")
-        items.append(.init(id: "agent", kind: .tool, text: "Task", isComplete: false,
-                           tool: .init(name: "Task", category: .subagent, input: #"{"description":"Audit fixtures","prompt":"…"}"#, status: .running)))
-        XCTAssertEqual(try activity(), "Agent · Audit fixtures")
-        items = items.map { var item = $0; item.isComplete = true; return item }
-        XCTAssertNil(try activity(), "Streaming prose or nothing running shows only the time")
+        document.update(items, omittedCount: 0, turns: [turn])
+        document.reflow(viewportWidth: 700)
+        let row = try XCTUnwrap(document.subviews.first { $0 is AgentWorkingRow })
+        let line = try XCTUnwrap(row.subviews.compactMap { $0 as? NSTextField }.first).stringValue
+        XCTAssertEqual(line, "48s", "Whole seconds, without the running command, which shows in its own row")
         XCTAssertEqual(AgentTurnTime.seconds(185.9), "3m 05s")
         XCTAssertEqual(AgentTurnTime.seconds(3785), "1h 03m 05s")
     }
@@ -343,15 +324,15 @@ final class AgentTimelineTests: XCTestCase {
                        "Nothing can load them, so no button offers to")
     }
 
-    func testWorkingLineNamesRetriesAndRateLimitsFirst() {
+    func testWorkingLineNamesRetriesAndRateLimits() {
         let soon = Calendar.current.date(bySettingHour: 14, minute: 0, second: 0, of: Date()) ?? Date()
-        XCTAssertEqual(AgentWorkingRow.describe(.init(kind: .retrying, attempt: 2, message: "Overloaded"), otherwise: "Bash · ls"),
+        XCTAssertEqual(AgentWorkingRow.describe(.init(kind: .retrying, attempt: 2, message: "Overloaded")),
                        "Retrying (attempt 2) · Overloaded")
-        XCTAssertTrue(AgentWorkingRow.describe(.init(kind: .rateLimited, resumesAt: soon), otherwise: nil)?.hasPrefix("Rate limited · resumes at ") == true)
-        XCTAssertEqual(AgentWorkingRow.describe(.init(kind: .rateLimitWarning, message: "98% of the usage limit used"), otherwise: "Bash · ls"),
-                       "Bash · ls", "A warning gives way to what is running")
-        XCTAssertEqual(AgentWorkingRow.describe(nil, otherwise: "Thinking"), "Thinking")
-        XCTAssertEqual(AgentWorkingRow.describe(.init(kind: .init(rawValue: "future")), otherwise: "Thinking"), "Thinking")
+        XCTAssertTrue(AgentWorkingRow.describe(.init(kind: .rateLimited, resumesAt: soon))?.hasPrefix("Rate limited · resumes at ") == true)
+        XCTAssertEqual(AgentWorkingRow.describe(.init(kind: .rateLimitWarning, message: "98% of the usage limit used")),
+                       "98% of the usage limit used")
+        XCTAssertNil(AgentWorkingRow.describe(nil))
+        XCTAssertNil(AgentWorkingRow.describe(.init(kind: .init(rawValue: "future"))))
     }
 
     func testSecondTickerRunsOnlyWhileSomethingSubscribes() {

@@ -768,11 +768,8 @@ final class AgentTranscriptDocument: ThemedView {
         // Only the newest turn can still be running, and its timer is always the
         // conversation's last row, below messages sent while it works.
         if let turn = turns.last, turn.completedAt == nil, itemIndices[turn.userItemID] != nil {
-            let start = itemIndices[turn.userItemID] ?? items.endIndex
-            let current = items[start...].last { $0.kind == .tool && !$0.isComplete }
-            let itemActivity = current.flatMap { AgentWorkingRow.activity(of: $0, root: workspaceRoot) }
             result.append(Entry(id: "working:" + turn.userItemID, kind: .working, items: [], turn: turn,
-                                activity: AgentWorkingRow.describe(providerActivity, otherwise: itemActivity)))
+                                activity: AgentWorkingRow.describe(providerActivity)))
         }
         var foundAnswer = false
         for position in result.indices.reversed() {

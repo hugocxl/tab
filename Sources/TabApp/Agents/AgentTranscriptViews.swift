@@ -698,14 +698,14 @@ final class AgentActivityRow: AgentTimelineRow {
     }
 }
 
-/// The bottom of a running turn: the sidebar's working glyph, the turn's live working
-/// time in whole seconds, and what the agent is doing now, such as `Bash · swift build`.
+/// The bottom of a running turn: the sidebar's working glyph and the turn's live working
+/// time in whole seconds, plus a retry or rate-limit note when one explains the wait.
 /// The time holds while the agent waits for the user.
 @MainActor
 final class AgentWorkingRow: AgentTimelineRow {
     var turn: AgentChatTurn? { didSet { if oldValue != turn { refresh() } } }
-    /// The newest unfinished item's label, worked out when the transcript's entries are
-    /// built, so a tick only formats the time.
+    /// The provider's note, worked out when the transcript's entries are built, so a
+    /// tick only formats the time.
     var activity: String? { didSet { if oldValue != activity { refresh() } } }
     private let glyph = ActivityGlyph()
     private let label = makeLabel("", font: .monospacedDigitSystemFont(ofSize: 13, weight: .regular))
@@ -742,10 +742,10 @@ final class AgentWorkingRow: AgentTimelineRow {
         refresh()
     }
 
-    /// The working line's note: a retry or rate limit first, as it explains a long wait;
-    /// a usage warning only when nothing else is running.
-    static func describe(_ activity: AgentChatActivity?, otherwise item: String?) -> String? {
-        guard let activity else { return item }
+    /// The working line's note: a retry, rate limit or usage warning, which explain a
+    /// long wait. What the agent is running shows in its own row, not here.
+    static func describe(_ activity: AgentChatActivity?) -> String? {
+        guard let activity else { return nil }
         let time = activity.resumesAt.map { date -> String in
             let formatter = DateFormatter()
             formatter.timeStyle = .short
@@ -758,23 +758,10 @@ final class AgentWorkingRow: AgentTimelineRow {
         case .rateLimited:
             return "Rate limited" + (time.map { " · resumes at \($0)" } ?? "")
         case .rateLimitWarning:
-            return item ?? [activity.message, time.map { "resets at \($0)" }].compactMap { $0 }.joined(separator: " · ")
+            return [activity.message, time.map { "resets at \($0)" }].compactMap { $0 }.joined(separator: " · ")
         default:
-            return item
+            return nil
         }
-    }
-
-    /// What an unfinished item says the agent is doing: a tool and its operation,
-    /// `Thinking`, or nil for streaming prose, which shows itself.
-    static func activity(of item: AgentChatItem, root: String?) -> String? {
-        guard item.kind == .tool, !item.isComplete else { return nil }
-        guard let tool = item.tool else {
-            return item.workContext?.itemType == "reasoning" ? "Thinking" : item.text.split(whereSeparator: \.isNewline).first.map(String.init)
-        }
-        let name = AgentToolPresentation.displayName(tool)
-        guard let operation = AgentToolPresentation.operation(tool, root: root)?
-            .split(whereSeparator: \.isNewline).first.map({ String($0.prefix(200)) }) else { return name }
-        return name + " · " + operation
     }
 }
 

@@ -434,7 +434,8 @@ final class AgentToolDisclosure: NSView, NSTextViewDelegate {
         let fullWidth = fullOutput.isHidden ? 0 : ceil(fullOutput.fittingSize.width)
         let stepsWidth = stepsButton.isHidden ? 0 : ceil(stepsButton.fittingSize.width)
         let trailing = (stepsWidth > 0 ? stepsWidth + 8 : 0) + (fullWidth > 0 ? fullWidth + 8 : 0)
-        header.frame = NSRect(x: 0, y: 0, width: header.naturalWidth(maximum: max(0, bounds.width - trailing)), height: headerHeight)
+        let inset = AgentToolHeader.leadingInset
+        header.frame = NSRect(x: -inset, y: 0, width: header.naturalWidth(maximum: max(0, bounds.width + inset - trailing)), height: headerHeight)
         var x = header.frame.maxX + 8
         if !stepsButton.isHidden {
             stepsButton.setTitleColor(theme.fgDim)
