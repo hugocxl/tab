@@ -79,6 +79,7 @@ public enum PluginError: Error, Equatable, Sendable, CustomStringConvertible, Lo
     case bundleNotFound(String)
     case downloadFailed(String)
     case invalidBundle(String)
+    case incompatibleVersion(String)
     case loadFailed(String)
     case installFailed(String)
 
@@ -92,6 +93,8 @@ public enum PluginError: Error, Equatable, Sendable, CustomStringConvertible, Lo
             return "Could not download plugin: \(detail)"
         case .invalidBundle(let detail):
             return "Invalid plugin bundle: \(detail)"
+        case .incompatibleVersion(let detail):
+            return detail
         case .loadFailed(let detail):
             return "Could not load plugin: \(detail)"
         case .installFailed(let detail):

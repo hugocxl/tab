@@ -8,6 +8,7 @@ public struct PluginInstaller: Sendable {
 
     public let dirs: TabDirs
     public let version: String
+    public let buildNumber: String?
     public let isDebugBuild: Bool
     public let localSearchDirectories: [URL]
     private let download: Downloader
@@ -15,12 +16,14 @@ public struct PluginInstaller: Sendable {
     public init(
         dirs: TabDirs,
         version: String = Release.version,
+        buildNumber: String? = Release.buildNumber,
         isDebugBuild: Bool = Release.isDebugBuild,
         localSearchDirectories: [URL]? = nil,
         download: @escaping Downloader = { try await PluginInstaller.defaultDownload($0) }
     ) {
         self.dirs = dirs
         self.version = version
+        self.buildNumber = buildNumber
         self.isDebugBuild = isDebugBuild
         self.localSearchDirectories = localSearchDirectories ?? Self.defaultLocalDirectories()
         self.download = download
@@ -31,6 +34,7 @@ public struct PluginInstaller: Sendable {
         FileManager.default.fileExists(atPath: dirs.pluginBundle(id).path)
     }
 
+<<<<<<< Updated upstream
     /// The `TabPluginVersion` recorded in an installed bundle's `Info.plist`, if any.
     public func installedBundleVersion(_ id: PluginId) -> String? {
         bundleVersion(at: dirs.pluginBundle(id))
@@ -53,6 +57,67 @@ public struct PluginInstaller: Sendable {
            localDate > installedDate {
             return false
         }
+||||||| Stash base
+=======
+    /// The `TabPluginVersion` and `CFBundleVersion` recorded in a bundle's `Info.plist`.
+    public func bundleVersion(at url: URL) -> (version: String?, build: String?)? {
+        let plistURL = url.appendingPathComponent("Contents/Info.plist")
+        guard let data = try? Data(contentsOf: plistURL),
+              let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+        else { return nil }
+        return (plist["TabPluginVersion"] as? String, plist["CFBundleVersion"] as? String)
+    }
+
+    /// The version and build recorded in an installed plugin's `Info.plist`.
+    public func installedBundleVersion(_ id: PluginId) -> (version: String?, build: String?)? {
+        bundleVersion(at: dirs.pluginBundle(id))
+    }
+
+    /// Whether the bundle at `url` was built for this exact Tab version and build.
+    /// Swift modules without library evolution require an exact host-build match.
+    public func isBundleCompatible(at url: URL) -> Bool {
+        guard let info = bundleVersion(at: url) else { return false }
+        if version != Release.sourceVersion {
+            guard info.version == version else { return false }
+            if let buildNumber, let pluginBuild = info.build, pluginBuild != buildNumber {
+                return false
+            }
+        } else if let pluginVersion = info.version, pluginVersion != version {
+            return false
+        }
+        return true
+    }
+
+    /// Whether the installed `.bundle` for `id` is present and matches this Tab build.
+    public func isInstalledBundleCompatible(_ id: PluginId) -> Bool {
+        isBundlePresent(id) && isBundleCompatible(at: dirs.pluginBundle(id))
+    }
+
+    /// Whether a compatible local build exists that is newer than the installed copy
+    /// (so debug rebuilds without a version bump still refresh installed plugins).
+    public func hasNewerLocalBundle(for descriptor: PluginDescriptor) -> Bool {
+        guard let local = findLocalBundle(for: descriptor),
+              isBundleCompatible(at: local) else { return false }
+        let installed = dirs.pluginBundle(descriptor.id)
+        guard isBundleCompatible(at: installed) else { return true }
+        guard let localDate = executableModificationDate(of: local),
+              let installedDate = executableModificationDate(of: installed) else { return false }
+        return localDate > installedDate
+    }
+
+    /// Replaces the installed bundle with a compatible local bundle when one is
+    /// available beside the app (used in debug builds); returns `false` when no
+    /// local bundle exists.
+    public func installLocalIfAvailable(_ descriptor: PluginDescriptor) throws -> Bool {
+        guard let local = findLocalBundle(for: descriptor) else { return false }
+        try validateBundle(at: local, descriptor: descriptor)
+        try FileManager.default.createDirectory(
+            at: dirs.plugins,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
+        try replaceBundle(at: dirs.pluginBundle(descriptor.id), with: local)
+>>>>>>> Stashed changes
         return true
     }
 
@@ -158,7 +223,7 @@ public struct PluginInstaller: Sendable {
         return nil
     }
 
-    private func validateBundle(at url: URL, descriptor: PluginDescriptor) throws {
+    public func validateBundle(at url: URL, descriptor: PluginDescriptor) throws {
         let plistURL = url.appendingPathComponent("Contents/Info.plist")
         guard let data = try? Data(contentsOf: plistURL),
               let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
@@ -179,6 +244,7 @@ public struct PluginInstaller: Sendable {
             throw PluginError.invalidBundle("Expected plugin “\(descriptor.id.rawValue)”, found “\(declaredId)”.")
         }
         if version != Release.sourceVersion {
+<<<<<<< Updated upstream
             let bundleVersion = plist["TabPluginVersion"] as? String
             guard bundleVersion == version else {
                 throw PluginError.invalidBundle(
@@ -202,6 +268,34 @@ public struct PluginInstaller: Sendable {
               let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
               let executable = plist["CFBundleExecutable"] as? String,
               !executable.isEmpty
+||||||| Stash base
+=======
+            guard let pluginVersion = plist["TabPluginVersion"] as? String, pluginVersion == version else {
+                let found = (plist["TabPluginVersion"] as? String) ?? "unknown"
+                throw PluginError.incompatibleVersion(
+                    "Plugin “\(descriptor.name)” (\(found)) doesn't match Tab \(version)."
+                )
+            }
+            if let buildNumber,
+               let pluginBuild = plist["CFBundleVersion"] as? String,
+               pluginBuild != buildNumber {
+                throw PluginError.incompatibleVersion(
+                    "Plugin “\(descriptor.name)” (build \(pluginBuild)) doesn't match Tab build \(buildNumber)."
+                )
+            }
+        } else if let pluginVersion = plist["TabPluginVersion"] as? String, pluginVersion != version {
+            throw PluginError.incompatibleVersion(
+                "Plugin “\(descriptor.name)” (\(pluginVersion)) doesn't match Tab \(version)."
+            )
+        }
+    }
+
+    private func executableModificationDate(of bundleURL: URL) -> Date? {
+        let plistURL = bundleURL.appendingPathComponent("Contents/Info.plist")
+        guard let data = try? Data(contentsOf: plistURL),
+              let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+              let executable = plist["CFBundleExecutable"] as? String, !executable.isEmpty
+>>>>>>> Stashed changes
         else { return nil }
         let binary = bundleURL.appendingPathComponent("Contents/MacOS/\(executable)")
         return (try? FileManager.default.attributesOfItem(atPath: binary.path))?[.modificationDate] as? Date

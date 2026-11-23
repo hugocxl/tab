@@ -130,14 +130,23 @@ final class PluginSystemTests: XCTestCase {
         let plist: [String: Any] = [
             "CFBundleExecutable": "TabExplorerPlugin",
             "CFBundleIdentifier": "com.hugocorta.tab.plugin.explorer",
+            "CFBundleVersion": "120",
             "NSPrincipalClass": "TabExplorerPluginFactory",
             "TabPluginId": "explorer",
+<<<<<<< Updated upstream
             "TabPluginVersion": Release.version,
+||||||| Stash base
+=======
+            "TabPluginVersion": "0.129.0",
+>>>>>>> Stashed changes
         ]
         let plistData = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
         try plistData.write(to: fakeBundle.appendingPathComponent("Contents/Info.plist"))
 
-        let installer = PluginInstaller(dirs: dirs, isDebugBuild: true, localSearchDirectories: [sourceDir])
+        let installer = PluginInstaller(
+            dirs: dirs, version: "0.129.0", buildNumber: "120",
+            isDebugBuild: true, localSearchDirectories: [sourceDir]
+        )
         XCTAssertFalse(installer.isBundlePresent(.explorer))
 
         let installedURL = try await installer.install(PluginCatalog.explorer)
@@ -148,6 +157,7 @@ final class PluginSystemTests: XCTestCase {
         XCTAssertFalse(installer.isBundlePresent(.explorer))
     }
 
+<<<<<<< Updated upstream
     func testInstallerRejectsMismatchedPluginVersion() async throws {
         let dirs = try ModelFixtures.profile()
         addTeardownBlock { try? FileManager.default.removeItem(at: dirs.root) }
@@ -277,4 +287,174 @@ final class PluginSystemTests: XCTestCase {
         }
         return best
     }
+||||||| Stash base
+=======
+    func testPluginInstallerRejectsVersionAndBuildMismatches() async throws {
+        let dirs = try ModelFixtures.profile()
+        addTeardownBlock { try? FileManager.default.removeItem(at: dirs.root) }
+
+        let sourceDir = dirs.root.appendingPathComponent("source-plugins", isDirectory: true)
+        let bundle = try makeFakeBundle(
+            in: sourceDir,
+            id: "diff",
+            executable: "TabDiffPlugin",
+            principal: "TabDiffPluginFactory",
+            version: "0.122.0",
+            build: "100"
+        )
+
+        // Matching version + build succeeds.
+        let matching = PluginInstaller(
+            dirs: dirs, version: "0.122.0", buildNumber: "100",
+            isDebugBuild: true, localSearchDirectories: [sourceDir]
+        )
+        XCTAssertTrue(matching.isBundleCompatible(at: bundle))
+        try matching.validateBundle(at: bundle, descriptor: PluginCatalog.diff)
+
+        // Newer app version rejects older plugin bundle.
+        let newerVersion = PluginInstaller(
+            dirs: dirs, version: "0.129.0", buildNumber: "100",
+            isDebugBuild: true, localSearchDirectories: [sourceDir]
+        )
+        XCTAssertFalse(newerVersion.isBundleCompatible(at: bundle))
+        XCTAssertThrowsError(try newerVersion.validateBundle(at: bundle, descriptor: PluginCatalog.diff)) { error in
+            guard case PluginError.incompatibleVersion = error else {
+                return XCTFail("Expected incompatibleVersion, got \(error)")
+            }
+        }
+
+        // Same version but different build number rejects stale plugin bundle.
+        let newerBuild = PluginInstaller(
+            dirs: dirs, version: "0.122.0", buildNumber: "101",
+            isDebugBuild: true, localSearchDirectories: [sourceDir]
+        )
+        XCTAssertFalse(newerBuild.isBundleCompatible(at: bundle))
+        XCTAssertThrowsError(try newerBuild.validateBundle(at: bundle, descriptor: PluginCatalog.diff)) { error in
+            guard case PluginError.incompatibleVersion = error else {
+                return XCTFail("Expected incompatibleVersion, got \(error)")
+            }
+        }
+    }
+
+    func testLoadInstalledUpdatesOutdatedBundleInsteadOfLoadingIt() async throws {
+        let dirs = try ModelFixtures.profile()
+        addTeardownBlock { try? FileManager.default.removeItem(at: dirs.root) }
+
+        // Place an outdated diff.bundle (0.122.0) directly in TAB_DIR/Plugins/.
+        _ = try makeFakeBundle(
+            in: dirs.plugins,
+            id: "diff",
+            executable: "TabDiffPlugin",
+            principal: "TabDiffPluginFactory",
+            version: "0.122.0",
+            build: "100"
+        )
+
+        var settings = Settings()
+        settings.plugins.markInstalled(.diff)
+        try settings.savePlugins(to: dirs.settings)
+
+        let requestedURL = Box<URL?>(nil)
+        let model = AppModel(dirs: dirs, theme: AppTheme(systemIsDark: true)) { _, _ in nil }
+        model.plugins.installer = PluginInstaller(
+            dirs: dirs,
+            version: "0.129.0",
+            buildNumber: "120",
+            isDebugBuild: false,
+            localSearchDirectories: [],
+            download: { url in
+                requestedURL.value = url
+                throw PluginError.downloadFailed("offline")
+            }
+        )
+
+        model.plugins.loadInstalled()
+        XCTAssertFalse(model.plugins.isActive(.diff))
+        await settle {
+            if case .failed = model.plugins.state(of: .diff) { return true }
+            return false
+        }
+        XCTAssertEqual(
+            requestedURL.value?.lastPathComponent,
+            "TabPlugin-diff-0.129.0-arm64.zip",
+            "Outdated installed plugin must trigger a download for the current app version"
+        )
+        guard case .failed(let message) = model.plugins.state(of: .diff) else {
+            return XCTFail("Expected failed state after offline update attempt, got \(model.plugins.state(of: .diff))")
+        }
+        XCTAssertTrue(message.contains("offline"))
+    }
+
+    func testHasNewerLocalBundleDetectsFreshDebugRebuild() throws {
+        let dirs = try ModelFixtures.profile()
+        addTeardownBlock { try? FileManager.default.removeItem(at: dirs.root) }
+
+        let installed = try makeFakeBundle(
+            in: dirs.plugins,
+            id: "diff",
+            executable: "TabDiffPlugin",
+            principal: "TabDiffPluginFactory",
+            version: "0.129.0",
+            build: "120"
+        )
+        let sourceDir = dirs.root.appendingPathComponent("local-plugins", isDirectory: true)
+        let local = try makeFakeBundle(
+            in: sourceDir,
+            id: "diff",
+            executable: "TabDiffPlugin",
+            principal: "TabDiffPluginFactory",
+            version: "0.129.0",
+            build: "120"
+        )
+
+        let olderDate = Date(timeIntervalSince1970: 1_700_000_000)
+        let newerDate = Date(timeIntervalSince1970: 1_700_000_100)
+        try FileManager.default.setAttributes(
+            [.modificationDate: olderDate],
+            ofItemAtPath: installed.appendingPathComponent("Contents/MacOS/TabDiffPlugin").path
+        )
+        try FileManager.default.setAttributes(
+            [.modificationDate: newerDate],
+            ofItemAtPath: local.appendingPathComponent("Contents/MacOS/TabDiffPlugin").path
+        )
+
+        let installer = PluginInstaller(
+            dirs: dirs, version: "0.129.0", buildNumber: "120",
+            isDebugBuild: true, localSearchDirectories: [sourceDir]
+        )
+        XCTAssertTrue(installer.hasNewerLocalBundle(for: PluginCatalog.diff))
+    }
+
+    private func makeFakeBundle(
+        in directory: URL,
+        id: String,
+        executable: String,
+        principal: String,
+        version: String,
+        build: String
+    ) throws -> URL {
+        let bundle = directory.appendingPathComponent("\(id).bundle", isDirectory: true)
+        let macOSDir = bundle.appendingPathComponent("Contents/MacOS", isDirectory: true)
+        try FileManager.default.createDirectory(at: macOSDir, withIntermediateDirectories: true)
+        let exec = macOSDir.appendingPathComponent(executable)
+        try Data("#!/bin/sh\n".utf8).write(to: exec)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: exec.path)
+        let plist: [String: Any] = [
+            "CFBundleExecutable": executable,
+            "CFBundleIdentifier": "com.hugocorta.tab.plugin.\(id)",
+            "CFBundleVersion": build,
+            "NSPrincipalClass": principal,
+            "TabPluginId": id,
+            "TabPluginVersion": version,
+        ]
+        let plistData = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+        try plistData.write(to: bundle.appendingPathComponent("Contents/Info.plist"))
+        return bundle
+    }
+}
+
+private final class Box<T>: @unchecked Sendable {
+    var value: T
+    init(_ value: T) { self.value = value }
+>>>>>>> Stashed changes
 }
