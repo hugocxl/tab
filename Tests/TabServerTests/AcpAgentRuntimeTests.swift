@@ -254,6 +254,75 @@ extension AcpAgentRuntimeTests {
     }
 }
 
+extension AcpAgentRuntimeTests {
+    private static func update(_ body: String) -> String {
+        #"emit '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"agy-1","update":"# + body + "}}'"
+    }
+
+    /// agy answers a prompt while a command it waits on still runs, then replies by itself.
+    func testWorkThatOutlivesThePromptKeepsTheTurnOpenUntilTheAgentReplies() async throws {
+        let recorder = AgentRuntimeRecorder()
+        let (runtime, fixture) = try runtime("""
+        take
+        \(Self.antigravityInitialize)
+        take
+        emit '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"agy-1"}}'
+        take
+        \(Self.update(#"{"sessionUpdate":"tool_call","toolCallId":"run-1","title":"npm test","kind":"execute","status":"in_progress","rawInput":{"CommandLine":"npm test"}}"#))
+        emit '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'
+        sleep 0.3
+        \(Self.update(#"{"sessionUpdate":"tool_call_update","toolCallId":"run-1","status":"completed","content":[{"type":"content","content":{"type":"text","text":"42 passed"}}]}"#))
+        \(Self.update(#"{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"All 42 tests pass."}}"#))
+        sleep 1
+        \(Self.update(#"{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"The wake fired."}}"#))
+        take
+        emit '{"jsonrpc":"2.0","id":4,"result":{"stopReason":"end_turn"}}'
+        hold
+        """, provider: .antigravity, recorder: recorder)
+        runtime.quietAfterWork = 0.5
+        try await runtime.send(text: "Run the tests", model: nil, reasoningEffort: nil)
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertEqual(recorder.statuses, [.working], "the prompt answered, but the command still runs")
+        try await wait(for: recorder) { recorder.statuses.count >= 2 }
+        XCTAssertEqual(recorder.statuses, [.working, .idle])
+        let tool = try XCTUnwrap(recorder.transcript["acp-tool:run-1"])
+        XCTAssertEqual(tool.text, "npm test", "the command keeps its title after the prompt ends")
+        XCTAssertEqual(tool.tool?.status, .completed)
+        XCTAssertTrue(recorder.transcript.values.contains { $0.kind == .assistant && $0.text == "All 42 tests pass." })
+
+        // A reply nobody prompted, such as a scheduled wake's, is a turn of its own.
+        try await wait(for: recorder) { recorder.statuses.count >= 3 }
+        XCTAssertEqual(recorder.statuses.last, .working)
+        try await runtime.steer(text: "Thanks", attachments: [])
+        try await wait(for: recorder) { recorder.statuses.last == .idle && recorder.statuses.count >= 4 }
+        XCTAssertEqual(try fixture.messages().map { $0["method"] as? String }.last, "session/prompt",
+                       "a follow-up during a held turn is the next prompt")
+        XCTAssertTrue(recorder.transcript.values.contains { $0.kind == .assistant && $0.text == "The wake fired." })
+    }
+
+    func testStoppingAHeldTurnEndsItWithoutAPromptToAnswer() async throws {
+        let recorder = AgentRuntimeRecorder()
+        let (runtime, fixture) = try runtime("""
+        take
+        \(Self.antigravityInitialize)
+        take
+        emit '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"agy-1"}}'
+        take
+        \(Self.update(#"{"sessionUpdate":"tool_call","toolCallId":"wake","title":"Running schedule","kind":"other","status":"in_progress"}"#))
+        emit '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'
+        take
+        hold
+        """, provider: .antigravity, recorder: recorder)
+        try await runtime.send(text: "Remind me in an hour", model: nil, reasoningEffort: nil)
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(recorder.statuses, [.working], "a scheduled wake holds the turn")
+        try await runtime.interrupt()
+        try await wait(for: recorder) { recorder.statuses.last == .idle }
+        try await wait(for: recorder) { (try? fixture.messages().last?["method"] as? String) == "session/cancel" }
+        XCTAssertEqual(recorder.transcript["acp-tool:wake"]?.tool?.status, .interrupted)
+    }
+}
+
 final class AcpSessionOptionsTests: XCTestCase {
     func testGeminiModelsAndOpenCodeOptionsBothListModels() throws {
         let gemini = AcpSessionOptions([

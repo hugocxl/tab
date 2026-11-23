@@ -7,6 +7,11 @@ import TabProtocol
 internal final class AcpSessionUpdates {
     private let onEvent: @Sendable (AgentRuntimeEvent) -> Void
     private var items: [String: AgentChatItem] = [:]
+    /// Tools that go on after their prompt ends, by ID, while they run: a shell command the
+    /// agent waits on, or a scheduled wake. The agent replies by itself when they finish.
+    private var outliving: Set<String> = []
+    /// Tools still running when a turn ended, so a later update keeps their title and input.
+    private var carried: [String: AgentChatItem] = [:]
     /// The order items began in, so a turn's end completes them in order.
     private var order: [String] = []
     /// The message or thought chunks without an ID of their own join, until something else starts.
@@ -20,6 +25,9 @@ internal final class AcpSessionUpdates {
     var currentModel: String?
 
     init(onEvent: @escaping @Sendable (AgentRuntimeEvent) -> Void) { self.onEvent = onEvent }
+
+    /// Whether a tool that outlives its prompt still runs, so the turn stays open after it.
+    var holdsTurn: Bool { !outliving.isEmpty }
 
     func beginTurn() {
         turnNumber += 1
@@ -90,6 +98,11 @@ internal final class AcpSessionUpdates {
 
     /// Completes every open item as the turn ended: done, or stopped when `interrupted`.
     func endTurn(interrupted: Bool, failed: Bool = false) {
+        for id in order where outliving.contains(id) && !interrupted && !failed {
+            if let item = items[id] { carried[id] = item }
+        }
+        if interrupted || failed { outliving.removeAll() }
+        if carried.count > 64 { carried.removeAll() }
         for id in order {
             guard var item = items[id], !item.isComplete else { continue }
             item.isComplete = true
@@ -142,7 +155,7 @@ internal final class AcpSessionUpdates {
     private func toolCall(_ update: [String: Any]) {
         guard let callID = update["toolCallId"] as? String, !callID.isEmpty else { return }
         let id = "acp-tool:" + callID
-        let previous = items[id]
+        let previous = items[id] ?? carried[id]
         let kind = (update["kind"] as? String) ?? previous?.tool?.name.flatMap { Self.kinds[$0] }
         let title = (update["title"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? previous?.text ?? kind ?? "Tool"
         var activity = previous?.tool ?? AgentToolActivity(name: kind ?? "other", status: .running, startedAt: Date())
@@ -203,6 +216,10 @@ internal final class AcpSessionUpdates {
             break
         }
         let done = activity.status == .completed || activity.status == .failed
+        let raw = (update["rawInput"] as? [String: Any]) ?? previous.flatMap { $0.tool?.input?.data(using: .utf8) }
+            .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+        if !done, Self.outlivesPrompt(kind: kind, title: title, rawInput: raw) { outliving.insert(id) } else { outliving.remove(id) }
+        if done { carried[id] = nil }
         var item = AgentChatItem(id: id, kind: .tool, text: title, isComplete: done, tool: activity,
                                  createdAt: previous?.createdAt ?? Date(), updatedAt: Date(),
                                  workContext: .init(providerTurnID: turnID,
@@ -227,6 +244,16 @@ internal final class AcpSessionUpdates {
     }
 
     // MARK: Shapes
+
+    /// Antigravity's own `schedule` call stays in progress until its wake fires.
+    private static let scheduleTitles: Set<String> = ["Run schedule", "Running schedule"]
+
+    /// Whether a running tool goes on after the prompt ends: a command the agent waits on,
+    /// which isn't a daemon, or a scheduled wake. From the provider source's AntigravityProtocol.ts.
+    static func outlivesPrompt(kind: String?, title: String, rawInput: [String: Any]?) -> Bool {
+        if scheduleTitles.contains(title) { return true }
+        return kind == "execute" && rawInput?["IsDaemon"] as? Bool != true
+    }
 
     /// The text of a content block, `{type: "text", text}`; other blocks have none.
     static func text(_ content: Any?) -> String? {

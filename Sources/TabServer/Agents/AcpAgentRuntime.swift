@@ -149,6 +149,17 @@ internal final class AcpAgentRuntime: AgentSessionRuntime, @unchecked Sendable {
     private var starting: [(Result<Void, Error>) -> Void]?
 
     private var busy = false
+    /// The turn's prompt has answered, but work it started goes on, such as a command the agent
+    /// waits on or a scheduled wake, and the agent will reply by itself. Also set for a turn the
+    /// agent began on its own. Such a turn ends after a quiet spell.
+    private var promptSettled = false
+    private var lastProgress = Date()
+    private var holdGeneration = 0
+    /// How long a held turn waits after the agent's last update before it ends: briefly once
+    /// nothing runs, and at most half an hour for a command that never reports back, as the
+    /// provider source bounds it.
+    var quietAfterWork: TimeInterval = 10
+    var quietWhileWorking: TimeInterval = 30 * 60
     private var interruptRequested = false
     private var planMode = false
     private var accessMode: AgentAccessMode = .standard
@@ -274,11 +285,17 @@ internal final class AcpAgentRuntime: AgentSessionRuntime, @unchecked Sendable {
             let response = value as? [String: Any] ?? [:]
             let reason = response["stopReason"] as? String ?? "end_turn"
             let cancelled = reason == "cancelled" || interruptRequested
-            updates.endTurn(interrupted: cancelled)
             let usage = response["usage"] as? [String: Any]
             onEvent(.turnUsage(AgentTurnUsage(inputTokens: agentTokenCount(usage?["inputTokens"]),
                                               outputTokens: agentTokenCount(usage?["outputTokens"]),
                                               model: options.model, stopReason: reason)))
+            if !cancelled, updates.holdsTurn {
+                // The agent replies by itself when the work it left running finishes.
+                promptSettled = true
+                touchHold()
+                return
+            }
+            updates.endTurn(interrupted: cancelled)
             switch reason {
             case "refusal": onEvent(.item(AgentChatItem(kind: .notice, text: "\(name) refused to continue this request.")))
             case "max_tokens": onEvent(.item(AgentChatItem(kind: .notice, text: "\(name) stopped at its output limit.")))
@@ -297,17 +314,58 @@ internal final class AcpAgentRuntime: AgentSessionRuntime, @unchecked Sendable {
         }
     }
 
+    // MARK: Work that outlives the prompt
+
+    /// Notes progress on a held turn and checks again once the quiet spell could be over.
+    private func touchHold() {
+        lastProgress = Date()
+        holdGeneration += 1
+        let generation = holdGeneration
+        let wait = updates.holdsTurn ? quietWhileWorking : quietAfterWork
+        queue.asyncAfter(deadline: .now() + wait) { [weak self] in
+            guard let self, self.busy, self.promptSettled, self.holdGeneration == generation else { return }
+            self.endHeldTurn(interrupted: false)
+        }
+    }
+
+    /// Ends a held turn: one whose prompt already answered.
+    private func endHeldTurn(interrupted: Bool) {
+        guard busy, promptSettled else { return }
+        updates.endTurn(interrupted: interrupted)
+        completeTurn()
+    }
+
+    /// The agent began work nobody prompted, such as its reply when a scheduled wake fires.
+    private func beginAgentTurn() {
+        busy = true
+        promptSettled = true
+        interruptRequested = false
+        updates.beginTurn()
+        onEvent(.providerTurn(reason: "\(name) continued on its own"))
+        onEvent(.status(.working))
+    }
+
     private func completeTurn() {
         busy = false
+        promptSettled = false
+        holdGeneration += 1
         interruptRequested = false
         cancelPermissions(reason: "The response ended")
         onEvent(.status(.idle))
     }
 
-    /// The protocol has no way to add to a running prompt, so a follow-up waits in the queue.
+    /// The protocol has no way to add to a running prompt, so a follow-up waits in the queue. A
+    /// turn whose prompt already answered takes it as its next prompt, as `agy` 1.5 expects.
     func steer(text: String, attachments: [StagedAgentAttachment]) async throws {
-        let name = queue.sync { self.name }
-        throw AgentRuntimeError("\(name) can't take a message while it works. Queue it, or send it when this response ends.")
+        try await perform {
+            guard self.busy, self.promptSettled else {
+                throw AgentRuntimeError("\(self.name) can't take a message while it works. Queue it, or send it when this response ends.")
+            }
+            self.updates.endTurn(interrupted: false)
+            self.promptSettled = false
+            self.holdGeneration += 1
+            try self.prompt(text: text, attachments: attachments)
+        }
     }
 
     func interrupt() async throws {
@@ -317,6 +375,8 @@ internal final class AcpAgentRuntime: AgentSessionRuntime, @unchecked Sendable {
             // The protocol answers pending permission requests with `cancelled` on cancel.
             self.cancelPermissions(reason: "The response was stopped")
             try self.notify("session/cancel", params: ["sessionId": sessionID])
+            // No prompt is left to answer a held turn's cancel, so it ends now.
+            if self.promptSettled { self.endHeldTurn(interrupted: true) }
         }
     }
 
@@ -751,8 +811,13 @@ internal final class AcpAgentRuntime: AgentSessionRuntime, @unchecked Sendable {
             if let model = options.model, model != before { onEvent(.resolvedModel(model)) }
             agentChangedMode()
         default:
-            guard busy else { return }
+            let kind = update["sessionUpdate"] as? String ?? ""
+            if !busy {
+                guard ["agent_message_chunk", "agent_thought_chunk", "tool_call", "tool_call_update", "plan"].contains(kind) else { return }
+                beginAgentTurn()
+            }
             updates.receive(update)
+            if promptSettled { touchHold() }
         }
     }
 

@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.121.1 - 2026-11-23
+
+### Fixed
+
+- Antigravity's reply after a long command or a scheduled wake it started now shows in the agent pane instead of being lost, and its turn stays open until that work finishes.
+
 ## 0.121.0 - 2026-11-23
 
 ### Added
