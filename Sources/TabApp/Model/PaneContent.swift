@@ -161,9 +161,23 @@ public final class PaneRegistry {
     public init() {}
 
     /// Builds panes of `kind` with `factory` from now on. Panes already
-    /// shown keep their controller.
+    /// shown keep their controller until `rebuild(_:)` is called.
     public func register(_ kind: PaneKind, factory: @escaping Factory) {
         factories[kind] = factory
+    }
+
+    /// Removes the factory registered for `kind` (for example, when its plugin
+    /// is uninstalled).
+    public func unregister(_ kind: PaneKind) {
+        factories[kind] = nil
+    }
+
+    /// Disposes cached controllers of `kind` so the next layout recreates them
+    /// with the current factory (or placeholder).
+    public func rebuild(_ kind: PaneKind) {
+        for (id, content) in kinds where PaneKind(content) == kind {
+            remove(id)
+        }
     }
 
     /// Whether a factory builds panes of `kind`.
@@ -221,15 +235,27 @@ final class PlaceholderPaneController: PaneContentController {
 
     init(context: PaneContext) {
         let kind = PaneKind(context.pane.content)
+        let titleText: String
         let detail: String
         switch context.pane.content {
-        case .editor(let path), .diff(let path, _): detail = path
-        case .browser(let browser): detail = browser.url ?? "New page"
-        case .simulator(let simulator): detail = simulator.name ?? "No simulator"
-        case .terminal, .agent: detail = context.project.directory.rawValue
+        case .editor(let path):
+            titleText = kind.name
+            detail = path
+        case .diff(let path, _):
+            titleText = "Diff View Plugin Not Installed"
+            detail = "\(path) — Install Diff View in Settings → Plugins to inspect diffs."
+        case .browser(let browser):
+            titleText = kind.name
+            detail = browser.url ?? "New page"
+        case .simulator(let simulator):
+            titleText = kind.name
+            detail = simulator.name ?? "No simulator"
+        case .terminal, .agent:
+            titleText = kind.name
+            detail = context.project.directory.rawValue
         }
         title = context.pane.title.isEmpty ? kind.name : context.pane.title
-        view = PlaceholderView(title: kind.name, detail: detail)
+        view = PlaceholderView(title: titleText, detail: detail)
     }
 
     func focusContent() { view.window?.makeFirstResponder(view) }

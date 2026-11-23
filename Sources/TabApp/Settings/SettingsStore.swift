@@ -825,4 +825,37 @@ public final class SettingsStore {
             backupStatus = "Import cancelled."
         }
     }
+
+    // MARK: Plugins
+
+    public func pluginState(_ id: PluginId) -> PluginInstallState {
+        host?.pluginState(id) ?? .notInstalled
+    }
+
+    public func pluginsDidChange() {
+        changed()
+    }
+
+    public func installPlugin(_ id: PluginId) {
+        let key = "plugin.\(id.rawValue)"
+        errors[key] = nil
+        changed()
+        Task { [weak self] in
+            guard let self, let host = self.host else { return }
+            do {
+                try await host.installPlugin(id)
+                self.errors[key] = nil
+            } catch {
+                self.errors[key] = Self.message(error)
+            }
+            self.changed()
+        }
+    }
+
+    public func uninstallPlugin(_ id: PluginId) {
+        let key = "plugin.\(id.rawValue)"
+        attempt(key) {
+            try host?.uninstallPlugin(id)
+        }
+    }
 }

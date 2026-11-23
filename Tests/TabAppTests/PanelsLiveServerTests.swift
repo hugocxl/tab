@@ -4,6 +4,8 @@ import TabCore
 import TabProtocol
 import XCTest
 @testable import TabApp
+@testable import TabExplorerPlugin
+@testable import TabDiffPlugin
 
 /// A project's native host backed by a real `tabd` side connection.
 @MainActor

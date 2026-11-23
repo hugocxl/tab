@@ -3,6 +3,16 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.122.0 - 2026-11-23
+
+### Added
+
+- Settings › Plugins lets you install and uninstall optional right-sidebar plugins on demand, starting with Explorer and Diff View, without bundling their code in Tab when uninstalled.
+
+### Changed
+
+- No plugins are installed by default, and opening the right sidebar with no plugins installed offers a shortcut to Settings › Plugins.
+
 ## 0.121.1 - 2026-11-23
 
 ### Fixed

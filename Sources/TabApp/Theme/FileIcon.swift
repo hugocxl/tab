@@ -2,7 +2,7 @@ import AppKit
 
 /// File-type rules resolve remote paths without consulting the local filesystem.
 @MainActor
-enum FileIcon {
+public enum FileIcon {
     typealias Resolution = (icon: AppIcon, hue: AppTheme.IconHue)
 
     /// Exact basenames precede suffix rules; overrides win within each group.
@@ -49,7 +49,7 @@ enum FileIcon {
     static func hasSpecificIcon(for path: String) -> Bool { resolve(path).icon != .file }
 
     /// Resolves and draws file or folder glyphs in the supplied theme.
-    static func image(for path: String, isDirectory: Bool = false, isExpanded: Bool = false,
+    public static func image(for path: String, isDirectory: Bool = false, isExpanded: Bool = false,
                       mimeType: String? = nil, theme: AppTheme, size: CGFloat = 14,
                       artwork: AppIcon.Artwork = .stroke) -> NSImage? {
         let resolved: Resolution = isDirectory ? style(for: isExpanded ? .folderOpen : .folder)

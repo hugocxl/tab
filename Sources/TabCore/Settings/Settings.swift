@@ -15,6 +15,8 @@ public struct Settings: Codable, Equatable, Sendable {
     public var agents: AgentSettings
     /// App update automation.
     public var updates: UpdateSettings
+    /// Installed plugins; none by default.
+    public var plugins: PluginSettings
     /// Other computers' servers, reached over SSH.
     public var servers: [ServerEntry]
 
@@ -29,6 +31,7 @@ public struct Settings: Codable, Equatable, Sendable {
         notifications = NotificationSettings()
         agents = AgentSettings()
         updates = UpdateSettings()
+        plugins = PluginSettings()
         servers = []
     }
 
@@ -45,6 +48,7 @@ public struct Settings: Codable, Equatable, Sendable {
         notifications = try container.value(.notifications, defaults.notifications)
         agents = try container.value(.agents, defaults.agents)
         updates = try container.value(.updates, defaults.updates)
+        plugins = try container.value(.plugins, defaults.plugins)
         servers = try container.value(.servers, defaults.servers)
     }
 
@@ -108,6 +112,10 @@ public struct Settings: Codable, Equatable, Sendable {
 
     public func saveUpdates(to url: URL) throws {
         try saveSection("updates", updates, to: url)
+    }
+
+    public func savePlugins(to url: URL) throws {
+        try saveSection("plugins", plugins, to: url)
     }
 
     public func saveWorktrees(to url: URL) throws {

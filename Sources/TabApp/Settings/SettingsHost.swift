@@ -131,6 +131,15 @@ public protocol SettingsHost: AnyObject {
     /// Arms a one-shot quiet relaunch for the ready update once Tab is hidden.
     func scheduleRelaunchWhenIdle()
 
+    // MARK: Plugins
+
+    /// Current installation state of a plugin.
+    func pluginState(_ id: PluginId) -> PluginInstallState
+    /// Installs and activates `id`.
+    func installPlugin(_ id: PluginId) async throws
+    /// Deactivates and removes `id` from disk.
+    func uninstallPlugin(_ id: PluginId) throws
+
     // MARK: Backup
 
     /// The local projects with their layouts and workspaces, as the backup
@@ -146,6 +155,9 @@ public extension SettingsHost {
     var updaterSummary: UpdaterSummary { UpdaterSummary(detail: "\(Release.appName) \(Release.version)") }
     func performUpdaterAction(_ action: UpdaterSummary.Action) {}
     func scheduleRelaunchWhenIdle() {}
+    func pluginState(_ id: PluginId) -> PluginInstallState { .notInstalled }
+    func installPlugin(_ id: PluginId) async throws {}
+    func uninstallPlugin(_ id: PluginId) throws {}
 }
 
 /// A host with no app behind it: a running server with default settings,
@@ -240,6 +252,17 @@ public final class PreviewSettingsHost: SettingsHost {
     }
     public func migrationSources() -> [TerminalMigration.Source] { migrations }
     public func openAgent(prompt: String) throws { agentPrompts.append(prompt) }
+
+    public var installedPlugins: Set<PluginId> = []
+    public func pluginState(_ id: PluginId) -> PluginInstallState {
+        installedPlugins.contains(id) ? .installed : .notInstalled
+    }
+    public func installPlugin(_ id: PluginId) async throws {
+        installedPlugins.insert(id)
+    }
+    public func uninstallPlugin(_ id: PluginId) throws {
+        installedPlugins.remove(id)
+    }
 
     public func backupState() throws -> Data {
         if let state { return state }

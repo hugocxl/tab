@@ -3,7 +3,7 @@ import TabCore
 
 /// A page of the Settings window, in sidebar order.
 public enum SettingsCategory: String, CaseIterable, Sendable {
-    case general, interface, appearance, terminal, keyboard, agents, integrations, notifications, privacy, browser, server, remoteServers, mobile, backup, changelog
+    case general, interface, appearance, terminal, keyboard, agents, integrations, plugins, notifications, privacy, browser, server, remoteServers, mobile, backup, changelog
 
     public var title: String {
         switch self {
@@ -14,6 +14,7 @@ public enum SettingsCategory: String, CaseIterable, Sendable {
         case .keyboard: return "Shortcuts"
         case .agents: return "Agents"
         case .integrations: return "Integrations"
+        case .plugins: return "Plugins"
         case .notifications: return "Notifications"
         case .privacy: return "Privacy"
         case .browser: return "Browser"
@@ -36,6 +37,7 @@ public enum SettingsCategory: String, CaseIterable, Sendable {
         case .keyboard: return (.command, 0xF7F7F8, 0xDCDCDF, 0x6E6E73)
         case .agents: return (.agents, 0xFFB86B, 0xF2701B, 0xFFFFFF)
         case .integrations: return (.extensions, 0xFF6FB5, 0x8E4BF2, 0xFFFFFF)
+        case .plugins: return (.extensions, 0x7C6BFF, 0x4E3CE0, 0xFFFFFF)
         case .notifications: return (.bell, 0xFF8A65, 0xE5484D, 0xFFFFFF)
         case .privacy: return (.hand, 0x5BB2FF, 0x1F6FEB, 0xFFFFFF)
         case .browser: return (.globe, 0x5BB2FF, 0x1F6FEB, 0xFFFFFF)
@@ -203,6 +205,8 @@ public enum SettingsCatalog {
         SettingItem("agent-integration", "Integrate with available agents", "Installs a Tab skill and session hooks for supported agents.", .integrations, "Coding Agents"),
         SettingItem("agent-integration-agents", "Agents", "", .integrations, "Coding Agents"),
         SettingItem("terminal-migration", "Migrate from another terminal", "An agent reads that terminal's configuration and brings its shortcuts, font, cursor and colors into Tab.", .integrations, "Migration"),
+        // Plugins
+        SettingItem("plugins", "Plugins", "Install and uninstall optional right-sidebar plugins such as Explorer and Diff View.", .plugins, "Plugins"),
         // Notifications
         SettingItem("notification-position", "Notification position", "Where the window shows updates, connection problems and confirmations.", .notifications, "In-App Notifications"),
         SettingItem("activity-tabs", "Show activity in tabs", "Sidebar cards and pane headers show what programs and agents are doing.", .notifications, "Program Activity"),

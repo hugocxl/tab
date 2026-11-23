@@ -161,6 +161,9 @@ jobs:
               --title "Tab $RELEASE_VERSION" --notes-file "$RUNNER_TEMP/tab-release-notes.md"
           fi
           ASSETS=("build/release/Tab-$RELEASE_VERSION-arm64.dmg" build/release/update.json)
+          for PLUGIN_ZIP in build/release/TabPlugin-*-"$RELEASE_VERSION"-arm64.zip; do
+            [ -f "$PLUGIN_ZIP" ] && ASSETS+=("$PLUGIN_ZIP")
+          done
           gh release upload "$TAG" --clobber "${ASSETS[@]}"
           for ASSET in "${ASSETS[@]}"; do
             NAME="$(basename "$ASSET")"

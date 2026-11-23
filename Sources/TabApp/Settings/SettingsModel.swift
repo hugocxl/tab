@@ -171,6 +171,8 @@ final class SettingsModel: ObservableObject {
         case .keyboard: buildKeyboard(builder)
         case .agents: buildAgents(builder)
         case .integrations: buildIntegrations(builder)
+        case .plugins:
+            builder.row("plugins", .disclosure { [weak self] in self?.select(.plugins) })
         case .notifications: buildNotifications(builder)
         case .privacy: buildPrivacy(builder)
         case .browser: buildBrowser(builder)

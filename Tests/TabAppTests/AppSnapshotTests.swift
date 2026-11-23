@@ -41,7 +41,7 @@ final class AppSnapshotTests: XCTestCase {
         controller.showWindow(nil)
         try? await Task.sleep(nanoseconds: 300_000_000)
         try render(window.contentView, to: output + "/window.png")
-        model.selectRightPanel(.sourceControl)
+        model.selectRightPanel("sourceControl")
         try? await Task.sleep(nanoseconds: 200_000_000)
         try render(window.contentView, to: output + "/right-sidebar.png")
         model.toggleZoom()

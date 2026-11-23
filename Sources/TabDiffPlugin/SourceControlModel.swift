@@ -1,4 +1,5 @@
 import Foundation
+import TabApp
 import TabProtocol
 
 /// The Source Control panel's state without views: the working tree status

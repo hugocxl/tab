@@ -65,6 +65,42 @@ extension NativeHost {
     }
 }
 
+/// What the Files explorer plugin panel needs from the app.
+@MainActor
+public protocol FilesPanelHost: NativeHost {
+    /// Opens the project file at `path` in an editor pane, with the caret at
+    /// a one-based line and column when given.
+    func openEditor(path: String, line: Int?, column: Int?)
+    /// Makes the side connection watch the project's folder, so
+    /// `filesChanged(_:)` hears about changes on disk.
+    func watchProjectFiles()
+}
+
+/// What the Source Control plugin panel needs from the app.
+@MainActor
+public protocol SourceControlHost: NativeHost {
+    /// Opens a file's diff in a pane, of its index when `staged`.
+    func openDiff(path: String, staged: Bool)
+    /// The panel changed the repository: open diffs should refresh.
+    func repositoryDidChange()
+    /// The saved source control presentation shared by projects.
+    var sourceControlTree: Bool { get }
+    /// Remembers the presentation for future panels and launches.
+    func setSourceControlTree(_ enabled: Bool)
+}
+
+extension SourceControlHost {
+    public var sourceControlTree: Bool { false }
+    public func setSourceControlTree(_ enabled: Bool) {}
+}
+
+/// What a diff pane needs from the app.
+@MainActor
+public protocol DiffHost: NativeHost {
+    /// The monospaced font from the terminal settings; see `NativeStyle.codeFont`.
+    var codeFont: NSFont { get }
+}
+
 /// Readable server errors shared by the native panels and panes.
 public enum NativeErrors {
     /// The server's message without its protocol code, with missing files,
@@ -195,11 +231,11 @@ public final class NativePanelCard: ThemedView {
 }
 
 /// A centered muted message filling a pane or panel, such as "Loading…".
-final class NativeMessageView: ThemedView {
+public final class NativeMessageView: ThemedView {
     private let label: NSTextField
     private let detail: NSTextField
 
-    init(_ text: String = "") {
+    public init(_ text: String = "") {
         label = makeLabel(text, font: AppFont.body)
         detail = makeLabel("", font: AppFont.footnote)
         super.init(frame: .zero)
@@ -225,25 +261,25 @@ final class NativeMessageView: ThemedView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    var text: String { label.stringValue }
+    public var text: String { label.stringValue }
 
-    func set(_ text: String) {
+    public func set(_ text: String) {
         label.stringValue = text
         detail.stringValue = text == NativeErrors.notRepository ? NativeErrors.notRepositoryHint : ""
         detail.isHidden = detail.stringValue.isEmpty
     }
 
-    override func themeDidChange() {
+    public override func themeDidChange() {
         label.textColor = theme.fgMuted
         detail.textColor = theme.fgMuted
     }
 }
 
 /// A menu item that runs a closure.
-final class ActionMenuItem: NSMenuItem {
+public final class ActionMenuItem: NSMenuItem {
     private let handler: () -> Void
 
-    init(_ title: String, enabled: Bool = true, handler: @escaping () -> Void) {
+    public init(_ title: String, enabled: Bool = true, handler: @escaping () -> Void) {
         self.handler = handler
         super.init(title: title, action: enabled ? #selector(runHandler) : nil, keyEquivalent: "")
         target = self
@@ -257,14 +293,14 @@ final class ActionMenuItem: NSMenuItem {
 
 /// A native one-line name field for naming files inline: Return submits,
 /// Escape or leaving it cancels.
-final class InlineNameField: NSView, NSTextFieldDelegate {
-    let field = NSTextField(string: "")
-    var onSubmit: ((String) -> Void)?
-    var onCancel: (() -> Void)?
-    var onChange: (() -> Void)?
+public final class InlineNameField: NSView, NSTextFieldDelegate {
+    public let field = NSTextField(string: "")
+    public var onSubmit: ((String) -> Void)?
+    public var onCancel: (() -> Void)?
+    public var onChange: (() -> Void)?
     private var finished = false
 
-    init(text: String, label: String) {
+    public init(text: String, label: String) {
         super.init(frame: .zero)
         field.stringValue = text
         field.bezelStyle = .roundedBezel
@@ -281,7 +317,7 @@ final class InlineNameField: NSView, NSTextFieldDelegate {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     /// Focuses the field with the name selected, without its extension.
-    func begin() {
+    public func begin() {
         window?.makeFirstResponder(field)
         guard let editor = field.currentEditor() else { return }
         let name = field.stringValue as NSString
@@ -291,16 +327,16 @@ final class InlineNameField: NSView, NSTextFieldDelegate {
     }
 
     /// Lets the field be submitted again after a refused name.
-    func resume() {
+    public func resume() {
         finished = false
         window?.makeFirstResponder(field)
     }
 
-    func controlTextDidChange(_ notification: Notification) {
+    public func controlTextDidChange(_ notification: Notification) {
         onChange?()
     }
 
-    func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+    public func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
         switch selector {
         case #selector(NSResponder.insertNewline(_:)):
             finished = true
@@ -315,7 +351,7 @@ final class InlineNameField: NSView, NSTextFieldDelegate {
         }
     }
 
-    func controlTextDidEndEditing(_ notification: Notification) {
+    public func controlTextDidEndEditing(_ notification: Notification) {
         guard !finished else { return }
         finished = true
         onCancel?()

@@ -3,6 +3,8 @@ import TabCore
 import TabProtocol
 import XCTest
 @testable import TabApp
+@testable import TabExplorerPlugin
+@testable import TabDiffPlugin
 
 /// Renders Settings, the panels and the feature sheets offscreen to PNGs for
 /// visual review. Runs only with `TAB_SNAPSHOT_DIR` set.

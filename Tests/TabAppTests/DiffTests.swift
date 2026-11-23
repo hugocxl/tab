@@ -2,6 +2,7 @@ import AppKit
 import XCTest
 import TabProtocol
 @testable import TabApp
+@testable import TabDiffPlugin
 
 final class DiffDocumentTests: XCTestCase {
     private func rows(_ kinds: [GitDiffKind]) -> [GitDiffRow] {

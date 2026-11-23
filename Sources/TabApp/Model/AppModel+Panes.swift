@@ -41,7 +41,7 @@ extension AppModel {
     /// Where a new terminal in `project` starts: the focused terminal's
     /// folder when it is in the same project (or anywhere on the same server,
     /// for Home), else the project's.
-    func newPaneDirectory(in project: Project) -> ServerPath {
+    public func newPaneDirectory(in project: Project) -> ServerPath {
         guard let pane = activePane,
               state.paneServer(pane) == project.serverId,
               project.home || state.paneProject(pane) == project.id,

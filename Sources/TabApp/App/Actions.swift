@@ -74,8 +74,8 @@ final class Actions {
             let current = model.currentProject
             window?.openPalette(.worktrees(current.parentId ?? current.id))
         case .toggleSidebar: model.toggleSidebar()
-        case .toggleFiles: model.toggleRightPanel(.files)
-        case .toggleSourceControl: model.toggleRightPanel(.sourceControl)
+        case .toggleFiles: model.toggleRightPanel("files")
+        case .toggleSourceControl: model.toggleRightPanel("sourceControl")
         case .goToFile: window?.openPalette(.files)
         case .findInFiles: window?.openPalette(.find)
         case .toggleFullScreen: window?.window?.toggleFullScreen(nil)

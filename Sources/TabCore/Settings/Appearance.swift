@@ -43,9 +43,38 @@ public enum ProjectOrder: String, Codable, Sendable, CaseIterable {
     case manual, name, nameDescending, recentlyActive, dateAdded
 }
 
-/// The native panel pinned on the right of the workspace.
-public enum SidePanel: String, Codable, Sendable, CaseIterable {
-    case none, files, sourceControl
+/// The plugin panel pinned on the right of the workspace, or `.none`.
+public enum SidePanel: Hashable, Codable, Sendable {
+    case none
+    case panel(String)
+
+    public static let files = SidePanel.panel("files")
+    public static let sourceControl = SidePanel.panel("sourceControl")
+
+    public var panelId: String? {
+        switch self {
+        case .none: return nil
+        case .panel(let id): return id
+        }
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let raw = try container.decode(String.self)
+        if raw.isEmpty || raw == "none" {
+            self = .none
+        } else {
+            self = .panel(raw)
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .none: try container.encode("none")
+        case .panel(let id): try container.encode(id)
+        }
+    }
 }
 
 /// The appearance used to select the light or dark theme.

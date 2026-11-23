@@ -1,17 +1,7 @@
 import AppKit
+import TabApp
 import TabCore
 import TabProtocol
-
-/// What the Files panel needs from the app.
-@MainActor
-public protocol FilesPanelHost: NativeHost {
-    /// Opens the project file at `path` in an editor pane, with the caret at
-    /// a one-based line and column when given.
-    func openEditor(path: String, line: Int?, column: Int?)
-    /// Makes the side connection watch the project's folder, so
-    /// `filesChanged(_:)` hears about changes on disk.
-    func watchProjectFiles()
-}
 
 /// The Files panel pinned on the right of a project: the project's tree,
 /// listed lazily from its server and kept current from file watch events.

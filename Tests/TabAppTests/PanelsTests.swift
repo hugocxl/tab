@@ -3,6 +3,8 @@ import XCTest
 import TabCore
 import TabProtocol
 @testable import TabApp
+@testable import TabExplorerPlugin
+@testable import TabDiffPlugin
 
 /// The Files panel's tree.
 final class PanelsFilesTreeTests: XCTestCase {

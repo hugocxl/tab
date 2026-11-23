@@ -2,14 +2,34 @@ import AppKit
 import XCTest
 import TabCore
 @testable import TabApp
+@testable import TabExplorerPlugin
+@testable import TabDiffPlugin
 
 @MainActor
 final class RightSidebarTests: XCTestCase {
-    private func model() throws -> AppModel {
+    private func model(withPlugins: Bool = true) throws -> AppModel {
         let dirs = try ModelFixtures.profile()
         let model = AppModel(dirs: dirs, theme: AppTheme(systemIsDark: true)) { _, _ in nil }
+        if withPlugins {
+            model.plugins.activate(plugin: ExplorerPlugin())
+            model.plugins.activate(plugin: DiffPlugin())
+        }
         addTeardownBlock { try? FileManager.default.removeItem(at: dirs.root) }
         return model
+    }
+
+    func testNoPluginsInstalledByDefaultShowsEmptyRightSidebarWhenToggled() throws {
+        let model = try model(withPlugins: false)
+        XCTAssertTrue(model.rightSidebarPanels.isEmpty)
+        XCTAssertFalse(model.rightSidebarVisible)
+        XCTAssertNil(model.rightPanel)
+
+        model.toggleRightSidebar()
+        XCTAssertTrue(model.rightSidebarVisible)
+        XCTAssertNil(model.rightPanel)
+
+        model.toggleRightSidebar()
+        XCTAssertFalse(model.rightSidebarVisible)
     }
 
     func testPaneZoomTemporarilyHidesBothSidebars() throws {
@@ -17,7 +37,7 @@ final class RightSidebarTests: XCTestCase {
         model.newHomeTerminal()
         XCTAssertNotNil(model.activePane)
         model.updateAppearance { $0.sidebarExpanded = true }
-        model.selectRightPanel(.sourceControl)
+        model.selectRightPanel("sourceControl")
 
         model.toggleZoom()
         XCTAssertNotNil(model.activeTab?.zoomed)
@@ -28,7 +48,7 @@ final class RightSidebarTests: XCTestCase {
 
         model.toggleZoom()
         XCTAssertTrue(model.sidebarExpanded)
-        XCTAssertEqual(model.rightPanel, .sourceControl)
+        XCTAssertEqual(model.rightPanel, "sourceControl")
 
         model.toggleSidebar()
         model.toggleRightSidebar()
@@ -41,11 +61,11 @@ final class RightSidebarTests: XCTestCase {
     func testOpeningEitherSidebarExitsPaneZoom() throws {
         let model = try model()
         model.newHomeTerminal()
-        model.selectRightPanel(.files)
+        model.selectRightPanel("files")
         model.toggleZoom()
-        model.toggleRightPanel(.files)
+        model.toggleRightPanel("files")
         XCTAssertNil(model.activeTab?.zoomed)
-        XCTAssertEqual(model.rightPanel, .files)
+        XCTAssertEqual(model.rightPanel, "files")
 
         model.toggleZoom()
         model.toggleSidebar()
@@ -69,23 +89,23 @@ final class RightSidebarTests: XCTestCase {
     func testCollapsingAndShowingAgainReopensTheLastTab() throws {
         let model = try model()
         model.toggleRightSidebar()
-        XCTAssertEqual(model.rightPanel, .files, "Files the first time")
-        model.selectRightPanel(.sourceControl)
+        XCTAssertEqual(model.rightPanel, "files", "Files the first time")
+        model.selectRightPanel("sourceControl")
         model.toggleRightSidebar()
         XCTAssertNil(model.rightPanel)
         model.toggleRightSidebar()
-        XCTAssertEqual(model.rightPanel, .sourceControl)
+        XCTAssertEqual(model.rightPanel, "sourceControl")
         XCTAssertEqual(try Appearance.load(model.dirs.settings).lastSidePanel, .sourceControl, "remembered across launches")
     }
 
     func testSelectingTheShownTabKeepsItOpenAndItsShortcutClosesIt() throws {
         let model = try model()
-        model.selectRightPanel(.files)
-        model.selectRightPanel(.files)
-        XCTAssertEqual(model.rightPanel, .files)
-        model.toggleRightPanel(.sourceControl)
-        XCTAssertEqual(model.rightPanel, .sourceControl, "another tab's shortcut switches")
-        model.toggleRightPanel(.sourceControl)
+        model.selectRightPanel("files")
+        model.selectRightPanel("files")
+        XCTAssertEqual(model.rightPanel, "files")
+        model.toggleRightPanel("sourceControl")
+        XCTAssertEqual(model.rightPanel, "sourceControl", "another tab's shortcut switches")
+        model.toggleRightPanel("sourceControl")
         XCTAssertNil(model.rightPanel)
     }
 }

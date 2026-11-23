@@ -1,4 +1,5 @@
 import Foundation
+import TabApp
 import TabProtocol
 
 /// The Files panel's tree: folder listings loaded lazily, which folders are

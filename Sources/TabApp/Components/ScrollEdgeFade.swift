@@ -5,15 +5,15 @@ import AppKit
 /// `length`, so it eases in as the user scrolls away from an end. The mask sits
 /// on the clip view, leaving the overlay scroller sharp.
 @MainActor
-final class ScrollEdgeFade: NSObject {
+public final class ScrollEdgeFade: NSObject {
     private weak var scrollView: NSScrollView?
     private let length: CGFloat
     private let mask = CAGradientLayer()
-    private(set) var topFade: CGFloat = 0
-    private(set) var bottomFade: CGFloat = 0
+    public private(set) var topFade: CGFloat = 0
+    public private(set) var bottomFade: CGFloat = 0
     private var maskBounds: CGRect?
 
-    init(_ scrollView: NSScrollView, length: CGFloat = 24) {
+    public init(_ scrollView: NSScrollView, length: CGFloat = 24) {
         self.scrollView = scrollView
         self.length = length
         super.init()

@@ -131,9 +131,13 @@ public final class AppModel {
     /// The project whose working tree the shell watches, and on which side
     /// connection.
     var gitWatch: (project: ProjectId, connection: ObjectIdentifier)?
-    var rightPanels: [RightPanelKind: RightPanelContent] = [:]
+    var rightPanels: [String: RightPanelContent] = [:]
     /// The right panel to give the keyboard once the shell shows it.
-    var rightPanelAwaitingFocus: RightPanelKind?
+    var rightPanelAwaitingFocus: String?
+    /// Whether the right sidebar is open showing its empty state (no plugins installed).
+    var rightSidebarShowingEmpty = false
+    /// Installed and active plugins, loaded lazily on demand.
+    public private(set) lazy var plugins = PluginManager(model: self)
     var editorLocations: [PaneId: (line: Int, column: Int)] = [:]
     /// The modifiers held long enough to show shortcut numbers in the
     /// sidebar, or `nil`.
@@ -253,6 +257,7 @@ public final class AppModel {
         panes.register(.agent) { AgentPaneController(context: $0) }
         AgentLinkFavicon.shared.policy = { [weak self] in self?.settings.agents.remoteImages ?? AgentSettings().remoteImages }
         registerNativeContent()
+        plugins.loadInstalled()
         browserProfiles.defaultProfileId = settings.browser.defaultProfile
         browserProfiles.notify = { [weak self] message, isError in self?.presenter?.showToast(message, error: isError) }
         browserProfiles.proxy = { [weak self] server in self?.browserProxy(server)?.configuration }

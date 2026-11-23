@@ -157,6 +157,15 @@ xcrun GetFileInfo -a "$MOUNT" | grep -q C
 swift scripts/release-metadata.swift "$MOUNT/Tab.app" "$DMG" "$TEAM" "$STAGING/update.json"
 detach
 mv "$STAGING/update.json" "$OUTPUT/update.json"
+for plugin_bundle in "$OUTPUT"/plugins/*.bundle; do
+    [ -d "$plugin_bundle" ] || continue
+    plugin_id="$(basename "$plugin_bundle" .bundle)"
+    plugin_zip="$OUTPUT/TabPlugin-$plugin_id-$RELEASE_VERSION-arm64.zip"
+    rm -f "$plugin_zip"
+    ditto -c -k --sequesterRsrc --keepParent "$plugin_bundle" "$plugin_zip"
+    notarize "$plugin_zip"
+    echo "==> Built $plugin_zip"
+done
 echo "==> Built $APP"
 echo "==> Built $DMG"
 echo "==> Built $OUTPUT/update.json"

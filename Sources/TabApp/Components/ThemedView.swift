@@ -163,7 +163,7 @@ extension NSView {
 /// A label configured like the chrome's text: no bezel, no background, not
 /// editable.
 @MainActor
-func makeLabel(_ text: String, font: NSFont = AppFont.body, color: NSColor? = nil) -> NSTextField {
+public func makeLabel(_ text: String, font: NSFont = AppFont.body, color: NSColor? = nil) -> NSTextField {
     let label = NSTextField(labelWithString: text)
     label.font = font
     label.textColor = color ?? AppTheme.shared.fg

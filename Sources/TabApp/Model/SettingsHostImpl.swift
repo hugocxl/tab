@@ -21,6 +21,7 @@ public final class SettingsHostImpl: SettingsHost {
                 self.store?.updateUpdaterSummary(self.updaterSummary)
             }
             if changes.contains(.remoteAccess) { self.refreshRemoteAccess() }
+            if !changes.isDisjoint(with: [.panel, .settings]) { self.store?.pluginsDidChange() }
         }
     }
 
@@ -162,6 +163,20 @@ public final class SettingsHostImpl: SettingsHost {
 
     public func scheduleRelaunchWhenIdle() {
         model.updater.scheduleRelaunchWhenIdle()
+    }
+
+    // MARK: Plugins
+
+    public func pluginState(_ id: PluginId) -> PluginInstallState {
+        model.plugins.state(of: id)
+    }
+
+    public func installPlugin(_ id: PluginId) async throws {
+        try await model.plugins.install(id)
+    }
+
+    public func uninstallPlugin(_ id: PluginId) throws {
+        try model.plugins.uninstall(id)
     }
 
     // MARK: Backup

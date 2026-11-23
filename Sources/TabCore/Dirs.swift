@@ -75,6 +75,12 @@ public struct TabDirs: Sendable, Equatable {
     public var proxy: URL { file("proxy.json") }
     /// Recovery copies made by restore.
     public var backups: URL { folder("Backups") }
+    /// Installed plugin bundles loaded on demand.
+    public var plugins: URL { folder("Plugins") }
+    /// The `.bundle` directory for an installed plugin.
+    public func pluginBundle(_ id: PluginId) -> URL {
+        plugins.appendingPathComponent("\(id.rawValue).bundle", isDirectory: true)
+    }
     /// The app's socket for `tab browser` and `tab <folder>`.
     public var appSocket: URL { file("app.sock") }
 

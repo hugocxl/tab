@@ -65,7 +65,25 @@ let package = Package(
                            .product(name: "Icons", package: "stack")],
             swiftSettings: swift5
         ),
-        .executableTarget(name: "TabDesktop", dependencies: ["TabApp"], swiftSettings: swift5),
+        .executableTarget(
+            name: "TabDesktop",
+            dependencies: ["TabApp"],
+            swiftSettings: swift5,
+            linkerSettings: [.unsafeFlags(["-Xlinker", "-export_dynamic"])]
+        ),
+
+        // Optional lazy-loaded plugins (never linked into TabDesktop; built as
+        // loadable .bundle archives by scripts/build-plugins.sh).
+        .target(
+            name: "TabExplorerPlugin",
+            dependencies: ["TabApp", "TabCore", "TabProtocol"],
+            swiftSettings: swift5
+        ),
+        .target(
+            name: "TabDiffPlugin",
+            dependencies: ["TabApp", "TabCore", "TabProtocol"],
+            swiftSettings: swift5
+        ),
 
         .testTarget(name: "TabCoreTests", dependencies: ["TabCore"], swiftSettings: swift5),
         .testTarget(name: "TabProtocolTests", dependencies: ["TabProtocol"], exclude: ["Fixtures"], swiftSettings: swift5),
@@ -73,6 +91,6 @@ let package = Package(
         .testTarget(name: "TabTerminalTests", dependencies: ["TabTerminal"], swiftSettings: swift5),
         .testTarget(name: "TabServerTests", dependencies: ["TabServer"], swiftSettings: swift5),
         .testTarget(name: "TabClientTests", dependencies: ["TabClient", "TabServer"], swiftSettings: swift5),
-        .testTarget(name: "TabAppTests", dependencies: ["TabApp", "TabServer"], swiftSettings: swift5),
+        .testTarget(name: "TabAppTests", dependencies: ["TabApp", "TabServer", "TabExplorerPlugin", "TabDiffPlugin"], swiftSettings: swift5),
     ]
 )

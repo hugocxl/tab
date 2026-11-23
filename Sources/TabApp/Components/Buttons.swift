@@ -59,11 +59,43 @@ public final class IconButton: NSButton {
     }
 }
 
+/// A small borderless text button that lights up on hover.
+public final class TextGlyphButton: NSButton {
+    public var onPress: (() -> Void)?
+    private let palette = PaletteObserver()
+
+    public init(_ title: String, tooltip: String, font: NSFont = AppFont.body) {
+        super.init(frame: .zero)
+        self.title = title
+        self.font = font
+        bezelStyle = .accessoryBarAction
+        showsBorderOnlyWhileMouseInside = true
+        refusesFirstResponder = true
+        controlSize = .small
+        translatesAutoresizingMaskIntoConstraints = false
+        toolTip = tooltip
+        setAccessibilityLabel(tooltip)
+        target = self
+        action = #selector(pressed)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    public override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        palette.observe(self) { [weak self] in self?.setTitleColor(AppTheme.shared.fgMuted) }
+    }
+
+    @objc private func pressed() {
+        onPress?()
+    }
+}
+
 /// A glyph in a circle that fills while hovered or pressed, the chrome's
 /// button in the sidebars and pane headers, with a glass tooltip showing its
 /// label and `shortcut`. Subclasses handle `pressed()`.
-class CircleButton: NSButton {
-    enum Glyph {
+public class CircleButton: NSButton {
+    public enum Glyph {
         case icon(AppIcon)
         case chrome(ChromeIcon)
 
@@ -85,15 +117,15 @@ class CircleButton: NSButton {
     }
     private var glyph: Glyph
 
-    func setGlyph(_ glyph: Glyph) {
+    public func setGlyph(_ glyph: Glyph) {
         self.glyph = glyph
         updateAppearance()
     }
     /// The action's shortcut, shown in the tooltip from the current keymap.
-    var shortcut: ShortcutId?
+    public var shortcut: ShortcutId?
     private var tooltipText: String?
     /// Tints the glyph with the accent, for toggles that are on.
-    var isActive = false { didSet { if isActive != oldValue { updateAppearance() } } }
+    public var isActive = false { didSet { if isActive != oldValue { updateAppearance() } } }
     let side: CGFloat
     let glyphSize: CGFloat
     private var isHovered = false { didSet { if isHovered != oldValue { updateAppearance() } } }
@@ -129,7 +161,7 @@ class CircleButton: NSButton {
     /// Fills the circle at rest too, deepening it while hovered.
     var restsFilled = false { didSet { updateAppearance() } }
 
-    override var intrinsicContentSize: NSSize { NSSize(width: side, height: side) }
+    public override var intrinsicContentSize: NSSize { NSSize(width: side, height: side) }
 
     /// How far the drawn glyph reaches left and right of the button's center.
     var glyphExtent: (left: CGFloat, right: CGFloat) {
@@ -170,22 +202,22 @@ class CircleButton: NSButton {
         }
     }
 
-    override var isHighlighted: Bool {
+    public override var isHighlighted: Bool {
         didSet { if isHighlighted != oldValue { updateAppearance() } }
     }
 
     /// The tooltip's text: kept here so AppKit shows only the glass tooltip.
-    override var toolTip: String? {
+    public override var toolTip: String? {
         get { tooltipText }
         set { tooltipText = newValue }
     }
 
-    override func layout() {
+    public override func layout() {
         super.layout()
         layer?.cornerRadius = min(bounds.width, bounds.height) / 2
     }
 
-    override func updateTrackingAreas() {
+    public override func updateTrackingAreas() {
         super.updateTrackingAreas()
         if let hoverArea { removeTrackingArea(hoverArea) }
         let area = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
@@ -194,22 +226,22 @@ class CircleButton: NSButton {
         hoverArea = area
     }
 
-    override func mouseEntered(with event: NSEvent) {
+    public override func mouseEntered(with event: NSEvent) {
         isHovered = true
         if let tooltipText { GlassTooltip.schedule(tooltipText, shortcut: shortcut, for: self) }
     }
 
-    override func mouseExited(with event: NSEvent) {
+    public override func mouseExited(with event: NSEvent) {
         isHovered = false
         GlassTooltip.hide(for: self)
     }
 
-    override func mouseDown(with event: NSEvent) {
+    public override func mouseDown(with event: NSEvent) {
         GlassTooltip.hide(for: self)
         super.mouseDown(with: event)
     }
 
-    override func viewDidMoveToWindow() {
+    public override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if window == nil {
             isHovered = false
@@ -238,17 +270,17 @@ class CircleButton: NSButton {
 
 /// A glyph button for the sidebars' chrome rows: a 30pt circle that fills
 /// while hovered, and stays filled while its panel is open (`isOn`).
-final class ChromeButton: CircleButton {
-    var onPress: ((ChromeButton) -> Void)?
-    var menuProvider: (() -> NSMenu?)?
-    var isOn = false { didSet { if isOn != oldValue { updateAppearance() } } }
+public final class ChromeButton: CircleButton {
+    public var onPress: ((ChromeButton) -> Void)?
+    public var menuProvider: (() -> NSMenu?)?
+    public var isOn = false { didSet { if isOn != oldValue { updateAppearance() } } }
 
-    init(_ icon: AppIcon, label: String, side: CGFloat = ChromeButton.side, glyph: CGFloat = ChromeButton.glyph, action: ((ChromeButton) -> Void)? = nil) {
+    public init(_ icon: AppIcon, label: String, side: CGFloat = ChromeButton.side, glyph: CGFloat = ChromeButton.glyph, action: ((ChromeButton) -> Void)? = nil) {
         onPress = action
         super.init(glyph: .icon(icon), label: label, side: side, glyph: glyph)
     }
 
-    init(_ icon: ChromeIcon, label: String, side: CGFloat = ChromeButton.side, glyph: CGFloat = ChromeButton.glyph, action: ((ChromeButton) -> Void)? = nil) {
+    public init(_ icon: ChromeIcon, label: String, side: CGFloat = ChromeButton.side, glyph: CGFloat = ChromeButton.glyph, action: ((ChromeButton) -> Void)? = nil) {
         onPress = action
         super.init(glyph: .chrome(icon), label: label, side: side, glyph: glyph)
     }
@@ -256,23 +288,23 @@ final class ChromeButton: CircleButton {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     /// The sidebar chrome's button circle.
-    static let side: CGFloat = 30
+    public static let side: CGFloat = 30
     /// The sidebar chrome's glyph.
-    static let glyph: CGFloat = 17
+    public static let glyph: CGFloat = 17
     /// The space between buttons side by side anywhere in the sidebars.
-    static let gap: CGFloat = 4
+    public static let gap: CGFloat = 4
     /// A sidebar chrome row: the button with the gutter between cards above
     /// and below it.
-    static let rowHeight: CGFloat = Metrics.gutter * 2 + side
+    public static let rowHeight: CGFloat = Metrics.gutter * 2 + side
 
     override var isFilled: Bool { isOn }
-    override var mouseDownCanMoveWindow: Bool { false }
+    public override var mouseDownCanMoveWindow: Bool { false }
 
     override func pressed() {
         onPress?(self)
     }
 
-    override func menu(for event: NSEvent) -> NSMenu? { menuProvider?() }
+    public override func menu(for event: NSEvent) -> NSMenu? { menuProvider?() }
 }
 
 /// A pane header's glyph button: a 22pt circle, smaller than the sidebars'.
@@ -368,7 +400,7 @@ public final class PillButton: NSButton {
 extension NSButton {
     /// Shows the title in `color`, which AppKit keeps in inactive windows,
     /// unlike its own label colors.
-    func setTitleColor(_ color: NSColor) {
+    public func setTitleColor(_ color: NSColor) {
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = alignment
         paragraph.lineBreakMode = lineBreakMode
@@ -382,7 +414,7 @@ extension NSButton {
 
 extension NSImage {
     /// The template image filled with `color`.
-    func tinted(_ color: NSColor) -> NSImage {
+    public func tinted(_ color: NSColor) -> NSImage {
         guard isTemplate else { return self }
         let image = NSImage(size: size, flipped: false) { rect in
             self.draw(in: rect)

@@ -1,24 +1,7 @@
 import AppKit
+import TabApp
 import TabCore
 import TabProtocol
-
-/// What the Source Control panel needs from the app.
-@MainActor
-public protocol SourceControlHost: NativeHost {
-    /// Opens a file's diff in a pane, of its index when `staged`.
-    func openDiff(path: String, staged: Bool)
-    /// The panel changed the repository: open diffs should refresh.
-    func repositoryDidChange()
-    /// The saved source control presentation shared by projects.
-    var sourceControlTree: Bool { get }
-    /// Remembers the presentation for future panels and launches.
-    func setSourceControlTree(_ enabled: Bool)
-}
-
-extension SourceControlHost {
-    public var sourceControlTree: Bool { false }
-    public func setSourceControlTree(_ enabled: Bool) {}
-}
 
 /// The Source Control panel pinned on the right of a project: branch,
 /// commit message, Amend and Commit, and the changed files by group.
@@ -325,7 +308,7 @@ public final class SourceControlController: NSViewController, NSTableViewDataSou
         let label = mode == .tree ? "View as List" : "View as Tree"
         viewModeButton?.toolTip = label
         viewModeButton?.setAccessibilityLabel(label)
-        table.rowHeight = mode == .tree ? FilesCellView.rowHeight : 28
+        table.rowHeight = mode == .tree ? ChangeFolderCell.rowHeight : 28
         render()
     }
 
@@ -360,8 +343,8 @@ public final class SourceControlController: NSViewController, NSTableViewDataSou
             let cell = (tableView.makeView(withIdentifier: identifier, owner: nil) as? ChangeFolderCell) ?? ChangeFolderCell()
             cell.identifier = identifier
             cell.theme = card.theme
-            cell.configure(node: FilesTree.Node(path: path, name: NativePath.basename(path), isDirectory: true, dimmed: false),
-                           depth: depth, expanded: model.isExpanded(path, in: group), selected: false)
+            cell.configure(path: path, name: NativePath.basename(path),
+                           depth: depth, expanded: model.isExpanded(path, in: group))
             cell.setAccessibilityLabel("\(path), folder, \(model.isExpanded(path, in: group) ? "expanded" : "collapsed")")
             cell.onActivate = { [weak self] in
                 self?.model.toggleFolder(path, in: group)
@@ -549,39 +532,6 @@ final class PlaceholderTextView: NSTextView {
     }
 }
 
-/// A small native borderless text button such as "Stage All" or "Reload",
-/// with the system hover bezel.
-final class TextGlyphButton: NSButton {
-    var onPress: (() -> Void)?
-    private let palette = PaletteObserver()
-
-    init(_ title: String, tooltip: String, font: NSFont = AppFont.body) {
-        super.init(frame: .zero)
-        self.title = title
-        self.font = font
-        bezelStyle = .accessoryBarAction
-        showsBorderOnlyWhileMouseInside = true
-        refusesFirstResponder = true
-        controlSize = .small
-        translatesAutoresizingMaskIntoConstraints = false
-        toolTip = tooltip
-        setAccessibilityLabel(tooltip)
-        target = self
-        action = #selector(pressed)
-    }
-
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        palette.observe(self) { [weak self] in self?.setTitleColor(AppTheme.shared.fgMuted) }
-    }
-
-    @objc private func pressed() {
-        onPress?()
-    }
-}
-
 /// A group heading: chevron, title with count, and Stage All or Unstage All.
 final class ChangeGroupCell: ThemedView {
     private let chevron = NSImageView()
@@ -651,10 +601,19 @@ extension TextGlyphButton {
     }
 }
 
-/// A collapsible Git folder using the Explorer row geometry and artwork.
-final class ChangeFolderCell: FilesCellView {
-    override class var artwork: AppIcon.Artwork { .stroke }
+/// A collapsible Git folder using stroke artwork.
+final class ChangeFolderCell: HoverView {
+    static let indent: CGFloat = 12
+    static let rowHeight: CGFloat = 24
+    static func iconX(depth: Int) -> CGFloat { 20 + CGFloat(depth) * indent }
+
     var onActivate: (() -> Void)?
+    private var path = ""
+    private var name = ""
+    private var depth = 0
+    private var expanded = false
+    private var folderIcon: NSImage?
+    private var chevron: NSImage?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -663,6 +622,50 @@ final class ChangeFolderCell: FilesCellView {
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    func configure(path: String, name: String, depth: Int, expanded: Bool) {
+        self.path = path
+        self.name = name
+        self.depth = depth
+        self.expanded = expanded
+        themeDidChange()
+        needsDisplay = true
+    }
+
+    override func themeDidChange() {
+        folderIcon = FileIcon.image(for: path, isDirectory: true, isExpanded: expanded, theme: theme, artwork: .stroke)
+        chevron = (expanded ? AppIcon.chevronDown : AppIcon.chevronRight).image(size: 11, artwork: .stroke)?.tinted(theme.fgDim)
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        if isHovered {
+            let rect = bounds.insetBy(dx: 0, dy: 0.5)
+            let path = NSBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), xRadius: Metrics.radiusMedium, yRadius: Metrics.radiusMedium)
+            theme.hover.setFill()
+            path.fill()
+        }
+        var x = Self.iconX(depth: depth) - 16
+        let midY = bounds.midY
+        if let chevron {
+            let size = chevron.size
+            let frame = NSRect(x: (x + (12 - size.width) / 2).rounded(), y: (midY - size.height / 2).rounded(),
+                               width: size.width, height: size.height)
+            chevron.draw(in: frame, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+        }
+        x += 16
+        if let glyph = folderIcon {
+            glyph.draw(in: NSRect(x: x, y: midY - 7, width: 14, height: 14),
+                       from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+        }
+        let textX = Self.iconX(depth: depth) + 14 + 6
+        let style = NSMutableParagraphStyle()
+        style.lineBreakMode = .byTruncatingTail
+        let attributes: [NSAttributedString.Key: Any] = [.font: AppFont.body, .foregroundColor: theme.fg, .paragraphStyle: style]
+        let text = NSAttributedString(string: name, attributes: attributes)
+        let height = text.size().height
+        text.draw(in: NSRect(x: textX, y: midY - height / 2, width: max(bounds.width - textX - 4, 0), height: height))
+    }
 
     override func mouseDown(with event: NSEvent) {}
 
@@ -740,7 +743,7 @@ final class ChangeFileCell: HoverView {
             showsTree = tree
         }
         let depth = path.split(separator: "/").count - 1
-        rowLeading?.constant = tree ? FilesCellView.iconX(depth: depth) : 4
+        rowLeading?.constant = tree ? ChangeFolderCell.iconX(depth: depth) : 4
         folder.isHidden = tree
         name.setContentHuggingPriority(tree ? .defaultLow : .defaultHigh, for: .horizontal)
         let code = SourceControlModel.letter(entry.file, in: group)

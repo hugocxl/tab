@@ -86,4 +86,5 @@ for product in tab tabd TabDesktop; do
 done
 codesign "${SIGN_ARGS[@]}" --entitlements "$ROOT/packaging/Tab.entitlements" "$APP"
 codesign --verify --deep --strict --verbose=2 "$APP"
+CODESIGN_IDENTITY="${CODESIGN_IDENTITY:--}" "$ROOT/scripts/build-plugins.sh" "$CONFIG" > /dev/null
 echo "$APP"

@@ -2,6 +2,7 @@ import AppKit
 import TabCore
 import XCTest
 @testable import TabApp
+@testable import TabExplorerPlugin
 
 @MainActor
 final class FileIconSnapshotTests: XCTestCase {

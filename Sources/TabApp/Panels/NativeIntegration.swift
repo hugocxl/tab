@@ -14,7 +14,7 @@ public final class ServerAPITransport: NativeTransport {
     public func files(_ request: FilesRequest) async throws -> FilesReply { try await api.files(request) }
 }
 
-/// A right panel that shows one controller per project, such as Files or
+/// A right panel that shows one controller per project, such as Explorer or
 /// Source Control, switching with the current project. Controllers and
 /// their hosts are made once per project and kept.
 @MainActor
@@ -23,7 +23,7 @@ public final class ProjectPanelContent<Controller: NSViewController>: RightPanel
     /// panel keeps alive; `nil` shows nothing for that project.
     public typealias Factory = @MainActor (Project) -> (controller: Controller, host: AnyObject)?
 
-    public let kind: RightPanelKind
+    public let panelId: String
     public let view: NSView = FlippedView()
     private let make: Factory
     private var entries: [ProjectId: (controller: Controller, host: AnyObject)] = [:]
@@ -31,10 +31,10 @@ public final class ProjectPanelContent<Controller: NSViewController>: RightPanel
     private let onShow: @MainActor (Controller) -> Void
     private let onFocus: @MainActor (Controller) -> Void
 
-    public init(kind: RightPanelKind, make: @escaping Factory,
+    public init(panelId: String, make: @escaping Factory,
                 onShow: @escaping @MainActor (Controller) -> Void = { _ in },
                 onFocus: @escaping @MainActor (Controller) -> Void = { $0.view.window?.makeFirstResponder($0.view) }) {
-        self.kind = kind
+        self.panelId = panelId
         self.make = make
         self.onShow = onShow
         self.onFocus = onFocus
@@ -81,30 +81,6 @@ public final class ProjectPanelContent<Controller: NSViewController>: RightPanel
     }
 }
 
-extension ProjectPanelContent where Controller == FilesPanelController {
-    /// The Files panel: `host` makes the host for a project's panel.
-    public static func files(host: @escaping @MainActor (Project) -> FilesPanelHost?) -> ProjectPanelContent {
-        ProjectPanelContent(kind: .files, make: { project in
-            guard let host = host(project) else { return nil }
-            let controller = FilesPanelController(host: host)
-            controller.drawsCard = false
-            return (controller, host)
-        }, onShow: { $0.ensureRoot() }, onFocus: { $0.focus() })
-    }
-}
-
-extension ProjectPanelContent where Controller == SourceControlController {
-    /// The Source Control panel: `host` makes the host for a project's panel.
-    public static func sourceControl(host: @escaping @MainActor (Project) -> SourceControlHost?) -> ProjectPanelContent {
-        ProjectPanelContent(kind: .sourceControl, make: { project in
-            guard let host = host(project) else { return nil }
-            let controller = SourceControlController(host: host)
-            controller.drawsCard = false
-            return (controller, host)
-        }, onShow: { $0.didShow() }, onFocus: { $0.focusMessage() })
-    }
-}
-
 /// An editor pane in a pane card.
 @MainActor
 public final class EditorPaneContent: PaneContentController, EditorLocationReceiver {
@@ -136,25 +112,4 @@ public final class EditorPaneContent: PaneContentController, EditorLocationRecei
             controller.willClose { continuation.resume(returning: $0) }
         }
     }
-}
-
-/// A diff pane in a pane card.
-@MainActor
-public final class DiffPaneContent: PaneContentController {
-    public let controller: DiffPaneController
-    private let host: DiffHost
-    public var titleDidChange: (() -> Void)?
-
-    public init(host: DiffHost, path: String, staged: Bool) {
-        self.host = host
-        controller = DiffPaneController(host: host, path: path, staged: staged)
-    }
-
-    public var view: NSView { controller.view }
-    public var title: String { PaneContent.diff(path: controller.path, staged: controller.staged).nativeTitle ?? controller.path }
-    public var icon: NSImage? { FileIcon.image(for: controller.path, theme: .shared, size: Metrics.glyph) }
-    public func focusContent() { controller.view.window?.makeFirstResponder(controller.rowsView) }
-    public func didShow() { controller.didShow() }
-    public func didHide() {}
-    public func willClose() async -> Bool { true }
 }

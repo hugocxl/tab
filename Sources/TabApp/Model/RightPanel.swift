@@ -1,51 +1,44 @@
 import AppKit
 import TabCore
 
-/// The tabs of the right sidebar, pinned beside the current project and
-/// shown one at a time.
-public enum RightPanelKind: String, CaseIterable, Sendable {
-    case files
-    case sourceControl
-
-    public var icon: AppIcon {
-        switch self {
-        case .files: return .folder
-        case .sourceControl: return .gitBranch
-        }
-    }
-
-    /// The shortcut that shows or hides the tab.
-    var shortcut: ShortcutId {
-        switch self {
-        case .files: return .toggleFiles
-        case .sourceControl: return .toggleSourceControl
-        }
-    }
-
-    var sidePanel: SidePanel {
-        switch self {
-        case .files: return .files
-        case .sourceControl: return .sourceControl
-        }
-    }
-
-    public var title: String {
-        switch self {
-        case .files: return "Files"
-        case .sourceControl: return "Source Control"
-        }
-    }
-
+/// Width constraints shared by the right sidebar shell and its plugins.
+public enum RightPanelMetrics {
     public static let defaultWidth: CGFloat = 300
     public static let minimumWidth: CGFloat = 220
     public static let maximumWidth: CGFloat = 640
+}
+
+/// Metadata for a right-sidebar tab provided by an active plugin.
+public struct RightPanelDescriptor: Equatable, Identifiable, Sendable {
+    public let id: String
+    public let pluginId: PluginId
+    public let title: String
+    public let icon: AppIcon
+    public let shortcut: ShortcutId?
+    public let order: Int
+
+    public init(
+        id: String,
+        pluginId: PluginId,
+        title: String,
+        icon: AppIcon,
+        shortcut: ShortcutId? = nil,
+        order: Int = 100
+    ) {
+        self.id = id
+        self.pluginId = pluginId
+        self.title = title
+        self.icon = icon
+        self.shortcut = shortcut
+        self.order = order
+    }
 }
 
 /// A right panel's content. The shell draws the sidebar's top row and
 /// resize handle; the content fills the rest, its footer row included.
 @MainActor
 public protocol RightPanelContent: AnyObject {
-    var kind: RightPanelKind { get }
+    var panelId: String { get }
     var view: NSView { get }
     /// The current project changed while the panel shows.
     func projectDidChange(_ project: Project?)
@@ -54,101 +47,110 @@ public protocol RightPanelContent: AnyObject {
     func focusContent()
 }
 
-/// Makes a panel's content, or `nil` when the module providing it is not
-/// there yet.
-public typealias RightPanelFactory = @MainActor (RightPanelKind, AppModel) -> RightPanelContent?
-
-/// Stands in for a panel whose module is not present.
-@MainActor
-final class PlaceholderPanel: RightPanelContent {
-    let kind: RightPanelKind
-    let view: NSView
-
-    init(kind: RightPanelKind) {
-        self.kind = kind
-        view = PlaceholderView(title: kind.title, detail: "")
-    }
-
-    func projectDidChange(_ project: Project?) {
-        (view as? PlaceholderView)?.update(title: kind.title, detail: project?.name ?? "")
-    }
-
-    func didShow() {}
-    func didHide() {}
-    func focusContent() {}
-}
+/// Makes a panel's content, or `nil` when no plugin provides `panelId`.
+public typealias RightPanelFactory = @MainActor (String, AppModel) -> RightPanelContent?
 
 extension AppModel {
-    /// The panel open on the right, if any.
-    public var rightPanel: RightPanelKind? {
-        guard activeTab?.zoomed == nil else { return nil }
-        switch appearance.sidePanel {
-        case .files: return .files
-        case .sourceControl: return .sourceControl
-        case .none: return nil
-        }
+    /// All right-sidebar tabs contributed by active plugins, in order.
+    public var rightSidebarPanels: [RightPanelDescriptor] {
+        plugins.sidebarPanels
     }
 
-    /// Opens the right sidebar on `kind`, or closes it when `kind` shows.
-    public func toggleRightPanel(_ kind: RightPanelKind) {
-        if rightPanel == kind {
+    /// The panel open on the right, if any active plugin provides it.
+    public var rightPanel: String? {
+        guard activeTab?.zoomed == nil else { return nil }
+        guard let id = appearance.sidePanel.panelId else { return nil }
+        guard plugins.sidebarPanel(id) != nil || rightPanelFactory != nil else { return nil }
+        return id
+    }
+
+    /// Whether the right sidebar is visible (either showing a plugin panel or
+    /// the empty state when no plugins are installed).
+    public var rightSidebarVisible: Bool {
+        guard activeTab?.zoomed == nil else { return false }
+        if rightPanel != nil { return true }
+        return rightSidebarShowingEmpty && rightSidebarPanels.isEmpty
+    }
+
+    /// Opens the right sidebar on `panelId`, or closes it when `panelId` shows.
+    public func toggleRightPanel(_ panelId: String) {
+        guard plugins.sidebarPanel(panelId) != nil || rightPanelFactory != nil else { return }
+        if rightPanel == panelId {
             closeRightSidebar()
         } else {
-            selectRightPanel(kind)
+            selectRightPanel(panelId)
         }
     }
 
-    /// Shows `kind` in the right sidebar, opening it when it is closed.
-    public func selectRightPanel(_ kind: RightPanelKind) {
-        guard rightPanel != kind else { return }
+    /// Shows `panelId` in the right sidebar, opening it when it is closed.
+    public func selectRightPanel(_ panelId: String) {
+        guard plugins.sidebarPanel(panelId) != nil || rightPanelFactory != nil else { return }
+        guard rightPanel != panelId else { return }
         if activeTab?.zoomed != nil { toggleZoom() }
+        rightSidebarShowingEmpty = false
         updateAppearance { appearance in
-            appearance.sidePanel = kind.sidePanel
-            appearance.lastSidePanel = kind.sidePanel
+            appearance.sidePanel = .panel(panelId)
+            appearance.lastSidePanel = .panel(panelId)
         }
-        rightPanelAwaitingFocus = kind
+        rightPanelAwaitingFocus = panelId
         notify(.panel)
     }
 
-    /// Gives the keyboard to `kind` if opening it asked for that; the shell
+    /// Gives the keyboard to `panelId` if opening it asked for that; the shell
     /// calls this once the panel's content is in the window.
-    public func focusRightPanelIfRequested(_ kind: RightPanelKind) {
-        guard rightPanelAwaitingFocus == kind else { return }
+    public func focusRightPanelIfRequested(_ panelId: String) {
+        guard rightPanelAwaitingFocus == panelId else { return }
         rightPanelAwaitingFocus = nil
-        rightPanelContent(kind)?.focusContent()
+        rightPanelContent(panelId)?.focusContent()
     }
 
-    /// Hides the right sidebar, or shows it again on the tab it last showed.
+    /// Hides the right sidebar, or shows it again on the tab it last showed
+    /// (or the empty state when no plugins are installed).
     public func toggleRightSidebar() {
-        if rightPanel != nil {
+        if rightSidebarVisible {
             closeRightSidebar()
-        } else {
-            selectRightPanel(appearance.lastSidePanel == .sourceControl ? .sourceControl : .files)
+            return
+        }
+        let available = rightSidebarPanels
+        if available.isEmpty && rightPanelFactory == nil {
+            if activeTab?.zoomed != nil { toggleZoom() }
+            rightSidebarShowingEmpty = true
+            notify(.panel)
+            return
+        }
+        if let last = appearance.lastSidePanel.panelId,
+           available.contains(where: { $0.id == last }) || rightPanelFactory != nil {
+            selectRightPanel(last)
+        } else if let first = available.first {
+            selectRightPanel(first.id)
         }
     }
 
-    private func closeRightSidebar() {
+    public func closeRightSidebar() {
         rightPanelAwaitingFocus = nil
+        rightSidebarShowingEmpty = false
         updateAppearance { $0.sidePanel = .none }
         notify(.panel)
     }
 
-    /// The content of `kind`, made once.
-    public func rightPanelContent(_ kind: RightPanelKind) -> RightPanelContent? {
-        if let existing = rightPanels[kind] { return existing }
-        let content = rightPanelFactory?(kind, self) ?? PlaceholderPanel(kind: kind)
-        rightPanels[kind] = content
+    /// The content of `panelId`, made once while its plugin stays active.
+    public func rightPanelContent(_ panelId: String) -> RightPanelContent? {
+        if let existing = rightPanels[panelId] { return existing }
+        let content = plugins.makePanelContent(panelId) ?? rightPanelFactory?(panelId, self)
+        if let content {
+            rightPanels[panelId] = content
+        }
         return content
     }
 
-    /// The right panel's width, remembered per panel.
-    public func rightPanelWidth(_ kind: RightPanelKind) -> CGFloat {
-        let width = appearance.sidePanelWidth.map { CGFloat($0) } ?? RightPanelKind.defaultWidth
-        return min(max(width, RightPanelKind.minimumWidth), RightPanelKind.maximumWidth)
+    /// The right panel's width, remembered across launches.
+    public func rightPanelWidth(_ panelId: String? = nil) -> CGFloat {
+        let width = appearance.sidePanelWidth.map { CGFloat($0) } ?? RightPanelMetrics.defaultWidth
+        return min(max(width, RightPanelMetrics.minimumWidth), RightPanelMetrics.maximumWidth)
     }
 
-    public func setRightPanelWidth(_ kind: RightPanelKind, _ width: CGFloat) {
-        let width = Double(min(max(width, RightPanelKind.minimumWidth), RightPanelKind.maximumWidth).rounded())
+    public func setRightPanelWidth(_ panelId: String?, _ width: CGFloat) {
+        let width = Double(min(max(width, RightPanelMetrics.minimumWidth), RightPanelMetrics.maximumWidth).rounded())
         updateAppearance { $0.sidePanelWidth = width }
         notify(.panel)
     }

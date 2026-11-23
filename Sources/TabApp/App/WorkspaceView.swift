@@ -16,14 +16,14 @@ final class WorkspaceView: ThemedView {
     private var inWorkspaceTransition = false
     /// The window's notices: updates, the connection, toasts.
     let notices = NoticeStack()
-    private var shownPanel: RightPanelKind?
+    private var shownPanel: String?
+    private var shownSidebarVisible = false
     private var shownPanelProject: ProjectId?
     private var liveSidebarWidth: CGFloat?
     private var livePanelWidth: CGFloat?
     private var subscription: AnyCancellable?
-    private var lastPanelLayout: (RightPanelKind?, CGFloat)?
     private var previousSidebarExpanded: Bool?
-    private var previousPanel: RightPanelKind?
+    private var previousSidebarVisible: Bool?
     private var resizeStartFrame: NSRect?
     private var resizeStartSidebarWidth: CGFloat = 0
     private var gestureMonitor: Any?
@@ -67,13 +67,14 @@ final class WorkspaceView: ThemedView {
         rightSidebar.onResize = { [weak self] width in
             guard let self else { return }
             self.livePanelWidth = width
-            if width == nil, let kind = self.shownPanel {
-                self.model.setRightPanelWidth(kind, self.rightSidebar.frame.width)
+            if width == nil, self.shownSidebarVisible {
+                self.model.setRightPanelWidth(self.shownPanel, self.rightSidebar.frame.width)
             }
             self.needsLayout = true
         }
-        rightSidebar.onSelect = { [weak model] kind in model?.toggleRightPanel(kind) }
+        rightSidebar.onSelect = { [weak model] id in model?.toggleRightPanel(id) }
         rightSidebar.onToggle = { [weak model] in model?.toggleRightSidebar() }
+        rightSidebar.onOpenPluginSettings = { [weak model] in model?.showSettingsAction?(.plugins) }
         sidebarToggle.button.shortcut = .toggleSidebar
         sidebarToggle.button.onPress = { [weak model] in model?.toggleSidebar() }
         rightSidebarToggle.onPress = { [weak model] in model?.toggleRightSidebar() }
@@ -163,29 +164,35 @@ final class WorkspaceView: ThemedView {
 
     /// Shows the right panel the model asks for, following the project.
     private func syncPanel() {
-        let kind = model.rightPanel
-        if kind != shownPanel {
-            if let old = shownPanel {
-                if kind == nil { InterfaceMotion.dismiss(rightSidebar, style: model.appearance.animationStyle, slide: 24) }
+        rightSidebar.panels = model.rightSidebarPanels
+        let visible = model.rightSidebarVisible
+        let id = model.rightPanel
+        if id != shownPanel || visible != shownSidebarVisible {
+            if let old = shownPanel, old != id {
                 model.rightPanelContent(old)?.didHide()
+            }
+            if !visible && shownSidebarVisible {
+                InterfaceMotion.dismiss(rightSidebar, style: model.appearance.animationStyle, slide: 24)
             }
             // Sized before the content arrives: constraints solved at zero
             // width leave controls such as checkboxes collapsed.
-            if let kind { rightSidebar.frame = rightSidebarFrame(kind) }
-            rightSidebar.content = kind.flatMap { model.rightPanelContent($0) }?.view
-            rightSidebar.selected = kind
-            shownPanel = kind
+            if visible { rightSidebar.frame = rightSidebarFrame(id) }
+            rightSidebar.content = id.flatMap { model.rightPanelContent($0) }?.view
+            rightSidebar.selected = id
+            rightSidebar.updateEmptyState()
+            shownPanel = id
+            shownSidebarVisible = visible
             shownPanelProject = nil
-            if let kind { model.rightPanelContent(kind)?.didShow() }
+            if let id { model.rightPanelContent(id)?.didShow() }
         }
-        guard let kind, let content = model.rightPanelContent(kind) else { return }
+        guard let id, let content = model.rightPanelContent(id) else { return }
         let project = model.currentProject
         if shownPanelProject != project.id {
             shownPanelProject = project.id
             content.projectDidChange(project)
         }
         model.updateFilesRoot()
-        model.focusRightPanelIfRequested(kind)
+        model.focusRightPanelIfRequested(id)
     }
 
     private static let connectionNotice = "connection"
@@ -215,8 +222,8 @@ final class WorkspaceView: ThemedView {
     }
 
     /// The right sidebar's frame, leaving the splits at least 240pt.
-    private func rightSidebarFrame(_ kind: RightPanelKind) -> NSRect {
-        let width = min(livePanelWidth ?? model.rightPanelWidth(kind), max(bounds.width - sidebarWidth - 240, RightPanelKind.minimumWidth))
+    private func rightSidebarFrame(_ panelId: String?) -> NSRect {
+        let width = min(livePanelWidth ?? model.rightPanelWidth(panelId), max(bounds.width - sidebarWidth - 240, RightPanelMetrics.minimumWidth))
         return NSRect(x: bounds.width - width, y: 0, width: width, height: bounds.height)
     }
 
@@ -229,7 +236,7 @@ final class WorkspaceView: ThemedView {
         let oldSidebarFrame = InterfaceMotion.frame(sidebar.view)
         let oldPanelFrame = InterfaceMotion.frame(rightSidebar)
         let changed = previousSidebarExpanded != nil &&
-            (previousSidebarExpanded != model.sidebarExpanded || previousPanel != shownPanel)
+            (previousSidebarExpanded != model.sidebarExpanded || previousSidebarVisible != shownSidebarVisible)
         let style = model.appearance.animationStyle
         defer {
             if changed {
@@ -240,13 +247,13 @@ final class WorkspaceView: ThemedView {
                 if model.sidebarExpanded {
                     InterfaceMotion.animate(sidebar.view, from: previousSidebarExpanded == true ? oldSidebarFrame : nil, style: style)
                 }
-                if shownPanel != nil { InterfaceMotion.animate(rightSidebar, from: previousPanel == nil ? nil : oldPanelFrame, style: style) }
+                if shownSidebarVisible { InterfaceMotion.animate(rightSidebar, from: previousSidebarVisible == true ? oldPanelFrame : nil, style: style) }
                 cutVeil(animated: true)
             } else {
                 cutVeil(animated: false)
             }
             previousSidebarExpanded = model.sidebarExpanded
-            previousPanel = shownPanel
+            previousSidebarVisible = shownSidebarVisible
         }
         let sidebarWidth = self.sidebarWidth
         let expanded = model.sidebarExpanded
@@ -255,14 +262,14 @@ final class WorkspaceView: ThemedView {
         sidebarToggle.reserve = max(sidebar.trafficLightsEnd - 2 * Metrics.gutter, 0)
         splits.sidebarToggle = expanded ? nil : sidebarToggle
         var right = bounds.width
-        if let kind = shownPanel {
+        if shownSidebarVisible {
             rightSidebar.isHidden = false
-            rightSidebar.frame = rightSidebarFrame(kind)
+            rightSidebar.frame = rightSidebarFrame(shownPanel)
             right = rightSidebar.frame.minX
         } else {
             rightSidebar.isHidden = true
         }
-        splits.rightSidebarToggle = shownPanel == nil ? rightSidebarToggle : nil
+        splits.rightSidebarToggle = shownSidebarVisible ? nil : rightSidebarToggle
         splits.frame = NSRect(x: sidebarWidth, y: 0, width: max(right - sidebarWidth, 0), height: bounds.height)
         notices.frame = bounds
     }
