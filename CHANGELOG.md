@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.116.1 - 2026-11-23
+
+### Fixed
+
+- Agents open new panes side by side unless you ask for one below, above or on the left.
+
 ## 0.116.0 - 2026-11-23
 
 ### Added

@@ -138,16 +138,17 @@ public enum AgentSkill {
     tab pane new simulator "iPhone 17"        # a simulator or emulator's screen
     tab pane new editor Sources/App.swift --line 42
     tab pane new diff Sources/App.swift       # its uncommitted changes; --staged for staged ones
-    tab pane new terminal --edge down -- npm test   # below yours
+    tab pane new terminal --edge down -- npm test   # below yours, when the user asks
     tab pane new browser http://localhost:3000 --beside "$EDITOR_PANE" --edge up
     tab tab new terminal                      # a new tab in Home instead
     tab tab new simulator
     ```
 
     - Inside Tab, a pane opens beside yours, on its right unless `--edge` says
-      `left`, `up` or `down`. `--beside PANE` opens it beside another pane of the
-      same computer's tabs. With `--project` it works in that project's folder,
-      but it still opens beside you.
+      `left`, `up` or `down`. Leave out `--edge` unless the user names a side:
+      side by side is what they expect. `--beside PANE` opens it beside another
+      pane of the same computer's tabs. With `--project` it works in that
+      project's folder, but it still opens beside you.
     - `editor` and `diff` take a file inside the project, absolute or relative to
       your current folder. A pane already showing that file is focused instead.
     - `simulator` without a name shows the only running simulator, else the picker.

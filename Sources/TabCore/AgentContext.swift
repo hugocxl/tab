@@ -93,8 +93,8 @@ public struct AgentContext: Hashable, Sendable {
 
         - "open a terminal", "new tab", "split", "another shell (here)": `tab pane new terminal`, a pane beside \
         yours in this tab. Add `-- <command>` to run something in it, such as a dev server.
-        - "below", "under", "above", "on the left": add `--edge down|up|left` (`right` by default); beside \
-        another pane: `--beside <pane>`.
+        - New panes open on the right of yours, side by side. Add `--edge down|up|left` only when the user \
+        says "below", "under", "above" or "on the left"; beside another pane: `--beside <pane>`.
         - "open <url>", "show me the page", "localhost:3000": `tab pane new browser <url>`.
         - "open <file> (at line N)": `tab pane new editor <file> --line N`; "show the diff of <file>": \
         `tab pane new diff <file>`.
