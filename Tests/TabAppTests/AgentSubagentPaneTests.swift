@@ -241,33 +241,6 @@ final class AgentSubagentPaneTests: XCTestCase {
         try await wait { pane.selection.model == "claude-opus-5-5" }
     }
 
-    func testOlderServerNoticeNamesWhatIsMissing() {
-        XCTAssertNil(AgentPaneController.olderServerNotice(server: "0.97.1", app: "0.97.1"))
-        XCTAssertNil(AgentPaneController.olderServerNotice(server: "0.98.0", app: "0.97.1"))
-        let old = AgentPaneController.olderServerNotice(server: "0.92.0", app: "0.96.0")
-        XCTAssertTrue(old?.contains("running agents") == true)
-        XCTAssertTrue(old?.contains("ends its running terminals and agents") == true)
-        XCTAssertTrue(AgentPaneController.olderServerNotice(server: "0.95.0", app: "0.97.0")?.contains("steps") == true)
-    }
-
-    func testOlderServerNoticeIsADismissibleNoticeOncePerConnection() async throws {
-        _ = NSApplication.shared
-        let session = SessionId(), project = ProjectId()
-        let snapshot = AgentChatSnapshot(session: session, project: project, provider: .claude, status: .idle, revision: 2)
-        let pane = AgentPaneController(session: session, project: project, provider: .claude) { _ in snapshot }
-        defer { pane.dispose() }
-        pane.serverVersion = { "0.92.0" }
-        pane.appVersion = "0.97.1"
-        pane.refresh()
-        try await wait { pane.snapshot != nil }
-        XCTAssertEqual(pane.notice?.kind, .warning)
-        XCTAssertFalse(pane.surface.dismissNotice.isHidden)
-        pane.dismissNotice()
-        pane.refresh()
-        try await Task.sleep(for: .milliseconds(150))
-        XCTAssertNil(pane.notice, "Said once per connection")
-    }
-
     func testTurnTheAgentBeganItselfReadsAsANoteNotAPrompt() throws {
         let document = AgentTranscriptDocument(frame: .zero)
         let anchor = AgentChatItem(id: "auto", kind: .user, text: "Background agent “Audit” finished",

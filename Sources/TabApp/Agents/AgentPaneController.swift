@@ -77,12 +77,6 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     var archiveRevealTask: Task<Void, Never>?
     /// Speaks approvals, failures and finished turns to VoiceOver.
     let announcer = AgentConversationAnnouncer()
-    /// The version of the Tab running this conversation's server, from its handshake.
-    var serverVersion: (() -> String?)?
-    /// This app's version, compared with the server's.
-    var appVersion = Release.version
-    /// This connection's server was found older than the app, and the pane said so.
-    private var checkedServerVersion = false
     /// This connection's server can't answer incremental reads; it gets full ones.
     private var readSinceUnsupported = false
     private(set) var subagentWindows: [String: AgentSubagentStepsWindow] = [:]
@@ -239,10 +233,6 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         }
         keyDisplay = { [weak model] id in model?.settings.keymap.chord(id)?.display }
         surface.mediaLoader.remotePolicy = { [weak model] in model?.settings.agents.remoteImages ?? AgentSettings().remoteImages }
-        serverVersion = { [weak model] in
-            guard let model, let project = owningProject() else { return nil }
-            return model.sideClient(for: project)?.server.build.version
-        }
         conversationRequest = { [weak model] request in
             guard let model, let project = owningProject(), let client = model.sideClient(for: project) else {
                 throw AgentPaneError.offline
@@ -1071,25 +1061,6 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         }
     }
 
-    /// Says once per connection when the server runs an older Tab than this app: `tabd`
-    /// outlives app updates, so newer agent features stay missing until it restarts.
-    private func noteOlderServer() {
-        guard !checkedServerVersion, let server = serverVersion?() else { return }
-        checkedServerVersion = true
-        guard let text = Self.olderServerNotice(server: server, app: appVersion) else { return }
-        showNotice(text, kind: .warning)
-    }
-
-    /// The notice for a server running `server` under an app running `app`, or nil when
-    /// the server is as new as the app.
-    static func olderServerNotice(server: String, app: String) -> String? {
-        guard ReleaseVersion.isNewer(app, than: server) else { return nil }
-        // Running agents arrived in 0.93.0; name them when that is what is missing.
-        let missing = ReleaseVersion.isNewer("0.93.0", than: server) ? "running agents" : "an agent's steps and finished agents"
-        return "This server runs Tab \(server), older than this app (\(app)). Newer agent features, such as \(missing), "
-            + "won't appear until it restarts. Restarting the server ends its running terminals and agents."
-    }
-
     /// Opens an agent's own steps in a window of their own, or brings it forward.
     func openSubagentSteps(_ agent: AgentSubagent) {
         guard !disposed, let toolUseID = agent.toolUseID, let request = conversationRequest else { return }
@@ -1202,7 +1173,6 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     func connectionChanged() {
         guard !disposed else { return }
         connectionGeneration &+= 1
-        checkedServerVersion = false
         readSinceUnsupported = false
         approvalToken = nil
         modelCatalogTask?.cancel()
@@ -2034,7 +2004,6 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         }
         if authoritative {
             surface.actions.project?.refreshProjectMetadata()
-            noteOlderServer()
         }
         composerWorkAccepted(result)
         updateControls()

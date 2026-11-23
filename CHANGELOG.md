@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.108.1 - 2026-11-23
+
+### Removed
+
+- Agent panes no longer warn that the server is older than the app, since the update
+  message at the bottom of the window already says so and offers Restart.
+
 ## 0.108.0 - 2026-11-23
 
 ### Added
