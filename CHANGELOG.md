@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.113.0 - 2026-11-23
+
+### Changed
+
+- Tool calls in agent conversations say what they did in plain words, such as Run, Search web,
+  Fetch, Find files and Load tools, instead of the tool's internal name.
 ## 0.112.0 - 2026-11-23
 
 ### Changed

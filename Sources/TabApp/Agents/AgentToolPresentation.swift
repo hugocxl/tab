@@ -3,27 +3,105 @@ import TabProtocol
 
 @MainActor
 enum AgentToolPresentation {
-    /// The tool's name as a header shows it: `Bash`, `Read`, or a provider's own tool name.
+    /// What the tool did, as a header shows it: `Run`, `Read`, `Search web`, `Load tools`,
+    /// or a provider's tool name in plain words.
     static func displayName(_ activity: AgentToolActivity) -> String {
-        // An MCP tool, `mcp__server__tool`, keeps its server's name.
+        // An MCP tool, `mcp__server__tool`, keeps its server's name unless the tool already says it.
         if let raw = activity.name, raw.hasPrefix("mcp__") {
             let parts = raw.components(separatedBy: "__")
-            if parts.count >= 3, !parts[1].isEmpty { return parts[2...].joined(separator: "__") + " (" + parts[1] + ")" }
+            if parts.count >= 3, !parts[1].isEmpty {
+                let tool = words(parts[2...].joined(separator: "_"))
+                let server = mcpServerName(parts[1])
+                return tool.lowercased().hasPrefix(server.lowercased()) ? tool : tool + " (" + server + ")"
+            }
         }
         let name = activity.name.map { $0.components(separatedBy: "__").last ?? $0 } ?? ""
+        let key = normalized(name)
         switch activity.category ?? .other {
-        case .command: return "Bash"
+        case .command: return "Run"
         case .read: return "Read"
         case .edit: return editTitle(activity, name: name)
-        case .search: return isTitleCased(name) ? name : "Search"
-        case .web: return isTitleCased(name) ? name : "Web"
+        case .search:
+            switch key {
+            case "glob": return "Find files"
+            case "listfiles", "ls": return "List files"
+            default: return "Search"
+            }
+        case .web:
+            let fetches = ["webfetch", "fetch", "openpage"].contains(key)
+                || (activity.searchPatterns ?? []).isEmpty && !(activity.urls ?? []).isEmpty
+            return fetches ? "Fetch" : "Search web"
         case .subagent: return "Agent"
         case .other:
             guard !name.isEmpty else { return "Tool" }
-            if isTitleCased(name) { return name }
-            let words = name.replacingOccurrences(of: "_", with: " ").replacingOccurrences(of: "-", with: " ")
-            return words.prefix(1).uppercased() + words.dropFirst()
+            return knownTitles[key] ?? words(name)
         }
+    }
+
+    /// Plain titles for provider tools whose names are jargon.
+    private static let knownTitles: [String: String] = [
+        "toolsearch": "Load tools",
+        "todowrite": "Update todos",
+        "updateplan": "Update plan",
+        "skill": "Use skill",
+        "askuserquestion": "Ask",
+        "enterplanmode": "Plan",
+        "exitplanmode": "Present plan",
+        "bashoutput": "Read output",
+        "taskoutput": "Read output",
+        "writestdin": "Write input",
+        "killshell": "Stop shell",
+        "killbash": "Stop shell",
+        "taskstop": "Stop task",
+        "sendmessage": "Message agent",
+        "listagents": "List agents",
+        "croncreate": "Schedule task",
+        "crondelete": "Cancel schedule",
+        "cronlist": "List schedules",
+        "viewimage": "View image",
+        "listmcpresourcestool": "List resources",
+        "readmcpresourcetool": "Read resource",
+        "lsp": "Code intelligence",
+    ]
+
+    /// A tool name in lowercase without separators: `ToolSearch` and `tool_search` match.
+    private static func normalized(_ name: String) -> String {
+        name.lowercased().filter { $0 != "_" && $0 != "-" && $0 != " " }
+    }
+
+    /// `ScheduleWakeup`, `create_issue` or `notion-search` as sentence-cased words.
+    static func words(_ name: String) -> String {
+        var words: [String] = []
+        var current = ""
+        let characters = Array(name)
+        for (index, character) in characters.enumerated() {
+            if character == "_" || character == "-" || character == " " {
+                if !current.isEmpty { words.append(current) }
+                current = ""
+                continue
+            }
+            // A capital starts a word unless it continues an acronym such as `LSP` or `URL`.
+            let previous = index > 0 ? characters[index - 1] : nil
+            let next = index + 1 < characters.count ? characters[index + 1] : nil
+            if character.isUppercase, !current.isEmpty,
+               previous?.isLowercase == true || previous?.isNumber == true || next?.isLowercase == true {
+                words.append(current)
+                current = ""
+            }
+            current.append(character)
+        }
+        if !current.isEmpty { words.append(current) }
+        guard let first = words.first else { return name }
+        let rest = words.dropFirst().map { $0.count > 1 && $0.allSatisfy(\.isUppercase) ? $0 : $0.lowercased() }
+        let lead = first.count > 1 && first.allSatisfy(\.isUppercase) ? first : first.prefix(1).uppercased() + first.dropFirst()
+        return ([lead] + rest).joined(separator: " ")
+    }
+
+    /// An MCP server's name for people: `claude_ai_Google_Calendar` is `Google Calendar`.
+    private static func mcpServerName(_ server: String) -> String {
+        let bare = server.hasPrefix("claude_ai_") ? String(server.dropFirst("claude_ai_".count)) : server
+        let parts = bare.split(whereSeparator: { $0 == "_" || $0 == "-" }).map(String.init)
+        return parts.map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined(separator: " ")
     }
 
     /// An edit's title by what it did: `Create` a new file, `Write` one over, `Delete`, else `Edit`.
@@ -58,18 +136,23 @@ enum AgentToolPresentation {
     /// to `root`, a pattern or a query. Nil when it would only repeat the tool's name.
     static func operation(_ activity: AgentToolActivity, root: String?) -> String? {
         var summary = activity.summary.trimmingCharacters(in: .whitespaces)
+        let key = normalized(activity.name.map { $0.components(separatedBy: "__").last ?? $0 } ?? "")
+        let input = activity.input.flatMap(AgentToolJSON.parse)
+        if key == "toolsearch", summary.hasPrefix("select:") {
+            // `select:Read,WebSearch` loads those tools by name.
+            summary = summary.dropFirst("select:".count).split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespaces) }.joined(separator: ", ")
+        } else if key == "skill", let skill = input?["skill"]?.string, !skill.isEmpty {
+            summary = skill
+        } else if activity.category == .web, summary.hasPrefix("https://") || summary.hasPrefix("http://") {
+            summary = String(summary.drop { $0 != "/" }.dropFirst(2))
+        }
         if let root, !root.isEmpty {
             let prefix = root.hasSuffix("/") ? root : root + "/"
             if summary.hasPrefix(prefix) { summary.removeFirst(prefix.count) }
         }
         guard !summary.isEmpty, summary != activity.name, summary != displayName(activity), summary != "Tool" else { return nil }
         return summary
-    }
-
-    /// A provider name meant for people, such as `Grep` or `WebFetch`, not `web_search`.
-    private static func isTitleCased(_ name: String) -> Bool {
-        guard let first = name.first, first.isUppercase, name.count <= 24 else { return false }
-        return name.allSatisfy { $0.isLetter || $0.isNumber }
     }
 
     static func argumentsNeedScroll(_ input: String?) -> Bool {

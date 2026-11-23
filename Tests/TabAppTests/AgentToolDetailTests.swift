@@ -50,7 +50,7 @@ final class AgentToolDetailTests: XCTestCase {
         row.frame = NSRect(x: 0, y: 0, width: 400, height: 30)
         row.layoutRow(width: 400)
         let header = try XCTUnwrap(descendants(row).compactMap { $0 as? AgentToolHeader }.first)
-        XCTAssertEqual(header.title, "Bash")
+        XCTAssertEqual(header.title, "Run")
         XCTAssertEqual(header.operation, "echo hello")
         XCTAssertLessThan(header.frame.width, 400, "The header hugs the tool name and its operation")
         XCTAssertNotNil(header.timestampTooltip)
@@ -96,7 +96,7 @@ final class AgentToolDetailTests: XCTestCase {
                     status: status, startedAt: Date(timeIntervalSince1970: 100), exitCode: code)
                 view.update(.init(id: "tool", kind: .tool, text: "Run check", tool: activity), expanded: false, theme: theme)
                 let header = try XCTUnwrap(descendants(view).compactMap { $0 as? AgentToolHeader }.first)
-                XCTAssertEqual(header.title, "Bash")
+                XCTAssertEqual(header.title, "Run")
                 XCTAssertEqual(header.operation, "check", "Command rows display the command input without an added lifecycle suffix")
                 XCTAssertEqual(header.labelColor, theme.fg)
                 XCTAssertEqual(header.activityIcon, .terminal)
@@ -220,7 +220,23 @@ final class AgentToolDetailTests: XCTestCase {
     }
 
     func testSmallerToolPresentationDetails() {
-        XCTAssertEqual(AgentToolPresentation.displayName(.init(name: "mcp__linear__create_issue")), "create_issue (linear)")
+        func title(_ name: String, _ category: AgentToolActivity.Category? = nil) -> String {
+            AgentToolPresentation.displayName(.init(name: name, category: category ?? AgentToolActivity.category(for: name)))
+        }
+        XCTAssertEqual(title("mcp__linear__create_issue"), "Create issue (Linear)")
+        XCTAssertEqual(title("mcp__claude_ai_Notion__notion-search"), "Notion search", "The tool already names its server")
+        XCTAssertEqual(title("Bash"), "Run")
+        XCTAssertEqual(title("WebSearch"), "Search web")
+        XCTAssertEqual(title("WebFetch"), "Fetch")
+        XCTAssertEqual(title("Glob"), "Find files")
+        XCTAssertEqual(title("ToolSearch"), "Load tools")
+        XCTAssertEqual(title("ScheduleWakeup"), "Schedule wakeup")
+        XCTAssertEqual(title("LSP"), "Code intelligence")
+        XCTAssertEqual(AgentToolPresentation.words("URLFetch_now"), "URL fetch now")
+        let load = AgentToolActivity(name: "ToolSearch", input: #"{"query":"select:Read,WebSearch","max_results":2}"#)
+        XCTAssertEqual(AgentToolPresentation.operation(load, root: nil), "Read, WebSearch")
+        let fetch = AgentToolActivity(name: "WebFetch", category: .web, input: #"{"url":"https://example.com/a","prompt":"x"}"#)
+        XCTAssertEqual(AgentToolPresentation.operation(fetch, root: nil), "example.com/a")
         XCTAssertEqual(AgentWebSearchPanel.paragraphs("First   line\nsame paragraph\n\n\nSecond\tparagraph"),
                        "First line same paragraph\n\nSecond paragraph")
         let thinking = AgentChatItem(id: "r", kind: .tool, text: "Thinking", detail: "…", isComplete: true,
