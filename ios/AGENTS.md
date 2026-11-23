@@ -45,7 +45,8 @@ port 7431.
   - `TabMobileKit` (TabProtocol, TabShared): connections, pairing, tabs with
     optimistic intents, terminal and agent controllers, the sidebar's cards. No
     UIKit.
-  - `TabMobileUI` (TabMobileKit, TabProtocol, TabShared): the UIKit app.
+  - `TabMobileUI` (TabMobileKit, TabProtocol, TabShared, `Icons` from the
+    `hugocxl/stack` package): the UIKit app.
   - `App/Tab.xcodeproj`: the app target, a scene delegate over `TabMobileUI`.
   - Keep `Package.swift` and this list in sync.
 - The protocol is Tab's, so it follows Tab's rules: it only grows, unknown fields
@@ -60,7 +61,7 @@ port 7431.
 - Tab icons use @hugocxl/icons through `TabIcon`; the two view-mode icons remain local.
 - Tabs and panes keep Tab's words in code, docs and UI:
   - A **tab** is one card in the list. It holds a split layout of panes.
-  - A **pane** is one terminal or agent inside a tab. Browser, simulator, editor
+  - A **pane** is one terminal, agent or simulator inside a tab. Browser, editor
     and diff panes show a placeholder; they open on the Mac.
   - **New Tab** always adds a card, a tab in Home; **New Pane** adds a pane to
     an existing tab.
