@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.123.0 - 2026-11-23
+
+### Changed
+
+- Streaming agent replies now fade newly arrived text in softly when Reduce Motion is off.
+- Long streaming agent replies and code blocks parse, highlight, and measure only their growing tail so live responses stay smooth.
+
 ## 0.122.0 - 2026-11-23
 
 ### Added

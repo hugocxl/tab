@@ -43,6 +43,7 @@ final class AgentResponseView: NSView, NSTextViewDelegate {
     private var renderedCardHosts: Set<String>?
     private var cardHosts: Set<String> { linkServices?.pullRequestHosts ?? [] }
     private var preparedBlocks: [AgentMarkdown.Block]?
+    private let streamingParser = AgentStreamingParser()
     private var source: String?
     private var palette: ChromePalette?
     private var scheme: ColorScheme?
@@ -98,6 +99,8 @@ final class AgentResponseView: NSView, NSTextViewDelegate {
     /// Cumulative actual work counters, including sections replaced during this view's lifetime.
     var sectionUpdateCount: Int { retiredUpdateCount + sections.reduce(0) { $0 + $1.updateCount } }
     var sectionMeasurementCount: Int { retiredMeasurementCount + sections.reduce(0) { $0 + $1.measurementCount } }
+    var streamingTailParseCount: Int { streamingParser.tailParseCount }
+    var streamingLastTailBytes: Int { streamingParser.lastParsedTailBytes }
 
     func setContent(_ source: String, theme: AppTheme) {
         let themeChanged = palette != theme.palette || scheme != theme.scheme || scale != AgentTextScale.factor
@@ -107,22 +110,17 @@ final class AgentResponseView: NSView, NSTextViewDelegate {
         preparedBlocks = nil
         palette = theme.palette
         scheme = theme.scheme
-        let parsedSource = isStreaming ? AgentStreamingCompletion.holdingBackAmbiguousTail(source) : source
-        var blocks = AgentResponseParser.parse(parsedSource, parseRawHTML: parseRawHTML)
-        completedStreamingTail = false
-        if isStreaming {
-            let completed = AgentStreamingCompletion.completingLastBlock(blocks)
-            completedStreamingTail = completed != blocks || parsedSource != source
-            blocks = completed
-        }
-        let references = inheritedReferences.merging(AgentMarkdownReferences.collect(blocks, parseRawHTML: parseRawHTML)) { inherited, _ in inherited }
-        applyBlocks(AgentMarkdownFootnotes.prepare(blocks, parseRawHTML: parseRawHTML), references: references, theme: theme)
+        let parsed = streamingParser.parse(source, isStreaming: isStreaming, parseRawHTML: parseRawHTML)
+        completedStreamingTail = parsed.completedTail
+        let references = inheritedReferences.merging(parsed.references) { inherited, _ in inherited }
+        applyBlocks(parsed.blocks, references: references, theme: theme)
     }
 
     func setPreparedContent(_ blocks: [AgentMarkdown.Block], theme: AppTheme) {
         guard preparedBlocks != blocks || palette != theme.palette || scheme != theme.scheme || scale != AgentTextScale.factor || source == nil || renderedCardHosts != cardHosts else { return }
         scale = AgentTextScale.factor
         preparedBlocks = blocks
+        streamingParser.reset()
         source = ""
         palette = theme.palette
         scheme = theme.scheme
@@ -184,10 +182,16 @@ final class AgentResponseView: NSView, NSTextViewDelegate {
                 self.invalidateIntrinsicContentSize()
                 self.onHeightChanged?()
             }
-            (section as? AgentResponseProse)?.services = linkServices
+            if let prose = section as? AgentResponseProse {
+                prose.services = linkServices
+                prose.text.fadesStreamedTokens = isStreaming
+            }
             (section as? AgentResponsePullRequest)?.services = linkServices
             (section as? AgentResponseTemplate)?.services = linkServices
-            (section as? AgentResponseCode)?.services = linkServices
+            if let code = section as? AgentResponseCode {
+                code.services = linkServices
+                code.text.fadesStreamedTokens = isStreaming
+            }
             (section as? AgentResponseDiagram)?.services = linkServices
             if let media = section as? AgentResponseMedia {
                 media.services = linkServices
@@ -234,8 +238,12 @@ final class AgentResponseView: NSView, NSTextViewDelegate {
 
     private func updateCommandAvailability() {
         for section in sections {
-            (section as? AgentResponseProse)?.text.fetchesFavicons = !isStreaming
+            if let prose = section as? AgentResponseProse {
+                prose.text.fadesStreamedTokens = isStreaming
+                prose.text.fetchesFavicons = !isStreaming
+            }
             if let code = section as? AgentResponseCode {
+                code.text.fadesStreamedTokens = isStreaming
                 code.isStreaming = isStreaming
                 code.onRunShellCommand = onRunShellCommand
             } else if let container = section as? AgentResponseContainer {
@@ -722,6 +730,10 @@ final class AgentResponseCode: AgentResponseSection {
     private var longestCodeWidth: CGFloat?
     private var longestWidthFont: NSFont?
     private(set) var longestLineScanCount = 0
+    private(set) var incrementalUpdateCount = 0
+    private var styledPalette: ChromePalette?
+    private var styledScheme: ColorScheme?
+    private var styledScale: CGFloat = 1
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -828,6 +840,60 @@ final class AgentResponseCode: AgentResponseSection {
         titleLabel.textColor = theme.fgMuted
         text.setAccessibilityLabel("Code" + (metadata.title.map { ", " + $0 } ?? (metadata.language.isEmpty ? "" : ", " + metadata.language)))
         let nextLanguage = Self.syntaxLanguage(metadata.language)
+        let font = AgentFont.mono(13)
+        let canAppend = !code.isEmpty
+            && source != code
+            && source.hasPrefix(code)
+            && highlighter != nil
+            && nextLanguage == language
+            && styledPalette == theme.palette
+            && styledScheme == theme.scheme
+            && styledScale == AgentTextScale.factor
+            && text.textStorage?.length == code.utf16.count
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.minimumLineHeight = lineHeight
+        paragraph.maximumLineHeight = lineHeight
+        paragraph.lineBreakMode = .byWordWrapping
+
+        if canAppend, let highlighter {
+            let oldLength = code.utf16.count
+            let delta = source.utf16.count - oldLength
+            let changed = highlighter.update(source, editedRange: NSRange(location: oldLength, length: delta), changeInLength: delta)
+            copyReset?.cancel()
+            resetCopyAction()
+            if let existingMax = longestCodeWidth, longestWidthFont == font {
+                let nsSource = source as NSString
+                let lineStart = nsSource.lineRange(for: NSRange(location: min(oldLength, max(0, nsSource.length - 1)), length: 0)).location
+                let appendedTail = nsSource.substring(from: lineStart)
+                longestCodeWidth = AgentMarkdownSource(appendedTail).lines.reduce(existingMax) { longest, line in
+                    max(longest, (line as NSString).size(withAttributes: [.font: font]).width)
+                }
+            } else {
+                longestCodeWidth = nil
+            }
+            code = source
+            let trimmed = source.hasSuffix("\n") ? source.dropLast() : Substring(source)
+            lineCount = trimmed.isEmpty ? 0 : trimmed.reduce(1) { $1 == "\n" ? $0 + 1 : $0 }
+            refreshFold()
+            refreshRunAction()
+            let tailStart = min(oldLength, changed.location)
+            let nsSource = source as NSString
+            let tailRange = NSRange(location: tailStart, length: nsSource.length - tailStart)
+            let tail = NSMutableAttributedString(string: nsSource.substring(with: tailRange), attributes: [
+                .font: font, .foregroundColor: theme.fg, .paragraphStyle: paragraph,
+            ])
+            for token in highlighter.tokens(in: tailRange) {
+                let relative = NSRange(location: token.range.location - tailStart, length: token.range.length)
+                guard relative.location >= 0, NSMaxRange(relative) <= tail.length else { continue }
+                tail.addAttributes(theme.syntaxColors.attributes(token.kind, font: font), range: relative)
+            }
+            Self.applyHangingIndents(tail, base: paragraph, font: font)
+            text.replaceTail(from: tailStart, with: tail, fadeFrom: oldLength)
+            text.delegate = delegate
+            incrementalUpdateCount += 1
+            return
+        }
+
         if highlighter == nil || nextLanguage != language {
             language = nextLanguage
             highlighter = SyntaxHighlighter(language: language)
@@ -845,6 +911,9 @@ final class AgentResponseCode: AgentResponseSection {
             longestCodeWidth = nil
         }
         code = source
+        styledPalette = theme.palette
+        styledScheme = theme.scheme
+        styledScale = AgentTextScale.factor
         let trimmed = source.hasSuffix("\n") ? source.dropLast() : Substring(source)
         lineCount = trimmed.isEmpty ? 0 : trimmed.reduce(1) { $1 == "\n" ? $0 + 1 : $0 }
         refreshFold()
@@ -854,17 +923,13 @@ final class AgentResponseCode: AgentResponseSection {
         wrapBackground = theme.fg.withAlphaComponent(0.08)
         for button in [wrap, run, copy] { button.contentTintColor = controlColor }
         refreshWrapAction()
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.minimumLineHeight = lineHeight
-        paragraph.maximumLineHeight = lineHeight
-        paragraph.lineBreakMode = .byWordWrapping
         let content = NSMutableAttributedString(string: source, attributes: [
-            .font: AgentFont.mono(13), .foregroundColor: theme.fg, .paragraphStyle: paragraph,
+            .font: font, .foregroundColor: theme.fg, .paragraphStyle: paragraph,
         ])
         for token in highlighter?.tokens ?? [] where NSMaxRange(token.range) <= content.length {
-            content.addAttributes(theme.syntaxColors.attributes(token.kind, font: AgentFont.mono(13)), range: token.range)
+            content.addAttributes(theme.syntaxColors.attributes(token.kind, font: font), range: token.range)
         }
-        Self.applyHangingIndents(content, base: paragraph, font: AgentFont.mono(13))
+        Self.applyHangingIndents(content, base: paragraph, font: font)
         text.setContent(content)
         text.delegate = delegate
         text.selectedTextAttributes = [.backgroundColor: theme.accent.withAlphaComponent(0.22)]

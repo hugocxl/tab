@@ -75,23 +75,37 @@ struct AgentMarkdownSource {
 
     let lines: [String]
     private let endings: [String]
+    /// UTF-8 byte offset of each line's start in the sanitized source.
+    private let lineUTF8Offsets: [Int]
 
     init(_ source: String) {
         let source = source.replacingOccurrences(of: "\0", with: "\u{FFFD}")
         var lines: [String] = []
         var endings: [String] = []
+        var offsets: [Int] = []
         var start = source.startIndex
+        var utf8Offset = 0
         for index in source.indices {
             let character = source[index]
             guard character == "\n" || character == "\r" || character == "\r\n" else { continue }
-            lines.append(String(source[start..<index]))
-            endings.append(String(character))
+            offsets.append(utf8Offset)
+            let line = String(source[start..<index])
+            let ending = String(character)
+            lines.append(line)
+            endings.append(ending)
+            utf8Offset += line.utf8.count + ending.utf8.count
             start = source.index(after: index)
         }
+        offsets.append(utf8Offset)
         lines.append(String(source[start...]))
         endings.append("")
         self.lines = lines
         self.endings = endings
+        self.lineUTF8Offsets = offsets
+    }
+
+    func utf8Offset(ofLine index: Int) -> Int {
+        lineUTF8Offsets.indices.contains(index) ? lineUTF8Offsets[index] : 0
     }
 
     func ending(after index: Int) -> String {

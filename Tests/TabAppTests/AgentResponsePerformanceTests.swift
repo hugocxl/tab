@@ -291,4 +291,131 @@ final class AgentResponsePerformanceTests: XCTestCase {
         XCTAssertLessThan(lastParse, 50, report)
         XCTAssertLessThan(parse.reduce(0, +), (apply.reduce(0, +) + layout.reduce(0, +) + draw.reduce(0, +)) / 2, report)
     }
+
+    func testCheckpointedStreamingParserMatchesFreshParseAndOnlyParsesTail() throws {
+        _ = NSApplication.shared
+        let theme = AppTheme(systemIsDark: true)
+        let workload = Self.longStreamedWorkload() + "\n\nA note with a footnote[^1].\n\n[^1]: Footnote body."
+        let bytes = Array(workload.utf8)
+        let response = AgentResponseView(frame: .zero)
+        response.isStreaming = true
+
+        var end = 0
+        var maxTailBytes = 0
+        while end < bytes.count {
+            end = min(bytes.count, end + 200)
+            let prefix = String(decoding: bytes[..<end], as: UTF8.self)
+            response.setContent(prefix, theme: theme)
+            if response.streamingTailParseCount > 0 {
+                maxTailBytes = max(maxTailBytes, response.streamingLastTailBytes)
+            }
+        }
+        XCTAssertGreaterThan(response.streamingTailParseCount, 50, "Long streams must reuse committed block checkpoints")
+        XCTAssertLessThan(maxTailBytes, bytes.count / 4, "Checkpointed tail should stay a small fraction of the full document")
+
+        response.isStreaming = false
+        response.setContent(workload, theme: theme)
+        _ = response.height(for: 640)
+
+        let fresh = AgentResponseView(frame: .zero)
+        fresh.setContent(workload, theme: theme)
+        _ = fresh.height(for: 640)
+        XCTAssertEqual(response.sectionViews.map(\.part), fresh.sectionViews.map(\.part),
+                       "Checkpointed streaming sections must match a fresh parse block-for-block")
+        XCTAssertEqual(response.textViews.map(\.string), fresh.textViews.map(\.string))
+        for (streamed, reference) in zip(response.sectionViews, fresh.sectionViews) {
+            if let prose = streamed as? AgentResponseProse, let ref = reference as? AgentResponseProse {
+                XCTAssertTrue(prose.text.attributedString().isEqual(to: ref.text.attributedString()),
+                              "Checkpointed streaming prose must match a fresh render exactly")
+            } else if let code = streamed as? AgentResponseCode, let ref = reference as? AgentResponseCode {
+                XCTAssertTrue(code.text.attributedString().isEqual(to: ref.text.attributedString()),
+                              "Checkpointed streaming code must match a fresh render exactly")
+            }
+        }
+
+        // Replacing the prefix resets the checkpoint cleanly.
+        response.isStreaming = true
+        response.setContent("Brand new response", theme: theme)
+        response.isStreaming = false
+        response.setContent("Brand new response", theme: theme)
+        XCTAssertEqual(response.textViews.map(\.string), ["Brand new response"])
+    }
+
+    func testStreamingCodeBlockUpdatesTailIncrementallyAndMatchesFreshRender() throws {
+        _ = NSApplication.shared
+        let theme = AppTheme(systemIsDark: true)
+        let lines = [
+            "func demo(items: [Int]) -> Int {",
+            "    /* start a multiline",
+            "       comment that spans lines */",
+            "    var total = 0",
+            "    for item in items {",
+            "        total += item * 2 // inline comment",
+            "    }",
+            "    let veryLongAppendedLine = \"This line is deliberately much wider than every earlier line in the code block so unwrapped width must grow.\"",
+            "    return total + veryLongAppendedLine.count",
+            "}",
+        ]
+        let response = AgentResponseView(frame: .zero)
+        response.isStreaming = true
+        var accumulated = "```swift\n" + lines[0] + "\n"
+        response.setContent(accumulated, theme: theme)
+        _ = response.height(for: 480)
+        let code = try XCTUnwrap(response.subviews.compactMap { $0 as? AgentResponseCode }.first)
+        code.setWrapped(false)
+        _ = response.height(for: 480)
+        let initialScans = code.longestLineScanCount
+        let initialWidth = code.text.frame.width
+        code.text.setSelectedRange(NSRange(location: 0, length: 4))
+
+        for line in lines.dropFirst() {
+            accumulated += line + "\n"
+            response.setContent(accumulated, theme: theme)
+            _ = response.height(for: 480)
+        }
+        XCTAssertEqual(code.incrementalUpdateCount, lines.count - 1,
+                       "Each append-only code chunk should take the incremental tail path")
+        XCTAssertEqual(code.longestLineScanCount, initialScans,
+                       "Appending lines must update longestCodeWidth incrementally without rescanning earlier lines")
+        XCTAssertEqual(code.text.selectedRange(), NSRange(location: 0, length: 4))
+        XCTAssertGreaterThan(code.text.frame.width, initialWidth,
+                             "Unwrapped code width must grow when a longer line streams in")
+
+        accumulated += "```\n"
+        response.isStreaming = false
+        response.setContent(accumulated, theme: theme)
+        _ = response.height(for: 480)
+
+        let fresh = AgentResponseView(frame: .zero)
+        fresh.setContent(accumulated, theme: theme)
+        let freshCode = try XCTUnwrap(fresh.subviews.compactMap { $0 as? AgentResponseCode }.first)
+        freshCode.setWrapped(false)
+        _ = fresh.height(for: 480)
+
+        XCTAssertTrue(code.text.attributedString().isEqual(to: freshCode.text.attributedString()),
+                      "Incrementally highlighted code must match a fresh render attribute-for-attribute")
+        XCTAssertEqual(code.text.frame.width, freshCode.text.frame.width, accuracy: 0.5)
+    }
+
+    func testTokenFadeTracksStreamedAppendsWithoutMutatingTextStorage() throws {
+        _ = NSApplication.shared
+        let theme = AppTheme(systemIsDark: true)
+        let response = AgentResponseView(frame: NSRect(x: 0, y: 0, width: 480, height: 200))
+        response.isStreaming = true
+        response.setContent("Hello", theme: theme)
+        let prose = try XCTUnwrap(response.subviews.compactMap { $0 as? AgentResponseProse }.first)
+        response.setContent("Hello world", theme: theme)
+        if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            XCTAssertTrue(prose.text.hasActiveTokenFades, "Streamed appends should schedule a token fade")
+        }
+
+        // Token fades draw at render time and must never alter NSTextStorage attributes.
+        let fresh = AgentResponseView(frame: .zero)
+        fresh.setContent("Hello world", theme: theme)
+        let freshProse = try XCTUnwrap(fresh.subviews.compactMap { $0 as? AgentResponseProse }.first)
+        XCTAssertTrue(prose.text.attributedString().isEqual(to: freshProse.text.attributedString()))
+
+        // Non-streaming updates do not schedule token fades.
+        XCTAssertFalse(freshProse.text.hasActiveTokenFades)
+    }
 }
