@@ -48,6 +48,7 @@ public final class FilesPanelController: NSViewController, NSTableViewDataSource
     private let statusLabel = makeLabel("", font: AppFont.footnote)
     let table = FilesTableView()
     private let scroll = NSScrollView()
+    private var scrollFade: ScrollEdgeFade?
 
     public init(host: FilesPanelHost) {
         self.host = host
@@ -101,6 +102,7 @@ public final class FilesPanelController: NSViewController, NSTableViewDataSource
         scroll.scrollerStyle = .overlay
         scroll.autohidesScrollers = true
         scroll.borderType = .noBorder
+        scrollFade = ScrollEdgeFade(scroll)
 
         let stack = NSStackView(views: [editArea, statusLabel, scroll])
         stack.orientation = .vertical

@@ -21,6 +21,7 @@ final class SidebarViewController: NSViewController {
     private let commandPalette = ChromeButton(ChromeIcon.command, label: "Command Palette")
     private let newTab = ChromeButton(ChromeIcon.plusCircle, label: "New Tab")
     private let scroll = ScrollView()
+    private var scrollFade: ScrollEdgeFade?
     private let list = NSStackView()
     private let footer = FlippedView()
     private let filter = SidebarFilterView()
@@ -66,6 +67,7 @@ final class SidebarViewController: NSViewController {
         ])
         scroll.translatesAutoresizingMaskIntoConstraints = true
         root.addSubview(scroll)
+        scrollFade = ScrollEdgeFade(scroll)
         root.addSubview(topRow)
         root.addSubview(footer)
         root.addSubview(resizeHandle)

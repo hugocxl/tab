@@ -49,6 +49,7 @@ public final class SourceControlController: NSViewController, NSTableViewDataSou
     private let message = NativeMessageView("Loading changes…")
     private let table = NSTableView()
     private let scroll = NSScrollView()
+    private var scrollFade: ScrollEdgeFade?
 
     public init(host: SourceControlHost) {
         self.host = host
@@ -105,6 +106,7 @@ public final class SourceControlController: NSViewController, NSTableViewDataSou
         scroll.scrollerStyle = .overlay
         scroll.autohidesScrollers = true
         scroll.borderType = .noBorder
+        scrollFade = ScrollEdgeFade(scroll)
 
         message.theme = theme
         let stack = NSStackView(views: [messageField, commitRow, message, scroll])

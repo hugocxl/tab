@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.112.0 - 2026-11-23
+
+### Changed
+
+- The sidebars' lists fade out at their top and bottom edges while there is more to scroll, instead of
+  cutting off sharply.
+
 ## 0.111.0 - 2026-11-23
 
 ### Added
