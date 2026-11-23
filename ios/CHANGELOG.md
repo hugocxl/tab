@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.29.0 - 2026-11-23
+
+### Added
+
+- Tab cards show when an agent's turn failed, when an agent is paused or has
+  shells running in the background, and when a terminal runs a command, as on
+  the Mac.
+
+### Changed
+
+- Tab cards match the Mac's sidebar: the project on the first line, then the
+  title, each pane with its status at the end of its row, and the branch last.
+- The model picker opens as a sheet that lists every model, with a slider for
+  the reasoning effort and a switch for plan mode.
+- A tab you are looking at that closes, on this device or another, takes you
+  back to the list.
+
 ## 0.28.2 - 2026-11-19
 
 ### Changed

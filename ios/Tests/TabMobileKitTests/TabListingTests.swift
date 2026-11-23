@@ -68,6 +68,20 @@ final class TabListingTests: XCTestCase {
         XCTAssertEqual(ServerModel.title(rows: [shell, server], customTitle: nil, branch: nil), "npm run dev")
         XCTAssertEqual(ServerModel.title(rows: [shell], customTitle: nil, branch: nil), "zsh")
         XCTAssertEqual(ServerModel.title(rows: [], customTitle: nil, branch: nil), "Empty tab")
+        // A failed agent leads like one waiting for you.
+        let failed = row("Ship it", .task("Ship it"), .error)
+        XCTAssertEqual(ServerModel.title(rows: [idle, failed], customTitle: nil, branch: nil), "Ship it")
+    }
+
+    /// As on the desktop, a terminal shows a spinner while a program works on
+    /// its own, not while one waits for typing.
+    func testTerminalsRunCommandsButNotInteractivePrograms() {
+        XCTAssertTrue(ServerModel.runsCommand(ForegroundProcess(name: "/usr/local/bin/npm", isShell: false)))
+        XCTAssertTrue(ServerModel.runsCommand(ForegroundProcess(name: "swift-build", isShell: false)))
+        XCTAssertFalse(ServerModel.runsCommand(ForegroundProcess(name: "vim", isShell: false)))
+        XCTAssertFalse(ServerModel.runsCommand(ForegroundProcess(name: "-zsh", isShell: true)))
+        XCTAssertFalse(ServerModel.runsCommand(ForegroundProcess(name: "claude", isShell: false)))
+        XCTAssertFalse(ServerModel.runsCommand(nil))
     }
 
     /// Grouping by project keeps Home first, then the server's project order,

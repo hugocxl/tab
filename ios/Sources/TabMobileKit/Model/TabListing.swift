@@ -10,6 +10,10 @@ public enum CardStatus: Hashable, Sendable {
     case attention
     case error
     case paused
+    /// Idle, with shells an agent left running in the background.
+    case background
+    /// A terminal runs a command.
+    case running
 }
 
 /// One pane in a card's list, as the desktop sidebar lists it: what it is,
@@ -26,17 +30,23 @@ public struct CardPane: Hashable, Sendable {
         case done
         case error
         case paused
+        /// Idle, with shells the agent left running in the background.
+        case background
+        /// A terminal runs a command, such as a script or a server.
+        case running
 
         /// How much the status asks for the user's eye, for the card's title
         /// row to show the most pressing of its panes'.
         var urgency: Int {
             switch self {
             case .idle: 0
-            case .done: 1
-            case .paused: 2
-            case .working, .progress: 3
-            case .error: 4
-            case .blocked: 5
+            case .background: 1
+            case .running: 2
+            case .done: 3
+            case .paused: 4
+            case .working, .progress: 5
+            case .error: 6
+            case .blocked: 7
             }
         }
     }
@@ -73,7 +83,8 @@ public struct CardPane: Hashable, Sendable {
     /// The muted text after the title: an idle shell's folder, as `~/repos/tab`.
     public var detail: String?
     public var status: Status
-    /// When the pane's agent started its turn, while it works or waits.
+    /// When the pane's agent started its turn, while it works, waits or is
+    /// held up, or when its terminal's command started.
     public var workingSince: Date?
     public var topic: Topic?
 
@@ -233,7 +244,7 @@ extension ServerModel {
             // A Home tab's folder follows its shell's name in the title or pane rows.
             location: project.home ? nil : project.name,
             branch: branch, base: git?.base, baseAhead: git?.baseAhead, primary: primary,
-            status: status(of: tab),
+            status: status(of: rows),
             projectName: project.home ? nil : root.name, iconProject: project.home ? nil : root.id,
             panes: tab.panes.map { summary(of: $0) },
             offline: !isConnected
@@ -294,8 +305,12 @@ extension ServerModel {
             }
         }
         let status = paneStatus(session: session, agent: agent)
-        let working = status == .working || status == .blocked
-        let since = working ? agent?.workingSince.map { Date(timeIntervalSince1970: TimeInterval($0) / 1000) } : nil
+        let started: UInt64? = switch status {
+        case .working, .blocked, .paused: agent?.workingSince
+        case .running: session.flatMap { metadata[$0]?.processSince }
+        default: nil
+        }
+        let since = started.map { Date(timeIntervalSince1970: TimeInterval($0) / 1000) }
         return CardPane(id: pane.id, icon: icon, hue: icon.signatureHue ?? plainHue, title: title, detail: detail, status: status, workingSince: since, topic: topic)
     }
 
@@ -306,16 +321,20 @@ extension ServerModel {
     static func title(rows: [CardPane], customTitle: String?, branch: String?) -> String {
         if let customTitle = customTitle?.trimmingCharacters(in: .whitespaces), !customTitle.isEmpty { return customTitle }
         let agents = rows.filter { if case .task = $0.topic { true } else { false } }
-        let lead = agents.first { $0.status == .blocked } ?? agents.first { $0.status == .working } ?? agents.first
+        let lead = agents.first { $0.status == .blocked || $0.status == .error } ?? agents.first { $0.status == .working } ?? agents.first
         if let lead { return lead.topicText }
         if let branch { return branch }
         let best = rows.filter { $0.topic != nil }.min { ($0.topic?.rank ?? 0) < ($1.topic?.rank ?? 0) }
         return best?.topicText ?? rows.first?.title ?? "Empty tab"
     }
 
-    /// What one pane is doing, by the same rules as the card's status.
+    /// What one pane is doing, by the desktop's rules: a failed turn is an
+    /// error rather than a wait for you, a message on its way already counts
+    /// as work, and a usage limit or a paused queue holds an agent up.
     private func paneStatus(session: SessionId?, agent: AgentActivity?) -> CardPane.Status {
         guard let session else { return .idle }
+        if agentController(session)?.submitting == true { return .working }
+        if agent?.condition == .failed { return .error }
         if agent?.state == .blocked { return .blocked }
         if let report = progress[session]?.progress {
             switch report.state {
@@ -324,10 +343,38 @@ extension ServerModel {
             default: return report.percent.map { .progress(Int($0)) } ?? .working
             }
         }
+        if agent?.condition == .paused { return .paused }
         if agent?.state == .working { return .working }
-        guard let event = activity.events.first(where: { !$0.read && $0.session == session }) else { return .idle }
-        return event.kind == .attention ? .blocked : .done
+        // An agent's own program is the agent, idle or not.
+        if agent == nil, Self.runsCommand(metadata[session]?.process) { return .running }
+        switch activity.events.first(where: { !$0.read && $0.session == session })?.kind {
+        case .attention?: return .blocked
+        case .failed?: return .error
+        case .some: return .done
+        case nil: break
+        }
+        if agent?.condition == .background { return .background }
+        return .idle
     }
+
+    /// Whether a terminal runs a program in front of its shell that works on
+    /// its own, such as a script, a build or a server, rather than one that
+    /// waits for typing, such as an editor, a pager or a remote shell.
+    static func runsCommand(_ process: ForegroundProcess?) -> Bool {
+        guard let process, !process.isShell else { return false }
+        var name = String(process.name.split(separator: "/").last ?? "").lowercased()
+        if name.hasPrefix("-") { name.removeFirst() }
+        return !name.isEmpty && !interactivePrograms.contains(name)
+    }
+
+    private static let interactivePrograms: Set<String> = [
+        "vim", "nvim", "vi", "view", "nano", "micro", "emacs", "hx", "helix", "kak",
+        "less", "more", "most", "man", "top", "htop", "btop", "atop", "glances", "watch",
+        "ssh", "mosh", "mosh-client", "telnet", "tmux", "screen", "zellij",
+        "lazygit", "lazydocker", "tig", "ranger", "nnn", "yazi", "lf", "mc", "fzf", "k9s",
+        "psql", "mysql", "sqlite3", "redis-cli", "mongosh",
+        "claude", "codex", "opencode", "cursor-agent", "copilot", "droid", "gemini", "aider", "amp", "kiro-cli",
+    ]
 
     public func summary(of pane: Pane) -> PaneSummary {
         switch pane.content {
@@ -350,24 +397,18 @@ extension ServerModel {
         return Self.abbreviate(value.directory)
     }
 
-    /// The desktop sidebar's rule: blocked agent, terminal progress, unread
-    /// event, working agent, else idle.
-    private func status(of tab: Tab) -> CardStatus {
-        let sessions = tab.panes.compactMap(\.content.activitySession)
-        let agents = sessions.compactMap(agentActivity)
-        if agents.contains(where: { $0.state == .blocked }) { return .attention }
-        for session in sessions {
-            guard let state = progress[session]?.progress?.state else { continue }
-            switch state {
-            case .error: return .error
-            case .paused: return .paused
-            default: return .working
-            }
+    /// The most pressing of the tab's panes' statuses, as the desktop sidebar
+    /// ranks them.
+    private func status(of rows: [CardPane]) -> CardStatus {
+        switch rows.map(\.status).max(by: { $0.urgency < $1.urgency }) ?? .idle {
+        case .blocked, .done: .attention
+        case .error: .error
+        case .working, .progress: .working
+        case .paused: .paused
+        case .background: .background
+        case .running: .running
+        case .idle: .idle
         }
-        let set = Set(sessions)
-        if activity.events.contains(where: { !$0.read && set.contains($0.session) }) { return .attention }
-        if agents.contains(where: { $0.state == .working }) { return .working }
-        return .idle
     }
 
     // MARK: Titles, read as the desktop reads them

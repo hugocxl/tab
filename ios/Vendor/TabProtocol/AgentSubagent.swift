@@ -28,18 +28,26 @@ public struct AgentSubagent: Codable, Hashable, Sendable, Identifiable {
     /// How many of the agent's own steps the server holds; it changes as the agent
     /// works, so a client showing them knows to read them again.
     public var steps: Int?
+    /// Changes whenever the agent's steps change, including a step that changed in place
+    /// (streamed text, a tool's result, the agent finishing) and older steps rolling out
+    /// of the kept window, which leave `steps` the same. Builds that predate it send nil;
+    /// clients then follow `steps`.
+    public var stepsRevision: UInt64?
 
     public init(id: String, toolUseID: String? = nil, description: String, agentType: String? = nil,
                 background: Bool = false, status: Status = .running, activity: String? = nil,
-                toolUses: Int? = nil, tokens: Int? = nil, startedAt: Date? = nil, finishedAt: Date? = nil, steps: Int? = nil) {
+                toolUses: Int? = nil, tokens: Int? = nil, startedAt: Date? = nil, finishedAt: Date? = nil, steps: Int? = nil,
+                stepsRevision: UInt64? = nil) {
         self.id = id; self.toolUseID = toolUseID; self.description = description; self.agentType = agentType
         self.background = background; self.status = status; self.activity = activity
         self.toolUses = toolUses; self.tokens = tokens; self.startedAt = startedAt; self.finishedAt = finishedAt
         self.steps = steps
+        self.stepsRevision = stepsRevision
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, toolUseID, description, agentType, background, status, activity, toolUses, tokens, startedAt, finishedAt, steps
+        case stepsRevision
     }
 
     public init(from decoder: Decoder) throws {
@@ -57,6 +65,7 @@ public struct AgentSubagent: Codable, Hashable, Sendable, Identifiable {
         startedAt = try c.decodeIfPresent(Date.self, forKey: .startedAt)
         finishedAt = try c.decodeIfPresent(Date.self, forKey: .finishedAt)
         steps = try c.decodeIfPresent(Int.self, forKey: .steps)
+        stepsRevision = try c.decodeIfPresent(UInt64.self, forKey: .stepsRevision)
     }
 
     /// Wire bounds a snapshot's subagents stay within.

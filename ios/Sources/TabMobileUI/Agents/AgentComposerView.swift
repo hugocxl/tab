@@ -31,7 +31,7 @@ enum AttachmentSource {
 }
 
 /// The composer in a glass card: attached files, the message, then one row
-/// with Attach, the plan mode chip, one picker for the model and its effort,
+/// with Attach, the plan mode chip, one button for the model picker,
 /// and one button that is Send for a draft, Stop while the agent works with
 /// nothing to send, and Dictate otherwise. While the agent works, Stop stays
 /// beside Send as you type a follow-up.
@@ -56,6 +56,8 @@ final class AgentComposerView: UIView, UITextViewDelegate {
     private var shownDraft = -1
     private var shownAttachments: [String] = []
     var onAttach: ((AttachmentSource) -> Void)?
+    /// Shows the model picker.
+    var onPickModel: (() -> Void)?
     /// Something went wrong that the pane should say, such as dictation failing.
     var onProblem: ((String) -> Void)?
 
@@ -114,7 +116,7 @@ final class AgentComposerView: UIView, UITextViewDelegate {
         model.configuration?.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 8, bottom: 0, trailing: 8)
         model.configuration?.imagePadding = 6
         model.configuration?.titleLineBreakMode = .byTruncatingTail
-        model.showsMenuAsPrimaryAction = true
+        model.addAction(UIAction { [weak self] _ in self?.onPickModel?() }, for: .primaryActionTriggered)
         model.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         primary.configuration?.cornerStyle = .capsule
@@ -203,7 +205,6 @@ final class AgentComposerView: UIView, UITextViewDelegate {
         }
         model.accessibilityLabel = "Model and reasoning effort"
         model.accessibilityValue = [provider.name, name, effort].compactMap { $0 }.joined(separator: ", ")
-        model.menu = Self.menu(controller)
         plan.isHidden = !controller.planMode
         plan.isEnabled = controller.status == .idle || controller.status == .failed
         refreshPrimary()
@@ -267,51 +268,6 @@ final class AgentComposerView: UIView, UITextViewDelegate {
             self?.onAttach?(.files)
         })
         return UIMenu(children: actions)
-    }
-
-    /// As the desktop's model picker: each agent with its models, locked to the
-    /// conversation's agent once it has started, then the reasoning effort,
-    /// then plan mode.
-    private static func menu(_ controller: AgentChatController) -> UIMenu {
-        let selection = controller.selection
-        let current = controller.effectiveModel
-        let providers = AgentChatProvider.allCases.map { provider -> UIMenuElement in
-            let models = controller.models[provider]
-            let locked = !controller.canChangeProvider && provider != controller.snapshot?.provider
-            var children: [UIMenuElement] = (models ?? []).map { model in
-                UIAction(title: model.title, attributes: locked ? .disabled : [],
-                         state: provider == selection.provider && model.id == current ? .on : .off) { _ in
-                    controller.select(provider: provider, model: model.id)
-                }
-            }
-            if children.isEmpty {
-                children = [UIAction(title: models == nil ? "Loading models…" : "No models reported", attributes: .disabled) { _ in }]
-            }
-            return UIMenu(title: provider.name, subtitle: locked ? "Open a new agent pane to use it" : nil,
-                          image: AgentLogo.image(provider, side: 22, scale: TabIcon.inlineScale),
-                          children: children)
-        }
-        var children: [UIMenuElement] = [UIMenu(options: .displayInline, children: providers)]
-        let efforts = controller.selectedModel?.reasoningEfforts ?? []
-        if !efforts.isEmpty {
-            let auto = UIAction(title: "Auto", state: controller.effort == nil ? .on : .off) { _ in
-                controller.select(effort: nil)
-            }
-            children.append(UIMenu(title: "Reasoning Effort", options: .displayInline, children: [auto] + efforts.map { effort in
-                UIAction(title: effort.title, state: controller.effort == effort ? .on : .off) { _ in
-                    controller.select(effort: effort)
-                }
-            }))
-        }
-        let free = controller.status == .idle || controller.status == .failed
-        let plan = UIAction(title: "Plan Mode", image: UIImage(systemName: "list.bullet.clipboard"),
-                            attributes: free ? [] : .disabled, state: controller.planMode ? .on : .off) { _ in
-            controller.togglePlanMode()
-        }
-        plan.subtitle = free ? "Plans before changing anything" : "Changes after the current response"
-        plan.discoverabilityTitle = "Plan Mode (Shift-Tab)"
-        children.append(UIMenu(options: .displayInline, children: [plan]))
-        return UIMenu(children: children)
     }
 
     /// Which action the one button offers: Send for a draft, which queues while

@@ -75,6 +75,10 @@ final class AgentPaneViewController: UIViewController, UICollectionViewDelegate 
 
         composer.translatesAutoresizingMaskIntoConstraints = false
         composer.onAttach = { [weak self] source in self?.pickAttachments(from: source) }
+        composer.onPickModel = { [weak self] in
+            guard let self else { return }
+            present(ModelPickerViewController(controller: controller).inSheet(), animated: true)
+        }
         composer.onProblem = { [weak self] message in
             self?.problem = message
             self?.problemRevision = self?.controller.snapshot?.revision

@@ -173,9 +173,26 @@ public final class RootViewController: UIViewController {
             split.show(.secondary)
             return
         }
-        split.setViewController(UINavigationController(rootViewController: TabViewController(server: server, tab: card.tab.id)),
-                                for: .secondary)
+        let tab = TabViewController(server: server, tab: card.tab.id)
+        tab.onClosed = { [weak self, weak tab] in
+            guard let tab else { return }
+            self?.leave(tab)
+        }
+        split.setViewController(UINavigationController(rootViewController: tab), for: .secondary)
         split.show(.secondary)
+    }
+
+    /// Leaves a tab that closed while it showed: back to the list on a
+    /// phone, the placeholder beside it on an iPad.
+    private func leave(_ tab: TabViewController) {
+        guard let split, (split.viewController(for: .secondary) as? UINavigationController)?.viewControllers.first === tab else { return }
+        showsDetail = false
+        list?.clearSelection()
+        if split.isCollapsed {
+            split.show(.primary)
+            return
+        }
+        split.setViewController(PlaceholderViewController(), for: .secondary)
     }
 
     private func showSettings() {

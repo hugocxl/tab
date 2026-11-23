@@ -71,6 +71,27 @@ public enum AgentState: String, Hashable, Codable, Sendable, CaseIterable {
     }
 }
 
+/// What qualifies an agent's state, when the state alone doesn't say it.
+/// Conditions from newer builds are kept as they are, and clients that don't
+/// know one show the state alone.
+public struct AgentCondition: RawRepresentable, Codable, Hashable, Sendable {
+    public var rawValue: String
+    public init(rawValue: String) { self.rawValue = rawValue }
+    public init(from decoder: Decoder) throws { rawValue = try decoder.singleValueContainer().decode(String.self) }
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+
+    /// Blocked because its turn failed, rather than waiting for an answer.
+    public static let failed = AgentCondition(rawValue: "failed")
+    /// Held up: a usage limit stops it until it resets, or its queued
+    /// messages wait for you to resume them.
+    public static let paused = AgentCondition(rawValue: "paused")
+    /// Idle, with shells it started still running in the background.
+    public static let background = AgentCondition(rawValue: "background")
+}
+
 /// An agent running in a session now.
 public struct AgentActivity: Hashable, Codable, Sendable {
     public var session: SessionId
@@ -82,15 +103,18 @@ public struct AgentActivity: Hashable, Codable, Sendable {
     /// starts working and kept while it works or waits for you. Older servers
     /// leave it out.
     public var workingSince: UInt64?
+    /// Older servers leave it out.
+    public var condition: AgentCondition?
 
     public init(session: SessionId, project: ProjectId, provider: AgentProvider, state: AgentState, title: String? = nil,
-                workingSince: UInt64? = nil) {
+                workingSince: UInt64? = nil, condition: AgentCondition? = nil) {
         self.session = session
         self.project = project
         self.provider = provider
         self.state = state
         self.title = title
         self.workingSince = workingSince
+        self.condition = condition
     }
 }
 
@@ -102,15 +126,18 @@ public enum EventKind: OpenEnum {
     /// A program asked for a desktop notification (OSC 9 or OSC 777);
     /// the event's `title` and `body` hold it.
     case notification
+    /// The agent's turn failed.
+    case failed
     case unknown(String)
 
-    public static let knownCases: [EventKind] = [.attention, .completed, .notification]
+    public static let knownCases: [EventKind] = [.attention, .completed, .notification, .failed]
 
     public var rawValue: String {
         switch self {
         case .attention: "attention"
         case .completed: "completed"
         case .notification: "notification"
+        case .failed: "failed"
         case .unknown(let value): value
         }
     }
@@ -120,6 +147,7 @@ public enum EventKind: OpenEnum {
         case .attention: "Needs your attention"
         case .completed: "Finished working"
         case .notification: "Sent a notification"
+        case .failed: "Stopped with an error"
         case .unknown: "Has an update"
         }
     }

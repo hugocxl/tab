@@ -27,6 +27,14 @@ public struct AgentChatTurn: Codable, Hashable, Sendable {
     public var waited: TimeInterval?
     /// What the turn used and why it stopped, when the provider reports it.
     public var usage: AgentTurnUsage?
+    /// Where recording the turn's file changes stands; nil from servers that predate it,
+    /// where `checkpoint` alone says the changes are ready.
+    public var checkpointStatus: AgentTurnCheckpointStatus?
+    /// The server can rewind the conversation to before this turn's message and continue
+    /// the provider from there. Nil or false: Edit from Here is unavailable.
+    public var rewindable: Bool?
+    /// The turn stopped at a usage or rate limit; absent from servers that predate it.
+    public var rateLimit: AgentRateLimitStop?
 
     public init(userItemID: String, startedAt: Date, completedAt: Date? = nil, status: AgentChatStatus = .working, checkpoint: AgentTurnCheckpoint? = nil, outcome: Outcome? = nil,
                 waitingSince: Date? = nil, waited: TimeInterval? = nil) {
@@ -108,6 +116,80 @@ extension AgentTurnCheckpoint {
         guard UUID(uuidString: id) != nil, files.count <= 64, totalFiles >= files.count,
               files.allSatisfy({ !$0.path.isEmpty && $0.path.utf8.count <= 1024 && !$0.path.contains("\0") }) else {
             throw .badRequest
+        }
+    }
+}
+
+/// Where recording one turn's file changes stands. A ready turn's `checkpoint` says whether
+/// it changed files; an unavailable one says why, and whether its original baseline is still
+/// there to try again from.
+public struct AgentTurnCheckpointStatus: Codable, Hashable, Sendable {
+    /// Unknown future states round-trip and read as unavailable.
+    public struct State: RawRepresentable, Codable, Hashable, Sendable {
+        public var rawValue: String
+        public init(rawValue: String) { self.rawValue = rawValue }
+        /// The baseline or the turn's result is being recorded.
+        public static let capturing = Self(rawValue: "capturing")
+        public static let ready = Self(rawValue: "ready")
+        public static let unavailable = Self(rawValue: "unavailable")
+        /// The conversation's folder isn't one Tab can record changes in, such as a folder
+        /// outside Git; every turn there is so.
+        public static let untracked = Self(rawValue: "untracked")
+        public init(from decoder: Decoder) throws { rawValue = try decoder.singleValueContainer().decode(String.self) }
+        public func encode(to encoder: Encoder) throws { var value = encoder.singleValueContainer(); try value.encode(rawValue) }
+    }
+
+    public var state: State
+    /// Why the changes are unavailable, at most `maxReasonBytes`.
+    public var reason: String?
+    /// Recording can be tried again from the turn's original baseline.
+    public var retryable: Bool?
+
+    public init(state: State, reason: String? = nil, retryable: Bool? = nil) {
+        self.state = state
+        self.reason = reason.map { Self.bounded($0) }
+        self.retryable = retryable
+    }
+
+    public static let maxReasonBytes = 512
+
+    /// `text` within `maxReasonBytes`, cut between characters.
+    public static func bounded(_ text: String) -> String {
+        guard text.utf8.count > maxReasonBytes else { return text }
+        var result = ""
+        for character in text {
+            guard result.utf8.count + character.utf8.count <= maxReasonBytes - 3 else { break }
+            result.append(character)
+        }
+        return result + "…"
+    }
+}
+
+extension AgentChatTurn {
+    /// What a client shows for the turn's file changes, from this server's status or, from
+    /// an older server, from whether a checkpoint arrived.
+    public enum CheckpointPhase: Equatable, Sendable {
+        /// An older server that hasn't sent a checkpoint: it may be recording or unavailable.
+        case unknown
+        case capturing
+        case unchanged
+        case changed
+        case unavailable(reason: String, retryable: Bool)
+        /// The folder can't have its changes recorded, as when it isn't in Git.
+        case untracked(reason: String)
+    }
+
+    public var checkpointPhase: CheckpointPhase {
+        if let checkpoint, checkpointStatus == nil || checkpointStatus?.state == .ready {
+            return checkpoint.totalFiles == 0 ? .unchanged : .changed
+        }
+        guard let status = checkpointStatus else { return .unknown }
+        switch status.state {
+        case .capturing: return .capturing
+        case .ready: return .unknown
+        case .untracked: return .untracked(reason: status.reason ?? "Tab can't record file changes in this folder.")
+        default:
+            return .unavailable(reason: status.reason ?? "This turn's file changes weren't recorded.", retryable: status.retryable == true)
         }
     }
 }

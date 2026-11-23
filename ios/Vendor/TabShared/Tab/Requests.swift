@@ -29,7 +29,8 @@ extension ServerClient {
     }
 
     public func agentAttachment(_ request: AgentAttachmentRequest) async throws -> AgentAttachmentReply {
-        let reply = try await self.request(.agentAttachment(request))
+        // Up to 10 MiB, which can take a while from another computer.
+        let reply = try await self.request(.agentAttachment(request), timeout: max(defaultTimeout, 60))
         guard case .agentAttachment(let attachment) = reply else { throw unexpected(reply) }
         return attachment
     }
@@ -308,6 +309,25 @@ extension ServerClient {
     public func writeServerSettings(_ settings: ServerSettingsDoc) async throws {
         let reply = try await request(.writeServerSettings(settings))
         guard case .serverSettingsWritten = reply else { throw unexpected(reply) }
+    }
+
+    /// The server's coding agents and what their last checks found.
+    public func agentProviders() async throws -> AgentProvidersState {
+        try providersReply(await request(.readAgentProviders))
+    }
+
+    public func writeAgentProviders(_ settings: AgentProviderSettings) async throws -> AgentProvidersState {
+        try providersReply(await request(.writeAgentProviders(settings)))
+    }
+
+    /// Checks each enabled provider's CLI version and sign-in, waiting for the result.
+    public func checkAgentProviders() async throws -> AgentProvidersState {
+        try providersReply(await request(.checkAgentProviders))
+    }
+
+    private func providersReply(_ reply: ReplyBody) throws -> AgentProvidersState {
+        guard case .agentProviders(let state) = reply else { throw unexpected(reply) }
+        return state
     }
 
     /// Stops the server. Without `force` it refuses while terminals run and

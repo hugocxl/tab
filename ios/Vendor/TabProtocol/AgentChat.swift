@@ -90,12 +90,16 @@ public struct AgentChatItem: Codable, Hashable, Sendable, Identifiable {
     public var createdAt: Date?
     public var updatedAt: Date?
     public var workContext: AgentChatWorkContext?
+    /// An approval's request and the decisions offered; see `AgentApprovalRequest`.
+    public var approval: AgentApprovalRequest?
 
     public init(id: String = UUID().uuidString, kind: Kind, text: String,
                 detail: String? = nil, isComplete: Bool = true, tool: AgentToolActivity? = nil,
                 attachments: [AgentChatAttachmentDescriptor]? = nil, createdAt: Date? = nil,
-                updatedAt: Date? = nil, workContext: AgentChatWorkContext? = nil, questionnaire: AgentQuestionnaire? = nil) {
+                updatedAt: Date? = nil, workContext: AgentChatWorkContext? = nil, questionnaire: AgentQuestionnaire? = nil,
+                approval: AgentApprovalRequest? = nil) {
         self.questionnaire = questionnaire
+        self.approval = approval
         self.id = id
         self.kind = kind
         self.text = text
@@ -151,10 +155,15 @@ public struct AgentChatSnapshot: Codable, Hashable, Sendable {
     public var session: SessionId
     public var project: ProjectId
     public var provider: AgentChatProvider
+    /// The server's `AgentProviderConfig` the conversation runs, when not `provider`'s built-in one.
+    public var providerID: String?
     public var providerSession: String?
     public var model: String?
     /// Actual provider model, independent of the user's optional model override.
     public var commands: [String]?
+    public var commandDescriptors: [AgentCommandDescriptor]?
+    /// Last successful in-place reset, also used to fence client caches.
+    public var resetID: SessionId?
     public var resolvedModel: String?
     public var contextUsage: AgentContextUsage?
     /// Agents the provider's agent started that are still running, oldest first.
@@ -198,7 +207,7 @@ public struct AgentChatSnapshot: Codable, Hashable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case session, project, provider, providerSession, model, commands, resolvedModel, contextUsage, subagents, reasoningEffort, accessMode, planMode, queuedPrompts, queuePaused, turns, status, revision, items, omittedItems, activity
+        case commandDescriptors, resetID, session, project, provider, providerID, providerSession, model, commands, resolvedModel, contextUsage, subagents, reasoningEffort, accessMode, planMode, queuedPrompts, queuePaused, turns, status, revision, items, omittedItems, activity
     }
 
     public init(from decoder: Decoder) throws {
@@ -209,9 +218,12 @@ public struct AgentChatSnapshot: Codable, Hashable, Sendable {
         session = try c.decode(SessionId.self, forKey: .session)
         project = try c.decode(ProjectId.self, forKey: .project)
         provider = try c.decode(AgentChatProvider.self, forKey: .provider)
+        providerID = try c.decodeIfPresent(String.self, forKey: .providerID)
         providerSession = try c.decodeIfPresent(String.self, forKey: .providerSession)
         model = try c.decodeIfPresent(String.self, forKey: .model)
         commands = try c.decodeIfPresent([String].self, forKey: .commands)
+        commandDescriptors = try c.decodeIfPresent([AgentCommandDescriptor].self, forKey: .commandDescriptors)
+        resetID = try c.decodeIfPresent(SessionId.self, forKey: .resetID)
         resolvedModel = try c.decodeIfPresent(String.self, forKey: .resolvedModel)
         contextUsage = try c.decodeIfPresent(AgentContextUsage.self, forKey: .contextUsage)
         subagents = try c.decodeIfPresent([AgentSubagent].self, forKey: .subagents)
@@ -232,17 +244,32 @@ public enum AgentChatRequest: Codable, Hashable, Sendable {
     /// Provider seeds new conversations only; reconnect returns the server's selected provider.
     case create(session: SessionId, project: ProjectId, provider: AgentChatProvider)
     case read(session: SessionId)
+    /// Archives the previous conversation and resets this pane in place, while idle.
+    case clear(session: SessionId, archive: SessionId, expectedRevision: UInt64)
     case submit(session: SessionId, prompt: AgentPrompt)
     case editQueued(session: SessionId, id: String, text: String, expectedRevision: UInt64, settings: AgentQueuedSettings? = nil)
     case removeQueued(session: SessionId, id: String, expectedRevision: UInt64)
     case deliverQueued(session: SessionId, id: String, expectedRevision: UInt64)
     case moveQueued(session: SessionId, id: String, beforeID: String, expectedRevision: UInt64)
     case resumeQueue(session: SessionId)
+    /// Replaces a queued prompt's text, settings and attachments together, against
+    /// `expectedRevision`. Older servers reply `unsupported` and keep the prompt as it was.
+    case editQueuedPrompt(session: SessionId, id: String, expectedRevision: UInt64, edit: AgentQueuedEdit)
     case answer(session: SessionId, request: String, answers: [String: [String]], cancelled: Bool)
+    /// Answers a pending request with one of the decisions its `AgentApprovalRequest`
+    /// offered, and a form's answers for a submit decision. Servers that predate it
+    /// reply `unsupported`; they never offer decisions, so clients use `approve`.
+    case decide(session: SessionId, request: String, decision: String, answers: [String: [String]]? = nil)
+    /// Accepts `prompt` like `submit`, but the server delivers it no earlier than `at`,
+    /// such as when a usage limit resets. Remove or deliver it like a queued prompt.
+    /// Idempotent by prompt ID. Servers that predate it reply `unsupported`.
+    case schedule(session: SessionId, prompt: AgentPrompt, at: Date)
 
     /// Nil model/effort explicitly restore provider defaults; nil provider keeps the current provider.
+    /// `providerID` names one of the server's `AgentProviderConfig`s of `provider`'s kind;
+    /// nil keeps the conversation's, or the kind's built-in one. Older servers ignore it.
     case send(session: SessionId, text: String, model: String?, reasoningEffort: AgentReasoningEffort? = nil,
-              provider: AgentChatProvider? = nil, attachments: [AgentChatAttachment]? = nil)
+              provider: AgentChatProvider? = nil, attachments: [AgentChatAttachment]? = nil, providerID: String? = nil)
     /// `always` also lets the same tool run without asking for the rest of the
     /// conversation; `reason` tells the agent why it was denied. A server that predates
     /// them ignores both and answers this request once.

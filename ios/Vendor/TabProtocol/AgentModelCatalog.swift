@@ -4,20 +4,31 @@ public struct AgentModelCatalogRequest: Hashable, Codable, Sendable {
     public var project: ProjectId
     public var provider: AgentChatProvider
     public var forceRefresh: Bool
+    /// One of the server's providers of `provider`'s kind; nil is the kind's built-in one.
+    /// The reply lists its models in the user's order with custom ones added; servers
+    /// that predate it list the built-in provider's models as reported.
+    public var providerID: String?
+    /// Also lists the models the user hid from the menu, as Settings does.
+    public var includeHidden: Bool
 
-    public init(project: ProjectId, provider: AgentChatProvider, forceRefresh: Bool = false) {
+    public init(project: ProjectId, provider: AgentChatProvider, forceRefresh: Bool = false,
+                providerID: String? = nil, includeHidden: Bool = false) {
         self.project = project
         self.provider = provider
         self.forceRefresh = forceRefresh
+        self.providerID = providerID
+        self.includeHidden = includeHidden
     }
 
-    private enum CodingKeys: String, CodingKey { case project, provider, forceRefresh }
+    private enum CodingKeys: String, CodingKey { case project, provider, forceRefresh, providerID, includeHidden }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         project = try container.decode(ProjectId.self, forKey: .project)
         provider = try container.decode(AgentChatProvider.self, forKey: .provider)
         forceRefresh = try container.decodeIfPresent(Bool.self, forKey: .forceRefresh) ?? false
+        providerID = try container.decodeIfPresent(String.self, forKey: .providerID)
+        includeHidden = try container.decodeIfPresent(Bool.self, forKey: .includeHidden) ?? false
     }
 }
 

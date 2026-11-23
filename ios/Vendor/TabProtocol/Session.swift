@@ -272,11 +272,15 @@ public struct SessionMetadata: Hashable, Codable, Sendable {
     public var title: String
     public var directory: ServerPath
     public var process: ForegroundProcess?
+    /// Unix milliseconds when a program took the foreground from the shell,
+    /// while one runs. Older servers leave it out.
+    public var processSince: UInt64?
 
-    public init(title: String, directory: ServerPath, process: ForegroundProcess? = nil) {
+    public init(title: String, directory: ServerPath, process: ForegroundProcess? = nil, processSince: UInt64? = nil) {
         self.title = title
         self.directory = directory
         self.process = process
+        self.processSince = processSince
     }
 }
 

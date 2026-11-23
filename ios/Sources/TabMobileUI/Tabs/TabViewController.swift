@@ -21,6 +21,9 @@ final class TabViewController: UIViewController {
     private let switcherEdge = UIScrollEdgeElementContainerInteraction()
     /// The panes the switcher shows, in order, with their labels.
     private var switcherPanes: [(id: PaneId, label: String)] = []
+    /// Called once when the tab closes, here, on the Mac or on another
+    /// device, so whoever shows it can leave it.
+    var onClosed: (() -> Void)?
 
     init(server: ServerModel, tab: TabId, focus: PaneId? = nil) {
         self.server = server
@@ -77,6 +80,10 @@ final class TabViewController: UIViewController {
         super.updateProperties()
         guard let (project, tab) = server.tab(tabId) else {
             showClosed()
+            let closed = onClosed
+            onClosed = nil
+            // Out of the update pass, which mustn't change the navigation stack.
+            if let closed { DispatchQueue.main.async(execute: closed) }
             return
         }
         emptyView.isHidden = true

@@ -14,6 +14,9 @@ extension AgentChatRequest {
         case .moveQueued(_, let id, let before, _):
             guard UUID(uuidString: id) != nil, UUID(uuidString: before) != nil, id != before else { throw .badRequest }
         case .resumeQueue: break
+        case .editQueuedPrompt(_, let id, _, let edit):
+            guard UUID(uuidString: id) != nil else { throw .badRequest }
+            try edit.validate()
         case .answer(_, let request, let answers, _):
             try Validation.message(request, limit: 1024)
             guard answers.count <= 12 else { throw .badRequest }
@@ -23,8 +26,21 @@ extension AgentChatRequest {
                 for value in values { try Validation.message(value, limit: 16 * 1024) }
             }
 
-        case .send(_, let text, let model, let effort, _, let attachments):
+        case .decide(_, let request, let decision, let answers):
+            try Validation.message(request, limit: 1024)
+            try Validation.message(decision, limit: 256)
+            guard (answers?.count ?? 0) <= 12 else { throw .badRequest }
+            for (id, values) in answers ?? [:] {
+                try Validation.message(id, limit: 1024)
+                guard values.count <= 32 else { throw .badRequest }
+                for value in values { try Validation.message(value, limit: 16 * 1024) }
+            }
+        case .schedule(_, let prompt, let at):
+            try prompt.validate()
+            guard at.timeIntervalSince1970.isFinite else { throw .badRequest }
+        case .send(_, let text, let model, let effort, _, let attachments, let providerID):
             try AgentChatAttachment.validate(attachments ?? [])
+            if let providerID { try Validation.message(providerID, limit: 64) }
             if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !(attachments ?? []).isEmpty {
                 guard text.utf8.count <= 64 * 1024 else { throw .badRequest }
             } else {
@@ -39,7 +55,7 @@ extension AgentChatRequest {
                 guard !allow else { throw .badRequest }
                 try Validation.message(reason, limit: 4096)
             }
-        case .fork(let session, let from, _):
+        case .clear(let session, let from, _), .fork(let session, let from, _):
             guard session != from else { throw .badRequest }
         case .create, .read, .interrupt, .close, .setAccess, .setPlan:
             break
@@ -50,6 +66,9 @@ extension AgentChatRequest {
 extension AgentChatSnapshot {
     public func validate() throws(ErrorCode) {
         try reasoningEffort?.validate()
+        if let commandDescriptors {
+            guard commandDescriptors.count <= 256, commandDescriptors.allSatisfy(\.isValid) else { throw .badRequest }
+        }
         guard items.count <= 512,
               items.reduce(0, { $0 + $1.transcriptByteCount }) <= 512 * 1024,
               items.allSatisfy({ $0.id.utf8.count <= 1024 }),
@@ -78,9 +97,13 @@ extension AgentChatSnapshot {
                   (prompt.error?.utf8.count ?? 0) <= 8192, prompt.attachments.count <= AgentChatAttachment.maxCount else { throw .badRequest }
             for attachment in prompt.attachments { try attachment.validate() }
         }
-        for turn in turns ?? [] { try turn.checkpoint?.validate() }
+        for turn in turns ?? [] {
+            try turn.checkpoint?.validate()
+            guard (turn.checkpointStatus?.reason?.utf8.count ?? 0) <= AgentTurnCheckpointStatus.maxReasonBytes else { throw .badRequest }
+        }
         for item in items {
             try item.questionnaire?.validate()
+            try item.approval?.validate()
             if let context = item.workContext {
                 guard [context.runID, context.providerTurnID, context.itemType, context.sourceStatus, context.toolNonExecutionKind, context.requestKind, context.planStatus]
                     .allSatisfy({ ($0?.utf8.count ?? 0) <= 4096 && $0?.contains("\0") != true }) else { throw .badRequest }
@@ -107,6 +130,7 @@ extension AgentChatItem {
         text.utf8.count + (detail?.utf8.count ?? 0) + (tool?.transcriptByteCount ?? 0)
             + (attachments ?? []).reduce(0) { $0 + $1.transcriptByteCount }
             + (questionnaire?.transcriptByteCount ?? 0)
+            + (approval?.transcriptByteCount ?? 0)
             + (createdAt == nil ? 0 : 48) + (updatedAt == nil ? 0 : 48)
             + (workContext.map { context in
                 400 + [context.runID, context.providerTurnID, context.itemType, context.sourceStatus, context.toolNonExecutionKind, context.requestKind, context.planStatus]

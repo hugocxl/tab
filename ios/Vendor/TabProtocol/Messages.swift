@@ -286,6 +286,13 @@ public enum RequestBody: Hashable, Codable, Sendable {
     // Server
     case readServerSettings
     case writeServerSettings(ServerSettingsDoc)
+    /// The server's coding agents and their last checks; replies `agentProviders`.
+    /// Servers that predate it reply `unsupported`.
+    case readAgentProviders
+    /// Replaces the server's coding agents; replies `agentProviders`.
+    case writeAgentProviders(AgentProviderSettings)
+    /// Checks every provider's CLI now; replies `agentProviders` once done.
+    case checkAgentProviders
     /// Refused with `serverBusy` while terminals run, unless `force`.
     case stopServer(force: Bool)
     case stopServerIfIdle
@@ -378,6 +385,9 @@ public enum RequestBody: Hashable, Codable, Sendable {
         case "mutateTabs": self = .mutateTabs(try c("intent"))
         case "readServerSettings": self = .readServerSettings
         case "writeServerSettings": self = .writeServerSettings(try c("settings"))
+        case "readAgentProviders": self = .readAgentProviders
+        case "writeAgentProviders": self = .writeAgentProviders(try c("settings"))
+        case "checkAgentProviders": self = .checkAgentProviders
         case "stopServer": self = .stopServer(force: try c("force"))
         case "stopServerIfIdle": self = .stopServerIfIdle
         case "restartServer": self = .restartServer
@@ -529,6 +539,11 @@ public enum RequestBody: Hashable, Codable, Sendable {
         case .writeServerSettings(let settings):
             var c = try TaggedEncoding(encoder, "writeServerSettings")
             try c(settings, "settings")
+        case .readAgentProviders: try TaggedEncoding(encoder, "readAgentProviders")
+        case .writeAgentProviders(let settings):
+            var c = try TaggedEncoding(encoder, "writeAgentProviders")
+            try c(settings, "settings")
+        case .checkAgentProviders: try TaggedEncoding(encoder, "checkAgentProviders")
         case .stopServer(let force):
             var c = try TaggedEncoding(encoder, "stopServer")
             try c(force, "force")
@@ -646,6 +661,7 @@ public enum ReplyBody: Hashable, Codable, Sendable {
     // Server
     case serverSettings(ServerSettingsDoc)
     case serverSettingsWritten
+    case agentProviders(AgentProvidersState)
     case serverStopping
     /// Terminals are running, so the server didn't stop.
     case serverBusy
@@ -725,6 +741,7 @@ public enum ReplyBody: Hashable, Codable, Sendable {
         case "folders": self = .folders(try c("names"))
         case "serverSettings": self = .serverSettings(try c("settings"))
         case "serverSettingsWritten": self = .serverSettingsWritten
+        case "agentProviders": self = .agentProviders(try c("state"))
         case "serverStopping": self = .serverStopping
         case "serverBusy": self = .serverBusy
         case "serverRestarting": self = .serverRestarting
@@ -839,6 +856,9 @@ public enum ReplyBody: Hashable, Codable, Sendable {
             var c = try TaggedEncoding(encoder, "serverSettings")
             try c(settings, "settings")
         case .serverSettingsWritten: try TaggedEncoding(encoder, "serverSettingsWritten")
+        case .agentProviders(let state):
+            var c = try TaggedEncoding(encoder, "agentProviders")
+            try c(state, "state")
         case .serverStopping: try TaggedEncoding(encoder, "serverStopping")
         case .serverBusy: try TaggedEncoding(encoder, "serverBusy")
         case .serverRestarting: try TaggedEncoding(encoder, "serverRestarting")

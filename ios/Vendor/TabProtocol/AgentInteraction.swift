@@ -7,17 +7,19 @@ public struct AgentPrompt: Codable, Hashable, Sendable, Identifiable {
     public var model: String?
     public var effort: AgentReasoningEffort?
     public var provider: AgentChatProvider
+    /// Which of the server's providers of `provider`'s kind runs it; nil is the kind's built-in one.
+    public var providerID: String?
     public var planMode: Bool
     public var attachments: [AgentChatAttachment]
     public init(id: String = UUID().uuidString, text: String, model: String?, effort: AgentReasoningEffort?,
-                provider: AgentChatProvider, planMode: Bool, attachments: [AgentChatAttachment] = []) {
+                provider: AgentChatProvider, providerID: String? = nil, planMode: Bool, attachments: [AgentChatAttachment] = []) {
         self.id = id; self.text = text; self.model = model; self.effort = effort
-        self.provider = provider; self.planMode = planMode; self.attachments = attachments
+        self.provider = provider; self.providerID = providerID; self.planMode = planMode; self.attachments = attachments
     }
     public func validate() throws(ErrorCode) {
         guard UUID(uuidString: id) != nil else { throw .badRequest }
         try AgentChatRequest.send(session: SessionId(), text: text, model: model, reasoningEffort: effort,
-                                  provider: provider, attachments: attachments).validate()
+                                  provider: provider, attachments: attachments, providerID: providerID).validate()
     }
 }
 
@@ -30,6 +32,8 @@ public struct AgentQueuedPrompt: Codable, Hashable, Sendable, Identifiable {
     public var state: State
     public var revision: UInt64
     public var error: String?
+    /// The server holds it until then, as a retry when a usage limit resets.
+    public var scheduledAt: Date?
     public init(prompt: AgentPrompt, state: State = .queued, revision: UInt64 = 0, error: String? = nil) {
         id = prompt.id; text = prompt.text; attachments = prompt.attachments.map(\.descriptor)
         self.state = state; self.revision = revision; self.error = error

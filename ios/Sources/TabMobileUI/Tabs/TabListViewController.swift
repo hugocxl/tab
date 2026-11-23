@@ -578,6 +578,14 @@ final class TabListViewController: UICollectionViewController {
         open(entry.card, on: entry.server)
     }
 
+    /// Forgets the shown tab, which closed.
+    func clearSelection() {
+        selected = nil
+        for path in collectionView.indexPathsForSelectedItems ?? [] {
+            collectionView.deselectItem(at: path, animated: true)
+        }
+    }
+
     func open(_ card: TabCard, on server: ServerModel) {
         selected = card.id
         restoring = nil
