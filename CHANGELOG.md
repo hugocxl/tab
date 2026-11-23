@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.110.1 - 2026-11-23
+
+### Changed
+
+- The website's build tools live with the website instead of at the top of the repository.
+
 ## 0.110.0 - 2026-11-23
 
 ### Changed

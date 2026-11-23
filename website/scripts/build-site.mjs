@@ -1,4 +1,4 @@
-// Build the GitHub Pages site from website/ into _site/.
+// Build the GitHub Pages site from website/ into website/_site/.
 // Pages follow the @hugocxl design system, copied from the @hugocxl/design-system
 // package, with Stroke icons from @hugocxl/icons and vectors from
 // @hugocxl/vectors inlined at build time. The changelog page and the version
@@ -17,8 +17,8 @@ const designSystem = dirname(createRequire(import.meta.url).resolve("@hugocxl/de
 // ─── Artwork: Stroke icons and vectors, inlined per DESIGN.md ──────────
 // The names come from {{icon NAME}} and {{vector NAME}} in the templates.
 const templates = [
-  ...readdirSync("website").filter((name) => name.endsWith(".html")).map((name) => `website/${name}`),
-  ...readdirSync("website/partials").map((name) => `website/partials/${name}`),
+  ...readdirSync(".").filter((name) => name.endsWith(".html")),
+  ...readdirSync("partials").map((name) => `partials/${name}`),
 ];
 const artwork = { icon: new Map(), vector: new Map() };
 for (const path of templates) {
@@ -46,7 +46,7 @@ const inline = (text) =>
     .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2">$1</a>');
 
 const versions = [];
-for (const line of read("CHANGELOG.md").split("\n")) {
+for (const line of read("../CHANGELOG.md").split("\n")) {
   const version = line.match(/^## (\d+\.\d+\.\d+) - (\d{4}-\d{2}-\d{2})$/);
   if (version) versions.push({ number: version[1], date: version[2], groups: [] });
   else if (!versions.length) continue;
@@ -82,7 +82,7 @@ const values = {
 };
 
 // ─── Templates ──────────────────────────────────────────────────────────
-const partial = (name) => read(`website/partials/${name}.html`).replace(/\n$/, "");
+const partial = (name) => read(`partials/${name}.html`).replace(/\n$/, "");
 function render(template) {
   const html = template
     .replace(/\{\{head ([^}]*)\}\}/, (_, args) => {
@@ -102,10 +102,10 @@ function render(template) {
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
 cpSync(join(designSystem, "system"), `${out}/system`, { recursive: true, filter: (path) => !path.endsWith(".DS_Store") });
-cpSync("website/assets", `${out}/assets`, { recursive: true, filter: (path) => !path.endsWith(".DS_Store") });
-cpSync("website/site.css", `${out}/site.css`);
+cpSync("assets", `${out}/assets`, { recursive: true, filter: (path) => !path.endsWith(".DS_Store") });
+cpSync("site.css", `${out}/site.css`);
 for (const page of ["index.html", "docs.html", "changelog.html"]) {
-  writeFileSync(`${out}/${page}`, render(read(`website/${page}`)));
+  writeFileSync(`${out}/${page}`, render(read(page)));
 }
 writeFileSync(`${out}/.nojekyll`, "");
 console.log(`Built site for Tab ${latest.number} with ${versions.length} changelog versions.`);

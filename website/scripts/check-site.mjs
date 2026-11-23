@@ -1,4 +1,4 @@
-// Check the built site in _site/: links, anchors, assets and the design system's
+// Check the built site in website/_site/: links, anchors, assets and the design system's
 // page contract (DS markup, recipe order, accent budget, one filled button,
 // icons from @hugocxl/icons only, plain layout only). The design system, icons
 // and vectors are checked against the @hugocxl packages in node_modules.
@@ -158,14 +158,14 @@ assert.equal(home.querySelectorAll(".ds-meta > li:first-child > .ds-dot").length
 assert.equal(home.querySelector(".ds-button").getAttribute("href"), "https://github.com/hugocxl/tab/releases/latest");
 
 // Changelog: one row per version in CHANGELOG.md, newest first.
-const changelog = readFileSync("CHANGELOG.md", "utf8");
+const changelog = readFileSync("../CHANGELOG.md", "utf8");
 const versions = [...changelog.matchAll(/^## (\d+\.\d+\.\d+) - /gm)].map((m) => m[1]);
 const rows = [...docs.get("changelog.html").querySelectorAll(".ds-index > li h3")].map((h) => h.textContent);
 assert.deepEqual(rows, versions, "changelog rows");
 assert.match(home.querySelector(".ds-meta").textContent, new RegExp(`Version ${versions[0].replaceAll(".", "\\.")}`));
 
 // Site CSS stays inside the design system's tokens.
-const css = readFileSync("website/site.css", "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+const css = readFileSync("site.css", "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
 assert.doesNotMatch(css, /#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(|oklch\(/i, "site.css: literal color");
 assert.doesNotMatch(css, /box-shadow|text-shadow|gradient|font-family|font-weight|font-size|border-radius:\s*\d|\d+px/i, "site.css: off-token style");
 for (const [, property] of css.matchAll(/var\((--[\w-]+)/g)) assert.match(property, /^--ds-/, `site.css: ${property}`);

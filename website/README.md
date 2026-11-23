@@ -14,11 +14,11 @@ The site at **https://hugocxl.github.io/tab/**, built strictly from the
 
 ## Build and check
 
-From the repository root, with Node 22:
+From `website/`, with Node 22:
 
 ```sh
 npm ci
-npm run build:site   # website/ → _site/
+npm run build:site   # templates → _site/
 npm run check:site   # links, anchors, assets, design system markup and recipe order
 python3 -m http.server 8765 --bind 127.0.0.1 --directory _site
 ```
@@ -36,6 +36,8 @@ python3 -m http.server 8765 --bind 127.0.0.1 --directory _site
   the check compares it and every inlined icon and vector with the packages.
 - `assets/tab-window.png`: the product screenshot. `assets/favicon.svg`: the
   small app icon.
+- `scripts/build-site.mjs`, `scripts/check-site.mjs`: the build and the check,
+  run through `package.json`.
 - `MESSAGING.md`: positioning, reusable descriptions and claim boundaries.
 
 Download links go to the latest GitHub release rather than a versioned disk image
