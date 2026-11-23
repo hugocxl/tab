@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.113.3 - 2026-11-23
+
+### Changed
+
+- Coding agents working on Tab now quit the development app and its server when they finish.
+
 ## 0.113.2 - 2026-11-23
 
 ### Fixed

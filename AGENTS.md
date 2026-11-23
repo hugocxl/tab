@@ -18,6 +18,16 @@ scripts/validate.sh               # build (warnings are errors), tests, debug bu
 A change is finished only when `scripts/validate.sh` passes. The release workflow
 runs the same script.
 
+If a task opened a dev app, close it and its server before you finish, or they
+keep running forever. Quit only this checkout's build, by bundle id, then stop its
+`tabd` with the bundle's own `tab`, outside Tab's `TAB_DIR`:
+
+```sh
+APP="$(scripts/bundle.sh debug | tail -1)"
+osascript -e "quit app id \"$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist")\""
+env -u TAB_DIR "$APP/Contents/MacOS/tab" server stop --force --yes
+```
+
 ## Architecture
 
 - Three executables ship in one bundle:
