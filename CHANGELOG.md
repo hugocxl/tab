@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.113.1 - 2026-11-23
+
+### Fixed
+
+- A quote you send to an agent shows the quoted words in the conversation instead of
+  "Assistant quote".
+
 ## 0.113.0 - 2026-11-23
 
 ### Changed

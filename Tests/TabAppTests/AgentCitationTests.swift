@@ -417,6 +417,14 @@ final class AgentCitationTests: XCTestCase {
         XCTAssertEqual(opened, [citation])
     }
 
+    func testSentQuotationsShowTheQuotedWordsRatherThanTheLinkLabel() throws {
+        let citation = AgentAssistantCitation(environmentId: "project", threadId: "thread", messageId: "answer", text: "Quoted words", start: 0, end: 12, prefix: "", suffix: "")
+        let rendered = AgentMarkdown.inline("remove this please: " + citation.markdown, theme: AppTheme(systemIsDark: false), lineBreaks: true)
+        XCTAssertEqual(rendered.string, "remove this please: " + AgentComposerCitation.label(for: citation))
+        let link = rendered.attribute(.link, at: rendered.length - 1, effectiveRange: nil) as? URL
+        XCTAssertEqual(link.flatMap { AgentAssistantCitation.parse($0.absoluteString) }, citation)
+    }
+
     // MARK: Toolbar
 
     func testToolbarShowsAboveTheSelectionAndHidesOnEscape() throws {

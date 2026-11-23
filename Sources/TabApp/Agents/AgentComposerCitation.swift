@@ -39,6 +39,17 @@ enum AgentComposerCitation {
         return "❝ " + preview + " ❞"
     }
 
+    /// A sent quotation in a message: its label, linked to the quoted text. The pill is
+    /// drawn by the rich-text layout manager's inline-code background.
+    static func chip(_ citation: AgentAssistantCitation, font: NSFont, color: NSColor, background: NSColor, identity: String) -> NSAttributedString {
+        var attributes: [NSAttributedString.Key: Any] = [
+            .font: font, .foregroundColor: color, .agentInlineCodeIdentity: identity,
+            .agentInlineCodeBackground: background, .toolTip: "Show the quoted message",
+        ]
+        if let url = URL(string: citation.href) { attributes[.link] = url }
+        return NSAttributedString(string: label(for: citation), attributes: attributes)
+    }
+
     /// Once a citation label is edited it becomes ordinary user text, rather than
     /// silently sending an unchanged hidden quotation after the user's edit.
     static func prepareEdit(in text: NSTextStorage?, range: NSRange) {

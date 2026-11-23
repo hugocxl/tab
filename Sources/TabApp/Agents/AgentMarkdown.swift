@@ -1,4 +1,5 @@
 import AppKit
+import TabProtocol
 
 /// Small native Markdown presentation layer. Foundation handles inline syntax; block structure
 /// supplies readable typography with a sanitized inline-HTML subset and no executable link
@@ -249,18 +250,26 @@ enum AgentMarkdown {
             return plain
         }
         let result = NSMutableAttributedString(string: "")
-        var lastThreadChip: String?
+        var lastChip: String?
         for (runIndex, run) in parsed.runs.enumerated() {
             if let url = run.link, let thread = AgentThreadLink(url.absoluteString) {
                 // One chip per link, even when emphasis splits its label into several runs.
-                guard url.absoluteString != lastThreadChip else { continue }
-                lastThreadChip = url.absoluteString
+                guard url.absoluteString != lastChip else { continue }
+                lastChip = url.absoluteString
                 let label = String(parsed[run.range].characters)
                 result.append(AgentThreadLink.chip(thread, title: thread.chipTitle(label: label, knownTitle: nil), font: font,
                                                    color: colors.link, background: colors.link.withAlphaComponent(0.12), identity: "thread:\(runIndex)"))
                 continue
             }
-            lastThreadChip = nil
+            if let url = run.link, let citation = AgentAssistantCitation.parse(url.absoluteString) {
+                // A sent quotation shows the quoted words, as it did in the composer.
+                guard url.absoluteString != lastChip else { continue }
+                lastChip = url.absoluteString
+                result.append(AgentComposerCitation.chip(citation, font: font, color: colors.link,
+                                                         background: colors.link.withAlphaComponent(0.12), identity: "citation:\(runIndex)"))
+                continue
+            }
+            lastChip = nil
             let intent = run.inlinePresentationIntent ?? []
             let inheritedWeight = (font.fontDescriptor.object(forKey: .traits) as? [NSFontDescriptor.TraitKey: Any])?[.weight] as? NSNumber
             var runFont = intent.contains(.code)
