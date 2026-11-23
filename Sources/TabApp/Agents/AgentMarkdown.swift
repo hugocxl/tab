@@ -704,6 +704,7 @@ final class AgentRichTextView: NSTextView {
         }
         super.init(frame: frameRect, textContainer: resolved)
         isEditable = false
+        unregisterDraggedTypes()
         isSelectable = true
         isRichText = true
         drawsBackground = false

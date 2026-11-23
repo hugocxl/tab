@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.118.0 - 2026-11-23
+
+### Changed
+
+- Dropping files or images anywhere on an agent pane attaches them and highlights the whole pane as the sole drop indicator.
+
 ## 0.117.0 - 2026-11-23
 
 ### Changed

@@ -103,6 +103,10 @@ final class AgentPaneView: ThemedView {
     private var scrollMutationDepth = 0
     private var boundsObserver: NSObjectProtocol?
     private let endButton = AgentEndButton()
+    private var paneDropActive = false
+    private var composerDropActive = false
+    private(set) var isHighlightingAttachmentDrop = false
+    var onDropHighlightChange: ((Bool) -> Void)?
     var onApproval: ((String, Bool) -> Void)?
     var onApprovalChoice: ((String, AgentApprovalChoice) -> Void)? {
         didSet { transcript.onApprovalChoice = { [weak self] id, choice in self?.onApprovalChoice?(id, choice) } }
@@ -201,6 +205,11 @@ final class AgentPaneView: ThemedView {
         composer.onEdit = { [weak self] in self?.refreshComposer() }
         composer.onOpenCitation = { [weak self] citation in self?.openCitation(citation) }
         composer.onPasteContext = { [weak self] pasteboard in self?.pasteContextFragment(from: pasteboard) ?? false }
+        composer.onAttachmentDropHighlightChange = { [weak self] active in
+            guard let self else { return }
+            self.composerDropActive = active
+            self.updateAttachmentDropHighlight()
+        }
         composerScroll.documentView = composer
         composerScroll.drawsBackground = false
         composerScroll.hasVerticalScroller = true
@@ -209,7 +218,7 @@ final class AgentPaneView: ThemedView {
         plan.isHidden = true
         plan.setAccessibilityLabel("Disable plan mode")
         plan.toolTip = "Plan mode · Shift-Tab to toggle"
-        attach.toolTip = "Attach files or drop them into the message box"
+        attach.toolTip = "Attach files or drop them anywhere in the pane"
         // The pop-ups keep the menus and selection; the combined picker presents them.
         model.isHidden = true
         effort.isHidden = true
@@ -268,7 +277,7 @@ final class AgentPaneView: ThemedView {
         selectionToolbar.onCite = { [weak self] in self?.citeSelection() }
         selectionToolbar.onCopy = { [weak self] in self?.copySelection() }
         addSubview(selectionToolbar)
-        registerForDraggedTypes([.fileURL, .png, .tiff])
+        registerForDraggedTypes(AgentAttachmentPasteboard.types)
         endButton.onPress = { [weak self] in self?.scrollToEnd() }
         endButton.isHidden = true
         retry.translatesAutoresizingMaskIntoConstraints = true
@@ -524,31 +533,48 @@ final class AgentPaneView: ThemedView {
         modelPicker.refresh()
     }
 
+    private func updateAttachmentDropHighlight() {
+        let active = paneDropActive || composerDropActive
+        guard active != isHighlightingAttachmentDrop else { return }
+        isHighlightingAttachmentDrop = active
+        onDropHighlightChange?(active)
+    }
+
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
         // Anywhere in the pane takes a drop, not just the composer.
-        guard sender.draggingSourceOperationMask.contains(.copy),
-              sender.draggingPasteboard.availableType(from: [.fileURL, .png, .tiff]) != nil else { return [] }
-        composerCard.highlighted = true
+        guard canAcceptDrop(sender) else {
+            paneDropActive = false
+            updateAttachmentDropHighlight()
+            return []
+        }
+        paneDropActive = true
+        updateAttachmentDropHighlight()
         return .copy
     }
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-        let operation = draggingEntered(sender)
-        if operation.isEmpty { draggingExited(sender) }
-        return operation
+        draggingEntered(sender)
     }
 
     override func draggingExited(_ sender: NSDraggingInfo?) {
-        composerCard.highlighted = false
+        paneDropActive = false
+        updateAttachmentDropHighlight()
     }
 
-    override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool { !draggingEntered(sender).isEmpty }
+    override func draggingEnded(_ sender: NSDraggingInfo) {
+        paneDropActive = false
+        updateAttachmentDropHighlight()
+    }
+
+    override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool { canAcceptDrop(sender) }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        defer { draggingExited(sender) }
-        guard !draggingEntered(sender).isEmpty else { return false }
-        return AgentAttachmentPasteboard.receive(sender.draggingPasteboard, onFiles: composer.onAttachFiles,
-                                                 onImage: composer.onAttachImage)
+        defer {
+            paneDropActive = false
+            updateAttachmentDropHighlight()
+        }
+        guard canAcceptDrop(sender) else { return false }
+        return performDrop(sender)
     }
 
     /// The controller owns enabled states and actions; the surface presents honest activity.
@@ -874,6 +900,21 @@ final class AgentPaneView: ThemedView {
         selectionToolbar.theme = theme
         selectionToolbar.themeDidChange()
         composer.needsDisplay = true
+    }
+}
+
+@MainActor
+extension AgentPaneView: PaneDropTarget {
+    var dropDraggedTypes: [NSPasteboard.PasteboardType] { AgentAttachmentPasteboard.types }
+
+    func canAcceptDrop(_ sender: NSDraggingInfo) -> Bool {
+        sender.draggingSourceOperationMask.contains(.copy)
+            && AgentAttachmentPasteboard.canRead(sender.draggingPasteboard)
+    }
+
+    func performDrop(_ sender: NSDraggingInfo) -> Bool {
+        AgentAttachmentPasteboard.receive(sender.draggingPasteboard, onFiles: composer.onAttachFiles,
+                                          onImage: composer.onAttachImage)
     }
 }
 

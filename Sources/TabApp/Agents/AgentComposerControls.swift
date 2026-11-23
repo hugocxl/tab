@@ -17,9 +17,16 @@ final class AgentComposerTextView: NSTextView {
     var onPasteLongText: ((String) -> Bool)?
     /// Items added to the message box's context menu, such as stashing the draft.
     var extraMenuItems: (() -> [NSMenuItem])?
+    /// Reports whether an attachment drag is currently active over the text view.
+    var onAttachmentDropHighlightChange: ((Bool) -> Void)?
     var planning = false { didSet { needsDisplay = true } }
     var placeholderColor = NSColor.secondaryLabelColor
-    private var acceptingAttachmentDrop = false { didSet { needsDisplay = true } }
+    private var acceptingAttachmentDrop = false {
+        didSet {
+            guard acceptingAttachmentDrop != oldValue else { return }
+            onAttachmentDropHighlightChange?(acceptingAttachmentDrop)
+        }
+    }
     private let ownedStorage: NSTextStorage?
 
     override init(frame frameRect: NSRect = .zero, textContainer container: NSTextContainer? = nil) {
@@ -92,11 +99,12 @@ final class AgentComposerTextView: NSTextView {
         AgentAttachmentPasteboard.receive(pasteboard, onFiles: onAttachFiles, onImage: onAttachImage)
     }
 
-    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { updateAttachmentDrop(sender) }
-    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { updateAttachmentDrop(sender) }
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { updateAttachmentDrop(sender, entered: true) }
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { updateAttachmentDrop(sender, entered: false) }
     override func draggingExited(_ sender: NSDraggingInfo?) { acceptingAttachmentDrop = false; super.draggingExited(sender) }
+    override func draggingEnded(_ sender: NSDraggingInfo) { acceptingAttachmentDrop = false; super.draggingEnded(sender) }
     override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        if AgentAttachmentPasteboard.canRead(sender.draggingPasteboard) { return updateAttachmentDrop(sender) == .copy }
+        if AgentAttachmentPasteboard.canRead(sender.draggingPasteboard) { return updateAttachmentDrop(sender, entered: false) == .copy }
         return super.prepareForDragOperation(sender)
     }
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
@@ -109,10 +117,10 @@ final class AgentComposerTextView: NSTextView {
         super.concludeDragOperation(sender)
     }
 
-    private func updateAttachmentDrop(_ sender: NSDraggingInfo) -> NSDragOperation {
+    private func updateAttachmentDrop(_ sender: NSDraggingInfo, entered: Bool) -> NSDragOperation {
         guard AgentAttachmentPasteboard.canRead(sender.draggingPasteboard) else {
             acceptingAttachmentDrop = false
-            return super.draggingUpdated(sender)
+            return entered ? super.draggingEntered(sender) : super.draggingUpdated(sender)
         }
         acceptingAttachmentDrop = sender.draggingSourceOperationMask.contains(.copy)
         return acceptingAttachmentDrop ? .copy : []
@@ -126,14 +134,6 @@ final class AgentComposerTextView: NSTextView {
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
-        if acceptingAttachmentDrop {
-            NSColor.controlAccentColor.withAlphaComponent(0.10).setFill()
-            let outline = NSBezierPath(roundedRect: visibleRect.insetBy(dx: 2, dy: 2), xRadius: 6, yRadius: 6)
-            outline.fill()
-            NSColor.controlAccentColor.setStroke()
-            outline.lineWidth = 2
-            outline.stroke()
-        }
         guard string.isEmpty, !hasMarkedText() else { return }
         ((planning ? "Plan changes" : "Ask anything · @ for context, / for commands") as NSString).draw(at: textContainerOrigin, withAttributes: [
             .font: font ?? AppFont.system(14, weight: .light), .foregroundColor: placeholderColor,

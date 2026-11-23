@@ -9,8 +9,6 @@ final class AgentSurfaceCard: ThemedView {
     private let glass: GlassView
     /// Sits above the glass: a layer's own background would draw beneath it.
     private let fill = NSView()
-    /// Accent outline while a file drag can drop here.
-    var highlighted = false { didSet { needsDisplay = true } }
 
     init(style: GlassView.Style) {
         self.style = style
@@ -31,7 +29,7 @@ final class AgentSurfaceCard: ThemedView {
         layer.cornerCurve = .continuous
         layer.masksToBounds = true
         layer.borderWidth = Metrics.border
-        layer.borderColor = (highlighted ? theme.accent : theme.fg.withAlphaComponent(theme.palette.isLight ? 0.10 : 0.12)).cgColor
+        layer.borderColor = theme.fg.withAlphaComponent(theme.palette.isLight ? 0.10 : 0.12).cgColor
         // Enough of the theme's composer color to keep text legible over a busy transcript,
         // while the conversation still reads through the glass. The panels above the
         // composer let more of it through, so they read as messages over the conversation.

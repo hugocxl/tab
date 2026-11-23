@@ -301,6 +301,7 @@ final class DropPreviewView: ThemedView {
         layer?.borderColor = theme.accent.withAlphaComponent(0.8).cgColor
         layer?.borderWidth = 2
         layer?.cornerRadius = Metrics.cardRadius
+        layer?.cornerCurve = .continuous
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }

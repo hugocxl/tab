@@ -2,6 +2,16 @@ import AppKit
 import TabCore
 import TabProtocol
 
+/// A pane content view that accepts file or attachment drops across the whole
+/// pane card, using the card's drop overlay as the sole drop indicator.
+@MainActor
+protocol PaneDropTarget: AnyObject {
+    var dropDraggedTypes: [NSPasteboard.PasteboardType] { get }
+    var onDropHighlightChange: ((Bool) -> Void)? { get set }
+    func canAcceptDrop(_ sender: NSDraggingInfo) -> Bool
+    func performDrop(_ sender: NSDraggingInfo) -> Bool
+}
+
 /// One pane in the split layout: a card with a 10pt radius and a 1pt
 /// border, a 36pt header (kind or agent glyph, title, and actions shown on
 /// the active or hovered card), and the pane's content in an 8pt-inset body.
@@ -21,6 +31,12 @@ final class PaneCardView: HoverView {
     private var extraButtons: [HeaderButton] = []
     private let zoomButton: HeaderButton
     private let body = FlippedView()
+    private let dropOverlay = DropPreviewView()
+    private var cardDropActive = false
+    private var contentDropActive = false
+
+    /// Whether the pane's drop indicator is currently shown.
+    var isDropHighlighted: Bool { !dropOverlay.isHidden }
 
     var isActive = false {
         didSet {
@@ -81,6 +97,8 @@ final class PaneCardView: HoverView {
         addSubview(glass)
         addSubview(body)
         addSubview(header)
+        dropOverlay.isHidden = true
+        addSubview(dropOverlay)
         for view in [glyph, titleLabel, suffixLabel, progressGlyph] as [NSView] { header.addSubview(view) }
 
         let split = HeaderButton(.columns, label: "Split Right") { [weak self] in self?.run { $0.split(.right) } }
@@ -117,17 +135,39 @@ final class PaneCardView: HoverView {
     /// Shows `controller`'s content in the body.
     func show(_ controller: PaneContentController) {
         if self.controller !== controller {
+            (self.controller?.view as? PaneDropTarget)?.onDropHighlightChange = nil
             self.controller?.view.removeFromSuperview()
             self.controller = controller
             controller.titleDidChange = { [weak self] in self?.refreshHeader() }
             body.addSubview(controller.view)
+            configureDropTarget(for: controller)
             needsLayout = true
         } else if controller.view.superview !== body {
             body.addSubview(controller.view)
+            configureDropTarget(for: controller)
             needsLayout = true
         }
         refreshHeader()
         needsDisplay = true
+    }
+
+    private func configureDropTarget(for controller: PaneContentController) {
+        cardDropActive = false
+        contentDropActive = false
+        updateDropOverlay()
+        if let target = controller.view as? PaneDropTarget {
+            registerForDraggedTypes(target.dropDraggedTypes)
+            target.onDropHighlightChange = { [weak self] active in
+                self?.contentDropActive = active
+                self?.updateDropOverlay()
+            }
+        } else {
+            unregisterDraggedTypes()
+        }
+    }
+
+    private func updateDropOverlay() {
+        dropOverlay.isHidden = !(cardDropActive || contentDropActive)
     }
 
     func refreshHeader() {
@@ -228,6 +268,7 @@ final class PaneCardView: HoverView {
     override func layout() {
         super.layout()
         glass.frame = bounds
+        dropOverlay.frame = bounds
         let gutter = Metrics.gutter
         header.frame = CGRect(x: 0, y: 0, width: bounds.width, height: Metrics.headerHeight)
         body.frame = CGRect(x: 0, y: Metrics.headerHeight, width: bounds.width, height: max(bounds.height - Metrics.headerHeight, 0))
@@ -268,6 +309,47 @@ final class PaneCardView: HoverView {
         titleLabel.frame = CGRect(x: x, y: y, width: titleWidth, height: labelHeight)
         let suffixWidth = suffixLabel.stringValue.isEmpty ? 0 : max(min(suffixLabel.textWidth, available - titleWidth - 4), 0)
         suffixLabel.frame = CGRect(x: x + titleWidth + 4, y: y, width: suffixWidth, height: labelHeight)
+    }
+
+    // MARK: Drag and drop
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard let target = controller?.view as? PaneDropTarget, target.canAcceptDrop(sender) else {
+            cardDropActive = false
+            updateDropOverlay()
+            return []
+        }
+        cardDropActive = true
+        updateDropOverlay()
+        return .copy
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        draggingEntered(sender)
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        cardDropActive = false
+        updateDropOverlay()
+    }
+
+    override func draggingEnded(_ sender: NSDraggingInfo) {
+        cardDropActive = false
+        updateDropOverlay()
+    }
+
+    override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard let target = controller?.view as? PaneDropTarget else { return false }
+        return target.canAcceptDrop(sender)
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        defer {
+            cardDropActive = false
+            updateDropOverlay()
+        }
+        guard let target = controller?.view as? PaneDropTarget, target.canAcceptDrop(sender) else { return false }
+        return target.performDrop(sender)
     }
 
     // MARK: Header events
