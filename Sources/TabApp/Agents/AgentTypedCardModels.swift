@@ -158,7 +158,7 @@ enum AgentCompactionPresentation {
     static func providerName(_ provider: AgentChatProvider?) -> String? {
         switch provider {
         case .claude: "Claude Agent"
-        case .codex: "Codex"
+        case let provider?: provider.name
         case nil: nil
         }
     }

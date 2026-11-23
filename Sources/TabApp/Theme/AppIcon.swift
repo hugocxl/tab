@@ -512,6 +512,8 @@ public enum AgentLogo {
         case .kiro: return .kiro
         case .xal: return .xal
         case .antigravity: return .antigravity
+        // @hugocxl/icons has no Gemini mark yet; the generic agent mark stands in.
+        case .gemini: return .brain
         case .ohMyPi: return .ohMyPi
         case .unknown: return .brain
         }

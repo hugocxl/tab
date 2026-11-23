@@ -242,6 +242,7 @@ enum Samples {
             autoCompactTokens: 300_000, models: AgentProviderModels(favorites: ["opus"], hidden: ["haiku"], order: ["opus", "sonnet"],
                                                                     custom: [AgentCustomModel(id: "claude-next")]))])),
         .checkAgentProviders,
+        .maintainAgentProvider(id: "gemini", action: .update),
         .writeServerSettings(ServerSettingsDoc(startupCommand: ["/bin/zsh"], historyBudgetBytes: 1024,
                                                shellIntegration: false)),
         .stopServer(force: true), .stopServerIfIdle, .restartServer,

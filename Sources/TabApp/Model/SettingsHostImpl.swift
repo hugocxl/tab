@@ -68,6 +68,9 @@ public final class SettingsHostImpl: SettingsHost {
         try await local().writeAgentProviders(settings)
     }
     public func checkAgentProviders() async throws -> AgentProvidersState { try await local().checkAgentProviders() }
+    public func maintainAgentProvider(_ id: String, action: AgentProviderMaintenance.Action) async throws -> AgentProvidersState {
+        try await local().maintainAgentProvider(id, action: action)
+    }
     public func agentModels(_ provider: AgentProviderConfig, refresh: Bool) async throws -> [AgentModelDescriptor] {
         try await local().agentModelCatalog(.init(project: model.state.home.id, provider: provider.kind, forceRefresh: refresh,
                                                   providerID: provider.id, includeHidden: true)).models

@@ -7,19 +7,53 @@ final class AgentProviderSettingsTests: XCTestCase {
         let json = """
         {"providers": [
             {"id": "claude-2", "kind": "claude", "name": "Work", "futureKey": 1},
-            {"id": "gemini", "kind": "gemini", "enabled": true},
+            {"id": "future", "kind": "future-agent", "enabled": true},
             {"id": "claude-2", "kind": "claude", "name": "Duplicate"},
             {"id": "codex", "kind": "codex", "enabled": false}
         ], "futureSetting": true}
         """
         let settings = try JSONDecoder().decode(AgentProviderSettings.self, from: Data(json.utf8))
-        XCTAssertEqual(settings.providers.map(\.id), ["claude-2", "codex", "claude"])
+        XCTAssertEqual(settings.providers.map(\.id), ["claude-2", "codex", "claude", "antigravity", "gemini", "opencode", "grok", "kiro"])
         XCTAssertEqual(settings.provider("claude-2")?.name, "Work")
         XCTAssertEqual(settings.provider("codex")?.enabled, false)
         XCTAssertEqual(settings.healthCheckInterval, AgentProviderSettings.defaultHealthCheckInterval)
         try settings.validate()
         XCTAssertEqual(try JSONDecoder().decode(AgentProviderSettings.self, from: Data("{}".utf8)).providers.map(\.id),
-                       ["claude", "codex"])
+                       ["claude", "codex", "antigravity", "gemini", "opencode", "grok", "kiro"], "a custom ACP agent is only ever added")
+        XCTAssertEqual(AgentProviderSettings().provider("gemini")?.enabled, false, "personal Google accounts use Antigravity")
+        XCTAssertEqual(AgentProviderSettings().provider("antigravity")?.enabled, true)
+    }
+
+    func testAnOlderServersStateOffersOnlyTheKindsItRuns() throws {
+        let checked = Date().timeIntervalSinceReferenceDate
+        let old = """
+        {"settings": {"providers": [{"id": "claude", "kind": "claude"}, {"id": "codex", "kind": "codex"}]},
+         "health": [{"provider": "claude", "installed": true, "auth": "signedOut", "checkedAt": \(checked)}]}
+        """
+        let state = try WireJSON.decode(AgentProvidersState.self, from: Data(old.utf8))
+        XCTAssertEqual(state.kinds, AgentChatProvider.original)
+        XCTAssertEqual(state.settings.providers.map(\.kind), [.claude, .codex],
+                       "this build's own built-in providers aren't offered by a server that can't run them")
+        XCTAssertEqual(state.health("claude")?.status, .error, "a status an older server didn't send comes from what it did")
+        XCTAssertTrue(state.maintenance.isEmpty)
+
+        let newer = """
+        {"settings": {}, "kinds": ["claude", "gemini", "future-agent"],
+         "health": [{"provider": "gemini", "installed": true, "auth": "signedIn", "status": "future-status", "checkedAt": \(checked),
+                     "versionAdvisory": {"status": "future", "latestVersion": "1.0.0"}}],
+         "maintenance": [{"provider": "gemini", "action": "update", "command": "npm i", "status": "future", "startedAt": \(checked)}]}
+        """
+        let decoded = try WireJSON.decode(AgentProvidersState.self, from: Data(newer.utf8))
+        XCTAssertEqual(decoded.kinds, [.claude, .gemini], "a kind this build doesn't know is left out")
+        XCTAssertEqual(decoded.settings.providers.map(\.id), ["claude", "gemini"])
+        XCTAssertEqual(decoded.health("gemini")?.status, .warning)
+        XCTAssertEqual(decoded.health("gemini")?.versionAdvisory?.status, .unknown)
+        XCTAssertEqual(decoded.maintenance("gemini")?.status, .failed, "an unknown outcome never reads as running")
+
+        let state2 = AgentProvidersState(settings: AgentProviderSettings(), maintenance: [
+            AgentProviderMaintenance(provider: "gemini", action: .install, command: "brew install gemini-cli", status: .running, startedAt: Date()),
+        ])
+        XCTAssertEqual(try WireJSON.decode(AgentProvidersState.self, from: WireJSON.encode(state2)), state2)
     }
 
     func testAConversationFallsBackToItsKindsBuiltInProvider() {

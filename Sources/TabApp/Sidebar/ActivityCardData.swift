@@ -248,8 +248,8 @@ struct ActivityCardData: Equatable {
     /// shows it, else the activity's or the seed's.
     @MainActor
     private static func chatProvider(controller: AgentPaneController?, agent: AgentActivity?, seed: AgentChatProvider) -> AgentProvider {
-        if let controller { return controller.selection.provider == .claude ? .claude : .codex }
-        return agent?.provider ?? (seed == .claude ? .claude : .codex)
+        if let controller { return controller.selection.provider.activityProvider }
+        return agent?.provider ?? seed.activityProvider
     }
 
     @MainActor

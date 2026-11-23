@@ -269,9 +269,11 @@ extension ClientConnection {
             try server.settings.write(settings)
             return .serverSettingsWritten
         case .readAgentProviders:
-            return .agentProviders(server.agentProviders.state())
+            return .agentProviders(server.agentProviders.refreshingState())
         case .writeAgentProviders(let settings):
             return .agentProviders(try server.agentProviders.write(settings))
+        case let .maintainAgentProvider(id, action):
+            return .agentProviders(try server.agentProviders.maintain(id, action: action))
         case .stopServer(let force):
             return server.requestStop(force: force)
         case .stopServerIfIdle:

@@ -18,7 +18,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     }
     /// The provider's logo, as a terminal running the same agent shows it.
     var icon: NSImage? {
-        AgentLogo.image(for: selection.provider == .claude ? .claude : .codex, lightBackground: AppTheme.shared.palette.isLight)
+        AgentLogo.image(for: selection.provider.activityProvider, lightBackground: AppTheme.shared.palette.isLight)
     }
     /// Keeps the pane's saved title in step with the conversation, for the
     /// tab title, sidebar filter and palette.
@@ -134,7 +134,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     private lazy var composerCoordinator = AgentComposerCoordinator(surface: surface)
     /// A provider's models as its menu offers them: the user's order, hidden ones left out.
     var loadModelCatalog: ((AgentProviderConfig, Bool) async throws -> [AgentModelDescriptor])?
-    /// The server's providers; servers that predate provider settings throw, leaving the built-in ones.
+    /// The server's providers that can run; servers that predate provider settings throw, leaving the built-in ones.
     var loadProviders: (() async throws -> AgentProviderSettings)?
     /// The providers the model menu offers, from the server's settings.
     private var providers = AgentProviderSettings().providers
@@ -351,7 +351,11 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
             guard let model, let project = model.state.paneProject(pane), let client = model.sideClient(for: project) else {
                 throw AgentPaneError.offline
             }
-            return try await client.agentProviders().settings
+            // A provider whose last check didn't find its CLI can't start a conversation.
+            let state = try await client.agentProviders()
+            var settings = state.settings
+            settings.providers.removeAll { state.health($0.id)?.installed == false }
+            return settings
         }
     }
 
@@ -1292,7 +1296,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
               preparingAttachments == 0,
               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !draftAttachments.isEmpty else { return }
         if let command = AgentSlashCommand(text: text), !command.isPath {
-            let provider = selection.provider == .claude ? TabProtocol.AgentChatProvider.claude : .codex
+            let provider = selection.provider
             let names = composerCoordinator.providerCommands + composerCoordinator.providerDescriptors.flatMap(\.names)
             if let error = command.validationError(provider: provider, commands: names,
                                                     hasAttachments: !draftAttachments.isEmpty, descriptors: composerCoordinator.providerDescriptors) {
@@ -2427,7 +2431,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
             heading.submenu = models
             heading.state = selection.providerKey == key ? .on : .off
             if !config.enabled { heading.toolTip = "Turned off in Settings › Agents" }
-            menuLogos[menu.items.count] = provider == .claude ? .claude : .codex
+            menuLogos[menu.items.count] = provider.activityProvider
             menu.addItem(heading)
             var choices = (modelCatalogs[key] ?? []).map { AgentModelSelection(provider: provider, providerID: key, model: $0.id) }
             let shownModel = descriptor(for: displayedSelection)
@@ -2464,7 +2468,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         menu.addItem(refreshModels)
         surface.model.menu = menu
         surface.model.menuLogos = menuLogos
-        surface.model.providerLogo = selection.provider == .claude ? .claude : .codex
+        surface.model.providerLogo = selection.provider.activityProvider
         surface.model.select(nil)
         surface.model.displayedTitle = modelTitle(displayedSelection)
         surface.model.icon = selection.provider == .claude ? .sparkles : .cpu

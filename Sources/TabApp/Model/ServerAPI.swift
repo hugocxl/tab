@@ -25,6 +25,7 @@ public protocol ServerAPI: AnyObject, Sendable {
     func agentProviders() async throws -> AgentProvidersState
     func writeAgentProviders(_ settings: AgentProviderSettings) async throws -> AgentProvidersState
     func checkAgentProviders() async throws -> AgentProvidersState
+    func maintainAgentProvider(_ id: String, action: AgentProviderMaintenance.Action) async throws -> AgentProvidersState
     func agentHistory(_ request: AgentHistoryRequest) async throws -> AgentHistoryReply
     func importAgentHistory(_ request: AgentHistoryImport) async throws -> AgentChatSnapshot
     func createSession(_ session: CreateSession) async throws -> SessionInfo
@@ -104,6 +105,10 @@ extension ServerAPI {
     }
 
     public func checkAgentProviders() async throws -> AgentProvidersState {
+        try await agentProviders()
+    }
+
+    public func maintainAgentProvider(_ id: String, action: AgentProviderMaintenance.Action) async throws -> AgentProvidersState {
         try await agentProviders()
     }
 

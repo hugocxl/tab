@@ -182,9 +182,11 @@ public enum SettingsCatalog {
         // Agents
         SettingItem("agent-check", "Provider status", "", .agents, "Providers"),
         SettingItem("agent-providers", "Providers", "The coding agents agent panes run on this Mac.", .agents, "Providers"),
-        SettingItem("agent-add-provider", "Add provider", "Run another Claude Code or Codex, such as one signed in to a different account.", .agents, "Providers"),
-        SettingItem("agent-check-interval", "Check again after", "Opening this page checks each provider's version and sign-in again once the last check is this old. 0 checks only when you ask.", .agents, "Advanced"),
+        SettingItem("agent-add-provider", "Add provider", "Run Gemini CLI, OpenCode, Grok, Kiro or any agent that speaks the Agent Client Protocol, or a second copy of one signed in to another account.", .agents, "Providers"),
+        SettingItem("agent-check-interval", "Check again after", "Each provider's version, sign-in and latest release are checked again once the last check is this old. 0 checks only when you ask.", .agents, "Advanced"),
         SettingItem("agent-provider-enabled", "Provider", "", .agents, "Provider", subpage: .agentProvider),
+        SettingItem("agent-provider-version", "Version", "The installed version, the latest release and the oldest one Tab works with.", .agents, "Provider", subpage: .agentProvider),
+        SettingItem("agent-provider-sign-in", "Sign-in", "", .agents, "Provider", subpage: .agentProvider),
         SettingItem("agent-provider-name", "Name", "Shown in the model menu and on agent panes.", .agents, "General", subpage: .agentProvider),
         SettingItem("agent-provider-executable", "Executable", "The CLI to run: a command on PATH, or a full path.", .agents, "Runtime", subpage: .agentProvider),
         SettingItem("agent-provider-home", "Config folder", "Where the CLI keeps its sign-in, settings and conversations. Another folder can sign in to another account.", .agents, "Runtime", subpage: .agentProvider),

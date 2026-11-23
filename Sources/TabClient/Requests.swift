@@ -325,6 +325,11 @@ extension ServerClient {
         try providersReply(await request(.checkAgentProviders))
     }
 
+    /// Starts installing or updating a provider's CLI; the reply shows it running.
+    public func maintainAgentProvider(_ id: String, action: AgentProviderMaintenance.Action) async throws -> AgentProvidersState {
+        try providersReply(await request(.maintainAgentProvider(id: id, action: action)))
+    }
+
     private func providersReply(_ reply: ReplyBody) throws -> AgentProvidersState {
         guard case .agentProviders(let state) = reply else { throw unexpected(reply) }
         return state

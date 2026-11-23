@@ -252,7 +252,9 @@ final class AgentSessions: @unchecked Sendable {
          checkpointStore: AgentCheckpointStore = AgentCheckpointStore(),
          clock: @escaping @Sendable () -> Date = { Date() },
          factory: @escaping Factory = { provider, directory, resume, callback in
-             AgentRuntime(provider: provider, directory: directory, resumeSession: resume, onEvent: callback)
+             provider.spec.wire == .acp
+                 ? AcpAgentRuntime(provider: provider, directory: directory, resumeSession: resume, onEvent: callback)
+                 : AgentRuntime(provider: provider, directory: directory, resumeSession: resume, onEvent: callback)
          }) throws {
         self.root = root
         self.checkpointStore = checkpointStore

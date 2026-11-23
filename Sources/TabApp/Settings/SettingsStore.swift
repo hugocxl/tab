@@ -53,6 +53,7 @@ public final class SettingsStore {
     public private(set) var agentModelsUnavailable: Set<String> = []
     public private(set) var checkingAgentProviders = false
     private var agentProviderWrite: Task<Void, Never>?
+    private var maintenanceFollower: Task<Void, Never>?
     /// Counts edits, so a read that started before one doesn't replace it.
     private var agentProviderEdits = 0
 
@@ -225,7 +226,8 @@ public final class SettingsStore {
             agentProviders = state
             return
         }
-        agentProviders = AgentProvidersState(settings: local.settings, health: state.health)
+        agentProviders = AgentProvidersState(settings: local.settings, health: state.health,
+                                             maintenance: state.maintenance, kinds: state.kinds)
     }
 
     private func needsCheck(_ state: AgentProvidersState) -> Bool {
@@ -253,6 +255,42 @@ public final class SettingsStore {
             }
             self?.checkingAgentProviders = false
             self?.changed()
+        }
+    }
+
+    /// Installs or updates `id`'s CLI on the server, then reads the providers until it finishes.
+    public func maintainAgentProvider(_ id: String, action: AgentProviderMaintenance.Action) {
+        guard let host else { return }
+        let edits = agentProviderEdits
+        Task { [weak self] in
+            do {
+                let state = try await host.maintainAgentProvider(id, action: action)
+                self?.acceptAgentProviders(state, editsAtStart: edits)
+                self?.errors["agent-provider-version"] = nil
+                self?.followMaintenance()
+            } catch {
+                self?.errors["agent-provider-version"] = Self.agentProvidersMessage(error)
+            }
+            self?.changed()
+        }
+    }
+
+    /// Reads the providers every second and a half while an install or update runs.
+    private func followMaintenance() {
+        guard maintenanceFollower == nil, let host else { return }
+        maintenanceFollower = Task { [weak self] in
+            defer { self?.maintenanceFollower = nil }
+            while self?.agentProviders?.maintenance.contains(where: \.isRunning) == true {
+                try? await Task.sleep(for: .milliseconds(1500))
+                guard let self, !Task.isCancelled else { return }
+                let edits = agentProviderEdits
+                guard let state = try? await host.agentProviders() else { return }
+                acceptAgentProviders(state, editsAtStart: edits)
+                changed()
+            }
+            // The CLI may list other models now.
+            guard let self else { return }
+            for id in agentModels.keys { loadAgentModels(id) }
         }
     }
 
@@ -335,7 +373,10 @@ public final class SettingsStore {
             guard let self, let current = agentProviders?.settings else { return }
             do {
                 let saved = try await host.writeAgentProviders(current)
-                if agentProviders?.settings == current { agentProviders?.health = saved.health }
+                if agentProviders?.settings == current {
+                    agentProviders?.health = saved.health
+                    agentProviders?.maintenance = saved.maintenance
+                }
             } catch {
                 errors[row] = Self.agentProvidersMessage(error)
                 if let state = try? await host.agentProviders() { agentProviders = state }

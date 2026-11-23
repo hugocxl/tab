@@ -293,6 +293,10 @@ public enum RequestBody: Hashable, Codable, Sendable {
     case writeAgentProviders(AgentProviderSettings)
     /// Checks every provider's CLI now; replies `agentProviders` once done.
     case checkAgentProviders
+    /// Starts installing or updating a provider's CLI; replies `agentProviders` at once,
+    /// with the run in `maintenance`, which later reads follow until it finishes.
+    /// Servers that predate it reply `unsupported`.
+    case maintainAgentProvider(id: String, action: AgentProviderMaintenance.Action)
     /// Refused with `serverBusy` while terminals run, unless `force`.
     case stopServer(force: Bool)
     case stopServerIfIdle
@@ -388,6 +392,7 @@ public enum RequestBody: Hashable, Codable, Sendable {
         case "readAgentProviders": self = .readAgentProviders
         case "writeAgentProviders": self = .writeAgentProviders(try c("settings"))
         case "checkAgentProviders": self = .checkAgentProviders
+        case "maintainAgentProvider": self = .maintainAgentProvider(id: try c("id"), action: try c("action"))
         case "stopServer": self = .stopServer(force: try c("force"))
         case "stopServerIfIdle": self = .stopServerIfIdle
         case "restartServer": self = .restartServer
@@ -544,6 +549,10 @@ public enum RequestBody: Hashable, Codable, Sendable {
             var c = try TaggedEncoding(encoder, "writeAgentProviders")
             try c(settings, "settings")
         case .checkAgentProviders: try TaggedEncoding(encoder, "checkAgentProviders")
+        case let .maintainAgentProvider(id, action):
+            var c = try TaggedEncoding(encoder, "maintainAgentProvider")
+            try c(id, "id")
+            try c(action, "action")
         case .stopServer(let force):
             var c = try TaggedEncoding(encoder, "stopServer")
             try c(force, "force")

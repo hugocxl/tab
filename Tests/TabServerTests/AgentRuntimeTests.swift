@@ -367,7 +367,7 @@ final class AgentRuntimeTests: XCTestCase {
     }
 
     func testDynamicFutureReasoningPassesThroughBothProviderRuntimes() async throws {
-        for provider in AgentChatProvider.allCases {
+        for provider in AgentChatProvider.original {
             let recorder = AgentRuntimeRecorder()
             let body = provider == .claude ? """
             take
@@ -610,7 +610,7 @@ final class AgentRuntimeTests: XCTestCase {
     }
 
     func testStartupTimeoutAndStopCancelPendingSend() async throws {
-        for provider in AgentChatProvider.allCases {
+        for provider in AgentChatProvider.original {
             let recorder = AgentRuntimeRecorder()
             let fixture = try AgentRuntimeFixture("take\nhold")
             defer { fixture.remove() }
@@ -918,7 +918,7 @@ final class AgentRuntimeTests: XCTestCase {
     }
 
     func testLargePromptCannotBlockStopWhenChildStopsReading() async throws {
-        for provider in AgentChatProvider.allCases {
+        for provider in AgentChatProvider.original {
             let handshake = provider == .claude ? """
             take
             emit '{"type":"control_response","response":{"subtype":"success","request_id":"1"}}'

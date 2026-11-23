@@ -1,10 +1,26 @@
 import Foundation
 
-/// Headless coding agents an agent pane runs.
+/// Headless coding agents an agent pane runs. Builds that predate a kind can't read
+/// conversations or panes of it; see `AgentProvidersState.kinds`.
 public enum AgentChatProvider: String, Codable, Hashable, Sendable, CaseIterable {
     case claude, codex
+    /// Google's Antigravity CLI, `agy`: Google's coding agent for personal and Google AI accounts.
+    case antigravity
+    /// Google's Gemini CLI, now for Gemini Code Assist Standard and Enterprise licenses and
+    /// paid API or Vertex keys; personal accounts moved to Antigravity on June 18, 2026.
+    case gemini
+    case openCode = "opencode"
+    /// xAI's Grok CLI.
+    case grok
+    /// Amazon's Kiro CLI.
+    case kiro
+    /// Any other agent that speaks the Agent Client Protocol, set up by hand.
+    case acp
 
-    public var name: String { self == .claude ? "Claude Code" : "Codex" }
+    /// The kinds every server knows, including those that predate the others.
+    public static let original: [AgentChatProvider] = [.claude, .codex]
+
+    public var name: String { spec.name }
 }
 
 public enum AgentChatStatus: String, Codable, Hashable, Sendable {

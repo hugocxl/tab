@@ -279,6 +279,9 @@ private final class SettingsWriteHost: SettingsHost {
         try await base.writeAgentProviders(settings)
     }
     func checkAgentProviders() async throws -> AgentProvidersState { try await base.checkAgentProviders() }
+    func maintainAgentProvider(_ id: String, action: AgentProviderMaintenance.Action) async throws -> AgentProvidersState {
+        try await base.maintainAgentProvider(id, action: action)
+    }
     func agentModels(_ provider: AgentProviderConfig, refresh: Bool) async throws -> [AgentModelDescriptor] {
         try await base.agentModels(provider, refresh: refresh)
     }

@@ -19,12 +19,17 @@ extension SettingsModel {
         }
         for provider in settings.providers where state != nil {
             let health = state?.health(provider.id)
+            let run = state?.maintenance(provider.id)
+            let open = SettingControl.disclosure { [weak self] in self?.openProvider(provider.id) }
+            let badge = Self.badge(provider, health: health, run: run)
             b.item("agent-providers", key: provider.id, label: Self.listTitle(provider, health: health),
-                   description: Self.status(provider, health: health),
-                   icon: AgentLogo.image(for: provider.kind == .claude ? .claude : .codex, lightBackground: light),
-                   .disclosure { [weak self] in self?.openProvider(provider.id) })
+                   description: Self.status(provider, health: health, run: run),
+                   icon: AgentLogo.image(for: provider.kind.activityProvider, lightBackground: light),
+                   badge.map { .row([.label($0, .badge), open]) } ?? open)
         }
-        let kinds = AgentChatProvider.allCases.map { Choice(id: $0.rawValue, title: $0.name) }
+        let kinds = (state?.kinds ?? AgentChatProvider.original).map { kind in
+            Choice(id: kind.rawValue, title: kind.spec.vendor.map { "\(kind.name) (\($0))" } ?? kind.name + "…")
+        }
         b.row("agent-add-provider", state == nil ? b.button("Add Provider…", enabled: false) {} : b.menu("agent-add-provider", "Add Provider…", kinds) { [weak self] raw in
             guard let self, let kind = AgentChatProvider(rawValue: raw), let id = store.addAgentProvider(kind) else { return }
             openProvider(id)
@@ -52,10 +57,8 @@ extension SettingsModel {
         b.row("agent-provider-enabled", b.toggle("agent-provider-enabled", provider.enabled) { on in
             update("agent-provider-enabled") { $0.enabled = on }
         }, label: provider.title, description: Self.detail(provider, health: health),
-           icon: AgentLogo.image(for: provider.kind == .claude ? .claude : .codex, lightBackground: light), iconSide: 28)
-        if provider.enabled, let message = health?.message {
-            b.note("agent-provider-enabled", message, error: health?.installed == false || health?.auth == .signedOut)
-        }
+           icon: AgentLogo.image(for: provider.kind.activityProvider, lightBackground: light), iconSide: 28)
+        buildStatus(b, provider: provider, health: health, run: state?.maintenance(id))
 
         // General
         b.row("agent-provider-name", b.field("agent-provider-name", provider.name ?? "", placeholder: provider.kind.name) { text in
@@ -64,27 +67,28 @@ extension SettingsModel {
         })
 
         // Runtime
+        let spec = provider.kind.spec
         b.row("agent-provider-executable", b.field("agent-provider-executable", provider.executable ?? "",
-                                                   placeholder: provider.defaultExecutable, monospaced: true) { text in
+                                                   placeholder: spec.executable ?? "e.g. qwen", monospaced: true) { text in
             let path = text.trimmingCharacters(in: .whitespacesAndNewlines)
             update("agent-provider-executable") { $0.executable = path.isEmpty ? nil : path }
-        })
-        b.row("agent-provider-home", b.field("agent-provider-home", provider.home ?? "",
-                                             placeholder: provider.kind == .claude ? "~/.claude" : "~/.codex", monospaced: true) { text in
-            let path = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            update("agent-provider-home") { $0.home = path.isEmpty ? nil : path }
-        }, label: "\(provider.homeVariable) folder")
+        }, description: spec.executable == nil ? "The agent to run: a command on PATH, or a full path. Required." : nil)
+        if let variable = provider.homeVariable {
+            b.row("agent-provider-home", b.field("agent-provider-home", provider.home ?? "",
+                                                 placeholder: spec.defaultHome ?? "", monospaced: true) { text in
+                let path = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                update("agent-provider-home") { $0.home = path.isEmpty ? nil : path }
+            }, label: "\(variable) folder")
+        }
         b.row("agent-provider-arguments", b.field("agent-provider-arguments", Executable.commandLine(provider.arguments),
-                                                  placeholder: provider.kind == .claude ? "e.g. --chrome" : "e.g. -c model_verbosity=low",
-                                                  monospaced: true) { [store] text in
+                                                  placeholder: spec.argumentsExample ?? "", monospaced: true) { [store] text in
             do {
                 let arguments = try Executable.commandArguments(text)
                 update("agent-provider-arguments") { $0.arguments = arguments }
             } catch {
                 store.setError("agent-provider-arguments", SettingsStore.message(error))
             }
-        }, description: provider.kind == .claude ? "Added to Claude Code's command line when a conversation starts."
-            : "Added after codex app-server when a conversation starts.")
+        }, description: Self.argumentsDescription(provider.kind))
         if provider.kind == .claude {
             b.row("agent-provider-auto-compact", b.field("agent-provider-auto-compact", provider.autoCompactTokens.map(String.init) ?? "",
                                                          placeholder: "e.g. 300000") { [store] text in
@@ -253,7 +257,115 @@ extension SettingsModel {
         return ids
     }
 
-    // MARK: Status text
+    // MARK: Status
+
+    /// The version, install and update controls, sign-in and the latest install or update.
+    private func buildStatus(_ b: SettingsPageBuilder, provider: AgentProviderConfig, health: AgentProviderHealth?,
+                             run: AgentProviderMaintenance?) {
+        let id = provider.id
+        let running = run?.isRunning == true
+        guard provider.enabled, let health else {
+            b.row("agent-provider-version", nil, description: provider.enabled ? "Not checked yet" : "Off")
+            b.row("agent-provider-sign-in", nil, description: provider.enabled ? "Not checked yet" : "Off")
+            return
+        }
+        let advisory = health.versionAdvisory
+        var control: SettingControl?
+        if !health.installed {
+            control = b.button(running ? "Installing…" : "Install", enabled: health.canInstall && !running) { [store] in
+                store.maintainAgentProvider(id, action: .install)
+            }
+        } else if let advisory, advisory.status == .behindLatest || advisory.status == .unsupported {
+            let title = advisory.latestVersion.map { "Update to \($0)" } ?? "Update"
+            control = b.button(running ? "Updating…" : title, enabled: advisory.canUpdate && !running) { [store] in
+                store.maintainAgentProvider(id, action: .update)
+            }
+        } else if advisory?.canUpdate == true {
+            control = b.button(running ? "Updating…" : "Update", enabled: !running) { [store] in
+                store.maintainAgentProvider(id, action: .update)
+            }
+        }
+        b.row("agent-provider-version", control, description: Self.versionDetail(provider, health: health))
+        if let message = health.message {
+            b.note("agent-provider-version", message, error: health.status == .error)
+        }
+        switch health.auth {
+        case _ where !health.installed:
+            b.row("agent-provider-sign-in", nil, description: "Install \(provider.kind.name) first.")
+        case .signedIn:
+            b.row("agent-provider-sign-in", .label("Signed in", .secondary),
+                  description: [health.email, health.account].compactMap { $0 }.joined(separator: " · "))
+        case .signedOut:
+            b.row("agent-provider-sign-in", .label("Signed out", .badge), description: health.signInCommand.map { "Sign in with `\($0)`." })
+        case .unknown:
+            b.row("agent-provider-sign-in", .label("Unknown", .badge), description: Self.unknownSignIn(provider))
+        }
+        if let run {
+            b.note("agent-provider-version", Self.maintenanceText(run), error: run.status == .failed)
+            if let output = run.output, !running {
+                b.below("agent-provider-version", .label(output, .monospaced))
+            }
+        }
+    }
+
+    static func argumentsDescription(_ kind: AgentChatProvider) -> String {
+        switch kind.spec.wire {
+        case .claudeStream: "Added to Claude Code's command line when a conversation starts."
+        case .codexAppServer: "Added after codex app-server when a conversation starts."
+        case .acp where kind == .acp: "The arguments that start the agent's Agent Client Protocol server, such as --acp."
+        case .acp: "Added after \(([kind.spec.executable ?? ""] + kind.spec.sessionArguments).joined(separator: " ")) when a conversation starts."
+        }
+    }
+
+    static func unknownSignIn(_ provider: AgentProviderConfig) -> String {
+        switch provider.kind {
+        case .acp: "Tab can't tell whether this agent is signed in. A conversation says so when it isn't."
+        case .openCode: "OpenCode has no saved model provider credentials, so only its free models may work. Run `opencode auth login` to add one."
+        default: "Tab couldn't tell whether \(provider.title) is signed in."
+        }
+    }
+
+    /// The version line: installed, latest and oldest supported, and how it updates.
+    static func versionDetail(_ provider: AgentProviderConfig, health: AgentProviderHealth) -> String {
+        guard health.installed else {
+            return health.installCommand.map { "Not installed. Install it with `\($0)`." } ?? "Not installed."
+        }
+        var parts = [health.version.map { "Version \($0)" } ?? "Version unknown"]
+        if let advisory = health.versionAdvisory {
+            switch advisory.status {
+            case .current: parts.append("Up to date")
+            case .behindLatest: parts.append(advisory.latestVersion.map { "\($0) is available" } ?? "An update is available")
+            case .unsupported: parts.append(advisory.minimumVersion.map { "Tab needs \($0) or later" } ?? "Too old for Tab")
+            case .unknown: break
+            }
+            if let installedBy = advisory.installedBy { parts.append("Installed with \(installedBy)") }
+            if !advisory.canUpdate, advisory.status != .current, let command = advisory.updateCommand {
+                parts.append("Update it with `\(command)`")
+            }
+        }
+        if let path = health.executablePath { parts.append(path) }
+        return parts.joined(separator: " · ")
+    }
+
+    static func maintenanceText(_ run: AgentProviderMaintenance) -> String {
+        let doing = run.action == .install ? "Installing" : "Updating"
+        switch run.status {
+        case .running: return "\(doing)… \(run.message ?? run.command)"
+        case .succeeded, .unchanged, .failed: return run.message ?? "\(run.command) finished."
+        }
+    }
+
+    /// A word beside a provider in the list when it needs attention.
+    static func badge(_ provider: AgentProviderConfig, health: AgentProviderHealth?, run: AgentProviderMaintenance?) -> String? {
+        guard provider.enabled else { return nil }
+        if run?.isRunning == true { return run?.action == .install ? "Installing" : "Updating" }
+        guard let health else { return nil }
+        if !health.installed { return "Not installed" }
+        if health.versionAdvisory?.status == .unsupported { return "Too old" }
+        if health.auth == .signedOut { return "Signed out" }
+        if health.versionAdvisory?.status == .behindLatest { return "Update" }
+        return nil
+    }
 
     static func listTitle(_ provider: AgentProviderConfig, health: AgentProviderHealth?) -> String {
         guard let version = health?.version, provider.enabled else { return provider.title }
@@ -261,15 +373,22 @@ extension SettingsModel {
     }
 
     /// One line under a provider in the list.
-    static func status(_ provider: AgentProviderConfig, health: AgentProviderHealth?) -> String {
+    static func status(_ provider: AgentProviderConfig, health: AgentProviderHealth?, run: AgentProviderMaintenance? = nil) -> String {
         guard provider.enabled else { return "Off" }
+        if let run, run.isRunning { return maintenanceText(run) }
         guard let health else { return "Not checked yet" }
         guard health.installed else { return "Not found" }
+        var parts: [String]
         switch health.auth {
-        case .signedIn: return ["Signed in", health.account].compactMap { $0 }.joined(separator: " · ")
-        case .signedOut: return "Not signed in"
-        case .unknown: return "Installed"
+        case .signedIn: parts = ["Signed in", health.account].compactMap { $0 }
+        case .signedOut: parts = ["Not signed in"]
+        case .unknown: parts = ["Installed"]
         }
+        if let advisory = health.versionAdvisory {
+            if advisory.status == .behindLatest, let latest = advisory.latestVersion { parts.append("\(latest) available") }
+            if advisory.status == .unsupported, let minimum = advisory.minimumVersion { parts.append("needs \(minimum)") }
+        }
+        return parts.joined(separator: " · ")
     }
 
     /// The line under a provider's name on its page.

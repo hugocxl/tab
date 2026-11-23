@@ -109,6 +109,8 @@ public protocol SettingsHost: AnyObject {
     func writeAgentProviders(_ settings: AgentProviderSettings) async throws -> AgentProvidersState
     /// Checks each enabled provider's CLI now.
     func checkAgentProviders() async throws -> AgentProvidersState
+    /// Starts installing or updating a provider's CLI on this Mac's server.
+    func maintainAgentProvider(_ id: String, action: AgentProviderMaintenance.Action) async throws -> AgentProvidersState
     /// `provider`'s models in the user's order, hidden ones included.
     func agentModels(_ provider: AgentProviderConfig, refresh: Bool) async throws -> [AgentModelDescriptor]
     /// What Tab installed for each coding agent on this computer.
@@ -218,6 +220,9 @@ public final class PreviewSettingsHost: SettingsHost {
         return providers
     }
     public func checkAgentProviders() async throws -> AgentProvidersState { providers }
+    public func maintainAgentProvider(_ id: String, action: AgentProviderMaintenance.Action) async throws -> AgentProvidersState {
+        providers
+    }
     public func agentModels(_ provider: AgentProviderConfig, refresh: Bool) async throws -> [AgentModelDescriptor] {
         provider.models.arrange(reportedModels[provider.kind] ?? [])
     }

@@ -13,11 +13,12 @@ public enum AgentProvider: OpenEnum {
     case kiro
     case xal
     case antigravity
+    case gemini
     case ohMyPi
     case unknown(String)
 
     public static let knownCases: [AgentProvider] = [
-        .claude, .codex, .openCode, .cursor, .copilot, .droid, .pi, .grok, .kiro, .xal, .antigravity, .ohMyPi,
+        .claude, .codex, .openCode, .cursor, .copilot, .droid, .pi, .grok, .kiro, .xal, .antigravity, .gemini, .ohMyPi,
     ]
 
     /// Stable: stored in detection manifests and sent on the wire.
@@ -34,6 +35,7 @@ public enum AgentProvider: OpenEnum {
         case .kiro: "kiro"
         case .xal: "xal"
         case .antigravity: "antigravity"
+        case .gemini: "gemini"
         case .ohMyPi: "omp"
         case .unknown(let value): value
         }
@@ -52,6 +54,7 @@ public enum AgentProvider: OpenEnum {
         case .kiro: "Kiro"
         case .xal: "Xal"
         case .antigravity: "Antigravity"
+        case .gemini: "Gemini CLI"
         case .ohMyPi: "Oh My Pi"
         case .unknown: "Agent"
         }

@@ -13,6 +13,61 @@ final class AgentLiveSmokeTests: XCTestCase {
         try await conversation(provider: .codex)
     }
 
+    func testGeminiLiveConversation() async throws {
+        try await conversation(provider: .gemini)
+    }
+
+    /// OpenCode's free models need no account, so this one runs without charges.
+    func testOpenCodeLiveConversation() async throws {
+        try await conversation(provider: .openCode)
+    }
+
+    /// Installs Antigravity CLI from Google's manifest into a temporary home, then checks it there.
+    func testAntigravityLiveInstallAndCheck() async throws {
+        guard ["antigravity", "all"].contains(ProcessInfo.processInfo.environment["TAB_AGENT_LIVE_TESTS"] ?? "") else {
+            throw XCTSkip("Set TAB_AGENT_LIVE_TESTS=antigravity; this downloads about 90 MB from Google.")
+        }
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("tab-agy-home-\(UUID().uuidString.prefix(8))")
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let log = try await AgentProviderRelease.install(AgentChatProvider.antigravity.spec, home: home)
+        XCTAssertTrue(log.contains("SHA-512 matches"), log)
+        let agy = home.appendingPathComponent(".local/bin/agy")
+        let health = AgentProviderStore.check(AgentProviderConfig(id: "antigravity", kind: .antigravity, executable: agy.path),
+                                              environment: ["PATH": "/usr/bin:/bin", "HOME": home.path], now: Date())
+        XCTAssertTrue(health.installed, health.message ?? "")
+        XCTAssertNotNil(health.version)
+        XCTAssertEqual(health.auth, .signedOut, "a new home has no Google sign-in")
+        XCTAssertEqual(health.message, "Run `agy` in a terminal and sign in with Google, or add GEMINI_API_KEY under Variables.")
+        let latest = await AgentProviderLatestVersions().latest(.manifest(try XCTUnwrap(AgentProviderRelease.manifestURL(
+            AgentChatProvider.antigravity.spec.releaseManifest ?? ""))))
+        XCTAssertEqual(latest, health.version, "a fresh install is the latest")
+    }
+
+    /// Lists an ACP agent's models the way the composer's menu does. Opening a session costs nothing.
+    func testACPLiveModelCatalog() async throws {
+        let selection = ProcessInfo.processInfo.environment["TAB_AGENT_LIVE_TESTS"]
+        let kinds = AgentChatProvider.allCases.filter { $0.spec.wire == .acp && (selection == $0.rawValue || selection == "all") }
+        guard !kinds.isEmpty else { throw XCTSkip("Set TAB_AGENT_LIVE_TESTS to an ACP provider, such as opencode or gemini.") }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("tab-acp-models-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let service = AgentModelCatalogService(home: URL(fileURLWithPath: NSHomeDirectory()), projectDirectory: { _ in directory })
+        for kind in kinds {
+            let reply = try await service.handle(.init(project: ProjectId(), provider: kind))
+            XCTAssertFalse(reply.models.isEmpty, "\(kind.name) listed no models")
+            XCTAssertEqual(reply.source, "live")
+            XCTAssertEqual(reply.models.filter(\.isDefault).count, 1, "the session's current model is the default")
+        }
+    }
+
+    private func makeRuntime(_ provider: AgentChatProvider, directory: URL, resume: String?,
+                         events: LiveAgentEvents) -> any AgentSessionRuntime {
+        provider.spec.wire == .acp
+            ? AcpAgentRuntime(provider: provider, directory: directory.path, resumeSession: resume, onEvent: { events.receive($0) })
+            : AgentRuntime(provider: provider, directory: directory.path, resumeSession: resume, onEvent: { events.receive($0) })
+    }
+
     private func conversation(provider: AgentChatProvider) async throws {
         let selection = ProcessInfo.processInfo.environment["TAB_AGENT_LIVE_TESTS"]
         guard selection == provider.rawValue || selection == "all" else {
@@ -26,8 +81,7 @@ final class AgentLiveSmokeTests: XCTestCase {
         XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty)
 
         let events = LiveAgentEvents(provider: provider)
-        let runtime = AgentRuntime(provider: provider, directory: directory.path,
-                                   resumeSession: nil, onEvent: { events.receive($0) })
+        let runtime = makeRuntime(provider, directory: directory, resume: nil, events: events)
         defer { runtime.stop() }
 
         try await turn(runtime: runtime, events: events, marker: "TAB_AGENT_OK", reasoningEffort: .low)
@@ -44,8 +98,7 @@ final class AgentLiveSmokeTests: XCTestCase {
 
         runtime.stop()
         let resumedEvents = LiveAgentEvents(provider: provider)
-        let resumed = AgentRuntime(provider: provider, directory: directory.path,
-                                   resumeSession: session, onEvent: { resumedEvents.receive($0) })
+        let resumed = makeRuntime(provider, directory: directory, resume: session, events: resumedEvents)
         defer { resumed.stop() }
         try await turn(runtime: resumed, events: resumedEvents, marker: "TAB_AGENT_RESUMED_OK",
                        reasoningEffort: .high,
@@ -58,7 +111,7 @@ final class AgentLiveSmokeTests: XCTestCase {
                       "The no-tools smoke conversation created files in its empty working directory.")
     }
 
-    private func turn(runtime: AgentRuntime, events: LiveAgentEvents, marker: String,
+    private func turn(runtime: any AgentSessionRuntime, events: LiveAgentEvents, marker: String,
                       reasoningEffort: AgentReasoningEffort? = nil, prompt: String? = nil) async throws {
         let finished = events.begin(marker: marker)
         let sending = Task {
@@ -136,6 +189,8 @@ private final class LiveAgentEvents: @unchecked Sendable {
             case .item(let item), .toolItem(let item, _), .itemUpdate(let item):
                 switch item.kind {
                 case .assistant: rows[item.id] = item.text
+                case .tool where ["reasoning", "todo_list"].contains(item.workContext?.itemType ?? ""):
+                    break
                 case .approval, .tool:
                     error = "The no-tools prompt unexpectedly requested a tool or approval: \(item.text). No approval was sent."
                 default: break

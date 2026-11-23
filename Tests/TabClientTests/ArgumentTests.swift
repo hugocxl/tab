@@ -303,7 +303,7 @@ final class ArgumentTests: XCTestCase {
         XCTAssertEqual(try command(["pane", "new", "agent", "--json"]),
                        .pane(CLIPane(placement: .pane, project: nil, content: .agent(provider: .claude, message: nil)), json: true))
         for words in [
-            ["pane", "new", "agent", "--provider", "gemini"], ["pane", "new", "agent", "App"],
+            ["pane", "new", "agent", "--provider", "acp"], ["pane", "new", "agent", "--provider", "future"], ["pane", "new", "agent", "App"],
             ["pane", "new", "agent", "--fork", "wispy-cedar"], ["pane", "new", "agent", "--fork", "--provider", "codex"],
             ["pane", "new", "editor", "a", "--line", "0"], ["pane", "new", "diff", "a", "b"],
             ["tab", "new", "editor", "a"], ["pane", "new", "simulator", "a", "b"],

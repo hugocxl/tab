@@ -558,7 +558,7 @@ enum CLICommands {
                 .pane(try placed(a, CLIPane(placement: .pane, project: a.value("--project"), content: try terminal(a))),
                       json: a.json)
             },
-            CLICommandSpec("pane new agent", ["[--project PROJECT] [--provider claude|codex] [--edge EDGE] [--beside PANE] [-- MESSAGE...]",
+            CLICommandSpec("pane new agent", ["[--project PROJECT] [--provider claude|codex|gemini|opencode|grok|kiro] [--edge EDGE] [--beside PANE] [-- MESSAGE...]",
                                               "--fork [AGENT] [--project PROJECT] [--edge EDGE] [--beside PANE] [-- MESSAGE...]"],
                            "Start an agent conversation in a new pane, or copy one with --fork; prints its ID",
                            words: 0 ... 1, values: ["--project", "--provider"] + placementOptions, flags: ["--fork"],
@@ -697,7 +697,7 @@ enum CLICommands {
                            json: true, literal: true, place: .app) { a in
                 .pane(CLIPane(placement: .tab, project: nil, content: try terminal(a)), json: a.json)
             },
-            CLICommandSpec("tab new agent", ["[--provider claude|codex] [-- MESSAGE...]"],
+            CLICommandSpec("tab new agent", ["[--provider claude|codex|gemini|opencode|grok|kiro] [-- MESSAGE...]"],
                            "Start an agent conversation in a new tab; prints its ID", values: ["--provider"],
                            json: true, literal: true, place: .app) { a in
                 .pane(CLIPane(placement: .tab, project: nil, content: try agent(a)), json: a.json)
@@ -765,8 +765,8 @@ enum CLICommands {
 
     private static func agent(_ a: CLIArguments) throws -> CLIPane.Content {
         let name = a.value("--provider") ?? AgentChatProvider.claude.rawValue
-        guard let provider = AgentChatProvider(rawValue: name) else {
-            throw CLIError("--provider must be \(AgentChatProvider.allCases.map(\.rawValue).joined(separator: " or "))")
+        guard let provider = AgentChatProvider(rawValue: name), provider.hasBuiltIn else {
+            throw CLIError("--provider must be \(AgentChatProvider.builtIn.map(\.rawValue).joined(separator: ", "))")
         }
         return .agent(provider: provider, message: try message(a))
     }

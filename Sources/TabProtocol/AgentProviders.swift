@@ -1,10 +1,10 @@
 import Foundation
 
-/// One coding agent a server can run in agent panes: a Claude Code or Codex
-/// CLI with its own executable, home folder, arguments, environment and model
-/// preferences. Each kind has a built-in provider whose `id` is the kind's
-/// name; more can be added, such as a second Claude signed in to another
-/// account through its own config folder.
+/// One coding agent a server can run in agent panes: a CLI such as Claude Code,
+/// Codex or Gemini CLI with its own executable, home folder, arguments, environment
+/// and model preferences. Each kind but a custom ACP agent has a built-in provider
+/// whose `id` is the kind's name; more can be added, such as a second Claude signed
+/// in to another account through its own config folder.
 public struct AgentProviderConfig: Hashable, Codable, Sendable, Identifiable {
     public var id: String
     public var kind: AgentChatProvider
@@ -12,12 +12,13 @@ public struct AgentProviderConfig: Hashable, Codable, Sendable, Identifiable {
     public var name: String?
     /// A disabled provider offers no models and starts no new conversations.
     public var enabled: Bool
-    /// The CLI to run: a name looked up on `PATH`, or a path. Empty runs `claude` or `codex`.
+    /// The CLI to run: a name looked up on `PATH`, or a path. Empty runs the kind's own command.
     public var executable: String?
-    /// `CLAUDE_CONFIG_DIR` or `CODEX_HOME`: where the CLI keeps its sign-in,
-    /// settings and conversations. Empty uses the CLI's own default.
+    /// The kind's `homeVariable`, such as `CLAUDE_CONFIG_DIR` or `CODEX_HOME`: where the
+    /// CLI keeps its sign-in, settings and conversations. Empty uses the CLI's own default.
     public var home: String?
-    /// Added after Tab's own arguments when the CLI starts.
+    /// Added after Tab's own arguments when the CLI starts. A custom ACP agent's are all
+    /// it starts with, such as `--acp`.
     public var arguments: [String]
     /// Variables set for the CLI, such as API keys and base URLs, in order.
     public var environment: [AgentProviderVariable]
@@ -45,10 +46,10 @@ public struct AgentProviderConfig: Hashable, Codable, Sendable, Identifiable {
 
     /// The built-in provider of `kind`, with nothing changed.
     public static func builtIn(_ kind: AgentChatProvider) -> AgentProviderConfig {
-        AgentProviderConfig(id: kind.rawValue, kind: kind)
+        AgentProviderConfig(id: kind.rawValue, kind: kind, enabled: kind.spec.enabledByDefault)
     }
 
-    public var isBuiltIn: Bool { id == kind.rawValue }
+    public var isBuiltIn: Bool { kind.hasBuiltIn && id == kind.rawValue }
 
     /// The name the app shows: the chosen one, else the kind's.
     public var title: String {
@@ -56,11 +57,11 @@ public struct AgentProviderConfig: Hashable, Codable, Sendable, Identifiable {
         return trimmed.isEmpty ? kind.name : trimmed
     }
 
-    /// The command run when none is set.
-    public var defaultExecutable: String { kind == .claude ? "claude" : "codex" }
+    /// The command run when none is set; empty for a custom ACP agent, which needs one.
+    public var defaultExecutable: String { kind.spec.executable ?? "" }
 
-    /// The variable `home` sets.
-    public var homeVariable: String { kind == .claude ? "CLAUDE_CONFIG_DIR" : "CODEX_HOME" }
+    /// The variable `home` sets, when the kind has one.
+    public var homeVariable: String? { kind.spec.homeVariable }
 
     private enum CodingKeys: String, CodingKey {
         case id, kind, name, enabled, executable, home, arguments, environment, autoCompactTokens, models
@@ -186,7 +187,7 @@ public struct AgentProviderSettings: Hashable, Codable, Sendable {
     private mutating func normalize() {
         var seen = Set<String>()
         providers = providers.filter { seen.insert($0.id).inserted }
-        for kind in AgentChatProvider.allCases where !seen.contains(kind.rawValue) {
+        for kind in AgentChatProvider.builtIn where !seen.contains(kind.rawValue) {
             providers.append(.builtIn(kind))
         }
     }
@@ -196,7 +197,8 @@ public struct AgentProviderSettings: Hashable, Codable, Sendable {
         return providers.first { $0.id == id }
     }
 
-    /// The provider a conversation runs: `id`'s, or else its kind's built-in one.
+    /// The provider a conversation runs: `id`'s, or else its kind's built-in one. A custom
+    /// ACP agent has no built-in one, so a missing one is a provider with no command.
     public func provider(_ id: String?, kind: AgentChatProvider) -> AgentProviderConfig {
         if let found = provider(id), found.kind == kind { return found }
         return provider(kind.rawValue) ?? .builtIn(kind)
@@ -227,6 +229,78 @@ public struct AgentProviderSettings: Hashable, Codable, Sendable {
     }
 }
 
+/// Whether a provider can run conversations, as its last check found.
+public enum AgentProviderStatus: String, Codable, Sendable, CaseIterable {
+    /// Installed, signed in or signed in as far as Tab can tell, and new enough.
+    case ready
+    /// It runs, but something needs attention: an update, an unknown sign-in, a version Tab hasn't tested.
+    case warning
+    /// It can't run: missing, signed out, or older than Tab supports.
+    case error
+    /// Turned off in Settings › Agents.
+    case disabled
+
+    public init(from decoder: Decoder) throws {
+        self = AgentProviderStatus(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .warning
+    }
+}
+
+/// How a provider's installed CLI compares with its latest release and the oldest Tab supports.
+public struct AgentProviderVersionAdvisory: Hashable, Codable, Sendable {
+    public enum Status: String, Codable, Sendable {
+        /// The latest release couldn't be looked up.
+        case unknown
+        case current
+        /// A newer release is out.
+        case behindLatest
+        /// Older than `minimumVersion`; conversations may fail until it is updated.
+        case unsupported
+
+        public init(from decoder: Decoder) throws {
+            self = Status(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
+        }
+    }
+
+    public var status: Status
+    public var latestVersion: String?
+    /// The oldest version Tab's integration works with.
+    public var minimumVersion: String?
+    /// How the CLI was installed, such as "Homebrew" or "npm".
+    public var installedBy: String?
+    /// The command that updates the CLI the way it was installed.
+    public var updateCommand: String?
+    /// Whether the server can run `updateCommand` itself.
+    public var canUpdate: Bool
+    /// When the latest release was looked up.
+    public var checkedAt: Date?
+
+    public init(status: Status, latestVersion: String? = nil, minimumVersion: String? = nil, installedBy: String? = nil,
+                updateCommand: String? = nil, canUpdate: Bool = false, checkedAt: Date? = nil) {
+        self.status = status
+        self.latestVersion = latestVersion
+        self.minimumVersion = minimumVersion
+        self.installedBy = installedBy
+        self.updateCommand = updateCommand
+        self.canUpdate = canUpdate
+        self.checkedAt = checkedAt
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case status, latestVersion, minimumVersion, installedBy, updateCommand, canUpdate, checkedAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        status = try c.decodeIfPresent(Status.self, forKey: .status) ?? .unknown
+        latestVersion = try c.decodeIfPresent(String.self, forKey: .latestVersion)
+        minimumVersion = try c.decodeIfPresent(String.self, forKey: .minimumVersion)
+        installedBy = try c.decodeIfPresent(String.self, forKey: .installedBy)
+        updateCommand = try c.decodeIfPresent(String.self, forKey: .updateCommand)
+        canUpdate = try c.decodeIfPresent(Bool.self, forKey: .canUpdate) ?? false
+        checkedAt = try c.decodeIfPresent(Date.self, forKey: .checkedAt)
+    }
+}
+
 /// What a check found about a provider's CLI.
 public struct AgentProviderHealth: Hashable, Codable, Sendable {
     public enum Auth: String, Codable, Sendable {
@@ -250,9 +324,24 @@ public struct AgentProviderHealth: Hashable, Codable, Sendable {
     /// Why it can't run, or what to fix, such as a missing CLI.
     public var message: String?
     public var checkedAt: Date
+    /// The overall state, from what the check found. Servers that predate it send none,
+    /// and it is worked out from the other fields.
+    public var status: AgentProviderStatus
+    /// The CLI the check ran.
+    public var executablePath: String?
+    public var versionAdvisory: AgentProviderVersionAdvisory?
+    /// The command that installs the CLI, when it wasn't found.
+    public var installCommand: String?
+    /// Whether the server can run `installCommand` itself.
+    public var canInstall: Bool
+    /// The command that signs in, when it is signed out.
+    public var signInCommand: String?
 
     public init(provider: String, installed: Bool, version: String? = nil, auth: Auth = .unknown,
-                account: String? = nil, email: String? = nil, message: String? = nil, checkedAt: Date) {
+                account: String? = nil, email: String? = nil, message: String? = nil, checkedAt: Date,
+                status: AgentProviderStatus? = nil, executablePath: String? = nil,
+                versionAdvisory: AgentProviderVersionAdvisory? = nil, installCommand: String? = nil,
+                canInstall: Bool = false, signInCommand: String? = nil) {
         self.provider = provider
         self.installed = installed
         self.version = version
@@ -261,9 +350,27 @@ public struct AgentProviderHealth: Hashable, Codable, Sendable {
         self.email = email
         self.message = message
         self.checkedAt = checkedAt
+        self.executablePath = executablePath
+        self.versionAdvisory = versionAdvisory
+        self.installCommand = installCommand
+        self.canInstall = canInstall
+        self.signInCommand = signInCommand
+        self.status = .ready
+        self.status = status ?? derivedStatus
     }
 
-    private enum CodingKeys: String, CodingKey { case provider, installed, version, auth, account, email, message, checkedAt }
+    /// The status the other fields imply.
+    public var derivedStatus: AgentProviderStatus {
+        guard installed else { return .error }
+        if auth == .signedOut || versionAdvisory?.status == .unsupported { return .error }
+        if auth == .unknown || versionAdvisory?.status == .behindLatest { return .warning }
+        return .ready
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case provider, installed, version, auth, account, email, message, checkedAt
+        case status, executablePath, versionAdvisory, installCommand, canInstall, signInCommand
+    }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -275,7 +382,60 @@ public struct AgentProviderHealth: Hashable, Codable, Sendable {
         email = try c.decodeIfPresent(String.self, forKey: .email)
         message = try c.decodeIfPresent(String.self, forKey: .message)
         checkedAt = try c.decode(Date.self, forKey: .checkedAt)
+        executablePath = try c.decodeIfPresent(String.self, forKey: .executablePath)
+        versionAdvisory = try c.decodeIfPresent(AgentProviderVersionAdvisory.self, forKey: .versionAdvisory)
+        installCommand = try c.decodeIfPresent(String.self, forKey: .installCommand)
+        canInstall = try c.decodeIfPresent(Bool.self, forKey: .canInstall) ?? false
+        signInCommand = try c.decodeIfPresent(String.self, forKey: .signInCommand)
+        status = .ready
+        status = try c.decodeIfPresent(AgentProviderStatus.self, forKey: .status) ?? derivedStatus
     }
+}
+
+/// Installing or updating a provider's CLI, run by its server.
+public struct AgentProviderMaintenance: Hashable, Codable, Sendable {
+    public enum Action: String, Codable, Sendable {
+        case install, update
+    }
+
+    public enum Status: String, Codable, Sendable {
+        case running
+        case succeeded
+        case failed
+        /// It finished, but the CLI reports the same version as before.
+        case unchanged
+
+        public init(from decoder: Decoder) throws {
+            self = Status(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .failed
+        }
+    }
+
+    public static let maxOutputBytes = 10_000
+
+    public var provider: String
+    public var action: Action
+    public var command: String
+    public var status: Status
+    public var startedAt: Date
+    public var finishedAt: Date?
+    /// What happened, in a sentence.
+    public var message: String?
+    /// The end of what the command printed.
+    public var output: String?
+
+    public init(provider: String, action: Action, command: String, status: Status, startedAt: Date,
+                finishedAt: Date? = nil, message: String? = nil, output: String? = nil) {
+        self.provider = provider
+        self.action = action
+        self.command = command
+        self.status = status
+        self.startedAt = startedAt
+        self.finishedAt = finishedAt
+        self.message = message
+        self.output = output
+    }
+
+    public var isRunning: Bool { status == .running }
 }
 
 /// A server's providers with what their last checks found.
@@ -283,21 +443,43 @@ public struct AgentProvidersState: Hashable, Codable, Sendable {
     public var settings: AgentProviderSettings
     /// The latest check of each provider that has had one.
     public var health: [AgentProviderHealth]
+    /// The latest install or update of each provider that has had one since the server started.
+    public var maintenance: [AgentProviderMaintenance]
+    /// The kinds of provider the server can run. Servers that predate it run only the
+    /// original two, and the providers of other kinds this build adds are left out.
+    public var kinds: [AgentChatProvider]
 
-    public init(settings: AgentProviderSettings, health: [AgentProviderHealth] = []) {
+    public init(settings: AgentProviderSettings, health: [AgentProviderHealth] = [],
+                maintenance: [AgentProviderMaintenance] = [], kinds: [AgentChatProvider] = AgentChatProvider.allCases) {
+        self.kinds = kinds
         self.settings = settings
         self.health = health
+        self.maintenance = maintenance
+        self.settings.providers.removeAll { !kinds.contains($0.kind) }
     }
 
-    private enum CodingKeys: String, CodingKey { case settings, health }
+    private enum CodingKeys: String, CodingKey { case settings, health, maintenance, kinds }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         settings = try c.decode(AgentProviderSettings.self, forKey: .settings)
         health = try c.decodeIfPresent([AgentProviderHealth].self, forKey: .health) ?? []
+        maintenance = try c.decodeIfPresent([AgentProviderMaintenance].self, forKey: .maintenance) ?? []
+        // A kind a newer server names but this build doesn't know is left out.
+        let names = try c.decodeIfPresent([String].self, forKey: .kinds)
+        kinds = names.map { $0.compactMap(AgentChatProvider.init(rawValue:)) } ?? AgentChatProvider.original
+        settings.providers.removeAll { !kinds.contains($0.kind) }
     }
 
     public func health(_ provider: String) -> AgentProviderHealth? { health.first { $0.provider == provider } }
+
+    public func maintenance(_ provider: String) -> AgentProviderMaintenance? { maintenance.first { $0.provider == provider } }
+
+    /// The status a provider shows: off, else what its last check found; nil before any check.
+    public func status(_ provider: AgentProviderConfig) -> AgentProviderStatus? {
+        guard provider.enabled else { return .disabled }
+        return health(provider.id)?.status
+    }
 }
 
 extension AgentProviderSettings {

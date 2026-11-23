@@ -3,6 +3,19 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.116.0 - 2026-11-23
+
+### Added
+
+- Agent panes can run Antigravity CLI, Google's coding agent for personal and Google AI accounts, with its Gemini models and their reasoning levels.
+- Agent panes can also run Gemini CLI for Gemini Code Assist accounts, OpenCode, Grok and Kiro, and any other agent that speaks the Agent Client Protocol, added in Settings › Agents.
+- Settings › Agents shows whether each provider is ready, needs attention or can't run, with its version, the latest release, the oldest version Tab supports and how it is signed in.
+- Settings › Agents can install a missing provider and update an outdated one, showing the command's progress and output, and installs Antigravity CLI straight from Google after checking the download.
+
+### Changed
+
+- The model menu leaves out providers whose command line tool isn't installed.
+
 ## 0.115.0 - 2026-11-23
 
 ### Changed

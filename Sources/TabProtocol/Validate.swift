@@ -238,6 +238,8 @@ extension RequestBody {
             if request.maxPixels == 0 || request.codecs.isEmpty || request.codecs.count > 8 { throw .badRequest }
         case .writeAgentProviders(let settings):
             try settings.validate()
+        case .maintainAgentProvider(let id, _):
+            if id.isEmpty || id.utf8.count > 64 { throw .badRequest }
         case .ping, .listSimulators, .listSessions, .attachWithoutResize, .endSession, .closeSession, .discardSession,
              .readSavedScreen, .identifyClient, .cancelCreation, .readCatalog, .listProjectSessions, .readTabs,
              .readServerSettings, .readAgentProviders, .checkAgentProviders, .stopServer, .stopServerIfIdle, .restartServer, .cancelExec, .readActivity,

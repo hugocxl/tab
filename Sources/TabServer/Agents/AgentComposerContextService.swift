@@ -82,6 +82,22 @@ actor AgentComposerContextService {
             if let configured = environment["CODEX_HOME"], !configured.isEmpty {
                 roots.append((URL(fileURLWithPath: configured), "skills", false))
             } else { roots.append((home, ".codex/skills", false)) }
+        case .antigravity:
+            // Project skills, then the user's own, as `agy` reads them.
+            roots = ancestors.flatMap { [($0, ".gemini/skills", false), ($0, ".agents/skills", false), ($0, ".agent/skills", false)] }
+            roots += [(home, ".gemini/config/skills", false), (home, ".gemini/antigravity-cli/skills", false)]
+        case .gemini:
+            roots = ancestors.flatMap { [($0, ".gemini/skills", false), ($0, ".agents/skills", false)] }
+            let root = environment["GEMINI_CLI_HOME"].flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) } ?? home
+            roots += [(root, ".gemini/skills", false), (home, ".agents/skills", false)]
+        case .openCode:
+            roots = ancestors.flatMap { [($0, ".opencode/skills", false), ($0, ".agents/skills", false)] }
+            if let configured = environment["OPENCODE_CONFIG_DIR"], !configured.isEmpty {
+                roots.append((URL(fileURLWithPath: configured), "skills", false))
+            } else { roots.append((home, ".config/opencode/skills", false)) }
+            roots.append((home, ".agents/skills", false))
+        case .grok, .kiro, .acp:
+            roots = ancestors.map { ($0, ".agents/skills", false) } + [(home, ".agents/skills", false)]
         }
         var reply = AgentComposerContextReply(skills: [])
         var names = Set<String>()

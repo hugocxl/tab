@@ -25,7 +25,7 @@ final class MessageTests: XCTestCase {
         for (index, body) in Samples.requests.enumerated() {
             roundTrip(Message.request(RequestId(UInt32(index)), body))
         }
-        XCTAssertEqual(try types(Samples.requests).count, 51, "add a sample for every RequestBody case")
+        XCTAssertEqual(try types(Samples.requests).count, 52, "add a sample for every RequestBody case")
     }
 
     func testEveryReplyRoundTrips() throws {
@@ -132,7 +132,7 @@ final class MessageTests: XCTestCase {
 
     func testAgentProviderRawValuesAreStable() {
         XCTAssertEqual(AgentProvider.knownCases.map(\.rawValue), [
-            "claude", "codex", "opencode", "cursor", "copilot", "droid", "pi", "grok", "kiro", "xal", "antigravity", "omp",
+            "claude", "codex", "opencode", "cursor", "copilot", "droid", "pi", "grok", "kiro", "xal", "antigravity", "gemini", "omp",
         ])
         for provider in AgentProvider.knownCases {
             XCTAssertEqual(AgentProvider(rawValue: provider.rawValue), provider)

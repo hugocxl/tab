@@ -98,6 +98,8 @@ struct AgentHistory: Sendable {
                 throw ServiceError(.badRequest, "Codex has no saved conversation \(session) in this folder")
             }
             return try Self.codexTranscript(Self.lines(of: file))
+        case .antigravity, .gemini, .openCode, .grok, .kiro, .acp:
+            throw ServiceError(.badRequest, "\(provider.name) conversations started outside Tab can't be opened here")
         }
     }
 
@@ -128,6 +130,8 @@ struct AgentHistory: Sendable {
                 if let threadName = record["thread_name"] as? String, !threadName.isEmpty { name = threadName }
             }
             return name.map(Self.title)
+        case .antigravity, .gemini, .openCode, .grok, .kiro, .acp:
+            return nil
         }
     }
 
