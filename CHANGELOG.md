@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.128.0 - 2026-11-23
+
+### Added
+
+- The QuickShot plugin captures the screen under your pointer from any app with both Command keys or your own shortcut, and copies the screenshot's path or image to the clipboard.
+- Installed plugins with options show a Configure button in Settings › Plugins that opens their own settings page.
+
 ## 0.127.0 - 2026-11-23
 
 ### Changed

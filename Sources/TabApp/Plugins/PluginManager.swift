@@ -1,4 +1,5 @@
 import AppKit
+import struct SwiftUI.AnyView
 import TabCore
 import TabProtocol
 
@@ -18,10 +19,12 @@ public final class PluginManager {
 
     private var panelsByPlugin: [PluginId: [PluginSidebarPanel]] = [:]
     private var panesByPlugin: [PluginId: Set<PaneKind>] = [:]
+    private var settingsViewByPlugin: [PluginId: @MainActor (SettingsStore) -> AnyView] = [:]
     private var filesHandlers: [PluginId: [@MainActor (ProjectId, FileChanges) -> Void]] = [:]
     private var gitHandlers: [PluginId: [@MainActor (ProjectId) -> Void]] = [:]
     private var reconnectHandlers: [PluginId: [@MainActor (ServerId) -> Void]] = [:]
     private var filesRootHandlers: [PluginId: [@MainActor (Project) -> Void]] = [:]
+    private var settingsHandlers: [PluginId: [@MainActor (Settings) -> Void]] = [:]
 
     public init(model: AppModel, installer: PluginInstaller? = nil) {
         self.model = model
@@ -65,6 +68,16 @@ public final class PluginManager {
     /// Creates the content controller for a registered right-sidebar panel.
     public func makePanelContent(_ id: String) -> RightPanelContent? {
         sidebarPanel(id)?.makeContent(model)
+    }
+
+    /// Whether `id` is active and provides a Settings configuration page.
+    public func hasSettingsView(for id: PluginId) -> Bool {
+        settingsViewByPlugin[id] != nil
+    }
+
+    /// Builds `id`'s Settings configuration view, if registered.
+    public func makeSettingsView(for id: PluginId, store: SettingsStore) -> AnyView? {
+        settingsViewByPlugin[id]?(store)
     }
 
     // MARK: Startup
@@ -187,10 +200,12 @@ public final class PluginManager {
                 model.panes.rebuild(kind)
             }
         }
+        settingsViewByPlugin.removeValue(forKey: id)
         filesHandlers.removeValue(forKey: id)
         gitHandlers.removeValue(forKey: id)
         reconnectHandlers.removeValue(forKey: id)
         filesRootHandlers.removeValue(forKey: id)
+        settingsHandlers.removeValue(forKey: id)
     }
 
     // MARK: Dynamic Bundle Loading
@@ -258,6 +273,14 @@ public final class PluginManager {
         filesRootHandlers[pluginId, default: []].append(handler)
     }
 
+    func registerSettingsView(_ makeView: @escaping @MainActor (SettingsStore) -> AnyView, for pluginId: PluginId) {
+        settingsViewByPlugin[pluginId] = makeView
+    }
+
+    func addSettingsChangedHandler(_ handler: @escaping @MainActor (Settings) -> Void, for pluginId: PluginId) {
+        settingsHandlers[pluginId, default: []].append(handler)
+    }
+
     // MARK: Event Dispatch
 
     func dispatchFilesChanged(_ project: ProjectId, _ changes: FileChanges) {
@@ -281,6 +304,12 @@ public final class PluginManager {
     func dispatchUpdateFilesRoot(_ project: Project) {
         for handlers in filesRootHandlers.values {
             for handler in handlers { handler(project) }
+        }
+    }
+
+    func dispatchSettingsChanged(_ settings: Settings) {
+        for handlers in settingsHandlers.values {
+            for handler in handlers { handler(settings) }
         }
     }
 }

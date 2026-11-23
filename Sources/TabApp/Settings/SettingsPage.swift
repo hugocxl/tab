@@ -22,7 +22,11 @@ struct SettingsPage: View {
         } else if model.category == .keyboard && !model.isSearching {
             ShortcutsPage(model: model)
         } else if model.category == .plugins && !model.isSearching {
-            PluginsPage(model: model)
+            if model.subpage == .pluginConfig, let pluginId = model.pluginId {
+                PluginConfigPage(pluginId: pluginId, model: model)
+            } else {
+                PluginsPage(model: model)
+            }
         } else {
             settings
         }

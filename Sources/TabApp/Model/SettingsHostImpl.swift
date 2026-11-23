@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import struct SwiftUI.AnyView
 import TabClient
 import TabCore
 import TabProtocol
@@ -183,6 +184,14 @@ public final class SettingsHostImpl: SettingsHost {
 
     public func uninstallPlugin(_ id: PluginId) throws {
         try model.plugins.uninstall(id)
+    }
+
+    public func hasPluginSettings(_ id: PluginId) -> Bool {
+        model.plugins.hasSettingsView(for: id)
+    }
+
+    public func pluginSettingsView(for id: PluginId, store: SettingsStore) -> AnyView? {
+        model.plugins.makeSettingsView(for: id, store: store)
     }
 
     // MARK: Backup

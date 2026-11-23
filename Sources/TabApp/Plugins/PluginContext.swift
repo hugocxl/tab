@@ -1,4 +1,5 @@
 import AppKit
+import struct SwiftUI.AnyView
 import TabCore
 import TabProtocol
 
@@ -50,5 +51,16 @@ public final class PluginContext {
     /// Subscribes to Home terminal folder changes (used by Explorer).
     public func onUpdateFilesRoot(_ handler: @escaping @MainActor (Project) -> Void) {
         manager.addUpdateFilesRootHandler(handler, for: pluginId)
+    }
+
+    /// Registers a Settings configuration page for this plugin, opened from
+    /// Settings → Plugins → Configure.
+    public func registerSettingsView(_ makeView: @escaping @MainActor (SettingsStore) -> AnyView) {
+        manager.registerSettingsView(makeView, for: pluginId)
+    }
+
+    /// Subscribes to `settings.json` updates (including changes to this plugin's config).
+    public func onSettingsChanged(_ handler: @escaping @MainActor (Settings) -> Void) {
+        manager.addSettingsChangedHandler(handler, for: pluginId)
     }
 }

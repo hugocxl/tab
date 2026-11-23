@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import struct SwiftUI.AnyView
 import TabClient
 import TabCore
 import TabProtocol
@@ -860,6 +861,29 @@ public final class SettingsStore {
         let key = "plugin.\(id.rawValue)"
         attempt(key) {
             try host?.uninstallPlugin(id)
+        }
+    }
+
+    public func hasPluginSettings(_ id: PluginId) -> Bool {
+        host?.hasPluginSettings(id) ?? false
+    }
+
+    public func pluginSettingsView(for id: PluginId) -> AnyView? {
+        host?.pluginSettingsView(for: id, store: self)
+    }
+
+    public func pluginConfig<T: Decodable>(_ type: T.Type, for id: PluginId) -> T? {
+        settings.plugins.decodeConfig(type, for: id)
+    }
+
+    public func updatePluginConfig<T: Encodable>(_ id: PluginId, _ value: T) {
+        let key = "plugin.\(id.rawValue).config"
+        attempt(key) {
+            var next = settings
+            try next.plugins.encodeConfig(value, for: id)
+            try next.savePlugins(to: dirs.settings)
+            settings = next
+            applySettings()
         }
     }
 }

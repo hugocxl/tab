@@ -58,6 +58,8 @@ public enum SettingsSubpage: String, CaseIterable, Sendable {
     case working, blocked, error, done
     /// One coding agent's settings; `SettingsModel.provider` says which.
     case agentProvider
+    /// One installed plugin's configuration page; `SettingsModel.pluginId` says which.
+    case pluginConfig
 
     public init(_ status: ActivityStatus) {
         switch status {
@@ -73,6 +75,7 @@ public enum SettingsSubpage: String, CaseIterable, Sendable {
         case .advancedFont: return "Advanced Font Settings"
         case .working, .blocked, .error, .done: return status?.title ?? ""
         case .agentProvider: return "Provider"
+        case .pluginConfig: return "Plugin"
         }
     }
 
@@ -81,13 +84,14 @@ public enum SettingsSubpage: String, CaseIterable, Sendable {
         case .advancedFont: return .terminal
         case .working, .blocked, .error, .done: return .notifications
         case .agentProvider: return .agents
+        case .pluginConfig: return .plugins
         }
     }
 
     /// The status a Notifications subpage is about.
     public var status: ActivityStatus? {
         switch self {
-        case .advancedFont, .agentProvider: return nil
+        case .advancedFont, .agentProvider, .pluginConfig: return nil
         case .working: return .working
         case .blocked: return .blocked
         case .error: return .error
@@ -206,7 +210,7 @@ public enum SettingsCatalog {
         SettingItem("agent-integration-agents", "Agents", "", .agents, "Terminal Integration"),
         SettingItem("terminal-migration", "Migrate from another terminal", "An agent reads that terminal's configuration and brings its shortcuts, font, cursor and colors into Tab.", .agents, "Migration"),
         // Plugins
-        SettingItem("plugins", "Plugins", "Install and uninstall optional right-sidebar plugins such as Explorer and Diff View.", .plugins, "Plugins"),
+        SettingItem("plugins", "Plugins", "Install, uninstall and configure optional plugins such as Explorer, Diff View and QuickShot.", .plugins, "Plugins"),
         // Notifications
         SettingItem("notification-position", "Notification position", "Where the window shows updates, connection problems and confirmations.", .notifications, "In-App Notifications"),
         SettingItem("activity-tabs", "Show activity in tabs", "Sidebar cards and pane headers show what programs and agents are doing.", .notifications, "Program Activity"),

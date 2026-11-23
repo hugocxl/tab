@@ -2,17 +2,17 @@ import SwiftUI
 
 /// The app theme's colors as Settings draws them, so the window matches the
 /// workspace instead of the system's grays.
-struct SettingsTheme {
-    var background: SwiftUI.Color
-    var sidebar: SwiftUI.Color
-    var card: SwiftUI.Color
-    var text: SwiftUI.Color
-    var secondaryText: SwiftUI.Color
-    var accent: SwiftUI.Color
-    var danger: SwiftUI.Color
+public struct SettingsTheme {
+    public var background: SwiftUI.Color
+    public var sidebar: SwiftUI.Color
+    public var card: SwiftUI.Color
+    public var text: SwiftUI.Color
+    public var secondaryText: SwiftUI.Color
+    public var accent: SwiftUI.Color
+    public var danger: SwiftUI.Color
 
     @MainActor
-    init(_ theme: AppTheme) {
+    public init(_ theme: AppTheme) {
         background = SwiftUI.Color(nsColor: theme.bg)
         sidebar = SwiftUI.Color(nsColor: theme.raised)
         card = SwiftUI.Color(nsColor: theme.rowFill)
@@ -29,7 +29,7 @@ private struct SettingsThemeKey: EnvironmentKey {
 
 extension EnvironmentValues {
     /// The theme Settings is drawn with.
-    var settingsTheme: SettingsTheme? {
+    public var settingsTheme: SettingsTheme? {
         get { self[SettingsThemeKey.self] }
         set { self[SettingsThemeKey.self] = newValue }
     }

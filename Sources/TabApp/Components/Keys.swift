@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import TabCore
 
 /// One key of a shortcut, drawn as in the command palette: a 20pt rounded
@@ -206,5 +207,47 @@ public final class ShortcutRecorder: NSButton {
         }
         onError?(nil)
         setChord(chord)
+    }
+}
+
+/// SwiftUI wrapper around `ShortcutRecorder` for Settings and plugin config pages.
+public struct ShortcutRecorderField: NSViewRepresentable {
+    public let chord: KeyChord?
+    public let placeholder: String
+    public let label: String
+    public let onRecord: (KeyChord) -> String?
+    public let onError: (String?) -> Void
+
+    public init(
+        chord: KeyChord?,
+        placeholder: String = "Click to record",
+        label: String,
+        onRecord: @escaping (KeyChord) -> String?,
+        onError: @escaping (String?) -> Void = { _ in }
+    ) {
+        self.chord = chord
+        self.placeholder = placeholder
+        self.label = label
+        self.onRecord = onRecord
+        self.onError = onError
+    }
+
+    public func makeNSView(context: Context) -> ShortcutRecorder {
+        let recorder = ShortcutRecorder(chord: chord, placeholder: placeholder, label: label)
+        update(recorder)
+        return recorder
+    }
+
+    public func updateNSView(_ recorder: ShortcutRecorder, context: Context) {
+        update(recorder)
+    }
+
+    private func update(_ recorder: ShortcutRecorder) {
+        recorder.placeholder = placeholder
+        if !recorder.isRecording && recorder.chord != chord {
+            recorder.setChord(chord)
+        }
+        recorder.onRecord = onRecord
+        recorder.onError = onError
     }
 }

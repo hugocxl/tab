@@ -507,6 +507,7 @@ public final class AppModel {
         for (_, controller) in panes.all {
             (controller as? TerminalPane)?.apply(settings: terminalSettings)
         }
+        plugins.dispatchSettingsChanged(settings)
         notify(.settings)
         notify(.state)
     }

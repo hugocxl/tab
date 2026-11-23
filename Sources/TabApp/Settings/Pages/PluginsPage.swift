@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 import TabCore
 
-/// Settings → Plugins: install and uninstall optional right-sidebar plugins.
+/// Settings → Plugins: install, uninstall and configure optional plugins.
 /// Plugins are loaded lazily on demand and removed from disk when uninstalled.
 struct PluginsPage: View {
     @ObservedObject var model: SettingsModel
@@ -18,7 +18,7 @@ struct PluginsPage: View {
             } header: {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Available Plugins")
-                    Text("Installed plugins appear in the right sidebar. Uninstalled plugins are removed from disk and not loaded by Tab.")
+                    Text("Install optional plugins to extend Tab with panels and utilities. Uninstalled plugins are removed from disk and not loaded by Tab.")
                         .font(.subheadline)
                         .fontWeight(.regular)
                         .foregroundStyle(.secondary)
@@ -32,6 +32,37 @@ struct PluginsPage: View {
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
         .background { theme?.background.ignoresSafeArea() }
+    }
+}
+
+/// Hosts an installed plugin's SwiftUI configuration page.
+struct PluginConfigPage: View {
+    let pluginId: PluginId
+    @ObservedObject var model: SettingsModel
+    @Environment(\.settingsTheme) private var theme
+
+    var body: some View {
+        if let view = model.store.pluginSettingsView(for: pluginId) {
+            view
+        } else {
+            let name = PluginCatalog.descriptor(for: pluginId)?.name ?? pluginId.rawValue
+            Form {
+                Section {
+                    HStack {
+                        Text("\(name) is not installed.")
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Back to Plugins") {
+                            model.select(.plugins)
+                        }
+                    }
+                    .listRowBackground(theme?.card)
+                }
+            }
+            .formStyle(.grouped)
+            .scrollContentBackground(.hidden)
+            .background { theme?.background.ignoresSafeArea() }
+        }
     }
 }
 
@@ -108,10 +139,18 @@ private struct PluginRow: View {
                     .foregroundStyle(.secondary)
             }
         case .installed:
-            Button("Uninstall", role: .destructive) {
-                model.store.uninstallPlugin(plugin.id)
+            HStack(spacing: 8) {
+                if model.store.hasPluginSettings(plugin.id) {
+                    Button("Configure") {
+                        model.openPlugin(plugin.id)
+                    }
+                    .buttonStyle(.bordered)
+                }
+                Button("Uninstall", role: .destructive) {
+                    model.store.uninstallPlugin(plugin.id)
+                }
+                .buttonStyle(.bordered)
             }
-            .buttonStyle(.bordered)
         case .notInstalled, .failed:
             Button("Install") {
                 model.store.installPlugin(plugin.id)

@@ -123,5 +123,6 @@ build_plugin "explorer" "TabExplorerPlugin" "Explorer" "TabExplorerPluginFactory
 build_plugin "diff" "TabDiffPlugin" "Diff View" "TabDiffPluginFactory"
 build_plugin "usage" "TabUsagePlugin" "AI Usage" "TabUsagePluginFactory"
 build_plugin "git-graph" "TabGitGraphPlugin" "Git Graph" "TabGitGraphPluginFactory"
+build_plugin "quickshot" "TabQuickShotPlugin" "QuickShot" "TabQuickShotPluginFactory"
 
 echo "$OUT_DIR"

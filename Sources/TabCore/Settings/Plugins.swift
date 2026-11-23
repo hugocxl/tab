@@ -36,6 +36,8 @@ public struct PluginId: RawRepresentable, Hashable, Codable, Sendable, CustomStr
     public static let usage = PluginId("usage")
     /// The commit graph plugin.
     public static let gitGraph = PluginId("git-graph")
+    /// The QuickShot screenshot-to-clipboard plugin.
+    public static let quickshot = PluginId("quickshot")
 }
 
 /// Catalog metadata for a plugin available to install in Tab.
@@ -115,12 +117,23 @@ public enum PluginCatalog {
         panelIds: ["gitGraph"]
     )
 
+    public static let quickshot = PluginDescriptor(
+        id: .quickshot,
+        name: "QuickShot",
+        summary: "Capture the screen under your pointer from any app with a shortcut, ready to paste into a terminal or agent.",
+        iconName: "image",
+        bundleName: "TabQuickShotPlugin",
+        principalClass: "TabQuickShotPluginFactory",
+        panelIds: []
+    )
+
     /// Every official plugin, in catalog order.
     public static let all: [PluginDescriptor] = [
         explorer,
         diff,
         usage,
         gitGraph,
+        quickshot,
     ]
 
     public static func descriptor(for id: PluginId) -> PluginDescriptor? {
@@ -128,12 +141,60 @@ public enum PluginCatalog {
     }
 }
 
-/// Which plugins are installed in this profile. By default, none are installed.
+/// Arbitrary JSON value used to persist per-plugin configuration in `settings.json`
+/// without coupling `TabCore` to individual plugin modules.
+public enum PluginConfigValue: Codable, Equatable, Sendable {
+    case null
+    case bool(Bool)
+    case int(Int64)
+    case double(Double)
+    case string(String)
+    case array([PluginConfigValue])
+    case object([String: PluginConfigValue])
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if container.decodeNil() {
+            self = .null
+        } else if let value = try? container.decode(Bool.self) {
+            self = .bool(value)
+        } else if let value = try? container.decode(Int64.self) {
+            self = .int(value)
+        } else if let value = try? container.decode(Double.self) {
+            self = .double(value)
+        } else if let value = try? container.decode(String.self) {
+            self = .string(value)
+        } else if let value = try? container.decode([PluginConfigValue].self) {
+            self = .array(value)
+        } else {
+            self = .object(try container.decode([String: PluginConfigValue].self))
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .null: try container.encodeNil()
+        case .bool(let value): try container.encode(value)
+        case .int(let value): try container.encode(value)
+        case .double(let value): try container.encode(value)
+        case .string(let value): try container.encode(value)
+        case .array(let value): try container.encode(value)
+        case .object(let value): try container.encode(value)
+        }
+    }
+}
+
+/// Which plugins are installed in this profile and their saved configurations.
+/// By default, none are installed.
 public struct PluginSettings: Codable, Equatable, Sendable {
     public var installed: [PluginId]
+    /// Per-plugin JSON configuration objects keyed by `PluginId.rawValue`.
+    public var config: [String: PluginConfigValue]
 
-    public init(installed: [PluginId] = []) {
+    public init(installed: [PluginId] = [], config: [String: PluginConfigValue] = [:]) {
         self.installed = installed
+        self.config = config
     }
 
     public init(from decoder: Decoder) throws {
@@ -141,6 +202,7 @@ public struct PluginSettings: Codable, Equatable, Sendable {
         let raw = try container.value(.installed, [PluginId]())
         var seen: Set<PluginId> = []
         installed = raw.filter { seen.insert($0).inserted }
+        config = try container.value(.config, [String: PluginConfigValue]())
     }
 
     public func isInstalled(_ id: PluginId) -> Bool {
@@ -155,5 +217,18 @@ public struct PluginSettings: Codable, Equatable, Sendable {
 
     public mutating func markUninstalled(_ id: PluginId) {
         installed.removeAll { $0 == id }
+    }
+
+    /// Decodes a plugin's saved configuration as `type`, or `nil` when absent or unreadable.
+    public func decodeConfig<T: Decodable>(_ type: T.Type, for id: PluginId) -> T? {
+        guard let value = config[id.rawValue] else { return nil }
+        guard let data = try? JSONEncoder().encode(value) else { return nil }
+        return try? JSONDecoder().decode(type, from: data)
+    }
+
+    /// Encodes and stores `value` as `id`'s configuration.
+    public mutating func encodeConfig<T: Encodable>(_ value: T, for id: PluginId) throws {
+        let data = try JSONEncoder().encode(value)
+        config[id.rawValue] = try JSONDecoder().decode(PluginConfigValue.self, from: data)
     }
 }
