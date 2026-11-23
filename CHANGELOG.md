@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.120.0 - 2026-11-23
+
+### Changed
+
+- The sidebar shows work in progress with a ring of fading ticks, like the system's loading spinner.
+
 ## 0.119.0 - 2026-11-23
 
 ### Changed

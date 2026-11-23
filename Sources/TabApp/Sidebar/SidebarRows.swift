@@ -584,7 +584,7 @@ final class SubtaskRowView: ThemedView {
     override func themeDidChange() {
         titleLabel.textColor = theme.fgDim
         elapsedLabel.textColor = theme.fgDim
-        spinner?.style = .spinner(theme.fgDim)
+        spinner?.style = .ticks(theme.fgDim)
     }
 
     override func layout() {
@@ -699,7 +699,7 @@ final class PaneStatusView: NSView {
         symbol.contentTintColor = color
         if spins {
             let activity = spinner ?? ActivityGlyph()
-            activity.style = .spinner(color)
+            activity.style = .ticks(color)
             if activity.superview == nil { addSubview(activity) }
             spinner = activity
             needsLayout = true
@@ -919,7 +919,7 @@ final class CreatingRow: HoverView {
         }
         if headerIcon?.image?.isTemplate ?? false { headerIcon?.contentTintColor = theme.fgDim }
         titleLabel.textColor = theme.fg
-        spinner.style = .spinner(theme.accent)
+        spinner.style = .ticks(theme.accent)
         detailIcon.image = AppIcon.gitBranch.image(size: SidebarCardView.iconSide, color: theme.fgDim)
         detailLabel.textColor = theme.fgMuted
         needsDisplay = true
