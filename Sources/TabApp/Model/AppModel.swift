@@ -48,6 +48,33 @@ public struct GitInfo: Equatable, Sendable {
     public var isRepository: Bool { summary != nil }
 }
 
+/// A worktree currently being created on the server.
+public struct WorktreeCreation: Identifiable, Equatable, Sendable {
+    static let placeholderName = "New worktree"
+
+    public let id: UUID
+    public let parent: ProjectId
+    public var name: String
+    public var branch: String?
+    public var base: String?
+    public var pullRequest: UInt64?
+    public var opening: PaneKind?
+    public var status: String
+
+    public init(id: UUID = UUID(), parent: ProjectId, name: String, branch: String? = nil,
+                base: String? = nil, pullRequest: UInt64? = nil, opening: PaneKind? = nil,
+                status: String = "Creating worktree…") {
+        self.id = id
+        self.parent = parent
+        self.name = name
+        self.branch = branch
+        self.base = base
+        self.pullRequest = pullRequest
+        self.opening = opening
+        self.status = status
+    }
+}
+
 /// The app's state and its connections to servers. Views observe
 /// `changes`; every mutation goes through the model, which saves
 /// `state.json` shortly after and keeps the servers in step.
@@ -113,8 +140,10 @@ public final class AppModel {
     public var shortcutHints: ChordModifiers? {
         didSet { if shortcutHints != oldValue { notify(.state) } }
     }
-    /// Worktree names being created, by parent project.
-    public internal(set) var worktreeCreations: [ProjectId: [String]] = [:]
+    /// Worktrees currently being created on the server.
+    public internal(set) var worktreeCreations: [WorktreeCreation] = []
+    /// The in-progress worktree creation currently shown in the workspace.
+    public internal(set) var selectedWorktreeCreation: UUID?
     /// Worktree projects being removed.
     public internal(set) var worktreeRemovals: Set<ProjectId> = []
     /// Worktrees with a removal or close underway, from its first question
@@ -276,8 +305,33 @@ public final class AppModel {
         return project.tabs.first { $0.id == selected } ?? project.tabs.first
     }
 
+    /// The in-progress worktree creation currently on screen, if any.
+    public var activeWorktreeCreation: WorktreeCreation? {
+        guard let id = selectedWorktreeCreation else { return nil }
+        return worktreeCreations.first { $0.id == id }
+    }
+
+    /// Shows an in-progress worktree creation in the workspace.
+    public func selectWorktreeCreation(_ id: UUID) {
+        guard worktreeCreations.contains(where: { $0.id == id }) else { return }
+        guard selectedWorktreeCreation != id else { return }
+        selectedWorktreeCreation = id
+        syncVisible()
+        notify(.state)
+    }
+
+    /// Leaves an in-progress worktree creation view for the current tab.
+    func clearSelectedWorktreeCreation() {
+        guard selectedWorktreeCreation != nil else { return }
+        selectedWorktreeCreation = nil
+        syncVisible()
+        notify(.state)
+    }
+
     /// The panes on screen now.
-    public var visiblePanes: [PaneId] { activeTab?.visiblePanes ?? [] }
+    public var visiblePanes: [PaneId] {
+        activeWorktreeCreation == nil ? (activeTab?.visiblePanes ?? []) : []
+    }
 
     /// The main connection of `project`'s server.
     public func client(for project: ProjectId) -> ServerAPI? {
@@ -513,12 +567,17 @@ public final class AppModel {
 
     /// Goes back or forward to the last project or Home terminal shown.
     public func navigate(forward: Bool) {
+        if !forward, selectedWorktreeCreation != nil {
+            clearSelectedWorktreeCreation()
+            return
+        }
         let live: (NavigationHistory.Location) -> Bool = { [state] location in
             guard let project = state.project(location.project), project.status == .available else { return false }
             guard let tab = location.tab else { return true }
             return project.tabs.contains { $0.id == tab }
         }
         guard let (index, location) = navigation.target(forward: forward, live: live) else { return }
+        clearSelectedWorktreeCreation()
         navigation.commit(index)
         edit { state in
             if let tab = location.tab {

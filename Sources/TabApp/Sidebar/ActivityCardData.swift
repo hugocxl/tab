@@ -207,7 +207,9 @@ struct ActivityCardData: Equatable {
         let branch = info?.summary?.branch.flatMap { $0 == project.name ? nil : $0 }
         let name = tab != nil ? shownPane.flatMap { idleDirectory($0.title) } : project.name
         let selected: Bool
-        if let tab {
+        if model.selectedWorktreeCreation != nil {
+            selected = false
+        } else if let tab {
             selected = model.currentProject.id == project.id && model.activeTab?.id == tab.id
         } else {
             selected = model.currentProject.id == project.id

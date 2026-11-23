@@ -840,33 +840,134 @@ final class ProjectHeaderRow: HoverView {
     override func menu(for event: NSEvent) -> NSMenu? { menuProvider?() }
 }
 
-/// A worktree the server is still creating.
-final class CreatingRow: ThemedView {
-    private let spinner = ActivityGlyph()
-    private let label: NSTextField
+/// A worktree the server is still creating, styled as a selectable sidebar card.
+final class CreatingRow: HoverView {
+    let entry: SidebarSnapshot.CreatingEntry
+    var onClick: (() -> Void)?
 
-    init(name: String) {
-        label = makeLabel(name, font: AppFont.body)
+    private let glass: GlassView?
+    private let headerIcon: NSImageView?
+    private let usesDefaultHeaderIcon: Bool
+    private let headerLabel: NSTextField?
+    private let spinner = ActivityGlyph()
+    private let titleLabel: NSTextField
+    private let detailIcon = NSImageView()
+    private let detailLabel: NSTextField
+
+    init(entry: SidebarSnapshot.CreatingEntry) {
+        self.entry = entry
+        usesDefaultHeaderIcon = entry.header != nil && entry.header?.icon == nil
+        if let header = entry.header {
+            let icon = NSImageView(image: header.icon ?? AppIcon.folder.image(size: SidebarCardView.iconSide, theme: .shared) ?? NSImage())
+            icon.imageScaling = .scaleProportionallyUpOrDown
+            icon.wantsLayer = true
+            icon.layer?.cornerRadius = 3
+            icon.layer?.masksToBounds = true
+            headerIcon = icon
+            headerLabel = makeLabel(header.title, font: AppFont.small)
+        } else {
+            headerIcon = nil
+            headerLabel = nil
+        }
+        glass = entry.selected ? GlassView(style: .card) : nil
+        titleLabel = makeLabel(entry.name, font: AppFont.bodyMedium)
+        detailLabel = makeLabel(entry.detail, font: AppFont.small)
         super.init(frame: .zero)
-        addSubview(spinner)
-        addSubview(label)
-        label.translatesAutoresizingMaskIntoConstraints = true
+        wantsLayer = true
+        layer?.cornerRadius = 8
+        layer?.cornerCurve = .continuous
+        layer?.borderWidth = 1
+        if let glass { addSubview(glass) }
+        detailIcon.imageScaling = .scaleProportionallyUpOrDown
+        titleLabel.lineBreakMode = .byTruncatingTail
+        detailLabel.lineBreakMode = .byTruncatingTail
+        let views: [NSView?] = [headerIcon, headerLabel, spinner, titleLabel, detailIcon, detailLabel]
+        for view in views.compactMap({ $0 }) {
+            view.translatesAutoresizingMaskIntoConstraints = true
+            addSubview(view)
+        }
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+        setAccessibilityLabel(["Creating worktree", entry.name, entry.detail].filter { !$0.isEmpty }.joined(separator: ", "))
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    override var intrinsicContentSize: NSSize { NSSize(width: NSView.noIntrinsicMetric, height: 28) }
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric,
+               height: SidebarCardView.height(header: headerLabel != nil, location: true, panes: 0, titleLines: 1))
+    }
+
+    override var mouseDownCanMoveWindow: Bool { false }
+    override var wantsUpdateLayer: Bool { true }
+
+    override func updateLayer() {
+        let hovered = !entry.selected && isHovered
+        layer?.backgroundColor = (entry.selected ? theme.surface : hovered ? theme.hover : .clear).cgColor
+        layer?.borderColor = (entry.selected ? theme.fg(alpha: 0.08) : .clear).cgColor
+    }
+
+    override func hoverDidChange() {
+        needsDisplay = true
+    }
 
     override func themeDidChange() {
-        label.textColor = theme.fgMuted
+        glass?.appearance = theme.nsAppearance
+        headerLabel?.textColor = theme.fg
+        if usesDefaultHeaderIcon {
+            headerIcon?.image = AppIcon.folder.image(size: SidebarCardView.iconSide, theme: theme)
+        }
+        if headerIcon?.image?.isTemplate ?? false { headerIcon?.contentTintColor = theme.fgDim }
+        titleLabel.textColor = theme.fg
         spinner.style = .spinner(theme.accent)
+        detailIcon.image = AppIcon.gitBranch.image(size: SidebarCardView.iconSide, color: theme.fgDim)
+        detailLabel.textColor = theme.fgMuted
+        needsDisplay = true
     }
 
     override func layout() {
         super.layout()
-        spinner.frame = CGRect(x: 12, y: 8, width: 12, height: 12)
-        let height = label.intrinsicContentSize.height
-        label.frame = CGRect(x: 32, y: (14 - height / 2).rounded(), width: max(bounds.width - 40, 0), height: height)
+        glass?.frame = bounds
+        let inset = Metrics.border + 10
+        let left = inset
+        let width = max(bounds.width - inset * 2, 0)
+        var y = Metrics.border + 8
+        let titleHeight: CGFloat = 20
+        spinner.frame = CGRect(x: left + 1, y: y + (titleHeight - 12) / 2, width: 12, height: 12)
+        let titleTextHeight = titleLabel.intrinsicContentSize.height
+        titleLabel.frame = CGRect(
+            x: left + SidebarCardView.textInset,
+            y: y + ((titleHeight - titleTextHeight) / 2).rounded(),
+            width: max(width - SidebarCardView.textInset, 0),
+            height: titleTextHeight
+        )
+        y += titleHeight
+        let rowHeight = PaneRowView.height
+        detailIcon.frame = CGRect(x: left, y: y + (rowHeight - SidebarCardView.iconSide) / 2,
+                                  width: SidebarCardView.iconSide, height: SidebarCardView.iconSide)
+        let detailHeight = detailLabel.intrinsicContentSize.height
+        detailLabel.frame = CGRect(
+            x: left + SidebarCardView.textInset,
+            y: y + ((rowHeight - detailHeight) / 2).rounded(),
+            width: max(width - SidebarCardView.textInset, 0),
+            height: detailHeight
+        )
+        y += rowHeight
+        if let headerIcon, let headerLabel {
+            headerIcon.frame = CGRect(x: left, y: y + (rowHeight - SidebarCardView.iconSide) / 2,
+                                      width: SidebarCardView.iconSide, height: SidebarCardView.iconSide)
+            let headerHeight = headerLabel.intrinsicContentSize.height
+            headerLabel.frame = CGRect(
+                x: left + SidebarCardView.textInset,
+                y: y + ((rowHeight - headerHeight) / 2).rounded(),
+                width: max(width - SidebarCardView.textInset, 0),
+                height: headerHeight
+            )
+        }
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        onClick?()
     }
 }
 

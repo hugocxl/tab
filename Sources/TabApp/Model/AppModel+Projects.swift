@@ -172,25 +172,55 @@ extension AppModel {
     /// an existing branch.
     public func createWorktree(parent: ProjectId, name: String, branch: String, base: String?,
                                directory: String, hooks: [WorktreeHook]?) async -> String? {
+        guard sideClient(for: parent) != nil else { return "Connect to the server to create a worktree." }
+        let creationId = beginWorktreeCreation(WorktreeCreation(
+            parent: parent, name: name, branch: branch, base: base,
+            status: "Creating worktree…"
+        ))
+        defer { endWorktreeCreation(creationId) }
         let intent = WorktreeIntent(
             action: .create(project: ProjectId(), directory: ServerPath(directory), branch: branch, base: base),
             options: WorktreeOptions(name: name, hooks: hooks)
         )
-        return await runWorktreeCreation(parent: parent, label: name, intent: intent, opening: nil, setup: nil)
+        return await runWorktreeCreation(creationId: creationId, parent: parent, intent: intent, opening: nil, setup: nil)
+    }
+
+    @discardableResult
+    private func beginWorktreeCreation(_ creation: WorktreeCreation) -> UUID {
+        worktreeCreations.append(creation)
+        selectedWorktreeCreation = creation.id
+        syncVisible()
+        notify(.state)
+        return creation.id
+    }
+
+    private func updateWorktreeCreation(_ id: UUID, _ change: (inout WorktreeCreation) -> Void) {
+        guard let index = worktreeCreations.firstIndex(where: { $0.id == id }) else { return }
+        var updated = worktreeCreations[index]
+        change(&updated)
+        guard updated != worktreeCreations[index] else { return }
+        worktreeCreations[index] = updated
+        notify(.state)
+    }
+
+    private func endWorktreeCreation(_ id: UUID) {
+        let removed = worktreeCreations.contains { $0.id == id }
+        worktreeCreations.removeAll { $0.id == id }
+        if selectedWorktreeCreation == id {
+            selectedWorktreeCreation = nil
+            syncVisible()
+            notify(.state)
+        } else if removed {
+            notify(.state)
+        }
     }
 
     /// Sends a worktree creation and opens what it made: the project, or
     /// with `opening` a new pane of that kind in it. `setup` runs in a new
     /// terminal where the user can watch, beside an agent pane.
-    private func runWorktreeCreation(parent: ProjectId, label: String, intent: WorktreeIntent,
+    private func runWorktreeCreation(creationId: UUID, parent: ProjectId, intent: WorktreeIntent,
                                      opening: PaneKind?, setup: [WorktreeHook]?) async -> String? {
         guard let side = sideClient(for: parent) else { return "Connect to the server to create a worktree." }
-        worktreeCreations[parent, default: []].append(label)
-        notify(.state)
-        defer {
-            worktreeCreations[parent]?.removeAll { $0 == label }
-            notify(.state)
-        }
         do {
             let reply = try await side.git(GitRequest(project: parent, action: .worktree(intent)))
             let created: ProjectDescriptor?
@@ -214,6 +244,9 @@ extension AppModel {
                summary.base == base {
                 presenter?.showToast("Couldn't fetch the latest \(base), so “\(created.name)” starts from your local copy.", error: false)
             }
+            // Remove the placeholder right as the real worktree opens so the
+            // coalesced state notification swaps them in one frame.
+            endWorktreeCreation(creationId)
             if let opening {
                 let command = setup.map {
                     Self.setupCommand($0, worktree: created, repository: state.project(parent)?.directory.rawValue ?? "",
@@ -246,7 +279,16 @@ extension AppModel {
                               opening: PaneKind = .terminal) {
         guard let side = sideClient(for: parent) else { return report("Connect to the server to create a worktree.") }
         let typed = Self.quickBranchName(name)
+        let creationId = beginWorktreeCreation(WorktreeCreation(
+            parent: parent,
+            name: typed.isEmpty ? WorktreeCreation.placeholderName : typed,
+            branch: typed.isEmpty ? nil : typed,
+            base: chosen,
+            opening: opening,
+            status: "Preparing worktree…"
+        ))
         Task {
+            defer { endWorktreeCreation(creationId) }
             let branches: [GitBranch]
             do {
                 branches = try await side.gitBranches(parent)
@@ -259,9 +301,20 @@ extension AppModel {
             }
             var base: String?
             if let existing = branches.first(where: { $0.name == worktreeName }) {
-                if existing.checkedOut { return await openWorktree(of: parent, branch: worktreeName, opening: opening) }
+                if existing.checkedOut {
+                    endWorktreeCreation(creationId)
+                    return await openWorktree(of: parent, branch: worktreeName, opening: opening)
+                }
             } else {
                 base = chosen ?? branches.first(where: \.isDefault)?.name ?? branches.first(where: \.current)?.name
+            }
+            updateWorktreeCreation(creationId) { creation in
+                creation.name = worktreeName
+                creation.branch = worktreeName
+                creation.base = base
+                creation.status = base != nil && fetchBase
+                    ? "Fetching latest \(base!) and creating worktree…"
+                    : "Creating worktree…"
             }
             guard let directory = quickWorktreeDirectory(parent: parent, name: worktreeName) else { return }
             let setup = await approvedSetup(parent: parent, name: worktreeName)
@@ -269,7 +322,7 @@ extension AppModel {
                 action: .create(project: ProjectId(), directory: ServerPath(directory), branch: worktreeName, base: base),
                 options: WorktreeOptions(name: worktreeName, fetchBase: base != nil && fetchBase ? true : nil)
             )
-            if let message = await runWorktreeCreation(parent: parent, label: worktreeName, intent: intent,
+            if let message = await runWorktreeCreation(creationId: creationId, parent: parent, intent: intent,
                                                        opening: opening, setup: setup) {
                 report(message)
             }
@@ -286,12 +339,18 @@ extension AppModel {
     /// Checks out pull request `number` of `parent` into a new worktree and
     /// opens a pane of `opening` in it, as `quickWorktree` does.
     public func pullRequestWorktree(parent: ProjectId, number: UInt64, opening: PaneKind = .terminal) {
+        guard sideClient(for: parent) != nil else { return report("Connect to the server to create a worktree.") }
         let name = "pr-\(number)"
+        let creationId = beginWorktreeCreation(WorktreeCreation(
+            parent: parent, name: name, branch: name, pullRequest: number,
+            opening: opening, status: "Checking out pull request #\(number)…"
+        ))
         Task {
+            defer { endWorktreeCreation(creationId) }
             guard let directory = quickWorktreeDirectory(parent: parent, name: name) else { return }
             let setup = await approvedSetup(parent: parent, name: name)
             let intent = WorktreeIntent(action: .checkoutPullRequest(project: ProjectId(), directory: ServerPath(directory), number: number))
-            if let message = await runWorktreeCreation(parent: parent, label: name, intent: intent,
+            if let message = await runWorktreeCreation(creationId: creationId, parent: parent, intent: intent,
                                                        opening: opening, setup: setup) {
                 report(message)
             }

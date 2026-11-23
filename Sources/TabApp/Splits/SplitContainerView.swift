@@ -10,12 +10,14 @@ final class SplitContainerView: ThemedView {
     unowned let model: AppModel
     private var cards: [PaneId: PaneCardView] = [:]
     private let emptyView = EmptyProjectView()
+    private let creatingView = WorktreeCreatingView()
     private let preview = DropPreviewView()
     private var dividers: [SplitGeometry.Divider] = []
     private var hovered: [Branch]?
     private var resizing: (path: [Branch], ratio: Double)?
     private var trackingAreasByDivider: [NSTrackingArea] = []
     private var shownTab: TabId?
+    private var shownCreation: UUID?
     private var animateNextLayout = false
     /// Another tab came in since the last layout pass, which shows it still.
     private var switchedTab = false
@@ -36,6 +38,8 @@ final class SplitContainerView: ThemedView {
         self.model = model
         super.init(frame: .zero)
         addSubview(emptyView)
+        creatingView.isHidden = true
+        addSubview(creatingView)
         preview.isHidden = true
         addSubview(preview)
     }
@@ -50,10 +54,35 @@ final class SplitContainerView: ThemedView {
 
     /// Matches the cards to the model's current tab.
     func reload() {
+        if let creation = model.activeWorktreeCreation {
+            if shownCreation != creation.id {
+                InterfaceMotion.cancel(in: self)
+                switchedTab = true
+                shownCreation = creation.id
+            }
+            animateNextLayout = false
+            for card in cards.values { card.isHidden = true }
+            emptyView.isHidden = true
+            creatingView.isHidden = false
+            let projectTitle = model.state.project(creation.parent).map { model.title(of: $0) }
+            creatingView.update(creation, projectTitle: projectTitle)
+            resizing = nil
+            needsLayout = true
+            return
+        }
+        let leavingCreation = shownCreation != nil
+        if leavingCreation {
+            InterfaceMotion.cancel(in: self)
+            switchedTab = true
+            shownCreation = nil
+        }
+        creatingView.isHidden = true
+        for card in cards.values { card.isHidden = false }
+
         let tab = self.tab
         // Another tab shows at once: the panes are already there, so fading
         // them in would only delay them.
-        let switchingTab = shownTab != nil && tab != nil && shownTab != tab?.id
+        let switchingTab = leavingCreation || (shownTab != nil && tab != nil && shownTab != tab?.id)
         if switchingTab {
             InterfaceMotion.cancel(in: self)
             switchedTab = true
@@ -91,7 +120,8 @@ final class SplitContainerView: ThemedView {
 
     /// The glass surfaces' frames, in this view's coordinates.
     var surfaceFrames: [CGRect] {
-        emptyView.isHidden ? cards.values.map(\.frame) : [emptyView.frame]
+        if !creatingView.isHidden { return [creatingView.frame] }
+        return emptyView.isHidden ? cards.values.map(\.frame) : [emptyView.frame]
     }
 
     /// The workspace animates this whole surface when a sidebar changes.
@@ -121,8 +151,9 @@ final class SplitContainerView: ThemedView {
             onLayout?(shouldAnimate)
         }
         emptyView.frame = content
+        creatingView.frame = content
         defer { placeSidebarToggles() }
-        guard let tab else {
+        guard creatingView.isHidden, let tab else {
             dividers = []
             updateDividerTracking()
             return
@@ -145,15 +176,19 @@ final class SplitContainerView: ThemedView {
     /// sidebar toggle, and ends the top-right card's with the right
     /// sidebar's.
     private func placeSidebarToggles() {
-        let empty = !emptyView.isHidden
-        let leftOwner = empty ? nil : topCard { abs($0.minX - content.minX) < 0.5 }
-        let rightOwner = empty ? nil : topCard { abs($0.maxX - content.maxX) < 0.5 }
+        let creating = !creatingView.isHidden
+        let empty = !creating && !emptyView.isHidden
+        let placeholder = creating || empty
+        let leftOwner = placeholder ? nil : topCard { abs($0.minX - content.minX) < 0.5 }
+        let rightOwner = placeholder ? nil : topCard { abs($0.maxX - content.maxX) < 0.5 }
         for (id, card) in cards {
             if id != leftOwner && card.leadingView != nil { card.leadingView = nil }
             if id != rightOwner && card.trailingView != nil { card.trailingView = nil }
         }
         if let leftOwner { cards[leftOwner]?.leadingView = sidebarToggle }
         if let rightOwner { cards[rightOwner]?.trailingView = rightSidebarToggle }
+        creatingView.leadingView = creating ? sidebarToggle : nil
+        creatingView.trailingView = creating ? rightSidebarToggle : nil
         emptyView.leadingView = empty ? sidebarToggle : nil
         emptyView.trailingView = empty ? rightSidebarToggle : nil
     }
@@ -237,7 +272,7 @@ final class SplitContainerView: ThemedView {
     /// on to the pane as a Command-click.
     /// A click anywhere in a pane makes it the active one, whatever its kind.
     func activatePane(for event: NSEvent) {
-        guard let tab, let window, event.window === window else { return }
+        guard creatingView.isHidden, let tab, let window, event.window === window else { return }
         let point = convert(event.locationInWindow, from: nil)
         let pane = tab.zoomed ?? SplitGeometry.frames(tab.layout, in: content, scale: scale)
             .first(where: { $0.1.contains(point) })?.0
@@ -246,7 +281,7 @@ final class SplitContainerView: ThemedView {
     }
 
     func handleCommandMouseDown(_ event: NSEvent) -> Bool {
-        guard event.modifierFlags.contains(.command), let tab, tab.zoomed == nil, tab.panes.count > 1,
+        guard creatingView.isHidden, event.modifierFlags.contains(.command), let tab, tab.zoomed == nil, tab.panes.count > 1,
               let window, event.window === window else { return false }
         let point = convert(event.locationInWindow, from: nil)
         guard let source = SplitGeometry.frames(tab.layout, in: content, scale: scale)

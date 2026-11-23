@@ -252,15 +252,14 @@ final class NewWorktreeDialog: NSObject {
         }
         model.saveWorktreeLocation(chosen, for: parent)
         let approved = hooks.filter { $0.1.isOn }.map(\.0)
-        create.isEnabled = false
-        create.title = "Creating…"
         let baseBranch = useExisting ? nil : (base.selectedId.isEmpty ? nil : base.selectedId)
+        let model = self.model
+        let parent = self.parent
+        close()
         Task {
             if let message = await model.createWorktree(parent: parent, name: worktreeName, branch: branchName, base: baseBranch,
                                                         directory: directory, hooks: approved.isEmpty ? nil : approved) {
-                fail(message)
-            } else {
-                close()
+                model.report(message)
             }
         }
     }

@@ -18,13 +18,21 @@ struct SidebarSnapshot: Equatable {
         var icon: NSImage?
     }
 
+    struct CreatingEntry: Equatable {
+        var id: UUID
+        var name: String
+        var detail: String
+        var selected: Bool
+        var header: CardHeader?
+    }
+
     struct GroupEntry: Equatable {
         var project: ProjectId
         var title: String
         var icon: NSImage?
         var canCreateWorktree: Bool
         var cards: [CardEntry]
-        var creating: [String]
+        var creating: [CreatingEntry]
     }
 
     struct HostEntry: Equatable {
@@ -69,11 +77,30 @@ struct SidebarSnapshot: Equatable {
                     return CardEntry(target: .project(card.project),
                                      data: ActivityCardData.make(project: target, tab: nil, primary: card.primary, model: model))
                 }
+                let creating = model.worktreeCreations
+                    .filter { $0.parent == project.id }
+                    .map { creation in
+                        let detail: String
+                        if let pr = creation.pullRequest {
+                            detail = "#\(pr) · Creating…"
+                        } else if let base = creation.base, !base.isEmpty {
+                            detail = "← \(base)"
+                        } else {
+                            detail = creation.status
+                        }
+                        return CreatingEntry(
+                            id: creation.id,
+                            name: creation.name,
+                            detail: detail,
+                            selected: model.selectedWorktreeCreation == creation.id,
+                            header: model.appearance.sidebarLayout == .tabs ? header(project) : nil
+                        )
+                    }
                 return GroupEntry(
                     project: project.id, title: model.title(of: project),
                     icon: model.projectIcon(project.id),
                     canCreateWorktree: project.status == .available && (model.shownGit(project.id)?.isRepository ?? false),
-                    cards: cards, creating: model.worktreeCreations[project.id] ?? []
+                    cards: cards, creating: creating
                 )
             }
             let openTabs = host.openTabs.map { order -> [CardEntry] in

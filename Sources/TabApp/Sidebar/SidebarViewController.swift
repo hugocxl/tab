@@ -185,8 +185,10 @@ final class SidebarViewController: NSViewController {
                 cards.append(view)
             }
             divide(cards, in: stack)
-            for name in collapsedProjects.contains(group.project) ? [] : group.creating {
-                let row = CreatingRow(name: name)
+            let showCreating = !collapsedProjects.contains(group.project) || group.creating.contains(where: \.selected)
+            for entry in showCreating ? group.creating : [] {
+                let row = CreatingRow(entry: entry)
+                row.onClick = { [weak self] in self?.model.selectWorktreeCreation(entry.id) }
                 row.translatesAutoresizingMaskIntoConstraints = false
                 stack.addArrangedSubview(row)
                 row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
@@ -197,12 +199,14 @@ final class SidebarViewController: NSViewController {
 
     /// Open Tabs: the host's open tabs in the listing's order, each card
     /// naming its project.
-    private func buildOpenTabs(_ cards: [SidebarSnapshot.CardEntry], creating: [String], cardNumber: inout Int) {
+    private func buildOpenTabs(_ cards: [SidebarSnapshot.CardEntry], creating: [SidebarSnapshot.CreatingEntry], cardNumber: inout Int) {
         let views = cards.map { cardView($0, hint: hint(.tabs, &cardNumber)) }
         views.forEach { add($0) }
         divide(views, in: list)
-        for name in creating {
-            add(CreatingRow(name: name))
+        for entry in creating {
+            let row = CreatingRow(entry: entry)
+            row.onClick = { [weak self] in self?.model.selectWorktreeCreation(entry.id) }
+            add(row)
         }
     }
 

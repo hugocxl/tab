@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.119.0 - 2026-11-23
+
+### Changed
+
+- Creating a new worktree navigates immediately to its tab and displays an animated loading view while Git sets it up.
+
 ## 0.118.0 - 2026-11-23
 
 ### Changed

@@ -16,6 +16,7 @@ extension AppModel {
     /// A new terminal in `project`, switching to it.
     public func newTerminal(in project: ProjectId, command: String? = nil, directory: ServerPath? = nil) {
         guard let target = state.project(project) else { return }
+        clearSelectedWorktreeCreation()
         let launch = Self.launch(in: target, directory: directory ?? newPaneDirectory(in: target), command: command)
         edit { state in
             _ = try state.openTerminal(project, launch: launch)
@@ -62,6 +63,7 @@ extension AppModel {
 
     /// Opens a running session of `project` that no tab shows.
     public func openExistingSession(_ session: SessionId, in project: ProjectId) {
+        clearSelectedWorktreeCreation()
         edit { state in
             guard state.project(project) != nil else { return }
             try state.openPane(project, Pane(content: .terminal(session: session)))
@@ -94,6 +96,7 @@ extension AppModel {
     @discardableResult
     public func newPane(_ kind: PaneKind, in project: ProjectId, tab: TabId? = nil, edge: Direction = .right) -> PaneId? {
         guard let target = state.project(project) else { return nil }
+        clearSelectedWorktreeCreation()
         let shown = tab.flatMap { id in target.tabs.first { $0.id == id } } ?? (target.home ? nil : target.tabs.first)
         let anchor = shown.flatMap { tab in
             activePane.flatMap { tab.layout.contains($0) ? $0 : nil } ?? state.shownPane(tab) ?? tab.layout.leaves.last
@@ -143,6 +146,7 @@ extension AppModel {
     public func newAgent(in project: ProjectId? = nil, provider: TabCore.AgentChatProvider = .claude) -> PaneId? {
         let target = project ?? currentProject.id
         guard let project = state.project(target) else { return nil }
+        clearSelectedWorktreeCreation()
         var opened: PaneId?
         guard edit({ opened = try $0.openAgent(target, provider: provider) }) else { return nil }
         connectOnDemand(project.serverId)
@@ -349,6 +353,7 @@ extension AppModel {
             controller(for: pane)?.focusContent()
             return
         }
+        clearSelectedWorktreeCreation()
         edit { try $0.focusPane(pane) }
         controller(for: pane)?.focusContent()
     }
@@ -363,7 +368,7 @@ extension AppModel {
 
     /// Gives the keyboard to the active pane's content.
     public func focusActiveContent() {
-        guard let pane = activePane else { return }
+        guard activeWorktreeCreation == nil, let pane = activePane else { return }
         Task { [weak self] in
             for attempt in 0..<100 {
                 guard let self, self.activePane == pane, let controller = self.controller(for: pane) else { return }
@@ -526,6 +531,7 @@ extension AppModel {
     /// Shows `project`, connecting its server when needed.
     public func selectProject(_ project: ProjectId) {
         guard let target = state.project(project), target.status == .available else { return }
+        clearSelectedWorktreeCreation()
         edit { state in
             try state.selectProject(project)
             state.revealCurrentProject()
@@ -538,6 +544,7 @@ extension AppModel {
     /// Shows a Home terminal.
     public func selectTab(_ tab: TabId) {
         guard let project = state.projects.first(where: { $0.tabs.contains { $0.id == tab } }) else { return }
+        clearSelectedWorktreeCreation()
         edit { try $0.selectTab(project.id, tab) }
         connectOnDemand(project.serverId)
         focusActiveContent()

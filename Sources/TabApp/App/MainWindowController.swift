@@ -131,6 +131,12 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, A
     }
 
     private func updateTitle() {
+        if let creation = model.activeWorktreeCreation {
+            if window?.title != creation.name { window?.title = creation.name }
+            window?.representedURL = nil
+            window?.standardWindowButton(.documentIconButton)?.isHidden = true
+            return
+        }
         let project = model.currentProject
         let title = project.home ? (model.activeTab?.title(active: model.activePane) ?? Release.appName) : model.title(of: project)
         if window?.title != title { window?.title = title }

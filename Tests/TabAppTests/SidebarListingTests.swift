@@ -51,6 +51,42 @@ final class SidebarListingTests: XCTestCase {
         XCTAssertNotEqual(project, parent)
     }
 
+    func testQuickWorktreeNavigatesImmediatelyAndClearsSelectionWhenSwitchingAway() async throws {
+        let parent = try XCTUnwrap(model.addProject(try ModelFixtures.folder("app")))
+        _ = await ModelFixtures.wait { self.model.state.projectIntents(.local).isEmpty }
+        model.newTerminal(in: parent)
+        XCTAssertEqual(model.currentProject.id, parent)
+
+        model.quickWorktree(parent: parent, name: "feature-login", base: "main", opening: .terminal)
+
+        // Immediately selected before any server round-trip finishes.
+        let creation = try XCTUnwrap(model.activeWorktreeCreation)
+        XCTAssertEqual(creation.parent, parent)
+        XCTAssertEqual(creation.name, "feature-login")
+        XCTAssertEqual(creation.base, "main")
+        XCTAssertTrue(model.visiblePanes.isEmpty, "hidden tab panes detach while the loading view shows")
+
+        // Sidebar snapshot marks the creating card selected and unselects regular cards.
+        let snapshot = SidebarSnapshot(model: model)
+        let group = try XCTUnwrap(snapshot.hosts.first?.groups.first(where: { $0.project == parent }))
+        XCTAssertEqual(group.creating.count, 1)
+        XCTAssertEqual(group.creating.first?.selected, true)
+        XCTAssertTrue(group.cards.allSatisfy { !$0.data.selected })
+
+        // Switching back to the parent clears the pending selection even though currentProject didn't change.
+        model.selectProject(parent)
+        XCTAssertNil(model.activeWorktreeCreation)
+        XCTAssertFalse(model.visiblePanes.isEmpty)
+
+        // Clicking the creating card selects it again.
+        model.selectWorktreeCreation(creation.id)
+        XCTAssertEqual(model.activeWorktreeCreation?.id, creation.id)
+
+        // Once the server finishes (or fails), the pending creation is removed cleanly.
+        _ = await ModelFixtures.wait { self.model.worktreeCreations.isEmpty }
+        XCTAssertNil(model.activeWorktreeCreation)
+    }
+
     /// The Open Tabs layout drops projects with nothing open and orders the
     /// rest by when their tab opened; Cmd-1–9 must select what it shows.
     func testOpenTabsListsOpenTabsOldestFirstAndTheNumberKeysFollow() async throws {
