@@ -3,6 +3,18 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.107.0 - 2026-11-23
+
+### Changed
+
+- Messages above an agent's message box use the default text size, wrap to up to three
+  lines instead of cutting off after one, and show an icon for errors, warnings, progress
+  and information.
+
+### Fixed
+
+- An agent's “Waiting for approval” capsule no longer cuts off its own label.
+
 ## 0.106.0 - 2026-11-23
 
 ### Changed

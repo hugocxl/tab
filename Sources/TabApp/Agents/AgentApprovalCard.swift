@@ -127,7 +127,10 @@ extension AgentPaneController {
             surface.retryTurn.title = "Retry Now"
             surface.retryTurn.isEnabled = true
             surface.retryTurn.toolTip = "Send the scheduled prompt now"
-            if showsRetry { surface.feedback.stringValue = "Usage limit reached. The prompt is sent again " + AgentTurnTime.moment(at) + "." }
+            if showsRetry {
+                surface.feedback.stringValue = "Usage limit reached. The prompt is sent again " + AgentTurnTime.moment(at) + "."
+                surface.noticeTone = .warning
+            }
         } else {
             surface.resumeAtReset.title = "Resume at Reset"
             surface.resumeAtReset.toolTip = resets.map { "Send the prompt again when the limit resets, " + AgentTurnTime.moment($0) }
@@ -135,6 +138,7 @@ extension AgentPaneController {
             if showsRetry, let limit, blocked == nil {
                 surface.feedback.stringValue = (limit.message ?? "Usage limit reached") + "."
                     + (resets.map { " Resets " + AgentTurnTime.moment($0) + "." } ?? " The provider didn't say when it resets.")
+                surface.noticeTone = .warning
             }
         }
         surface.feedback.toolTip = surface.feedback.stringValue

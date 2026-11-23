@@ -2132,6 +2132,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         updateSelectionMenus()
         surface.setApprovalsEnabled(!approvalInFlight && commandTask == nil && !disposed && !needsAuthoritativeSnapshot)
         surface.feedback.stringValue = errorMessage ?? notice?.text ?? statusText
+        surface.noticeTone = noticeTone
         surface.feedback.toolTip = surface.feedback.stringValue
         surface.feedback.setAccessibilityValue(surface.feedback.stringValue)
         surface.retry.isHidden = errorMessage == nil
@@ -2171,6 +2172,25 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         dictation = final ? nil : (NSRange(location: range.location, length: (replacement as NSString).length), replacement)
         saveDraft()
         updateControls()
+    }
+
+    /// The tone of what the notice card shows: an error, the notice, or else the status.
+    private var noticeTone: AgentPaneView.NoticeTone {
+        if errorMessage != nil { return .danger }
+        if let notice {
+            switch notice.kind {
+            case .warning: return .warning
+            case .info: return .info
+            case .progress: return .progress
+            }
+        }
+        if voice.state == .authorizing || preparingAttachments > 0 || historyTask != nil || needsAuthoritativeSnapshot { return .progress }
+        if voice.state == .listening { return .info }
+        switch snapshot?.status {
+        case nil: return .progress
+        case .failed: return snapshot?.turns?.last?.outcome == .interrupted ? .warning : .danger
+        default: return .info
+        }
     }
 
     private var statusText: String {

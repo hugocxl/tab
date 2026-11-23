@@ -195,6 +195,11 @@ final class NoticeIcon: ThemedView {
         didSet { if color != oldValue { update() } }
     }
 
+    /// The side of a Tab Icon glyph; rings follow the view's bounds.
+    var glyphSize: CGFloat = 17 {
+        didSet { if glyphSize != oldValue { update() } }
+    }
+
     private let symbol = NSImageView()
     private let track = CAShapeLayer()
     private let ring = CAShapeLayer()
@@ -253,7 +258,7 @@ final class NoticeIcon: ThemedView {
             track.isHidden = true
             ring.isHidden = true
             ring.removeAnimation(forKey: Self.spinKey)
-            symbol.image = icon.image(size: 17, theme: theme)
+            symbol.image = icon.image(size: glyphSize, theme: theme)
             symbol.contentTintColor = color
         case .progress(let fraction):
             symbol.isHidden = true

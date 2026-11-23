@@ -47,6 +47,10 @@ final class AgentPaneView: ThemedView {
     /// Closes a composer notice; errors offer Refresh instead.
     let dismissNotice = AgentIconButton(icon: .close, label: "Dismiss message", iconSize: 12)
     let feedback = NSTextField(wrappingLabelWithString: "")
+    /// How the notice card reads: its icon and how strongly its text shows.
+    enum NoticeTone: Equatable { case info, progress, warning, danger }
+    var noticeTone: NoticeTone = .info { didSet { if noticeTone != oldValue { applyNoticeTone() } } }
+    private let noticeIcon = NoticeIcon()
     let transcriptScroll = NSScrollView()
     let composerScroll = NSScrollView()
     let transcript = AgentTranscriptDocument()
@@ -87,7 +91,7 @@ final class AgentPaneView: ThemedView {
     private let emptyDetail = makeLabel("Ask a question or make something new.", font: AppFont.body)
     private let activity = AgentSurfaceCard(style: .agentActivity)
     private var busy = false
-    private let activityLabel = makeLabel("", font: AppFont.small)
+    private let activityLabel = makeLabel("", font: AppFont.body)
     private var activityStatus: AgentChatStatus = .idle
     private var submitting = false
     private var renderedItems: [AgentChatItem] = []
@@ -226,11 +230,14 @@ final class AgentPaneView: ThemedView {
         activity.setAccessibilityRole(.button)
         activity.addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(activityPressed)))
         NotificationCenter.default.addObserver(self, selector: #selector(textScaleDidChange), name: .agentTextScaleDidChange, object: nil)
-        feedback.font = AppFont.small
+        feedback.font = AppFont.body
         feedback.isSelectable = true
-        feedback.maximumNumberOfLines = 2
-        feedback.lineBreakMode = .byTruncatingTail
-        for child in [feedback, retry, retryTurn, resumeAtReset, newConversation, dismissNotice] as [NSView] {
+        // Wraps, then truncates its last line; the tooltip keeps the whole message.
+        feedback.maximumNumberOfLines = Self.noticeMaximumLines
+        feedback.lineBreakMode = .byWordWrapping
+        feedback.cell?.truncatesLastVisibleLine = true
+        noticeIcon.glyphSize = 15
+        for child in [noticeIcon, feedback, retry, retryTurn, resumeAtReset, newConversation, dismissNotice] as [NSView] {
             notice.addSubview(child)
             child.translatesAutoresizingMaskIntoConstraints = true
         }
@@ -253,7 +260,7 @@ final class AgentPaneView: ThemedView {
             panel.translatesAutoresizingMaskIntoConstraints = true
             panelDocument.addSubview(panel)
         }
-        taskProgressButton.font = AppFont.small
+        taskProgressButton.font = AppFont.body
         taskProgressButton.alignment = .left
         taskProgressButton.lineBreakMode = .byTruncatingTail
         taskProgressButton.isHidden = true
@@ -330,28 +337,11 @@ final class AgentPaneView: ThemedView {
         var top = composerCard.frame.minY
         let noticeText = feedback.stringValue
         notice.isHidden = noticeText.isEmpty && retry.isHidden && retryTurn.isHidden && newConversation.isHidden
-        feedback.isHidden = notice.isHidden
         if !notice.isHidden {
-            // One action at a time: Refresh for errors, else Retry for a failed turn.
-            let action = !retry.isHidden ? retry : !retryTurn.isHidden ? retryTurn : newConversation
-            let retryWidth = action.isHidden ? 0 : ceil(action.fittingSize.width)
-            let dismissWidth: CGFloat = dismissNotice.isHidden ? 0 : 24
-            let resumeWidth = action === retryTurn && !resumeAtReset.isHidden ? ceil(resumeAtReset.fittingSize.width) : 0
-            let trailing = (retryWidth > 0 ? retryWidth + 8 : 0) + (dismissWidth > 0 ? dismissWidth + 4 : 0) + (resumeWidth > 0 ? resumeWidth + 4 : 0)
-            let textWidth = max(1, width - 28 - trailing)
-            let textHeight = min(32, ceil((noticeText as NSString).boundingRect(
-                with: NSSize(width: textWidth, height: .greatestFiniteMagnitude),
-                options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: [.font: AppFont.small]).height))
-            let height = max(36, textHeight + 18)
-            top -= gap + height
-            notice.frame = NSRect(x: left, y: top, width: width, height: height)
-            feedback.frame = NSRect(x: 14, y: floor((height - textHeight) / 2), width: textWidth, height: textHeight)
-            dismissNotice.frame = NSRect(x: width - 8 - dismissWidth, y: floor((height - 24) / 2), width: dismissWidth, height: 24)
-            let retryRight = width - 8 - (dismissWidth > 0 ? dismissWidth + 4 : 0)
-            action.frame = NSRect(x: retryRight - retryWidth, y: floor((height - 24) / 2), width: retryWidth, height: 24)
-            resumeAtReset.frame = NSRect(x: action.frame.minX - 4 - resumeWidth, y: action.frame.minY, width: resumeWidth, height: 24)
+            top -= gap + layoutNotice(text: noticeText, width: width)
+            notice.frame.origin = NSPoint(x: left, y: top)
         }
-        let activityHeight: CGFloat = activity.isHidden ? 0 : 26
+        let activityHeight: CGFloat = activity.isHidden ? 0 : Self.activityHeight
         let panelBudget = max(0, top - activityHeight - 64)
         let questionHeight = questions.isHidden ? 0 : min(questions.preferredHeight(for: width), max(160, panelBudget))
         let panels: [(NSView, CGFloat)] = [
@@ -373,10 +363,13 @@ final class AgentPaneView: ThemedView {
         panelScroll.frame = NSRect(x: left, y: top, width: width, height: panelHeight)
         panelDocument.frame = NSRect(x: 0, y: 0, width: width, height: panelY)
         if activityHeight > 0 {
-            let labelWidth = ceil((activityLabel.stringValue as NSString).size(withAttributes: [.font: AppFont.small]).width) + 4
+            // The capsule hugs its label, but never outgrows the composer's width.
+            let padding: CGFloat = 14
+            let labelWidth = max(0, min(activityLabel.singleLineWidth, width - padding * 2))
+            let labelHeight = ceil(activityLabel.intrinsicContentSize.height)
             top -= gap + activityHeight
-            activity.frame = NSRect(x: left, y: top, width: labelWidth + 24, height: activityHeight)
-            activityLabel.frame = NSRect(x: 12, y: floor((activityHeight - 16) / 2), width: labelWidth, height: 16)
+            activity.frame = NSRect(x: left, y: top, width: labelWidth + padding * 2, height: activityHeight)
+            activityLabel.frame = NSRect(x: padding, y: floor((activityHeight - labelHeight) / 2), width: labelWidth, height: labelHeight)
         }
         // The conversation runs under the floating cards and ends where the composer does;
         // its last row can scroll clear of the topmost card.
@@ -399,6 +392,91 @@ final class AgentPaneView: ThemedView {
     }
 
     private static let controlSize: CGFloat = 32
+    private static let activityHeight: CGFloat = 28
+    /// The notice wraps to this many lines before truncating; its tooltip keeps the rest.
+    private static let noticeMaximumLines = 3
+    private static let noticeMinimumHeight: CGFloat = 40
+    private static let noticeIconSide: CGFloat = 16
+    private static let noticeInset: CGFloat = 14
+    private static let noticeControlHeight: CGFloat = 24
+    /// The height of one line of the notice's text, as its label lays it out.
+    private static let noticeLineHeight = ceil(NSLayoutManager().defaultLineHeight(for: AppFont.body))
+
+    /// Lays out the notice card's contents for `width`, sizes the card and returns its height.
+    /// The icon sits on the first line; the buttons stay centered however many lines wrap.
+    private func layoutNotice(text: String, width: CGFloat) -> CGFloat {
+        // One action at a time: Refresh for errors, else Retry for a failed turn, else New Conversation.
+        let action = !retry.isHidden ? retry : !retryTurn.isHidden ? retryTurn : newConversation
+        let resumes = action === retryTurn && !action.isHidden && !resumeAtReset.isHidden
+        let controlGap: CGFloat = 6
+        var controls: [(view: NSView, width: CGFloat)] = []
+        if !dismissNotice.isHidden { controls.append((dismissNotice, Self.noticeControlHeight)) }
+        if !action.isHidden { controls.append((action, ceil(action.fittingSize.width))) }
+        // Resume at Reset is the one optional button: it goes when it would push past the card.
+        let resumeWidth = resumes ? ceil(resumeAtReset.fittingSize.width) : 0
+        let required = controls.reduce(8 + Self.noticeInset) { $0 + $1.width + controlGap }
+        if resumes, required + resumeWidth + controlGap <= width { controls.append((resumeAtReset, resumeWidth)) }
+        else { resumeAtReset.frame = .zero }
+        // Buttons line up from the trailing edge; text keeps a wider gap from them than
+        // they keep from each other, and the card's own inset when nothing follows it.
+        var trailing = width - 8
+        for control in controls {
+            trailing -= control.width
+            control.view.frame = NSRect(x: trailing, y: 0, width: control.width, height: Self.noticeControlHeight)
+            trailing -= controlGap
+        }
+        let textRight = controls.isEmpty ? width - Self.noticeInset : trailing + controlGap - 12
+        let font = AppFont.body
+        let lineHeight = Self.noticeLineHeight
+        let textX = Self.noticeInset + Self.noticeIconSide + 8
+        let textWidth = max(0, textRight - textX)
+        var lines = 0
+        if !text.isEmpty, textWidth >= 24 {
+            let measured = (text as NSString).boundingRect(
+                with: NSSize(width: textWidth, height: .greatestFiniteMagnitude),
+                options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: [.font: font]).height
+            lines = min(Self.noticeMaximumLines, max(1, Int((measured / lineHeight).rounded())))
+        }
+        // Too narrow for any text, the card keeps its buttons and the tooltip keeps the message.
+        feedback.isHidden = lines == 0
+        noticeIcon.isHidden = lines == 0
+        let textHeight = CGFloat(max(lines, 1)) * lineHeight
+        let height = max(Self.noticeMinimumHeight, textHeight + 24)
+        notice.frame.size = NSSize(width: width, height: height)
+        let textY = floor((height - textHeight) / 2)
+        // A label's cell insets its text by 2 points on each side; the frame reaches past
+        // that so the text itself starts at `textX`.
+        feedback.frame = NSRect(x: textX - 2, y: textY, width: textWidth + 4, height: textHeight)
+        // The card is flipped, so the first line is the top one.
+        let firstLineMid = textY + lineHeight / 2
+        noticeIcon.frame = NSRect(x: Self.noticeInset, y: round(firstLineMid - Self.noticeIconSide / 2),
+                                  width: Self.noticeIconSide, height: Self.noticeIconSide)
+        // On one line the buttons center with the icon; once the text wraps, on the card.
+        let controlMid = lines > 1 ? height / 2 : firstLineMid
+        for control in controls {
+            control.view.frame.origin.y = round(controlMid - Self.noticeControlHeight / 2)
+        }
+        return height
+    }
+
+    /// The notice's icon and text color follow its tone: errors and warnings read at full strength.
+    private func applyNoticeTone() {
+        switch noticeTone {
+        case .info:
+            noticeIcon.icon = .icon(.infoFill)
+            noticeIcon.color = theme.fgDim
+        case .progress:
+            noticeIcon.icon = .spinner
+            noticeIcon.color = theme.fgDim
+        case .warning:
+            noticeIcon.icon = .icon(.triangleAlertFill)
+            noticeIcon.color = theme.warning
+        case .danger:
+            noticeIcon.icon = .icon(.exclamationCircleFill)
+            noticeIcon.color = theme.danger
+        }
+        feedback.textColor = noticeTone == .warning || noticeTone == .danger ? theme.fg : theme.fgMuted
+    }
 
     /// Nothing sent, queued or running yet: the composer sits centered under a greeting.
     private var isEmptyConversation: Bool {
@@ -802,7 +880,8 @@ final class AgentPaneView: ThemedView {
         activityLabel.textColor = theme.fgMuted
         emptyTitle.textColor = theme.fg
         emptyDetail.textColor = theme.fgDim
-        feedback.textColor = theme.fgMuted
+        noticeIcon.theme = theme
+        applyNoticeTone()
         for control in [model, effort] { control.chatTheme = theme }
         contextIndicator.chatTheme = theme
         send.chatTheme = theme

@@ -59,7 +59,7 @@ public final class GlassView: NSView {
         /// Panels stacked above the agent composer: the prompt queue, questions and notices.
         public static let agentPanel = Style(cornerRadius: 16, fallbackMaterial: .popover, regular: true)
         /// The agent's activity capsule above those panels.
-        public static let agentActivity = Style(cornerRadius: 13, fallbackMaterial: .popover, regular: true)
+        public static let agentActivity = Style(cornerRadius: 14, fallbackMaterial: .popover, regular: true)
     }
 
     private let material: NSView
