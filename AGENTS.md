@@ -43,8 +43,8 @@ runs the same script.
   - `TabServer` (TabCore, TabSimulators, TabProtocol, TabTerminal): everything `tabd`
     does.
   - `TabClient` (TabCore, TabProtocol): connecting, handshake, reconnecting, tunnels.
-  - `TabApp` (TabClient, TabCore, TabSimulators, TabProtocol): the UI. Apps never link
-    server code.
+  - `TabApp` (TabClient, TabCore, TabSimulators, TabProtocol, `Icons` from
+    @hugocxl/icons): the UI. Apps never link server code.
   - Keep `Package.swift` and this list in sync.
 - Each server keeps its projects' tabs and their split layouts in
   `sessions/tabs.json`, so every app connected to it shows the same tabs. Apps
