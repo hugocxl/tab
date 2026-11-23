@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.109.0 - 2026-11-23
+
+### Changed
+
+- Sidebar cards in the Open Tabs layout name their project on the first line, above
+  the tab's title.
+
 ## 0.108.1 - 2026-11-23
 
 ### Removed

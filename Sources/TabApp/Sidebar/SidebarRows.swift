@@ -104,14 +104,14 @@ final class SidebarCardView: HoverView {
         return min(max(Int((height / titleLineHeight).rounded(.up)), 1), maxTitleLines)
     }
 
-    /// The card's height for its sections: the padding, the title's lines,
-    /// one row per listed pane, then the footer's location and project rows.
+    /// The card's height for its sections: the padding, the project row, the
+    /// title's lines, one row per listed pane, then the footer's location row.
     static func height(header: Bool, location: Bool, panes: Int, titleLines: Int = 1) -> CGFloat {
         var height = Line.padding * 2 + Line.title + CGFloat(titleLines - 1) * titleLineHeight
+        if header { height += Line.row }
         if panes > 0 { height += Line.sectionGap + CGFloat(panes) * Line.row }
-        let footer = (location ? 1 : 0) + (header ? 1 : 0)
-        // Without panes the footer follows the title directly.
-        if footer > 0 { height += (panes > 0 ? Line.sectionGap : 0) + CGFloat(footer) * Line.row }
+        // Without panes the location follows the title directly.
+        if location { height += (panes > 0 ? Line.sectionGap : 0) + Line.row }
         return height
     }
 
@@ -307,6 +307,10 @@ final class SidebarCardView: HoverView {
         let left = Metrics.border + 10
         let right = bounds.width - left
         var top = Line.padding
+        if let headerIcon, let headerLabel {
+            layoutIconRow(icon: headerIcon, label: headerLabel, top: top, left: left, right: right)
+            top += Line.row
+        }
         var x = left
         let center = top + Line.title / 2
         let lines = titleLines
@@ -327,13 +331,9 @@ final class SidebarCardView: HoverView {
             row.frame = CGRect(x: left, y: top, width: max(right - left, 0), height: Line.row)
             top += Line.row
         }
-        if !paneRows.isEmpty, showsLocation || headerLabel != nil { top += Line.sectionGap }
+        if !paneRows.isEmpty, showsLocation { top += Line.sectionGap }
         if showsLocation {
-            layoutFooterRow(icon: locationIcon, label: locationLabel, top: top, left: left, right: right)
-            top += Line.row
-        }
-        if let headerIcon, let headerLabel {
-            layoutFooterRow(icon: headerIcon, label: headerLabel, top: top, left: left, right: right)
+            layoutIconRow(icon: locationIcon, label: locationLabel, top: top, left: left, right: right)
         }
     }
 
@@ -342,9 +342,9 @@ final class SidebarCardView: HoverView {
         CGRect(x: x, y: (centerY - iconSide / 2).rounded(), width: iconSide, height: iconSide)
     }
 
-    /// A footer row, the location or the project: its icon in the first
-    /// column, its text in the second.
-    private func layoutFooterRow(icon: NSView, label: NSTextField, top: CGFloat, left: CGFloat, right: CGFloat) {
+    /// A row of the project on top or the location below: its icon in the
+    /// first column, its text in the second.
+    private func layoutIconRow(icon: NSView, label: NSTextField, top: CGFloat, left: CGFloat, right: CGFloat) {
         let center = top + Line.row / 2
         icon.frame = Self.iconBox(x: left, centerY: center)
         let height = label.intrinsicContentSize.height
