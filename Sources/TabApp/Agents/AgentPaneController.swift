@@ -1289,6 +1289,8 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         }
         let attachments = draftAttachments.map { AgentChatAttachment(id: $0.id, name: $0.name, mimeType: $0.mimeType, data: $0.data) }
         let sentIDs = Set(attachments.map(\.id))
+        // The message shows these bytes at once, never downloading them back from the server.
+        attachmentCache.seed(attachments)
         composerCoordinator.dismiss()
         surface.scrollToEnd()
         var prompt = AgentPrompt(text: text, model: selection.model, effort: reasoningEffort,
@@ -1972,6 +1974,8 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         if needsAuthoritativeSnapshot {
             guard authoritative else { return }
             needsAuthoritativeSnapshot = false
+            // Previews that failed while the server was away load now that it's back.
+            surface.transcript.retryFailedAttachments()
         } else {
             guard result.revision >= (snapshot?.revision ?? 0) else { return }
         }

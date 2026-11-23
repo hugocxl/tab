@@ -12,7 +12,7 @@ final class AgentFileAttachmentTests: XCTestCase {
         AgentChatAttachmentDescriptor(id: "notes", name: "Implementation notes.md", mimeType: "text/markdown", byteCount: 1_200),
     ]
 
-    func testStandaloneCardsAndInlineRowsKeepActionsAndCorrectOrdering() throws {
+    func testFilesAreCardsAboveTheTextAndKeepActionsAndOrdering() throws {
         _ = NSApplication.shared
         let row = AgentMessageRow(frame: .zero)
         var actions: [(String, String, Bool)] = []
@@ -21,7 +21,6 @@ final class AgentFileAttachmentTests: XCTestCase {
         place(row)
         let cards = row.subviews.compactMap { $0 as? AgentFileAttachmentCard }
         XCTAssertEqual(cards.count, 2)
-        XCTAssertTrue(cards.allSatisfy(\.standalone))
         XCTAssertEqual(cards[0].frame.size, NSSize(width: 256, height: 52))
         XCTAssertEqual(cards[1].frame.minY - cards[0].frame.maxY, 4)
         XCTAssertTrue(try XCTUnwrap(row.subviews.first { $0 is ThemedBackground }).isHidden)
@@ -30,12 +29,14 @@ final class AgentFileAttachmentTests: XCTestCase {
         XCTAssertEqual(actions.map { $0.0 }, ["message", "message"])
         XCTAssertEqual(actions.map { $0.1 }, ["pdf", "notes"])
         XCTAssertEqual(actions.map { $0.2 }, [false, true])
+        // With text, the same cards sit above the bubble instead of changing shape inside it.
         row.update([AgentChatItem(id: "message", kind: .user, text: "Review these documents.", attachments: files)])
         place(row)
-        XCTAssertTrue(cards.allSatisfy { !$0.standalone })
-        XCTAssertEqual(cards[0].frame.height, 32)
-        let body = try XCTUnwrap(row.subviews.compactMap { $0 as? AgentResponseView }.first)
-        XCTAssertGreaterThanOrEqual(body.frame.minY - cards[1].frame.maxY, 8)
+        XCTAssertEqual(cards[0].frame.size, NSSize(width: 256, height: 52))
+        XCTAssertEqual(cards[0].frame.maxX, row.frame.width)
+        let bubble = try XCTUnwrap(row.subviews.first { $0 is ThemedBackground })
+        XCTAssertFalse(bubble.isHidden)
+        XCTAssertEqual(bubble.frame.minY - cards[1].frame.maxY, 4)
     }
 
     func testFileSizeFormattingMatchesSourceIncludingRoundedUnitBoundary() {

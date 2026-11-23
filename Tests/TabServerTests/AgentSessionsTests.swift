@@ -2747,3 +2747,49 @@ extension AgentSessionsTests {
         sessions.shutdown()
     }
 }
+
+/// Holds each turn in `setPlan`, before its attachments are written, until released.
+private final class HeldStagingRuntime: AgentSessionRuntime, @unchecked Sendable {
+    private let lock = NSLock()
+    private var isReleased = false
+    let callback: @Sendable (AgentRuntimeEvent) -> Void
+    init(_ callback: @escaping @Sendable (AgentRuntimeEvent) -> Void) { self.callback = callback }
+    func release() { lock.withLock { isReleased = true } }
+    func setPlan(_ enabled: Bool) async throws {
+        while !lock.withLock({ isReleased }) { try await Task.sleep(for: .milliseconds(10)) }
+    }
+    func send(text: String, model: String?, reasoningEffort: AgentReasoningEffort?) async throws { callback(.status(.idle)) }
+    func approve(request: String, allow: Bool) async throws {}
+    func setAccess(_ mode: AgentAccessMode) async throws {}
+    func interrupt() async throws {}
+    func stop() {}
+}
+
+extension AgentSessionsTests {
+    func testSentAttachmentPreviewsBeforeItIsWrittenToDisk() async throws {
+        let root = try root()
+        let runtime = HeldStagingRuntime { _ in }
+        let sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, _ in runtime })
+        defer { sessions.shutdown() }
+        let id = SessionId()
+        _ = try await sessions.handle(.create(session: id, project: ProjectId(), provider: .claude))
+        let png = AgentChatAttachment(name: "Screenshot.png", mimeType: "image/png", data: Data([0x89, 0x50, 0x4E, 0x47, 1, 2, 3]))
+        let send = Task { try await sessions.handle(.send(session: id, text: "Look", model: nil, attachments: [png])) }
+        let user = try await waitForUserItem(sessions, id)
+        // The message is on screen while its turn still waits to write the file.
+        let early = try await sessions.attachment(.init(session: id, item: user.id, attachment: png.id))
+        XCTAssertEqual(early.attachment.data, png.data)
+        runtime.release()
+        _ = try await send.value
+        let stored = try await sessions.attachment(.init(session: id, item: user.id, attachment: png.id))
+        XCTAssertEqual(stored.attachment.data, png.data)
+    }
+
+    private func waitForUserItem(_ sessions: AgentSessions, _ id: SessionId) async throws -> AgentChatItem {
+        for _ in 0..<300 {
+            if let user = try? await sessions.handle(.read(session: id)).items.first(where: { $0.kind == .user }) { return user }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        throw AgentRuntimeError("The message never appeared.")
+    }
+}

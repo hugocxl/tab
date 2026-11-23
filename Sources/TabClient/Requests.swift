@@ -29,7 +29,8 @@ extension ServerClient {
     }
 
     public func agentAttachment(_ request: AgentAttachmentRequest) async throws -> AgentAttachmentReply {
-        let reply = try await self.request(.agentAttachment(request))
+        // Up to 10 MiB, which can take a while from another computer.
+        let reply = try await self.request(.agentAttachment(request), timeout: max(defaultTimeout, 60))
         guard case .agentAttachment(let attachment) = reply else { throw unexpected(reply) }
         return attachment
     }

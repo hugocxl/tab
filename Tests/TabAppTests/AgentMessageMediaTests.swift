@@ -1,6 +1,7 @@
 import AppKit
 import ImageIO
 import XCTest
+import TabClient
 import TabCore
 import TabProtocol
 @testable import TabApp
@@ -21,6 +22,34 @@ final class AgentMessageMediaTests: XCTestCase {
         XCTAssertEqual(firstBytes, Data([1]))
         XCTAssertEqual(secondBytes, Data([2]))
         XCTAssertEqual(fetched, ["a/b", "a"])
+    }
+
+    func testSentAttachmentsShowWithoutFetchingAndTransientFailuresRetry() async throws {
+        let cache = AgentAttachmentCache()
+        cache.retryDelays = [.zero, .zero]
+        let sent = AgentChatAttachment(name: "sent.png", mimeType: "image/png", data: Data([1, 2]))
+        var calls = 0
+        cache.fetch = { _, _ in calls += 1; throw ClientError.disconnected }
+        cache.seed([sent])
+        let seeded = try await cache.data(item: "message", attachment: sent.descriptor)
+        XCTAssertEqual(seeded, sent.data)
+        XCTAssertEqual(calls, 0)
+        // A server can publish a message a moment before its files are readable.
+        let other = AgentChatAttachment(name: "other.png", mimeType: "image/png", data: Data([3]))
+        cache.fetch = { _, _ in
+            calls += 1
+            if calls < 3 { throw ClientError.server(ErrorReply(code: .badRequest, message: "Attachment preview index is unavailable.")) }
+            return other.data
+        }
+        let retried = try await cache.data(item: "message", attachment: other.descriptor)
+        XCTAssertEqual(retried, other.data)
+        XCTAssertEqual(calls, 3)
+        // A server that can't serve previews is asked once.
+        calls = 0
+        cache.fetch = { _, _ in calls += 1; throw ClientError.server(ErrorReply(code: .unsupported, message: "")) }
+        let old = AgentChatAttachment(name: "old.png", mimeType: "image/png", data: Data([4]))
+        do { _ = try await cache.data(item: "message", attachment: old.descriptor); XCTFail("Expected unsupported") } catch {}
+        XCTAssertEqual(calls, 1)
     }
 
     func testAnimatedGIFRetainsFramesAndPlaysInTileAndPreview() async throws {
@@ -115,7 +144,7 @@ final class AgentMessageMediaTests: XCTestCase {
         XCTAssertTrue(try XCTUnwrap(row.subviews.compactMap { $0 as? PillButton }.first { $0.toolTip == "Copy message" }).isHidden)
     }
 
-    func testWholeImageStackGeometryAndRetryAfterFetchFailure() async throws {
+    func testMosaicGeometryAndRetryAfterFetchFailure() async throws {
         let files = try [fixture("One", color: .systemBlue), fixture("Two", color: .systemGreen), fixture("Three", color: .systemOrange)]
         let media = AgentMessageMediaView(frame: .zero)
         var fail = true
@@ -126,17 +155,20 @@ final class AgentMessageMediaTests: XCTestCase {
         media.update(item: "message", attachments: files.map(\.descriptor), theme: AppTheme(systemIsDark: false))
         let tiles = media.subviews.compactMap { $0 as? AgentMediaTile }
         try await wait { tiles.allSatisfy { $0.toolTip?.contains("Offline") == true } }
+        // Failed previews shrink to short cards instead of empty image-sized boxes.
+        XCTAssertTrue(tiles.allSatisfy(\.hasFailed))
+        XCTAssertEqual(media.measuredSize(maxWidth: 400), NSSize(width: 260, height: 3 * 56 + 2 * 2))
         fail = false
         tiles.forEach { $0.onPress?() }
         try await wait { media.images.allSatisfy { $0 != nil } }
         media.frame = NSRect(origin: .zero, size: media.measuredSize(maxWidth: 400))
         media.layoutSubtreeIfNeeded()
-        XCTAssertEqual(media.frame.size, NSSize(width: 360, height: 270))
-        XCTAssertEqual(tiles[0].frame.size, NSSize(width: 177, height: 132))
-        XCTAssertTrue(tiles.allSatisfy(\.fitsWholeImage))
-        XCTAssertEqual(tiles[0].frame.maxY + 6, tiles[2].frame.minY)
-        XCTAssertEqual(tiles[0].frame.minX, tiles[2].frame.minX)
-        XCTAssertEqual(tiles[0].frame.maxX + 6, tiles[1].frame.minX)
+        // Three images: one large on the left, two stacked on the right, like assistant media.
+        XCTAssertEqual(media.frame.size, NSSize(width: 360, height: 180))
+        XCTAssertEqual(tiles[0].frame, NSRect(x: 0, y: 0, width: 214, height: 180))
+        XCTAssertEqual(tiles[1].frame.minX, tiles[0].frame.maxX + 2)
+        XCTAssertEqual(tiles[2].frame.minY, tiles[1].frame.maxY + 2)
+        XCTAssertEqual(tiles[2].frame.maxY, 180)
         var previewIndex: Int?
         media.onPreview = { _, _, index in previewIndex = index }
         XCTAssertTrue(tiles[2].accessibilityPerformPress())

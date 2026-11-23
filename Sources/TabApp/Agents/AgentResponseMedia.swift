@@ -31,9 +31,6 @@ final class AgentResponseMedia: AgentResponseSection {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         frameView.wantsLayer = true
-        frameView.layer?.cornerRadius = 10
-        frameView.layer?.masksToBounds = true
-        frameView.layer?.borderWidth = 1
         addSubview(frameView)
         setAccessibilityElement(false)
     }
@@ -47,8 +44,9 @@ final class AgentResponseMedia: AgentResponseSection {
             items = next
             rebuild()
         }
-        frameView.layer?.backgroundColor = theme.border.cgColor
-        frameView.layer?.borderColor = theme.border.withAlphaComponent(0.7).cgColor
+        // Images share a hairline frame; a video or audio card is a card of its own.
+        AgentMediaStyle.applyFrame(to: frameView, theme: theme)
+        if !items.contains(where: { $0.kind == .image }) { frameView.layer?.borderWidth = 0 }
         for tile in tiles {
             (tile as? AgentMediaTile)?.apply(theme)
             (tile as? AgentMediaPlayTile)?.apply(theme)
@@ -127,6 +125,7 @@ final class AgentResponseMedia: AgentResponseSection {
             let media = items[index]
             if clickable {
                 tile.block("Image from \(host) · Click to load") { [weak self] in self?.services?.mediaLoader?.approve(media.source) }
+                placeholderChanged()
             } else {
                 let openLink = services?.openLink
                 tile.block("Image from \(host) not loaded · Click to open the link") {
@@ -134,10 +133,11 @@ final class AgentResponseMedia: AgentResponseSection {
                         openLink?(url.absoluteString)
                     }
                 }
+                placeholderChanged()
             }
-        case .failed(let message): tile.fail(message)
+        case .failed(let message): tile.fail(message); placeholderChanged()
         case .loaded(let entry):
-            guard let image = entry.image else { tile.fail("Image unavailable"); return }
+            guard let image = entry.image else { tile.fail("Image unavailable"); placeholderChanged(); return }
             if tile.image !== image { tile.show(image) }
             let size = entry.pixelSize ?? image.size
             guard pixelSizes[index] != size else { return }
@@ -148,13 +148,20 @@ final class AgentResponseMedia: AgentResponseSection {
         }
     }
 
+    /// A lone image that failed or waits for a click shrinks to a short card, and grows
+    /// back when it loads.
+    private func placeholderChanged() {
+        guard items.count == 1 else { return }
+        invalidateMeasurement()
+        onHeightChanged?()
+    }
+
     /// The bounded size of a single image of `pixelSize` in a column `width` wide.
     static func fittedSize(_ pixelSize: CGSize?, width: CGFloat) -> NSSize {
         guard let pixelSize, pixelSize.width > 0, pixelSize.height > 0 else {
             return NSSize(width: min(width, placeholderSize.width), height: placeholderSize.height)
         }
-        let scale = min(1, width / pixelSize.width, maximumHeight / pixelSize.height)
-        return NSSize(width: max(1, floor(pixelSize.width * scale)), height: max(1, floor(pixelSize.height * scale)))
+        return AgentMediaStyle.fittedSize(pixelSize, maxWidth: width, maxHeight: maximumHeight)
     }
 
     /// The single tile or collage size for `items` in a column `width` wide.
@@ -163,14 +170,11 @@ final class AgentResponseMedia: AgentResponseSection {
         guard !items.isEmpty else { return .zero }
         if items.count == 1 {
             if items[0].kind != .image { return NSSize(width: min(width, Self.placeholderSize.width + 40), height: Self.playerHeight) }
+            if (tiles.first as? AgentMediaTile)?.isCompact == true { return AgentMediaStyle.compactSize(count: 1, width: width) }
             let cached = pixelSizes[0] ?? services?.mediaLoader?.state(for: items[0].source)?.entry.flatMap { $0.pixelSize }
             return Self.fittedSize(cached, width: width)
         }
-        let collage = min(width, Self.collageWidth)
-        let count = items.count
-        if count <= 3 { return NSSize(width: collage, height: 240) }
-        let rows = CGFloat((count + 1) / 2)
-        return NSSize(width: collage, height: rows * 160 + (rows - 1) * 2)
+        return NSSize(width: min(width, Self.collageWidth), height: AgentMediaCollage.response.height(count: items.count))
     }
 
     override func height(for width: CGFloat) -> CGFloat {
@@ -180,21 +184,8 @@ final class AgentResponseMedia: AgentResponseSection {
 
     override func layoutSection(width: CGFloat) {
         frameView.frame = NSRect(origin: .zero, size: frameSize)
-        let count = tiles.count, collage = frameSize.width
-        for (index, tile) in tiles.enumerated() {
-            if count == 1 { tile.frame = frameView.bounds }
-            else if count == 2 {
-                tile.frame = NSRect(x: CGFloat(index) * (collage + 2) / 2, y: 0, width: (collage - 2) / 2, height: 240)
-            } else if count == 3 {
-                let first = floor((collage - 2) * 0.6)
-                tile.frame = index == 0 ? NSRect(x: 0, y: 0, width: first, height: 240)
-                    : NSRect(x: first + 2, y: CGFloat(index - 1) * 121, width: collage - first - 2, height: 119)
-            } else {
-                let full = count % 2 == 1 && index == count - 1
-                tile.frame = NSRect(x: CGFloat(index % 2) * (collage + 2) / 2, y: CGFloat(index / 2) * 162,
-                                    width: full ? collage : (collage - 2) / 2, height: 160)
-            }
-        }
+        let frames = tiles.count == 1 ? [frameView.bounds] : AgentMediaCollage.response.frames(count: tiles.count, width: frameSize.width)
+        for (tile, frame) in zip(tiles, frames) { tile.frame = frame }
     }
 }
 
@@ -205,9 +196,10 @@ final class AgentMediaPlayTile: NSControl {
     let actions: AgentImageActions
     var onPress: (() -> Void)?
     private let icon = NSImageView()
-    private let title = makeLabel("", font: AppFont.system(13, weight: .medium))
-    private let detail = makeLabel("", font: AppFont.footnote)
+    private let title = makeLabel("", font: AppFont.system(14, weight: .medium))
+    private let detail = makeLabel("", font: AppFont.system(12))
     private var background = NSColor.windowBackgroundColor
+    private var iconFill = NSColor.clear
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
 
@@ -230,7 +222,8 @@ final class AgentMediaPlayTile: NSControl {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     func apply(_ theme: AppTheme) {
-        background = theme.card
+        background = AgentMediaStyle.fill(theme)
+        iconFill = AgentMediaStyle.iconFill(theme)
         title.textColor = theme.fg
         detail.textColor = theme.fgMuted
         icon.image = AppIcon.play.image(size: 16, scale: AppIcon.inlineScale, color: theme.fgMuted)
@@ -239,14 +232,14 @@ final class AgentMediaPlayTile: NSControl {
 
     override func layout() {
         super.layout()
-        icon.frame = NSRect(x: 14, y: bounds.midY - 8, width: 16, height: 16)
-        let x: CGFloat = 40, width = max(0, bounds.width - x - 12)
+        icon.frame = NSRect(x: 8 + (AgentMediaStyle.iconBox - 16) / 2, y: bounds.midY - 8, width: 16, height: 16)
+        let x: CGFloat = 8 + AgentMediaStyle.iconBox + 12, width = max(0, bounds.width - x - 12)
         if bounds.height < 48 {
-            title.frame = NSRect(x: x, y: bounds.midY - 9, width: width, height: 18)
+            title.frame = NSRect(x: x, y: bounds.midY - 10, width: width, height: 20)
             detail.isHidden = true
         } else {
             detail.isHidden = false
-            title.frame = NSRect(x: x, y: bounds.midY - 18, width: width, height: 18)
+            title.frame = NSRect(x: x, y: bounds.midY - 19, width: width, height: 20)
             detail.frame = NSRect(x: x, y: bounds.midY + 2, width: width, height: 16)
         }
     }
@@ -254,6 +247,9 @@ final class AgentMediaPlayTile: NSControl {
     override func draw(_ dirtyRect: NSRect) {
         background.setFill()
         bounds.fill()
+        iconFill.setFill()
+        NSBezierPath(roundedRect: NSRect(x: 8, y: bounds.midY - AgentMediaStyle.iconBox / 2, width: AgentMediaStyle.iconBox,
+                                         height: AgentMediaStyle.iconBox), xRadius: 8, yRadius: 8).fill()
         guard window?.firstResponder === self else { return }
         NSColor.keyboardFocusIndicatorColor.setStroke()
         let outline = NSBezierPath(rect: bounds.insetBy(dx: 2, dy: 2))
@@ -364,8 +360,8 @@ enum AgentInlineMedia {
             }()
             used[key] = attachment
             guard let cell = attachment.attachmentCell as? AgentInlineMediaCell else { continue }
-            cell.placeholder = theme.fg.withAlphaComponent(0.08)
-            cell.border = theme.border.withAlphaComponent(0.7)
+            cell.placeholder = AgentMediaStyle.fill(theme)
+            cell.border = AgentMediaStyle.hairline(theme)
             cell.muted = colors.muted
             attributes[.agentInlineMediaSource] = nil
             attributes[.attachment] = attachment

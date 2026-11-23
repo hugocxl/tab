@@ -440,6 +440,17 @@ final class AgentTranscriptDocument: ThemedView {
         return updateViewport(rect, followingEnd: followingEnd)
     }
 
+    /// Loads again the mounted rows' attachment previews that failed; rows mounted
+    /// later load theirs as they appear.
+    func retryFailedAttachments() {
+        func visit(_ view: NSView) {
+            if let media = view as? AgentMessageMediaView { media.retryFailed(); return }
+            if let images = view as? AgentToolImagesView { images.retryFailed(); return }
+            view.subviews.forEach(visit)
+        }
+        subviews.forEach(visit)
+    }
+
     func setApprovalsEnabled(_ enabled: Bool) {
         approvalsEnabled = enabled
         for cached in cache.values { cached.row.setApprovalsEnabled(enabled) }

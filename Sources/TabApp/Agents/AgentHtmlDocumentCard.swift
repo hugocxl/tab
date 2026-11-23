@@ -71,7 +71,6 @@ final class AgentHtmlDocumentCard: ThemedView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
-        layer?.cornerRadius = 12
         icon.setAccessibilityElement(false)
         title.lineBreakMode = .byTruncatingTail
         detail.lineBreakMode = .byTruncatingTail
@@ -99,8 +98,10 @@ final class AgentHtmlDocumentCard: ThemedView {
     }
 
     override func themeDidChange() {
-        layer?.backgroundColor = theme.fg.withAlphaComponent(isAvailable ? 0.055 : 0.03).cgColor
-        icon.image = FileIcon.image(for: "document.html", theme: theme, size: 18)
+        AgentMediaStyle.applyCard(to: self, theme: theme)
+        if !isAvailable { layer?.backgroundColor = theme.fg.withAlphaComponent(0.03).cgColor }
+        needsDisplay = true
+        icon.image = FileIcon.image(for: "document.html", theme: theme, size: 16)
         icon.alphaValue = isAvailable ? 1 : 0.5
         title.textColor = isAvailable ? theme.fg : theme.fgMuted
         detail.textColor = isAvailable ? theme.fgMuted : theme.fgDim
@@ -108,7 +109,7 @@ final class AgentHtmlDocumentCard: ThemedView {
 
     override func layout() {
         super.layout()
-        icon.frame = NSRect(x: 14, y: (bounds.height - 20) / 2, width: 20, height: 20)
+        icon.frame = NSRect(x: 8 + (AgentMediaStyle.iconBox - 16) / 2, y: (bounds.height - 16) / 2, width: 16, height: 16)
         let buttonY = (bounds.height - 24) / 2
         var right = bounds.width - 10
         for button in [copy, download, preview] {
@@ -117,9 +118,15 @@ final class AgentHtmlDocumentCard: ThemedView {
             button.frame = NSRect(x: right, y: buttonY, width: width, height: 24)
             right -= 4
         }
-        let textX: CGFloat = 46
+        let textX: CGFloat = 8 + AgentMediaStyle.iconBox + 12
         let textWidth = max(1, right - textX)
         title.frame = NSRect(x: textX, y: 9, width: textWidth, height: 20)
         detail.frame = NSRect(x: textX, y: 30, width: textWidth, height: 16)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        AgentMediaStyle.iconFill(theme).setFill()
+        NSBezierPath(roundedRect: NSRect(x: 8, y: (bounds.height - AgentMediaStyle.iconBox) / 2, width: AgentMediaStyle.iconBox,
+                                         height: AgentMediaStyle.iconBox), xRadius: 8, yRadius: 8).fill()
     }
 }

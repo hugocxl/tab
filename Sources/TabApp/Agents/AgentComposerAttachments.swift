@@ -322,19 +322,24 @@ final class AgentAttachmentStrip: NSView {
         scroll.isHidden = width == 0 || height == 0
         scroll.frame = NSRect(x: bounds.minX, y: bounds.minY, width: width, height: height)
         content.frame = NSRect(x: 0, y: 0, width: max(width, CGFloat(chips.count) * 226), height: height)
+        // The same height as a sent file card, centered in the strip.
+        let chipHeight = max(0, min(52, height - 16))
         for (index, chip) in chips.enumerated() {
-            chip.frame = NSRect(x: CGFloat(index) * 226, y: min(8, height), width: 218, height: max(0, min(60, height - 16)))
+            chip.frame = NSRect(x: CGFloat(index) * 226, y: max(0, (height - chipHeight) / 2), width: 218, height: chipHeight)
         }
     }
 }
 
+/// A draft attachment, drawn like a sent file card: an icon or thumbnail box, the name,
+/// and its kind and size.
 @MainActor
 private final class AgentAttachmentChip: NSView {
     var onRemove: (() -> Void)?
     var onPreview: (() -> Void)? { didSet { preview.isEnabled = onPreview != nil } }
     var onReplace: (() -> Void)?
     var chatTheme: AppTheme = .shared { didSet { applyTheme() } }
-    private let image = NSImageView()
+    private let attachment: AgentDraftAttachment
+    private let thumbnail = AgentAttachmentThumbnail()
     private let name = NSTextField(labelWithString: "")
     private let size = NSTextField(labelWithString: "")
     private let remove = NSButton()
@@ -342,17 +347,15 @@ private final class AgentAttachmentChip: NSView {
     override var isFlipped: Bool { true }
 
     init(attachment: AgentDraftAttachment) {
+        self.attachment = attachment
         super.init(frame: .zero)
-        wantsLayer = true
-        layer?.cornerRadius = 8
-        layer?.borderWidth = 1
-        image.image = attachment.thumbnail ?? NSWorkspace.shared.icon(for: UTType(mimeType: attachment.mimeType) ?? .data)
-        image.imageScaling = .scaleProportionallyUpOrDown
+        thumbnail.image = attachment.thumbnail
         name.stringValue = attachment.name
-        name.font = AppFont.small
+        name.font = AppFont.system(14, weight: .medium)
         name.lineBreakMode = .byTruncatingMiddle
-        size.stringValue = ByteCountFormatter.string(fromByteCount: Int64(attachment.byteCount), countStyle: .file)
-        size.font = AppFont.system(10)
+        size.stringValue = AgentFileAttachmentCard.detail(name: attachment.name, byteCount: attachment.byteCount)
+        size.font = AppFont.system(12)
+        size.lineBreakMode = .byTruncatingTail
         remove.image = AppIcon.close.image(size: 12, scale: AppIcon.inlineScale)
         remove.isBordered = false
         remove.target = self
@@ -365,7 +368,7 @@ private final class AgentAttachmentChip: NSView {
         preview.target = self
         preview.action = #selector(previewPressed)
         preview.setAccessibilityLabel("Preview \(attachment.name)")
-        for view in [image, name, size, preview, remove] { addSubview(view) }
+        for view in [thumbnail, name, size, preview, remove] { addSubview(view) }
         toolTip = "\(attachment.name) — \(size.stringValue)"
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
@@ -375,8 +378,9 @@ private final class AgentAttachmentChip: NSView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     private func applyTheme() {
-        layer?.backgroundColor = chatTheme.fg.withAlphaComponent(0.035).cgColor
-        layer?.borderColor = chatTheme.border.cgColor
+        AgentMediaStyle.applyCard(to: self, theme: chatTheme)
+        thumbnail.fill = AgentMediaStyle.iconFill(chatTheme)
+        thumbnail.icon = attachment.thumbnail == nil ? FileIcon.image(for: attachment.name, theme: chatTheme, size: 16) : nil
         name.textColor = chatTheme.fg
         size.textColor = chatTheme.fgMuted
         remove.contentTintColor = chatTheme.fgMuted
@@ -384,11 +388,13 @@ private final class AgentAttachmentChip: NSView {
 
     override func layout() {
         super.layout()
-        image.frame = NSRect(x: 8, y: 8, width: 44, height: 44)
-        name.frame = NSRect(x: 60, y: 11, width: 126, height: 18)
-        size.frame = NSRect(x: 60, y: 32, width: 126, height: 16)
+        let box = AgentMediaStyle.iconBox
+        thumbnail.frame = NSRect(x: 8, y: (bounds.height - box) / 2, width: box, height: box)
+        let textX = 8 + box + 12, textWidth = max(0, bounds.width - textX - 30)
+        name.frame = NSRect(x: textX, y: bounds.midY - 18, width: textWidth, height: 20)
+        size.frame = NSRect(x: textX, y: bounds.midY + 2, width: textWidth, height: 16)
         preview.frame = NSRect(x: 0, y: 0, width: max(0, bounds.width - 28), height: max(0, bounds.height))
-        remove.frame = NSRect(x: max(0, bounds.width - 27), y: 5, width: 22, height: 22)
+        remove.frame = NSRect(x: max(0, bounds.width - 28), y: (bounds.height - 22) / 2, width: 22, height: 22)
     }
     override func menu(for event: NSEvent) -> NSMenu? {
         guard onReplace != nil || onPreview != nil else { return super.menu(for: event) }
@@ -401,4 +407,31 @@ private final class AgentAttachmentChip: NSView {
 
     @objc private func removePressed() { onRemove?() }
     @objc private func previewPressed() { onPreview?() }
+}
+
+/// A card's icon box: an image thumbnail filling it, or a file icon centered on a fill.
+@MainActor
+private final class AgentAttachmentThumbnail: NSView {
+    var image: NSImage? { didSet { needsDisplay = true } }
+    var icon: NSImage? { didSet { needsDisplay = true } }
+    var fill = NSColor.clear { didSet { needsDisplay = true } }
+    override var isFlipped: Bool { true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let path = NSBezierPath(roundedRect: bounds, xRadius: 8, yRadius: 8)
+        fill.setFill()
+        path.fill()
+        if let image, image.size.width > 0, image.size.height > 0 {
+            NSGraphicsContext.saveGraphicsState()
+            path.addClip()
+            let scale = max(bounds.width / image.size.width, bounds.height / image.size.height)
+            let size = NSSize(width: image.size.width * scale, height: image.size.height * scale)
+            image.draw(in: NSRect(x: bounds.midX - size.width / 2, y: bounds.midY - size.height / 2, width: size.width, height: size.height),
+                       from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+            NSGraphicsContext.restoreGraphicsState()
+        } else if let icon {
+            icon.draw(in: NSRect(x: bounds.midX - 8, y: bounds.midY - 8, width: 16, height: 16),
+                      from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+        }
+    }
 }

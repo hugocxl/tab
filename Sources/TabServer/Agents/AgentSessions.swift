@@ -110,6 +110,9 @@ final class AgentSessions: @unchecked Sendable {
         /// Reverts and rewinds of this conversation admitted and not yet finished.
         var reverts = 0
         var stagingToolImages = false
+        /// A turn's attachments by user item until they are written to disk, so previews
+        /// of a message that was just sent never miss.
+        var stagingAttachments: [String: [AgentChatAttachment]] = [:]
         var deferredEvents: [AgentRuntimeEvent] = []
         var deferredEventBytes = 0
         var deferredEventOverflow = false
@@ -766,7 +769,7 @@ final class AgentSessions: @unchecked Sendable {
         }
         // Attachment bytes are checked here and written by the turn's task, so up to 8 MiB
         // of disk writes never hold the sessions queue.
-        var turnAttachmentFiles: (attachments: [AgentChatAttachment], root: URL)?
+        var turnAttachmentFiles: (attachments: [AgentChatAttachment], root: URL, item: String)?
         if case .send(_, let text, let model, let effort, let requestedProvider, let attachments) = request {
             guard entry.deliveryID == nil || entry.deliveryID == deliveryID else {
                 throw ServiceError(.badRequest, "A queued prompt is being delivered.")
@@ -872,7 +875,7 @@ final class AgentSessions: @unchecked Sendable {
                 .appendingPathComponent(userID, isDirectory: true)
             do {
                 try AgentAttachments.validateForStaging(attachments ?? [])
-                turnAttachmentFiles = (attachments ?? [], attachmentRoot)
+                turnAttachmentFiles = (attachments ?? [], attachmentRoot, userID)
             } catch {
                 throw ServiceError(.badRequest, error.localizedDescription)
             }
@@ -1023,6 +1026,7 @@ final class AgentSessions: @unchecked Sendable {
         }
         let pending = PendingReply(continuation)
         let turnAttachments = turnAttachmentFiles
+        if let files = turnAttachments, !files.attachments.isEmpty { entry.stagingAttachments[files.item] = files.attachments }
         if case .send = request { entry.pendingSubmission = pending }
         queue.asyncAfter(deadline: .now() + submissionTimeout) { [self] in
             guard !pending.finished else { return }
@@ -1072,6 +1076,7 @@ final class AgentSessions: @unchecked Sendable {
                 failure = nil
             } catch { failure = error }
             queue.async { [self] in
+                if let files = turnAttachments { entry.stagingAttachments[files.item] = nil }
                 guard !pending.finished else { return }
                 pending.finished = true
                 if entry.pendingSubmission === pending { entry.pendingSubmission = nil }
@@ -2778,9 +2783,12 @@ extension AgentSessions {
 
     /// An attachment of a prompt still waiting in the queue, which the queued editor previews.
     /// Its bytes live in the durable queue until the prompt is delivered.
+    /// An attachment still in memory: a queued prompt's, or a sent message's not yet on disk.
     fileprivate func queuedAttachment(_ request: AgentAttachmentRequest) -> AgentAttachmentReply? {
-        queue.sync {
-            entries[request.session]?.inbox.records.first { $0.id == request.item && $0.display != nil }?
+        queue.sync { () -> AgentChatAttachment? in
+            guard let entry = entries[request.session] else { return nil }
+            if let staging = entry.stagingAttachments[request.item]?.first(where: { $0.id == request.attachment }) { return staging }
+            return entry.inbox.records.first { $0.id == request.item && $0.display != nil }?
                 .prompt?.attachments.first { $0.id == request.attachment }
         }.map(AgentAttachmentReply.init(attachment:))
     }

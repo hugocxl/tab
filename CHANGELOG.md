@@ -3,6 +3,24 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.110.0 - 2026-11-23
+
+### Changed
+
+- Images, files, videos and documents in agent conversations share one look: the same rounded
+  cards and image frames, file icons and sizes in the composer, your messages, tool results and
+  the agent's replies.
+- Several images in a message or a tool result show as one mosaic, like the agent's own images,
+  instead of small letterboxed boxes.
+- Files you send appear as cards above your message, whether or not it has text.
+
+### Fixed
+
+- Images you attach to an agent message show right away, even on another computer's server,
+  instead of failing with "Click to retry" while the agent starts.
+- An image that can't load shows a short card with its name and what a click does, and loads
+  again by itself when the server comes back.
+
 ## 0.109.0 - 2026-11-23
 
 ### Changed

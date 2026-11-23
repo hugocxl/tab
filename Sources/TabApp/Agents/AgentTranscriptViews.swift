@@ -148,8 +148,8 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
     private var bodyHeight: CGFloat = 0
     private var detailHeight: CGFloat = 0
     private var attachmentCards: [AgentFileAttachmentCard] = []
-    private var filesOnly = false
     private var attachmentsHeight: CGFloat = 0
+    private var cardWidth: CGFloat = 0
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -352,7 +352,6 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
         media.fetch = fetchAttachment
         media.onPreview = onPreviewAttachments
         media.update(item: item.id, attachments: images, theme: theme)
-        filesOnly = item.kind == .user && images.isEmpty && !attachments.isEmpty && item.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         while attachmentCards.count > attachments.count { attachmentCards.removeLast().removeFromSuperview() }
         while attachmentCards.count < attachments.count {
             let card = AgentFileAttachmentCard(frame: .zero)
@@ -361,7 +360,7 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
         }
         for (index, attachment) in attachments.enumerated() {
             let card = attachmentCards[index]
-            card.update(attachment, standalone: filesOnly, theme: theme)
+            card.update(attachment, theme: theme)
             card.onOpen = { [weak self] download in self?.onOpenAttachment?(item.id, attachment, download) }
         }
         response.isHidden = item.kind != .assistant && item.kind != .user
@@ -389,7 +388,8 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
         detail.setContent(AgentMarkdown.plain(Self.bounded(item.detail ?? ""), theme: theme, muted: true, monospaced: true))
         body.selectedTextAttributes = [.backgroundColor: theme.accent.withAlphaComponent(0.22)]
         detail.selectedTextAttributes = body.selectedTextAttributes
-        bubble.isHidden = item.kind != .user || filesOnly || (!media.isHidden && item.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty)
+        // A message's images, then its files, sit above its text; with no text there's no bubble.
+        bubble.isHidden = item.kind != .user || item.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         media.joinsTextBubble = !bubble.isHidden
         let pending = item.kind == .approval && !item.isComplete
         permissionTitle.isHidden = item.kind != .approval
@@ -419,18 +419,18 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
             let plain = item.text as NSString
             let natural = plain.boundingRect(with: NSSize(width: max(1, width * Self.widthFraction - 28), height: .greatestFiniteMagnitude),
                 options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: [.font: AgentFont.system(14, weight: .light)]).width
-            let attachmentWidth = attachmentCards.map(\.naturalWidth).max() ?? 0
-            bubbleWidth = min(width * Self.widthFraction, max(48, ceil(max(natural, attachmentWidth)) + 28))
+            bubbleWidth = min(width * Self.widthFraction, max(48, ceil(natural) + 28))
             let hasRichBlocks = AgentResponsePart.partition(AgentResponseParser.parse(item.text, parseRawHTML: false)).contains { $0.kind != 0 }
             if hasRichBlocks { bubbleWidth = width * Self.widthFraction }
             bodyHeight = item.text.isEmpty ? 0 : response.height(for: max(1, bubbleWidth - 28))
             if !expandMessage.isHidden && !messageExpanded { bodyHeight = min(Self.collapsedMessageHeight, bodyHeight) }
-            attachmentsHeight = attachmentCards.reduce(0) { $0 + $1.preferredHeight } + CGFloat(max(0, attachmentCards.count - 1)) * 4
-            if !attachmentCards.isEmpty && bodyHeight > 0 { attachmentsHeight += 8 }
-            if filesOnly { bubbleWidth = min(width * Self.widthFraction, 256); return attachmentsHeight + 28 }
+            cardWidth = min(width * Self.widthFraction, AgentFileAttachmentCard.size.width)
+            let cards = CGFloat(attachmentCards.count)
+            attachmentsHeight = cards * AgentFileAttachmentCard.size.height + max(0, cards - 1) * 4
             mediaSize = media.measuredSize(maxWidth: max(1, width * Self.widthFraction))
-            if bubble.isHidden { return mediaSize.height + 28 }
-            return mediaSize.height + (mediaSize.height > 0 ? 4 : 0) + bodyHeight + attachmentsHeight + 14 + (expandMessage.isHidden ? 0 : 26) + 28
+            let stack = stackHeight
+            if bubble.isHidden { return stack + 28 }
+            return stack + (stack > 0 ? 4 : 0) + bodyHeight + 14 + (expandMessage.isHidden ? 0 : 26) + 28
         }
         bodyHeight = item.kind == .assistant ? response.height(for: width) : body.height(for: width)
         detailHeight = detail.isHidden ? 0 : detail.height(for: max(1, width - 24))
@@ -443,19 +443,31 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
         return bodyHeight + (changesHeight > 0 ? 16 + changesHeight : 0) + (copy.isHidden ? 0 : 28)
     }
 
+    /// The images and file cards above a user message's text.
+    private var stackHeight: CGFloat {
+        mediaSize.height + (mediaSize.height > 0 && attachmentsHeight > 0 ? 4 : 0) + attachmentsHeight
+    }
+
     override func layoutRow(width: CGFloat) {
         guard let item else { return }
         if item.kind == .user {
             let left = width - bubbleWidth
             media.frame = NSRect(x: width - mediaSize.width, y: 0, width: mediaSize.width, height: mediaSize.height)
             media.layoutSubtreeIfNeeded()
-            let bubbleY = mediaSize.height + (mediaSize.height > 0 && !bubble.isHidden ? 4 : 0)
+            var cardTop = mediaSize.height + (mediaSize.height > 0 ? 4 : 0)
+            for card in attachmentCards {
+                card.frame = NSRect(x: width - cardWidth, y: cardTop, width: cardWidth, height: AgentFileAttachmentCard.size.height)
+                card.layoutSubtreeIfNeeded()
+                cardTop += AgentFileAttachmentCard.size.height + 4
+            }
+            let stack = stackHeight
+            let bubbleY = stack + (stack > 0 && !bubble.isHidden ? 4 : 0)
             bubble.frame = NSRect(x: left, y: bubbleY, width: bubbleWidth, height: max(0, bounds.height - 28 - bubbleY))
-            if !media.isHidden && !bubble.isHidden {
+            if stack > 0 && !bubble.isHidden {
                 bubble.cornerRadius = 0
                 AgentMessageShape.apply(to: bubble, topRight: AgentMessageShape.joinedRadius)
             } else { bubble.cornerRadius = AgentMessageShape.radius; bubble.layer?.mask = nil }
-            response.frame = NSRect(x: left + 14, y: bubbleY + 7 + attachmentsHeight, width: max(1, bubbleWidth - 28), height: bodyHeight)
+            response.frame = NSRect(x: left + 14, y: bubbleY + 7, width: max(1, bubbleWidth - 28), height: bodyHeight)
             expandMessage.frame = NSRect(x: max(left, width - 146), y: response.frame.maxY + 4, width: min(140, bubbleWidth), height: 24)
             response.layoutSubtreeIfNeeded()
             response.wantsLayer = true
@@ -468,14 +480,7 @@ final class AgentMessageRow: AgentTimelineRow, NSTextViewDelegate {
                 messageFade.endPoint = CGPoint(x: 0.5, y: 1)
                 response.layer?.mask = messageFade
             } else { response.layer?.mask = nil }
-            var attachmentTop: CGFloat = filesOnly ? 0 : bubbleY + 7
-            for card in attachmentCards {
-                card.frame = NSRect(x: filesOnly ? left : left + 14, y: attachmentTop,
-                                    width: max(1, filesOnly ? bubbleWidth : bubbleWidth - 28), height: card.preferredHeight)
-                card.layoutSubtreeIfNeeded()
-                attachmentTop += card.preferredHeight + 4
-            }
-            copy.frame = NSRect(x: width - 60, y: (filesOnly ? attachmentsHeight : bubble.isHidden ? media.frame.maxY : bubble.frame.maxY) + 4, width: 60, height: 24)
+            copy.frame = NSRect(x: width - 60, y: (bubble.isHidden ? stack : bubble.frame.maxY) + 4, width: 60, height: 24)
             editPrompt.frame = NSRect(x: copy.frame.minX - 28, y: copy.frame.minY, width: 28, height: 24)
             forkPrompt.frame = NSRect(x: (editPrompt.isHidden ? copy.frame.minX : editPrompt.frame.minX) - 28, y: copy.frame.minY, width: 28, height: 24)
             let actionsWidth: CGFloat = (copy.isHidden ? 0 : 70) + (editPrompt.isHidden ? 0 : 28) + (forkPrompt.isHidden ? 0 : 28)
