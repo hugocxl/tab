@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.108.0 - 2026-11-23
+
+### Added
+
+- A terminal running a script, build or server shows a gray spinner and how long it has run
+  in the sidebar and its pane header, while editors, pagers and remote shells stay idle.
+
 ## 0.107.0 - 2026-11-23
 
 ### Changed

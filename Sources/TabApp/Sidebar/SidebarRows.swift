@@ -536,7 +536,8 @@ final class CardDivider: ThemedView {
 }
 
 /// Tab Icons for waiting, done, failed, paused and idle states, a native
-/// spinner while working, and a dim one while only background shells run.
+/// spinner while working, a muted one while a command runs, and a dim one
+/// while only background shells run.
 /// The idle circle appears only with `showsIdle`.
 final class PaneStatusView: NSView {
     var status: ActivityCardData.PaneRow.Status = .idle {
@@ -579,12 +580,13 @@ final class PaneStatusView: NSView {
         let color: NSColor
         let spins: Bool
         switch status {
-        case .working, .progress, .background: spins = true
+        case .working, .progress, .background, .running: spins = true
         default: spins = false
         }
         switch status {
         case .working, .progress: (icon, color) = (nil, grayWorking ? theme.fgMuted : theme.accent)
         case .background: (icon, color) = (nil, theme.fgDim)
+        case .running: (icon, color) = (nil, theme.fgMuted)
         case .blocked: (icon, color) = (.exclamationCircleFill, theme.accent)
         case .done: (icon, color) = (.circleCheckFill, theme.success)
         case .error: (icon, color) = (.circleXFill, theme.danger)

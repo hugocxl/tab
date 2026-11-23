@@ -29,6 +29,8 @@ struct ActivityCardData: Equatable {
         case paused
         /// Idle, with shells an agent left running in the background.
         case background
+        /// A terminal runs a command.
+        case running
         case idle
     }
 
@@ -57,6 +59,8 @@ struct ActivityCardData: Equatable {
             case paused
             /// Idle, with shells the agent left running in the background.
             case background
+            /// A terminal runs a command, such as a script or a server.
+            case running
 
             /// How much the status asks for the user's eye, for the card's
             /// title row to show the most pressing of its panes'.
@@ -64,11 +68,12 @@ struct ActivityCardData: Equatable {
                 switch self {
                 case .idle: return 0
                 case .background: return 1
-                case .done: return 2
-                case .paused: return 3
-                case .working, .progress: return 4
-                case .error: return 5
-                case .blocked: return 6
+                case .running: return 2
+                case .done: return 3
+                case .paused: return 4
+                case .working, .progress: return 5
+                case .error: return 6
+                case .blocked: return 7
                 }
             }
         }
@@ -224,6 +229,7 @@ struct ActivityCardData: Equatable {
         case .working, .progress: return .working
         case .paused: return .paused
         case .background: return .background
+        case .running: return .running
         case .idle: return .idle
         }
     }
@@ -297,7 +303,13 @@ struct ActivityCardData: Equatable {
             }
         }
         let status = paneStatus(pane, server: server, model: model)
-        let since = status == .working || status == .blocked || status == .paused ? agent?.workingSince.map { Date(timeIntervalSince1970: TimeInterval($0) / 1000) } : nil
+        let started: UInt64?
+        switch status {
+        case .working, .blocked, .paused: started = agent?.workingSince
+        case .running: started = session.flatMap { connection?.metadata[$0]?.processSince }
+        default: started = nil
+        }
+        let since = started.map { Date(timeIntervalSince1970: TimeInterval($0) / 1000) }
         return PaneRow(id: pane.id, icon: icon, title: text, detail: detail, status: status, workingSince: since, active: active, topic: topic)
     }
 
@@ -382,6 +394,8 @@ struct ActivityCardData: Equatable {
         if notifications.showsInTabs(.working) {
             if agent?.condition == .paused { return .paused }
             if agent?.state == .working { return .working }
+            // An agent's own program is the agent, idle or not.
+            if agent == nil, runsCommand(connection.metadata[session]) { return .running }
         }
         let event = connection.activity.events.first {
             !$0.read && $0.session == session && model.reports($0) && notifications.showsInTabs($0.kind.status)
@@ -395,6 +409,25 @@ struct ActivityCardData: Equatable {
         if agent?.condition == .background && notifications.showsInTabs(.working) { return .background }
         return .idle
     }
+
+    /// Whether a terminal runs a program in front of its shell that works on
+    /// its own, such as a script, a build or a server, rather than one that
+    /// waits for typing, such as an editor, a pager or a remote shell.
+    static func runsCommand(_ metadata: SessionMetadata?) -> Bool {
+        guard let process = metadata?.process, !process.isShell else { return false }
+        var name = String(process.name.split(separator: "/").last ?? "").lowercased()
+        if name.hasPrefix("-") { name.removeFirst() }
+        return !name.isEmpty && !interactivePrograms.contains(name)
+    }
+
+    private static let interactivePrograms: Set<String> = [
+        "vim", "nvim", "vi", "view", "nano", "micro", "emacs", "hx", "helix", "kak",
+        "less", "more", "most", "man", "top", "htop", "btop", "atop", "glances", "watch",
+        "ssh", "mosh", "mosh-client", "telnet", "tmux", "screen", "zellij",
+        "lazygit", "lazydocker", "tig", "ranger", "nnn", "yazi", "lf", "mc", "fzf", "k9s",
+        "psql", "mysql", "sqlite3", "redis-cli", "mongosh",
+        "claude", "codex", "opencode", "cursor-agent", "copilot", "droid", "gemini", "aider", "amp", "kiro-cli",
+    ]
 
     /// How long a turn has run: `43s` under a minute, `3m` under an hour,
     /// then `1h 3m`.

@@ -65,6 +65,7 @@ final class SessionOwner: @unchecked Sendable {
     private var title = ""
     private var directory: ServerPath
     private var process: ForegroundProcess?
+    private var processSince: UInt64?
     private var observedDirectory: String?
     private var nextProcessProbe: TimeInterval = 0
     private var lastOutput: TimeInterval = 0
@@ -340,7 +341,7 @@ final class SessionOwner: @unchecked Sendable {
             sharedChanged = probeProcess() || sharedChanged
         }
         if sharedChanged {
-            let metadata = SessionMetadata(title: title, directory: directory, process: process)
+            let metadata = SessionMetadata(title: title, directory: directory, process: process, processSince: processSince)
             shared.withLock { sharedMetadata = metadata }
             delegate?.sessionMetadataChanged(info.id, metadata)
         }
@@ -350,6 +351,12 @@ final class SessionOwner: @unchecked Sendable {
         guard let observation = ForegroundProbe.observe(master: pty.masterFD, shell: pty.pid) else { return false }
         var changed = false
         if observation.process != process {
+            // One program handing the foreground to another keeps the start.
+            if observation.process.isShell {
+                processSince = nil
+            } else if process?.isShell != false {
+                processSince = Clock.nowMilliseconds()
+            }
             process = observation.process
             changed = true
             detectionNeeded = true

@@ -381,6 +381,10 @@ extension AppModel {
     }
 
     private func sessionMetadata(_ server: ServerId, _ session: SessionId, _ metadata: SessionMetadata) {
+        if let connection = connections[server] {
+            let previous = connection.metadata.updateValue(metadata, forKey: session)
+            if ActivityCardData.runsCommand(previous) != ActivityCardData.runsCommand(metadata) || previous?.processSince != metadata.processSince { notify(.activity) }
+        }
         let title = TerminalTitle.derive(
             metadata.title, processName: metadata.process?.name, processIsShell: metadata.process?.isShell ?? true,
             directory: TerminalSessionController.abbreviate(metadata.directory.rawValue)
@@ -395,6 +399,7 @@ extension AppModel {
     /// A terminal's program ended: its server closes its panes everywhere.
     func sessionEnded(_ server: ServerId, _ session: SessionId) {
         connections[server]?.progress[session] = nil
+        connections[server]?.metadata[session] = nil
     }
 
     // MARK: Git

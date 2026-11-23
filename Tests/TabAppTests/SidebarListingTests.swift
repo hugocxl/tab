@@ -216,6 +216,30 @@ final class SidebarListingTests: XCTestCase {
         XCTAssertEqual(agent.lead?.icon, .agent(.claude))
     }
 
+    func testTerminalRunningACommandShowsAsRunningWithItsStart() async throws {
+        model.newHomeTerminal()
+        let pane = try XCTUnwrap(model.activePane)
+        let bound = await ModelFixtures.wait { self.model.state.pane(pane)?.content.session != nil }
+        XCTAssertTrue(bound)
+        let session = try XCTUnwrap(model.state.pane(pane)?.content.session)
+        let connection = try XCTUnwrap(model.connection(.local))
+        func row(_ name: String, isShell: Bool = false) throws -> ActivityCardData.PaneRow {
+            connection.metadata[session] = SessionMetadata(title: "", directory: ServerPath("/tmp"),
+                                                           process: ForegroundProcess(name: name, isShell: isShell),
+                                                           processSince: 1_700_000_000_000)
+            return try XCTUnwrap(SidebarSnapshot(model: model).hosts.first?.terminals.first?.data.panes.first)
+        }
+
+        let script = try row("bash")
+        XCTAssertEqual(script.status, .running)
+        XCTAssertEqual(script.workingSince, Date(timeIntervalSince1970: 1_700_000_000))
+        XCTAssertEqual(try row("zsh", isShell: true).status, .idle)
+        XCTAssertEqual(try row("nvim").status, .idle, "an editor waits for typing")
+
+        connection.activity.agents = [AgentActivity(session: session, project: model.state.home.id, provider: .claude, state: .idle)]
+        XCTAssertEqual(try row("node").status, .idle, "an idle agent isn't a running command")
+    }
+
     func testChatOpenersBecomeTitles() {
         XCTAssertEqual(ActivityCardData.chatTopic("can you write a lorem ipsum? thanks"), "Write a lorem ipsum")
         XCTAssertEqual(ActivityCardData.chatTopic("Hey, please fix README.md formatting"), "Fix README.md formatting")

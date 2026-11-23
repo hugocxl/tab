@@ -163,6 +163,7 @@ final class PaneCardView: HoverView {
             switch shown.flatMap({ shown in server.map { ActivityCardData.paneStatus(shown, server: $0, model: model) } }) {
             case .working?, .progress?: progressGlyph.style = .spinner(theme.accent)
             case .background?: progressGlyph.style = .spinner(theme.fgDim)
+            case .running?: progressGlyph.style = .spinner(theme.fgMuted)
             case .blocked?: progressGlyph.style = .dot(theme.accent, diameter: 7)
             case .error?: progressGlyph.style = .dot(theme.danger, diameter: 7)
             case .paused?: progressGlyph.style = .dot(theme.warning, diameter: 7)

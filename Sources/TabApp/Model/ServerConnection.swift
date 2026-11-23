@@ -78,6 +78,8 @@ public final class ServerConnection {
     var activityDirty = false
     /// Terminal progress by session.
     public internal(set) var progress: [SessionId: SessionProgress] = [:]
+    /// The last title, folder and foreground program by session.
+    public internal(set) var metadata: [SessionId: SessionMetadata] = [:]
     /// The last error, for banners and the host menu.
     public var lastError: String? { lastFailure?.description }
     /// Why the last attempt failed, while not connected.
