@@ -655,8 +655,9 @@ final class AgentPaneView: ThemedView {
     }
 
     /// `itemsUnchanged` says the items are those last rendered, as an incremental read
-    /// that changed no item reports, so the transcript skips comparing them.
-    func render(_ snapshot: AgentChatSnapshot, itemsUnchanged: Bool = false) {
+    /// that changed no item reports, so the transcript skips comparing them, and
+    /// `unchangedLead` says how many leading items are, so it compares only the rest.
+    func render(_ snapshot: AgentChatSnapshot, itemsUnchanged: Bool = false, unchangedLead: Int = 0) {
         if self.snapshot?.session != snapshot.session { navigationPromptID = nil }
         self.snapshot = snapshot
         taskProgress.update(snapshot)
@@ -674,8 +675,11 @@ final class AgentPaneView: ThemedView {
             let omitted = snapshot.omittedItems ?? 0
             let activityChanged = self.transcript.providerActivity != snapshot.activity
             self.transcript.providerActivity = snapshot.activity
-            if (!itemsUnchanged && visible != self.renderedItems) || turns != self.renderedTurns || omitted != self.renderedOmitted || activityChanged {
-                self.transcript.update(visible, omittedCount: omitted, turns: turns)
+            let lead = min(unchangedLead, visible.count, self.renderedItems.count)
+            let itemsChanged = !itemsUnchanged && (visible.count != self.renderedItems.count
+                || visible[lead...] != self.renderedItems[lead...])
+            if itemsChanged || turns != self.renderedTurns || omitted != self.renderedOmitted || activityChanged {
+                self.transcript.update(visible, omittedCount: omitted, turns: turns, unchangedLead: lead)
                 self.renderedItems = visible
                 self.renderedTurns = turns
                 self.renderedOmitted = omitted

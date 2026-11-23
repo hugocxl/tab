@@ -26,6 +26,24 @@ struct AgentTranscriptLayout {
         }
     }
 
+    /// Keeps the rows before `start` and lays out `heights` after them, in time for the
+    /// rows replaced rather than the whole transcript.
+    mutating func replace(from start: Int, heights newHeights: [CGFloat], trailingSpaces newSpaces: [CGFloat]) {
+        let start = min(start, heights.count)
+        heights.removeSubrange(start...)
+        sums.removeSubrange((start + 1)...)
+        if trailingSpaces.count > start { trailingSpaces.removeSubrange(start...) }
+        while trailingSpaces.count < start { trailingSpaces.append(spacing) }
+        for (offset, height) in newHeights.enumerated() {
+            heights.append(max(1, height))
+            trailingSpaces.append(offset < newSpaces.count ? newSpaces[offset] : spacing)
+            // A Fenwick node holds its own row and the span of rows its children hold.
+            let position = heights.count
+            sums.append(heights[position - 1] + trailingSpaces[position - 1]
+                        + prefix(position - 1) - prefix(position - (position & -position)))
+        }
+    }
+
     mutating func setHeight(_ height: CGFloat, at index: Int) {
         let height = max(1, height)
         let delta = height - heights[index]

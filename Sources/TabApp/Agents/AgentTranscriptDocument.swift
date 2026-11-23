@@ -71,10 +71,34 @@ final class AgentTranscriptDocument: ThemedView {
     private var lastFollowingEnd = false
     private var pendingAnchor: AgentTranscriptAnchor?
     private var omittedCount = 0
+    /// What the last update built from, so the next one rebuilds only from the turn before
+    /// its first change: streaming into a long conversation costs its last turns, not all of it.
+    private struct Built {
+        var source: [AgentChatItem]
+        /// The source items shown, and where each is in `source`.
+        var items: [AgentChatItem]
+        var sourcePositions: [Int]
+        var turns: [AgentChatTurn]
+        var provider: AgentChatProvider?
+        /// Where each turn's user item is, and how many entries come before its own.
+        var segments: [(item: Int, entry: Int)]
+        /// Typed todo and plan items, by position, with the provider item each one replaces.
+        var typed: [(item: Int, nativeID: String)]
+    }
+    private var built: Built?
+    /// Off only to check that reusing turns lays out what a whole rebuild would.
+    var reusesUnchangedTurns = true
+    /// How many entries the last update built rather than reused.
+    private(set) var rebuiltEntryCount = 0
+    /// An item whose rows must be rebuilt although it didn't change, as when its work unfolds.
+    private var dirtyItemID: String?
     private var approvalsEnabled = true
     private let spareRowLimit = 32
     private let earlier = makeLabel("", font: AppFont.footnote)
-    private let showEarlier = PillButton("Show earlier messages", style: .plain)
+    /// The first shown item when earlier items were last asked for, and when; see `loadEarlierIfNear`.
+    private var earlierRequest: (firstID: String?, at: Date)?
+    /// How far above the viewport, in viewports, earlier items load before the reader gets there.
+    private let earlierPrefetch: CGFloat = 2
 
     /// Space under the last row for the composer and panels that float over the transcript.
     var bottomInset: CGFloat {
@@ -89,6 +113,8 @@ final class AgentTranscriptDocument: ThemedView {
     private(set) var viewportOrigin: CGFloat = 0
     private(set) var measurementCount = 0
     var entryCount: Int { entries.count }
+    /// Every entry as text, with its frame, for comparing how two updates laid one out.
+    var entryDescriptions: [String] { entries.indices.map { "\(entries[$0]) @ \(entryFrame(at: $0))" } }
     var mountedRowCount: Int { mounted.count }
     var retainedRowCount: Int { cache.count }
     var isUpdatingViewport: Bool { updatingViewport }
@@ -123,14 +149,24 @@ final class AgentTranscriptDocument: ThemedView {
         return menu
     }
     /// Says why `omittedCount` earlier items aren't shown, in place of the conversation's note.
-    var earlierNote: ((Int) -> String)?
-    var onEarlier: (() -> Void)? { didSet { if (oldValue == nil) != (onEarlier == nil) { layoutHeader() } } }
+    var earlierNote: ((Int) -> String)? { didSet { updateEarlierNote() } }
+    /// Loads the items above the oldest shown. While set, they load by themselves as the
+    /// reader scrolls toward them, so the conversation reads as one with no start cut off.
+    var onEarlier: (() -> Void)? {
+        didSet {
+            guard (oldValue == nil) != (onEarlier == nil) else { return }
+            earlierRequest = nil
+            updateEarlierNote()
+            layoutHeader()
+        }
+    }
     /// Saves a plan through the conversation's project actions: `(relativePath, contents, cwd)`.
     var writeProjectFile: ((String, String, String?) async throws -> String)?
     var pasteboard: NSPasteboard = .general
     var provider: AgentChatProvider? {
         didSet {
             guard oldValue != provider, !entries.isEmpty else { return }
+            built = nil
             update(sourceItems, omittedCount: omittedCount, turns: sourceTurns)
         }
     }
@@ -153,6 +189,7 @@ final class AgentTranscriptDocument: ThemedView {
                 cached.needsLayout = true
                 heights[id]?.valid = false
             }
+            built = nil
             update(sourceItems, omittedCount: omittedCount, turns: sourceTurns)
         }
     }
@@ -163,30 +200,34 @@ final class AgentTranscriptDocument: ThemedView {
             label.translatesAutoresizingMaskIntoConstraints = true
             addSubview(label)
         }
-        showEarlier.translatesAutoresizingMaskIntoConstraints = true
-        showEarlier.onPress = { [weak self] in self?.onEarlier?() }
-        addSubview(showEarlier)
         layoutHeader()
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    func update(_ sourceItems: [AgentChatItem], omittedCount: Int, turns: [AgentChatTurn] = []) {
+    /// `unchangedLead` counts leading items known to be those of the last update, which
+    /// aren't compared again.
+    func update(_ sourceItems: [AgentChatItem], omittedCount: Int, turns: [AgentChatTurn] = [], unchangedLead: Int = 0) {
         self.sourceItems = sourceItems
         sourceTurns = turns
-        // Approval decisions remain in the authoritative audit snapshot, not the chat, and
-        // a pending question shows only in its form above the composer.
-        let items = sourceItems.filter { $0.kind != .approval || (!$0.isComplete && $0.questionnaire == nil) }
         var anchor = captureAnchor(at: lastViewport.minY)
         captureStates()
-        migrateToolGroupStates()
-        let previous = Dictionary(uniqueKeysWithValues: entries.map { ($0.id, $0) })
-        let grouped = makeEntries(items, turns: turns)
+        let (items, sourcePositions, reuse) = reusablePrefix(sourceItems, unchangedLead: unchangedLead, turns: turns)
+        // Turns are in conversation order, so the rebuilt items' turns are the last ones.
+        let tailTurns = reuse.items == 0 ? turns[...]
+            : turns.lastIndex(where: { $0.userItemID == items[reuse.items].id }).map { turns[$0...] } ?? turns[...]
+        // Copied out, so replacing the tail below doesn't copy every entry.
+        let oldTail = Array(entries[reuse.entries...])
+        var previous: [String: Entry] = [:]
+        var previousOwner: [String: String] = [:]
+        for entry in oldTail {
+            previous[entry.id] = entry
+            for item in entry.items { previousOwner[item.id] = entry.id }
+        }
+        let grouped = makeEntries(Array(items[reuse.items...]), turns: Array(tailTurns), typedNativeIDs: reuse.typed)
         // A turn that just finished folds its work, unless that would take away what the
         // reader is using: an open row, the keyboard focus or the row the view is anchored
         // to. Folding under the anchor moves it to the summary instead of jumping away.
-        var previousOwner: [String: String] = [:]
-        for entry in entries { for item in entry.items { previousOwner[item.id] = entry.id } }
         let focused = focusedRowID()
         for entry in grouped where entry.kind == .work && savedStates[entry.id] == nil {
             var children: [String: AgentTimelineRowState] = [:]
@@ -201,7 +242,7 @@ final class AgentTranscriptDocument: ThemedView {
                 return state?.expanded == true || state?.toolExpandedIDs.isEmpty == false || owner == focused
             }
             let anchored = anchor.rowID.map(owners.contains) ?? false
-            if inUse || anchored, !previous.keys.contains(entry.id) {
+            if inUse || anchored, previous[entry.id] == nil {
                 savedStates[entry.id] = AgentTimelineRowState(expanded: true, children: children)
             } else if !children.isEmpty {
                 savedStates[entry.id] = AgentTimelineRowState(children: children)
@@ -209,61 +250,182 @@ final class AgentTranscriptDocument: ThemedView {
         }
         // Work history is projected into the same timeline as its answer. Keeping its
         // entries separate gives it the main scrollbar and the normal viewport budget.
-        var allIDs = Set(grouped.map(\.id))
-        let next = grouped.flatMap { entry -> [Entry] in
+        var tailIDs = Set(grouped.map(\.id))
+        let tail = grouped.flatMap { entry -> [Entry] in
             guard entry.kind == .work else { return [entry] }
+            // Migrate value-only state from the previous nested history renderer.
+            for (id, state) in savedStates[entry.id]?.children ?? [:] where savedStates[id] == nil {
+                savedStates[id] = state
+                migrateToolGroupStates([state])
+            }
+            // A folded group keeps its rows' state and heights without building its rows,
+            // so a long history of folded turns costs one entry each.
+            guard savedStates[entry.id]?.expanded == true else {
+                for item in entry.items { tailIDs.insert(Self.entryID(for: item)) }
+                return [entry]
+            }
             let children = makeEntries(entry.items, turns: []).map { child in
                 var child = child
                 child.groupedWork = true
                 child.showsResponseActions = false
                 return child
             }
-            allIDs.formUnion(children.map(\.id))
-            // Migrate value-only state from the previous nested history renderer.
-            for (id, state) in savedStates[entry.id]?.children ?? [:] where savedStates[id] == nil {
-                savedStates[id] = state
-            }
-            return savedStates[entry.id]?.expanded == true ? [entry] + children : [entry]
+            tailIDs.formUnion(children.map(\.id))
+            return [entry] + children
         }
         // An anchor row that folded away moves to the summary that now holds it.
-        if let id = anchor.rowID, !next.contains(where: { $0.id == id }),
+        if let id = anchor.rowID, positions[id].map({ $0 >= reuse.entries }) ?? true, !tail.contains(where: { $0.id == id }),
            let itemID = previous[id]?.items.first?.id,
-           let group = next.first(where: { $0.kind == .work && $0.items.contains { $0.id == itemID } }) {
+           let group = tail.first(where: { $0.kind == .work && $0.items.contains { $0.id == itemID } }) {
             anchor = AgentTranscriptAnchor(rowID: group.id, localOffset: 0, fallback: anchor.fallback)
         }
-        let retained = Set(next.map(\.id))
-        for id in Array(cache.keys) where !retained.contains(id) { removeCachedRow(id) }
-        savedStates = savedStates.filter { allIDs.contains($0.key) }
-        heights = heights.filter { allIDs.contains($0.key) }
-        for entry in next {
+        if reuse.entries == 0 {
+            savedStates = savedStates.filter { tailIDs.contains($0.key) }
+            heights = heights.filter { tailIDs.contains($0.key) }
+        } else {
+            // Only the rebuilt rows can have gone; the reused ones keep their state.
+            for entry in oldTail {
+                let ids = [entry.id] + (entry.kind == .work ? entry.items.map(Self.entryID(for:)) : [])
+                for id in ids where !tailIDs.contains(id) {
+                    savedStates.removeValue(forKey: id)
+                    heights.removeValue(forKey: id)
+                }
+            }
+        }
+        for entry in tail {
             if heights[entry.id] == nil { heights[entry.id] = Height(value: estimate(entry)) }
             if previous[entry.id] != entry { heights[entry.id]?.valid = false }
         }
-        entries = next
-        positions = Dictionary(uniqueKeysWithValues: entries.enumerated().map { ($0.element.id, $0.offset) })
+        for entry in oldTail { positions.removeValue(forKey: entry.id) }
+        if reuse.entries == 0 { positions.removeAll(keepingCapacity: true) }
+        entries.replaceSubrange(reuse.entries..., with: tail)
+        rebuiltEntryCount = tail.count
+        for index in reuse.entries..<entries.count { positions[entries[index].id] = index }
+        for id in Array(cache.keys) where positions[id] == nil { removeCachedRow(id) }
         self.omittedCount = omittedCount
-        // Without a way to load them, the dropped items are simply gone from Tab.
-        earlier.stringValue = earlierNote?(omittedCount)
-            ?? (omittedCount == 1 ? "1 earlier item isn't" : "\(omittedCount) earlier items aren't")
-            + " shown, to keep this conversation within its size limit"
-        geometry.reset(heights: entries.map { heights[$0.id]?.value ?? 80 },
-                       trailingSpaces: entries.enumerated().map { index, entry in
-            if case .card = entry.kind { return entry.groupedWork ? 6 : 14 }
-            if entry.groupedWork, entry.kind == .activity {
-                return index + 1 < entries.count && entries[index + 1].groupedWork && entries[index + 1].kind == .activity ? 4 : 6
-            }
-            if entry.kind == .activity, index + 1 < entries.count, entries[index + 1].kind == .activity { return 4 }
-            if entry.kind == .working || entry.kind == .work || entry.kind == .activity { return 10 }
-            if entry.items.first?.kind == .assistant, index + 1 < entries.count,
-               entries[index + 1].kind == .activity { return 8 }
-            // A user message already reserves room below it for its hover actions.
-            if entry.kind == .message, entry.items.first?.kind == .user { return 10 }
-            return 26
-        })
+        updateEarlierNote()
+        // The row before the rebuilt ones is laid out again too: its spacing depends on the next.
+        let first = max(0, reuse.entries - 1)
+        geometry.replace(from: first, heights: (first..<entries.count).map { heights[entries[$0].id]?.value ?? 80 },
+                         trailingSpaces: (first..<entries.count).map(trailingSpace(at:)))
+        recordBuilt(source: sourceItems, items: items, sourcePositions: sourcePositions, turns: turns, tailTurns: tailTurns, reuse: reuse)
         layoutHeader()
         lastViewport.origin.y = offset(for: anchor)
         pendingAnchor = anchor
         reflow(viewportWidth: viewportWidth)
+    }
+
+    private func trailingSpace(at index: Int) -> CGFloat {
+        let entry = entries[index]
+        let next = index + 1 < entries.count ? entries[index + 1] : nil
+        if case .card = entry.kind { return entry.groupedWork ? 6 : 14 }
+        if entry.groupedWork, entry.kind == .activity {
+            return next.map { $0.groupedWork && $0.kind == .activity } == true ? 4 : 6
+        }
+        if entry.kind == .activity, next?.kind == .activity { return 4 }
+        if entry.kind == .working || entry.kind == .work || entry.kind == .activity { return 10 }
+        if entry.items.first?.kind == .assistant, next?.kind == .activity { return 8 }
+        // A user message already reserves room below it for its hover actions.
+        if entry.kind == .message, entry.items.first?.kind == .user { return 10 }
+        return 26
+    }
+
+    private typealias Reuse = (items: Int, entries: Int, typed: Set<String>)
+
+    /// Approval decisions remain in the authoritative audit snapshot, not the chat, and
+    /// a pending question shows only in its form above the composer.
+    private static func shows(_ item: AgentChatItem) -> Bool {
+        item.kind != .approval || (!item.isComplete && item.questionnaire == nil)
+    }
+
+    /// The items to show, where each is among `source`, and how much of the last build
+    /// still holds: the items and entries before the turn ahead of the first changed item
+    /// or turn, and the typed items among them. A turn's entries depend only on its own
+    /// items, except for the newest turn's notes and typed items replacing earlier provider
+    /// items, which the step back and the typed check cover.
+    private func reusablePrefix(_ source: [AgentChatItem], unchangedLead: Int, turns: [AgentChatTurn])
+        -> (items: [AgentChatItem], sourcePositions: [Int], reuse: Reuse) {
+        let none: Reuse = (0, 0, [])
+        defer { dirtyItemID = nil }
+        // Taken out of `built`, so the shown items are edited in place rather than copied.
+        guard reusesUnchangedTurns, var last = built, last.provider == provider else {
+            built = nil
+            var items: [AgentChatItem] = [], positions: [Int] = []
+            for (index, item) in source.enumerated() where Self.shows(item) { items.append(item); positions.append(index) }
+            return (items, positions, none)
+        }
+        built = nil
+        let shared = min(last.source.count, source.count)
+        var changedSource = min(unchangedLead, shared)
+        while changedSource < shared, last.source[changedSource] == source[changedSource] { changedSource += 1 }
+        // The shown items before the first changed source item, by binary search.
+        var low = 0, high = last.sourcePositions.count
+        while low < high {
+            let middle = (low + high) / 2
+            if last.sourcePositions[middle] < changedSource { low = middle + 1 } else { high = middle }
+        }
+        let kept = low
+        last.items.removeSubrange(kept...)
+        last.sourcePositions.removeSubrange(kept...)
+        for index in changedSource..<source.count where Self.shows(source[index]) {
+            last.items.append(source[index])
+            last.sourcePositions.append(index)
+        }
+        let items = last.items, positions = last.sourcePositions
+        last.items = []; last.sourcePositions = []
+        guard last.segments.count > 1 else { return (items, positions, none) }
+        var changed = kept
+        var turn = 0
+        let sharedTurns = min(last.turns.count, turns.count)
+        while turn < sharedTurns, last.turns[turn] == turns[turn] { turn += 1 }
+        var touched: [String] = dirtyItemID.map { [$0] } ?? []
+        if turn < max(last.turns.count, turns.count) {
+            if turn < last.turns.count { touched.append(last.turns[turn].userItemID) }
+            if turn < turns.count { touched.append(turns[turn].userItemID) }
+        }
+        if let newest = last.turns.last?.userItemID, newest != turns.last?.userItemID { touched.append(newest) }
+        for id in touched {
+            if let index = items[..<changed].lastIndex(where: { $0.id == id }) { changed = index }
+        }
+        // Step back one more turn: the newest turn's notes move when another starts.
+        guard let segment = last.segments.lastIndex(where: { $0.item <= changed }), segment > 0 else {
+            return (items, positions, none)
+        }
+        let start = last.segments[segment - 1]
+        guard start.item > 0 else { return (items, positions, none) }
+        // A typed item in the rebuilt part that replaces an item before it changes reused rows.
+        let tailIDs = Set(items[start.item...].lazy.map(\.id))
+        for item in items[start.item...] {
+            guard let native = Self.typedNativeID(item.id) else { continue }
+            if !tailIDs.contains(native) { return (items, positions, none) }
+        }
+        built = last
+        let typed = Set(last.typed.lazy.filter { $0.item < start.item }.map(\.nativeID))
+        return (items, positions, (start.item, start.entry, typed))
+    }
+
+    private func recordBuilt(source: [AgentChatItem], items: [AgentChatItem], sourcePositions: [Int], turns: [AgentChatTurn],
+                             tailTurns: ArraySlice<AgentChatTurn>, reuse: Reuse) {
+        var segments = reuse.items > 0 ? built?.segments ?? [] : []
+        var typed = reuse.items > 0 ? built?.typed ?? [] : []
+        built = nil
+        while let last = segments.last, last.item >= reuse.items { segments.removeLast() }
+        while let last = typed.last, last.item >= reuse.items { typed.removeLast() }
+        let turnIDs = Set(tailTurns.lazy.map(\.userItemID))
+        for index in reuse.items..<items.count {
+            let item = items[index]
+            if let native = Self.typedNativeID(item.id) { typed.append((index, native)) }
+            guard item.kind == .user, turnIDs.contains(item.id), let entry = positions[item.id] else { continue }
+            segments.append((index, entry))
+        }
+        built = Built(source: source, items: items, sourcePositions: sourcePositions, turns: turns,
+                      provider: provider, segments: segments, typed: typed)
+    }
+
+    /// The provider item a typed todo or plan item stands for, from its ID.
+    private static func typedNativeID(_ id: String) -> String? {
+        for prefix in ["todo_list:", "proposed_plan:"] where id.hasPrefix(prefix) { return String(id.dropFirst(prefix.count)) }
+        return nil
     }
 
     /// Renders retained rows again after the link services' pull-request hosts changed.
@@ -339,6 +501,7 @@ final class AgentTranscriptDocument: ThemedView {
         trimCache()
         viewportOrigin = origin
         lastViewport = NSRect(x: rect.minX, y: origin, width: viewportWidth, height: height)
+        loadEarlierIfNear(origin: origin, height: height)
         // Nested scroll surfaces use the same correction path. Suppress recursive
         // viewport work until the corrected geometry and clip origin agree.
         if let clip = superview as? NSClipView, clip.documentView === self {
@@ -395,11 +558,20 @@ final class AgentTranscriptDocument: ThemedView {
         case .item(let targetID):
             guard let owner = entries.first(where: { $0.items.contains(where: { $0.id == targetID }) }) else { return nil }
             if owner.kind == .work {
-                var states = rowStates
-                var state = states[owner.id] ?? AgentTimelineRowState()
-                state.expanded = true
-                states[owner.id] = state
-                rowStates = states
+                captureStates()
+                var state = savedStates[owner.id] ?? AgentTimelineRowState()
+                if state.expanded != true {
+                    state.expanded = true
+                    savedStates[owner.id] = state
+                    if let cached = cache[owner.id] {
+                        cached.row.restoreState(state)
+                        cached.needsMeasurement = true
+                        cached.needsLayout = true
+                    }
+                    heights[owner.id]?.valid = false
+                    dirtyItemID = owner.turn?.userItemID
+                    update(sourceItems, omittedCount: omittedCount, turns: sourceTurns)
+                }
             }
             guard let entry = entries.first(where: { $0.kind != .work && $0.items.contains(where: { $0.id == targetID }) }) else { return nil }
             return AgentTranscriptAnchor(rowID: entry.id, localOffset: offset, fallback: lastViewport.minY)
@@ -451,6 +623,28 @@ final class AgentTranscriptDocument: ThemedView {
         subviews.forEach(visit)
     }
 
+    /// Asks for earlier items once the viewport comes within `earlierPrefetch` viewports of
+    /// the oldest shown, after this pass, so a page usually lands before the reader sees the
+    /// top. A request that brought nothing new is asked again only after a pause, so a
+    /// failing server isn't asked on every scroll.
+    private func loadEarlierIfNear(origin: CGFloat, height: CGFloat) {
+        guard omittedCount > 0, onEarlier != nil, height > 0,
+              origin - geometry.leading < earlierPrefetch * height else { return }
+        let firstID = sourceItems.first?.id
+        if let request = earlierRequest, request.firstID == firstID, Date().timeIntervalSince(request.at) < 5 { return }
+        earlierRequest = (firstID, Date())
+        Task { @MainActor [weak self] in self?.onEarlier?() }
+    }
+
+    private func updateEarlierNote() {
+        // Items that load as the reader nears them need no explanation, only a placeholder
+        // for the moment before they arrive. Without a way to load them, they are gone from Tab.
+        if let earlierNote { earlier.stringValue = earlierNote(omittedCount); return }
+        earlier.stringValue = onEarlier != nil ? "Loading earlier messages…"
+            : (omittedCount == 1 ? "1 earlier item isn't" : "\(omittedCount) earlier items aren't")
+            + " shown, to keep this conversation within its size limit"
+    }
+
     func setApprovalsEnabled(_ enabled: Bool) {
         approvalsEnabled = enabled
         for cached in cache.values { cached.row.setApprovalsEnabled(enabled) }
@@ -459,7 +653,6 @@ final class AgentTranscriptDocument: ThemedView {
     override func themeDidChange() {
         themeEpoch &+= 1
         earlier.textColor = theme.fgDim
-        showEarlier.setTitleColor(theme.fgMuted)
         reflow(viewportWidth: viewportWidth)
     }
 
@@ -468,12 +661,9 @@ final class AgentTranscriptDocument: ThemedView {
     private func layoutHeader() {
         let left = floor((viewportWidth - rowWidth) / 2)
         let start: CGFloat = isNested ? 0 : 28
-        let canLoad = onEarlier != nil
-        geometry.leading = start + (omittedCount > 0 ? (canLoad ? 66 : 30) : 0)
+        geometry.leading = start + (omittedCount > 0 ? 30 : 0)
         earlier.isHidden = omittedCount == 0
-        showEarlier.isHidden = omittedCount == 0 || !canLoad
         earlier.frame = NSRect(x: left, y: start, width: rowWidth, height: 18)
-        showEarlier.frame = NSRect(x: left - 4, y: start + 22, width: min(rowWidth, 180), height: 26)
     }
 
     private func updateFrame() {
@@ -527,6 +717,7 @@ final class AgentTranscriptDocument: ThemedView {
                 guard !self.updatingViewport else { return }
                 if row is AgentCompletedWorkRow {
                     self.lastFollowingEnd = false
+                    self.dirtyItemID = self.positions[id].flatMap { self.entries[$0].turn?.userItemID }
                     self.update(self.sourceItems, omittedCount: self.omittedCount, turns: self.sourceTurns)
                 }
                 if let onDisclosure = self.onDisclosure { onDisclosure() }
@@ -616,10 +807,12 @@ final class AgentTranscriptDocument: ThemedView {
         for (id, cached) in cache { savedStates[id] = cached.row.captureState() }
     }
 
-    private func migrateToolGroupStates() {
+    private func migrateToolGroupStates() { migrateToolGroupStates(Array(savedStates.values)) }
+
+    private func migrateToolGroupStates(_ states: [AgentTimelineRowState]) {
         // Earlier versions stored all consecutive tools under the first tool's ID.
         // Split that value state before those entries are independently restored.
-        for state in Array(savedStates.values) {
+        for state in states {
             for id in state.toolExpandedIDs where savedStates["activity:" + id] == nil {
                 savedStates["activity:" + id] = AgentTimelineRowState(toolExpandedIDs: [id])
             }
@@ -670,7 +863,13 @@ final class AgentTranscriptDocument: ThemedView {
         }
     }
 
-    private func makeEntries(_ items: [AgentChatItem], turns: [AgentChatTurn]) -> [Entry] {
+    /// The ID of the entry that shows `item` on its own row.
+    private static func entryID(for item: AgentChatItem) -> String {
+        item.kind == .tool ? "activity:" + item.id : item.id
+    }
+
+    /// `typedNativeIDs` are the provider items typed items before `items` replace.
+    private func makeEntries(_ items: [AgentChatItem], turns: [AgentChatTurn], typedNativeIDs earlierTyped: Set<String> = []) -> [Entry] {
         var userEnds: [String: Int] = [:]
         var answers: [String: Int] = [:]
         var nextUser = items.endIndex
@@ -725,7 +924,7 @@ final class AgentTranscriptDocument: ThemedView {
         // Each turn shows its newest todo list as a card; earlier updates are one line each.
         // A provider's raw tool row for a todo or plan its typed card already shows is hidden.
         var newestTodos: Set<String> = []
-        var typedNativeIDs: Set<String> = []
+        var typedNativeIDs = earlierTyped
         var segmentTodo: String?
         for item in items {
             if item.kind == .user {
@@ -734,9 +933,7 @@ final class AgentTranscriptDocument: ThemedView {
             } else if item.kind == .tool, item.workContext?.itemType == "todo_list" {
                 segmentTodo = item.id
             }
-            for prefix in ["todo_list:", "proposed_plan:"] where item.id.hasPrefix(prefix) {
-                typedNativeIDs.insert(String(item.id.dropFirst(prefix.count)))
-            }
+            if let native = Self.typedNativeID(item.id) { typedNativeIDs.insert(native) }
         }
         if let todo = segmentTodo { newestTodos.insert(todo) }
         func shadowed(_ item: AgentChatItem) -> Bool {
@@ -747,7 +944,7 @@ final class AgentTranscriptDocument: ThemedView {
             // A turn the agent began itself opens with a note, not a message from the user.
             var card = item.isProviderTurn ? .notice : classifier.classify(item)
             if card == .todo, !newestTodos.contains(item.id) { card = nil }
-            return Entry(id: item.kind == .tool ? "activity:" + item.id : item.id,
+            return Entry(id: Self.entryID(for: item),
                          kind: card.map { .card($0) } ?? (item.kind == .tool ? .activity : .message),
                          items: [item], timestamp: timestamps[item.id], duration: durations[item.id],
                          showsResponseActions: !currentTurnIsRunning,

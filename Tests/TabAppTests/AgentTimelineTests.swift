@@ -324,6 +324,39 @@ final class AgentTimelineTests: XCTestCase {
                        "Nothing can load them, so no button offers to")
     }
 
+    func testEarlierItemsLoadAsTheReaderNearsThemWithoutAButton() async throws {
+        let document = AgentTranscriptDocument(frame: .zero)
+        var requests = 0
+        document.onEarlier = { requests += 1 }
+        let items = (0..<60).map { AgentChatItem(id: "m\($0)", kind: .assistant, text: "Message \($0)") }
+        document.update(items, omittedCount: 100)
+        // The conversation opens at its end, far below the start: nothing loads.
+        document.updateViewport(NSRect(x: 0, y: 1_000_000, width: 700, height: 400), followingEnd: true)
+        await Task.yield()
+        XCTAssertEqual(requests, 0)
+        let labels = document.subviews.compactMap { $0 as? NSTextField }.filter { !$0.isHidden }.map(\.stringValue)
+        XCTAssertEqual(labels, ["Loading earlier messages…"])
+        XCTAssertFalse(document.subviews.contains { $0 is NSButton && !$0.isHidden }, "Nothing to press")
+
+        // Within two viewports of the start, the next page loads, once.
+        document.updateViewport(NSRect(x: 0, y: 500, width: 700, height: 400), followingEnd: false)
+        document.updateViewport(NSRect(x: 0, y: 0, width: 700, height: 400), followingEnd: false)
+        for _ in 0..<5 { await Task.yield() }
+        XCTAssertEqual(requests, 1, "A request in flight isn't repeated on every scroll")
+        // Once the page lands, the next one loads as the reader keeps going.
+        let page = (0..<20).map { AgentChatItem(id: "p\($0)", kind: .assistant, text: "Earlier \($0)") }
+        document.update(page + items, omittedCount: 80)
+        document.updateViewport(NSRect(x: 0, y: 0, width: 700, height: 400), followingEnd: false)
+        for _ in 0..<5 { await Task.yield() }
+        XCTAssertEqual(requests, 2)
+        // At the start of the conversation, nothing more loads and nothing is noted.
+        document.update(page + items, omittedCount: 0)
+        document.updateViewport(NSRect(x: 0, y: 0, width: 700, height: 400), followingEnd: false)
+        for _ in 0..<5 { await Task.yield() }
+        XCTAssertEqual(requests, 2)
+        XCTAssertTrue(document.subviews.compactMap { $0 as? NSTextField }.allSatisfy(\.isHidden))
+    }
+
     func testWorkingLineNamesRetriesAndRateLimits() {
         let soon = Calendar.current.date(bySettingHour: 14, minute: 0, second: 0, of: Date()) ?? Date()
         XCTAssertEqual(AgentWorkingRow.describe(.init(kind: .retrying, attempt: 2, message: "Overloaded")),

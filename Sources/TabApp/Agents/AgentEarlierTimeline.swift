@@ -12,6 +12,7 @@ import TabProtocol
 ///   `fillGap` merges the newest archive pages that lead back to what is held.
 /// - A page that arrives after the retained window moved still applies: archive positions
 ///   don't change while the conversation isn't reset, and items already held are skipped.
+/// - Turns of trimmed items stay with them, so a carried turn keeps its shape.
 struct AgentEarlierTimeline {
     /// The conversation reset the loaded items belong to.
     private(set) var resetID: SessionId?
@@ -24,7 +25,13 @@ struct AgentEarlierTimeline {
     private(set) var needsGapFill = false
     private var retained: [AgentChatItem] = []
     private var retainedIDs: Set<String> = []
+    private var retainedTurns: [AgentChatTurn] = []
+    /// Turns of the carried items, oldest first.
+    private var carriedTurns: [AgentChatTurn] = []
     private var omitted = 0
+    /// How many items `shown` began with when it was last read, while none came before them
+    /// since; see `unchangedLead`.
+    private var lead = 0
 
     /// True once any archived page loaded.
     var isLoaded: Bool { cursor != nil }
@@ -44,25 +51,47 @@ struct AgentEarlierTimeline {
     /// Takes a new retained window and its omitted count, and returns what to show: the
     /// loaded items then the retained ones, and how many older items stay hidden.
     mutating func observe(_ window: [AgentChatItem], omitted newOmitted: Int, resetID reset: SessionId?) -> (items: [AgentChatItem], omitted: Int) {
+        observe(window, turns: [], omitted: newOmitted, resetID: reset).items
+    }
+
+    /// Like `observe(_:omitted:resetID:)`, with the window's turns: the turns to show are
+    /// those of carried items, then the window's. `unchangedLead` says how many leading
+    /// items are the ones the previous result began with, so a reader can skip them.
+    mutating func observe(_ window: [AgentChatItem], turns windowTurns: [AgentChatTurn], omitted newOmitted: Int,
+                          resetID reset: SessionId?) -> (items: (items: [AgentChatItem], omitted: Int), turns: [AgentChatTurn], unchangedLead: Int) {
         if reset != resetID { self = AgentEarlierTimeline(); resetID = reset }
         let windowIDs = Set(window.map(\.id))
         if isLoaded {
-            // What the reader had in the window and the server trimmed since.
+            // What the reader had in the window and the server trimmed since. It was shown
+            // just after the carried items, so the shown items still begin the same way.
             let trimmed = retained.filter { !windowIDs.contains($0.id) && !ids.contains($0.id) }
             items.append(contentsOf: trimmed)
             for item in trimmed { ids.insert(item.id) }
+            if !trimmed.isEmpty {
+                let trimmedIDs = Set(trimmed.map(\.id))
+                carriedTurns.append(contentsOf: retainedTurns.filter { trimmedIDs.contains($0.userItemID) })
+            }
             if newOmitted - omitted > trimmed.count { needsGapFill = true }
         }
         retained = window
         retainedIDs = windowIDs
+        retainedTurns = windowTurns
         omitted = newOmitted
-        return shown
+        let result = shown
+        let above = result.items.count - window.count
+        let unchanged = above == items.count ? min(lead, above) : 0
+        lead = above == items.count ? above : 0
+        let windowTurnIDs = Set(windowTurns.map(\.userItemID))
+        let turns = carriedTurns.isEmpty ? windowTurns : carriedTurns.filter { !windowTurnIDs.contains($0.userItemID) } + windowTurns
+        return (result, turns, unchanged)
     }
 
     /// The loaded items above the retained window, and the older items still hidden.
     var shown: (items: [AgentChatItem], omitted: Int) {
         guard !items.isEmpty else { return (retained, omitted) }
-        let above = items.filter { !retainedIDs.contains($0.id) }
+        // Loaded items are never retained ones, unless the server sent one back.
+        let overlaps = retained.contains { ids.contains($0.id) }
+        let above = overlaps ? items.filter { !retainedIDs.contains($0.id) } : items
         return (above + retained, max(0, omitted - above.count))
     }
 
@@ -80,6 +109,7 @@ struct AgentEarlierTimeline {
             guard page.start < cursor else { return true }
         }
         let fresh = page.items.filter { !holds($0.id) }
+        if !fresh.isEmpty { lead = 0 }
         items.insert(contentsOf: fresh, at: 0)
         for item in fresh { ids.insert(item.id) }
         cursor = min(cursor ?? page.start, page.start)
@@ -97,6 +127,8 @@ struct AgentEarlierTimeline {
             for item in new { seen.insert(item.id) }
             fresh = new + fresh
         }
+        // A gap's items go after those already shown, which keep their place.
+        lead = min(lead, items.count)
         items.append(contentsOf: fresh)
         for item in fresh { ids.insert(item.id) }
         if cursor == nil, let oldest = pages.last { cursor = oldest.start }

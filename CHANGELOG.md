@@ -3,6 +3,17 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.127.0 - 2026-11-23
+
+### Changed
+
+- Agent conversations no longer cut off their earliest messages: older messages load by themselves as you scroll up, however long the conversation grows.
+- Long agent conversations stay smooth while a reply streams, since only the newest turns are laid out again.
+
+### Fixed
+
+- Older turns in a long agent conversation keep their folded work and file changes when they scroll out of the server's recent window.
+
 ## 0.126.0 - 2026-11-23
 
 ### Added

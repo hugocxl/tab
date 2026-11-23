@@ -33,7 +33,8 @@ enum AgentTypedCardKind: Equatable {
 /// The memo holds at most `limit` items and is cleared when full.
 @MainActor
 final class AgentTypedCardClassifier {
-    static let limit = 256
+    /// Holds every todo list of a long conversation, so none is parsed again per snapshot.
+    static let limit = 16_384
     private struct Memo { var detail: String?; var valid: Bool }
     private var todoMemo: [String: Memo] = [:]
     /// Decodes a todo detail; replaceable to count parses.

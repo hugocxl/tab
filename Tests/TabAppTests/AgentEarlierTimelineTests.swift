@@ -178,4 +178,28 @@ final class AgentEarlierTimelineTests: XCTestCase {
         XCTAssertEqual(timeline.observe([], omitted: 0, resetID: SessionId()).items, [])
         XCTAssertFalse(timeline.isLoaded)
     }
+
+    func testTrimmedItemsKeepTheirTurnsAndTheLeadStaysUnchanged() {
+        func item(_ id: String, _ kind: AgentChatItem.Kind = .assistant) -> AgentChatItem { AgentChatItem(id: id, kind: kind, text: id) }
+        func turn(_ user: String) -> AgentChatTurn {
+            AgentChatTurn(userItemID: user, startedAt: Date(timeIntervalSince1970: 1), completedAt: Date(timeIntervalSince1970: 2), status: .idle)
+        }
+        var timeline = AgentEarlierTimeline()
+        _ = timeline.observe([item("u1", .user), item("a1"), item("u2", .user), item("a2")], turns: [turn("u1"), turn("u2")],
+                             omitted: 2, resetID: nil)
+        timeline.accept(AgentEarlierItems(items: [item("x"), item("y")], start: 0, total: 2), before: nil, resetID: nil)
+        var shown = timeline.observe([item("u1", .user), item("a1"), item("u2", .user), item("a2")], turns: [turn("u1"), turn("u2")],
+                                     omitted: 2, resetID: nil)
+        XCTAssertEqual(shown.unchangedLead, 0, "A loaded page comes before everything shown")
+        XCTAssertEqual(shown.items.items.map(\.id), ["x", "y", "u1", "a1", "u2", "a2"])
+        // The server trims the first turn out of its window, and its turn with it.
+        shown = timeline.observe([item("u2", .user), item("a2"), item("u3", .user)], turns: [turn("u2"), turn("u3")],
+                                 omitted: 4, resetID: nil)
+        XCTAssertEqual(shown.items.items.map(\.id), ["x", "y", "u1", "a1", "u2", "a2", "u3"])
+        XCTAssertEqual(shown.turns.map(\.userItemID), ["u1", "u2", "u3"], "The carried turn keeps its shape")
+        XCTAssertEqual(shown.unchangedLead, 2, "What was shown first is still shown first")
+        shown = timeline.observe([item("u2", .user), item("a2"), item("u3", .user)], turns: [turn("u2"), turn("u3")],
+                                 omitted: 4, resetID: nil)
+        XCTAssertEqual(shown.unchangedLead, 4)
+    }
 }

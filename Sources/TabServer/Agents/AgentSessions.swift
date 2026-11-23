@@ -205,6 +205,8 @@ final class AgentSessions: @unchecked Sendable {
 
     let queue = DispatchQueue(label: "tab.agents.sessions", qos: .userInitiated)
     let writer = DispatchQueue(label: "tab.agents.persistence", qos: .utility)
+    /// Line indexes of the archives of dropped items, so paging back stays cheap at any length.
+    private let earlierArchive = AgentEarlierArchive()
     var retainedCheckpointIDs: [SessionId: Set<String>] = [:] // writer queue only
     let root: URL
     /// The server's clock, injected so retention can be tested across days.
@@ -506,10 +508,10 @@ final class AgentSessions: @unchecked Sendable {
         case .searchEarlier(let session, let query, let before):
             guard queue.sync(execute: { entries[session] != nil }) else { throw ServiceError.unknownSession(session) }
             let file = queue.sync { earlierFile(session: session) }
-            let writer = writer
+            let writer = writer, earlierArchive = earlierArchive
             return .archiveSearch(try await runBlocking {
                 writer.sync {}
-                return AgentArchiveSearch.search(file: file, query: query, before: before)
+                return AgentArchiveSearch.search(earlierArchive.lines(of: file), query: query, before: before)
             })
         case .readSince(let session, let revision):
             return .delta(try queue.sync { () throws -> AgentChatDelta in
@@ -1687,14 +1689,12 @@ final class AgentSessions: @unchecked Sendable {
         }
     }
 
-    /// Where items a conversation dropped past its size limit are kept, one JSON line each.
+    /// Where items a conversation dropped past its size limit are kept, one JSON line each,
+    /// for as long as the conversation is.
     private func earlierFile(session: SessionId) -> URL {
         let suffix = entries[session]?.snapshot.resetID.map { "-" + $0.description } ?? ""
         return root.appendingPathComponent("earlier", isDirectory: true).appendingPathComponent(session.description + suffix + ".jsonl")
     }
-
-    /// The archive stops growing at this size; later drops are only counted.
-    static let earlierArchiveBytes = 64 * 1024 * 1024
 
     private func archive(_ items: [AgentChatItem], session: SessionId) {
         let lines = items.compactMap { item -> Data? in
@@ -1711,8 +1711,7 @@ final class AgentSessions: @unchecked Sendable {
                 if !FileManager.default.fileExists(atPath: file.path) { FileManager.default.createFile(atPath: file.path, contents: nil) }
                 let handle = try FileHandle(forWritingTo: file)
                 defer { try? handle.close() }
-                let size = try handle.seekToEnd()
-                guard size < UInt64(Self.earlierArchiveBytes) else { return }
+                try handle.seekToEnd()
                 for line in lines { try handle.write(contentsOf: line) }
             } catch { ServerLog.error("agent earlier items not archived: \(error)") }
         }
@@ -1721,17 +1720,17 @@ final class AgentSessions: @unchecked Sendable {
     /// A page of archived items, read on a blocking worker after earlier archive writes.
     private func earlierItems(session: SessionId, before: Int?, limit: Int) async throws -> AgentEarlierItems {
         let file = queue.sync { earlierFile(session: session) }
-        let writer = writer
+        let writer = writer, earlierArchive = earlierArchive
         return try await runBlocking { () throws -> AgentEarlierItems in
             writer.sync {}
-            guard let data = try? Data(contentsOf: file) else { return AgentEarlierItems(items: [], start: 0, total: 0) }
-            let lines = data.split(separator: 0x0A, omittingEmptySubsequences: true)
+            guard let lines = earlierArchive.lines(of: file) else { return AgentEarlierItems(items: [], start: 0, total: 0) }
             let end = min(before ?? lines.count, lines.count)
             var items: [AgentChatItem] = []
             var bytes = 0
             var start = end
+            let decoder = JSONDecoder()
             while start > 0, items.count < limit {
-                guard let item = try? JSONDecoder().decode(AgentChatItem.self, from: Data(lines[start - 1])) else { start -= 1; continue }
+                guard let item = try? decoder.decode(AgentChatItem.self, from: lines[start - 1]) else { start -= 1; continue }
                 guard bytes + item.transcriptByteCount <= AgentEarlierItems.maxBytes else { break }
                 bytes += item.transcriptByteCount
                 items.insert(item, at: 0)

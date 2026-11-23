@@ -769,15 +769,17 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
 
     /// The snapshot with any loaded earlier items above its own. Items the server trimmed
     /// since the pages loaded stay in place; a gap left by a reconnect is filled.
-    private func displayed(_ result: AgentChatSnapshot) -> AgentChatSnapshot {
-        let shown = earlier.observe(result.items, omitted: result.omittedItems ?? 0, resetID: result.resetID)
+    /// `unchangedLead` counts the leading items that are those the previous result began with.
+    private func displayed(_ result: AgentChatSnapshot) -> (snapshot: AgentChatSnapshot, unchangedLead: Int) {
+        let shown = earlier.observe(result.items, turns: result.turns ?? [], omitted: result.omittedItems ?? 0, resetID: result.resetID)
         if earlier.needsGapFill, earlierTask == nil { loadEarlier() }
         updateEarlierLoader()
-        guard earlier.isLoaded else { return result }
+        guard earlier.isLoaded else { return (result, 0) }
         var snapshot = result
-        snapshot.items = shown.items
-        snapshot.omittedItems = shown.omitted
-        return snapshot
+        snapshot.items = shown.items.items
+        snapshot.omittedItems = shown.items.omitted
+        if result.turns != nil || !shown.turns.isEmpty { snapshot.turns = shown.turns }
+        return (snapshot, shown.unchangedLead)
     }
 
     /// Offers Show Earlier while the archive has more to load, or a gap to fill.
@@ -832,7 +834,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
                     }
                     guard self.earlier.accept(result, before: before, resetID: resetID, omittedWhenRequested: omitted) else { return }
                 }
-                if let current = self.snapshot { self.surface.render(self.displayed(current)) }
+                if let current = self.snapshot { self.surface.render(self.displayed(current).snapshot) }
             } catch let error as ClientError where error.serverCode == .unsupported {
                 self?.earlierUnavailable = true
                 self?.updateEarlierLoader()
@@ -2027,7 +2029,8 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
             reasoningEffort = result.reasoningEffort
             selectionEdited = false
         }
-        surface.render(displayed(result), itemsUnchanged: itemsUnchanged)
+        let shown = displayed(result)
+        surface.render(shown.snapshot, itemsUnchanged: itemsUnchanged, unchangedLead: shown.unchangedLead)
         announcer.observe(result, in: surface)
         for (toolUseID, window) in subagentWindows {
             if let agent = result.subagents?.first(where: { $0.toolUseID == toolUseID }) { window.update(agent) }

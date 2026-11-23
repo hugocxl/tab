@@ -591,8 +591,11 @@ final class AgentConversationArchiveFindTests: XCTestCase {
                                                 output: "src/a.swift: the archived needle sits here", status: .completed))
                     : AgentChatItem(id: "a\(index)", kind: .assistant, text: "Archived answer \(index)", createdAt: date)
             }
-            retained = [AgentChatItem(id: "u", kind: .user, text: "Latest question"),
-                        AgentChatItem(id: "r", kind: .assistant, text: "Latest answer")]
+            // Enough retained history that the pane opens far below the start, where earlier
+            // pages don't load until the reader scrolls up or Find reveals one.
+            retained = (0..<60).map { AgentChatItem(id: "f\($0)", kind: .assistant, text: "Retained answer \($0)") }
+                + [AgentChatItem(id: "u", kind: .user, text: "Latest question"),
+                   AgentChatItem(id: "r", kind: .assistant, text: "Latest answer")]
         }
 
         var snapshot: AgentChatSnapshot {
