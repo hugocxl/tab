@@ -614,6 +614,9 @@ final class FilesTableView: NSTableView {
 /// One tree row, drawn directly: chevron, folder or file glyph and name,
 /// with hover and selection fills.
 class FilesCellView: HoverView {
+    /// The Explorer keeps the library's two-tone file artwork; the rest of the
+    /// app, Source Control's tree included, draws stroke icons.
+    class var artwork: AppIcon.Artwork { .duotone }
     private var node = FilesTree.Node(path: "", name: "", isDirectory: false, dimmed: false)
     private var depth = 0
     private var expanded = false
@@ -639,9 +642,11 @@ class FilesCellView: HoverView {
     }
 
     override func themeDidChange() {
-        fileIcon = FileIcon.image(for: node.path, isDirectory: node.isDirectory, isExpanded: expanded, theme: theme)
+        let artwork = Self.artwork
+        fileIcon = FileIcon.image(for: node.path, isDirectory: node.isDirectory, isExpanded: expanded, theme: theme,
+                                  artwork: artwork)
         chevron = node.isDirectory
-            ? (expanded ? AppIcon.chevronDown : AppIcon.chevronRight).image(size: 11)?.tinted(theme.fgDim)
+            ? (expanded ? AppIcon.chevronDown : AppIcon.chevronRight).image(size: 11, artwork: artwork)?.tinted(theme.fgDim)
             : nil
         needsDisplay = true
     }

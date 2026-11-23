@@ -3,6 +3,14 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.115.0 - 2026-11-23
+
+### Changed
+
+- Every icon outside the Explorer is now drawn as an outline, including status dots, the loading spinner and the agent composer's Send, Stop and Dictate buttons.
+- Source Control's Stage, Unstage and Discard buttons show icons instead of text symbols.
+- Checked and unchecked tasks in agent replies look different again, as a checked box and an empty square.
+
 ## 0.114.1 - 2026-11-23
 
 ### Fixed

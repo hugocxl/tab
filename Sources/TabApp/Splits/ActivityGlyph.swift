@@ -1,9 +1,9 @@
 import AppKit
 import QuartzCore
 
-/// A small status glyph: a dot, a spinning arc while work runs, or a ring
-/// filled to a percentage. The spinner turns with a Core Animation rotation,
-/// so it costs no redraws.
+/// A small status glyph: a dot, a spinner while work runs, or a ring filled to
+/// a percentage. The dot and spinner are stroke icons; the spinner turns with a
+/// Core Animation rotation, so it costs no redraws.
 final class ActivityGlyph: NSView {
     enum Style: Equatable {
         case none
@@ -18,6 +18,7 @@ final class ActivityGlyph: NSView {
     }
 
     private let shape = CAShapeLayer()
+    private let icon = CALayer()
     private let track = CAShapeLayer()
     private var dots: [CAShapeLayer] = []
 
@@ -26,6 +27,7 @@ final class ActivityGlyph: NSView {
         wantsLayer = true
         layer?.addSublayer(track)
         layer?.addSublayer(shape)
+        layer?.addSublayer(icon)
         track.fillColor = nil
         shape.fillColor = nil
         shape.lineCap = .round
@@ -54,7 +56,8 @@ final class ActivityGlyph: NSView {
         let center = CGPoint(x: bounds.midX, y: bounds.midY)
         shape.frame = bounds
         track.frame = bounds
-        shape.removeAnimation(forKey: "spin")
+        icon.removeAnimation(forKey: "spin")
+        icon.contents = nil
         track.path = nil
         dots.forEach { $0.removeFromSuperlayer() }
         dots.removeAll()
@@ -62,18 +65,12 @@ final class ActivityGlyph: NSView {
         case .none:
             shape.path = nil
         case let .dot(color, diameter):
-            let rect = CGRect(x: center.x - diameter / 2, y: center.y - diameter / 2, width: diameter, height: diameter)
-            shape.path = CGPath(ellipseIn: rect, transform: nil)
-            shape.fillColor = color.cgColor
-            shape.strokeColor = nil
+            shape.path = nil
+            // The dot icon's ring spans about half its canvas.
+            show(.dot, size: ceil(diameter * 2), color: color, center: center)
         case .spinner(let color):
-            let radius = side / 2 - 1.5
-            shape.path = CGPath(ellipseIn: CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2), transform: nil)
-            shape.fillColor = nil
-            shape.strokeColor = color.cgColor
-            shape.lineWidth = 1.5
-            shape.strokeStart = 0
-            shape.strokeEnd = 0.7
+            shape.path = nil
+            show(.spinner, size: side, color: color, center: center)
             guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
             let spin = CABasicAnimation(keyPath: "transform.rotation.z")
             spin.fromValue = 0
@@ -81,7 +78,7 @@ final class ActivityGlyph: NSView {
             spin.duration = 1
             spin.repeatCount = .infinity
             spin.isRemovedOnCompletion = false
-            shape.add(spin, forKey: "spin")
+            icon.add(spin, forKey: "spin")
         case .dots(let color):
             shape.path = nil
             let diameter: CGFloat = 2.5
@@ -116,5 +113,11 @@ final class ActivityGlyph: NSView {
             shape.strokeStart = 0
             shape.strokeEnd = min(max(fraction, 0), 1)
         }
+    }
+
+    private func show(_ glyph: AppIcon, size: CGFloat, color: NSColor, center: CGPoint) {
+        icon.frame = CGRect(x: center.x - size / 2, y: center.y - size / 2, width: size, height: size)
+        icon.contentsScale = window?.backingScaleFactor ?? 2
+        icon.contents = glyph.image(size: size, color: color)
     }
 }

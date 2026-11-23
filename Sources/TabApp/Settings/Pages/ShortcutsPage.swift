@@ -20,7 +20,7 @@ struct ShortcutsPage: View {
                         Button {
                             query = ""
                         } label: {
-                            Image(.circleXFill, size: 13)
+                            Image(.circleX, size: 13)
                         }
                         .buttonStyle(.borderless)
                         .foregroundStyle(.secondary)

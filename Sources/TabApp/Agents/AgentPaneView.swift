@@ -210,7 +210,6 @@ final class AgentPaneView: ThemedView {
         plan.setAccessibilityLabel("Disable plan mode")
         plan.toolTip = "Plan mode · Shift-Tab to toggle"
         attach.toolTip = "Attach files or drop them into the message box"
-        attach.filled = true
         // The pop-ups keep the menus and selection; the combined picker presents them.
         model.isHidden = true
         effort.isHidden = true
@@ -450,16 +449,16 @@ final class AgentPaneView: ThemedView {
     private func applyNoticeTone() {
         switch noticeTone {
         case .info:
-            noticeIcon.icon = .icon(.infoFill)
+            noticeIcon.icon = .icon(.info)
             noticeIcon.color = theme.fgDim
         case .progress:
             noticeIcon.icon = .spinner
             noticeIcon.color = theme.fgDim
         case .warning:
-            noticeIcon.icon = .icon(.triangleAlertFill)
+            noticeIcon.icon = .icon(.triangleAlert)
             noticeIcon.color = theme.warning
         case .danger:
-            noticeIcon.icon = .icon(.exclamationCircleFill)
+            noticeIcon.icon = .icon(.circleAlert)
             noticeIcon.color = theme.danger
         }
         feedback.textColor = noticeTone == .warning || noticeTone == .danger ? theme.fg : theme.fgMuted

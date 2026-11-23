@@ -133,7 +133,7 @@ public struct UpdateChip: Equatable, Sendable {
         case .installing(let version):
             return UpdateChip(tone: .info, icon: .spinner, message: "Installing \(app) \(version)…", dismissal: nil)
         case .installed(let version):
-            return UpdateChip(tone: .info, icon: .icon(.refreshCircleFill),
+            return UpdateChip(tone: .info, icon: .icon(.refreshCircle),
                               message: "\(app) \(version) is installed. Restart to open it.",
                               button: Button(title: "Restart", action: .update), dismissal: nil)
         case .restartingServer:
@@ -144,24 +144,24 @@ public struct UpdateChip: Equatable, Sendable {
 
         switch notice {
         case .confirmUpdate? where ready.map({ UpdateDecision.step(compatible: $0.compatible, sessions: sessions, agents: agents) }) == .confirmEndingTerminals:
-            return UpdateChip(tone: .warning, icon: .icon(.exclamationCircleFill),
+            return UpdateChip(tone: .warning, icon: .icon(.circleAlert),
                               message: "Restart now? This ends \(endingWork(sessions)).",
                               button: Button(title: "Restart", action: .endTerminalsAndUpdate), dismissal: .notice)
         case .confirmServerRestart? where outdatedServer != nil:
-            return UpdateChip(tone: .warning, icon: .icon(.exclamationCircleFill),
+            return UpdateChip(tone: .warning, icon: .icon(.circleAlert),
                               message: "Restart the server? This ends \(endingWork(sessions)).",
                               button: Button(title: "Restart", action: .endTerminalsAndRestartServer), dismissal: .notice)
         case .installFailed(let reason)?:
-            return UpdateChip(tone: .danger, icon: .icon(.exclamationCircleFill),
+            return UpdateChip(tone: .danger, icon: .icon(.circleAlert),
                               message: "Couldn’t install the update. \(sentence(reason))",
                               button: ready != nil ? Button(title: "Try Again", action: .update)
                                   : available.map { _ in Button(title: "Download Again", action: .download) }, dismissal: .notice)
         case .unsavedEditors? where ready != nil:
-            return UpdateChip(tone: .warning, icon: .icon(.exclamationCircleFill),
+            return UpdateChip(tone: .warning, icon: .icon(.circleAlert),
                               message: "Save or close files with unsaved changes, then restart.",
                               button: Button(title: "Restart", action: .update), dismissal: .notice)
         case .serverRestartFailed(let reason)?:
-            return UpdateChip(tone: .danger, icon: .icon(.exclamationCircleFill),
+            return UpdateChip(tone: .danger, icon: .icon(.circleAlert),
                               message: "Couldn’t restart the server. \(sentence(reason))",
                               button: outdatedServer.map { _ in Button(title: "Try Again", action: .restartServer) }, dismissal: .notice)
         default:
@@ -187,24 +187,24 @@ public struct UpdateChip: Equatable, Sendable {
 
         switch notice {
         case .checkFailed(let reason)?:
-            return UpdateChip(tone: .danger, icon: .icon(.exclamationCircleFill),
+            return UpdateChip(tone: .danger, icon: .icon(.circleAlert),
                               message: "Couldn’t check for updates. \(sentence(reason))",
                               button: Button(title: "Try Again", action: .checkAgain), dismissal: .notice)
         case let .downloadFailed(version, reason)?:
-            return UpdateChip(tone: .danger, icon: .icon(.exclamationCircleFill),
+            return UpdateChip(tone: .danger, icon: .icon(.circleAlert),
                               message: "Couldn’t download \(app) \(version). \(sentence(reason))",
                               button: Button(title: "Try Again", action: available == version ? .download : .checkAgain), dismissal: .notice)
         case .unavailable(let reason)?:
-            return UpdateChip(tone: .warning, icon: .icon(.exclamationCircleFill), message: sentence(reason), dismissal: .notice)
+            return UpdateChip(tone: .warning, icon: .icon(.circleAlert), message: sentence(reason), dismissal: .notice)
         case .upToDate(let version)?:
-            return UpdateChip(tone: .success, icon: .icon(.circleCheckFill),
+            return UpdateChip(tone: .success, icon: .icon(.circleCheck),
                               message: "You’re up to date. \(app) \(version) is the latest version.", dismissal: .notice)
         default:
             break
         }
 
         if let available {
-            return UpdateChip(tone: .info, icon: .icon(.downloadCircleFill), message: "\(app) \(available) is available.",
+            return UpdateChip(tone: .info, icon: .icon(.circleArrowDown), message: "\(app) \(available) is available.",
                               button: Button(title: "Update", action: .download), dismissal: .available(available))
         }
 
@@ -218,7 +218,7 @@ public struct UpdateChip: Equatable, Sendable {
             case .confirmEndingTerminals:
                 message = "\(app) \(ready.version) is ready. It needs a new server, so restarting ends running terminals and agents."
             }
-            return UpdateChip(tone: .info, icon: .icon(.refreshCircleFill), message: message,
+            return UpdateChip(tone: .info, icon: .icon(.refreshCircle), message: message,
                               button: Button(title: "Restart", action: .update), dismissal: .ready(ready.version))
         }
 
@@ -229,17 +229,17 @@ public struct UpdateChip: Equatable, Sendable {
         }
 
         if let outdatedServer {
-            return UpdateChip(tone: .warning, icon: .icon(.exclamationCircleFill),
+            return UpdateChip(tone: .warning, icon: .icon(.circleAlert),
                               message: serverUpdateMessage(version: outdatedServer),
                               button: Button(title: "Restart", action: .restartServer), dismissal: .server(outdatedServer))
         }
 
         switch notice {
         case .updated(let version)?:
-            return UpdateChip(tone: .success, icon: .icon(.circleCheckFill), message: "Updated to \(app) \(version).",
+            return UpdateChip(tone: .success, icon: .icon(.circleCheck), message: "Updated to \(app) \(version).",
                               button: Button(title: "What’s New", action: .showChangelog), dismissal: .notice)
         case .serverRestarted(let version)?:
-            return UpdateChip(tone: .success, icon: .icon(.circleCheckFill),
+            return UpdateChip(tone: .success, icon: .icon(.circleCheck),
                               message: "The server is running \(app) \(version).", dismissal: .notice)
         default:
             break

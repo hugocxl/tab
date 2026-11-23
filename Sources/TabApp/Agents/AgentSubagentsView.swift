@@ -223,8 +223,8 @@ final class AgentSubagentRow: NSView {
         close.chatTheme = theme
         icon.theme = theme
         switch subagent?.status {
-        case .completed: (icon.icon, icon.color) = (.icon(.circleCheckFill), theme.success)
-        case .failed: (icon.icon, icon.color) = (.icon(.circleXFill), theme.danger)
+        case .completed: (icon.icon, icon.color) = (.icon(.circleCheck), theme.success)
+        case .failed: (icon.icon, icon.color) = (.icon(.circleX), theme.danger)
         case .stopped: (icon.icon, icon.color) = (.icon(.minusCircle), theme.fgDim)
         case .running, nil: (icon.icon, icon.color) = (.spinner, theme.fgDim)
         }

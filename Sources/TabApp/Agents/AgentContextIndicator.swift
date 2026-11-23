@@ -54,24 +54,26 @@ final class AgentContextIndicator: AgentComposerButton {
         }
         let center = NSPoint(x: bounds.midX, y: bounds.midY)
         let radius: CGFloat = 8
+        guard let fractionUsed else {
+            // Capacity unknown: a dashed ring instead of an empty meter.
+            let side: CGFloat = 22
+            AppIcon.circleDashed.image(size: side, color: chatTheme.fgDim)?.draw(
+                in: NSRect(x: center.x - side / 2, y: center.y - side / 2, width: side, height: side),
+                from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+            return
+        }
         chatTheme.fg.withAlphaComponent(0.18).setStroke()
         let track = NSBezierPath(ovalIn: NSRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2))
         track.lineWidth = 2.5
         track.stroke()
-        if let fractionUsed {
-            (fractionUsed > 0.9 ? chatTheme.danger : chatTheme.fgMuted).setStroke()
-            if fractionUsed > 0 {
-                let arc = NSBezierPath()
-                arc.appendArc(withCenter: center, radius: radius, startAngle: -90,
-                              endAngle: -90 + CGFloat(min(1, fractionUsed)) * 360, clockwise: false)
-                arc.lineWidth = 2.5
-                arc.lineCapStyle = .round
-                arc.stroke()
-            }
-        } else {
-            chatTheme.fgDim.setFill()
-            NSBezierPath(ovalIn: NSRect(x: center.x - 1.5, y: center.y - 1.5, width: 3, height: 3)).fill()
-        }
+        guard fractionUsed > 0 else { return }
+        (fractionUsed > 0.9 ? chatTheme.danger : chatTheme.fgMuted).setStroke()
+        let arc = NSBezierPath()
+        arc.appendArc(withCenter: center, radius: radius, startAngle: -90,
+                      endAngle: -90 + CGFloat(min(1, fractionUsed)) * 360, clockwise: false)
+        arc.lineWidth = 2.5
+        arc.lineCapStyle = .round
+        arc.stroke()
     }
 
     /// Compacts the conversation through the provider's own command; nil when the

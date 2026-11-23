@@ -50,10 +50,11 @@ enum FileIcon {
 
     /// Resolves and draws file or folder glyphs in the supplied theme.
     static func image(for path: String, isDirectory: Bool = false, isExpanded: Bool = false,
-                      mimeType: String? = nil, theme: AppTheme, size: CGFloat = 14) -> NSImage? {
+                      mimeType: String? = nil, theme: AppTheme, size: CGFloat = 14,
+                      artwork: AppIcon.Artwork = .stroke) -> NSImage? {
         let resolved: Resolution = isDirectory ? style(for: isExpanded ? .folderOpen : .folder)
             : resolve(path, mimeType: mimeType)
-        return resolved.icon.image(size: size, theme: theme)
+        return resolved.icon.image(size: size, theme: theme, artwork: artwork)
     }
 
     static func image(for path: String, mimeType: String? = nil, dark: Bool, size: CGFloat = 14) -> NSImage? {

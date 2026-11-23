@@ -36,7 +36,7 @@ public enum SettingsCategory: String, CaseIterable, Sendable {
         case .keyboard: return (.command, 0xF7F7F8, 0xDCDCDF, 0x6E6E73)
         case .agents: return (.agents, 0xFFB86B, 0xF2701B, 0xFFFFFF)
         case .integrations: return (.extensions, 0xFF6FB5, 0x8E4BF2, 0xFFFFFF)
-        case .notifications: return (.bellUnread, 0xFF8A65, 0xE5484D, 0xFFFFFF)
+        case .notifications: return (.bell, 0xFF8A65, 0xE5484D, 0xFFFFFF)
         case .privacy: return (.hand, 0x5BB2FF, 0x1F6FEB, 0xFFFFFF)
         case .browser: return (.globe, 0x5BB2FF, 0x1F6FEB, 0xFFFFFF)
         case .remoteServers: return (.network, 0x4FD1D5, 0x1E9AA0, 0xFFFFFF)

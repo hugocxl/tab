@@ -7,7 +7,7 @@ import TabCore
 @MainActor
 final class NoticeTests: XCTestCase {
     private func notice(_ message: String) -> Notice {
-        Notice(tone: .neutral, icon: .icon(.infoFill), message: message)
+        Notice(tone: .neutral, icon: .icon(.info), message: message)
     }
 
     func testStackKeepsNewestFirstUpdatesInPlaceAndDropsTheOldestTimedNotice() {
@@ -30,7 +30,7 @@ final class NoticeTests: XCTestCase {
     func testIconTransitionsPreserveTemplateTintAndHideProgressRings() throws {
         let view = NoticeIcon(frame: NSRect(x: 0, y: 0, width: 18, height: 18))
         view.color = .systemRed
-        view.icon = .icon(.infoFill)
+        view.icon = .icon(.info)
         let glyph = try XCTUnwrap(view.subviews.compactMap { $0 as? NSImageView }.first)
         let image = try XCTUnwrap(glyph.image)
         XCTAssertTrue(image.isTemplate)
@@ -42,7 +42,7 @@ final class NoticeTests: XCTestCase {
         XCTAssertTrue(glyph.isHidden)
         view.icon = .spinner
         XCTAssertTrue(glyph.isHidden)
-        view.icon = .icon(.circleCheckFill)
+        view.icon = .icon(.circleCheck)
         view.color = .systemGreen
         XCTAssertFalse(glyph.isHidden)
         XCTAssertEqual(glyph.contentTintColor, .systemGreen)

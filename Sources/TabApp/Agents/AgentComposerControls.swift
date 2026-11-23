@@ -287,7 +287,7 @@ final class AgentRoundButton: AgentComposerButton {
     let kind: Kind
     var onPress: (() -> Void)?
     var chatTheme: AppTheme = .shared { didSet { needsDisplay = true } }
-    /// Dictation is listening: the accent fill shows that a click finishes it.
+    /// Dictation is listening: the accent ink shows that a click finishes it.
     var active = false { didSet { if active != oldValue { needsDisplay = true } } }
 
     init(kind: Kind) {
@@ -310,27 +310,21 @@ final class AgentRoundButton: AgentComposerButton {
 
     override var isEnabled: Bool { didSet { needsDisplay = true } }
 
-    /// Send is the one solid button; Stop and an idle Dictate are quieter, so the
+    /// Send is the one bright button; Stop and an idle Dictate are quieter, so the
     /// primary action stands out beside them.
     private var quiet: Bool { kind == .stop || (kind == .dictate && !active) }
 
     override func draw(_ dirtyRect: NSRect) {
-        let circle = NSBezierPath(ovalIn: bounds)
-        let solid = chatTheme.agentComposer.withAlphaComponent(1)
-        let fill = !isEnabled ? chatTheme.fg.withAlphaComponent(0.10) : active ? chatTheme.accent
-            : quiet ? chatTheme.fg.withAlphaComponent(0.10) : chatTheme.fg
-        fill.setFill()
-        circle.fill()
         if isEnabled && (hovered || isHighlighted) {
-            (quiet ? chatTheme.fg : solid).withAlphaComponent(isHighlighted ? 0.14 : 0.07).setFill()
-            circle.fill()
+            chatTheme.fg.withAlphaComponent(isHighlighted ? 0.10 : 0.06).setFill()
+            NSBezierPath(ovalIn: bounds).fill()
         }
-        let ink = !isEnabled ? chatTheme.fgDim : active ? chatTheme.accentForeground : quiet ? chatTheme.fg : solid
+        let ink = !isEnabled ? chatTheme.fgDim : active ? chatTheme.accent : quiet ? chatTheme.fgMuted : chatTheme.fg
         let icon: AppIcon
         let size: CGFloat
         switch kind {
-        case .send: icon = .arrowUp; size = 16
-        case .stop: icon = .stop; size = 11
+        case .send: icon = .circleArrowUp; size = 24
+        case .stop: icon = .square; size = 16
         case .dictate: icon = .microphone; size = 16
         }
         icon.image(size: size, color: ink)?.draw(
@@ -508,8 +502,6 @@ final class AgentIconButton: AgentComposerButton {
     var onPress: (() -> Void)?
     var chatTheme: AppTheme = .shared { didSet { needsDisplay = true } }
     var icon: AppIcon { didSet { needsDisplay = true } }
-    /// A resting disc behind the icon, as on the composer's attach button.
-    var filled = false { didSet { needsDisplay = true } }
     private let iconSize: CGFloat
 
     init(icon: AppIcon, label: String, iconSize: CGFloat = 16) {
@@ -531,13 +523,11 @@ final class AgentIconButton: AgentComposerButton {
     override var contentTintColor: NSColor? { didSet { needsDisplay = true } }
 
     override func draw(_ dirtyRect: NSRect) {
-        let resting: CGFloat = filled ? 0.08 : 0
-        let alpha = isEnabled && (hovered || isHighlighted) ? resting + (isHighlighted ? 0.10 : 0.05) : resting
-        if alpha > 0 {
-            chatTheme.fg.withAlphaComponent(alpha).setFill()
+        if isEnabled && (hovered || isHighlighted) {
+            chatTheme.fg.withAlphaComponent(isHighlighted ? 0.10 : 0.05).setFill()
             NSBezierPath(ovalIn: bounds).fill()
         }
-        let ink = isEnabled ? (contentTintColor ?? (filled ? chatTheme.fg : chatTheme.fgMuted)) : chatTheme.fgDim.withAlphaComponent(0.6)
+        let ink = isEnabled ? (contentTintColor ?? chatTheme.fgMuted) : chatTheme.fgDim.withAlphaComponent(0.6)
         icon.image(size: iconSize, color: ink)?.draw(
             in: NSRect(x: floor(bounds.midX - iconSize / 2), y: floor(bounds.midY - iconSize / 2), width: iconSize, height: iconSize),
             from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)

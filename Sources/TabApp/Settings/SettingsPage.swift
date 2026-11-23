@@ -35,7 +35,7 @@ struct SettingsPage: View {
                             Label {
                                 Text(message)
                             } icon: {
-                                Image(.triangleAlertFill, size: 13)
+                                Image(.triangleAlert, size: 13)
                             }
                                 .foregroundStyle(theme?.danger ?? .red)
                             Spacer()

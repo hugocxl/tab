@@ -20,7 +20,7 @@ enum AgentTaskCheckbox {
         let dark = state & 2 != 0
         func gray(_ value: CGFloat) -> NSColor { NSColor(srgbRed: value / 255, green: value / 255, blue: value / 255, alpha: 1) }
         let border = gray(dark ? (checked ? 136 : 117) : 217)
-        let icon: AppIcon = checked ? .checkboxFill : .checkbox
+        let icon: AppIcon = checked ? .checkbox : .square
         icon.image(size: rect.height, color: border)?.draw(
             in: rect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
     }

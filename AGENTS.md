@@ -94,10 +94,11 @@ env -u TAB_DIR "$APP/Contents/MacOS/tab" server stop --force --yes
   dialogs, never on the terminal rendering path.
 - Shortcuts come only from `ShortcutCatalog`, and colors only from `AppTheme`.
 - Every icon comes from @hugocxl/icons; draw no SF Symbols and ship no local
-  SVGs. `AppIcon` uses the default (duotone) set, and the sidebar's header and
-  footer buttons and the pane header use its stroke set through `ChromeIcon`.
-  Agent logos, Git host logos, command marks and file types are icons too, each
-  with its signature hue.
+  SVGs. `AppIcon` and `ChromeIcon` use its stroke set, never its filled or
+  duotone ones; only brand and language logos, which have no stroke version,
+  come from the default set. The Explorer's file tree alone keeps the
+  default (two-tone) artwork. Agent logos, Git host logos, command marks and
+  file types are icons too, each with its signature hue.
 - Glass surfaces use `GlassView` (Liquid Glass on macOS 26, frosted material
   before). Add a `GlassView.Style` preset for a new use rather than creating effect
   views directly.

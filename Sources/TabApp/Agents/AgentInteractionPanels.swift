@@ -345,7 +345,7 @@ final class AgentQueueView: ThemedView {
 
     private func applyColors() {
         title.textColor = theme.fgMuted
-        pauseIcon.image = AppIcon.pauseCircleFill.image(size: AgentPanelMetrics.glyphSize, color: theme.warning)
+        pauseIcon.image = AppIcon.pauseCircle.image(size: AgentPanelMetrics.glyphSize, color: theme.warning)
         resume.setTitleColor(theme.fg)
         for case let row as AgentQueueRow in rows.subviews { row.apply(theme) }
     }

@@ -2,7 +2,7 @@ import AppKit
 import Combine
 import TabCore
 
-/// A small round state dot.
+/// A small round state dot, the stroke dot icon in the state's color.
 final class StatusDot: ThemedView {
     var glyph: RemoteStatusGlyph = .offline {
         didSet {
@@ -23,8 +23,10 @@ final class StatusDot: ThemedView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     override func draw(_ dirtyRect: NSRect) {
-        glyph.color(theme).setFill()
-        NSBezierPath(ovalIn: bounds).fill()
+        // The dot icon's ring spans about half its canvas.
+        let side = bounds.width * 2
+        AppIcon.dot.image(size: side, color: glyph.color(theme))?.draw(
+            in: NSRect(x: bounds.midX - side / 2, y: bounds.midY - side / 2, width: side, height: side))
     }
 }
 

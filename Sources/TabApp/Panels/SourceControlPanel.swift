@@ -549,7 +549,7 @@ final class PlaceholderTextView: NSTextView {
     }
 }
 
-/// A small native borderless text button such as "Stage All", "+" or "↺",
+/// A small native borderless text button such as "Stage All" or "Reload",
 /// with the system hover bezel.
 final class TextGlyphButton: NSButton {
     var onPress: (() -> Void)?
@@ -653,6 +653,7 @@ extension TextGlyphButton {
 
 /// A collapsible Git folder using the Explorer row geometry and artwork.
 final class ChangeFolderCell: FilesCellView {
+    override class var artwork: AppIcon.Artwork { .stroke }
     var onActivate: (() -> Void)?
 
     override init(frame: NSRect) {
@@ -687,7 +688,7 @@ final class ChangeFileCell: HoverView {
     private let removed = makeLabel("", font: AppFont.footnote)
     /// Stage, Unstage and Discard, made on the first hover: sizing buttons
     /// is costly, and every row the table adds would pay for them.
-    private var actions: (stack: NSStackView, stage: TextGlyphButton, unstage: TextGlyphButton, discard: TextGlyphButton)?
+    private var actions: (stack: NSStackView, stage: IconButton, unstage: IconButton, discard: IconButton)?
     private var rowLeading: NSLayoutConstraint?
     private let row = NSStackView()
     private var showsTree = false
@@ -790,9 +791,9 @@ final class ChangeFileCell: HoverView {
     }
 
     private func makeActions() {
-        let stage = TextGlyphButton("+", tooltip: "Stage")
-        let unstage = TextGlyphButton("−", tooltip: "Unstage")
-        let discard = TextGlyphButton("↺", tooltip: "Discard")
+        let stage = IconButton(.plus, label: "Stage", side: 20)
+        let unstage = IconButton(.minus, label: "Unstage", side: 20)
+        let discard = IconButton(.reset, label: "Discard", side: 20)
         stage.onPress = { [weak self] in self?.onStage?() }
         unstage.onPress = { [weak self] in self?.onUnstage?() }
         discard.onPress = { [weak self] in self?.onDiscard?() }
