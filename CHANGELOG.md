@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.131.0 - 2026-11-23
+
+### Added
+
+- An agent conversation can switch to another provider partway through: after you confirm, your next message sends the new provider the whole conversation so far.
+
 ## 0.130.1 - 2026-11-23
 
 ### Fixed

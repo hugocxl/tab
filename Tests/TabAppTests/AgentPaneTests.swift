@@ -911,11 +911,14 @@ final class AgentPaneTests: XCTestCase {
         pane.send()
         XCTAssertEqual(pane.reasoningEffort, .low, "The command changes the same next-message setting as the picker")
         XCTAssertTrue(pane.surface.composer.string.isEmpty)
+        var asked = false
+        pane.confirmProviderHandoff = { _ in asked = true; return false }
         pane.selectModel(provider: .claude, model: nil)
-        XCTAssertEqual(pane.selection.provider, .codex, "The provider can't change while a turn runs")
+        try await wait { asked }
+        XCTAssertEqual(pane.selection.provider, .codex, "Declining the handoff keeps the provider")
     }
 
-    func testResumedConversationRestoresOptionsAndLocksOnlyOtherProviders() async throws {
+    func testResumedConversationRestoresOptionsAndOffersOtherProvidersAsAHandoff() async throws {
         let backend = Backend()
         backend.snapshot.provider = .codex
         backend.snapshot.providerSession = "thread-1"
@@ -928,13 +931,16 @@ final class AgentPaneTests: XCTestCase {
         try await wait { pane.snapshot != nil }
         XCTAssertEqual(pane.selection.provider, .codex)
         XCTAssertEqual(pane.reasoningEffort, .high)
+        var asked: String?
+        pane.confirmProviderHandoff = { provider in asked = provider; return false }
         pane.selectModel(provider: .claude, model: "claude-opus-5-5")
+        try await wait { asked != nil }
         XCTAssertEqual(pane.selection.provider, .codex)
         let otherModels = modelItems(pane).filter {
             ($0.representedObject as? AgentModelSelection)?.provider == .claude
         }
         XCTAssertFalse(otherModels.isEmpty)
-        XCTAssertTrue(otherModels.allSatisfy { !$0.isEnabled })
+        XCTAssertTrue(otherModels.allSatisfy { $0.isEnabled && $0.toolTip?.contains("conversation so far") == true })
         pane.selectModel(provider: .codex, model: "gpt-6-astra")
         pane.selectEffort(nil)
         pane.surface.composer.string = "Continue"

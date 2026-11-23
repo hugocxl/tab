@@ -15,6 +15,8 @@ private final class FakeAgentRuntime: AgentSessionRuntime, @unchecked Sendable {
     var onAccess: (@Sendable (AgentAccessMode) async throws -> Void)?
     private var stopCount = 0
     private var submittedModels: [String?] = []
+    private var submittedTexts: [String] = []
+    var texts: [String] { lock.withLock { submittedTexts } }
     private var submittedEfforts: [AgentReasoningEffort?] = []
     private var currentAccess: AgentAccessMode = .standard
     var providerSession: String? = "provider-resume-id"
@@ -27,7 +29,7 @@ private final class FakeAgentRuntime: AgentSessionRuntime, @unchecked Sendable {
 
     init(_ callback: @escaping @Sendable (AgentRuntimeEvent) -> Void) { self.callback = callback }
     func send(text: String, model: String?, reasoningEffort: AgentReasoningEffort?) async throws {
-        lock.withLock { submittedModels.append(model); submittedEfforts.append(reasoningEffort) }
+        lock.withLock { submittedModels.append(model); submittedEfforts.append(reasoningEffort); submittedTexts.append(text) }
         if let providerSession { callback(.providerSession(providerSession)) }
         if let onSend { try await onSend() }
     }
@@ -1114,14 +1116,67 @@ final class AgentSessionsTests: XCTestCase {
         } catch {}
         let unchanged = try await sessions.handle(.read(session: session))
         XCTAssertEqual(unchanged, selected)
-        box.runtime?.callback(.status(.idle))
+    }
+
+    func testEstablishedConversationSwitchesProviderWithItsTranscript() async throws {
+        let root = try root(), box = AgentRuntimeBox(), resumes = AgentRuntimeResumes()
+        let codexSessionAfterFailure = AgentEventCount()
+        let factory: AgentSessions.Factory = { provider, _, resume, callback in
+            resumes.append(resume)
+            let runtime = FakeAgentRuntime(callback)
+            if provider == .claude {
+                runtime.providerSession = "claude-1"
+                runtime.onSend = {
+                    callback(.textDelta(id: "reply", text: "hi there"))
+                    callback(.status(.idle))
+                }
+            } else {
+                // Codex fails before naming its conversation once, so the handoff must survive a restart.
+                runtime.providerSession = codexSessionAfterFailure.count == 0 ? nil : "codex-1"
+                runtime.onSend = {
+                    if codexSessionAfterFailure.count == 0 {
+                        codexSessionAfterFailure.increment()
+                        callback(.failure("boom"))
+                    } else { callback(.status(.idle)) }
+                }
+            }
+            box.install(runtime)
+            return runtime
+        }
+        let session = SessionId(), project = ProjectId()
+        var sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: factory)
+        _ = try await sessions.handle(.create(session: session, project: project, provider: .claude))
+        _ = try await sessions.handle(.send(session: session, text: "hello", model: nil))
         let established = try await sessions.handle(.read(session: session))
-        do {
-            _ = try await sessions.handle(.send(session: session, text: "lose context", model: nil, provider: .claude))
-            XCTFail("An established provider session cannot switch")
-        } catch {}
-        let afterRejection = try await sessions.handle(.read(session: session))
-        XCTAssertEqual(afterRejection, established)
+        XCTAssertEqual(established.providerSession, "claude-1")
+        XCTAssertEqual(established.turns?.first?.rewindable, true)
+
+        let switched = try await sessions.handle(.send(session: session, text: "carry on", model: nil, provider: .codex))
+        XCTAssertEqual(switched.provider, .codex)
+        XCTAssertNil(switched.providerSession)
+        XCTAssertEqual(switched.turns?.first?.rewindable, false, "The old provider's fork points can't resume under the new one")
+        XCTAssertEqual(resumes.values.last, .some(nil), "The new provider starts its own conversation")
+        let handedOff = try XCTUnwrap(box.runtime?.texts.last)
+        XCTAssertTrue(handedOff.contains("[User]\nhello"))
+        XCTAssertTrue(handedOff.contains("[Assistant]\nhi there"))
+        XCTAssertTrue(handedOff.contains("Claude"))
+        XCTAssertTrue(handedOff.hasSuffix("\n\ncarry on"))
+        XCTAssertFalse(handedOff.contains("Switched to"), "Notices stay out of the transcript")
+        let shown = try await sessions.handle(.read(session: session))
+        XCTAssertEqual(shown.items.last { $0.kind == .user }?.text, "carry on", "The transcript shows only what the user typed")
+
+        sessions.shutdown()
+        sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: factory)
+        defer { sessions.shutdown() }
+        _ = try await sessions.handle(.send(session: session, text: "retry", model: nil, provider: .codex))
+        let retried = try XCTUnwrap(box.runtime?.texts.last)
+        XCTAssertTrue(retried.contains("[User]\nhello"), "Until the new provider names its conversation, each message carries the transcript")
+        XCTAssertTrue(retried.contains("[User]\ncarry on"))
+        XCTAssertTrue(retried.hasSuffix("\n\nretry"))
+        let resumed = try await sessions.handle(.read(session: session))
+        XCTAssertEqual(resumed.providerSession, "codex-1")
+        _ = try await sessions.handle(.send(session: session, text: "next", model: nil, provider: .codex))
+        XCTAssertEqual(box.runtime?.texts.last, "next")
     }
 
     func testUnsupportedEffortAndBusyConfigurationChangesLeaveSnapshotUntouched() async throws {
@@ -1186,8 +1241,8 @@ final class AgentSessionsTests: XCTestCase {
         XCTAssertEqual(box.runtime?.efforts, [nil])
     }
 
-    func testSuccessfulTurnWithoutProviderIDCannotSwitchEvenAfterRestart() async throws {
-        let root = try root()
+    func testSuccessfulTurnWithoutProviderIDHandsOffItsHistoryAfterRestart() async throws {
+        let root = try root(), box = AgentRuntimeBox(), resumes = AgentRuntimeResumes()
         let sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, callback in
             let runtime = FakeAgentRuntime(callback)
             runtime.providerSession = nil
@@ -1198,19 +1253,21 @@ final class AgentSessionsTests: XCTestCase {
         _ = try await sessions.handle(.create(session: session, project: ProjectId(), provider: .claude))
         _ = try await sessions.handle(.send(session: session, text: "completed without output", model: nil))
         sessions.shutdown()
-        let recovered = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, callback in
-            XCTFail("A rejected provider switch must not launch a process")
-            return FakeAgentRuntime(callback)
+        let recovered = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, resume, callback in
+            resumes.append(resume)
+            let runtime = FakeAgentRuntime(callback)
+            box.install(runtime)
+            return runtime
         })
         defer { recovered.shutdown() }
         let before = try await recovered.handle(.read(session: session))
         XCTAssertNil(before.providerSession)
-        do {
-            _ = try await recovered.handle(.send(session: session, text: "switch", model: nil, provider: .codex))
-            XCTFail("Successful-turn history must survive bounded transcript persistence")
-        } catch {}
-        let after = try await recovered.handle(.read(session: session))
-        XCTAssertEqual(after, before)
+        let switched = try await recovered.handle(.send(session: session, text: "switch", model: nil, provider: .codex))
+        XCTAssertEqual(switched.provider, .codex)
+        XCTAssertEqual(resumes.values, [nil])
+        let delivered = try XCTUnwrap(box.runtime?.texts.last)
+        XCTAssertTrue(delivered.contains("[User]\ncompleted without output"), "Successful-turn history must survive bounded transcript persistence")
+        XCTAssertTrue(delivered.hasSuffix("\n\nswitch"))
     }
 
     func testAccessChangesApplyToPendingApprovalsPersistAndConfigureReplacementRuntime() async throws {
@@ -2820,10 +2877,17 @@ extension AgentSessionsTests {
         // A prompt without a provider ID, as from an older app, carries on with the same provider.
         let next = try await sessions.handle(.send(session: id, text: "Next", model: nil, provider: .claude))
         XCTAssertEqual(next.providerID, "claude-2")
+        // Another account takes the conversation over from its transcript, with its own settings.
+        let moved = try await sessions.handle(.send(session: id, text: "Other account", model: nil, provider: .claude, providerID: "claude"))
+        XCTAssertNil(moved.providerID)
+        XCTAssertEqual(box.runtime?.launches.last?.provider?.arguments, [])
+        XCTAssertTrue(box.runtime?.texts.last?.contains("[User]\nNext") == true)
         do {
-            _ = try await sessions.handle(.send(session: id, text: "Other account", model: nil, provider: .claude, providerID: "claude"))
-            XCTFail("An established conversation must not move to another account")
-        } catch {}
+            _ = try await sessions.handle(.send(session: id, text: "Off", model: nil, provider: .claude, providerID: "off"))
+            XCTFail("A provider turned off takes over no conversation")
+        } catch {
+            XCTAssertTrue("\(error)".contains("turned off"), "\(error)")
+        }
 
         let fresh = SessionId()
         _ = try await sessions.handle(.create(session: fresh, project: ProjectId(), provider: .claude))

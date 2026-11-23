@@ -112,7 +112,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     private struct PickerState: Equatable {
         var selection: AgentModelSelection
         var effort: AgentReasoningEffort?
-        var lockedProvider: String?
+        var handsOff: Bool
         var resolvedModel: String?
         var providers: [AgentProviderConfig]
         var health: [String: AgentProviderHealth]
@@ -2024,7 +2024,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         authoritativeProject = result.project
         surface.citationEnvironmentId = result.project.description
         errorMessage = nil
-        if !selectionEdited || (result.providerSession != nil && selection.providerKey != Self.providerKey(result)) {
+        if !selectionEdited {
             selection = AgentModelSelection(provider: result.provider, providerID: result.providerID, model: result.model)
             reasoningEffort = result.reasoningEffort
             selectionEdited = false
@@ -2305,7 +2305,8 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     /// conversation would otherwise fail only after a prompt is sent.
     private func warnIfUnavailable() {
         let config = providerConfig(selection.providerKey, kind: selection.provider)
-        guard canChangeProvider, let reason = unavailability(config) else { return }
+        guard snapshot?.providerSession == nil || !isCurrentProvider(config.id),
+              let reason = unavailability(config) else { return }
         let key = config.id + "\n" + reason.detail
         guard announcedUnavailable != key else { return }
         announcedUnavailable = key
@@ -2326,10 +2327,12 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         snapshot.map { Self.providerKey($0) == key } ?? false
     }
 
-    /// Provider conversations cannot be resumed by a different provider.
-    /// While a turn runs, its provider may name its conversation at any moment.
-    private var canChangeProvider: Bool {
-        snapshot?.providerSession == nil && snapshot?.status != .working && snapshot?.status != .waiting
+    /// Whether a provider other than the conversation's would take it over from its
+    /// transcript, because the conversation has already begun.
+    private var switchingHandsOff: Bool {
+        guard let snapshot else { return false }
+        return snapshot.providerSession != nil || (snapshot.omittedItems ?? 0) > 0
+            || snapshot.items.contains { $0.kind == .user || $0.kind == .assistant }
     }
 
     /// The model and effort can change at any time: a choice made while the agent works
@@ -2372,12 +2375,39 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         // A picker opened while idle can finish during reconnection. Keep that
         // choice as a local draft until an authoritative snapshot arrives.
         let key = providerID ?? (provider == selection.provider ? selection.providerKey : provider.rawValue)
-        guard canEditSelection,
-              canChangeProvider || isCurrentProvider(key) else { return }
+        guard canEditSelection else { return }
         let trimmed = model?.trimmingCharacters(in: .whitespacesAndNewlines)
         let chosen = AgentModelSelection(provider: provider, providerID: key, model: trimmed?.isEmpty == false ? trimmed : nil)
         guard chosen != selection else { return applyModel(chosen) }
-        confirmingRestart { [weak self] in self?.applyModel(chosen) }
+        guard switchingHandsOff, !isCurrentProvider(key), key != selection.providerKey else {
+            return confirmingRestart { [weak self] in self?.applyModel(chosen) }
+        }
+        Task { [weak self] in
+            guard let self else { return }
+            let config = self.providerConfig(key, kind: provider)
+            let confirmed = await (self.confirmProviderHandoff ?? self.presentHandoffConfirmation)(config.title)
+            guard confirmed, !self.disposed else { self.menuState = nil; self.updateControls(); return }
+            self.confirmingRestart { [weak self] in self?.applyModel(chosen) }
+        }
+    }
+
+    /// Asks before another provider takes over the conversation; nil asks with a sheet.
+    var confirmProviderHandoff: ((String) async -> Bool)?
+
+    private func presentHandoffConfirmation(_ provider: String) async -> Bool {
+        guard let window = surface.window else { return true }
+        let current = snapshot.map { providerConfig(Self.providerKey($0), kind: $0.provider).title } ?? "The current agent"
+        let alert = NSAlert()
+        alert.window.appearance = surface.theme.nsAppearance
+        alert.messageText = "Switch this conversation to \(provider)?"
+        alert.informativeText = "\(provider) can't continue \(current)'s conversation, so your next message sends it the whole conversation so far. "
+            + "A long conversation uses much more of your \(provider) limits or credits, and \(provider) starts without what \(current) kept out of the transcript, such as files it read in full. "
+            + "Earlier messages can't be rewound after the switch."
+        alert.addButton(withTitle: "Switch to \(provider)")
+        alert.addButton(withTitle: "Cancel")
+        return await withCheckedContinuation { continuation in
+            alert.beginSheetModal(for: window) { continuation.resume(returning: $0 == .alertFirstButtonReturn) }
+        }
     }
 
     private func applyModel(_ chosen: AgentModelSelection) {
@@ -2447,7 +2477,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     private func updateSelectionMenus() {
         guard !modelMenuOpen else { return }
         let state = PickerState(selection: selection, effort: reasoningEffort,
-                                lockedProvider: canChangeProvider ? nil : snapshot.map(Self.providerKey),
+                                handsOff: switchingHandsOff,
                                 resolvedModel: effectiveModel, providers: menuProviders, health: providerHealth)
         guard menuState != state else { return }
         menuState = state
@@ -2506,10 +2536,11 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
                 } ?? displayedSelection
                 item.state = choice == current ? .on : .off
                 let reported = descriptor(for: choice) != nil
-                item.isEnabled = reported && (canChangeProvider || isCurrentProvider(key))
-                    && ((config.enabled && unavailable == nil) || isCurrentProvider(key))
+                item.isEnabled = reported && ((config.enabled && unavailable == nil) || isCurrentProvider(key))
+                let handsOff = switchingHandsOff && !isCurrentProvider(key)
                 item.toolTip = !reported ? "Current model is not listed in the provider catalog."
-                    : unavailable.map { $0.detail } ?? (item.isEnabled ? choice.model : "Open a new agent pane to use another provider.")
+                    : unavailable.map { $0.detail }
+                    ?? (handsOff ? "\(choice.model ?? config.title) · Switching sends \(config.title) the conversation so far" : choice.model)
                 models.addItem(item)
             }
         }

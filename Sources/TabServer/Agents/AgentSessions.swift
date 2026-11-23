@@ -138,6 +138,9 @@ final class AgentSessions: @unchecked Sendable {
         var forkPoint: String?
         /// The latest message the provider wrote to this conversation.
         var lastProviderMessage: String?
+        /// The provider changed after the conversation began, and the new one hasn't named
+        /// its conversation yet: each message carries the transcript, as `AgentHandoff` writes it.
+        var handoffFrom: String?
         /// Each agent's own steps, by the tool call that started it; held with the provider process.
         var subagentSteps: [String: [AgentChatItem]] = [:]
         /// Where each turn began in the provider's conversation, by its user item, so a
@@ -174,6 +177,7 @@ final class AgentSessions: @unchecked Sendable {
         var forkSource: String?
         var forkPoint: String?
         var lastProviderMessage: String?
+        var handoffFrom: String?
         var archived: Bool?
         var closedAt: Date?
         var retention: AgentConversationRetention?
@@ -313,6 +317,7 @@ final class AgentSessions: @unchecked Sendable {
                 entry.forkSource = saved.forkSource
                 entry.forkPoint = saved.forkPoint
                 entry.lastProviderMessage = saved.lastProviderMessage
+                entry.handoffFrom = saved.handoffFrom
                 entry.turnForkPoints = saved.turnForkPoints ?? [:]
                 entry.alwaysAllowedTools = Set(saved.alwaysAllowedTools ?? [])
                 // Snapshots saved before tool bodies were stored once still carry both copies.
@@ -792,6 +797,7 @@ final class AgentSessions: @unchecked Sendable {
         // Attachment bytes are checked here and written by the turn's task, so up to 8 MiB
         // of disk writes never hold the sessions queue.
         var turnAttachmentFiles: (attachments: [AgentChatAttachment], root: URL, item: String)?
+        var handoff: AgentHandoff?
         if case .send(_, let text, let model, let effort, let requestedProvider, let attachments, let requestedProviderID) = request {
             guard entry.deliveryID == nil || entry.deliveryID == deliveryID else {
                 throw ServiceError(.badRequest, "A queued prompt is being delivered.")
@@ -877,27 +883,30 @@ final class AgentSessions: @unchecked Sendable {
             let providerID = requestedProviderID ?? (provider == entry.snapshot.provider ? entry.snapshot.providerID : nil)
             let switching = provider != entry.snapshot.provider
                 || !Self.sameProvider(providerID, entry.snapshot.providerID, kind: provider)
+            // Another provider takes over an established conversation from its transcript.
+            let handingOff = switching && (entry.snapshot.providerSession != nil || entry.hasSuccessfulTurn
+                || entry.forkSource != nil || entry.handoffFrom != nil)
             if switching {
-                guard entry.snapshot.providerSession == nil, !entry.hasSuccessfulTurn,
-                      entry.snapshot.status == .idle || entry.snapshot.status == .failed else {
-                    throw ServiceError(.badRequest, "An established conversation cannot switch providers. Open a new agent pane.")
+                guard entry.snapshot.status == .idle || entry.snapshot.status == .failed else {
+                    throw ServiceError(.badRequest, "Provider changes apply after the current response.")
                 }
             }
             if let effort, !effort.isAccepted(provider: provider, model: model) {
                 throw ServiceError(.badRequest, "\(provider.name) does not support \(effort.title) reasoning for this model")
             }
             let config = providers(providerID, provider)
-            if !config.enabled, entry.snapshot.providerSession == nil {
+            if !config.enabled, entry.snapshot.providerSession == nil || switching {
                 throw ServiceError(.badRequest, "\(config.title) is turned off. Turn it on in Settings › Agents, or choose another provider.")
             }
             let restart = switching
                 || (provider == .claude && (model != entry.snapshot.model || effort != entry.snapshot.reasoningEffort))
-            if restart {
+            if restart, !switching {
                 guard !entry.hasSuccessfulTurn || entry.snapshot.providerSession != nil else {
                     throw ServiceError(.badRequest, "The provider has not supplied a session ID to resume this conversation")
                 }
             }
-            if entry.runtime == nil, entry.hasSuccessfulTurn, entry.snapshot.providerSession == nil {
+            if entry.runtime == nil, entry.hasSuccessfulTurn, entry.snapshot.providerSession == nil,
+               !handingOff, entry.handoffFrom == nil {
                 throw ServiceError(.badRequest, "The provider has not supplied a session ID to resume this conversation")
             }
             let userID = deliveryID ?? UUID().uuidString
@@ -917,6 +926,23 @@ final class AgentSessions: @unchecked Sendable {
             if switching || model != entry.snapshot.model {
                 entry.snapshot.contextUsage = nil
                 entry.snapshot.resolvedModel = nil
+            }
+            if handingOff {
+                // Neither the old provider's conversation nor its fork points can carry on
+                // under the new one, so earlier turns no longer rewind.
+                entry.handoffFrom = entry.handoffFrom ?? providers(entry.snapshot.providerID, entry.snapshot.provider).title
+                entry.snapshot.providerSession = nil
+                entry.forkSource = nil
+                entry.forkPoint = nil
+                entry.lastProviderMessage = nil
+                entry.turnForkPoints.removeAll()
+                for index in (entry.snapshot.turns ?? []).indices { entry.snapshot.turns?[index].rewindable = false }
+                entry.snapshot.items.append(AgentChatItem(kind: .notice, text:
+                    "Switched to \(providers(providerID, provider).title). It reads the conversation so far with your next message."))
+            }
+            if let previous = entry.handoffFrom {
+                handoff = AgentHandoff(previousProvider: previous, items: entry.snapshot.items,
+                                       earlierFile: earlierFile(session: id))
             }
             entry.snapshot.provider = provider
             entry.snapshot.providerID = Self.sameProvider(providerID, nil, kind: provider) ? nil : providerID
@@ -1095,6 +1121,12 @@ final class AgentSessions: @unchecked Sendable {
                         delivered = "/" + String(decoding: nativeSkill.data, as: UTF8.self) + " " + (invocation?.arguments ?? "")
                     } else if skillRequest {
                         delivered = "Use the attached skill instructions for this request. " + (invocation?.arguments ?? "")
+                    } else if let handoff, invocation == nil {
+                        let writer = writer, archive = earlierArchive
+                        delivered = try await runBlocking {
+                            writer.sync {}
+                            return handoff.prompt(for: text, archive: archive)
+                        }
                     } else { delivered = text }
                     try await runtime.send(text: delivered, model: model, reasoningEffort: effort, attachments: staged.filter { nativeSkill == nil || $0.attachment.id != "native-skill" })
                 case .setAccess: try await accessTask?.value
@@ -1283,6 +1315,7 @@ final class AgentSessions: @unchecked Sendable {
             entry.forkSource = nil
             entry.forkPoint = nil
             entry.lastProviderMessage = nil
+            entry.handoffFrom = nil
         case .providerMessage(let id):
             guard id.utf8.count <= 4096 else { return }
             entry.lastProviderMessage = id
@@ -2682,7 +2715,8 @@ final class AgentSessions: @unchecked Sendable {
                           alwaysAllowedTools: entry.alwaysAllowedTools.isEmpty ? nil : entry.alwaysAllowedTools.sorted(),
                           snapshot: entry.snapshot, directory: entry.directory, hasSuccessfulTurn: entry.hasSuccessfulTurn,
                           forkSource: entry.forkSource, forkPoint: entry.forkPoint,
-                          lastProviderMessage: entry.lastProviderMessage, archived: entry.archived ? true : nil,
+                          lastProviderMessage: entry.lastProviderMessage, handoffFrom: entry.handoffFrom,
+                          archived: entry.archived ? true : nil,
                           closedAt: entry.closedAt, retention: entry.retention == .keep ? nil : entry.retention)
         let file = root.appendingPathComponent(entry.snapshot.session.description + ".json")
         writer.async {
@@ -2730,9 +2764,6 @@ extension AgentSessions {
     private func handleInbox(_ request: AgentChatRequest, entry: Entry) throws -> Bool {
         switch request {
         case .submit(_, let prompt):
-            guard Self.keepsProvider(prompt, entry.snapshot) || entry.snapshot.providerSession == nil else {
-                throw AgentRuntimeError("An established conversation cannot switch providers.")
-            }
             // A new message after a stop or failure is the user carrying on, so it
             // resumes the queue. Prompts that need review stay put, and a reconnect
             // resending a prompt already accepted changes nothing.
@@ -2750,9 +2781,6 @@ extension AgentSessions {
             }
             drainInbox(entry)
         case .schedule(_, let prompt, let at):
-            guard Self.keepsProvider(prompt, entry.snapshot) || entry.snapshot.providerSession == nil else {
-                throw AgentRuntimeError("An established conversation cannot switch providers.")
-            }
             try mutateInbox(entry) { inbox in
                 // A reconnect resending the schedule changes nothing, even once delivered.
                 guard !inbox.records.contains(where: { $0.id == prompt.id }) else { try inbox.submit(prompt); return }
