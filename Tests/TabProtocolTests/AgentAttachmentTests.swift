@@ -23,7 +23,7 @@ final class AgentAttachmentTests: XCTestCase {
         XCTAssertEqual(try WireJSON.decode(AgentChatRequest.self, from: WireJSON.encode(request)), request)
         let legacy = Data("{\"send\":{\"session\":\"\(SessionId())\",\"text\":\"hello\"}}".utf8)
         let decoded = try WireJSON.decode(AgentChatRequest.self, from: legacy)
-        if case .send(_, _, _, _, _, let attachments) = decoded { XCTAssertNil(attachments) }
+        if case .send(_, _, _, _, _, let attachments, _) = decoded { XCTAssertNil(attachments) }
         else { XCTFail("Expected legacy send") }
     }
 

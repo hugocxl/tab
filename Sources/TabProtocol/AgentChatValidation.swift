@@ -38,8 +38,9 @@ extension AgentChatRequest {
         case .schedule(_, let prompt, let at):
             try prompt.validate()
             guard at.timeIntervalSince1970.isFinite else { throw .badRequest }
-        case .send(_, let text, let model, let effort, _, let attachments):
+        case .send(_, let text, let model, let effort, _, let attachments, let providerID):
             try AgentChatAttachment.validate(attachments ?? [])
+            if let providerID { try Validation.message(providerID, limit: 64) }
             if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !(attachments ?? []).isEmpty {
                 guard text.utf8.count <= 64 * 1024 else { throw .badRequest }
             } else {

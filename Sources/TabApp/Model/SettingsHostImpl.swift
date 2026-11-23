@@ -62,6 +62,16 @@ public final class SettingsHostImpl: SettingsHost {
     }
 
     public func readServerSettings() async throws -> ServerSettingsDoc { try await local().serverSettings() }
+
+    public func agentProviders() async throws -> AgentProvidersState { try await local().agentProviders() }
+    public func writeAgentProviders(_ settings: AgentProviderSettings) async throws -> AgentProvidersState {
+        try await local().writeAgentProviders(settings)
+    }
+    public func checkAgentProviders() async throws -> AgentProvidersState { try await local().checkAgentProviders() }
+    public func agentModels(_ provider: AgentProviderConfig, refresh: Bool) async throws -> [AgentModelDescriptor] {
+        try await local().agentModelCatalog(.init(project: model.state.home.id, provider: provider.kind, forceRefresh: refresh,
+                                                  providerID: provider.id, includeHidden: true)).models
+    }
     public func writeServerSettings(_ settings: ServerSettingsDoc) async throws { try await local().writeServerSettings(settings) }
 
     public func stopServer() async throws {

@@ -3,7 +3,7 @@ import TabCore
 
 /// A page of the Settings window, in sidebar order.
 public enum SettingsCategory: String, CaseIterable, Sendable {
-    case general, interface, appearance, terminal, keyboard, integrations, notifications, privacy, browser, server, remoteServers, mobile, backup, changelog
+    case general, interface, appearance, terminal, keyboard, agents, integrations, notifications, privacy, browser, server, remoteServers, mobile, backup, changelog
 
     public var title: String {
         switch self {
@@ -12,6 +12,7 @@ public enum SettingsCategory: String, CaseIterable, Sendable {
         case .appearance: return "Themes"
         case .terminal: return "Terminal"
         case .keyboard: return "Shortcuts"
+        case .agents: return "Agents"
         case .integrations: return "Integrations"
         case .notifications: return "Notifications"
         case .privacy: return "Privacy"
@@ -33,6 +34,7 @@ public enum SettingsCategory: String, CaseIterable, Sendable {
         case .appearance: return (.themes, 0x3FA2FF, 0xC04BF2, 0xFFFFFF)
         case .terminal: return (.bash, 0x3A3A3C, 0x151515, 0x5BE37A)
         case .keyboard: return (.command, 0xF7F7F8, 0xDCDCDF, 0x6E6E73)
+        case .agents: return (.agents, 0xFFB86B, 0xF2701B, 0xFFFFFF)
         case .integrations: return (.extensions, 0xFF6FB5, 0x8E4BF2, 0xFFFFFF)
         case .notifications: return (.bellUnread, 0xFF8A65, 0xE5484D, 0xFFFFFF)
         case .privacy: return (.hand, 0x5BB2FF, 0x1F6FEB, 0xFFFFFF)
@@ -46,7 +48,7 @@ public enum SettingsCategory: String, CaseIterable, Sendable {
     }
 
     /// Categories that start a new group in the sidebar, with a gap above.
-    var startsGroup: Bool { [.terminal, .browser, .backup].contains(self) }
+    var startsGroup: Bool { [.terminal, .agents, .browser, .backup].contains(self) }
 }
 
 /// A page opened from a row of a category's page, such as Terminal's
@@ -54,6 +56,8 @@ public enum SettingsCategory: String, CaseIterable, Sendable {
 public enum SettingsSubpage: String, CaseIterable, Sendable {
     case advancedFont
     case working, blocked, error, done
+    /// One coding agent's settings; `SettingsModel.provider` says which.
+    case agentProvider
 
     public init(_ status: ActivityStatus) {
         switch status {
@@ -68,6 +72,7 @@ public enum SettingsSubpage: String, CaseIterable, Sendable {
         switch self {
         case .advancedFont: return "Advanced Font Settings"
         case .working, .blocked, .error, .done: return status?.title ?? ""
+        case .agentProvider: return "Provider"
         }
     }
 
@@ -75,13 +80,14 @@ public enum SettingsSubpage: String, CaseIterable, Sendable {
         switch self {
         case .advancedFont: return .terminal
         case .working, .blocked, .error, .done: return .notifications
+        case .agentProvider: return .agents
         }
     }
 
     /// The status a Notifications subpage is about.
     public var status: ActivityStatus? {
         switch self {
-        case .advancedFont: return nil
+        case .advancedFont, .agentProvider: return nil
         case .working: return .working
         case .blocked: return .blocked
         case .error: return .error
@@ -173,6 +179,21 @@ public enum SettingsCatalog {
         SettingItem("app-links", "Links that open apps", "", .terminal, "Links"),
         SettingItem("generated-titles", "Prefer generated titles", "", .terminal, "Titles"),
         SettingItem("startup-command", "Startup command", "", .terminal, "Shell"),
+        // Agents
+        SettingItem("agent-check", "Provider status", "", .agents, "Providers"),
+        SettingItem("agent-providers", "Providers", "The coding agents agent panes run on this Mac.", .agents, "Providers"),
+        SettingItem("agent-add-provider", "Add provider", "Run another Claude Code or Codex, such as one signed in to a different account.", .agents, "Providers"),
+        SettingItem("agent-check-interval", "Check again after", "Opening this page checks each provider's version and sign-in again once the last check is this old. 0 checks only when you ask.", .agents, "Advanced"),
+        SettingItem("agent-provider-enabled", "Provider", "", .agents, "Provider", subpage: .agentProvider),
+        SettingItem("agent-provider-name", "Name", "Shown in the model menu and on agent panes.", .agents, "General", subpage: .agentProvider),
+        SettingItem("agent-provider-executable", "Executable", "The CLI to run: a command on PATH, or a full path.", .agents, "Runtime", subpage: .agentProvider),
+        SettingItem("agent-provider-home", "Config folder", "Where the CLI keeps its sign-in, settings and conversations. Another folder can sign in to another account.", .agents, "Runtime", subpage: .agentProvider),
+        SettingItem("agent-provider-arguments", "Launch arguments", "Added to the command line when a conversation starts.", .agents, "Runtime", subpage: .agentProvider),
+        SettingItem("agent-provider-auto-compact", "Auto-compact after", "Compact the conversation at this many tokens, from 100,000 to 1,000,000. Leave it empty for Claude's default.", .agents, "Runtime", subpage: .agentProvider),
+        SettingItem("agent-provider-variables", "Variables", "API keys, base URLs and other settings for the CLI, saved in plain text on this Mac.", .agents, "Environment", subpage: .agentProvider),
+        SettingItem("agent-provider-models", "Models", "Favorites come first in the model menu, and hidden models stay out of it.", .agents, "Models", subpage: .agentProvider),
+        SettingItem("agent-provider-custom-model", "Add model", "A model the CLI accepts but doesn't list, by its ID.", .agents, "Models", subpage: .agentProvider),
+        SettingItem("agent-provider-remove", "Remove provider", "Its conversations stay in their panes but can't continue.", .agents, "Removal", subpage: .agentProvider),
         // Integrations
         SettingItem("agent-integration", "Integrate with available agents", "Installs a Tab skill and session hooks for supported agents.", .integrations, "Coding Agents"),
         SettingItem("agent-integration-agents", "Agents", "", .integrations, "Coding Agents"),
@@ -245,12 +266,13 @@ public enum SettingsCatalog {
     }
 
     /// Sections that group rows into their own card without a title.
-    static let untitledSections: Set<String> = Set([activityStatuses] + ActivityStatus.allCases.flatMap {
+    static let untitledSections: Set<String> = Set([activityStatuses, "Removal"] + ActivityStatus.allCases.flatMap {
         ["\($0.title) Alerts", "\($0.title) Sound"]
     })
 
     /// A line under a section's title.
-    static let sectionSubtitles = ["Program Activity": "How status from processes and agents is handled"]
+    static let sectionSubtitles = ["Program Activity": "How status from processes and agents is handled",
+                                   "Providers": "The coding agents agent panes run on this Mac"]
 
     private static let byId: [String: SettingItem] = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0) })
 

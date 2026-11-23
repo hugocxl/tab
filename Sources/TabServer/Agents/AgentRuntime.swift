@@ -272,6 +272,8 @@ internal final class AgentRuntime: @unchecked Sendable {
         environment.removeValue(forKey: "CLAUDECODE")
         // Only terminals are Tab sessions; an inherited one isn't this agent's.
         environment.removeValue(forKey: "TAB_SESSION_ID")
+        let config = launch.provider ?? .builtIn(provider)
+        environment = AgentProviderLaunch.environment(config, base: environment)
         environment.merge(launch.environment) { _, tab in tab }
 
         if let path = launch.path { environment["PATH"] = [path, environment["PATH"]].compactMap { $0 }.joined(separator: ":") }
@@ -293,8 +295,9 @@ internal final class AgentRuntime: @unchecked Sendable {
             self.model = model
             self.reasoningEffort = reasoningEffort
         }
+        arguments += config.arguments
         let launch = try launchBuilder?(arguments) ?? launchOverride ?? AgentProcess.Launch(
-            executable: AgentProcess.resolve(provider == .claude ? "claude" : "codex", environment: environment),
+            executable: AgentProviderLaunch.executable(config, environment: environment),
             arguments: arguments, environment: environment)
         let generation = processGeneration
         process = try AgentProcess(launch: launch, directory: directory, onLine: { [weak self] line in

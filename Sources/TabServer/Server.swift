@@ -43,6 +43,7 @@ public final class Server: @unchecked Sendable {
     let agents: AgentSessions
     let agentComposerContext: AgentComposerContextService
     let agentModelCatalog: AgentModelCatalogService
+    let agentProviders: AgentProviderStore
     let agentHistory: AgentHistory
     let agentTitles: AgentTitles
     let shellIntegration: ShellIntegration?
@@ -91,8 +92,11 @@ public final class Server: @unchecked Sendable {
                 guard directory.isDirectory else { throw ServiceError(.badPath, "The agent's project folder is unavailable") }
                 return directory.url
             })
+        let agentProviders = AgentProviderStore(url: dirs.agentProviders)
+        self.agentProviders = agentProviders
         agentModelCatalog = AgentModelCatalogService(home: URL(fileURLWithPath: configuration.homeDirectory),
             cacheDirectory: dirs.root.appendingPathComponent("agent-model-catalog"),
+            providers: { id, kind in agentProviders.provider(id, kind: kind) },
             projectDirectory: { project in
                 let directory = try catalog.project(project).directory
                 guard directory.isDirectory else { throw ServiceError(.badPath, "The agent's project folder is unavailable") }
@@ -106,6 +110,9 @@ public final class Server: @unchecked Sendable {
             return directory.rawValue
         })
         let composerService = agentComposerContext
+        let modelCatalog = agentModelCatalog
+        agentProviders.onChange = { Task { await modelCatalog.invalidate() } }
+        agents.providers = { id, kind in agentProviders.provider(id, kind: kind) }
         agents.composerCatalog = { request in try await composerService.catalog(request) }
         agents.launchEnvironment = ["TAB_SERVER_ID": catalog.serverId.description]
         agents.projectContext = { id in

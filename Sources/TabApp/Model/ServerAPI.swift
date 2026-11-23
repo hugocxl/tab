@@ -22,6 +22,9 @@ public protocol ServerAPI: AnyObject, Sendable {
     func agentConversation(_ request: AgentConversationRequest) async throws -> AgentConversationReply
     func agentComposerContext(_ request: AgentComposerContextRequest) async throws -> AgentComposerContextReply
     func agentModelCatalog(_ request: AgentModelCatalogRequest) async throws -> AgentModelCatalogReply
+    func agentProviders() async throws -> AgentProvidersState
+    func writeAgentProviders(_ settings: AgentProviderSettings) async throws -> AgentProvidersState
+    func checkAgentProviders() async throws -> AgentProvidersState
     func agentHistory(_ request: AgentHistoryRequest) async throws -> AgentHistoryReply
     func importAgentHistory(_ request: AgentHistoryImport) async throws -> AgentChatSnapshot
     func createSession(_ session: CreateSession) async throws -> SessionInfo
@@ -90,6 +93,18 @@ extension ServerAPI {
 
     public func agentModelCatalog(_ request: AgentModelCatalogRequest) async throws -> AgentModelCatalogReply {
         throw ModelError("Model discovery is unsupported by this server.")
+    }
+
+    public func agentProviders() async throws -> AgentProvidersState {
+        throw ClientError.server(ErrorReply(code: .unsupported, message: "This server predates agent provider settings."))
+    }
+
+    public func writeAgentProviders(_ settings: AgentProviderSettings) async throws -> AgentProvidersState {
+        try await agentProviders()
+    }
+
+    public func checkAgentProviders() async throws -> AgentProvidersState {
+        try await agentProviders()
     }
 
     public func agentComposerContext(_ request: AgentComposerContextRequest) async throws -> AgentComposerContextReply {

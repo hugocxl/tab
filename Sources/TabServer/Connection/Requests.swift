@@ -50,6 +50,10 @@ extension ClientConnection {
             Task { [self] in
                 reply(id, await asyncResult { .agentConversation(try await server.agents.conversation(request)) })
             }
+        case .checkAgentProviders:
+            Task { [self] in
+                reply(id, await asyncResult { .agentProviders(await server.agentProviders.check()) })
+            }
         case .agentModelCatalog(let request):
             Task { [self] in
                 reply(id, await asyncResult { .agentModelCatalog(try await server.agentModelCatalog.handle(request)) })
@@ -264,6 +268,10 @@ extension ClientConnection {
         case .writeServerSettings(let settings):
             try server.settings.write(settings)
             return .serverSettingsWritten
+        case .readAgentProviders:
+            return .agentProviders(server.agentProviders.state())
+        case .writeAgentProviders(let settings):
+            return .agentProviders(try server.agentProviders.write(settings))
         case .stopServer(let force):
             return server.requestStop(force: force)
         case .stopServerIfIdle:
@@ -305,7 +313,7 @@ extension ClientConnection {
             return .remoteAccess(remote.state())
 
         case .hello, .ping, .unknown, .authenticate, .pair, .git, .files, .exec, .cancelExec, .agentChat, .agentConversation, .agentCheckpoint, .agentAttachment,
-             .agentComposerContext, .agentModelCatalog, .agentHistory, .importAgentHistory, .openTunnel, .closeTunnel, .listSimulators, .simulatorAction, .attachSimulator,
+             .agentComposerContext, .agentModelCatalog, .checkAgentProviders, .agentHistory, .importAgentHistory, .openTunnel, .closeTunnel, .listSimulators, .simulatorAction, .attachSimulator,
              .detachSimulator, .simulatorScreenshot:
             throw ServiceError(.badRequest, "Unexpected request")
         }

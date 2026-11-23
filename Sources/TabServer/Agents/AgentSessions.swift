@@ -38,6 +38,21 @@ struct AgentLaunch: Sendable, Equatable {
     var forkPoint: String?
     /// Added to the provider's system prompt: where in Tab the agent runs.
     var instructions: String?
+    /// The CLI, home folder, arguments and variables from Settings › Agents.
+    var provider: AgentProviderConfig?
+}
+
+extension AgentSessions {
+    /// Whether two provider IDs name the same provider of `kind`; nil is its built-in one.
+    static func sameProvider(_ a: String?, _ b: String?, kind: AgentChatProvider) -> Bool {
+        (a ?? kind.rawValue) == (b ?? kind.rawValue)
+    }
+
+    /// Whether `prompt` runs on the conversation's current provider.
+    static func keepsProvider(_ prompt: AgentPrompt, _ snapshot: AgentChatSnapshot) -> Bool {
+        prompt.provider == snapshot.provider
+            && (prompt.providerID == nil || sameProvider(prompt.providerID, snapshot.providerID, kind: snapshot.provider))
+    }
 }
 
 extension AgentSessionRuntime {
@@ -216,6 +231,8 @@ final class AgentSessions: @unchecked Sendable {
     var checkDirectory: @Sendable (String) throws -> Void = { _ in }
     /// Tab's variables for every agent; each also gets `TAB_AGENT_ID`.
     var launchEnvironment: [String: String] = [:]
+    /// The provider settings a conversation of a kind runs with, given the ID it chose.
+    var providers: @Sendable (String?, AgentChatProvider) -> AgentProviderConfig = { _, kind in .builtIn(kind) }
     /// The folder holding this Tab's `tab`, put first on agents' `PATH`.
     var cliDirectory: String?
     /// The project an agent works in, as its instructions describe it.
@@ -335,7 +352,7 @@ final class AgentSessions: @unchecked Sendable {
         let submissionContext: (SessionId, SessionId?)? = queue.sync {
             let id: SessionId
             switch request {
-            case .submit(let session, _), .send(let session, _, _, _, _, _): id = session
+            case .submit(let session, _), .send(let session, _, _, _, _, _, _): id = session
             default: return nil
             }
             return (id, entries[id]?.snapshot.resetID)
@@ -365,7 +382,7 @@ final class AgentSessions: @unchecked Sendable {
         let session: SessionId, text: String, provider: AgentChatProvider?, attachments: [AgentChatAttachment]
         switch request {
         case .submit(let id, let prompt): session = id; text = prompt.text; provider = prompt.provider; attachments = prompt.attachments
-        case .send(let id, let value, _, _, let selected, let files): session = id; text = value; provider = selected; attachments = files ?? []
+        case .send(let id, let value, _, _, let selected, let files, _): session = id; text = value; provider = selected; attachments = files ?? []
         default: return request
         }
         if case .submit(let id, let prompt) = request {
@@ -407,8 +424,9 @@ final class AgentSessions: @unchecked Sendable {
         let files = attachments.filter { $0.id != "skill-instructions" && $0.id != "native-skill" } + [attachment]
         switch request {
         case .submit(let session, var prompt): prompt.attachments = files; return .submit(session: session, prompt: prompt)
-        case .send(let session, let text, let model, let effort, let provider, _):
-            return .send(session: session, text: text, model: model, reasoningEffort: effort, provider: provider, attachments: files)
+        case .send(let session, let text, let model, let effort, let provider, _, let providerID):
+            return .send(session: session, text: text, model: model, reasoningEffort: effort, provider: provider, attachments: files,
+                         providerID: providerID)
         default: return request
         }
     }
@@ -670,7 +688,7 @@ final class AgentSessions: @unchecked Sendable {
         }
         let id: SessionId
         switch request {
-        case .clear(let session, _, _), .read(let session), .send(let session, _, _, _, _, _), .approve(let session, _, _, _, _),
+        case .clear(let session, _, _), .read(let session), .send(let session, _, _, _, _, _, _), .approve(let session, _, _, _, _),
              .interrupt(let session), .close(let session), .setAccess(let session, _), .setPlan(let session, _): id = session
         case .submit(let session, _), .editQueued(let session, _, _, _, _), .removeQueued(let session, _, _),
              .deliverQueued(let session, _, _), .moveQueued(let session, _, _, _), .resumeQueue(let session), .answer(let session, _, _, _),
@@ -707,7 +725,7 @@ final class AgentSessions: @unchecked Sendable {
         let submitted: (String, AgentChatProvider, Bool)?
         switch request {
         case .submit(_, let prompt): submitted = (prompt.text, prompt.provider, !prompt.attachments.isEmpty)
-        case .send(_, let text, _, _, let provider, let attachments): submitted = (text, provider ?? entry.snapshot.provider, attachments?.isEmpty == false)
+        case .send(_, let text, _, _, let provider, let attachments, _): submitted = (text, provider ?? entry.snapshot.provider, attachments?.isEmpty == false)
         default: submitted = nil
         }
         if let (text, provider, attachments) = submitted, let command = AgentSlashCommand(text: text), !command.isPath {
@@ -770,7 +788,7 @@ final class AgentSessions: @unchecked Sendable {
         // Attachment bytes are checked here and written by the turn's task, so up to 8 MiB
         // of disk writes never hold the sessions queue.
         var turnAttachmentFiles: (attachments: [AgentChatAttachment], root: URL, item: String)?
-        if case .send(_, let text, let model, let effort, let requestedProvider, let attachments) = request {
+        if case .send(_, let text, let model, let effort, let requestedProvider, let attachments, let requestedProviderID) = request {
             guard entry.deliveryID == nil || entry.deliveryID == deliveryID else {
                 throw ServiceError(.badRequest, "A queued prompt is being delivered.")
             }
@@ -779,6 +797,7 @@ final class AgentSessions: @unchecked Sendable {
             try checkDirectory(entry.directory)
             if !entry.submitting, entry.snapshot.status == .working, let runtime = entry.runtime {
                 guard requestedProvider == nil || requestedProvider == entry.snapshot.provider,
+                      requestedProviderID == nil || Self.sameProvider(requestedProviderID, entry.snapshot.providerID, kind: entry.snapshot.provider),
                       model == entry.snapshot.model, effort == entry.snapshot.reasoningEffort else {
                     throw ServiceError(.badRequest, "Model and reasoning changes apply after the current response.")
                 }
@@ -850,7 +869,11 @@ final class AgentSessions: @unchecked Sendable {
             _ = try projectDirectory(entry.snapshot.project)
             try checkDirectory(entry.directory)
             let provider = requestedProvider ?? entry.snapshot.provider
-            if provider != entry.snapshot.provider {
+            // A prompt without a provider ID keeps the conversation's provider of its kind.
+            let providerID = requestedProviderID ?? (provider == entry.snapshot.provider ? entry.snapshot.providerID : nil)
+            let switching = provider != entry.snapshot.provider
+                || !Self.sameProvider(providerID, entry.snapshot.providerID, kind: provider)
+            if switching {
                 guard entry.snapshot.providerSession == nil, !entry.hasSuccessfulTurn,
                       entry.snapshot.status == .idle || entry.snapshot.status == .failed else {
                     throw ServiceError(.badRequest, "An established conversation cannot switch providers. Open a new agent pane.")
@@ -859,7 +882,11 @@ final class AgentSessions: @unchecked Sendable {
             if let effort, !effort.isAccepted(provider: provider, model: model) {
                 throw ServiceError(.badRequest, "\(provider.name) does not support \(effort.title) reasoning for this model")
             }
-            let restart = provider != entry.snapshot.provider
+            let config = providers(providerID, provider)
+            if !config.enabled, entry.snapshot.providerSession == nil {
+                throw ServiceError(.badRequest, "\(config.title) is turned off. Turn it on in Settings › Agents, or choose another provider.")
+            }
+            let restart = switching
                 || (provider == .claude && (model != entry.snapshot.model || effort != entry.snapshot.reasoningEffort))
             if restart {
                 guard !entry.hasSuccessfulTurn || entry.snapshot.providerSession != nil else {
@@ -880,14 +907,15 @@ final class AgentSessions: @unchecked Sendable {
                 throw ServiceError(.badRequest, error.localizedDescription)
             }
             if restart, entry.runtime != nil {
-                retireRuntime(entry, reason: provider != entry.snapshot.provider ? "the provider changed"
+                retireRuntime(entry, reason: switching ? "the provider changed"
                     : "the model or reasoning effort changed, which restarts Claude")
             }
-            if provider != entry.snapshot.provider || model != entry.snapshot.model {
+            if switching || model != entry.snapshot.model {
                 entry.snapshot.contextUsage = nil
                 entry.snapshot.resolvedModel = nil
             }
             entry.snapshot.provider = provider
+            entry.snapshot.providerID = Self.sameProvider(providerID, nil, kind: provider) ? nil : providerID
             let user = AgentChatItem(id: userID, kind: .user, text: text,
                                      attachments: attachments?.map(\.descriptor))
             let firstMessage = !entry.snapshot.items.contains { $0.kind == .user && !$0.isProviderTurn }
@@ -1008,7 +1036,8 @@ final class AgentSessions: @unchecked Sendable {
                                            project: projectContext(entry.snapshot.project),
                                            cli: cliDirectory.map { ($0 as NSString).appendingPathComponent(Executable.cli) })
                 runtime.prepare(AgentLaunch(environment: environment, path: cliDirectory, forkSource: entry.forkSource,
-                                            forkPoint: entry.forkPoint, instructions: context.text))
+                                            forkPoint: entry.forkPoint, instructions: context.text,
+                                            provider: providers(entry.snapshot.providerID, entry.snapshot.provider)))
                 configureAccess(entry, runtime: runtime, mode: entry.snapshot.accessMode ?? .standard)
             }
         }
@@ -1045,7 +1074,7 @@ final class AgentSessions: @unchecked Sendable {
             let failure: Error?
             do {
                 switch request {
-                case .send(_, let text, _, _, _, _):
+                case .send(_, let text, _, _, _, _, _):
                     try await accessTask?.value
                     _ = await baselineTask?.value
                     try Task.checkCancellation()
@@ -2700,7 +2729,7 @@ extension AgentSessions {
     private func handleInbox(_ request: AgentChatRequest, entry: Entry) throws -> Bool {
         switch request {
         case .submit(_, let prompt):
-            guard prompt.provider == entry.snapshot.provider || entry.snapshot.providerSession == nil else {
+            guard Self.keepsProvider(prompt, entry.snapshot) || entry.snapshot.providerSession == nil else {
                 throw AgentRuntimeError("An established conversation cannot switch providers.")
             }
             // A new message after a stop or failure is the user carrying on, so it
@@ -2720,7 +2749,7 @@ extension AgentSessions {
             }
             drainInbox(entry)
         case .schedule(_, let prompt, let at):
-            guard prompt.provider == entry.snapshot.provider || entry.snapshot.providerSession == nil else {
+            guard Self.keepsProvider(prompt, entry.snapshot) || entry.snapshot.providerSession == nil else {
                 throw AgentRuntimeError("An established conversation cannot switch providers.")
             }
             try mutateInbox(entry) { inbox in
@@ -2821,7 +2850,7 @@ extension AgentSessions {
         if restoreHoldsWork(entry) { throw AgentRuntimeError("Files are being restored in this folder. The prompt waits until the restore finishes.") }
         if entry.snapshot.status == .working {
             guard prompt.model == entry.snapshot.model, prompt.effort == entry.snapshot.reasoningEffort,
-                  prompt.provider == entry.snapshot.provider, prompt.planMode == (entry.snapshot.planMode == true) else {
+                  Self.keepsProvider(prompt, entry.snapshot), prompt.planMode == (entry.snapshot.planMode == true) else {
                 throw AgentRuntimeError("This prompt uses different model or plan settings. It must wait for the next turn.")
             }
         } else { entry.snapshot.planMode = prompt.planMode }
@@ -2873,7 +2902,7 @@ extension AgentSessions {
                         throw AgentDeliveryNotStarted()
                     }
                     try begin(.send(session: id, text: prompt.text, model: prompt.model, reasoningEffort: prompt.effort,
-                                    provider: prompt.provider, attachments: prompt.attachments),
+                                    provider: prompt.provider, attachments: prompt.attachments, providerID: prompt.providerID),
                               continuation: delivered, deliveryID: attemptID)
                 } catch { delivered.resume(throwing: error) }
             }

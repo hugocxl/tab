@@ -2793,3 +2793,45 @@ extension AgentSessionsTests {
         throw AgentRuntimeError("The message never appeared.")
     }
 }
+
+extension AgentSessionsTests {
+    func testAConversationKeepsTheProviderItChoseAndStartsWithItsSettings() async throws {
+        let root = try root()
+        let box = AgentRuntimeBox()
+        let settings = AgentProviderSettings(providers: [
+            AgentProviderConfig(id: "claude-2", kind: .claude, arguments: ["--chrome"]),
+            AgentProviderConfig(id: "off", kind: .claude, enabled: false),
+        ])
+        let sessions = try AgentSessions(root: root, projectDirectory: { _ in root.path }, factory: { _, _, _, callback in
+            let runtime = FakeAgentRuntime(callback)
+            runtime.onSend = { callback(.status(.idle)) }
+            box.install(runtime)
+            return runtime
+        })
+        sessions.providers = { id, kind in settings.provider(id, kind: kind) }
+        defer { sessions.shutdown() }
+
+        let id = SessionId()
+        _ = try await sessions.handle(.create(session: id, project: ProjectId(), provider: .claude))
+        let started = try await sessions.handle(.send(session: id, text: "Start", model: nil, provider: .claude, providerID: "claude-2"))
+        XCTAssertEqual(started.providerID, "claude-2")
+        XCTAssertEqual(box.runtime?.launches.last?.provider?.arguments, ["--chrome"])
+
+        // A prompt without a provider ID, as from an older app, carries on with the same provider.
+        let next = try await sessions.handle(.send(session: id, text: "Next", model: nil, provider: .claude))
+        XCTAssertEqual(next.providerID, "claude-2")
+        do {
+            _ = try await sessions.handle(.send(session: id, text: "Other account", model: nil, provider: .claude, providerID: "claude"))
+            XCTFail("An established conversation must not move to another account")
+        } catch {}
+
+        let fresh = SessionId()
+        _ = try await sessions.handle(.create(session: fresh, project: ProjectId(), provider: .claude))
+        do {
+            _ = try await sessions.handle(.send(session: fresh, text: "Hi", model: nil, provider: .claude, providerID: "off"))
+            XCTFail("A provider turned off starts no conversation")
+        } catch {
+            XCTAssertTrue("\(error)".contains("turned off"), "\(error)")
+        }
+    }
+}

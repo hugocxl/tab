@@ -12,10 +12,12 @@ actor AgentModelCatalogService {
     private let timeout: TimeInterval
     private let cacheDirectory: URL?
     private let now: @Sendable () -> Date
+    private let providers: @Sendable (String?, AgentChatProvider) -> AgentProviderConfig
     private struct Key: Hashable, Sendable {
         var project: ProjectId
-        var provider: AgentChatProvider
-        var filename: String { "\(project.description)-\(provider.rawValue).json" }
+        /// The provider's ID; a built-in provider's is its kind's name.
+        var provider: String
+        var filename: String { "\(project.description)-\(provider).json" }
     }
     private struct Refresh: Sendable {
         var id = UUID()
@@ -27,6 +29,7 @@ actor AgentModelCatalogService {
     init(home: URL, environment: [String: String] = AgentProcess.environment(),
          launch: AgentProcess.Launch? = nil, timeout: TimeInterval = 4, cacheDirectory: URL? = nil,
          now: @escaping @Sendable () -> Date = { Date() },
+         providers: @escaping @Sendable (String?, AgentChatProvider) -> AgentProviderConfig = { _, kind in .builtIn(kind) },
          projectDirectory: @escaping @Sendable (ProjectId) throws -> URL) {
         self.home = home
         self.environment = environment
@@ -34,6 +37,7 @@ actor AgentModelCatalogService {
         self.timeout = timeout
         self.cacheDirectory = cacheDirectory
         self.now = now
+        self.providers = providers
         self.projectDirectory = projectDirectory
     }
 
@@ -42,10 +46,27 @@ actor AgentModelCatalogService {
     /// is retried sooner.
     static func freshness(_ reply: AgentModelCatalogReply) -> TimeInterval { reply.models.isEmpty ? 30 : 600 }
 
+    /// Forgets every discovered catalog, as after the providers' settings change.
+    func invalidate() {
+        cached = [:]
+    }
+
+    /// The provider's models, arranged as the user chose in Settings: custom
+    /// ones added, favorites first, hidden ones left out unless asked for.
     func handle(_ request: AgentModelCatalogRequest) async throws -> AgentModelCatalogReply {
+        let config = providers(request.providerID, request.provider)
+        guard config.enabled else { return AgentModelCatalogReply(models: [], source: "disabled") }
+        var reply = try await discover(request, config: config)
+        reply.models = Array((request.includeHidden ? config.models.arrange(reply.models) : config.models.visible(reply.models))
+            .prefix(AgentModelCatalogReply.maxModels))
+        return reply
+    }
+
+    private func discover(_ request: AgentModelCatalogRequest, config: AgentProviderConfig) async throws -> AgentModelCatalogReply {
         let directory = try projectDirectory(request.project)
         let provider = request.provider
-        let key = Key(project: request.project, provider: provider)
+        let key = Key(project: request.project, provider: config.id)
+        let environment = AgentProviderLaunch.environment(config, base: self.environment)
         if !request.forceRefresh, let cached = cached[key], now().timeIntervalSince(cached.0) < Self.freshness(cached.1) { return cached.1 }
         if let pending = pending[key] {
             if !request.forceRefresh, let cached = cached[key], !cached.1.models.isEmpty { return cached.1 }
@@ -64,15 +85,14 @@ actor AgentModelCatalogService {
             if !request.forceRefresh, memory == nil, provider == .codex, disk.source == "cache", let modified,
                Date().timeIntervalSince(modified) < 300 { return disk }
         }
-        var environment = environment
-        if provider == .claude { environment.removeValue(forKey: "CLAUDECODE") }
-        let launchEnvironment = environment
+        var launchEnvironment = environment
+        if provider == .claude { launchEnvironment.removeValue(forKey: "CLAUDECODE") }
         let override = launch
         let timeout = timeout
-        let task = Task.detached { () -> AgentModelCatalogReply in
+        let task = Task.detached { [launchEnvironment] () -> AgentModelCatalogReply in
             do {
                 let launch = try override ?? AgentProcess.Launch(
-                    executable: AgentProcess.resolve(provider == .codex ? "codex" : "claude", environment: launchEnvironment),
+                    executable: AgentProviderLaunch.executable(config, environment: launchEnvironment),
                     arguments: provider == .codex ? ["app-server"] : ["--print", "--verbose", "--input-format", "stream-json",
                         "--output-format", "stream-json", "--no-session-persistence", "--safe-mode",
                         "--strict-mcp-config", "--mcp-config", "{\"mcpServers\":{}}", "--tools", ""], environment: launchEnvironment)

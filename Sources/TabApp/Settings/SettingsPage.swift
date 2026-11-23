@@ -501,11 +501,19 @@ private struct TextFieldView: View {
 
 private struct ButtonView: View {
     let spec: ButtonSpec
+    @Environment(\.settingsTheme) private var theme
 
     var body: some View {
         let button = Button(role: spec.style == .destructive ? .destructive : nil, action: spec.action) {
             if let icon = spec.icon {
-                Image(icon, size: 13).accessibilityLabel(spec.title)
+                if spec.isOn {
+                    Image(icon, size: 13)
+                        .foregroundStyle(theme?.accent ?? .accentColor)
+                        .accessibilityLabel(spec.title)
+                        .accessibilityAddTraits(.isSelected)
+                } else {
+                    Image(icon, size: 13).accessibilityLabel(spec.title)
+                }
             } else {
                 Text(spec.title)
             }

@@ -274,6 +274,14 @@ private final class SettingsWriteHost: SettingsHost {
     func agentIntegrations() async throws -> [AgentIntegrationStatus] { try await base.agentIntegrations() }
     func setAgentIntegration(_ enabled: Bool) async throws -> [AgentIntegrationStatus] { try await base.setAgentIntegration(enabled) }
     func migrationSources() -> [TerminalMigration.Source] { base.migrationSources() }
+    func agentProviders() async throws -> AgentProvidersState { try await base.agentProviders() }
+    func writeAgentProviders(_ settings: AgentProviderSettings) async throws -> AgentProvidersState {
+        try await base.writeAgentProviders(settings)
+    }
+    func checkAgentProviders() async throws -> AgentProvidersState { try await base.checkAgentProviders() }
+    func agentModels(_ provider: AgentProviderConfig, refresh: Bool) async throws -> [AgentModelDescriptor] {
+        try await base.agentModels(provider, refresh: refresh)
+    }
     func openAgent(prompt: String) throws { try base.openAgent(prompt: prompt) }
     func backupState() throws -> Data { try base.backupState() }
 }

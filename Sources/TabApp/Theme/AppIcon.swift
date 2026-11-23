@@ -129,6 +129,7 @@ public enum AppIcon: String, CaseIterable, Sendable {
     case maximize
     case mcp
     case minus
+    case star
     case minusCircle = "minus-circle"
     case monitor
     case multiplexer

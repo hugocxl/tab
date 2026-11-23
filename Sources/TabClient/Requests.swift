@@ -311,6 +311,25 @@ extension ServerClient {
         guard case .serverSettingsWritten = reply else { throw unexpected(reply) }
     }
 
+    /// The server's coding agents and what their last checks found.
+    public func agentProviders() async throws -> AgentProvidersState {
+        try providersReply(await request(.readAgentProviders))
+    }
+
+    public func writeAgentProviders(_ settings: AgentProviderSettings) async throws -> AgentProvidersState {
+        try providersReply(await request(.writeAgentProviders(settings)))
+    }
+
+    /// Checks each enabled provider's CLI version and sign-in, waiting for the result.
+    public func checkAgentProviders() async throws -> AgentProvidersState {
+        try providersReply(await request(.checkAgentProviders))
+    }
+
+    private func providersReply(_ reply: ReplyBody) throws -> AgentProvidersState {
+        guard case .agentProviders(let state) = reply else { throw unexpected(reply) }
+        return state
+    }
+
     /// Stops the server. Without `force` it refuses while terminals run and
     /// returns false.
     @discardableResult

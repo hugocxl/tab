@@ -114,7 +114,7 @@ final class AgentPaneTests: XCTestCase {
             case .submit, .editQueued, .editQueuedPrompt, .moveQueued, .removeQueued, .deliverQueued, .resumeQueue, .answer, .schedule: break
             case .create, .fork:
                 if failCreate { throw NSError(domain: "Offline", code: 1) }
-            case .send(_, let text, let model, let effort, let provider, _):
+            case .send(_, let text, let model, let effort, let provider, _, _):
                 if gateNextSend {
                     gateNextSend = false
                     await withCheckedContinuation { sendGate = $0 }
@@ -180,7 +180,7 @@ final class AgentPaneTests: XCTestCase {
                 try await request($0)
             }
             pane.loadModelCatalog = { provider, _ in
-                let options: [(String, String)] = provider == .claude
+                let options: [(String, String)] = provider.kind == .claude
                     ? [("claude-sonnet-5-5", "Claude Sonnet 5.5"), ("claude-opus-5-5", "Claude Opus 5.5")]
                     : [("gpt-6.1-sol", "GPT-6.1 Sol"), ("gpt-6-astra", "GPT-6 Astra")]
                 return options.map { .init(id: $0.0, title: $0.1, reasoningEfforts: [.low, .medium, .high, .max],
@@ -277,7 +277,7 @@ final class AgentPaneTests: XCTestCase {
         pane.send()
         try await wait { pane.errorMessage != nil }
         XCTAssertEqual(pane.draftAttachments.first?.data, bytes)
-        guard case .send(_, let text, _, _, _, let attachments) = backend.requests.last else { return XCTFail("Missing send") }
+        guard case .send(_, let text, _, _, _, let attachments, _) = backend.requests.last else { return XCTFail("Missing send") }
         XCTAssertEqual(text, "")
         XCTAssertEqual(attachments?.first?.data, bytes)
         XCTAssertEqual(attachments?.first?.name, file.lastPathComponent)
@@ -670,7 +670,7 @@ final class AgentPaneTests: XCTestCase {
         let pane = backend.controller()
         defer { pane.dispose() }
         pane.loadModelCatalog = { provider, _ in
-            guard provider == .codex else { return [] }
+            guard provider.kind == .codex else { return [] }
             return [.init(id: "future-codex-model", title: "Future Codex Model",
                           reasoningEfforts: [.low, .high, .init(rawValue: "next-generation")], defaultReasoningEffort: .low)]
         }
@@ -686,7 +686,7 @@ final class AgentPaneTests: XCTestCase {
         pane.surface.composer.string = "Use the discovered model"
         pane.send()
         try await wait { pane.surface.composer.string.isEmpty }
-        guard case .send(_, _, let model, let effort, let provider, _) = backend.requests.last else { return XCTFail("Missing send") }
+        guard case .send(_, _, let model, let effort, let provider, _, _) = backend.requests.last else { return XCTFail("Missing send") }
         XCTAssertEqual(model, "future-codex-model")
         XCTAssertEqual(provider, .codex)
         XCTAssertEqual(effort?.rawValue, "next-generation")
@@ -698,7 +698,7 @@ final class AgentPaneTests: XCTestCase {
         defer { pane.dispose() }
         var refreshes: [Bool] = []
         pane.loadModelCatalog = { provider, force in
-            guard provider == .codex else { return [] }
+            guard provider.kind == .codex else { return [] }
             refreshes.append(force)
             return [.init(id: force ? "new-release" : "existing", title: force ? "New release" : "Existing",
                           reasoningEfforts: [.high])]

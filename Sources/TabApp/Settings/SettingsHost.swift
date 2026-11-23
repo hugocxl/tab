@@ -104,6 +104,13 @@ public protocol SettingsHost: AnyObject {
 
     // MARK: Agents
 
+    /// This Mac's server's coding agents and what their last checks found.
+    func agentProviders() async throws -> AgentProvidersState
+    func writeAgentProviders(_ settings: AgentProviderSettings) async throws -> AgentProvidersState
+    /// Checks each enabled provider's CLI now.
+    func checkAgentProviders() async throws -> AgentProvidersState
+    /// `provider`'s models in the user's order, hidden ones included.
+    func agentModels(_ provider: AgentProviderConfig, refresh: Bool) async throws -> [AgentModelDescriptor]
     /// What Tab installed for each coding agent on this computer.
     func agentIntegrations() async throws -> [AgentIntegrationStatus]
     /// Installs or removes the skill and hooks of every agent found.
@@ -148,6 +155,8 @@ public final class PreviewSettingsHost: SettingsHost {
         AgentIntegrationStatus(agent: $0, found: $0 != .pi, skill: .missing, hook: $0.supportsSessionHook ? .missing : .unsupported)
     }
     public var migrations = Array(TerminalMigration.sources.prefix(2))
+    public var providers = AgentProvidersState(settings: AgentProviderSettings())
+    public var reportedModels: [AgentChatProvider: [AgentModelDescriptor]] = [:]
 
     public init() {}
 
@@ -202,6 +211,15 @@ public final class PreviewSettingsHost: SettingsHost {
             if integrations[index].agent.supportsSessionHook { integrations[index].hook = enabled ? .installed : .missing }
         }
         return integrations
+    }
+    public func agentProviders() async throws -> AgentProvidersState { providers }
+    public func writeAgentProviders(_ settings: AgentProviderSettings) async throws -> AgentProvidersState {
+        providers.settings = settings
+        return providers
+    }
+    public func checkAgentProviders() async throws -> AgentProvidersState { providers }
+    public func agentModels(_ provider: AgentProviderConfig, refresh: Bool) async throws -> [AgentModelDescriptor] {
+        provider.models.arrange(reportedModels[provider.kind] ?? [])
     }
     public func migrationSources() -> [TerminalMigration.Source] { migrations }
     public func openAgent(prompt: String) throws { agentPrompts.append(prompt) }

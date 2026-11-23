@@ -288,7 +288,7 @@ final class SettingsTests: XCTestCase {
         let listed = SettingsSidebar.groups.flatMap { $0 }
         XCTAssertEqual(Set(listed), Set(SettingsCategory.allCases).subtracting([.server]))
         XCTAssertEqual(listed.count, Set(listed).count)
-        XCTAssertEqual(SettingsSidebar.groups.map { $0.first }, [.general, .terminal, .browser, .backup])
+        XCTAssertEqual(SettingsSidebar.groups.map { $0.first }, [.general, .terminal, .agents, .browser, .backup])
         XCTAssertEqual(SettingsSidebar.groups.last?.last, .changelog)
     }
 }

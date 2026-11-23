@@ -37,7 +37,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     private var initialPreferences: AgentComposerPreferences?
     private var savePreferences: ((AgentComposerPreferences?) -> Void)?
     private func persistSelection(access: AgentAccessMode? = nil) {
-        savePreferences?(.init(provider: selection.provider, model: selection.model,
+        savePreferences?(.init(provider: selection.provider, providerID: selection.providerID, model: selection.model,
                                effort: reasoningEffort, access: access ?? snapshot?.accessMode))
     }
     var confirmClose: (() async -> Bool)?
@@ -112,8 +112,9 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     private struct PickerState: Equatable {
         var selection: AgentModelSelection
         var effort: AgentReasoningEffort?
-        var lockedProvider: TabCore.AgentChatProvider?
+        var lockedProvider: String?
         var resolvedModel: String?
+        var providers: [AgentProviderConfig]
     }
     private(set) var connectionGeneration: UInt64 = 0
     private(set) var needsAuthoritativeSnapshot = false
@@ -131,11 +132,17 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     var preparingAttachments = 0
     private var attachmentPreview: NSPopover?
     private lazy var composerCoordinator = AgentComposerCoordinator(surface: surface)
-    var loadModelCatalog: ((TabProtocol.AgentChatProvider, Bool) async throws -> [AgentModelDescriptor])?
-    private var modelCatalogs: [TabProtocol.AgentChatProvider: [AgentModelDescriptor]] = [:]
+    /// A provider's models as its menu offers them: the user's order, hidden ones left out.
+    var loadModelCatalog: ((AgentProviderConfig, Bool) async throws -> [AgentModelDescriptor])?
+    /// The server's providers; servers that predate provider settings throw, leaving the built-in ones.
+    var loadProviders: (() async throws -> AgentProviderSettings)?
+    /// The providers the model menu offers, from the server's settings.
+    private var providers = AgentProviderSettings().providers
+    /// Each provider's models, by provider ID.
+    private var modelCatalogs: [String: [AgentModelDescriptor]] = [:]
     private var modelCatalogTask: Task<Void, Never>?
     private var modelCatalogLoadedAt = Date.distantPast
-    private var unavailableModelCatalogs = Set<TabProtocol.AgentChatProvider>()
+    private var unavailableModelCatalogs = Set<String>()
     private var modelMenuOpen = false
 
     @MainActor
@@ -337,7 +344,14 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
             guard let model, let project = model.state.paneProject(pane), let client = model.sideClient(for: project) else {
                 throw AgentPaneError.offline
             }
-            return try await client.agentModelCatalog(.init(project: project, provider: provider, forceRefresh: forceRefresh)).models
+            return try await client.agentModelCatalog(.init(project: project, provider: provider.kind, forceRefresh: forceRefresh,
+                                                            providerID: provider.id)).models
+        }
+        loadProviders = { [weak model] in
+            guard let model, let project = model.state.paneProject(pane), let client = model.sideClient(for: project) else {
+                throw AgentPaneError.offline
+            }
+            return try await client.agentProviders().settings
         }
     }
 
@@ -346,7 +360,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         initialPreferences = draft ?? defaults
         savePreferences = save
         if let draft {
-            selection = AgentModelSelection(provider: draft.provider, model: draft.model)
+            selection = AgentModelSelection(provider: draft.provider, providerID: draft.providerID, model: draft.model)
             reasoningEffort = draft.effort
             selectionEdited = true
         }
@@ -579,7 +593,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
             guard let self, !Task.isCancelled, !self.disposed else { return }
             self.retryTask = nil
             let prompt = AgentPrompt(text: item.text, model: self.selection.model, effort: self.reasoningEffort,
-                                     provider: self.selection.provider, planMode: self.snapshot?.planMode == true,
+                                     provider: self.selection.provider, providerID: self.selection.providerKey, planMode: self.snapshot?.planMode == true,
                                      attachments: attachments)
             self.composerCoordinator.dismiss()
             self.surface.scrollToEnd()
@@ -668,7 +682,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     func compactConversation() {
         guard !disposed, commandTask == nil, created, canSend, composerCoordinator.providerCommands.contains("compact") else { return }
         let prompt = AgentPrompt(text: "/compact", model: selection.model, effort: reasoningEffort,
-                                 provider: selection.provider, planMode: snapshot?.planMode == true)
+                                 provider: selection.provider, providerID: selection.providerKey, planMode: snapshot?.planMode == true)
         run(.submit(session: session, prompt: prompt))
     }
 
@@ -1236,7 +1250,8 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
                     if firstSnapshot, result.items.isEmpty, result.providerSession == nil, result.revision <= 1,
                        let defaults = self.initialPreferences {
                         if !self.selectionEdited {
-                            self.selection = AgentModelSelection(provider: defaults.provider, model: defaults.model)
+                            self.selection = AgentModelSelection(provider: defaults.provider, providerID: defaults.providerID,
+                                                                 model: defaults.model)
                             self.reasoningEffort = defaults.effort
                             self.selectionEdited = true
                             self.persistSelection(access: defaults.access)
@@ -1294,7 +1309,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         composerCoordinator.dismiss()
         surface.scrollToEnd()
         var prompt = AgentPrompt(text: text, model: selection.model, effort: reasoningEffort,
-                                 provider: selection.provider, planMode: snapshot?.planMode == true, attachments: attachments)
+                                 provider: selection.provider, providerID: selection.providerKey, planMode: snapshot?.planMode == true, attachments: attachments)
         // A reconnect may update the displayed model or mode after acceptance.
         // Keep the original delivery identity until the user edits the payload or settings.
         if let previous = lastSubmission, previous.text == text, previous.attachments == attachments {
@@ -1996,8 +2011,8 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         authoritativeProject = result.project
         surface.citationEnvironmentId = result.project.description
         errorMessage = nil
-        if !selectionEdited || (result.providerSession != nil && selection.provider != result.provider) {
-            selection = AgentModelSelection(provider: result.provider, model: result.model)
+        if !selectionEdited || (result.providerSession != nil && selection.providerKey != Self.providerKey(result)) {
+            selection = AgentModelSelection(provider: result.provider, providerID: result.providerID, model: result.model)
             reasoningEffort = result.reasoningEffort
             selectionEdited = false
         }
@@ -2209,12 +2224,12 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     }
 
     private var selectedModelDescriptor: AgentModelDescriptor? {
-        descriptor(for: AgentModelSelection(provider: selection.provider, model: effectiveModel))
+        descriptor(for: AgentModelSelection(provider: selection.provider, providerID: selection.providerID, model: effectiveModel))
     }
 
     private func descriptor(for choice: AgentModelSelection) -> AgentModelDescriptor? {
         guard let model = choice.model else { return nil }
-        let models = modelCatalogs[choice.provider] ?? []
+        let models = modelCatalogs[choice.providerKey] ?? []
         return models.first { $0.id == model } ?? models.first { $0.resolvedModel == model }
     }
 
@@ -2230,17 +2245,23 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         modelCatalogTask = Task { [weak self] in
             guard let self else { return }
             defer { if generation == self.connectionGeneration { self.modelCatalogTask = nil } }
-            for provider in TabProtocol.AgentChatProvider.allCases {
+            if let settings = try? await self.loadProviders?() {
+                guard !Task.isCancelled, !self.disposed, generation == self.connectionGeneration else { return }
+                self.providers = settings.providers
+                self.menuState = nil
+                self.updateControls()
+            }
+            for provider in self.menuProviders {
                 do {
                     let models = try await loadModelCatalog(provider, force)
                     guard !Task.isCancelled, !self.disposed, generation == self.connectionGeneration else { return }
-                    self.modelCatalogs[provider] = models
-                    self.unavailableModelCatalogs.remove(provider)
+                    self.modelCatalogs[provider.id] = models
+                    self.unavailableModelCatalogs.remove(provider.id)
                     self.menuState = nil
                     self.updateControls()
                 } catch {
                     guard !Task.isCancelled, !self.disposed, generation == self.connectionGeneration else { return }
-                    self.unavailableModelCatalogs.insert(provider)
+                    self.unavailableModelCatalogs.insert(provider.id)
                     self.menuState = nil
                     self.updateControls()
                 }
@@ -2250,7 +2271,26 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
 
     var effectiveModel: String? {
         selection.model ?? (selection.provider == snapshot?.provider ? snapshot?.resolvedModel : nil)
-            ?? modelCatalogs[selection.provider]?.first(where: \.isDefault)?.id
+            ?? modelCatalogs[selection.providerKey]?.first(where: \.isDefault)?.id
+    }
+
+    /// The providers the model menu lists: the enabled ones, and the chosen one even when turned off.
+    private var menuProviders: [AgentProviderConfig] {
+        providers.filter { $0.enabled || $0.id == selection.providerKey }
+    }
+
+    private func providerConfig(_ key: String, kind: TabCore.AgentChatProvider) -> AgentProviderConfig {
+        providers.first { $0.id == key && $0.kind == kind } ?? .builtIn(kind)
+    }
+
+    /// The conversation's provider ID, a built-in one's being its kind's name.
+    private static func providerKey(_ snapshot: AgentChatSnapshot) -> String {
+        snapshot.providerID ?? snapshot.provider.rawValue
+    }
+
+    /// Whether `key` is the provider the conversation already runs.
+    private func isCurrentProvider(_ key: String) -> Bool {
+        snapshot.map { Self.providerKey($0) == key } ?? false
     }
 
     /// Provider conversations cannot be resumed by a different provider.
@@ -2295,13 +2335,14 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         }
     }
 
-    func selectModel(provider: TabCore.AgentChatProvider, model: String?) {
+    func selectModel(provider: TabCore.AgentChatProvider, providerID: String? = nil, model: String?) {
         // A picker opened while idle can finish during reconnection. Keep that
         // choice as a local draft until an authoritative snapshot arrives.
+        let key = providerID ?? (provider == selection.provider ? selection.providerKey : provider.rawValue)
         guard canEditSelection,
-              canChangeProvider || provider == snapshot?.provider else { return }
+              canChangeProvider || isCurrentProvider(key) else { return }
         let trimmed = model?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let chosen = AgentModelSelection(provider: provider, model: trimmed?.isEmpty == false ? trimmed : nil)
+        let chosen = AgentModelSelection(provider: provider, providerID: key, model: trimmed?.isEmpty == false ? trimmed : nil)
         guard chosen != selection else { return applyModel(chosen) }
         confirmingRestart { [weak self] in self?.applyModel(chosen) }
     }
@@ -2336,7 +2377,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     @objc private func modelSelected(_ sender: Any?) {
         guard let item = (sender as? NSMenuItem) ?? surface.model.selectedItem else { return }
         if let value = item.representedObject as? AgentModelSelection {
-            selectModel(provider: value.provider, model: value.model)
+            selectModel(provider: value.provider, providerID: value.providerKey, model: value.model)
         } else if item.representedObject as? String == "refresh-models" {
             modelCatalogLoadedAt = .distantPast
             menuState = nil
@@ -2368,30 +2409,34 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     private func updateSelectionMenus() {
         guard !modelMenuOpen else { return }
         let state = PickerState(selection: selection, effort: reasoningEffort,
-                                lockedProvider: canChangeProvider ? nil : snapshot?.provider,
-                                resolvedModel: effectiveModel)
+                                lockedProvider: canChangeProvider ? nil : snapshot.map(Self.providerKey),
+                                resolvedModel: effectiveModel, providers: menuProviders)
         guard menuState != state else { return }
         menuState = state
-        let displayedSelection = AgentModelSelection(provider: selection.provider, model: effectiveModel)
+        let displayedSelection = AgentModelSelection(provider: selection.provider, providerID: selection.providerID, model: effectiveModel)
         let menu = NSMenu()
         menu.delegate = self
         var menuLogos: [Int: AgentProvider] = [:]
         menu.autoenablesItems = false
-        for provider in TabCore.AgentChatProvider.allCases {
-            let heading = NSMenuItem(title: provider.name, action: nil, keyEquivalent: "")
-            let models = NSMenu(title: provider.name)
+        for config in menuProviders {
+            let provider = config.kind
+            let key = config.id
+            let heading = NSMenuItem(title: config.title, action: nil, keyEquivalent: "")
+            let models = NSMenu(title: config.title)
             models.autoenablesItems = false
             heading.submenu = models
-            heading.state = selection.provider == provider ? .on : .off
+            heading.state = selection.providerKey == key ? .on : .off
+            if !config.enabled { heading.toolTip = "Turned off in Settings › Agents" }
             menuLogos[menu.items.count] = provider == .claude ? .claude : .codex
             menu.addItem(heading)
-            var choices = (modelCatalogs[provider] ?? []).map { AgentModelSelection(provider: provider, model: $0.id) }
+            var choices = (modelCatalogs[key] ?? []).map { AgentModelSelection(provider: provider, providerID: key, model: $0.id) }
             let shownModel = descriptor(for: displayedSelection)
-            if displayedSelection.provider == provider && displayedSelection.model != nil && shownModel == nil {
+            if displayedSelection.providerKey == key && displayedSelection.model != nil && shownModel == nil {
                 choices.append(displayedSelection)
             }
             if choices.isEmpty {
-                let title = unavailableModelCatalogs.contains(provider) ? "Models unavailable" : modelCatalogs[provider] == nil ? "Loading models…" : "No models reported"
+                let title = !config.enabled ? "Turned off" : unavailableModelCatalogs.contains(key) ? "Models unavailable"
+                    : modelCatalogs[key] == nil ? "Loading models…" : "No models reported"
                 let status = NSMenuItem(title: title, action: nil, keyEquivalent: "")
                 status.isEnabled = false
                 models.addItem(status)
@@ -2401,10 +2446,13 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
                 item.representedObject = choice
                 item.target = self
                 item.action = #selector(modelSelected(_:))
-                let current = selectedModelDescriptor.map { AgentModelSelection(provider: selection.provider, model: $0.id) } ?? displayedSelection
+                let current = selectedModelDescriptor.map {
+                    AgentModelSelection(provider: selection.provider, providerID: selection.providerID, model: $0.id)
+                } ?? displayedSelection
                 item.state = choice == current ? .on : .off
                 let reported = descriptor(for: choice) != nil
-                item.isEnabled = reported && (canChangeProvider || provider == snapshot?.provider)
+                item.isEnabled = reported && (canChangeProvider || isCurrentProvider(key))
+                    && (config.enabled || isCurrentProvider(key))
                 item.toolTip = !reported ? "Current model is not listed in the provider catalog."
                     : item.isEnabled ? choice.model : "Open a new agent pane to use another provider."
                 models.addItem(item)
@@ -2420,7 +2468,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         surface.model.select(nil)
         surface.model.displayedTitle = modelTitle(displayedSelection)
         surface.model.icon = selection.provider == .claude ? .sparkles : .cpu
-        surface.model.toolTip = "Model · \(selection.provider.name). Changes apply to the next message."
+        surface.model.toolTip = "Model · \(providerConfig(selection.providerKey, kind: selection.provider).title). Changes apply to the next message."
 
         surface.effort.removeAllItems()
         surface.effort.addItem(withTitle: selectedModelDescriptor?.reasoningEfforts.isEmpty == true ? "Off" : "Auto")

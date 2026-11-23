@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import TabCore
+import TabProtocol
 
 /// What the Settings window shows: the open page or the search, the
 /// back/forward history, the editors open on the page, and the page's rows
@@ -11,11 +12,15 @@ final class SettingsModel: ObservableObject {
     struct Location: Equatable {
         var category: SettingsCategory
         var subpage: SettingsSubpage?
+        /// The coding agent an `agentProvider` page shows.
+        var provider: String?
     }
 
     let store: SettingsStore
     private(set) var category: SettingsCategory = .general
     private(set) var subpage: SettingsSubpage?
+    /// The coding agent the open provider page shows.
+    private(set) var provider: String?
     private(set) var query = ""
     private(set) var backStack: [Location] = []
     private(set) var forwardStack: [Location] = []
@@ -25,6 +30,10 @@ final class SettingsModel: ObservableObject {
 
     /// Transient editors on the page.
     var profileName = ""
+    /// A provider page's unsaved new variable and custom model.
+    var variableName = ""
+    var variableValue = ""
+    var customModelID = ""
     var nameSheet: NamePromptSheet?
     /// The bundled changelog, read when its page first opens.
     private(set) lazy var changelog: Changelog? = Changelog.bundled()
@@ -50,8 +59,18 @@ final class SettingsModel: ObservableObject {
     var canGoBack: Bool { !backStack.isEmpty }
     var canGoForward: Bool { !forwardStack.isEmpty }
     var isSearching: Bool { !query.trimmingCharacters(in: .whitespaces).isEmpty }
-    var title: String { isSearching ? "Search" : subpage?.title ?? category.title }
-    private var location: Location { Location(category: category, subpage: subpage) }
+    var title: String {
+        if isSearching { return "Search" }
+        if subpage == .agentProvider { return shownProvider.title }
+        return subpage?.title ?? category.title
+    }
+    private var location: Location { Location(category: category, subpage: subpage, provider: provider) }
+
+    /// The provider the open provider page shows, or the first while none is chosen.
+    var shownProvider: AgentProviderConfig {
+        let settings = store.agentProviders?.settings ?? AgentProviderSettings()
+        return settings.provider(provider) ?? settings.providers.first ?? .builtIn(.claude)
+    }
 
     /// The page selected in the sidebar: none while searching.
     var selection: SettingsCategory? { isSearching ? nil : category }
@@ -67,6 +86,11 @@ final class SettingsModel: ObservableObject {
     /// Opens a subpage of the current page, such as Advanced Font Settings.
     func open(_ subpage: SettingsSubpage) {
         go(to: Location(category: subpage.category, subpage: subpage))
+    }
+
+    /// Opens a coding agent's page.
+    func openProvider(_ id: String) {
+        go(to: Location(category: .agents, subpage: .agentProvider, provider: id))
     }
 
     private func go(to next: Location) {
@@ -92,11 +116,15 @@ final class SettingsModel: ObservableObject {
     private func open(_ location: Location) {
         category = location.category
         subpage = location.subpage
+        provider = location.provider
         query = ""
         if category == .server || category == .terminal { store.loadServerSettings() }
         if category == .mobile { store.loadRemoteAccess() }
         if category == .browser { store.refreshBrowserProfiles() }
         if category == .integrations { store.loadAgentIntegrations() }
+        if category == .agents {
+            if subpage == .agentProvider { store.loadAgentModels(shownProvider.id) } else { store.loadAgentProviders() }
+        }
         reload()
     }
 
@@ -141,6 +169,7 @@ final class SettingsModel: ObservableObject {
         case .interface: buildInterface(builder)
         case .terminal: buildTerminal(builder)
         case .keyboard: buildKeyboard(builder)
+        case .agents: buildAgents(builder)
         case .integrations: buildIntegrations(builder)
         case .notifications: buildNotifications(builder)
         case .privacy: buildPrivacy(builder)

@@ -45,6 +45,16 @@ public final class SettingsStore {
     /// What Tab installed for each coding agent; `nil` until read.
     public private(set) var agentIntegrations: [AgentIntegrationStatus]?
     public private(set) var agentIntegrationBusy = false
+    /// This Mac's server's coding agents; `nil` until read.
+    public private(set) var agentProviders: AgentProvidersState?
+    /// Each provider's models as Settings lists them, hidden ones included, by provider ID.
+    public private(set) var agentModels: [String: [AgentModelDescriptor]] = [:]
+    /// Providers whose model list couldn't be read.
+    public private(set) var agentModelsUnavailable: Set<String> = []
+    public private(set) var checkingAgentProviders = false
+    private var agentProviderWrite: Task<Void, Never>?
+    /// Counts edits, so a read that started before one doesn't replace it.
+    private var agentProviderEdits = 0
 
     /// Fires after anything the window shows changed.
     public let changes = PassthroughSubject<Void, Never>()
@@ -186,6 +196,159 @@ public final class SettingsStore {
             self?.agentIntegrationBusy = false
             self?.changed()
         }
+    }
+
+    // MARK: Agent providers
+
+    /// Reads the providers, then checks them again when the last check is
+    /// older than the server's interval.
+    public func loadAgentProviders() {
+        guard let host, serverState == .running else { return }
+        let edits = agentProviderEdits
+        Task { [weak self] in
+            do {
+                let state = try await host.agentProviders()
+                guard let self else { return }
+                self.acceptAgentProviders(state, editsAtStart: edits)
+                self.errors["agent-providers"] = nil
+                if self.needsCheck(state) { self.checkAgentProviders() }
+            } catch {
+                self?.errors["agent-providers"] = Self.agentProvidersMessage(error)
+            }
+            self?.changed()
+        }
+    }
+
+    /// Takes the server's providers, keeping local edits made since the read began.
+    private func acceptAgentProviders(_ state: AgentProvidersState, editsAtStart: Int) {
+        guard editsAtStart != agentProviderEdits, let local = agentProviders else {
+            agentProviders = state
+            return
+        }
+        agentProviders = AgentProvidersState(settings: local.settings, health: state.health)
+    }
+
+    private func needsCheck(_ state: AgentProvidersState) -> Bool {
+        let interval = TimeInterval(state.settings.healthCheckInterval)
+        return state.settings.providers.contains { provider in
+            guard provider.enabled else { return false }
+            guard let checked = state.health(provider.id)?.checkedAt else { return true }
+            return interval > 0 && Date().timeIntervalSince(checked) > interval
+        }
+    }
+
+    /// Checks every enabled provider's CLI version and sign-in.
+    public func checkAgentProviders() {
+        guard let host, !checkingAgentProviders else { return }
+        checkingAgentProviders = true
+        changed()
+        let edits = agentProviderEdits
+        Task { [weak self] in
+            do {
+                let state = try await host.checkAgentProviders()
+                self?.acceptAgentProviders(state, editsAtStart: edits)
+                self?.errors["agent-providers"] = nil
+            } catch {
+                self?.errors["agent-providers"] = Self.agentProvidersMessage(error)
+            }
+            self?.checkingAgentProviders = false
+            self?.changed()
+        }
+    }
+
+    /// Lists `id`'s models, asking its CLI again when `refresh`.
+    public func loadAgentModels(_ id: String, refresh: Bool = false) {
+        guard let host, let provider = agentProviders?.settings.provider(id) else { return }
+        Task { [weak self] in
+            do {
+                self?.agentModels[id] = try await host.agentModels(provider, refresh: refresh)
+                self?.agentModelsUnavailable.remove(id)
+            } catch {
+                self?.agentModelsUnavailable.insert(id)
+            }
+            self?.changed()
+        }
+    }
+
+    /// Orders `id`'s listed models by its preferences at once, leaving out a
+    /// removed custom model, then lists them again once the change is saved.
+    public func rearrangeAgentModels(_ id: String, removing removed: String? = nil) {
+        guard let preferences = agentProviders?.settings.provider(id)?.models, let models = agentModels[id] else { return }
+        agentModels[id] = preferences.arrange(models.filter { $0.id != removed })
+        changed()
+        let write = agentProviderWrite
+        Task { [weak self] in
+            await write?.value
+            self?.loadAgentModels(id)
+        }
+    }
+
+    /// Changes one provider, recording a refusal under `row`.
+    public func updateAgentProvider(_ id: String, row: String, _ change: @escaping (inout AgentProviderConfig) -> Void) {
+        updateAgentProviders(row) { settings in
+            guard let index = settings.providers.firstIndex(where: { $0.id == id }) else { return }
+            change(&settings.providers[index])
+        }
+    }
+
+    /// Adds a provider of `kind` and returns its ID.
+    @discardableResult
+    public func addAgentProvider(_ kind: AgentChatProvider) -> String? {
+        guard let settings = agentProviders?.settings, settings.providers.count < AgentProviderSettings.maxProviders else {
+            setError("agent-providers", "Remove a provider before adding another.")
+            return nil
+        }
+        let id = settings.newID(kind)
+        let count = settings.providers.filter { $0.kind == kind }.count
+        updateAgentProviders("agent-providers") { settings in
+            settings.providers.append(AgentProviderConfig(id: id, kind: kind, name: "\(kind.name) \(count + 1)"))
+        }
+        return id
+    }
+
+    public func removeAgentProvider(_ id: String) {
+        updateAgentProviders("agent-providers") { settings in
+            settings.providers.removeAll { $0.id == id && !$0.isBuiltIn }
+        }
+        agentModels[id] = nil
+    }
+
+    /// Applies `change` at once and saves it on the server after any earlier
+    /// save, so quick edits arrive in order; a refused one reloads the server's.
+    public func updateAgentProviders(_ row: String, _ change: @escaping (inout AgentProviderSettings) -> Void) {
+        guard var state = agentProviders, let host else { return }
+        var next = state.settings
+        change(&next)
+        do {
+            try next.validate()
+        } catch {
+            return setError(row, "That value isn't allowed here.")
+        }
+        state.settings = next
+        agentProviders = state
+        agentProviderEdits += 1
+        errors[row] = nil
+        changed()
+        let previous = agentProviderWrite
+        agentProviderWrite = Task { [weak self] in
+            await previous?.value
+            guard let self, let current = agentProviders?.settings else { return }
+            do {
+                let saved = try await host.writeAgentProviders(current)
+                if agentProviders?.settings == current { agentProviders?.health = saved.health }
+            } catch {
+                errors[row] = Self.agentProvidersMessage(error)
+                if let state = try? await host.agentProviders() { agentProviders = state }
+            }
+            changed()
+        }
+    }
+
+    private static func agentProvidersMessage(_ error: Error) -> String {
+        if case ClientError.server(let reply) = error, reply.code == .unsupported {
+            return "This Mac's server is older than this app. Restart it from Settings › Server to manage providers."
+        }
+        return message(error)
     }
 
     // MARK: Appearance

@@ -194,7 +194,8 @@ final class SettingsPageBuilder {
         .segmented(SegmentedSpec(titles: titles, selected: selected, label: items[id]?.label ?? id, change: change))
     }
 
-    func button(_ title: String, style: ButtonSpec.Style = .normal, enabled: Bool = true, icon: AppIcon? = nil, help: String? = nil, _ action: @escaping () -> Void) -> SettingControl {
-        .button(ButtonSpec(title: title, style: style, enabled: enabled, icon: icon, help: help, action: action))
+    func button(_ title: String, style: ButtonSpec.Style = .normal, enabled: Bool = true, icon: AppIcon? = nil, help: String? = nil,
+                isOn: Bool = false, _ action: @escaping () -> Void) -> SettingControl {
+        .button(ButtonSpec(title: title, style: style, enabled: enabled, icon: icon, help: help, isOn: isOn, action: action))
     }
 }

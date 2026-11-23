@@ -150,6 +150,8 @@ struct ButtonSpec {
     /// Shows a Tab Icon instead of the title; the title stays its label.
     var icon: AppIcon?
     var help: String?
+    /// Draws the icon in the accent color, as a favorite's star.
+    var isOn = false
     var action: () -> Void
 }
 

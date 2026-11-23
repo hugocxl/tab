@@ -49,11 +49,12 @@ final class SettingsControlsTests: XCTestCase {
         var terminal: Any?
         var server: ServerSettingsDoc
         var remote: RemoteAccessSettings
+        var agents: AgentProviderSettings
     }
 
     private func snapshot() -> Snapshot {
         Snapshot(settings: document(dirs.settings), terminal: document(dirs.terminalSettings),
-                 server: host.serverSettings, remote: host.remoteAccess.settings)
+                 server: host.serverSettings, remote: host.remoteAccess.settings, agents: host.providers.settings)
     }
 
     private func written(since before: Snapshot) -> [String] {
@@ -62,6 +63,7 @@ final class SettingsControlsTests: XCTestCase {
         paths += changedPaths(before.terminal, after.terminal).map { "terminal.json:\($0)" }
         if before.server != after.server { paths.append("server") }
         if before.remote != after.remote { paths.append("remote") }
+        if before.agents != after.agents { paths.append("agents") }
         return paths
     }
 
@@ -93,7 +95,8 @@ final class SettingsControlsTests: XCTestCase {
             stepper.commit(next)
         case .text(let field):
             guard field.enabled else { return false }
-            if rowId == "browser-profiles" { return false }
+            // Drafts of a new entry, saved by their Add button.
+            if ["browser-profiles", "agent-provider-variables", "agent-provider-custom-model"].contains(rowId) { return false }
             let numeric = Double(field.value) != nil || Double(field.placeholder) != nil
             var text = numeric ? "1000" : (field.value.isEmpty ? "qa-value" : field.value + "-qa")
             if rowId.contains("folder") || rowId.contains("template") { text = "~/qa-worktrees" }
@@ -101,6 +104,7 @@ final class SettingsControlsTests: XCTestCase {
             if rowId == "startup-command" { text = "/bin/bash -l" }
             if rowId == "mobile-port" { text = "7420" }
             if rowId == "browser-home-page" { text = "https://example.com" }
+            if rowId == "agent-provider-auto-compact" { text = "300000" }
             field.commit(text)
         default:
             return false
@@ -112,6 +116,7 @@ final class SettingsControlsTests: XCTestCase {
         let store = SettingsStore(dirs: dirs, host: host, theme: AppTheme(catalog: ThemeCatalog.load(customDirectory: nil), systemIsDark: true))
         store.loadServerSettings()
         store.loadRemoteAccess()
+        store.loadAgentProviders()
         try await Task.sleep(nanoseconds: 50_000_000)
         let page = SettingsModel(store: store)
         var report: [String: [String]] = [:]
@@ -123,6 +128,10 @@ final class SettingsControlsTests: XCTestCase {
             let rowIds = try XCTUnwrap(page.lastBuild).rows.map(\.id)
             for rowId in rowIds {
                 for index in 0 ..< 16 {
+                    // A control may open another page, such as Add Provider opening the new provider's.
+                    if page.subpage != subpage || page.category != category {
+                        if let subpage { page.open(subpage) } else { page.select(category) }
+                    }
                     page.reload()
                     guard let row = page.lastBuild?.rows.first(where: { $0.id == rowId }), let control = row.control else { break }
                     let found = controls(in: control)
@@ -132,6 +141,7 @@ final class SettingsControlsTests: XCTestCase {
                     if category == .server || category == .mobile || category == .terminal {
                         try await Task.sleep(nanoseconds: 2_000_000)
                     }
+                    if category == .agents { try await Task.sleep(nanoseconds: 30_000_000) }
                     let paths = written(since: before)
                     let key = index == 0 ? rowId : "\(rowId)#\(index)"
                     if paths.isEmpty && store.errors[rowId] == nil {
@@ -159,6 +169,9 @@ final class SettingsControlsTests: XCTestCase {
             "browser-enabled": "settings.json:browser.enabled",
             "mobile-access": "remote",
             "startup-command": "server",
+            "agent-check-interval": "agents",
+            "agent-provider-name": "agents",
+            "agent-provider-auto-compact": "agents",
         ]
         for (row, path) in expected {
             XCTAssertTrue(report[row]?.contains(path) ?? false, "\(row) wrote \(report[row] ?? []) instead of \(path)")

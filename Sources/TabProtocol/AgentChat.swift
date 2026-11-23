@@ -155,6 +155,8 @@ public struct AgentChatSnapshot: Codable, Hashable, Sendable {
     public var session: SessionId
     public var project: ProjectId
     public var provider: AgentChatProvider
+    /// The server's `AgentProviderConfig` the conversation runs, when not `provider`'s built-in one.
+    public var providerID: String?
     public var providerSession: String?
     public var model: String?
     /// Actual provider model, independent of the user's optional model override.
@@ -205,7 +207,7 @@ public struct AgentChatSnapshot: Codable, Hashable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case commandDescriptors, resetID, session, project, provider, providerSession, model, commands, resolvedModel, contextUsage, subagents, reasoningEffort, accessMode, planMode, queuedPrompts, queuePaused, turns, status, revision, items, omittedItems, activity
+        case commandDescriptors, resetID, session, project, provider, providerID, providerSession, model, commands, resolvedModel, contextUsage, subagents, reasoningEffort, accessMode, planMode, queuedPrompts, queuePaused, turns, status, revision, items, omittedItems, activity
     }
 
     public init(from decoder: Decoder) throws {
@@ -216,6 +218,7 @@ public struct AgentChatSnapshot: Codable, Hashable, Sendable {
         session = try c.decode(SessionId.self, forKey: .session)
         project = try c.decode(ProjectId.self, forKey: .project)
         provider = try c.decode(AgentChatProvider.self, forKey: .provider)
+        providerID = try c.decodeIfPresent(String.self, forKey: .providerID)
         providerSession = try c.decodeIfPresent(String.self, forKey: .providerSession)
         model = try c.decodeIfPresent(String.self, forKey: .model)
         commands = try c.decodeIfPresent([String].self, forKey: .commands)
@@ -263,8 +266,10 @@ public enum AgentChatRequest: Codable, Hashable, Sendable {
     case schedule(session: SessionId, prompt: AgentPrompt, at: Date)
 
     /// Nil model/effort explicitly restore provider defaults; nil provider keeps the current provider.
+    /// `providerID` names one of the server's `AgentProviderConfig`s of `provider`'s kind;
+    /// nil keeps the conversation's, or the kind's built-in one. Older servers ignore it.
     case send(session: SessionId, text: String, model: String?, reasoningEffort: AgentReasoningEffort? = nil,
-              provider: AgentChatProvider? = nil, attachments: [AgentChatAttachment]? = nil)
+              provider: AgentChatProvider? = nil, attachments: [AgentChatAttachment]? = nil, providerID: String? = nil)
     /// `always` also lets the same tool run without asking for the rest of the
     /// conversation; `reason` tells the agent why it was denied. A server that predates
     /// them ignores both and answers this request once.

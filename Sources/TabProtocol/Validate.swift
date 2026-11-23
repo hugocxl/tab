@@ -236,9 +236,11 @@ extension RequestBody {
         case .attachSimulator(let request):
             try request.simulator.validate()
             if request.maxPixels == 0 || request.codecs.isEmpty || request.codecs.count > 8 { throw .badRequest }
+        case .writeAgentProviders(let settings):
+            try settings.validate()
         case .ping, .listSimulators, .listSessions, .attachWithoutResize, .endSession, .closeSession, .discardSession,
              .readSavedScreen, .identifyClient, .cancelCreation, .readCatalog, .listProjectSessions, .readTabs,
-             .readServerSettings, .stopServer, .stopServerIfIdle, .restartServer, .cancelExec, .readActivity,
+             .readServerSettings, .readAgentProviders, .checkAgentProviders, .stopServer, .stopServerIfIdle, .restartServer, .cancelExec, .readActivity,
              .readRemoteAccess, .cancelPairing, .revokeDevice, .reportAgentState, .unknown:
             break
         }
@@ -381,6 +383,9 @@ extension ReplyBody {
             try page.validate()
         case .serverSettings(let settings):
             try settings.validate()
+        case .agentProviders(let state):
+            try state.settings.validate()
+            guard state.health.count <= AgentProviderSettings.maxProviders else { throw .badRequest }
         case .searchPage(let page):
             try page.validate()
         case .sessions(let sessions):

@@ -3,6 +3,17 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.111.0 - 2026-11-23
+
+### Added
+
+- Settings › Agents lists the Claude Code and Codex providers agent panes use, with each one's
+  version and sign-in, and lets you add more, such as one signed in to another account.
+- Each provider has its own executable, config folder, launch arguments, environment
+  variables and Claude auto-compact limit, and you can turn it off.
+- Star, reorder, hide or add models for each provider, and the model menu in agent panes
+  follows that order and lists each provider by its name.
+
 ## 0.110.1 - 2026-11-23
 
 ### Changed
