@@ -520,6 +520,16 @@ public enum AgentLogo {
         }
     }
 
+    /// A configured provider's mark at menu-item size.
+    @MainActor
+    static func menuImage(for provider: AgentProviderConfig, lightBackground: Bool) -> NSImage? {
+        // Copy, since the unaccented mark is the shared cached image.
+        guard let image = image(for: provider, lightBackground: lightBackground)?.copy() as? NSImage else { return nil }
+        image.size = NSSize(width: 16, height: 16)
+        image.isTemplate = false
+        return image
+    }
+
     static func mark(_ provider: AgentProvider) -> AppIcon {
         switch provider {
         case .claude: return .claude

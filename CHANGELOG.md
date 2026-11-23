@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.129.0 - 2026-11-23
+
+### Changed
+
+- The agent pane's model menu shows each provider's logo and puts reasoning effort in an Effort submenu that marks the model's default.
+
 ## 0.128.0 - 2026-11-23
 
 ### Added

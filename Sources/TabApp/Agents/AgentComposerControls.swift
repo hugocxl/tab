@@ -153,10 +153,7 @@ class AgentTextPopUp: NSPopUpButton {
     private func refreshLogos() {
         brandImage = providerLogo.flatMap { AgentLogo.image(for: $0, lightBackground: chatTheme.palette.isLight) }
         for (index, provider) in menuLogos {
-            let image = AgentLogo.image(for: provider, lightBackground: chatTheme.palette.isLight)
-            image?.size = NSSize(width: 16, height: 16)
-            image?.isTemplate = false
-            item(at: index)?.image = image
+            item(at: index)?.image = AgentLogo.menuImage(for: provider, lightBackground: chatTheme.palette.isLight)
         }
     }
     var displayedTitle: String? {
@@ -337,15 +334,16 @@ final class AgentRoundButton: AgentComposerButton {
 }
 
 /// One selector for the model and its reasoning effort, such as "Opus 5.5 · Medium".
-/// The model and effort pop-ups stay the source of truth; this menu lists both and
-/// sends their actions, so the controller handles a choice exactly as before.
+/// The model and effort pop-ups stay the source of truth; this menu lists both, with
+/// each provider's logo and the efforts in an Effort submenu, and sends their actions,
+/// so the controller handles a choice exactly as before.
 @MainActor
 final class AgentModelPicker: AgentComposerButton {
     var chatTheme: AppTheme = .shared { didSet { needsDisplay = true } }
     private let model: AgentTextPopUp
-    private let effort: AgentTextPopUp
+    private let effort: AgentReasoningPopUp
 
-    init(model: AgentTextPopUp, effort: AgentTextPopUp) {
+    init(model: AgentTextPopUp, effort: AgentReasoningPopUp) {
         self.model = model
         self.effort = effort
         super.init(frame: .zero)
@@ -404,8 +402,11 @@ final class AgentModelPicker: AgentComposerButton {
         let menu = NSMenu()
         menu.autoenablesItems = false
         if !effortOnly, let models = model.menu {
-            for item in models.items {
+            for (index, item) in models.items.enumerated() {
                 guard let copy = item.copy() as? NSMenuItem else { continue }
+                if let provider = model.menuLogos[index] {
+                    copy.image = AgentLogo.menuImage(for: provider, lightBackground: chatTheme.palette.isLight)
+                }
                 // Top-level pop-up items act through the pop-up's own action.
                 if copy.action == nil, copy.submenu == nil, !copy.isSeparatorItem {
                     copy.target = model.target
@@ -415,24 +416,46 @@ final class AgentModelPicker: AgentComposerButton {
                 menu.addItem(copy)
             }
         }
-        let efforts = effort.itemArray.enumerated().filter { !$0.element.isSeparatorItem }
-        if !efforts.isEmpty {
-            if !effortOnly { menu.addItem(.separator()) }
+        let efforts = effortChoices()
+        if effortOnly {
             menu.addItem(.sectionHeader(title: "Reasoning effort"))
-            for (index, item) in efforts {
-                let choice = NSMenuItem(title: item.title, action: #selector(chooseEffort(_:)), keyEquivalent: "")
-                choice.target = self
-                choice.tag = index
-                choice.state = item === effort.selectedItem ? .on : .off
-                choice.isEnabled = effort.isEnabled && item.isEnabled
-                choice.toolTip = item.toolTip
-                menu.addItem(choice)
-            }
+            efforts.forEach { menu.addItem($0) }
+        } else if !efforts.isEmpty {
+            menu.addItem(.separator())
+            let heading = NSMenuItem(title: "Effort", action: nil, keyEquivalent: "")
+            heading.image = AppIcon.brain.image(size: 16, color: chatTheme.fgMuted)
+            heading.badge = effort.selectedItem.map { NSMenuItemBadge(string: $0.title) }
+            heading.isEnabled = effort.isEnabled
+            let submenu = NSMenu(title: "Effort")
+            submenu.autoenablesItems = false
+            let note = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+            note.attributedTitle = NSAttributedString(
+                string: "Higher effort is more thorough,\nbut slower and uses your limits faster.",
+                attributes: [.font: AppFont.small, .foregroundColor: NSColor.secondaryLabelColor])
+            note.isEnabled = false
+            submenu.addItem(note)
+            efforts.forEach { submenu.addItem($0) }
+            heading.submenu = submenu
+            menu.addItem(heading)
         }
         // The controller refreshes catalogs and holds menu rebuilds while the model menu is open.
         if let models = model.menu { models.delegate?.menuWillOpen?(models) }
         menu.popUp(positioning: nil, at: NSPoint(x: 0, y: bounds.height + 4), in: self)
         if let models = model.menu { models.delegate?.menuDidClose?(models) }
+    }
+
+    /// One item per effort, checked on the current one and badged on the model's default.
+    private func effortChoices() -> [NSMenuItem] {
+        effort.itemArray.enumerated().filter { !$0.element.isSeparatorItem }.map { index, item in
+            let choice = NSMenuItem(title: item.title, action: #selector(chooseEffort(_:)), keyEquivalent: "")
+            choice.target = self
+            choice.tag = index
+            choice.state = item === effort.selectedItem ? .on : .off
+            choice.isEnabled = effort.isEnabled && item.isEnabled
+            choice.toolTip = item.toolTip
+            if item.title == effort.defaultValueTitle { choice.badge = NSMenuItemBadge(string: "Default") }
+            return choice
+        }
     }
 
     private func disable(_ item: NSMenuItem) {
