@@ -255,9 +255,64 @@ extension GitService {
             || current.branch != expected.branch {
             throw gitError("Worktree identity changed during teardown; files were preserved")
         }
-        try git.run(repository, ["worktree", "remove", "--force", "--", target])
+        let discarded = try Self.moveContentsAside(target)
+        do {
+            try git.run(repository, ["worktree", "remove", "--force", "--", target])
+        } catch {
+            Self.restoreContents(from: discarded, to: target)
+            throw error
+        }
+        Self.deleteInBackground(discarded)
         try catalog.removeWorktreeProject(project.id)
         return .done
+    }
+
+    // MARK: - Discarding files
+
+    /// Moves everything but the `.git` file out of the worktree into a
+    /// hidden folder beside it, so `git worktree remove` has almost nothing
+    /// to delete: a build folder of many files takes longer than Git's timeout.
+    static func moveContentsAside(_ target: String) throws -> String {
+        let manager = FileManager.default
+        let name = (target as NSString).lastPathComponent
+        let discarded = ((target as NSString).deletingLastPathComponent as NSString)
+            .appendingPathComponent(".\(name).tab-removing-\(UUID().uuidString)")
+        do {
+            try manager.createDirectory(atPath: discarded, withIntermediateDirectories: false)
+            for entry in try manager.contentsOfDirectory(atPath: target) where entry != ".git" {
+                try manager.moveItem(atPath: (target as NSString).appendingPathComponent(entry),
+                                     toPath: (discarded as NSString).appendingPathComponent(entry))
+            }
+        } catch {
+            restoreContents(from: discarded, to: target)
+            throw gitError("Couldn't clear the worktree's folder: \(error.localizedDescription)")
+        }
+        return discarded
+    }
+
+    /// Puts back what `moveContentsAside` moved, when the removal fails.
+    static func restoreContents(from discarded: String, to target: String) {
+        let manager = FileManager.default
+        for entry in (try? manager.contentsOfDirectory(atPath: discarded)) ?? [] {
+            do {
+                try manager.moveItem(atPath: (discarded as NSString).appendingPathComponent(entry),
+                                     toPath: (target as NSString).appendingPathComponent(entry))
+            } catch {
+                ServerLog.error("couldn't restore \(entry) to \(target): \(error)")
+            }
+        }
+        rmdir(discarded)
+    }
+
+    /// Deletes `discarded` off the request's thread.
+    static func deleteInBackground(_ discarded: String) {
+        DispatchQueue.global(qos: .utility).async {
+            do {
+                try FileManager.default.removeItem(atPath: discarded)
+            } catch {
+                ServerLog.error("couldn't delete \(discarded): \(error)")
+            }
+        }
     }
 
     /// Whether a fresh inspection still matches the confirmed one. Ignored

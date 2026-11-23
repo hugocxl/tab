@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.114.1 - 2026-11-23
+
+### Fixed
+
+- Closing a worktree with a large build folder removes it instead of timing out and leaving it on disk.
+
 ## 0.114.0 - 2026-11-23
 
 ### Added

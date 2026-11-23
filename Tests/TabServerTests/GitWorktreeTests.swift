@@ -162,6 +162,40 @@ final class GitWorktreeTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: directory))
     }
 
+    func testRemovalDeletesTheSetAsideFilesAfterGitForgetsTheWorktree() throws {
+        let repo = try GitTestRepo(commit: true)
+        try repo.write(".gitignore", ".build/\n")
+        try repo.commit("ignore")
+        let (id, directory, _) = try create(repo)
+        try FileManager.default.createDirectory(atPath: directory + "/.build/debug", withIntermediateDirectories: true)
+        try Data("x".utf8).write(to: URL(fileURLWithPath: directory + "/.build/debug/product"))
+        let expected = try inspect(repo, id)
+        XCTAssertEqual(try repo.git(.worktree(WorktreeIntent(action: .remove(expected: expected))), project: id), .done)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory))
+        guard case .worktrees(let entries) = try repo.git(.worktrees) else { return XCTFail("worktrees") }
+        XCTAssertEqual(entries.count, 1)
+        let parent = (directory as NSString).deletingLastPathComponent
+        let deadline = Date().addingTimeInterval(10)
+        while try FileManager.default.contentsOfDirectory(atPath: parent).contains(where: { $0.contains(".tab-removing-") }),
+              Date() < deadline {
+            usleep(20_000)
+        }
+        XCTAssertFalse(try FileManager.default.contentsOfDirectory(atPath: parent).contains { $0.contains(".tab-removing-") })
+    }
+
+    func testFilesSetAsideForAFailedRemovalGoBack() throws {
+        let repo = try GitTestRepo(commit: true)
+        let (id, directory, _) = try create(repo)
+        try Data("keep me".utf8).write(to: URL(fileURLWithPath: directory + "/notes"))
+        let before = try FileManager.default.contentsOfDirectory(atPath: directory).sorted()
+        let discarded = try GitService.moveContentsAside(directory)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory), [".git"])
+        GitService.restoreContents(from: discarded, to: directory)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory).sorted(), before)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: discarded))
+        XCTAssertTrue(try inspect(repo, id).dirty)
+    }
+
     func testFailedRegistrationRemovesTheWorktreeAndTheBranchItMade() throws {
         let repo = try GitTestRepo(commit: true)
         try repo.run("branch", "existing")
