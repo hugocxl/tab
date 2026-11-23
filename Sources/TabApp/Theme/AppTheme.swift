@@ -249,9 +249,9 @@ public final class AppTheme: ObservableObject {
     public func windowBackdrop(isKey: Bool) -> GlassRecipe {
         let canvas = palette.bg.nsColor
         if isLight {
-            return GlassRecipe(tint: .clear, fill: GlassPlane(canvas.withAlphaComponent(isKey ? 0.8 : 0.85)))
+            return GlassRecipe(tint: .clear, fill: GlassPlane(canvas.withAlphaComponent(isKey ? 0.35 : 0.45)))
         }
-        return GlassRecipe(tint: .clear, fill: GlassPlane(palette.raised.nsColor.withAlphaComponent(isKey ? 0.75 : 0.8)))
+        return GlassRecipe(tint: .clear, fill: GlassPlane(palette.raised.nsColor.withAlphaComponent(isKey ? 0.3 : 0.42)))
     }
 
     /// The window chrome between the glass surfaces: a canvas tint over the
@@ -260,11 +260,11 @@ public final class AppTheme: ObservableObject {
     public func windowVeil(isKey: Bool) -> GlassRecipe {
         let canvas = palette.bg.nsColor
         if isLight {
-            return GlassRecipe(tint: canvas.withAlphaComponent(isKey ? 0.75 : 0.8))
+            return GlassRecipe(tint: canvas.withAlphaComponent(isKey ? 0.3 : 0.4))
         }
         return GlassRecipe(
-            tint: canvas.withAlphaComponent(0.85),
-            fill: isKey ? GlassPlane(NSColor.black.withAlphaComponent(0.3), blend: "overlayBlendMode") : GlassPlane(NSColor.black.withAlphaComponent(0.2))
+            tint: canvas.withAlphaComponent(isKey ? 0.32 : 0.4),
+            fill: isKey ? GlassPlane(NSColor.black.withAlphaComponent(0.15), blend: "overlayBlendMode") : GlassPlane(NSColor.black.withAlphaComponent(0.12))
         )
     }
 
@@ -277,16 +277,16 @@ public final class AppTheme: ObservableObject {
         if isLight {
             let raised = palette.raised.nsColor
             let fill: GlassPlane? = switch (isKey, isActive) {
-            case (true, true): GlassPlane(raised.withAlphaComponent(0.5))
+            case (true, true): GlassPlane(raised.withAlphaComponent(0.25))
             case (true, false): GlassPlane(fg(alpha: 0.05), blend: "plusD")
-            case (false, _): GlassPlane(raised.withAlphaComponent(0.4))
+            case (false, _): GlassPlane(raised.withAlphaComponent(0.2))
             }
-            return GlassRecipe(tint: canvas.withAlphaComponent(0.1), backdrop: isKey && isActive ? GlassPlane(raised.withAlphaComponent(0.85)) : nil, fill: fill)
+            return GlassRecipe(tint: canvas.withAlphaComponent(0.1), backdrop: isKey && isActive ? GlassPlane(raised.withAlphaComponent(0.35)) : nil, fill: fill)
         }
         return GlassRecipe(
-            tint: canvas.withAlphaComponent(0.35),
-            backdrop: GlassPlane(NSColor.black.withAlphaComponent(isKey ? 0.2 : 0.6)),
-            fill: isKey && !isActive ? GlassPlane(NSColor.black.withAlphaComponent(0.2)) : nil
+            tint: canvas.withAlphaComponent(0.22),
+            backdrop: isKey ? nil : GlassPlane(NSColor.black.withAlphaComponent(0.25)),
+            fill: isKey && !isActive ? GlassPlane(NSColor.black.withAlphaComponent(0.12)) : nil
         )
     }
 

@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.117.0 - 2026-11-23
+
+### Changed
+
+- The Glass interface style is more translucent across the sidebar and panes, letting more of the desktop show through.
+
 ## 0.116.1 - 2026-11-23
 
 ### Fixed

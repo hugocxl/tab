@@ -71,6 +71,19 @@ final class InterfaceSettingsTests: XCTestCase {
         }
     }
 
+    func testGlassWindowAndPaneRecipesStayTranslucent() {
+        for dark in [true, false] {
+            let theme = AppTheme(catalog: ThemeCatalog.load(customDirectory: nil), systemIsDark: dark)
+            let backdrop = theme.windowBackdrop(isKey: true)
+            let veil = theme.windowVeil(isKey: true)
+            let pane = theme.paneGlass(isKey: true, isActive: true)
+            XCTAssertLessThanOrEqual(backdrop.fill?.color.alphaComponent ?? 0, 0.5, "dark: \(dark)")
+            XCTAssertLessThanOrEqual(veil.tint.alphaComponent, 0.5, "dark: \(dark)")
+            XCTAssertLessThanOrEqual(pane.tint.alphaComponent, 0.35, "dark: \(dark)")
+            XCTAssertLessThanOrEqual(pane.backdrop?.color.alphaComponent ?? 0, 0.5, "dark: \(dark)")
+        }
+    }
+
     func testOffRemovesAnExistingTransition() {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 200),
                               styleMask: .borderless, backing: .buffered, defer: false)
