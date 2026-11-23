@@ -258,6 +258,28 @@ final class GitRepositoryTests: XCTestCase {
         XCTAssertEqual(info.currentBranch, "main")
     }
 
+    func testGraphListsEveryBranchWithChildrenBeforeParents() throws {
+        let repo = try GitTestRepo(commit: false)
+        XCTAssertEqual(try repo.git(.graph(maxCount: 100, skip: 0)), .log([]))
+        try repo.write("file", "base\n")
+        let base = try repo.commit("base")
+        _ = try repo.git(.createBranch("feature"))
+        try repo.write("feature", "feature\n")
+        let feature = try repo.commit("feature")
+        _ = try repo.git(.switchBranch("main"))
+        try repo.write("main", "main\n")
+        let main = try repo.commit("main")
+
+        guard case .log(let history) = try repo.git(.log(maxCount: 100, skip: 0)) else { return XCTFail("log") }
+        XCTAssertEqual(history.map(\.hash), [main, base])
+        guard case .log(let graph) = try repo.git(.graph(maxCount: 100, skip: 0)) else { return XCTFail("graph") }
+        XCTAssertEqual(Set(graph.map(\.hash)), [base, feature, main])
+        XCTAssertEqual(graph.last?.hash, base)
+        XCTAssertTrue(graph.first { $0.hash == feature }?.refs.contains(GitRef(name: "feature", kind: .localBranch)) ?? false)
+        guard case .log(let page) = try repo.git(.graph(maxCount: 2, skip: 1)) else { return XCTFail("graph page") }
+        XCTAssertEqual(page.map(\.hash), Array(graph.dropFirst().map(\.hash)))
+    }
+
     func testCheckoutCherryPickAndRevert() throws {
         let repo = try GitTestRepo(commit: true)
         try repo.write("file", "one\n")

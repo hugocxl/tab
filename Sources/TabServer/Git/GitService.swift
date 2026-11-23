@@ -111,7 +111,7 @@ public final class GitService: GitServiceProtocol, @unchecked Sendable {
     static func isRead(_ action: GitAction) -> Bool {
         switch action {
         case .summary, .branches, .changes, .worktrees, .worktreeHooks, .inspectRemoval, .status, .repoInfo,
-             .remoteBranches, .log, .diff, .rawDiff, .branchDiff, .changesPreview, .stagedPreview:
+             .remoteBranches, .log, .graph, .diff, .rawDiff, .branchDiff, .changesPreview, .stagedPreview:
             return true
         case .pullRequest(let action):
             switch action {
@@ -139,6 +139,8 @@ public final class GitService: GitServiceProtocol, @unchecked Sendable {
         case .repoInfo: return .repoInfo(try repository.repoInfo())
         case .remoteBranches: return .remoteBranches(try repository.remoteBranches())
         case .log(let maxCount, let skip): return .log(try repository.log(maxCount: maxCount, skip: skip))
+        case .graph(let maxCount, let skip):
+            return .log(try repository.log(maxCount: maxCount, skip: skip, everyBranch: true))
         case .diff(let request): return try repository.diff(request, raw: false)
         case .rawDiff(let request): return try repository.diff(request, raw: true)
         case .branchDiff(let base, let lineLimit):

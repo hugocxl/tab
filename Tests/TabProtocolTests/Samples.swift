@@ -88,7 +88,7 @@ enum Samples {
         .stage(["a"]), .unstage(["a", "b"]), .discard(["c"]),
         .commit(message: "Fix", stageAll: true, amend: false),
         .diff(GitDiffRequest(path: "a", staged: true, lineLimit: 100, context: 3)),
-        .rawDiff(GitDiffRequest(staged: false)), .log(maxCount: 50, skip: 10), .status(local: true), .repoInfo,
+        .rawDiff(GitDiffRequest(staged: false)), .log(maxCount: 50, skip: 10), .graph(maxCount: 400, skip: 800), .status(local: true), .repoInfo,
         .initRepository, .pull, .push(setUpstream: true), .fetch, .checkout("abc"), .cherryPick("def"),
         .revert("0123"), .createTag(name: "v1", hash: "abc"), .worktrees,
         .worktree(WorktreeIntent(operation: operation,

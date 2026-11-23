@@ -98,6 +98,7 @@ public enum AppIcon: String, CaseIterable, Sendable {
     case gaugeMedium = "gauge-medium"
     case git
     case gitBranch = "git-branch"
+    case gitGraph = "git-graph"
     case gitcafe
     case github
     case gitlab
@@ -122,6 +123,7 @@ public enum AppIcon: String, CaseIterable, Sendable {
     case layers
     case lightbulb
     case listTodo = "list-todo"
+    case locate
     case lock
     case lockOpen = "lock-open"
     case logs

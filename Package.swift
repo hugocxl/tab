@@ -89,6 +89,11 @@ let package = Package(
             dependencies: ["TabApp", "TabCore", "TabProtocol"],
             swiftSettings: swift5
         ),
+        .target(
+            name: "TabGitGraphPlugin",
+            dependencies: ["TabApp", "TabCore", "TabProtocol"],
+            swiftSettings: swift5
+        ),
 
         .testTarget(name: "TabCoreTests", dependencies: ["TabCore"], swiftSettings: swift5),
         .testTarget(name: "TabProtocolTests", dependencies: ["TabProtocol"], exclude: ["Fixtures"], swiftSettings: swift5),
@@ -96,6 +101,7 @@ let package = Package(
         .testTarget(name: "TabTerminalTests", dependencies: ["TabTerminal"], swiftSettings: swift5),
         .testTarget(name: "TabServerTests", dependencies: ["TabServer"], swiftSettings: swift5),
         .testTarget(name: "TabClientTests", dependencies: ["TabClient", "TabServer"], swiftSettings: swift5),
-        .testTarget(name: "TabAppTests", dependencies: ["TabApp", "TabServer", "TabExplorerPlugin", "TabDiffPlugin", "TabUsagePlugin"], swiftSettings: swift5),
+        .testTarget(name: "TabAppTests", dependencies: ["TabApp", "TabServer", "TabExplorerPlugin", "TabDiffPlugin", "TabUsagePlugin",
+                                                       "TabGitGraphPlugin"], swiftSettings: swift5),
     ]
 )

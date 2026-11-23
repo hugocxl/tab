@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.126.0 - 2026-11-23
+
+### Added
+
+- The Git Graph plugin draws every branch's commits as a graph in the right sidebar, loading more history as you scroll, and lets you switch branches, check out, cherry-pick or revert a commit from its menu.
+
 ## 0.125.0 - 2026-11-23
 
 ### Added

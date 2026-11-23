@@ -55,9 +55,10 @@ env -u TAB_DIR "$APP/Contents/MacOS/tab" server stop --force --yes
   - `TabClient` (TabCore, TabProtocol): connecting, handshake, reconnecting, tunnels.
   - `TabApp` (TabClient, TabCore, TabSimulators, TabProtocol, `Icons` from
     @hugocxl/icons): the UI. Apps never link server code.
-  - `TabExplorerPlugin`, `TabDiffPlugin`, `TabUsagePlugin` (TabApp, TabCore, TabProtocol): optional
-    lazy-loaded right-sidebar plugins built as `.bundle`s by
-    `scripts/build-plugins.sh` and never linked into `TabDesktop`.
+  - `TabExplorerPlugin`, `TabDiffPlugin`, `TabUsagePlugin`, `TabGitGraphPlugin`
+    (TabApp, TabCore, TabProtocol): optional lazy-loaded right-sidebar plugins
+    built as `.bundle`s by `scripts/build-plugins.sh` and never linked into
+    `TabDesktop`.
   - Keep `Package.swift` and this list in sync.
 - Each server keeps its projects' tabs and their split layouts in
   `sessions/tabs.json`, so every app connected to it shows the same tabs. Apps

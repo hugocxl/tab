@@ -50,7 +50,7 @@ final class MessageTests: XCTestCase {
             roundTrip(Message.request(RequestId(1), .git(GitRequest(project: Samples.project, action: action))))
         }
         for reply in Samples.gitReplies { roundTrip(Message.reply(RequestId(1), .git(reply))) }
-        XCTAssertEqual(try types(Samples.gitActions).count, 40, "add a sample for every GitAction case")
+        XCTAssertEqual(try types(Samples.gitActions).count, 41, "add a sample for every GitAction case")
         XCTAssertEqual(try types(Samples.gitReplies).count, 22, "add a sample for every GitReply case")
     }
 

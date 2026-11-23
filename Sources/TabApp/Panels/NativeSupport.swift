@@ -94,6 +94,16 @@ extension SourceControlHost {
     public func setSourceControlTree(_ enabled: Bool) {}
 }
 
+/// What the Git Graph plugin panel needs from the app.
+@MainActor
+public protocol GitGraphHost: NativeHost {
+    /// Whether the project's server answers `graph` with every branch;
+    /// older servers only list HEAD's history with `log`.
+    var supportsGitGraph: Bool { get }
+    /// The panel changed the repository: other panels should refresh.
+    func repositoryDidChange()
+}
+
 /// What a diff pane needs from the app.
 @MainActor
 public protocol DiffHost: NativeHost {

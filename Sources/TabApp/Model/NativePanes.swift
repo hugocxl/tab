@@ -5,7 +5,7 @@ import TabProtocol
 
 /// What the native editor and plugin panels/panes of one project need from the app.
 @MainActor
-public final class ProjectHost: FilesPanelHost, SourceControlHost, EditorHost, DiffHost {
+public final class ProjectHost: FilesPanelHost, SourceControlHost, GitGraphHost, EditorHost, DiffHost {
     unowned let model: AppModel
     public let project: ProjectId
 
@@ -64,6 +64,10 @@ public final class ProjectHost: FilesPanelHost, SourceControlHost, EditorHost, D
     public func repositoryDidChange() {
         model.gitChanged(project)
     }
+
+    // MARK: Git Graph
+
+    public var supportsGitGraph: Bool { model.sideClient(for: project)?.supports(.gitGraph) ?? false }
 
     // MARK: Editor and diff
 

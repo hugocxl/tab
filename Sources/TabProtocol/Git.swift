@@ -33,6 +33,10 @@ public enum GitAction: Hashable, Codable, Sendable {
     /// The working tree (or staged) diff as text, optionally of one file.
     case rawDiff(GitDiffRequest)
     case log(maxCount: UInt32, skip: UInt32)
+    /// Commits of every local branch, remote branch and tag plus HEAD, in
+    /// date order with children before their parents, for a commit graph.
+    /// Replies with `log`; servers without `Feature.gitGraph` lack it.
+    case graph(maxCount: UInt32, skip: UInt32)
     case status(local: Bool)
     case repoInfo
     case initRepository
@@ -87,6 +91,7 @@ public enum GitAction: Hashable, Codable, Sendable {
         case "diff": self = .diff(try c("request"))
         case "rawDiff": self = .rawDiff(try c("request"))
         case "log": self = .log(maxCount: try c("maxCount"), skip: try c("skip"))
+        case "graph": self = .graph(maxCount: try c("maxCount"), skip: try c("skip"))
         case "status": self = .status(local: try c("local"))
         case "repoInfo": self = .repoInfo
         case "init": self = .initRepository
@@ -163,6 +168,10 @@ public enum GitAction: Hashable, Codable, Sendable {
             try c(request, "request")
         case .log(let maxCount, let skip):
             var c = try TaggedEncoding(encoder, "log")
+            try c(maxCount, "maxCount")
+            try c(skip, "skip")
+        case .graph(let maxCount, let skip):
+            var c = try TaggedEncoding(encoder, "graph")
             try c(maxCount, "maxCount")
             try c(skip, "skip")
         case .status(let local):

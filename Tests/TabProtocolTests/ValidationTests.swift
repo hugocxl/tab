@@ -97,6 +97,7 @@ final class ValidationTests: XCTestCase {
         XCTAssertEqual(git(.commit(message: "  ", stageAll: false, amend: false)), .badRequest)
         XCTAssertNil(git(.commit(message: "", stageAll: false, amend: true)))
         XCTAssertEqual(git(.log(maxCount: 1001, skip: 0)), .badRequest)
+        XCTAssertEqual(git(.graph(maxCount: 1001, skip: 0)), .badRequest)
         XCTAssertEqual(git(.diff(GitDiffRequest(path: nil))), .badRequest)
         XCTAssertEqual(git(.diff(GitDiffRequest(path: "a", lineLimit: 0))), .badRequest)
         XCTAssertEqual(git(.stage(["a\u{0}"])), .badPath)

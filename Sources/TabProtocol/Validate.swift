@@ -681,7 +681,7 @@ extension GitRequest {
             try Validation.hash(hash)
         case .commit(let message, _, let amend):
             if !(amend && message.isEmpty) { try Validation.message(message, limit: 64 * 1024) }
-        case .log(let maxCount, _):
+        case .log(let maxCount, _), .graph(let maxCount, _):
             if maxCount > 1000 { throw .badRequest }
         case .diff(let request):
             guard let path = request.path else { throw .badRequest }

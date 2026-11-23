@@ -34,6 +34,8 @@ public struct PluginId: RawRepresentable, Hashable, Codable, Sendable, CustomStr
     public static let diff = PluginId("diff")
     /// The AI Usage plugin: agent subscription limits in the right sidebar.
     public static let usage = PluginId("usage")
+    /// The commit graph plugin.
+    public static let gitGraph = PluginId("git-graph")
 }
 
 /// Catalog metadata for a plugin available to install in Tab.
@@ -103,11 +105,22 @@ public enum PluginCatalog {
         panelIds: ["usage"]
     )
 
+    public static let gitGraph = PluginDescriptor(
+        id: .gitGraph,
+        name: "Git Graph",
+        summary: "Browse every branch's commits as a graph in the right sidebar, and check out, cherry-pick or revert them.",
+        iconName: "git-graph",
+        bundleName: "TabGitGraphPlugin",
+        principalClass: "TabGitGraphPluginFactory",
+        panelIds: ["gitGraph"]
+    )
+
     /// Every official plugin, in catalog order.
     public static let all: [PluginDescriptor] = [
         explorer,
         diff,
         usage,
+        gitGraph,
     ]
 
     public static func descriptor(for id: PluginId) -> PluginDescriptor? {

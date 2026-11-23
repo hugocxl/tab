@@ -267,14 +267,19 @@ struct GitRepository: Sendable {
         return String(local.dropFirst(7))
     }
 
-    func log(maxCount: UInt32, skip: UInt32) throws -> [GitCommit] {
+    /// HEAD's history, or with `everyBranch` the history of every local
+    /// branch, remote branch and tag in date order, children first.
+    func log(maxCount: UInt32, skip: UInt32, everyBranch: Bool = false) throws -> [GitCommit] {
         if maxCount == 0 { return [] }
         let summary = try summary()
-        if summary.head == nil, summary.branch != nil { return [] }
+        if summary.head == nil, summary.branch != nil, !everyBranch { return [] }
+        let revisions = everyBranch
+            ? ["--date-order", "--branches", "--remotes", "--tags"] + (summary.head == nil ? [] : ["HEAD"])
+            : []
         let output = try git.run(path, [
             "log", "--no-show-signature", "--no-notes", "-z", "--format=%H%x00%h%x00%s%x00%an%x00%aI%x00%P",
-            "--max-count=\(maxCount)", "--skip=\(skip)", "--",
-        ])
+            "--max-count=\(maxCount)", "--skip=\(skip)",
+        ] + revisions + ["--"])
         if output.isEmpty { return [] }
         var text = Self.textOf(output)
         if text.hasSuffix("\0") { text.removeLast() }
