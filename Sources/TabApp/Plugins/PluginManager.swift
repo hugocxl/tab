@@ -83,17 +83,9 @@ public final class PluginManager {
     // MARK: Startup
 
     /// Loads and activates every plugin listed in `settings.plugins.installed`
-<<<<<<< Updated upstream
     /// whose `.bundle` is present in `TAB_DIR/Plugins/`. Bundles built for a
     /// different Tab version are refreshed before loading so stale Swift ABI
     /// binaries are never loaded into `TabDesktop`.
-||||||| Stash base
-    /// whose `.bundle` is present in `TAB_DIR/Plugins/`.
-=======
-    /// whose `.bundle` is present in `TAB_DIR/Plugins/`. Outdated bundles from
-    /// an earlier Tab build are never loaded (Swift ABI is tied to the host
-    /// build); they are refreshed locally or re-downloaded in the background.
->>>>>>> Stashed changes
     public func loadInstalled() {
         for id in model.settings.plugins.installed {
             guard activePlugins[id] == nil else { continue }
@@ -102,7 +94,6 @@ public final class PluginManager {
                 states[id] = .notInstalled
                 continue
             }
-<<<<<<< Updated upstream
             guard installer.isBundleCompatible(id) else {
                 let found = installer.installedBundleVersion(id) ?? "unknown"
                 let expected = installer.version
@@ -110,27 +101,6 @@ public final class PluginManager {
                 states[id] = .installing
                 Task { [weak self] in
                     await self?.updateInstalledPlugin(id)
-||||||| Stash base
-=======
-            let descriptor = PluginCatalog.descriptor(for: id)
-            let needsUpdate = !installer.isInstalledBundleCompatible(id)
-                || (descriptor.map { installer.hasNewerLocalBundle(for: $0) } ?? false)
-            if needsUpdate {
-                if let descriptor, (try? installer.installLocalIfAvailable(descriptor)) == true {
-                    do {
-                        try loadAndActivateBundle(for: id)
-                    } catch {
-                        Log.app.error("Failed to load refreshed plugin \(id.rawValue): \(error)")
-                        states[id] = .failed(error.localizedDescription)
-                    }
-                    continue
-                }
-                if let descriptor {
-                    scheduleUpdate(descriptor)
-                } else {
-                    Log.app.warning("Skipping incompatible unknown plugin bundle: \(id.rawValue)")
-                    states[id] = .failed("Plugin “\(id.rawValue)” doesn't match Tab \(installer.version).")
->>>>>>> Stashed changes
                 }
                 continue
             }
@@ -143,7 +113,6 @@ public final class PluginManager {
         }
     }
 
-<<<<<<< Updated upstream
     private func updateInstalledPlugin(_ id: PluginId) async {
         guard activePlugins[id] == nil else { return }
         guard let descriptor = PluginCatalog.descriptor(for: id) else {
@@ -162,35 +131,6 @@ public final class PluginManager {
             Log.app.error("Failed to refresh plugin \(id.rawValue): \(error)")
             states[id] = .failed(error.localizedDescription)
             model.notify(.settings)
-||||||| Stash base
-=======
-    private func scheduleUpdate(_ descriptor: PluginDescriptor) {
-        let id = descriptor.id
-        let installedVersion = installer.installedBundleVersion(id)?.version ?? "unknown"
-        let targetVersion = installer.version
-        Log.app.info("Plugin \(id.rawValue) (\(installedVersion)) doesn't match Tab \(targetVersion); updating")
-        states[id] = .installing
-        model.notify(.settings)
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                _ = try await self.installer.install(descriptor)
-                guard self.model.settings.plugins.isInstalled(id) else {
-                    try? self.installer.remove(id)
-                    return
-                }
-                try self.loadAndActivateBundle(for: id)
-                self.states[id] = .installed
-                self.model.notify(.panel)
-                self.model.notify(.settings)
-                self.model.notify(.state)
-            } catch {
-                guard self.model.settings.plugins.isInstalled(id) else { return }
-                Log.app.error("Failed to update plugin \(id.rawValue): \(error)")
-                self.states[id] = .failed(error.localizedDescription)
-                self.model.notify(.settings)
-            }
->>>>>>> Stashed changes
         }
     }
 
@@ -206,7 +146,6 @@ public final class PluginManager {
             states[id] = .installed
             return
         }
-        guard states[id] != .installing else { return }
         states[id] = .installing
         model.notify(.settings)
 
@@ -316,14 +255,6 @@ public final class PluginManager {
                 )
             }
             let bundleURL = model.dirs.pluginBundle(id)
-            if let descriptor = PluginCatalog.descriptor(for: id) {
-                try installer.validateBundle(at: bundleURL, descriptor: descriptor)
-            } else if !installer.isBundleCompatible(at: bundleURL) {
-                let found = installer.bundleVersion(at: bundleURL)?.version ?? "unknown"
-                throw PluginError.incompatibleVersion(
-                    "Plugin “\(id.rawValue)” (\(found)) doesn't match Tab \(installer.version)."
-                )
-            }
             guard let bundle = Bundle(url: bundleURL) else {
                 throw PluginError.invalidBundle("Could not open bundle at \(bundleURL.path).")
             }

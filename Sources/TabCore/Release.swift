@@ -13,16 +13,6 @@ public enum Release {
         Bundle.main.infoDictionary.flatMap(version(ofBundle:)) ?? sourceVersion
     }
 
-    /// This build's `CFBundleVersion` (commit count), or `nil` when running
-    /// outside a Tab app bundle (such as `swift test`).
-    public static var buildNumber: String? {
-        guard let info = Bundle.main.infoDictionary,
-              info[versionKey] != nil,
-              let build = info["CFBundleVersion"] as? String,
-              !build.isEmpty else { return nil }
-        return build
-    }
-
     /// The Info.plist key with a bundle's full version, such as
     /// `1.2.0-beta.340`; `CFBundleShortVersionString` holds only `X.Y.Z`.
     public static let versionKey = "TabVersion"

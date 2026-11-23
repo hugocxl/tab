@@ -3,7 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
-<<<<<<< Updated upstream
+## 0.130.1 - 2026-11-23
+
+### Fixed
+
+- Tab builds again after a plugin update was merged incompletely.
+
 ## 0.130.0 - 2026-11-23
 
 ### Changed
@@ -13,14 +18,6 @@ Changelog.
 ### Fixed
 
 - Plugins installed for an older version of Tab are refreshed after an update instead of loading a mismatched build.
-||||||| Stash base
-=======
-## 0.129.1 - 2026-11-23
-
-### Fixed
-
-- Plugins installed by an earlier version of Tab update themselves after Tab updates instead of failing to load.
->>>>>>> Stashed changes
 
 ## 0.129.0 - 2026-11-23
 
