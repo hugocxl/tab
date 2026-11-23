@@ -121,9 +121,13 @@ final class SettingsModel: ObservableObject {
         if category == .server || category == .terminal { store.loadServerSettings() }
         if category == .mobile { store.loadRemoteAccess() }
         if category == .browser { store.refreshBrowserProfiles() }
-        if category == .integrations { store.loadAgentIntegrations() }
         if category == .agents {
-            if subpage == .agentProvider { store.loadAgentModels(shownProvider.id) } else { store.loadAgentProviders() }
+            if subpage == .agentProvider {
+                store.loadAgentModels(shownProvider.id)
+            } else {
+                store.loadAgentProviders()
+                store.loadAgentIntegrations()
+            }
         }
         reload()
     }
@@ -170,7 +174,6 @@ final class SettingsModel: ObservableObject {
         case .terminal: buildTerminal(builder)
         case .keyboard: buildKeyboard(builder)
         case .agents: buildAgents(builder)
-        case .integrations: buildIntegrations(builder)
         case .plugins:
             builder.row("plugins", .disclosure { [weak self] in self?.select(.plugins) })
         case .notifications: buildNotifications(builder)

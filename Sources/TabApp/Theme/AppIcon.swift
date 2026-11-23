@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import TabCore
+import TabProtocol
 import Icons
 
 /// Tab's icons, from @hugocxl/icons' stroke set: signature marks carry their theme hue; UI templates inherit the caller's tint.
@@ -497,6 +498,21 @@ public enum AgentLogo {
     @MainActor
     public static func image(for provider: AgentProvider, lightBackground: Bool) -> NSImage? {
         mark(provider).image(size: 64, theme: AppTheme.shared)
+    }
+
+    /// A configured provider's mark, with a dot of its accent color in the corner when it has one,
+    /// so several accounts of one kind tell apart.
+    @MainActor
+    public static func image(for provider: AgentProviderConfig, lightBackground: Bool) -> NSImage? {
+        let logo = image(for: provider.kind.activityProvider, lightBackground: lightBackground)
+        guard let logo, let accent = provider.accentColor.flatMap(RGBColor.init(hex:))?.nsColor else { return logo }
+        return NSImage(size: logo.size, flipped: false) { rect in
+            logo.draw(in: rect)
+            let side = (rect.width * 0.4).rounded()
+            accent.setFill()
+            NSBezierPath(ovalIn: NSRect(x: rect.maxX - side, y: rect.minY, width: side, height: side)).fill()
+            return true
+        }
     }
 
     static func mark(_ provider: AgentProvider) -> AppIcon {

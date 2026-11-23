@@ -74,6 +74,26 @@ final class AgentProviderSettingsTests: XCTestCase {
         XCTAssertEqual(models.arrange(reported).first { $0.id == "a" }?.title, "A", "a custom ID the CLI reports keeps its details")
     }
 
+    func testAccountsGetIDsFromTheirLabelsAndKeepTheirColorAndFolder() throws {
+        var settings = AgentProviderSettings()
+        XCTAssertEqual(settings.newID(.claude, label: "Claude Code"), "claude-2", "the kind's own name adds a numbered one")
+        XCTAssertEqual(settings.newID(.claude, label: "  Work · Équipe! "), "claude-work-equipe")
+        XCTAssertEqual(settings.newID(.acp, label: ""), "acp", "the first custom agent takes the kind's name")
+        settings.providers.append(AgentProviderConfig(id: "claude-work", kind: .claude, name: "Work", shadowHome: nil,
+                                                      accentColor: "#1F6FEB"))
+        XCTAssertEqual(settings.newID(.claude, label: "work"), "claude-work-2")
+        XCTAssertFalse(AgentProviderConfig.isValidID("work account"))
+        XCTAssertFalse(AgentProviderConfig.isValidID("équipe"), "IDs stay ASCII")
+
+        var codex = AgentProviderConfig(id: "codex-personal", kind: .codex, shadowHome: "~/.codex-tab/personal", accentColor: "#2fa84a")
+        let decoded = try JSONDecoder().decode(AgentProviderConfig.self, from: JSONEncoder().encode(codex))
+        XCTAssertEqual(decoded, codex)
+        XCTAssertTrue(decoded.accentComponents! == (0x2F, 0xA8, 0x4A))
+        try codex.validate()
+        codex.accentColor = "blue"
+        XCTAssertThrowsError(try codex.validate())
+    }
+
     func testValidationRefusesWhatACLICantTake() {
         func refuses(_ change: (inout AgentProviderConfig) -> Void) {
             var provider = AgentProviderConfig.builtIn(.claude)

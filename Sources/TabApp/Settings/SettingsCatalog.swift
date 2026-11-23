@@ -3,7 +3,7 @@ import TabCore
 
 /// A page of the Settings window, in sidebar order.
 public enum SettingsCategory: String, CaseIterable, Sendable {
-    case general, interface, appearance, terminal, keyboard, agents, integrations, plugins, notifications, privacy, browser, server, remoteServers, mobile, backup, changelog
+    case general, interface, appearance, terminal, keyboard, agents, plugins, notifications, privacy, browser, server, remoteServers, mobile, backup, changelog
 
     public var title: String {
         switch self {
@@ -13,7 +13,6 @@ public enum SettingsCategory: String, CaseIterable, Sendable {
         case .terminal: return "Terminal"
         case .keyboard: return "Shortcuts"
         case .agents: return "Agents"
-        case .integrations: return "Integrations"
         case .plugins: return "Plugins"
         case .notifications: return "Notifications"
         case .privacy: return "Privacy"
@@ -36,7 +35,6 @@ public enum SettingsCategory: String, CaseIterable, Sendable {
         case .terminal: return (.bash, 0x3A3A3C, 0x151515, 0x5BE37A)
         case .keyboard: return (.command, 0xF7F7F8, 0xDCDCDF, 0x6E6E73)
         case .agents: return (.agents, 0xFFB86B, 0xF2701B, 0xFFFFFF)
-        case .integrations: return (.extensions, 0xFF6FB5, 0x8E4BF2, 0xFFFFFF)
         case .plugins: return (.extensions, 0x7C6BFF, 0x4E3CE0, 0xFFFFFF)
         case .notifications: return (.bell, 0xFF8A65, 0xE5484D, 0xFFFFFF)
         case .privacy: return (.hand, 0x5BB2FF, 0x1F6FEB, 0xFFFFFF)
@@ -187,24 +185,26 @@ public enum SettingsCatalog {
         // Agents
         SettingItem("agent-check", "Provider status", "", .agents, "Providers"),
         SettingItem("agent-providers", "Providers", "The coding agents agent panes run on this Mac.", .agents, "Providers"),
-        SettingItem("agent-add-provider", "Add provider", "Run Gemini CLI, OpenCode, Grok, Kiro or any agent that speaks the Agent Client Protocol, or a second copy of one signed in to another account.", .agents, "Providers"),
+        SettingItem("agent-add-provider", "Add provider", "Add another account, such as a second Claude subscription, or another agent: Gemini CLI, OpenCode, Grok, Kiro or any that speaks the Agent Client Protocol.", .agents, "Providers"),
         SettingItem("agent-check-interval", "Check again after", "Each provider's version, sign-in and latest release are checked again once the last check is this old. 0 checks only when you ask.", .agents, "Advanced"),
         SettingItem("agent-provider-enabled", "Provider", "", .agents, "Provider", subpage: .agentProvider),
         SettingItem("agent-provider-version", "Version", "The installed version, the latest release and the oldest one Tab works with.", .agents, "Provider", subpage: .agentProvider),
         SettingItem("agent-provider-sign-in", "Sign-in", "", .agents, "Provider", subpage: .agentProvider),
         SettingItem("agent-provider-name", "Name", "Shown in the model menu and on agent panes.", .agents, "General", subpage: .agentProvider),
+        SettingItem("agent-provider-id", "ID", "Conversations name their provider by it.", .agents, "General", subpage: .agentProvider),
+        SettingItem("agent-provider-accent", "Accent color", "A dot beside the provider's logo in the model menu, to tell accounts apart.", .agents, "General", subpage: .agentProvider),
         SettingItem("agent-provider-executable", "Executable", "The CLI to run: a command on PATH, or a full path.", .agents, "Runtime", subpage: .agentProvider),
         SettingItem("agent-provider-home", "Config folder", "Where the CLI keeps its sign-in, settings and conversations. Another folder can sign in to another account.", .agents, "Runtime", subpage: .agentProvider),
+        SettingItem("agent-provider-shadow-home", "Account folder", "Keeps this account's sign-in apart while sharing conversations, skills and settings with the Codex folder. Empty signs in to the Codex folder itself.", .agents, "Runtime", subpage: .agentProvider),
         SettingItem("agent-provider-arguments", "Launch arguments", "Added to the command line when a conversation starts.", .agents, "Runtime", subpage: .agentProvider),
         SettingItem("agent-provider-auto-compact", "Auto-compact after", "Compact the conversation at this many tokens, from 100,000 to 1,000,000. Leave it empty for Claude's default.", .agents, "Runtime", subpage: .agentProvider),
         SettingItem("agent-provider-variables", "Variables", "API keys, base URLs and other settings for the CLI, saved in plain text on this Mac.", .agents, "Environment", subpage: .agentProvider),
         SettingItem("agent-provider-models", "Models", "Favorites come first in the model menu, and hidden models stay out of it.", .agents, "Models", subpage: .agentProvider),
         SettingItem("agent-provider-custom-model", "Add model", "A model the CLI accepts but doesn't list, by its ID.", .agents, "Models", subpage: .agentProvider),
         SettingItem("agent-provider-remove", "Remove provider", "Its conversations stay in their panes but can't continue.", .agents, "Removal", subpage: .agentProvider),
-        // Integrations
-        SettingItem("agent-integration", "Integrate with available agents", "Installs a Tab skill and session hooks for supported agents.", .integrations, "Coding Agents"),
-        SettingItem("agent-integration-agents", "Agents", "", .integrations, "Coding Agents"),
-        SettingItem("terminal-migration", "Migrate from another terminal", "An agent reads that terminal's configuration and brings its shortcuts, font, cursor and colors into Tab.", .integrations, "Migration"),
+        SettingItem("agent-integration", "Integrate with available agents", "Installs a Tab skill and session hooks for supported agents.", .agents, "Terminal Integration"),
+        SettingItem("agent-integration-agents", "Agents", "", .agents, "Terminal Integration"),
+        SettingItem("terminal-migration", "Migrate from another terminal", "An agent reads that terminal's configuration and brings its shortcuts, font, cursor and colors into Tab.", .agents, "Migration"),
         // Plugins
         SettingItem("plugins", "Plugins", "Install and uninstall optional right-sidebar plugins such as Explorer and Diff View.", .plugins, "Plugins"),
         // Notifications
@@ -281,7 +281,8 @@ public enum SettingsCatalog {
 
     /// A line under a section's title.
     static let sectionSubtitles = ["Program Activity": "How status from processes and agents is handled",
-                                   "Providers": "The coding agents agent panes run on this Mac"]
+                                   "Providers": "The coding agents agent panes run on this Mac",
+                                   "Terminal Integration": "Agents you start in Tab's terminals"]
 
     private static let byId: [String: SettingItem] = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0) })
 

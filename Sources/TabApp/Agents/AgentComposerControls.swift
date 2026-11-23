@@ -147,7 +147,7 @@ class AgentTextPopUp: NSPopUpButton {
     var chatTheme: AppTheme = .shared { didSet { refreshLogos(); needsDisplay = true } }
     var icon: AppIcon = .cpu { didSet { needsDisplay = true } }
     var providerLogo: AgentProvider? { didSet { refreshLogos(); needsDisplay = true } }
-    var menuLogos: [Int: AgentProvider] = [:] { didSet { refreshLogos() } }
+    var menuLogos: [Int: AgentProviderConfig] = [:] { didSet { refreshLogos() } }
     private var brandImage: NSImage?
 
     private func refreshLogos() {

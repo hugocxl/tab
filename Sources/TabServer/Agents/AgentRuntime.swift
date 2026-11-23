@@ -295,7 +295,8 @@ internal final class AgentRuntime: @unchecked Sendable {
             self.model = model
             self.reasoningEffort = reasoningEffort
         }
-        arguments += config.arguments
+        if provider == .codex { try AgentProviderLaunch.prepareShadowHome(config) }
+        arguments += AgentProviderLaunch.homeArguments(config) + config.arguments
         let launch = try launchBuilder?(arguments) ?? launchOverride ?? AgentProcess.Launch(
             executable: AgentProviderLaunch.executable(config, environment: environment),
             arguments: arguments, environment: environment)

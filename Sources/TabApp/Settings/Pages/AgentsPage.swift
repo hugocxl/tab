@@ -24,16 +24,11 @@ extension SettingsModel {
             let badge = Self.badge(provider, health: health, run: run)
             b.item("agent-providers", key: provider.id, label: Self.listTitle(provider, health: health),
                    description: Self.status(provider, health: health, run: run),
-                   icon: AgentLogo.image(for: provider.kind.activityProvider, lightBackground: light),
+                   icon: AgentLogo.image(for: provider, lightBackground: light),
                    badge.map { .row([.label($0, .badge), open]) } ?? open)
         }
-        let kinds = (state?.kinds ?? AgentChatProvider.original).map { kind in
-            Choice(id: kind.rawValue, title: kind.spec.vendor.map { "\(kind.name) (\($0))" } ?? kind.name + "…")
-        }
-        b.row("agent-add-provider", state == nil ? b.button("Add Provider…", enabled: false) {} : b.menu("agent-add-provider", "Add Provider…", kinds) { [weak self] raw in
-            guard let self, let kind = AgentChatProvider(rawValue: raw), let id = store.addAgentProvider(kind) else { return }
-            openProvider(id)
-        })
+        b.row("agent-add-provider", b.button("Add Provider…", enabled: state != nil) { [weak self] in self?.showAddProvider() })
+        buildTerminalIntegration(b)
 
         b.row("agent-check-interval", b.stepper("agent-check-interval", Double(settings.healthCheckInterval / 60), range: 0 ... 1440,
                                                 unit: "minutes") { [store] minutes in
@@ -41,6 +36,16 @@ extension SettingsModel {
         })
 
         if b.subpage == .agentProvider && !b.isSearching { buildProvider(b, state: state) }
+    }
+
+    /// The Add Provider dialog, which opens the new provider's page.
+    func showAddProvider() {
+        guard let state = store.agentProviders, store.canAddAgentProvider() else { return }
+        let sheet = AddProviderSheet(settings: state.settings, kinds: state.kinds) { [weak self] config in
+            guard let self, let id = store.addAgentProvider(config) else { return }
+            openProvider(id)
+        }
+        sheet.present(on: window)
     }
 
     // MARK: A provider's page
@@ -57,7 +62,7 @@ extension SettingsModel {
         b.row("agent-provider-enabled", b.toggle("agent-provider-enabled", provider.enabled) { on in
             update("agent-provider-enabled") { $0.enabled = on }
         }, label: provider.title, description: Self.detail(provider, health: health),
-           icon: AgentLogo.image(for: provider.kind.activityProvider, lightBackground: light), iconSide: 28)
+           icon: AgentLogo.image(for: provider, lightBackground: light), iconSide: 28)
         buildStatus(b, provider: provider, health: health, run: state?.maintenance(id))
 
         // General
@@ -65,6 +70,13 @@ extension SettingsModel {
             let name = text.trimmingCharacters(in: .whitespacesAndNewlines)
             update("agent-provider-name") { $0.name = name.isEmpty ? nil : name }
         })
+        b.row("agent-provider-id", .label(id, .monospaced))
+        let accent = SettingControl.color(ColorSpec(color: provider.accentColor.flatMap(RGBColor.init(hex:)), label: "Accent color") { color in
+            update("agent-provider-accent") { $0.accentColor = color.hex.uppercased() }
+        })
+        b.row("agent-provider-accent", provider.accentColor == nil ? accent : .row([accent, b.button("Remove", icon: .trash) {
+            update("agent-provider-accent") { $0.accentColor = nil }
+        }]))
 
         // Runtime
         let spec = provider.kind.spec
@@ -78,7 +90,15 @@ extension SettingsModel {
                                                  placeholder: spec.defaultHome ?? "", monospaced: true) { text in
                 let path = text.trimmingCharacters(in: .whitespacesAndNewlines)
                 update("agent-provider-home") { $0.home = path.isEmpty ? nil : path }
-            }, label: "\(variable) folder")
+            }, label: "\(variable) folder", description: provider.supportsShadowHome
+                ? "The shared Codex folder, with its settings and conversations." : nil)
+        }
+        if provider.supportsShadowHome {
+            b.row("agent-provider-shadow-home", b.field("agent-provider-shadow-home", provider.shadowHome ?? "",
+                                                        placeholder: "e.g. ~/.codex-tab/personal", monospaced: true) { text in
+                let path = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                update("agent-provider-shadow-home") { $0.shadowHome = path.isEmpty ? nil : path }
+            })
         }
         b.row("agent-provider-arguments", b.field("agent-provider-arguments", Executable.commandLine(provider.arguments),
                                                   placeholder: spec.argumentsExample ?? "", monospaced: true) { [store] text in
@@ -296,15 +316,26 @@ extension SettingsModel {
             b.row("agent-provider-sign-in", .label("Signed in", .secondary),
                   description: [health.email, health.account].compactMap { $0 }.joined(separator: " · "))
         case .signedOut:
-            b.row("agent-provider-sign-in", .label("Signed out", .badge), description: health.signInCommand.map { "Sign in with `\($0)`." })
+            b.row("agent-provider-sign-in", signInButton(b, health) ?? .label("Signed out", .badge),
+                  description: health.message ?? health.signInCommand.map { "Sign in with `\($0)`." })
         case .unknown:
-            b.row("agent-provider-sign-in", .label("Unknown", .badge), description: Self.unknownSignIn(provider))
+            b.row("agent-provider-sign-in", signInButton(b, health).map { .row([.label("Unknown", .badge), $0]) } ?? .label("Unknown", .badge),
+                  description: Self.unknownSignIn(provider))
         }
         if let run {
             b.note("agent-provider-version", Self.maintenanceText(run), error: run.status == .failed)
             if let output = run.output, !running {
                 b.below("agent-provider-version", .label(output, .monospaced))
             }
+        }
+    }
+
+    /// Opens a terminal running the provider's sign-in in its own config folder.
+    private func signInButton(_ b: SettingsPageBuilder, _ health: AgentProviderHealth) -> SettingControl? {
+        guard let command = health.signInCommand else { return nil }
+        return b.button("Sign In…", help: "Runs \(command) in a new terminal tab") { [weak self] in
+            self?.store.host?.openTerminal(command: command)
+            self?.window?.close()
         }
     }
 

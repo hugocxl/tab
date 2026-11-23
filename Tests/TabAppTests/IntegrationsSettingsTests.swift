@@ -30,7 +30,7 @@ final class IntegrationsSettingsTests: XCTestCase {
     func testTheSwitchInstallsIntoEveryAgentFoundAndRemovesAgain() async throws {
         let store = SettingsStore(dirs: dirs, host: host, theme: AppTheme(catalog: ThemeCatalog(entries: []), systemIsDark: true))
         let page = SettingsModel(store: store)
-        page.select(.integrations)
+        page.select(.agents)
         try await Task.sleep(nanoseconds: 50_000_000)
         page.reload()
         XCTAssertFalse(try toggle(page).isOn)
@@ -54,7 +54,7 @@ final class IntegrationsSettingsTests: XCTestCase {
     func testMigratingOpensAnAgentWithAPromptForThatTerminal() throws {
         let store = SettingsStore(dirs: dirs, host: host, theme: AppTheme(catalog: ThemeCatalog(entries: []), systemIsDark: true))
         let page = SettingsModel(store: store)
-        page.select(.integrations)
+        page.select(.agents)
         let row = try XCTUnwrap(page.lastBuild?.rows.first { $0.id == "terminal-migration" })
         let buttons = try XCTUnwrap(row.control).leaves.compactMap { control -> ButtonSpec? in
             if case .button(let spec) = control { return spec }

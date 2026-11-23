@@ -121,6 +121,8 @@ public protocol SettingsHost: AnyObject {
     func migrationSources() -> [TerminalMigration.Source]
     /// Opens an agent tab in Home with `prompt` in its composer, not yet sent.
     func openAgent(prompt: String) throws
+    /// Opens a terminal tab in this Mac's Home running `command`, such as an agent's sign-in.
+    func openTerminal(command: String)
 
     // MARK: Updates
 
@@ -177,6 +179,7 @@ public final class PreviewSettingsHost: SettingsHost {
     public var state: Data?
     public var importSources: [BrowserImportSource] = []
     public private(set) var agentPrompts: [String] = []
+    public private(set) var terminalCommands: [String] = []
     public var integrations = CodingAgent.allCases.map {
         AgentIntegrationStatus(agent: $0, found: $0 != .pi, skill: .missing, hook: $0.supportsSessionHook ? .missing : .unsupported)
     }
@@ -252,6 +255,7 @@ public final class PreviewSettingsHost: SettingsHost {
     }
     public func migrationSources() -> [TerminalMigration.Source] { migrations }
     public func openAgent(prompt: String) throws { agentPrompts.append(prompt) }
+    public func openTerminal(command: String) { terminalCommands.append(command) }
 
     public var installedPlugins: Set<PluginId> = []
     public func pluginState(_ id: PluginId) -> PluginInstallState {

@@ -141,7 +141,8 @@ final class AgentProviderStore: @unchecked Sendable {
     }
 
     private static func runsTheSameCLI(_ a: AgentProviderConfig, _ b: AgentProviderConfig) -> Bool {
-        a.executable == b.executable && a.home == b.home && a.environment == b.environment && a.arguments == b.arguments
+        a.executable == b.executable && a.home == b.home && a.shadowHome == b.shadowHome && a.environment == b.environment
+            && a.arguments == b.arguments
     }
 
     // MARK: Versions and updates
@@ -321,7 +322,6 @@ final class AgentProviderStore: @unchecked Sendable {
     /// Runs `provider`'s CLI for its version and sign-in. Blocks for up to about 20 seconds.
     static func check(_ provider: AgentProviderConfig, environment base: [String: String], now: Date) -> AgentProviderHealth {
         let environment = AgentProviderLaunch.environment(provider, base: base)
-        let spec = provider.kind.spec
         let executable: URL
         do {
             executable = try AgentProviderLaunch.executable(provider, environment: environment)
@@ -337,7 +337,15 @@ final class AgentProviderStore: @unchecked Sendable {
                 checkedAt: now, executablePath: executable.path)
         }
         var health = AgentProviderHealth(provider: provider.id, installed: true, version: version, checkedAt: now,
-                                         executablePath: executable.path, signInCommand: spec.signInCommand)
+                                         executablePath: executable.path,
+                                         signInCommand: AgentProviderLaunch.signInCommand(provider, executable: provider.executable.map { _ in executable.path }))
+        do {
+            try AgentProviderLaunch.prepareShadowHome(provider)
+        } catch {
+            health.message = error.localizedDescription
+            health.status = .error
+            return health
+        }
         func run(_ arguments: [String]) -> ProcessOutput? {
             try? ProcessRunner.run(executable.path, arguments, environment: environment, timeout: 10)
         }
@@ -389,7 +397,7 @@ final class AgentProviderStore: @unchecked Sendable {
     /// What to run to sign in, with the provider's config folder when it has its own.
     static func signInMessage(_ provider: AgentProviderConfig) -> String {
         let spec = provider.kind.spec
-        let home = provider.home.map(AgentProviderLaunch.expand).flatMap { $0.isEmpty ? nil : $0 }
+        let home = AgentProviderLaunch.effectiveHome(provider)
         var with = ""
         if let variable = provider.homeVariable, let home { with = " with \(variable)=\(home)" }
         let keys = spec.apiKeyVariables.isEmpty ? "" : ", or add \(spec.apiKeyVariables[0]) under Variables"
@@ -520,10 +528,53 @@ enum AgentProviderLaunch {
         return NSHomeDirectory() + trimmed.dropFirst()
     }
 
+    /// The folder the kind's home variable names: a Codex account's shadow home, else the
+    /// provider's home; nil leaves the CLI's own default.
+    static func effectiveHome(_ provider: AgentProviderConfig) -> String? {
+        guard provider.homeVariable != nil else { return nil }
+        if provider.supportsShadowHome, let shadow = provider.shadowHome.map(expand), !shadow.isEmpty { return shadow }
+        return provider.home.map(expand).flatMap { $0.isEmpty ? nil : $0 }
+    }
+
+    /// The home a shadow home shares everything but its sign-in with.
+    static func sharedHome(_ provider: AgentProviderConfig) -> String {
+        let home = provider.home.map(expand) ?? ""
+        return home.isEmpty ? expand(provider.kind.spec.defaultHome ?? "~") : home
+    }
+
+    /// Links a Codex account's shadow home to its shared home before the CLI runs in it.
+    static func prepareShadowHome(_ provider: AgentProviderConfig) throws {
+        guard provider.supportsShadowHome, let shadow = provider.shadowHome.map(expand), !shadow.isEmpty else { return }
+        do {
+            try CodexShadowHome.prepare(shared: URL(fileURLWithPath: sharedHome(provider), isDirectory: true),
+                                        shadow: URL(fileURLWithPath: shadow, isDirectory: true))
+        } catch {
+            throw AgentRuntimeError("\(provider.title) can't start: \(error)")
+        }
+    }
+
+    /// Arguments Tab adds before the provider's own: a shadow home's bundled plugins.
+    static func homeArguments(_ provider: AgentProviderConfig) -> [String] {
+        guard provider.supportsShadowHome, let shadow = provider.shadowHome.map(expand), !shadow.isEmpty else { return [] }
+        return CodexShadowHome.arguments(shadow: URL(fileURLWithPath: shadow, isDirectory: true))
+    }
+
+    /// The command line that signs `provider` in, in its own home folder.
+    static func signInCommand(_ provider: AgentProviderConfig, executable: String?) -> String? {
+        let spec = provider.kind.spec
+        guard var words = spec.signInCommand.map({ $0.split(separator: " ").map(String.init) }), !words.isEmpty else { return nil }
+        if let executable { words[0] = executable }
+        var line = Executable.commandLine(words)
+        if let variable = provider.homeVariable, let home = effectiveHome(provider) {
+            line = Executable.commandLine(["\(variable)=\(home)"]) + " " + line
+        }
+        return line
+    }
+
     /// `base` with the provider's home folder, auto-compact window and variables set.
     static func environment(_ provider: AgentProviderConfig, base: [String: String]) -> [String: String] {
         var environment = base
-        if let variable = provider.homeVariable, let home = provider.home.map(expand), !home.isEmpty {
+        if let variable = provider.homeVariable, let home = effectiveHome(provider) {
             environment[variable] = home
         }
         if provider.kind == .claude, let tokens = provider.autoCompactTokens {

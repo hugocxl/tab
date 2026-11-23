@@ -4,7 +4,9 @@ import TabCore
 import TabProtocol
 
 extension SettingsModel {
-    func buildIntegrations(_ b: SettingsPageBuilder) {
+    /// Settings › Agents' sections for agents in Tab's terminals and for migrating
+    /// from another terminal.
+    func buildTerminalIntegration(_ b: SettingsPageBuilder) {
         let statuses = store.agentIntegrations
         let enabled = statuses.map(AgentIntegrations.isEnabled) ?? false
         b.row("agent-integration", b.toggle("agent-integration", enabled, enabled: statuses != nil && !store.agentIntegrationBusy) { [store] in

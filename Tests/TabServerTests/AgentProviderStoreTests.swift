@@ -91,6 +91,54 @@ final class AgentProviderStoreTests: XCTestCase {
         XCTAssertEqual(signedOut.version, "0.170.0")
         XCTAssertEqual(signedOut.auth, .signedOut)
         XCTAssertEqual(signedOut.message, "Run `codex login` in a terminal with CODEX_HOME=/tmp/codex-work to sign in.")
+        XCTAssertEqual(signedOut.signInCommand, "CODEX_HOME=/tmp/codex-work \(codex.path) login",
+                       "the Sign In button signs in to this provider's folder, with its own executable")
+    }
+
+    func testACodexAccountFolderSharesEverythingButItsSignIn() throws {
+        let directory = try root()
+        let shared = directory.appendingPathComponent("codex"), shadow = directory.appendingPathComponent("accounts/work")
+        let manager = FileManager.default
+        try manager.createDirectory(at: shared.appendingPathComponent("sessions"), withIntermediateDirectories: true)
+        try Data("model = \"o\"".utf8).write(to: shared.appendingPathComponent("config.toml"))
+        try Data("shared".utf8).write(to: shared.appendingPathComponent("auth.json"))
+        try manager.createDirectory(at: shadow.appendingPathComponent("thread-writer-locks"), withIntermediateDirectories: true)
+
+        try CodexShadowHome.prepare(shared: shared, shadow: shadow)
+        XCTAssertEqual(try manager.destinationOfSymbolicLink(atPath: shadow.appendingPathComponent("config.toml").path),
+                       shared.appendingPathComponent("config.toml").path)
+        XCTAssertNotNil(try? manager.destinationOfSymbolicLink(atPath: shadow.appendingPathComponent("sessions").path))
+        XCTAssertNotNil(try? manager.destinationOfSymbolicLink(atPath: shadow.appendingPathComponent("thread-writer-locks").path),
+                        "an idle lock folder made before linking becomes the shared one")
+        XCTAssertFalse(manager.fileExists(atPath: shadow.appendingPathComponent("auth.json").path), "the shared sign-in is never linked")
+
+        // Codex signs this account in, and later adds a file to the shared folder.
+        try Data("work".utf8).write(to: shadow.appendingPathComponent("auth.json"))
+        try Data("{}".utf8).write(to: shared.appendingPathComponent("history.jsonl"))
+        try CodexShadowHome.prepare(shared: shared, shadow: shadow)
+        XCTAssertEqual(try String(contentsOf: shadow.appendingPathComponent("auth.json"), encoding: .utf8), "work")
+        XCTAssertEqual(try String(contentsOf: shared.appendingPathComponent("auth.json"), encoding: .utf8), "shared")
+        XCTAssertNotNil(try? manager.destinationOfSymbolicLink(atPath: shadow.appendingPathComponent("history.jsonl").path))
+
+        // A real file where a shared one belongs is never deleted.
+        try manager.removeItem(at: shadow.appendingPathComponent("history.jsonl"))
+        try Data("mine".utf8).write(to: shadow.appendingPathComponent("history.jsonl"))
+        XCTAssertThrowsError(try CodexShadowHome.prepare(shared: shared, shadow: shadow))
+        XCTAssertEqual(try String(contentsOf: shadow.appendingPathComponent("history.jsonl"), encoding: .utf8), "mine")
+        XCTAssertThrowsError(try CodexShadowHome.prepare(shared: shared, shadow: shared), "an account folder can't be the shared one")
+    }
+
+    func testACodexAccountRunsInItsFolderWithItsBundledPlugins() throws {
+        let directory = try root()
+        let provider = AgentProviderConfig(id: "codex-work", kind: .codex, home: directory.appendingPathComponent("codex").path,
+                                           shadowHome: directory.appendingPathComponent("work").path)
+        XCTAssertEqual(AgentProviderLaunch.environment(provider, base: [:])["CODEX_HOME"], directory.appendingPathComponent("work").path)
+        XCTAssertEqual(AgentProviderLaunch.homeArguments(provider).first, "-c")
+        XCTAssertTrue(AgentProviderLaunch.homeArguments(provider).last?.hasPrefix("marketplaces.openai-bundled.source=\"\(directory.path)/work/.tmp/") ?? false)
+        XCTAssertEqual(AgentProviderLaunch.homeArguments(.builtIn(.codex)), [])
+        var claude = AgentProviderConfig(id: "claude", kind: .claude)
+        claude.shadowHome = "/tmp/ignored"
+        XCTAssertNil(AgentProviderLaunch.environment(claude, base: [:])["CLAUDE_CONFIG_DIR"], "only Codex has account folders")
     }
 
     func testSignInLabels() {

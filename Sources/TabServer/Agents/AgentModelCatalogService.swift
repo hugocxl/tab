@@ -94,7 +94,9 @@ actor AgentModelCatalogService {
             do {
                 let arguments: [String]
                 switch provider.spec.wire {
-                case .codexAppServer: arguments = ["app-server"]
+                case .codexAppServer:
+                    try AgentProviderLaunch.prepareShadowHome(config)
+                    arguments = ["app-server"] + AgentProviderLaunch.homeArguments(config)
                 case .acp: arguments = AgentProviderLaunch.sessionArguments(config)
                 case .claudeStream:
                     arguments = ["--print", "--verbose", "--input-format", "stream-json",

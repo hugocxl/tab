@@ -3,6 +3,19 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.124.0 - 2026-11-23
+
+### Added
+
+- Add Provider in Settings › Agents walks through the agent, a label, ID and accent color, then its config folder, sign-in method and launch arguments, so a second Claude or Codex account takes a minute to set up.
+- A second Codex account can keep only its sign-in in a folder of its own, sharing conversations, skills and settings with your main Codex folder.
+- A provider's page has a Sign In button that opens a terminal signed in to that provider's own folder.
+
+### Changed
+
+- The model menu marks a provider that can't run, such as a signed-out Codex, says why, offers to sign in, and keeps its models from being chosen; the composer warns when the chosen provider can't run.
+- Settings › Integrations is now part of Settings › Agents, with terminal integration and migration under the providers.
+
 ## 0.123.0 - 2026-11-23
 
 ### Changed

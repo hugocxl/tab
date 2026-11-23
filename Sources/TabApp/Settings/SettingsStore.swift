@@ -371,17 +371,21 @@ public final class SettingsStore {
 
     /// Adds a provider of `kind` and returns its ID.
     @discardableResult
-    public func addAgentProvider(_ kind: AgentChatProvider) -> String? {
-        guard let settings = agentProviders?.settings, settings.providers.count < AgentProviderSettings.maxProviders else {
+    /// Whether another provider fits; sets the list's error when it doesn't.
+    public func canAddAgentProvider() -> Bool {
+        guard let settings = agentProviders?.settings else { return false }
+        guard settings.providers.count < AgentProviderSettings.maxProviders else {
             setError("agent-providers", "Remove a provider before adding another.")
-            return nil
+            return false
         }
-        let id = settings.newID(kind)
-        let count = settings.providers.filter { $0.kind == kind }.count
-        updateAgentProviders("agent-providers") { settings in
-            settings.providers.append(AgentProviderConfig(id: id, kind: kind, name: "\(kind.name) \(count + 1)"))
-        }
-        return id
+        return true
+    }
+
+    /// Adds `provider` as the Add Provider dialog made it; nil when it can't be added.
+    public func addAgentProvider(_ provider: AgentProviderConfig) -> String? {
+        guard canAddAgentProvider(), agentProviders?.settings.provider(provider.id) == nil else { return nil }
+        updateAgentProviders("agent-providers") { $0.providers.append(provider) }
+        return agentProviders?.settings.provider(provider.id) == nil ? nil : provider.id
     }
 
     public func removeAgentProvider(_ id: String) {

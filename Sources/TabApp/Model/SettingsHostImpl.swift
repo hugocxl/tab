@@ -149,6 +149,12 @@ public final class SettingsHostImpl: SettingsHost {
         model.draftAgentPrompt(prompt, in: pane)
     }
 
+    public func openTerminal(command: String) {
+        model.newTerminal(in: model.state.home.id, command: command)
+        NSApp.activate(ignoringOtherApps: true)
+        model.presenter?.window?.makeKeyAndOrderFront(nil)
+    }
+
     // MARK: Updates
 
     public var updaterSummary: UpdaterSummary { model.updater.summary }

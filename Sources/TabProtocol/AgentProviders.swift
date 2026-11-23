@@ -17,6 +17,12 @@ public struct AgentProviderConfig: Hashable, Codable, Sendable, Identifiable {
     /// The kind's `homeVariable`, such as `CLAUDE_CONFIG_DIR` or `CODEX_HOME`: where the
     /// CLI keeps its sign-in, settings and conversations. Empty uses the CLI's own default.
     public var home: String?
+    /// Codex only: a folder of this account's own that keeps its sign-in apart while
+    /// sharing everything else, such as conversations and skills, with `home`. Empty
+    /// runs Codex in `home` itself.
+    public var shadowHome: String?
+    /// A `#RRGGBB` color marking the provider in the model menu, such as one per account.
+    public var accentColor: String?
     /// Added after Tab's own arguments when the CLI starts. A custom ACP agent's are all
     /// it starts with, such as `--acp`.
     public var arguments: [String]
@@ -29,8 +35,8 @@ public struct AgentProviderConfig: Hashable, Codable, Sendable, Identifiable {
     public static let autoCompactRange = 100_000 ... 1_000_000
 
     public init(id: String, kind: AgentChatProvider, name: String? = nil, enabled: Bool = true,
-                executable: String? = nil, home: String? = nil, arguments: [String] = [],
-                environment: [AgentProviderVariable] = [], autoCompactTokens: Int? = nil,
+                executable: String? = nil, home: String? = nil, shadowHome: String? = nil, accentColor: String? = nil,
+                arguments: [String] = [], environment: [AgentProviderVariable] = [], autoCompactTokens: Int? = nil,
                 models: AgentProviderModels = AgentProviderModels()) {
         self.id = id
         self.kind = kind
@@ -38,6 +44,8 @@ public struct AgentProviderConfig: Hashable, Codable, Sendable, Identifiable {
         self.enabled = enabled
         self.executable = executable
         self.home = home
+        self.shadowHome = shadowHome
+        self.accentColor = accentColor
         self.arguments = arguments
         self.environment = environment
         self.autoCompactTokens = autoCompactTokens
@@ -63,8 +71,30 @@ public struct AgentProviderConfig: Hashable, Codable, Sendable, Identifiable {
     /// The variable `home` sets, when the kind has one.
     public var homeVariable: String? { kind.spec.homeVariable }
 
+    /// Whether the kind can keep an account's sign-in in a shadow home.
+    public var supportsShadowHome: Bool { kind == .codex }
+
+    /// Marker colors the app offers for `accentColor`.
+    public static let accentColors = ["#F2701B", "#E5484D", "#D6409F", "#8E4BF2", "#1F6FEB", "#1E9AA0", "#2FA84A", "#F29D1B"]
+
+    /// `accentColor` as red, green and blue from 0 to 255, when it is a valid `#RRGGBB`.
+    public var accentComponents: (red: Int, green: Int, blue: Int)? {
+        guard let hex = accentColor, Self.isAccentColor(hex), let value = Int(hex.dropFirst(), radix: 16) else { return nil }
+        return ((value >> 16) & 0xFF, (value >> 8) & 0xFF, value & 0xFF)
+    }
+
+    public static func isAccentColor(_ text: String) -> Bool {
+        text.count == 7 && text.first == "#" && text.dropFirst().allSatisfy(\.isHexDigit)
+    }
+
+    /// Whether `id` can name a provider: 1 to 64 letters, digits, `-` and `_`.
+    public static func isValidID(_ id: String) -> Bool {
+        !id.isEmpty && id.utf8.count <= 64
+            && id.unicodeScalars.allSatisfy { CharacterSet.alphanumerics.contains($0) && $0.isASCII || $0 == "-" || $0 == "_" }
+    }
+
     private enum CodingKeys: String, CodingKey {
-        case id, kind, name, enabled, executable, home, arguments, environment, autoCompactTokens, models
+        case id, kind, name, enabled, executable, home, shadowHome, accentColor, arguments, environment, autoCompactTokens, models
     }
 
     public init(from decoder: Decoder) throws {
@@ -75,6 +105,8 @@ public struct AgentProviderConfig: Hashable, Codable, Sendable, Identifiable {
         enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
         executable = try c.decodeIfPresent(String.self, forKey: .executable)
         home = try c.decodeIfPresent(String.self, forKey: .home)
+        shadowHome = try c.decodeIfPresent(String.self, forKey: .shadowHome)
+        accentColor = try c.decodeIfPresent(String.self, forKey: .accentColor)
         arguments = try c.decodeIfPresent([String].self, forKey: .arguments) ?? []
         environment = try c.decodeIfPresent([AgentProviderVariable].self, forKey: .environment) ?? []
         autoCompactTokens = try c.decodeIfPresent(Int.self, forKey: .autoCompactTokens)
@@ -209,6 +241,22 @@ public struct AgentProviderSettings: Hashable, Codable, Sendable {
         var number = 2
         while provider("\(kind.rawValue)-\(number)") != nil { number += 1 }
         return "\(kind.rawValue)-\(number)"
+    }
+
+    /// A new provider's ID from its label, such as `claude-work` for “Work”, unused by any
+    /// other; `newID` when the label has no letters or digits.
+    public func newID(_ kind: AgentChatProvider, label: String) -> String {
+        let words = label.lowercased().folding(options: .diacriticInsensitive, locale: nil)
+            .split { !($0.isASCII && ($0.isLetter || $0.isNumber)) }
+        let kindName = kind.name.lowercased()
+        guard !words.isEmpty, words.joined(separator: " ") != kindName else {
+            return provider(kind.rawValue) == nil ? kind.rawValue : newID(kind)
+        }
+        let base = String((kind.rawValue + "-" + words.joined(separator: "-")).prefix(60))
+        guard provider(base) != nil else { return base }
+        var number = 2
+        while provider("\(base)-\(number)") != nil { number += 1 }
+        return "\(base)-\(number)"
     }
 
     /// Decodes each provider alone, so one a newer build wrote with a kind
@@ -501,7 +549,8 @@ extension AgentProviderConfig {
         }
         guard !id.isEmpty, id.utf8.count <= 64,
               id.unicodeScalars.allSatisfy({ CharacterSet.alphanumerics.contains($0) || $0 == "-" || $0 == "_" }),
-              text(name, max: 128), text(executable), text(home),
+              text(name, max: 128), text(executable), text(home), text(shadowHome),
+              accentColor.map(Self.isAccentColor) ?? true,
               arguments.count <= 64, arguments.allSatisfy({ text($0) }),
               autoCompactTokens.map(Self.autoCompactRange.contains) ?? true else { throw .badRequest }
         try Validation.environment(Dictionary(environment.map { ($0.name, $0.value) }, uniquingKeysWith: { _, last in last }))

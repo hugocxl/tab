@@ -286,5 +286,6 @@ private final class SettingsWriteHost: SettingsHost {
         try await base.agentModels(provider, refresh: refresh)
     }
     func openAgent(prompt: String) throws { try base.openAgent(prompt: prompt) }
+    func openTerminal(command: String) { base.openTerminal(command: command) }
     func backupState() throws -> Data { try base.backupState() }
 }

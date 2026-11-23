@@ -98,6 +98,13 @@ final class SettingsTests: XCTestCase {
             XCTAssertEqual(build.unknownIds, [], "\(subpage) shows rows missing from the catalog")
             shown.formUnion(build.rowIds)
         }
+        // A provider's page shows its kind's own rows, such as Codex's account folder.
+        for provider in AgentProviderSettings().providers {
+            page.openProvider(provider.id)
+            let build = try XCTUnwrap(page.lastBuild)
+            XCTAssertEqual(build.unknownIds, [], "\(provider.id)'s page shows rows missing from the catalog")
+            shown.formUnion(build.rowIds)
+        }
         for item in SettingsCatalog.items {
             XCTAssertTrue(shown.contains(item.id), "\(item.id) is in the catalog but no page shows it")
         }

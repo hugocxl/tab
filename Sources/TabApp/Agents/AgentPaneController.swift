@@ -115,6 +115,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         var lockedProvider: String?
         var resolvedModel: String?
         var providers: [AgentProviderConfig]
+        var health: [String: AgentProviderHealth]
     }
     private(set) var connectionGeneration: UInt64 = 0
     private(set) var needsAuthoritativeSnapshot = false
@@ -134,10 +135,16 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     private lazy var composerCoordinator = AgentComposerCoordinator(surface: surface)
     /// A provider's models as its menu offers them: the user's order, hidden ones left out.
     var loadModelCatalog: ((AgentProviderConfig, Bool) async throws -> [AgentModelDescriptor])?
-    /// The server's providers that can run; servers that predate provider settings throw, leaving the built-in ones.
-    var loadProviders: (() async throws -> AgentProviderSettings)?
+    /// The server's providers with their last checks; servers that predate provider settings throw, leaving the built-in ones.
+    var loadProviders: (() async throws -> AgentProvidersState)?
+    /// Runs a command, such as a provider's sign-in, in a new terminal beside the pane.
+    var openTerminal: ((String) -> Void)?
     /// The providers the model menu offers, from the server's settings.
     private var providers = AgentProviderSettings().providers
+    /// What each provider's last check found, by provider ID.
+    private var providerHealth: [String: AgentProviderHealth] = [:]
+    /// The unavailable provider and reason the composer last warned about, so it warns once.
+    private var announcedUnavailable: String?
     /// Each provider's models, by provider ID.
     private var modelCatalogs: [String: [AgentModelDescriptor]] = [:]
     private var modelCatalogTask: Task<Void, Never>?
@@ -351,11 +358,11 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
             guard let model, let project = model.state.paneProject(pane), let client = model.sideClient(for: project) else {
                 throw AgentPaneError.offline
             }
-            // A provider whose last check didn't find its CLI can't start a conversation.
-            let state = try await client.agentProviders()
-            var settings = state.settings
-            settings.providers.removeAll { state.health($0.id)?.installed == false }
-            return settings
+            return try await client.agentProviders()
+        }
+        openTerminal = { [weak model] command in
+            guard let model, let project = model.state.paneProject(pane) else { return }
+            model.newTerminal(in: project, command: command)
         }
     }
 
@@ -2249,11 +2256,13 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         modelCatalogTask = Task { [weak self] in
             guard let self else { return }
             defer { if generation == self.connectionGeneration { self.modelCatalogTask = nil } }
-            if let settings = try? await self.loadProviders?() {
+            if let state = try? await self.loadProviders?() {
                 guard !Task.isCancelled, !self.disposed, generation == self.connectionGeneration else { return }
-                self.providers = settings.providers
+                self.providers = state.settings.providers
+                self.providerHealth = Dictionary(state.health.map { ($0.provider, $0) }, uniquingKeysWith: { _, last in last })
                 self.menuState = nil
                 self.updateControls()
+                self.warnIfUnavailable()
             }
             for provider in self.menuProviders {
                 do {
@@ -2278,9 +2287,26 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
             ?? modelCatalogs[selection.providerKey]?.first(where: \.isDefault)?.id
     }
 
-    /// The providers the model menu lists: the enabled ones, and the chosen one even when turned off.
+    /// The providers the model menu lists: the enabled ones whose CLI was found, and the
+    /// chosen one even when turned off or missing.
     private var menuProviders: [AgentProviderConfig] {
-        providers.filter { $0.enabled || $0.id == selection.providerKey }
+        providers.filter { ($0.enabled && providerHealth[$0.id]?.installed != false) || $0.id == selection.providerKey }
+    }
+
+    /// Why a provider can't start a conversation now, as its last check found.
+    private func unavailability(_ config: AgentProviderConfig) -> AgentProviderUnavailability? {
+        AgentProviderUnavailability(config, health: providerHealth[config.id])
+    }
+
+    /// Warns in the composer, once, that the chosen provider can't run, as a new
+    /// conversation would otherwise fail only after a prompt is sent.
+    private func warnIfUnavailable() {
+        let config = providerConfig(selection.providerKey, kind: selection.provider)
+        guard canChangeProvider, let reason = unavailability(config) else { return }
+        let key = config.id + "\n" + reason.detail
+        guard announcedUnavailable != key else { return }
+        announcedUnavailable = key
+        showNotice(reason.detail, kind: .warning)
     }
 
     private func providerConfig(_ key: String, kind: TabCore.AgentChatProvider) -> AgentProviderConfig {
@@ -2389,6 +2415,11 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         }
     }
 
+    @objc private func signInSelected(_ sender: NSMenuItem) {
+        guard let command = sender.representedObject as? String else { return }
+        openTerminal?(command)
+    }
+
     func menuWillOpen(_ menu: NSMenu) {
         guard menu === surface.model.menu else { return }
         modelMenuOpen = true
@@ -2414,13 +2445,13 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         guard !modelMenuOpen else { return }
         let state = PickerState(selection: selection, effort: reasoningEffort,
                                 lockedProvider: canChangeProvider ? nil : snapshot.map(Self.providerKey),
-                                resolvedModel: effectiveModel, providers: menuProviders)
+                                resolvedModel: effectiveModel, providers: menuProviders, health: providerHealth)
         guard menuState != state else { return }
         menuState = state
         let displayedSelection = AgentModelSelection(provider: selection.provider, providerID: selection.providerID, model: effectiveModel)
         let menu = NSMenu()
         menu.delegate = self
-        var menuLogos: [Int: AgentProvider] = [:]
+        var menuLogos: [Int: AgentProviderConfig] = [:]
         menu.autoenablesItems = false
         for config in menuProviders {
             let provider = config.kind
@@ -2430,8 +2461,25 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
             models.autoenablesItems = false
             heading.submenu = models
             heading.state = selection.providerKey == key ? .on : .off
-            if !config.enabled { heading.toolTip = "Turned off in Settings › Agents" }
-            menuLogos[menu.items.count] = provider.activityProvider
+            let unavailable = config.enabled ? unavailability(config) : nil
+            if !config.enabled { heading.toolTip = "\(config.title): Turned off in Settings › Agents." }
+            if let unavailable {
+                heading.toolTip = unavailable.detail
+                heading.badge = NSMenuItemBadge(string: unavailable.badge)
+                let reason = NSMenuItem(title: unavailable.reason, action: nil, keyEquivalent: "")
+                reason.isEnabled = false
+                reason.toolTip = unavailable.detail
+                models.addItem(reason)
+                if let command = unavailable.signInCommand, openTerminal != nil {
+                    let signIn = NSMenuItem(title: "Sign In in a Terminal…", action: #selector(signInSelected(_:)), keyEquivalent: "")
+                    signIn.target = self
+                    signIn.representedObject = command
+                    signIn.toolTip = "Runs \(command)"
+                    models.addItem(signIn)
+                }
+                models.addItem(.separator())
+            }
+            menuLogos[menu.items.count] = config
             menu.addItem(heading)
             var choices = (modelCatalogs[key] ?? []).map { AgentModelSelection(provider: provider, providerID: key, model: $0.id) }
             let shownModel = descriptor(for: displayedSelection)
@@ -2456,9 +2504,9 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
                 item.state = choice == current ? .on : .off
                 let reported = descriptor(for: choice) != nil
                 item.isEnabled = reported && (canChangeProvider || isCurrentProvider(key))
-                    && (config.enabled || isCurrentProvider(key))
+                    && ((config.enabled && unavailable == nil) || isCurrentProvider(key))
                 item.toolTip = !reported ? "Current model is not listed in the provider catalog."
-                    : item.isEnabled ? choice.model : "Open a new agent pane to use another provider."
+                    : unavailable.map { $0.detail } ?? (item.isEnabled ? choice.model : "Open a new agent pane to use another provider.")
                 models.addItem(item)
             }
         }
