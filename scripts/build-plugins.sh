@@ -121,5 +121,6 @@ EOF
 
 build_plugin "explorer" "TabExplorerPlugin" "Explorer" "TabExplorerPluginFactory"
 build_plugin "diff" "TabDiffPlugin" "Diff View" "TabDiffPluginFactory"
+build_plugin "usage" "TabUsagePlugin" "AI Usage" "TabUsagePluginFactory"
 
 echo "$OUT_DIR"

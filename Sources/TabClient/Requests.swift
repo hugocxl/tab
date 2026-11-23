@@ -10,6 +10,12 @@ extension ServerClient {
         return catalog
     }
 
+    public func agentUsageLimits(_ request: AgentUsageLimitsRequest) async throws -> AgentUsageLimitsReply {
+        let reply = try await self.request(.agentUsageLimits(request))
+        guard case .agentUsageLimits(let limits) = reply else { throw unexpected(reply) }
+        return limits
+    }
+
     public func agentComposerContext(_ request: AgentComposerContextRequest) async throws -> AgentComposerContextReply {
         let reply = try await self.request(.agentComposerContext(request))
         guard case .agentComposerContext(let context) = reply else { throw unexpected(reply) }

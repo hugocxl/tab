@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.125.0 - 2026-11-23
+
+### Added
+
+- The AI Usage plugin shows how much of your Claude and Codex plan limits is left in the right sidebar, with each window's pace and time to reset.
+
 ## 0.124.0 - 2026-11-23
 
 ### Added

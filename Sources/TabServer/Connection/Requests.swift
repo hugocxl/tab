@@ -58,6 +58,10 @@ extension ClientConnection {
             Task { [self] in
                 reply(id, await asyncResult { .agentModelCatalog(try await server.agentModelCatalog.handle(request)) })
             }
+        case .agentUsageLimits(let request):
+            Task { [self] in
+                reply(id, .agentUsageLimits(await server.agentUsageLimits.handle(request)))
+            }
         case .agentComposerContext(let request):
             Task { [self] in
                 reply(id, await asyncResult { .agentComposerContext(try await server.agentComposerContext.catalog(request)) })
@@ -315,7 +319,7 @@ extension ClientConnection {
             return .remoteAccess(remote.state())
 
         case .hello, .ping, .unknown, .authenticate, .pair, .git, .files, .exec, .cancelExec, .agentChat, .agentConversation, .agentCheckpoint, .agentAttachment,
-             .agentComposerContext, .agentModelCatalog, .checkAgentProviders, .agentHistory, .importAgentHistory, .openTunnel, .closeTunnel, .listSimulators, .simulatorAction, .attachSimulator,
+             .agentComposerContext, .agentModelCatalog, .agentUsageLimits, .checkAgentProviders, .agentHistory, .importAgentHistory, .openTunnel, .closeTunnel, .listSimulators, .simulatorAction, .attachSimulator,
              .detachSimulator, .simulatorScreenshot:
             throw ServiceError(.badRequest, "Unexpected request")
         }

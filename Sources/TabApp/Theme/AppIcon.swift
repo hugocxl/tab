@@ -27,6 +27,7 @@ public enum AppIcon: String, CaseIterable, Sendable {
     case browserslist
     case bun
     case c
+    case chartLine = "chart-line"
     case check
     case checkbox
     case chevronDown = "chevron-down"
@@ -194,6 +195,8 @@ public enum AppIcon: String, CaseIterable, Sendable {
     case terraform
     case themes = "palette"
     case toml
+    case trendingDown = "trending-down"
+    case trendingUp = "trending-up"
     case triangleAlert = "triangle-alert"
     case typescript
     case viewList = "list"

@@ -170,7 +170,7 @@ extension RequestBody {
             try request.validate()
         case .agentConversation(let request):
             try request.validate()
-        case .agentComposerContext, .agentModelCatalog, .agentHistory:
+        case .agentComposerContext, .agentModelCatalog, .agentUsageLimits, .agentHistory:
             break
         case .importAgentHistory(let request):
             try request.validate()
@@ -359,6 +359,8 @@ extension ReplyBody {
             try history.validate()
         case .agentModelCatalog(let catalog):
             try catalog.validate()
+        case .agentUsageLimits(let limits):
+            try limits.validate()
         case .activityClaimed(let ids):
             if ids.count > Limits.activityHistoryLimit { throw .badRequest }
         case .activity(let snapshot):

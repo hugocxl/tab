@@ -22,6 +22,7 @@ public protocol ServerAPI: AnyObject, Sendable {
     func agentConversation(_ request: AgentConversationRequest) async throws -> AgentConversationReply
     func agentComposerContext(_ request: AgentComposerContextRequest) async throws -> AgentComposerContextReply
     func agentModelCatalog(_ request: AgentModelCatalogRequest) async throws -> AgentModelCatalogReply
+    func agentUsageLimits(_ request: AgentUsageLimitsRequest) async throws -> AgentUsageLimitsReply
     func agentProviders() async throws -> AgentProvidersState
     func writeAgentProviders(_ settings: AgentProviderSettings) async throws -> AgentProvidersState
     func checkAgentProviders() async throws -> AgentProvidersState
@@ -94,6 +95,10 @@ extension ServerAPI {
 
     public func agentModelCatalog(_ request: AgentModelCatalogRequest) async throws -> AgentModelCatalogReply {
         throw ModelError("Model discovery is unsupported by this server.")
+    }
+
+    public func agentUsageLimits(_ request: AgentUsageLimitsRequest) async throws -> AgentUsageLimitsReply {
+        throw ClientError.server(ErrorReply(code: .unsupported, message: "This server predates usage limits."))
     }
 
     public func agentProviders() async throws -> AgentProvidersState {

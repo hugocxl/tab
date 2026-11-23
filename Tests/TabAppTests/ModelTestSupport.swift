@@ -48,6 +48,7 @@ final class ModelFakeServer: ServerAPI, TerminalBackend, @unchecked Sendable {
     private var _stops: [Bool] = []
     private var _idleStops = 0
     var gitReply: (@Sendable (GitRequest) -> GitReply)?
+    var usageLimits: AgentUsageLimitsReply?
     var beforeClaim: (@Sendable () async -> Void)?
 
     init(identity: ServerId = ServerId(), catalog: CatalogPage) {
@@ -186,6 +187,10 @@ final class ModelFakeServer: ServerAPI, TerminalBackend, @unchecked Sendable {
         locked { _claims.append(events) }
         if let beforeClaim { await beforeClaim() }
         return locked { _claimResult ?? events }
+    }
+    func agentUsageLimits(_ request: AgentUsageLimitsRequest) async throws -> AgentUsageLimitsReply {
+        guard let usageLimits else { throw ClientError.server(ErrorReply(code: .unsupported, message: "unsupported")) }
+        return usageLimits
     }
     func git(_ request: GitRequest) async throws -> GitReply {
         locked { _gitRequests.append(request) }

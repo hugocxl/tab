@@ -32,6 +32,8 @@ public struct PluginId: RawRepresentable, Hashable, Codable, Sendable, CustomStr
     public static let explorer = PluginId("explorer")
     /// The Source Control and Diff View plugin.
     public static let diff = PluginId("diff")
+    /// The AI Usage plugin: agent subscription limits in the right sidebar.
+    public static let usage = PluginId("usage")
 }
 
 /// Catalog metadata for a plugin available to install in Tab.
@@ -91,10 +93,21 @@ public enum PluginCatalog {
         panelIds: ["sourceControl"]
     )
 
+    public static let usage = PluginDescriptor(
+        id: .usage,
+        name: "AI Usage",
+        summary: "See how much of your Claude and Codex plan limits is left in the right sidebar.",
+        iconName: "chart-line",
+        bundleName: "TabUsagePlugin",
+        principalClass: "TabUsagePluginFactory",
+        panelIds: ["usage"]
+    )
+
     /// Every official plugin, in catalog order.
     public static let all: [PluginDescriptor] = [
         explorer,
         diff,
+        usage,
     ]
 
     public static func descriptor(for id: PluginId) -> PluginDescriptor? {

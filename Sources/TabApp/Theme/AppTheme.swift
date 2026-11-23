@@ -35,6 +35,11 @@ extension AppTheme {
         case .brown: return isLight ? "#956b4f" : "#c3987b"
         }
     }
+
+    /// `hue` as a color; see `iconHex(_:)`.
+    public func iconColor(_ hue: IconHue) -> NSColor {
+        NSColor(hex: UInt32(iconHex(hue).dropFirst(), radix: 16) ?? 0)
+    }
 }
 
 extension TabCore.RGBColor {

@@ -229,6 +229,8 @@ public enum Topic: OpenEnum {
 
 public enum RequestBody: Hashable, Codable, Sendable {
     case agentModelCatalog(AgentModelCatalogRequest)
+    /// The signed-in agents' subscription limits; replies `agentUsageLimits`.
+    case agentUsageLimits(AgentUsageLimitsRequest)
     case agentAttachment(AgentAttachmentRequest)
     case agentCheckpoint(AgentCheckpointRequest)
     case agentChat(AgentChatRequest)
@@ -347,6 +349,7 @@ public enum RequestBody: Hashable, Codable, Sendable {
         switch c.type {
         case "hello": self = .hello(try c("hello"))
         case "agentModelCatalog": self = .agentModelCatalog(try c("request"))
+        case "agentUsageLimits": self = .agentUsageLimits(try c("request"))
         case "agentAttachment": self = .agentAttachment(try c("request"))
         case "agentCheckpoint": self = .agentCheckpoint(try c("request"))
         case "agentChat": self = .agentChat(try c("request"))
@@ -429,6 +432,9 @@ public enum RequestBody: Hashable, Codable, Sendable {
             try c(hello, "hello")
         case .agentModelCatalog(let request):
             var c = try TaggedEncoding(encoder, "agentModelCatalog")
+            try c(request, "request")
+        case .agentUsageLimits(let request):
+            var c = try TaggedEncoding(encoder, "agentUsageLimits")
             try c(request, "request")
         case .agentAttachment(let request):
             var c = try TaggedEncoding(encoder, "agentAttachment")
@@ -627,6 +633,7 @@ public enum RequestBody: Hashable, Codable, Sendable {
 
 public enum ReplyBody: Hashable, Codable, Sendable {
     case agentModelCatalog(AgentModelCatalogReply)
+    case agentUsageLimits(AgentUsageLimitsReply)
     case agentAttachment(AgentAttachmentReply)
     case agentCheckpoint(AgentCheckpointReply)
     case agentChat(AgentChatSnapshot)
@@ -717,6 +724,7 @@ public enum ReplyBody: Hashable, Codable, Sendable {
         case "hello": self = .hello(try c("hello"))
         case "versionUnsupported": self = .versionUnsupported(supported: try c("supported"))
         case "agentModelCatalog": self = .agentModelCatalog(try c("catalog"))
+        case "agentUsageLimits": self = .agentUsageLimits(try c("limits"))
         case "agentAttachment": self = .agentAttachment(try c("attachment"))
         case "agentCheckpoint": self = .agentCheckpoint(try c("checkpoint"))
         case "agentChat": self = .agentChat(try c("snapshot"))
@@ -789,6 +797,9 @@ public enum ReplyBody: Hashable, Codable, Sendable {
         case .agentModelCatalog(let catalog):
             var c = try TaggedEncoding(encoder, "agentModelCatalog")
             try c(catalog, "catalog")
+        case .agentUsageLimits(let limits):
+            var c = try TaggedEncoding(encoder, "agentUsageLimits")
+            try c(limits, "limits")
         case .agentAttachment(let attachment):
             var c = try TaggedEncoding(encoder, "agentAttachment")
             try c(attachment, "attachment")

@@ -43,6 +43,7 @@ public final class Server: @unchecked Sendable {
     let agents: AgentSessions
     let agentComposerContext: AgentComposerContextService
     let agentModelCatalog: AgentModelCatalogService
+    let agentUsageLimits: AgentUsageLimitsService
     let agentProviders: AgentProviderStore
     let agentHistory: AgentHistory
     let agentTitles: AgentTitles
@@ -102,6 +103,7 @@ public final class Server: @unchecked Sendable {
                 guard directory.isDirectory else { throw ServiceError(.badPath, "The agent's project folder is unavailable") }
                 return directory.url
             })
+        agentUsageLimits = AgentUsageLimitsService(providers: { kind in agentProviders.provider(nil, kind: kind) })
         agentHistory = AgentHistory(home: URL(fileURLWithPath: configuration.homeDirectory))
         agentTitles = AgentTitles(history: agentHistory)
         agents = try AgentSessions(root: dirs.root.appendingPathComponent("agents"), projectDirectory: { project in
