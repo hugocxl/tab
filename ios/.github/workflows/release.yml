@@ -1,12 +1,5 @@
 name: Release
 
-# Every push to main releases its CHANGELOG.md versions: each version since the
-# newest tag is tagged vX.Y.Z at the commit that adds it and published as a
-# GitHub release with its changelog section, so a failed run is caught up by
-# the next one. The app itself ships through TestFlight with scripts/release.sh;
-# scripts/validate.sh runs locally before every commit. Tags this workflow
-# pushes don't start it again.
-
 on:
   push:
     branches: [main]
@@ -20,38 +13,13 @@ concurrency:
 
 jobs:
   release:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      - name: Check the app's version is the changelog's
-        run: |
-          set -euo pipefail
-          CHANGELOG="$(sed -n 's/^## \([0-9][0-9.]*\) .*/\1/p' CHANGELOG.md | head -1)"
-          sed -n 's/.*MARKETING_VERSION = \(.*\);/\1/p' App/Tab.xcodeproj/project.pbxproj | while read -r VERSION; do
-            [ "$VERSION" = "$CHANGELOG" ] || { echo "MARKETING_VERSION $VERSION isn't the changelog's $CHANGELOG" >&2; exit 1; }
-          done
-      - name: Tag and publish new versions
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898283+github-actions[bot]@users.noreply.github.com'
-          NEW="$(scripts/release-tags.sh tag "$GITHUB_SHA")"
-          [ -n "$NEW" ] || { echo 'No new version to release'; exit 0; }
-          mapfile -t TAGS <<< "$NEW"
-          # One push per tag: GitHub refuses this token a tag on a commit whose
-          # workflows differ from main's, and that mustn't hold back the others.
-          FAILED=0
-          for TAG in "${TAGS[@]}"; do
-            git push origin "refs/tags/$TAG" || { FAILED=1; continue; }
-            if gh release view "$TAG" > /dev/null 2>&1; then continue; fi
-            scripts/release-tags.sh notes "${TAG#v}" > "$RUNNER_TEMP/notes.md"
-            gh release create "$TAG" --verify-tag --title "Tab iOS ${TAG#v}" --notes-file "$RUNNER_TEMP/notes.md"
-          done
-          exit "$FAILED"
+    uses: hugocxl/stack/.github/workflows/reusable-release-tag.yml@main
+    with:
+      app-name: Tab iOS
+      run-validate: false
+      pre-release-command: |
+        CHANGELOG="$(sed -n 's/^## \([0-9][0-9.]*\) .*/\1/p' CHANGELOG.md | head -1)"
+        sed -n 's/.*MARKETING_VERSION = \(.*\);/\1/p' App/Tab.xcodeproj/project.pbxproj | while read -r VERSION; do
+          [ "$VERSION" = "$CHANGELOG" ] || { echo "MARKETING_VERSION $VERSION isn't the changelog's $CHANGELOG" >&2; exit 1; }
+        done
+    secrets: inherit

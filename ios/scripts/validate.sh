@@ -3,6 +3,7 @@
 # and the app build, with warnings as errors.
 set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+git -C "$ROOT" config core.hooksPath .githooks 2>/dev/null || true
 . "$ROOT/scripts/simulator.sh"
 DEVICE=$(iphone_simulator)
 STRICT="GCC_TREAT_WARNINGS_AS_ERRORS=YES"
