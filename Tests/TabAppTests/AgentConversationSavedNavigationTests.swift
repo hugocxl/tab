@@ -53,7 +53,7 @@ final class AgentConversationSavedNavigationTests: XCTestCase {
         XCTAssertFalse(controller.surface.revealCitation(foreign))
         XCTAssertEqual(controller.snapshot?.session, session)
         XCTAssertTrue(requests.allSatisfy { request in
-            switch request { case .create(let found, let owner, _): return found == session && owner == project
+            switch request { case .create(let found, let owner, _, _): return found == session && owner == project
             case .read(let found): return found == session
             default: return false }
         }, "Navigation must not send a prompt or allocate another session")

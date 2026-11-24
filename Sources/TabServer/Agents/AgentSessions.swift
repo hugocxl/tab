@@ -153,6 +153,16 @@ final class AgentSessions: @unchecked Sendable {
         /// every item counts as changed at the loaded revision.
         var itemRevisions: [String: UInt64] = [:]
         var observedItems: [String: AgentChatItem] = [:]
+        /// The parent asked for the work under way, so it hears how it ends; see `AgentReports`.
+        var owesReport = false
+        /// What the latest report said, so the same outcome isn't reported twice.
+        var reportedOutcome: String?
+        /// The queued prompt being delivered is a report from one of this conversation's agents.
+        var deliveringReport = false
+        /// The queued prompt being delivered is one the parent queued.
+        var deliveringByParent = false
+        /// What the parent's sidebar entry last showed of this conversation.
+        var shownToParent: String?
 
         init(_ snapshot: AgentChatSnapshot, directory: String) {
             self.snapshot = snapshot
@@ -181,6 +191,8 @@ final class AgentSessions: @unchecked Sendable {
         var archived: Bool?
         var closedAt: Date?
         var retention: AgentConversationRetention?
+        var owesReport: Bool?
+        var reportedOutcome: String?
     }
 
     /// Where a request's snapshot goes: a waiting caller, or a queued delivery that
@@ -248,6 +260,8 @@ final class AgentSessions: @unchecked Sendable {
         try AgentAttachments.record(staged, root: directory)
     }
     var entries: [SessionId: Entry] = [:]
+    /// Conversations that started others, ever; see `AgentLineage`. Confined to `queue`.
+    var parents: Set<SessionId> = []
     var composerCatalog: (@Sendable (AgentComposerContextRequest) async throws -> AgentComposerContextReply)?
     var stopping = false
 
@@ -320,6 +334,8 @@ final class AgentSessions: @unchecked Sendable {
                 entry.handoffFrom = saved.handoffFrom
                 entry.turnForkPoints = saved.turnForkPoints ?? [:]
                 entry.alwaysAllowedTools = Set(saved.alwaysAllowedTools ?? [])
+                entry.owesReport = saved.owesReport == true
+                entry.reportedOutcome = saved.reportedOutcome
                 // Snapshots saved before tool bodies were stored once still carry both copies.
                 for index in entry.snapshot.items.indices { Self.dropDuplicateDetail(&entry.snapshot.items[index]) }
                 bound(entry)
@@ -346,17 +362,28 @@ final class AgentSessions: @unchecked Sendable {
                 ServerLog.error("agent snapshot unavailable: \(file.lastPathComponent): \(error)")
             }
         }
+        parents = Set(entries.values.compactMap(\.snapshot.parent))
+    }
+
+    /// Reports work a parent asked for that ended with the previous server. The server calls
+    /// it once it has set up how providers launch, as a report may start a parent's turn.
+    func reportWorkEndedByRestart() {
+        queue.async { [self] in
+            for entry in entries.values where entry.owesReport { reportIfDue(entry) }
+        }
     }
 
     func publishActivity() {
-        queue.sync { for entry in entries.values { activityChanged(entry.snapshot, entry.directory) } }
+        queue.sync { for entry in entries.values { activityChanged(activitySnapshot(entry), entry.directory) } }
     }
 
     var hasSessions: Bool {
         queue.sync { entries.values.contains { $0.snapshot.status != .closed || $0.runtime != nil || $0.submitting } }
     }
 
-    func handle(_ request: AgentChatRequest) async throws -> AgentChatSnapshot {
+    /// `caller` is the agent conversation asking, found from the process tree; nil when the
+    /// user asks. See `AgentLineage`.
+    func handle(_ request: AgentChatRequest, caller: SessionId? = nil) async throws -> AgentChatSnapshot {
         try request.validate()
         let submissionContext: (SessionId, SessionId?)? = queue.sync {
             let id: SessionId
@@ -378,7 +405,8 @@ final class AgentSessions: @unchecked Sendable {
                     if let (session, resetID) = submissionContext, entries[session]?.snapshot.resetID != resetID {
                         throw AgentRuntimeError("The conversation was cleared while this message was being prepared. Review the draft before sending it again.")
                     }
-                    try begin(request, continuation: Reply(continuation))
+                    try authorize(request, caller: caller)
+                    try begin(request, continuation: Reply(continuation), caller: caller)
                 } catch {
                     continuation.resume(throwing: error)
                 }
@@ -455,8 +483,10 @@ final class AgentSessions: @unchecked Sendable {
         }
     }
 
-    func conversation(_ request: AgentConversationRequest) async throws -> AgentConversationReply {
+    /// `caller` is the agent conversation asking; nil when the user asks. See `AgentLineage`.
+    func conversation(_ request: AgentConversationRequest, caller: SessionId? = nil) async throws -> AgentConversationReply {
         try request.validate()
+        try queue.sync { try authorize(request, caller: caller) }
         switch request {
         case .subagentSteps(let session, let toolUseID):
             let (items, shell, project, revision, listed) = try queue.sync { () throws -> ([AgentChatItem]?, (AgentChatItem, AgentSubagent)?, ProjectId, UInt64?, Bool) in
@@ -500,7 +530,7 @@ final class AgentSessions: @unchecked Sendable {
                                        truncated: data.count >= AgentToolOutput.maximumBytes)
             })
         case .fork(let session, let from, let project, let at):
-            return .forked(try queue.sync { try fork(session, from: from, into: project, at: at) })
+            return .forked(try queue.sync { try fork(session, from: from, into: project, at: at, caller: caller) })
         case .earlier(let session, let before, let limit):
             guard queue.sync(execute: { entries[session] != nil }) else { throw ServiceError.unknownSession(session) }
             return .earlier(try await earlierItems(session: session, before: before, limit: limit))
@@ -671,9 +701,11 @@ final class AgentSessions: @unchecked Sendable {
         }
     }
 
+    /// `caller` is the agent conversation asking, nil for the user and for the server's own
+    /// deliveries; `authorize` already let it through.
     private func begin(_ request: AgentChatRequest,
-                       continuation: Reply, deliveryID: String? = nil) throws {
-        if case .create(let id, let project, let provider) = request {
+                       continuation: Reply, deliveryID: String? = nil, caller: SessionId? = nil) throws {
+        if case .create(let id, let project, let provider, let options) = request {
             if let entry = entries[id] {
                 guard entry.snapshot.project == project else {
                     throw ServiceError(.badRequest, "This agent session ID is already in use")
@@ -682,9 +714,17 @@ final class AgentSessions: @unchecked Sendable {
                 return
             }
             guard !stopping else { throw ServiceError(.badRequest, "The server is stopping") }
+            let ceiling = try admitChild(of: caller)
             let directory = try projectDirectory(project)
             try checkDirectory(directory)
-            let entry = Entry(AgentChatSnapshot(session: id, project: project, provider: provider, accessMode: .fullAccess), directory: directory)
+            // The user's conversations start with Full access, as they always have; an agent's
+            // start with its own access unless it asks for less.
+            var snapshot = AgentChatSnapshot(session: id, project: project, provider: provider, model: options?.model,
+                                             reasoningEffort: options?.reasoningEffort,
+                                             accessMode: options?.accessMode ?? ceiling ?? .fullAccess)
+            snapshot.parent = caller
+            if let caller { parents.insert(caller) }
+            let entry = Entry(snapshot, directory: directory)
             entries[id] = entry
             touch(entry)
             persist(entry)
@@ -692,13 +732,14 @@ final class AgentSessions: @unchecked Sendable {
             return
         }
         if case .fork(let id, let from, let project) = request {
-            continuation.resume(returning: try fork(id, from: from, into: project))
+            continuation.resume(returning: try fork(id, from: from, into: project, caller: caller))
             return
         }
         let id: SessionId
         switch request {
         case .clear(let session, _, _), .read(let session), .send(let session, _, _, _, _, _, _), .approve(let session, _, _, _, _),
-             .interrupt(let session), .close(let session), .setAccess(let session, _), .setPlan(let session, _): id = session
+             .interrupt(let session), .close(let session), .setAccess(let session, _), .setPlan(let session, _),
+             .stop(let session, _), .collect(let session): id = session
         case .submit(let session, _), .editQueued(let session, _, _, _, _), .removeQueued(let session, _, _),
              .deliverQueued(let session, _, _), .moveQueued(let session, _, _, _), .resumeQueue(let session), .answer(let session, _, _, _),
              .editQueuedPrompt(let session, _, _, _),
@@ -706,8 +747,32 @@ final class AgentSessions: @unchecked Sendable {
         case .create, .fork: throw ServiceError(.badRequest, "Unexpected create")
         }
         guard let entry = entries[id] else { throw ServiceError.unknownSession(id) }
-        if case .read = request {
+        switch request {
+        case .read:
             continuation.resume(returning: entry.snapshot)
+            return
+        case .collect:
+            withdrawReport(entry, readBy: caller)
+            continuation.resume(returning: entry.snapshot)
+            return
+        default: break
+        }
+        // An agent stopping or closing one below it already knows how that work ended.
+        switch request {
+        case .interrupt, .stop, .close:
+            if let caller, caller != id, ancestors(of: id).contains(caller) { entry.owesReport = false }
+        default: break
+        }
+        if case .stop(_, let descendants) = request {
+            if descendants {
+                for child in openDescendants(of: id) {
+                    child.owesReport = false
+                    // Each stops as Stop in its pane would; one that can't is left as it is.
+                    do { try begin(.interrupt(session: child.snapshot.session), continuation: Reply { _ in }) }
+                    catch { ServerLog.error("agent \(child.snapshot.session) not stopped with its parent: \(error)") }
+                }
+            }
+            try begin(.interrupt(session: id), continuation: continuation)
             return
         }
         guard !entry.resetting else { throw AgentRuntimeError("The conversation is being cleared. Try again shortly.") }
@@ -744,7 +809,7 @@ final class AgentSessions: @unchecked Sendable {
             guard !entry.submitting, entry.snapshot.status != .working, entry.snapshot.status != .waiting,
                   (entry.inbox.visible.isEmpty || (deliveryID != nil && entry.deliveryID == deliveryID)) else { throw AgentRuntimeError("Run commands after active and queued work finishes.") }
         }
-        if try handleInbox(request, entry: entry) {
+        if try handleInbox(request, entry: entry, byParent: caller != nil && caller == entry.snapshot.parent) {
             writer.async { [self] in
                 queue.async {
                     if let error = entry.inboxError { continuation.resume(throwing: AgentRuntimeError(error)) }
@@ -812,6 +877,12 @@ final class AgentSessions: @unchecked Sendable {
                     throw ServiceError(.badRequest, "Model and reasoning changes apply after the current response.")
                 }
                 let userID = deliveryID ?? UUID().uuidString
+                let steeredReport = deliveryID != nil && deliveryID == entry.deliveryID && entry.deliveringReport
+                // Joining the running turn: the parent asking makes it work the parent hears of.
+                if (caller != nil && caller == entry.snapshot.parent)
+                    || (deliveryID != nil && deliveryID == entry.deliveryID && entry.deliveringByParent) {
+                    entry.owesReport = true
+                }
                 let attachmentRoot = root.appendingPathComponent("attachments", isDirectory: true)
                     .appendingPathComponent(id.description).appendingPathComponent(userID)
                 try AgentAttachments.validateForStaging(attachments ?? [])
@@ -842,7 +913,8 @@ final class AgentSessions: @unchecked Sendable {
                             entry.submitting = false
                             entry.steering = false
                             entry.snapshot.items.append(self.observedItem(.init(id: userID, kind: .user, text: text,
-                                attachments: attachments?.map(\.descriptor)), entry: entry))
+                                attachments: attachments?.map(\.descriptor),
+                                workContext: steeredReport ? .init(itemType: AgentChatItem.agentReportType) : nil), entry: entry))
                             self.touch(entry)
                             self.persist(entry)
                             continuation.resume(returning: entry.snapshot)
@@ -946,8 +1018,16 @@ final class AgentSessions: @unchecked Sendable {
             }
             entry.snapshot.provider = provider
             entry.snapshot.providerID = Self.sameProvider(providerID, nil, kind: provider) ? nil : providerID
+            let delivering = deliveryID != nil && deliveryID == entry.deliveryID
+            let reported = delivering && entry.deliveringReport
+            // The parent hears how a turn it asked for ends; a turn the user or another agent
+            // starts is theirs. A report's turn carries on whatever this one owes.
+            if !reported {
+                entry.owesReport = delivering ? entry.deliveringByParent : caller != nil && caller == entry.snapshot.parent
+            }
             let user = AgentChatItem(id: userID, kind: .user, text: text,
-                                     attachments: attachments?.map(\.descriptor))
+                                     attachments: attachments?.map(\.descriptor),
+                                     workContext: reported ? .init(itemType: AgentChatItem.agentReportType) : nil)
             let firstMessage = !entry.snapshot.items.contains { $0.kind == .user && !$0.isProviderTurn }
             entry.snapshot.items.append(observedItem(user, entry: entry))
             if let session = entry.snapshot.providerSession, let message = entry.lastProviderMessage {
@@ -1410,7 +1490,7 @@ final class AgentSessions: @unchecked Sendable {
     /// sees what the other says next. Claude forks at the message `from` had
     /// reached when the fork was made; Codex forks the whole thread as it is
     /// at the first message.
-    private func fork(_ id: SessionId, from: SessionId, into project: ProjectId?) throws -> AgentChatSnapshot {
+    private func fork(_ id: SessionId, from: SessionId, into project: ProjectId?, caller: SessionId?) throws -> AgentChatSnapshot {
         guard let source = entries[from] else { throw ServiceError.unknownSession(from) }
         let project = project ?? source.snapshot.project
         if let entry = entries[id] {
@@ -1420,6 +1500,7 @@ final class AgentSessions: @unchecked Sendable {
             return entry.snapshot
         }
         guard !stopping else { throw ServiceError(.badRequest, "The server is stopping") }
+        let ceiling = try admitChild(of: caller)
         let folder = try projectDirectory(project)
         // A fork in its source's project keeps working where the source does.
         let directory = project == source.snapshot.project ? source.directory : folder
@@ -1430,6 +1511,7 @@ final class AgentSessions: @unchecked Sendable {
         snapshot.revision = 0
         snapshot.status = .idle
         snapshot.turns = nil
+        adopt(&snapshot, by: caller, ceiling: ceiling)
         snapshot.items = snapshot.items.filter { $0.kind != .approval || $0.isComplete }
         Self.finishItems(&snapshot.items)
         let entry = Entry(snapshot, directory: directory)
@@ -1450,7 +1532,8 @@ final class AgentSessions: @unchecked Sendable {
     /// A new conversation `id` with what `from` said before its user message `at`. Claude
     /// resumes `from`'s provider conversation at the message that turn began after;
     /// Codex can only fork a whole thread, so it is refused.
-    private func fork(_ id: SessionId, from: SessionId, into project: ProjectId?, at: String) throws -> AgentChatSnapshot {
+    private func fork(_ id: SessionId, from: SessionId, into project: ProjectId?, at: String,
+                      caller: SessionId?) throws -> AgentChatSnapshot {
         guard let source = entries[from] else { throw ServiceError.unknownSession(from) }
         let project = project ?? source.snapshot.project
         if let entry = entries[id] {
@@ -1458,6 +1541,7 @@ final class AgentSessions: @unchecked Sendable {
             return entry.snapshot
         }
         guard !stopping else { throw ServiceError(.badRequest, "The server is stopping") }
+        let ceiling = try admitChild(of: caller)
         guard source.snapshot.provider == .claude else {
             throw ServiceError(.badRequest, "Codex can fork a conversation only at its latest message.")
         }
@@ -1484,6 +1568,7 @@ final class AgentSessions: @unchecked Sendable {
         snapshot.omittedItems = nil
         snapshot.contextUsage = nil
         snapshot.providerSession = point?.session
+        adopt(&snapshot, by: caller, ceiling: ceiling)
         snapshot.items = source.snapshot.items[..<index].filter { $0.kind != .approval || $0.isComplete }
         Self.finishItems(&snapshot.items)
         let entry = Entry(snapshot, directory: directory)
@@ -1648,6 +1733,8 @@ final class AgentSessions: @unchecked Sendable {
             revision: archived.revision + 1)
         fresh.resetID = id; fresh.planMode = archived.planMode
         fresh.commands = archived.commands; fresh.commandDescriptors = archived.commandDescriptors
+        // Clearing keeps it in its tree: it still stops with, and reports to, its parent.
+        fresh.parent = archived.parent
         let replacement = Saved(snapshot: fresh, directory: entry.directory, hasSuccessfulTurn: false)
         entry.resetting = true
         retireRuntime(entry)
@@ -2342,7 +2429,8 @@ final class AgentSessions: @unchecked Sendable {
 
     func touch(_ entry: Entry) {
         guard !entry.resetting, entries[entry.snapshot.session] === entry else { return }
-        activityChanged(entry.snapshot, entry.directory)
+        activityChanged(activitySnapshot(entry), entry.directory)
+        republishParent(of: entry)
         bound(entry)
         entry.snapshot.revision &+= 1
         recordItemRevisions(entry)
@@ -2352,6 +2440,8 @@ final class AgentSessions: @unchecked Sendable {
                 entry.notifying = false
                 guard !stopping, !entry.resetting, entries[entry.snapshot.session] === entry else { return }
                 changed(entry.snapshot.session, entry.snapshot.revision)
+                // Settled for now: the parent hears of it when clients do.
+                reportIfDue(entry)
             }
         }
         if !entry.checkpointing {
@@ -2718,7 +2808,8 @@ final class AgentSessions: @unchecked Sendable {
                           forkSource: entry.forkSource, forkPoint: entry.forkPoint,
                           lastProviderMessage: entry.lastProviderMessage, handoffFrom: entry.handoffFrom,
                           archived: entry.archived ? true : nil,
-                          closedAt: entry.closedAt, retention: entry.retention == .keep ? nil : entry.retention)
+                          closedAt: entry.closedAt, retention: entry.retention == .keep ? nil : entry.retention,
+                          owesReport: entry.owesReport ? true : nil, reportedOutcome: entry.reportedOutcome)
         let file = root.appendingPathComponent(entry.snapshot.session.description + ".json")
         writer.async {
             do {
@@ -2762,7 +2853,8 @@ extension AgentSessions {
         }
     }
 
-    private func handleInbox(_ request: AgentChatRequest, entry: Entry) throws -> Bool {
+    /// `byParent`: the agent that started this conversation asked, so the work is reported to it.
+    private func handleInbox(_ request: AgentChatRequest, entry: Entry, byParent: Bool) throws -> Bool {
         switch request {
         case .submit(_, let prompt):
             // A new message after a stop or failure is the user carrying on, so it
@@ -2771,6 +2863,7 @@ extension AgentSessions {
             try mutateInbox(entry) { inbox in
                 let resent = inbox.records.contains { $0.id == prompt.id }
                 try inbox.submit(prompt)
+                if !resent, byParent { inbox.records[inbox.records.count - 1].byParent = true }
                 guard !resent, inbox.paused else { return }
                 inbox.paused = false
                 // It answers what the user just saw, so it goes ahead of prompts held by the stop.
@@ -2874,8 +2967,17 @@ extension AgentSessions {
     private func deliverInbox(_ entry: Entry, index: Int) throws {
         guard !entry.submitting, entry.deliveryID == nil, entry.interrupting == nil,
               entry.snapshot.status != .waiting, entry.snapshot.status != .closed,
-              let prompt = entry.inbox.records[index].prompt else {
+              var prompt = entry.inbox.records[index].prompt else {
             throw AgentRuntimeError("Wait for the current interaction before delivering this prompt.")
+        }
+        let report = entry.inbox.records[index].report != nil
+        if report {
+            // A report goes to the conversation as it is now, not as it was when queued.
+            prompt.model = entry.snapshot.model
+            prompt.effort = entry.snapshot.reasoningEffort
+            prompt.provider = entry.snapshot.provider
+            prompt.providerID = entry.snapshot.providerID
+            prompt.planMode = entry.snapshot.planMode == true
         }
         if restoreHoldsWork(entry) { throw AgentRuntimeError("Files are being restored in this folder. The prompt waits until the restore finishes.") }
         if entry.snapshot.status == .working {
@@ -2894,10 +2996,14 @@ extension AgentSessions {
         let attemptID = UUID().uuidString
         entry.deliveryID = attemptID
         entry.deliveryCancelled = false
+        entry.deliveringReport = report
+        entry.deliveringByParent = entry.inbox.records[index].byParent == true
         let id = entry.snapshot.session
         let delivered = Reply { [self] outcome in
             queue.async { [self] in
                 entry.deliveryID = nil
+                entry.deliveringReport = false
+                entry.deliveringByParent = false
                 do {
                     try mutateInbox(entry) { inbox in
                         guard let index = inbox.records.firstIndex(where: { $0.id == prompt.id }) else { return }

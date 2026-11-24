@@ -116,12 +116,21 @@ public struct AgentContext: Hashable, Sendable {
     }
 
     private var rules: String {
-        """
+        let general = """
         Panes, splits, tabs and windows always mean Tab's, never your own subagents or task tools, which Tab \
         doesn't show. Run long-lived work such as dev servers and watchers in a pane or with `tab session new`, \
         not in your own shell. Never start `claude` or `codex` in a terminal; use `tab pane new agent`. Close or \
         stop only panes and terminals you opened, unless the user asks. If `tab pane` can't reach the app, you \
         run on another computer: tell the user what to open. `tab pane --help` and `tab --help` list every option.
+        """
+        guard case .agentPane = place else { return general }
+        return general + "\n\n" + """
+        Agents you start with `tab pane new agent` are yours. A new one sees only its message, so make it \
+        self-contained; give each one that changes files its own worktree with `--worktree <name>`. When work \
+        you sent one ends, fails or waits for the user, Tab sends you its report as your next message, so end \
+        your turn instead of waiting on it. They get at most your access, and only the user approves their \
+        requests. `tab agent list --children` lists them, and `tab agent stop <agent>` stops one and those it \
+        started.
         """
     }
 }

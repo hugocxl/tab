@@ -76,6 +76,12 @@ public enum CLIAgent: Hashable, Sendable {
     case wait(agent: String, timeoutMs: UInt32)
     /// Sends a message, as the user would in its pane.
     case send(agent: String, text: String)
+    /// The open conversations, with the agent that started each; with `children`, only
+    /// those the agent this command runs in started.
+    case list(children: Bool)
+    /// Stops the agent's turn and holds its queue, and unless `only`, those of every
+    /// agent below it.
+    case stop(agent: String, only: Bool)
 }
 
 /// The server's simulators and emulators. A missing simulator means the only
@@ -164,14 +170,50 @@ public struct CLIPane: Hashable, Sendable {
     /// The pane a new pane opens beside, as `tab pane` names one; the
     /// caller's when missing.
     public var beside: String?
+    /// How a new or forked agent's conversation starts.
+    public var start: CLIAgentStart
 
     public init(placement: AppPane.Placement, project: String?, content: Content, edge: Direction? = nil,
-                beside: String? = nil) {
+                beside: String? = nil, start: CLIAgentStart = CLIAgentStart()) {
         self.placement = placement
         self.project = project
         self.content = content
         self.edge = edge
         self.beside = beside
+        self.start = start
+    }
+}
+
+extension AgentAccessMode {
+    /// How `--access` names it: ask, auto or full.
+    public var cliName: String {
+        switch self {
+        case .ask: "ask"
+        case .standard: "auto"
+        case .fullAccess: "full"
+        }
+    }
+}
+
+/// What a new agent pane's conversation starts with beyond its provider: its model,
+/// effort and access, and a Git worktree of its own.
+public struct CLIAgentStart: Hashable, Sendable {
+    public var model: String?
+    public var effort: AgentReasoningEffort?
+    /// At most the access of the agent this command runs in; the server refuses more.
+    public var access: AgentAccessMode?
+    /// A new worktree, on a branch of this name, of the project the agent would work in.
+    public var worktree: String?
+
+    public init(model: String? = nil, effort: AgentReasoningEffort? = nil, access: AgentAccessMode? = nil,
+                worktree: String? = nil) {
+        self.model = model; self.effort = effort; self.access = access; self.worktree = worktree
+    }
+
+    /// Options for the server's new conversation, nil when there are none.
+    public var options: AgentStartOptions? {
+        model == nil && effort == nil && access == nil
+            ? nil : AgentStartOptions(model: model, reasoningEffort: effort, accessMode: access)
     }
 }
 

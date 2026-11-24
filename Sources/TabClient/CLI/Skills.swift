@@ -23,7 +23,7 @@ public enum AgentSkill {
     public static let text = #"""
     ---
     name: tab-cli
-    description: How to drive Tab from a shell with the `tab` command — open terminal, agent, browser, simulator, editor and diff panes in the app, list the panes on screen and focus, close, zoom, move, swap and resize them, start terminals that keep running, type into them, read and wait on their output, branch your own conversation into agent panes and read their replies, check apps on iOS simulators and Android emulators, and manage projects and Git worktrees. Use this when you are an agent running inside a Tab terminal or Tab agent pane (or any script on the same computer) and the user asks for anything in the app, however loosely — "open a terminal here", "new tab", "split this", "show me the page", "close that pane", "make it bigger", "put the tests below" — asks to branch or fork the conversation or split work into panes, wants work to run in its own terminal instead of blocking yours, or to drive the Tab app's built-in browser or a simulator.
+    description: How to drive Tab from a shell with the `tab` command — open terminal, agent, browser, simulator, editor and diff panes in the app, list the panes on screen and focus, close, zoom, move, swap and resize them, start terminals that keep running, type into them, read and wait on their output, branch your own conversation into agent panes, delegate parts of a task to agents that report back when done, and read their replies, check apps on iOS simulators and Android emulators, and manage projects and Git worktrees. Use this when you are an agent running inside a Tab terminal or Tab agent pane (or any script on the same computer) and the user asks for anything in the app, however loosely — "open a terminal here", "new tab", "split this", "show me the page", "close that pane", "make it bigger", "put the tests below" — asks to branch or fork the conversation, split work into panes, or run agents in parallel, wants work to run in its own terminal instead of blocking yours, or to drive the Tab app's built-in browser or a simulator.
     ---
 
     # Tab CLI
@@ -218,25 +218,55 @@ public enum AgentSkill {
     Forking needs a Tab agent pane; from a terminal, start `pane new agent` with a
     message that carries the context instead.
 
-    Branches work in the same folder as you. When they change files, give each a
-    worktree, so they don't edit the same ones:
+    Branches work in the same folder as you. When they change files, give each
+    its own worktree with `--worktree`, so they don't edit the same ones:
 
     ```bash
-    WT=$(tab worktree new MyProject try-cache | cut -f1)
-    tab pane new agent --fork --project "$WT" -- "Fix the slow query with a cache"
+    tab pane new agent --fork --worktree try-cache -- "Fix the slow query with a cache"
     ```
 
-    To follow a branch, wait for its reply, then read it. Don't report what a
-    branch said before you've read it.
+    ## Delegate to agents
+
+    To split a task across agents, start one per part. A new agent (without
+    `--fork`) sees only its message, so write it as a complete brief: the goal,
+    the files and commands that matter, what is done already, what to leave
+    alone, and what to report back. Give each agent that changes files its own
+    worktree, and pick a model and effort that fit the part:
 
     ```bash
-    tab agent wait "$FIRST" --timeout 600       # prints its latest reply once it's idle
-    tab agent read "$FIRST" --all               # the whole conversation
-    tab agent send "$FIRST" "Make it shorter"   # a message, as the user would send it
+    API=$(tab pane new agent --worktree api-cache --effort high -- "<brief for the API part>")
+    DOCS=$(tab pane new agent --provider codex --effort medium -- "<brief for the docs part>")
     ```
 
-    `agent wait` fails when the branch needs the user to approve something, fails,
-    or the timeout passes.
+    From a Tab agent pane, the agents you start are yours, and Tab knows it from
+    your process, not from anything you pass:
+
+    - **They report back.** When work you sent one ends, fails, or waits for the
+      user, Tab queues its report and delivers it as your next message once
+      you're idle. So start them all, do what else you can, and end your turn;
+      don't sit in `tab agent wait`. Reading an agent first withdraws its report.
+    - **They never get more access than you.** `--access ask|auto|full` lowers it.
+      You can't send work to an agent with more access than yours, and only the
+      user approves an agent's requests, in its pane. When one waits for that,
+      tell the user which pane. Short of Full access, you also type only into
+      terminals you or your agents started, not the user's.
+    - **They stop with you.** `tab agent stop <agent>` stops it and every agent it
+      started; `--only` stops just that one.
+
+    ```bash
+    tab agent list --children                   # your agents: id, name, state, parent…
+    tab agent read "$API" --all                 # the whole conversation
+    tab agent send "$API" "Also cover the retry path"
+    tab agent stop "$API"                       # it and the agents it started
+    ```
+
+    Don't report what an agent said before you've read it. Agents nest at most
+    four deep, and you can have 16 open at once; close finished ones with
+    `tab pane close <agent>`.
+
+    From a Tab terminal or elsewhere, agents you start aren't linked to you: wait
+    for them with `tab agent wait "$API" --timeout 600`, which fails when the agent
+    needs the user to approve something, fails, or the timeout passes.
 
     ## Wait instead of polling
 

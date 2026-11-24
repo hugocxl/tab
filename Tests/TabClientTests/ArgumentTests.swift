@@ -165,10 +165,49 @@ final class ArgumentTests: XCTestCase {
                        .agent(.send(agent: "abcd", text: "Clean the links")))
         for words in [
             ["agent", "read", "a", "b"], ["agent", "send", "abcd", " "],
-            ["agent", "wait", "abcd", "--timeout", "3601"], ["agent", "list"],
+            ["agent", "wait", "abcd", "--timeout", "3601"], ["agent", "list", "abcd"],
+            ["agent", "stop", "a", "b"],
         ] {
             assertRefused(words)
         }
+    }
+
+    func testAgentCommandsListAndStopTheAgentsAnAgentStarted() throws {
+        XCTAssertEqual(try action(["agent", "list"]), .agent(.list(children: false)))
+        XCTAssertEqual(try action(["agent", "list", "--children", "--json"]), .agent(.list(children: true)))
+        // Stopping reaches the agents it started unless --only says otherwise.
+        XCTAssertEqual(try action(["agent", "stop", "wispy-cedar"]), .agent(.stop(agent: "wispy-cedar", only: false)))
+        XCTAssertEqual(try action(["agent", "stop", "abcd", "--only"]), .agent(.stop(agent: "abcd", only: true)))
+    }
+
+    func testNewAgentsChooseTheirModelEffortAccessAndWorktree() throws {
+        func pane(_ words: [String]) throws -> CLIPane {
+            guard case .pane(let pane, _) = try command(words) else { throw CLIError("\(words) is not a pane") }
+            return pane
+        }
+        XCTAssertEqual(try pane(["pane", "new", "agent", "--worktree", "api-cache", "--model", "sonnet", "--effort", "HIGH",
+                                 "--access", "auto", "--", "Cache", "the", "query"]),
+                       CLIPane(placement: .pane, project: nil, content: .agent(provider: nil, message: "Cache the query"),
+                               start: CLIAgentStart(model: "sonnet", effort: .high, access: .standard, worktree: "api-cache")))
+        XCTAssertEqual(try pane(["pane", "new", "agent", "--fork", "--worktree", "try-it", "--access", "ask"]),
+                       CLIPane(placement: .pane, project: nil, content: .fork(agent: nil, project: nil, message: nil),
+                               start: CLIAgentStart(access: .ask, worktree: "try-it")))
+        XCTAssertEqual(try pane(["tab", "new", "agent", "--access", "full", "--effort", "low"]),
+                       CLIPane(placement: .tab, project: nil, content: .agent(provider: nil, message: nil),
+                               start: CLIAgentStart(effort: .low, access: .fullAccess)))
+        XCTAssertNil(CLIAgentStart(worktree: "only-a-folder").options, "A worktree alone asks the server for nothing new")
+        XCTAssertEqual(CLIAgentStart(model: "m", access: .ask).options, AgentStartOptions(model: "m", accessMode: .ask))
+        for words in [
+            ["pane", "new", "agent", "--access", "everything"], ["pane", "new", "agent", "--effort", "extreme"],
+            ["pane", "new", "agent", "--model", " "], ["pane", "new", "agent", "--worktree", " "],
+            // A fork keeps its model and effort.
+            ["pane", "new", "agent", "--fork", "--model", "other"], ["pane", "new", "agent", "--fork", "--effort", "low"],
+            // A tab opens in Home, which has no worktrees.
+            ["tab", "new", "agent", "--worktree", "x"],
+        ] {
+            assertRefused(words)
+        }
+        XCTAssertEqual(AgentAccessMode.allCases.map(\.cliName), ["auto", "ask", "full"])
     }
 
     func testSessionCommandsDefaultToTheCallingTerminal() throws {

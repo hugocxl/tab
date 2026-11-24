@@ -53,7 +53,7 @@ struct AgentRewindPlan: Equatable {
 
     /// The plan for editing `snapshot` from its user message `item`, or why it can't be.
     static func make(_ snapshot: AgentChatSnapshot, item: AgentChatItem) -> Result<AgentRewindPlan, AgentRewindUnavailable> {
-        guard item.kind == .user, !item.isProviderTurn, item.isComplete else { return .failure(.init("Only a message you sent can be edited from here.")) }
+        guard item.kind == .user, !item.isAutomaticTurn, item.isComplete else { return .failure(.init("Only a message you sent can be edited from here.")) }
         guard snapshot.provider == .claude else {
             return .failure(.init("\(snapshot.provider.name) can't continue from an earlier message. Use Edit as New Prompt instead."))
         }

@@ -34,7 +34,8 @@ final class ExecJobs: @unchecked Sendable {
     }
 
     /// Starts `request` in `root`; `completion` gets its result on the job's thread.
-    func start(_ request: ExecRequest, root: String, disconnected: @escaping @Sendable () -> Bool,
+    /// `agent` is the conversation that asked, if any; see `AgentCallers`.
+    func start(_ request: ExecRequest, root: String, agent: SessionId? = nil, disconnected: @escaping @Sendable () -> Bool,
                completion: @escaping @Sendable (Result<ExecResult, Error>) -> Void) throws {
         let flag = try lock.withLock { () throws -> CancelFlag in
             guard active.count < Self.maxActive, active[request.job] == nil else {
@@ -53,7 +54,7 @@ final class ExecJobs: @unchecked Sendable {
             if request.env["PATH"] == nil, let path = LoginPath.value {
                 request.env["PATH"] = path
             }
-            let result = Result { try Exec.run(request, root: root) { flag.isSet || disconnected() } }
+            let result = Result { try Exec.run(request, root: root, agent: agent) { flag.isSet || disconnected() } }
             lock.withLock { active[request.job] = nil }
             completion(result)
         }
@@ -66,7 +67,9 @@ final class ExecJobs: @unchecked Sendable {
 enum Exec {
     /// Runs `request` in `root` (or its `cwd`), killing its process group on
     /// cancellation or timeout. Output beyond `Limits.maxExecOutput` is dropped.
-    static func run(_ request: ExecRequest, root: String, cancelled: () -> Bool) throws -> ExecResult {
+    /// What the program runs calls Tab as `agent`, the conversation that asked for it.
+    static func run(_ request: ExecRequest, root: String, agent: SessionId? = nil,
+                    cancelled: () -> Bool) throws -> ExecResult {
         do {
             try request.validate()
         } catch {
@@ -78,6 +81,9 @@ enum Exec {
         var environment = ProcessInfo.processInfo.environment
         for (key, value) in request.env { environment[key] = value }
         let child = try Child(argv: argv, environment: environment, directory: directory)
+        if let agent { AgentCallers.shared.register(child.pid, agent: agent) }
+        // Supervising reaps the child, after which its PID may be reused.
+        defer { if let agent { AgentCallers.shared.unregister(child.pid, agent: agent) } }
         return supervise(child, request: request, cancelled: cancelled)
     }
 

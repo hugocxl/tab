@@ -62,10 +62,15 @@ public struct Feature: RawRepresentable, Hashable, Codable, Sendable {
     /// Git requests may ask for `graph`: every branch's commits in date order.
     public static let gitGraph = Feature(rawValue: "gitGraph")
 
+    /// Agent conversations record the agent that started them (`AgentChatSnapshot.parent`
+    /// and `AgentActivity.parent`), never get more access than it, take `AgentStartOptions`,
+    /// stop with their parent (`AgentChatRequest.stop`), and report back to it.
+    public static let agentLineage = Feature(rawValue: "agentLineage")
+
     /// Features this build's server supports.
     public static let all: [Feature] = [.terminalInput, .sessionEnvironment, .fileSearch, .fileByteRanges, .pullRequestPreview,
                                         .fileWriteParents, .agentStateReports, .tunnels, .simulators, .fileRoots,
-                                        .panePositioning, .gitGraph]
+                                        .panePositioning, .gitGraph, .agentLineage]
 }
 
 /// What kind of program a client is.

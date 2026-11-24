@@ -11,6 +11,12 @@ struct AgentPromptInbox: Codable {
         var display: AgentQueuedPrompt?
         /// Delivered no earlier than this, as the user scheduled it.
         var notBefore: Date?
+        /// The agent this conversation started that the prompt reports on, written by the
+        /// server; see `AgentReports`.
+        var report: SessionId?
+        /// The agent that started this conversation queued it, so the turn it starts is
+        /// reported back to that agent.
+        var byParent: Bool?
     }
     var records: [Record] = []
     var paused = false
@@ -42,6 +48,37 @@ struct AgentPromptInbox: Codable {
         }
         records.append(Record(id: prompt.id, fingerprint: fingerprint, prompt: prompt, display: .init(prompt: prompt)))
     }
+    /// Queues `prompt` as the report on `agent`. A report on it still waiting in the queue
+    /// takes the new text instead, so the parent hears only how the agent stands now.
+    mutating func report(_ prompt: AgentPrompt, on agent: SessionId) throws {
+        if let index = records.firstIndex(where: { $0.report == agent && $0.display?.state == .queued }),
+           var queued = records[index].prompt {
+            queued.text = prompt.text
+            try queued.validate()
+            records[index].prompt = queued
+            records[index].fingerprint = try Self.fingerprint(queued)
+            records[index].display?.text = queued.text
+            records[index].display?.revision += 1
+            return
+        }
+        try submit(prompt)
+        records[records.count - 1].report = agent
+    }
+
+    /// Drops the report on `agent` still waiting in the queue, as when the parent read the
+    /// agent itself. Reports already being delivered stay. Returns whether one went.
+    mutating func withdrawReport(on agent: SessionId) -> Bool {
+        guard let index = records.firstIndex(where: { $0.report == agent && $0.display?.state == .queued }) else {
+            return false
+        }
+        records[index].prompt = nil
+        records[index].display = nil
+        return true
+    }
+
+    /// Whether the queued prompt `id` is a report from an agent this conversation started.
+    func isReport(_ id: String) -> Bool { records.contains { $0.id == id && $0.report != nil } }
+
     func index(_ id: String, revision: UInt64) throws -> Int {
         guard let index = records.firstIndex(where: { $0.id == id }),
               let display = records[index].display, display.revision == revision,

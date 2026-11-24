@@ -94,7 +94,7 @@ final class Activity: @unchecked Sendable {
         let stopped = outcome == .interrupted || outcome == .cancelled || wasBackground && held == nil && !agentsFinished
         return record(AgentActivity(session: session, project: snapshot.project,
                                     provider: snapshot.provider.activityProvider, state: state, title: title,
-                                    condition: condition, subtasks: Self.subtasks(snapshot)),
+                                    condition: condition, subtasks: Self.subtasks(snapshot), parent: snapshot.parent),
                       completed: previous?.state == .working && state == .idle && !stopped)
     }
 

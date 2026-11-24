@@ -212,6 +212,28 @@ enum Projects {
 
     static func create(_ action: WorktreeAction, root: ProjectDescriptor, name: String?, hooks: Bool,
                        client: ServerClient, json: Bool) async throws {
+        let (project, failure) = try await makeWorktree(action, root: root, name: name, hooks: hooks, client: client)
+        Output.record(record(project), columns: ["id", "name", "directory"], json: json)
+        if let failure { throw CLIError("worktree created, but setup failed: \(failure)") }
+    }
+
+    /// A new worktree of `root` on the branch `name`, from its HEAD, in the default
+    /// folder, without setup hooks: where `pane new agent --worktree` starts an agent.
+    static func newWorktree(_ name: String, of project: ProjectDescriptor, client: ServerClient,
+                            target: Target) async throws -> ProjectDescriptor {
+        let root = try await root(project.id.description, client: client, target: target)
+        let folder = try await defaultDirectory(root: root, name: name, client: client, target: target)
+        let (created, failure) = try await makeWorktree(
+            .create(project: ProjectId(), directory: ServerPath(folder), branch: name, base: "HEAD"),
+            root: root, name: name, hooks: false, client: client)
+        if let failure { throw CLIError("worktree \(created.name) created, but setup failed: \(failure)") }
+        return created
+    }
+
+    /// Creates the worktree `action` describes, returning its project and, when the
+    /// worktree exists but its setup failed, why.
+    static func makeWorktree(_ action: WorktreeAction, root: ProjectDescriptor, name: String?, hooks: Bool,
+                             client: ServerClient) async throws -> (ProjectDescriptor, String?) {
         // A pull request's worktree starts under the branch name the server
         // prepares, since the server checks out that name; it is renamed once
         // it exists.
@@ -232,8 +254,7 @@ enum Projects {
             try await mutate(.rename(project: project.id, name: name), client: client)
             project.name = name
         }
-        Output.record(record(project), columns: ["id", "name", "directory"], json: json)
-        if let failure { throw CLIError("worktree created, but setup failed: \(failure)") }
+        return (project, failure)
     }
 
     /// The setup or teardown commands configured for `project`, printed as

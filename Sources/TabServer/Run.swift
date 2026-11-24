@@ -141,7 +141,7 @@ public final class ServerRunner: @unchecked Sendable {
         while true {
             do {
                 let stream = try listener.accept()
-                server.serve(stream, origin: .local)
+                server.serve(stream, origin: .local, peer: AgentCallers.peer(of: stream.readDescriptor))
             } catch {
                 if !lock.withLock({ stopping }) {
                     ServerLog.error("accept failed: \(error)")

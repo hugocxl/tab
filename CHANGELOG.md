@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.137.0 - 2026-11-24
+
+### Added
+
+- Let agents start agents that report back when done, never get more access, and stop together.
+
 ## 0.136.0 - 2026-11-24
 
 ### Changed

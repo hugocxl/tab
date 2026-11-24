@@ -111,7 +111,8 @@ final class AgentPaneTests: XCTestCase {
             } else { operation = request }
             requests.append(operation)
             switch operation {
-            case .submit, .editQueued, .editQueuedPrompt, .moveQueued, .removeQueued, .deliverQueued, .resumeQueue, .answer, .schedule: break
+            case .submit, .editQueued, .editQueuedPrompt, .moveQueued, .removeQueued, .deliverQueued, .resumeQueue, .answer, .schedule,
+                 .stop, .collect: break
             case .create, .fork:
                 if failCreate { throw NSError(domain: "Offline", code: 1) }
             case .send(_, let text, let model, let effort, let provider, _, _):
@@ -1105,7 +1106,7 @@ final class AgentPaneTests: XCTestCase {
         var routedRequests: [AgentChatRequest] = []
         let pane = AgentPaneController(context: PaneContext(pane: paneState, project: bootstrapHome, model: model)) { _, request in
             routedRequests.append(request)
-            guard case .create(let session, let project, let provider) = request else {
+            guard case .create(let session, let project, let provider, _) = request else {
                 throw ClientError.unexpectedReply("Expected create")
             }
             return AgentChatSnapshot(session: session, project: project, provider: provider)
@@ -1120,7 +1121,7 @@ final class AgentPaneTests: XCTestCase {
         try await wait { pane.snapshot != nil }
         XCTAssertEqual(pane.snapshot?.project, home.id)
         let routed = try XCTUnwrap(routedRequests.first)
-        guard case .create(_, let project, _) = routed else {
+        guard case .create(_, let project, _, _) = routed else {
             return XCTFail("No routed create request")
         }
         XCTAssertEqual(project, home.id)

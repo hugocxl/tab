@@ -43,12 +43,14 @@ extension ClientConnection {
                 reply(id, await asyncResult { .agentCheckpoint(try await server.agents.checkpoint(request)) })
             }
         case .agentChat(let request):
+            let caller = agent
             Task { [self] in
-                reply(id, await asyncResult { .agentChat(try await server.agents.handle(request)) })
+                reply(id, await asyncResult { .agentChat(try await server.agents.handle(request, caller: caller)) })
             }
         case .agentConversation(let request):
+            let caller = agent
             Task { [self] in
-                reply(id, await asyncResult { .agentConversation(try await server.agents.conversation(request)) })
+                reply(id, await asyncResult { .agentConversation(try await server.agents.conversation(request, caller: caller)) })
             }
         case .checkAgentProviders:
             Task { [self] in
@@ -83,6 +85,9 @@ extension ClientConnection {
                 })
             }
         case .importAgentHistory(let asked):
+            guard agent == nil else {
+                return reply(id, .error(errorReply(ServiceError(.unauthorized, "Only the user can continue a conversation from history."))))
+            }
             Task { [self] in
                 let settings = server.agentProviders.settings
                 let request = AgentHistoryImport(session: asked.session, project: asked.project, provider: asked.provider,
@@ -98,7 +103,7 @@ extension ClientConnection {
         case .exec(let request):
             do {
                 let root = try server.projectPath(request.project)
-                try jobs.start(request, root: root, disconnected: { [weak self] in self?.isClosed ?? true }) {
+                try jobs.start(request, root: root, agent: agent, disconnected: { [weak self] in self?.isClosed ?? true }) {
                     [weak self] result in
                     self?.reply(id, result.map { ReplyBody.exec($0) })
                 }
@@ -249,6 +254,9 @@ extension ClientConnection {
             return .clientIdentified(setKind(kind))
         case .writeInput(let session, let bytes):
             guard let owner = server.owner(session) else { throw ServiceError.unknownSession(session) }
+            guard mayType(into: owner) else {
+                throw ServiceError(.unauthorized, "An agent short of Full access types only into terminals it started. Ask the user to run it, or start a terminal of your own with tab session new.")
+            }
             owner.writeInput(bytes) { [weak self] error in
                 let failure = error.map { ServiceError(.badRequest, "The terminal didn't take the input: \($0)") }
                 self?.reply(id, failure.map { .error(errorReply($0)) } ?? .inputWritten)

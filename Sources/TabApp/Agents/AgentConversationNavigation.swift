@@ -4,7 +4,7 @@ import TabProtocol
 /// Navigation uses retained item identities; it never needs to mount the whole transcript.
 enum AgentPromptNavigation {
     static func entries(_ items: [AgentChatItem]) -> [AgentSearchPicker.Entry] {
-        items.filter { $0.kind == .user && !$0.isProviderTurn }.enumerated().map { index, item in
+        items.filter { $0.kind == .user && !$0.isAutomaticTurn }.enumerated().map { index, item in
             let text = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
             return .init(id: item.id, title: text.isEmpty ? "Attachments" : text.replacingOccurrences(of: "\n", with: " "),
                          detail: "Prompt \(index + 1)" + ((item.attachments?.isEmpty == false) ? " · \(item.attachments?.count ?? 0) attachments" : ""))
@@ -35,7 +35,7 @@ extension AgentPaneView {
 
     func updateOutline() {
         guard let picker = outlinePicker else { return }
-        let prompts = (snapshot?.items ?? []).lazy.filter { $0.kind == .user && !$0.isProviderTurn }
+        let prompts = (snapshot?.items ?? []).lazy.filter { $0.kind == .user && !$0.isAutomaticTurn }
         if let outlineSource, prompts.elementsEqual(outlineSource) { return }
         let source = Array(prompts)
         outlineSource = source
@@ -47,7 +47,7 @@ extension AgentPaneView {
 
     @discardableResult
     func navigatePrompt(previous: Bool) -> Bool {
-        let prompts = (snapshot?.items ?? []).filter { $0.kind == .user && !$0.isProviderTurn }
+        let prompts = (snapshot?.items ?? []).filter { $0.kind == .user && !$0.isAutomaticTurn }
         let visibleTop = transcriptScroll.contentView.bounds.minY
         let id: String?
         if let current = navigationPromptID {

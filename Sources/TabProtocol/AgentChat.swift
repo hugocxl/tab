@@ -39,6 +39,18 @@ public enum AgentAccessMode: String, Codable, Hashable, Sendable, CaseIterable {
         }
     }
 
+    /// How much a conversation may do without asking: Ask, then Auto, then Full access.
+    public var rank: Int {
+        switch self {
+        case .ask: 0
+        case .standard: 1
+        case .fullAccess: 2
+        }
+    }
+
+    /// Whether this lets a conversation do more without asking than `other` does.
+    public func exceeds(_ other: AgentAccessMode) -> Bool { rank > other.rank }
+
     public var tooltip: String {
         switch self {
         case .standard:
@@ -134,6 +146,36 @@ extension AgentChatItem {
     public static let providerTurnType = "provider_turn"
 
     public var isProviderTurn: Bool { kind == .user && workContext?.itemType == Self.providerTurnType }
+
+    /// `workContext.itemType` of the user-kind row that opens a turn on a report from an
+    /// agent this conversation started: it finished, failed, or waits for the user. The
+    /// server wrote it; nobody typed it. Builds that predate it show it as a user message.
+    public static let agentReportType = "agent_report"
+
+    public var isAgentReport: Bool { kind == .user && workContext?.itemType == Self.agentReportType }
+
+    /// A user-kind row that opens a turn nobody typed: one the provider began, or a report
+    /// from an agent this conversation started. It is shown as a note, not as the user's.
+    public var isAutomaticTurn: Bool { isProviderTurn || isAgentReport }
+}
+
+/// What a new conversation starts with instead of its provider's defaults. A conversation
+/// another agent starts never gets more access than that agent has.
+public struct AgentStartOptions: Codable, Hashable, Sendable {
+    public var model: String?
+    public var reasoningEffort: AgentReasoningEffort?
+    /// Nil gives the conversation the access of the agent that starts it, or Full access
+    /// when the user starts it.
+    public var accessMode: AgentAccessMode?
+
+    public init(model: String? = nil, reasoningEffort: AgentReasoningEffort? = nil, accessMode: AgentAccessMode? = nil) {
+        self.model = model; self.reasoningEffort = reasoningEffort; self.accessMode = accessMode
+    }
+
+    public func validate() throws(ErrorCode) {
+        if let model { try Validation.message(model, limit: 256) }
+        try reasoningEffort?.validate()
+    }
 }
 
 /// Something holding up the provider that the transcript doesn't show, such as a retry
@@ -198,6 +240,10 @@ public struct AgentChatSnapshot: Codable, Hashable, Sendable {
     public var omittedItems: Int?
     /// What holds the provider up now, if anything the transcript doesn't show.
     public var activity: AgentChatActivity?
+    /// The agent conversation that started this one, as the server saw the caller; nil
+    /// when the user started it. Stopping the parent with `stop` stops this one too, and
+    /// this one reports back to it. Absent from servers without `Feature.agentLineage`.
+    public var parent: SessionId?
 
     public init(session: SessionId, project: ProjectId, provider: AgentChatProvider,
                 providerSession: String? = nil, model: String? = nil,
@@ -223,7 +269,7 @@ public struct AgentChatSnapshot: Codable, Hashable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case commandDescriptors, resetID, session, project, provider, providerID, providerSession, model, commands, resolvedModel, contextUsage, subagents, reasoningEffort, accessMode, planMode, queuedPrompts, queuePaused, turns, status, revision, items, omittedItems, activity
+        case commandDescriptors, resetID, session, project, provider, providerID, providerSession, model, commands, resolvedModel, contextUsage, subagents, reasoningEffort, accessMode, planMode, queuedPrompts, queuePaused, turns, status, revision, items, omittedItems, activity, parent
     }
 
     public init(from decoder: Decoder) throws {
@@ -251,14 +297,16 @@ public struct AgentChatSnapshot: Codable, Hashable, Sendable {
         items = try c.decode([AgentChatItem].self, forKey: .items)
         omittedItems = try c.decodeIfPresent(Int.self, forKey: .omittedItems)
         activity = try? c.decodeIfPresent(AgentChatActivity.self, forKey: .activity)
+        parent = try c.decodeIfPresent(SessionId.self, forKey: .parent)
     }
 }
 
 /// Agent requests are separate from terminal sessions and PTY input.
 public enum AgentChatRequest: Codable, Hashable, Sendable {
     /// Idempotent: a pane chooses and persists its session ID before connecting.
-    /// Provider seeds new conversations only; reconnect returns the server's selected provider.
-    case create(session: SessionId, project: ProjectId, provider: AgentChatProvider)
+    /// Provider and `options` seed new conversations only; reconnect returns the server's
+    /// selected provider. A server without `Feature.agentLineage` ignores `options`.
+    case create(session: SessionId, project: ProjectId, provider: AgentChatProvider, options: AgentStartOptions? = nil)
     case read(session: SessionId)
     /// Archives the previous conversation and resets this pane in place, while idle.
     case clear(session: SessionId, archive: SessionId, expectedRevision: UInt64)
@@ -302,6 +350,14 @@ public enum AgentChatRequest: Codable, Hashable, Sendable {
     /// `from`'s, or else in `from`'s project; a server that predates `project`
     /// ignores it.
     case fork(session: SessionId, from: SessionId, project: ProjectId? = nil)
+    /// Interrupts `session`'s turn and holds its queue, as Stop does, and with
+    /// `descendants` also every open conversation it started, those started, and so on.
+    /// Replies with `session`'s snapshot. Only servers with `Feature.agentLineage` know it.
+    case stop(session: SessionId, descendants: Bool)
+    /// `read`, by the agent that started `session`, to take in what it did: a report on it
+    /// still queued to that agent is withdrawn, as this reply carries the news. Only servers
+    /// with `Feature.agentLineage` know it.
+    case collect(session: SessionId)
 }
 
 /// Which Claude tool approvals the user may grant for the rest of a conversation.

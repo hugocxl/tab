@@ -8,7 +8,7 @@ enum Agents {
     static func run(_ command: CLIAgent, client: ServerClient, json: Bool) async throws {
         switch command {
         case .read(let selector, let all):
-            let snapshot = try await read(try await resolve(selector, client: client), client: client)
+            let snapshot = try await read(try await resolve(selector, client: client), client: client, collect: true)
             report(snapshot, all: all, json: json)
         case .wait(let selector, let timeoutMs):
             let agent = try await resolve(selector, client: client)
@@ -18,6 +18,23 @@ enum Agents {
             let snapshot = try await read(try await resolve(selector, client: client), client: client)
             _ = try await client.agentChat(.send(session: snapshot.session, text: text, model: snapshot.model,
                                                  reasoningEffort: snapshot.reasoningEffort))
+            Output.ok(json: json)
+        case .list(let children):
+            try requireLineage(client)
+            var agents = try await conversations(client: client)
+            if children {
+                guard let me = hostingAgent(server: client.server.server) else {
+                    throw CLIError("--children lists the agents a Tab agent pane started; this isn't one")
+                }
+                agents = agents.filter { $0.parent == me }
+            }
+            let projects = try await client.catalog().projects
+            Output.list(agents.map { listRecord($0, projects: projects) },
+                        columns: ["id", "name", "state", "parent", "provider", "project", "title"], json: json)
+        case .stop(let selector, let only):
+            try requireLineage(client)
+            let agent = try await resolve(selector, client: client)
+            _ = try await client.agentChat(.stop(session: agent, descendants: !only))
             Output.ok(json: json)
         }
     }
@@ -54,6 +71,32 @@ enum Agents {
         throw CLIError("no provider \(name)" + (choices.isEmpty ? "; add one in Settings › Agents" : "; use \(choices)"))
     }
 
+    /// Refuses commands a server that predates agent lineage can't run.
+    static func requireLineage(_ client: ServerClient) throws {
+        guard client.supports(.agentLineage) else {
+            throw CLIError("this Tab server predates agent lineage; update Tab")
+        }
+    }
+
+    /// The agent conversations the server lists, leaving out agents that run in terminals.
+    static func conversations(client: ServerClient) async throws -> [AgentActivity] {
+        let terminals = Set(try await client.sessions().map(\.id))
+        return try await client.activity().agents.filter { !terminals.contains($0.session) }
+    }
+
+    static func listRecord(_ agent: AgentActivity, projects: [ProjectDescriptor]) -> JSONValue {
+        .object([
+            "id": .string(agent.session.description),
+            "name": .string(SessionName.of(agent.session)),
+            "state": .string(agent.state.rawValue),
+            "parent": agent.parent.map { .string($0.description) } ?? .null,
+            "provider": .string(agent.provider.rawValue),
+            "projectId": .string(agent.project.description),
+            "project": .string(projects.first { $0.id == agent.project }?.name ?? agent.project.description),
+            "title": agent.title.map(JSONValue.string) ?? .null,
+        ])
+    }
+
     /// The Tab agent this command runs in, when it belongs to `server`.
     static func hostingAgent(server: ServerId,
                              environment: [String: String] = ProcessInfo.processInfo.environment) -> SessionId? {
@@ -72,9 +115,13 @@ enum Agents {
         return try SessionSelector.resolve(selector, among: try await client.activity().agents.map(\.session))
     }
 
-    static func read(_ agent: SessionId, client: ServerClient) async throws -> AgentChatSnapshot {
+    /// With `collect`, the caller takes in what the agent did, so a report on it still
+    /// queued to the caller, its parent, is withdrawn; see `AgentChatRequest.collect`.
+    static func read(_ agent: SessionId, client: ServerClient, collect: Bool = false) async throws -> AgentChatSnapshot {
         do {
-            return try await client.agentChat(.read(session: agent))
+            let request: AgentChatRequest = collect && client.supports(.agentLineage)
+                ? .collect(session: agent) : .read(session: agent)
+            return try await client.agentChat(request)
         } catch let error as ClientError where error.serverCode == .unknownSession {
             throw CLIError("no agent \(agent); tab agent takes the ID tab pane new agent prints")
         }
@@ -87,11 +134,11 @@ enum Agents {
             group.addTask {
                 // Read after subscribing, so a change between the two isn't missed.
                 var events = client.events.makeAsyncIterator()
-                var snapshot = try await read(agent, client: client)
+                var snapshot = try await read(agent, client: client, collect: true)
                 while try settled(snapshot) == nil {
                     guard let event = await events.next() else { throw CLIError("lost the connection to the server") }
                     switch event {
-                    case .agentChatChanged(agent, _): snapshot = try await read(agent, client: client)
+                    case .agentChatChanged(agent, _): snapshot = try await read(agent, client: client, collect: true)
                     case .disconnected(let error): throw error
                     case .serverRestarting: throw CLIError("the server is restarting")
                     default: continue
@@ -150,6 +197,7 @@ enum Agents {
             "projectId": .string(snapshot.project.description),
             "provider": .string(snapshot.provider.rawValue),
             "status": .string(snapshot.status.rawValue),
+            "parent": snapshot.parent.map { .string($0.description) } ?? .null,
             "reply": .string(reply(snapshot)),
         ]
         if all {

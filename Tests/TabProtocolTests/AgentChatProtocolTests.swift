@@ -29,6 +29,58 @@ final class AgentChatProtocolTests: XCTestCase {
         }
     }
 
+    func testAgentLineageCrossesTheWireAndOlderPeersStillUnderstandEachOther() throws {
+        let session = SessionId(), parent = SessionId(), project = ProjectId()
+        var snapshot = AgentChatSnapshot(session: session, project: project, provider: .claude, accessMode: .ask)
+        snapshot.parent = parent
+        let messages: [Message] = [
+            .request(RequestId(1), .agentChat(.create(session: session, project: project, provider: .codex,
+                                                      options: AgentStartOptions(model: "small", reasoningEffort: .low,
+                                                                                 accessMode: .ask)))),
+            .request(RequestId(2), .agentChat(.stop(session: session, descendants: true))),
+            .request(RequestId(3), .agentChat(.collect(session: session))),
+            .reply(RequestId(2), .agentChat(snapshot)),
+        ]
+        for message in messages {
+            try message.validate()
+            XCTAssertEqual(try WireJSON.decode(Message.self, from: WireJSON.encode(message)), message)
+        }
+
+        // A create without options is exactly what older clients send, and older servers read.
+        let plain = try WireJSON.encode(AgentChatRequest.create(session: session, project: project, provider: .claude))
+        XCTAssertFalse(String(decoding: plain, as: UTF8.self).contains("options"))
+        // A snapshot or activity from an older server has no parent.
+        snapshot.parent = nil
+        let older = try WireJSON.encode(snapshot)
+        XCTAssertFalse(String(decoding: older, as: UTF8.self).contains("parent"))
+        XCTAssertNil(try WireJSON.decode(AgentChatSnapshot.self, from: older).parent)
+        let activity = AgentActivity(session: session, project: project, provider: .claude, state: .idle)
+        XCTAssertNil(try WireJSON.decode(AgentActivity.self, from: WireJSON.encode(activity)).parent)
+        let child = AgentActivity(session: session, project: project, provider: .claude, state: .working, parent: parent)
+        XCTAssertEqual(try WireJSON.decode(AgentActivity.self, from: WireJSON.encode(child)).parent, parent)
+        XCTAssertTrue(Feature.all.contains(.agentLineage))
+    }
+
+    func testAccessModesOrderFromAskToFullAccess() throws {
+        XCTAssertTrue(AgentAccessMode.fullAccess.exceeds(.standard))
+        XCTAssertTrue(AgentAccessMode.standard.exceeds(.ask))
+        XCTAssertFalse(AgentAccessMode.ask.exceeds(.ask))
+        XCTAssertFalse(AgentAccessMode.standard.exceeds(.fullAccess))
+        XCTAssertThrowsError(try AgentChatRequest.create(session: SessionId(), project: ProjectId(), provider: .claude,
+                                                         options: AgentStartOptions(model: String(repeating: "m", count: 257))).validate())
+        XCTAssertThrowsError(try AgentStartOptions(reasoningEffort: AgentReasoningEffort(rawValue: "")).validate())
+    }
+
+    func testReportsAndProviderTurnsAreTurnsNobodyTyped() {
+        let report = AgentChatItem(kind: .user, text: "Agent … finished.", workContext: .init(itemType: AgentChatItem.agentReportType))
+        let provider = AgentChatItem(kind: .user, text: "A background agent finished", workContext: .init(itemType: AgentChatItem.providerTurnType))
+        let typed = AgentChatItem(kind: .user, text: "Hello")
+        XCTAssertTrue(report.isAgentReport && report.isAutomaticTurn && !report.isProviderTurn)
+        XCTAssertTrue(provider.isAutomaticTurn && !provider.isAgentReport)
+        XCTAssertFalse(typed.isAutomaticTurn)
+        XCTAssertFalse(AgentChatItem(kind: .assistant, text: "x", workContext: report.workContext).isAgentReport)
+    }
+
     func testClaudeSlashCommandsCrossTheWireAndOlderSnapshotsStillDecode() throws {
         var snapshot = AgentChatSnapshot(session: SessionId(), project: ProjectId(), provider: .claude)
         snapshot.commands = ["compact", "review"]

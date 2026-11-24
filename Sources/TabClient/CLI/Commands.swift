@@ -375,6 +375,16 @@ enum CLICommands {
                 }
                 return manage(a, .agent(.send(agent: a.word(0), text: text)))
             },
+            CLICommandSpec("agent list", ["[--children]"],
+                           "The open agent conversations and the agent that started each; --children, only yours",
+                           flags: ["--children"], json: true) { a in
+                manage(a, .agent(.list(children: a.flag("--children"))))
+            },
+            CLICommandSpec("agent stop", ["AGENT [--only]"],
+                           "Stop the agent and every agent it started, as Stop does; --only stops just AGENT",
+                           words: 1 ... 1, flags: ["--only"]) { a in
+                manage(a, .agent(.stop(agent: a.word(0), only: a.flag("--only"))))
+            },
         ],
         notes: """
         An agent is a conversation in one of Tab's agent panes, such as one that
@@ -385,8 +395,21 @@ enum CLICommands {
         once the agent is idle; it fails when the agent waits for the user to
         approve something, fails, or closes, or after --timeout seconds: 600 by
         default, at most 3600. send starts a new turn, or joins the running one.
-        --json prints the agent's id, project, provider, status and reply, and
-        with read --all its messages.
+        --json prints the agent's id, project, provider, status, parent and reply,
+        and with read --all its messages.
+
+        An agent you start from a Tab agent pane is yours: its parent is you, and
+        Tab knows it from your process, not from anything you pass. It gets at
+        most your access, and you can't give work to an agent with more access
+        than you, nor approve anything for any agent; the user does that in its
+        pane. When work you sent it ends, fails, or waits for the user, Tab queues
+        a report to you, delivered once you are idle, so end your turn instead of
+        waiting; read or wait on the agent first and the report is withdrawn.
+        stop stops the whole tree below AGENT unless --only, without reports to
+        you. Short of Full access, an agent types only into terminals it or its
+        agents started.
+        list prints the columns id, name, state, parent, provider, project and
+        title.
         """)
 
     static let activity = CLIGroup(
@@ -558,23 +581,24 @@ enum CLICommands {
                 .pane(try placed(a, CLIPane(placement: .pane, project: a.value("--project"), content: try terminal(a))),
                       json: a.json)
             },
-            CLICommandSpec("pane new agent", ["[--project PROJECT] [--provider PROVIDER] [--edge EDGE] [--beside PANE] [-- MESSAGE...]",
-                                              "--fork [AGENT] [--project PROJECT] [--edge EDGE] [--beside PANE] [-- MESSAGE...]"],
+            CLICommandSpec("pane new agent", ["[--project PROJECT] [--worktree NAME] [--provider PROVIDER] [--model MODEL] [--effort EFFORT] [--access ask|auto|full] [--edge EDGE] [--beside PANE] [-- MESSAGE...]",
+                                              "--fork [AGENT] [--project PROJECT] [--worktree NAME] [--access ask|auto|full] [--edge EDGE] [--beside PANE] [-- MESSAGE...]"],
                            "Start an agent conversation in a new pane, or copy one with --fork; prints its ID",
-                           words: 0 ... 1, values: ["--project", "--provider"] + placementOptions, flags: ["--fork"],
-                           json: true, literal: true, place: .app) { a in
+                           words: 0 ... 1, values: ["--project", "--provider", "--worktree"] + startOptions + placementOptions,
+                           flags: ["--fork"], json: true, literal: true, place: .app) { a in
+                let start = try agentStart(a, worktree: true)
                 guard a.flag("--fork") else {
                     guard a.words.isEmpty else { throw a.usage }
                     return .pane(try placed(a, CLIPane(placement: .pane, project: a.value("--project"),
-                                                       content: try agent(a))), json: a.json)
+                                                       content: try agent(a), start: start)), json: a.json)
                 }
-                guard a.value("--provider") == nil else {
-                    throw CLIError("a fork keeps its provider; leave out --provider")
+                guard a.value("--provider") == nil, a.value("--model") == nil, a.value("--effort") == nil else {
+                    throw CLIError("a fork keeps its provider, model and effort; leave out --provider, --model and --effort")
                 }
                 if let agent = a.optional(0), SessionId(string: agent) == nil { throw CLIError("an agent is named by its ID") }
                 return .pane(try placed(a, CLIPane(placement: .pane, project: a.value("--project"),
                                                    content: .fork(agent: a.optional(0), project: a.value("--project"),
-                                                                  message: try message(a)))), json: a.json)
+                                                                  message: try message(a)), start: start)), json: a.json)
             },
             CLICommandSpec("pane new browser", ["[URL] [--project PROJECT] [--profile PROFILE] [--edge EDGE] [--beside PANE]"],
                            "Open a page in a new pane; prints the browser's ID", words: 0 ... 1,
@@ -681,6 +705,13 @@ enum CLICommands {
         fork takes on; without it, the agent waits for the user. Read its replies
         with tab agent.
 
+        --worktree NAME first makes a Git worktree of the project, on a new branch
+        NAME from its HEAD, and starts the agent there. --model and --effort choose
+        the new agent's model and reasoning effort (low, medium, high, xhigh, max
+        or ultra, as its provider offers). --access is ask (ask every time), auto
+        or full; an agent started from an agent pane gets that agent's access, and
+        never more. Started by the user, a new agent has full access.
+
         SIMULATOR is an ID or a name from tab simulator list; without it, the pane shows
         the only running simulator, else the simulator picker. FILE is absolute or
         relative to the current folder, and inside the project; --staged shows the
@@ -697,10 +728,11 @@ enum CLICommands {
                            json: true, literal: true, place: .app) { a in
                 .pane(CLIPane(placement: .tab, project: nil, content: try terminal(a)), json: a.json)
             },
-            CLICommandSpec("tab new agent", ["[--provider PROVIDER] [-- MESSAGE...]"],
-                           "Start an agent conversation in a new tab; prints its ID", values: ["--provider"],
+            CLICommandSpec("tab new agent", ["[--provider PROVIDER] [--model MODEL] [--effort EFFORT] [--access ask|auto|full] [-- MESSAGE...]"],
+                           "Start an agent conversation in a new tab; prints its ID", values: ["--provider"] + startOptions,
                            json: true, literal: true, place: .app) { a in
-                .pane(CLIPane(placement: .tab, project: nil, content: try agent(a)), json: a.json)
+                .pane(CLIPane(placement: .tab, project: nil, content: try agent(a), start: try agentStart(a, worktree: false)),
+                      json: a.json)
             },
             CLICommandSpec("tab new browser", ["[URL] [--profile PROFILE]"],
                            "Open a page in a new tab; prints the browser's ID", words: 0 ... 1,
@@ -734,6 +766,45 @@ enum CLICommands {
 
     /// The options that place a new pane.
     private static let placementOptions = ["--edge", "--beside"]
+
+    /// The options that choose how a new agent's conversation starts.
+    private static let startOptions = ["--model", "--effort", "--access"]
+
+    /// The reasoning efforts `--effort` takes; each provider offers some of them.
+    static let efforts: [AgentReasoningEffort] = [.low, .medium, .high, .xhigh, .max, .ultra]
+
+    /// `--model`, `--effort`, `--access` and, where a worktree may be made, `--worktree`.
+    private static func agentStart(_ a: CLIArguments, worktree: Bool) throws -> CLIAgentStart {
+        var start = CLIAgentStart()
+        if let model = a.value("--model") {
+            let trimmed = model.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty, trimmed.utf8.count <= 256 else { throw CLIError("--model needs a model name") }
+            start.model = trimmed
+        }
+        if let name = a.value("--effort") {
+            guard let effort = efforts.first(where: { $0.rawValue == name.lowercased() }) else {
+                throw CLIError("--effort must be \(efforts.map(\.rawValue).joined(separator: ", "))")
+            }
+            start.effort = effort
+        }
+        if let name = a.value("--access") {
+            start.access = try access(name)
+        }
+        if worktree, let name = a.value("--worktree") {
+            start.worktree = try projectName(name)
+        }
+        return start
+    }
+
+    /// An access mode as people name it: ask, auto or full.
+    static func access(_ name: String) throws -> AgentAccessMode {
+        switch name.lowercased() {
+        case "ask": return .ask
+        case "auto": return .standard
+        case "full": return .fullAccess
+        default: throw CLIError("--access must be ask (ask every time), auto or full (full access)")
+        }
+    }
 
     /// `pane` with the `--edge` and `--beside` it was given.
     private static func placed(_ a: CLIArguments, _ pane: CLIPane) throws -> CLIPane {

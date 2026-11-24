@@ -63,6 +63,10 @@ internal final class AgentProcess: @unchecked Sendable {
             throw AgentRuntimeError("Could not configure nonblocking agent input: \(String(cString: strerror(errno)))")
         }
         try process.run()
+        // A conversation's provider: what it runs calls Tab as that conversation.
+        let agent = launch.environment["TAB_AGENT_ID"].flatMap(SessionId.init(string:))
+        let pid = process.processIdentifier
+        if let agent { AgentCallers.shared.register(pid, agent: agent) }
         // Parent copies must not keep the child's pipe ends alive.
         try? input.fileHandleForReading.close()
         try? output.fileHandleForWriting.close()
@@ -100,6 +104,8 @@ internal final class AgentProcess: @unchecked Sendable {
             if !oversized && !buffer.isEmpty { onLine(buffer) }
             try? output.fileHandleForReading.close()
             process.waitUntilExit()
+            // Reaped, so the PID may be reused by an unrelated process.
+            if let agent { AgentCallers.shared.unregister(pid, agent: agent) }
             // Do not wait for descendants that inherited stderr indefinitely.
             _ = stderrDone.wait(timeout: .now() + 0.5)
             onExit(process.terminationStatus, stderr.text)

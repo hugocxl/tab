@@ -941,8 +941,8 @@ final class AgentTranscriptDocument: ThemedView {
                 && item.tool?.name.map({ ["TodoWrite", "ExitPlanMode"].contains($0) }) == true
         }
         func entry(for item: AgentChatItem) -> Entry {
-            // A turn the agent began itself opens with a note, not a message from the user.
-            var card = item.isProviderTurn ? .notice : classifier.classify(item)
+            // A turn the agent began itself, or a report from an agent it started, opens with a note, not a message from the user.
+            var card = item.isAutomaticTurn ? .notice : classifier.classify(item)
             if card == .todo, !newestTodos.contains(item.id) { card = nil }
             return Entry(id: Self.entryID(for: item),
                          kind: card.map { .card($0) } ?? (item.kind == .tool ? .activity : .message),

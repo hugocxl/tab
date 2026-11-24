@@ -54,10 +54,12 @@ enum Panes {
                             placement: pane.placement, edge: pane.edge, anchor: pane.beside)
             record = Sessions.record(session)
         case .agent(let name, let text):
-            let project = try await project(pane, client: client, target: target).id
+            try checkStart(pane.start, client: client)
+            let project = try await agentProject(pane, client: client, target: target)
             let (provider, id) = try await Agents.provider(name, sending: text != nil, client: client)
             providerID = id
-            let snapshot = try await client.agentChat(.create(session: SessionId(), project: project, provider: provider))
+            let snapshot = try await client.agentChat(.create(session: SessionId(), project: project, provider: provider,
+                                                              options: pane.start.options))
             shown = AppPane(kind: .agent, session: snapshot.session, project: snapshot.project,
                             provider: snapshot.provider, beside: caller, placement: pane.placement,
                             edge: pane.edge, anchor: pane.beside)
@@ -67,13 +69,26 @@ enum Panes {
         case .fork(let agent, let selector, let text):
             guard let source = agent.flatMap(SessionId.init(string:)) ?? Agents.hostingAgent(server: client.server.server)
             else { throw CLIError("give an agent ID; this isn't a Tab agent on that server") }
+            try checkStart(pane.start, client: client)
             var project: ProjectId?
-            if let selector { project = try await Projects.resolve(selector, client: client, target: target).id }
-            let snapshot = try await client.agentChat(.fork(session: SessionId(), from: source, project: project))
+            if pane.start.worktree != nil {
+                project = try await agentProject(pane, client: client, target: target)
+            } else if let selector {
+                project = try await Projects.resolve(selector, client: client, target: target).id
+            }
+            var snapshot = try await client.agentChat(.fork(session: SessionId(), from: source, project: project))
             if let project, snapshot.project != project {
                 // A server older than forking into another project forked in place.
                 _ = try? await client.agentChat(.close(session: snapshot.session))
                 throw CLIError("the server can't fork into another project; update Tab")
+            }
+            if let access = pane.start.access, access != snapshot.accessMode {
+                do {
+                    snapshot = try await client.agentChat(.setAccess(session: snapshot.session, mode: access))
+                } catch {
+                    _ = try? await client.agentChat(.close(session: snapshot.session))
+                    throw CLIError("could not give the fork \(access.title): \(CLI.message(error))")
+                }
             }
             shown = AppPane(kind: .agent, session: snapshot.session, project: snapshot.project,
                             provider: snapshot.provider, beside: caller, placement: pane.placement,
@@ -151,7 +166,26 @@ enum Panes {
             "id": .string(snapshot.session.description),
             "projectId": .string(snapshot.project.description),
             "provider": .string(snapshot.provider.rawValue),
+            "access": .string((snapshot.accessMode ?? .standard).cliName),
+            "parent": snapshot.parent.map { .string($0.description) } ?? .null,
         ])
+    }
+
+    /// Refuses start options a server that predates them would ignore.
+    static func checkStart(_ start: CLIAgentStart, client: ServerClient) throws {
+        guard start.options != nil, !client.supports(.agentLineage) else { return }
+        throw CLIError("this Tab server can't choose a new agent's model, effort or access; update Tab")
+    }
+
+    /// Where a new agent works: a new worktree when `--worktree` names one, of the
+    /// project it would otherwise work in.
+    static func agentProject(_ pane: CLIPane, client: ServerClient, target: Target) async throws -> ProjectId {
+        let project = try await project(pane, client: client, target: target)
+        guard let name = pane.start.worktree else { return project.id }
+        guard !project.home else {
+            throw CLIError("Home isn't a Git repository; give --project the project to make a worktree of")
+        }
+        return try await Projects.newWorktree(name, of: project, client: client, target: target).id
     }
 
     /// The Tab agent or terminal this command runs in, for a new pane to open beside.

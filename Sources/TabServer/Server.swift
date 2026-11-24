@@ -159,6 +159,7 @@ public final class Server: @unchecked Sendable {
         agents.checkDirectory = { [weak self] directory in
             try self?.services.worktreeGuard?.checkSession(directory: directory)
         }
+        agents.reportWorkEndedByRestart()
         resumeCleanup()
         pruneExpiredSessions()
     }
@@ -243,6 +244,7 @@ public final class Server: @unchecked Sendable {
             throw error
         }
         let owner: SessionOwner
+        var started: SessionOwner?
         do {
             let settings = settings.settings
             let spawn = SessionSpawn.request(
@@ -250,9 +252,11 @@ public final class Server: @unchecked Sendable {
                 command: request.command, extra: request.environment, server: catalog.serverId, session: id)
             owner = try SessionOwner(info: info, request: spawn, historyBudgetBytes: settings.historyBudgetBytes,
                                      colors: requester?.colorsForNewSession, archive: archive, activity: activity,
-                                     detector: services.detector, delegate: self)
+                                     detector: services.detector, delegate: self, caller: requester?.agent)
+            started = owner
             try owner.start()
         } catch {
+            if let started, let agent = started.caller { AgentCallers.shared.unregister(started.processID, agent: agent) }
             _ = sessionLock.withLock { starting.remove(id) }
             catalog.failCreation(request.operation, error)
             throw error
@@ -606,10 +610,13 @@ public final class Server: @unchecked Sendable {
     // MARK: Connections
 
     /// Serves a client on `stream`.
-    func serve(_ stream: ByteStream, origin: ConnectionOrigin) {
+    /// `peer` is the process on the other end of a local socket, which tells which agent
+    /// conversation, if any, the client runs under; see `AgentCallers`.
+    func serve(_ stream: ByteStream, origin: ConnectionOrigin, peer: pid_t? = nil) {
         let connection = connectionLock.withLock { () -> ClientConnection in
             nextConnection += 1
-            let connection = ClientConnection(number: nextConnection, server: self, stream: stream, origin: origin)
+            let connection = ClientConnection(number: nextConnection, server: self, stream: stream, origin: origin,
+                                              peer: peer)
             connections[nextConnection] = connection
             return connection
         }
@@ -755,6 +762,7 @@ extension Server: SessionOwnerDelegate {
     }
 
     func sessionFinished(_ owner: SessionOwner, reason: ExitReason, saved: Bool) {
+        if let agent = owner.caller { AgentCallers.shared.unregister(owner.processID, agent: agent) }
         lifecycle.async { [self] in
             let id = owner.info.id
             catalog.recordExit(id, saved: saved)

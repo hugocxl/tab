@@ -57,7 +57,9 @@ extension AgentChatRequest {
             }
         case .clear(let session, let from, _), .fork(let session, let from, _):
             guard session != from else { throw .badRequest }
-        case .create, .read, .interrupt, .close, .setAccess, .setPlan:
+        case .create(_, _, _, let options):
+            try options?.validate()
+        case .read, .interrupt, .close, .setAccess, .setPlan, .stop, .collect:
             break
         }
     }

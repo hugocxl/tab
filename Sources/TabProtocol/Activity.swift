@@ -111,9 +111,13 @@ public struct AgentActivity: Hashable, Codable, Sendable {
     /// The agents and shells it started that still run, oldest first. Older
     /// servers and terminal agents leave it out.
     public var subtasks: [AgentSubtask]?
+    /// The agent conversation that started this one; see `AgentChatSnapshot.parent`.
+    /// Older servers and terminal agents leave it out.
+    public var parent: SessionId?
 
     public init(session: SessionId, project: ProjectId, provider: AgentProvider, state: AgentState, title: String? = nil,
-                workingSince: UInt64? = nil, condition: AgentCondition? = nil, subtasks: [AgentSubtask]? = nil) {
+                workingSince: UInt64? = nil, condition: AgentCondition? = nil, subtasks: [AgentSubtask]? = nil,
+                parent: SessionId? = nil) {
         self.session = session
         self.project = project
         self.provider = provider
@@ -122,6 +126,7 @@ public struct AgentActivity: Hashable, Codable, Sendable {
         self.workingSince = workingSince
         self.condition = condition
         self.subtasks = subtasks
+        self.parent = parent
     }
 }
 

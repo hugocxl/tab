@@ -14,7 +14,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     let surface = AgentPaneView()
     var view: NSView { surface }
     var title: String {
-        snapshot?.items.first(where: { $0.kind == .user && !$0.isProviderTurn })?.text
+        snapshot?.items.first(where: { $0.kind == .user && !$0.isAutomaticTurn })?.text
             .split(whereSeparator: \.isNewline).first.map { String($0.prefix(160)) } ?? "Agent"
     }
     /// The provider's logo, as a terminal running the same agent shows it.
@@ -185,7 +185,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
                 throw AgentPaneError.offline
             }
             let routed: AgentChatRequest
-            if case .create(let session, _, let provider) = request {
+            if case .create(let session, _, let provider, _) = request {
                 routed = .create(session: session, project: project, provider: provider)
             } else {
                 routed = request
@@ -590,7 +590,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
               let turn = snapshot.turns?.last, turn.completedAt != nil,
               turn.outcome == .failed || turn.outcome == .interrupted,
               let item = snapshot.items.last(where: { $0.id == turn.userItemID }),
-              item.kind == .user, !item.isProviderTurn else { return nil }
+              item.kind == .user, !item.isAutomaticTurn else { return nil }
         return item
     }
 
@@ -723,7 +723,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         let agent = snapshot.provider.name
         return snapshot.items.compactMap { item -> String? in
             switch item.kind {
-            case .user where item.isProviderTurn: return "_\(item.text)_"
+            case .user where item.isAutomaticTurn: return "_\(item.text)_"
             case .user: return "**You**\n\n" + item.text + (item.attachments ?? []).map { "\n\nAttachment: " + $0.name }.joined()
             case .assistant: return "**\(agent)**\n\n" + item.text
             case .tool:
@@ -2096,7 +2096,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         let composer = surface.composer
         let walking = recall.map { composer.string == $0.text } ?? false
         guard walking || (older && composer.string.isEmpty && draftAttachments.isEmpty) else { recall = nil; return false }
-        let prompts = (snapshot?.items ?? []).reversed().filter { $0.kind == .user && !$0.isProviderTurn && !$0.text.isEmpty }.map(\.text)
+        let prompts = (snapshot?.items ?? []).reversed().filter { $0.kind == .user && !$0.isAutomaticTurn && !$0.text.isEmpty }.map(\.text)
         let next = (recall?.index ?? -1) + (older ? 1 : -1)
         if next < 0 {
             recall = nil

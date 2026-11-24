@@ -89,10 +89,17 @@ final class SessionOwner: @unchecked Sendable {
     private var finishing = false
     private var finishCompletions: [@Sendable (ExitReason) -> Void] = []
 
+    /// The agent conversation that asked for this terminal; what runs in it calls Tab as
+    /// that conversation. See `AgentCallers`.
+    let caller: SessionId?
+    /// The terminal's shell or program.
+    var processID: pid_t { pty.pid }
+
     init(info: SessionInfo, request: SpawnRequest, historyBudgetBytes: UInt64, colors: TerminalColors?,
          archive: ArchiveStore, activity: Activity, detector: AgentDetector?,
-         delegate: SessionOwnerDelegate) throws {
+         delegate: SessionOwnerDelegate, caller: SessionId? = nil) throws {
         self.info = info
+        self.caller = caller
         queue = DispatchQueue(label: "tab.session.\(info.id)", qos: .userInitiated)
         inputQueue = DispatchQueue(label: "tab.session.\(info.id).input", qos: .userInitiated)
         let budget = Int(clamping: historyBudgetBytes)
@@ -107,6 +114,7 @@ final class SessionOwner: @unchecked Sendable {
         } catch {
             throw ServiceError(.spawnFailed, "Could not start \(request.program): \(error)")
         }
+        if let caller { AgentCallers.shared.register(pty.pid, agent: caller) }
         size = request.size
         sharedSize = request.size
         directory = info.directory

@@ -44,10 +44,34 @@ final class ClientConnection: @unchecked Sendable {
         let sink: ChannelSink
     }
 
-    init(number: Int, server: Server, stream: ByteStream, origin: ConnectionOrigin) {
+    /// The process on the other end of a local socket.
+    let peer: pid_t?
+    /// The agent conversation this client runs under, found from `peer`; nil for the
+    /// user's own clients. See `AgentCallers`.
+    var agent: SessionId? {
+        let (known, kind) = lock.withLock { (callerAgent, identity.kind) }
+        if let known { return known }
+        // `tab` run directly as a command Tab started for an agent can say hello before
+        // Tab registers it, so a CLI looks again; the app never runs under an agent.
+        guard kind == .cli, let peer, let found = AgentCallers.shared.agent(for: peer) else { return nil }
+        lock.withLock { callerAgent = found }
+        return found
+    }
+    private var callerAgent: SessionId?
+
+    /// Whether this client may type into `owner`'s terminal. An agent short of Full access
+    /// types only into terminals it, or an agent below it, started, so it can't run
+    /// commands as the user by typing them into the user's terminal.
+    func mayType(into owner: SessionOwner) -> Bool {
+        guard let agent else { return true }
+        return server.agents.mayType(agent, into: owner.caller)
+    }
+
+    init(number: Int, server: Server, stream: ByteStream, origin: ConnectionOrigin, peer: pid_t? = nil) {
         self.number = number
         self.server = server
         self.origin = origin
+        self.peer = peer
         frames = FrameConnection(stream: stream)
         worker = DispatchQueue(label: "tab.connection.\(number)", qos: .userInitiated)
         if case .mobile = origin {
@@ -135,6 +159,10 @@ final class ClientConnection: @unchecked Sendable {
             session(channel, message)
         case .input(let channel, let data):
             guard let target = attached(channel) else { return }
+            guard mayType(into: target.owner) else {
+                ServerLog.error("client \(number): input refused, an agent can't type into a terminal it didn't start")
+                return
+            }
             do {
                 try Validation.input(data)
             } catch {
@@ -162,9 +190,12 @@ final class ClientConnection: @unchecked Sendable {
             outbox.finish()
             return
         }
+        // Found while the client waits for this reply, so the process is still there.
+        let agent = peer.flatMap { AgentCallers.shared.agent(for: $0) }
         lock.withLock {
             handshaken = true
             identity = SessionClient(id: hello.clientId ?? ClientId(), kind: hello.client.isKnown ? hello.client : .desktop)
+            callerAgent = agent
         }
         outbox.push(.reply(id, .hello(HelloReply(version: version, server: server.info))))
     }
@@ -227,7 +258,12 @@ final class ClientConnection: @unchecked Sendable {
         }
         guard let target = attached(channel) else { return }
         switch message {
-        case .input(let input): target.owner.input(input)
+        case .input(let input):
+            guard mayType(into: target.owner) else {
+                ServerLog.error("client \(number): input refused, an agent can't type into a terminal it didn't start")
+                return
+            }
+            target.owner.input(input)
         case .resize(let size): target.owner.resize(size)
         case .ack(let seq): outbox.ack(seq, on: channel)
         case .scroll(let scroll): target.owner.scroll(scroll)
