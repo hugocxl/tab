@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.134.1 - 2026-11-24
+
+### Fixed
+
+- Grant write permissions to the release workflow so releases publish reliably.
+
 ## 0.134.0 - 2026-11-24
 
 ### Changed
