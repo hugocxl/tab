@@ -13,6 +13,8 @@ concurrency:
 
 jobs:
   release:
+    permissions:
+      contents: write
     uses: hugocxl/stack/.github/workflows/reusable-release-tag.yml@main
     with:
       app-name: Tab iOS
