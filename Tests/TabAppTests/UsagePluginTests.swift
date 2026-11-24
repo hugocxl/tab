@@ -40,12 +40,67 @@ final class UsagePluginTests: XCTestCase {
         let model = AppModel(dirs: dirs, theme: AppTheme(systemIsDark: true)) { _, _ in nil }
         model.plugins.activate(plugin: UsagePlugin())
         XCTAssertEqual(model.rightSidebarPanels.map(\.id), ["usage"])
+        XCTAssertEqual(model.sidebarFooterItems.map(\.id), ["usage-summary"])
         model.selectRightPanel("usage")
         XCTAssertEqual(model.rightPanel, "usage")
         XCTAssertNotNil(model.rightPanelContent("usage"))
         model.plugins.deactivate(.usage)
         XCTAssertTrue(model.rightSidebarPanels.isEmpty)
+        XCTAssertTrue(model.sidebarFooterItems.isEmpty)
         XCTAssertEqual(PluginCatalog.descriptor(for: .usage)?.panelIds, ["usage"])
+    }
+
+    func testSidebarFooterButtonTogglesFloatingCardAndCleansUpOnDeactivate() async throws {
+        let dirs = try ModelFixtures.profile()
+        addTeardownBlock { try? FileManager.default.removeItem(at: dirs.root) }
+        let model = AppModel(dirs: dirs, theme: AppTheme(systemIsDark: true)) { _, _ in nil }
+        let sidebar = SidebarViewController(model: model)
+        sidebar.view.frame = NSRect(x: 0, y: 0, width: 270, height: 600)
+        sidebar.view.layoutSubtreeIfNeeded()
+        XCTAssertTrue(sidebar.pluginFooterButtonIds.isEmpty)
+        XCTAssertFalse(sidebar.isFooterCardOpen)
+
+        model.plugins.activate(plugin: UsagePlugin())
+        try await settle { sidebar.pluginFooterButtonIds == ["usage-summary"] }
+
+        sidebar.toggleFooterCard("usage-summary")
+        XCTAssertTrue(sidebar.isFooterCardOpen)
+
+        sidebar.toggleFooterCard("usage-summary")
+        XCTAssertFalse(sidebar.isFooterCardOpen)
+
+        sidebar.toggleFooterCard("usage-summary")
+        XCTAssertTrue(sidebar.isFooterCardOpen)
+
+        model.plugins.deactivate(.usage)
+        try await settle { sidebar.pluginFooterButtonIds.isEmpty && !sidebar.isFooterCardOpen }
+    }
+
+    func testCompactCardShowsCompressedUsageAndSharesStoreWithPanel() async throws {
+        let theme = AppTheme(systemIsDark: true)
+        let identity = ServerId()
+        let home = ProjectDescriptor.home(directory: ServerPath(NSHomeDirectory()))
+        let server = ModelFakeServer(identity: identity, catalog: CatalogPage(server: identity, home: home.id, revision: 1, projects: [home]))
+        server.usageLimits = Self.sample(now: Date())
+        let store = UsageStore()
+
+        let card = UsageCompactCardController(theme: theme, store: store) { _ in (server, nil) }
+        card.show(project: (ProjectId(), identity))
+        try await settle { !card.rows.isEmpty }
+        XCTAssertEqual(card.rows.map { $0.limits.providerId }, ["claude-side", "codex", "claude", "grok"])
+        XCTAssertEqual(card.rows.first?.tone, .low)
+        XCTAssertEqual(card.rows.first?.bar?.fraction, 0.86)
+        XCTAssertNil(card.rows.last?.bar)
+        XCTAssertGreaterThan(card.preferredHeight(forWidth: 250), 120)
+
+        card.apply(UsageConfig(order: .provider, figure: .left))
+        XCTAssertEqual(card.rows.map { $0.limits.providerId }, ["claude", "claude-side", "codex", "grok"])
+        XCTAssertEqual(card.rows[1].bar?.fraction, 0.14)
+
+        // Opening the right-sidebar panel with the same store sees the cached reading immediately.
+        let panel = UsagePanelController(theme: theme, store: store) { _ in (server, nil) }
+        panel.show(project: (ProjectId(), identity))
+        XCTAssertEqual(panel.cards.count, 4)
     }
 
     func testPanelShowsOneCardPerAccountClosestToItsLimitFirst() async throws {

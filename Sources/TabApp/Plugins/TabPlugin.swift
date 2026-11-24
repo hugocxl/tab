@@ -46,6 +46,48 @@ public struct PluginSidebarPanel {
     }
 }
 
+/// Content shown inside a floating card at the bottom of the left sidebar.
+@MainActor
+public protocol SidebarFooterCardContent: AnyObject {
+    var view: NSView { get }
+    /// Called when the card's preferred height changes so the sidebar can refit it.
+    var onPreferredSizeChange: (() -> Void)? { get set }
+    /// The current project changed.
+    func projectDidChange(_ project: Project?)
+    func didShow()
+    func didHide()
+    /// Height the card wants at `width`, before the sidebar caps it to available space.
+    func preferredHeight(forWidth width: CGFloat) -> CGFloat
+}
+
+/// A button in the left sidebar's footer contributed by a plugin, opening a
+/// floating card at the bottom of the left sidebar when clicked.
+@MainActor
+public struct PluginSidebarFooterItem {
+    public let id: String
+    public let pluginId: PluginId
+    public let title: String
+    public let icon: AppIcon
+    public let order: Int
+    public let makeCard: @MainActor (AppModel, _ dismiss: @escaping @MainActor () -> Void) -> SidebarFooterCardContent
+
+    public init(
+        id: String,
+        pluginId: PluginId,
+        title: String,
+        icon: AppIcon,
+        order: Int = 100,
+        makeCard: @escaping @MainActor (AppModel, _ dismiss: @escaping @MainActor () -> Void) -> SidebarFooterCardContent
+    ) {
+        self.id = id
+        self.pluginId = pluginId
+        self.title = title
+        self.icon = icon
+        self.order = order
+        self.makeCard = makeCard
+    }
+}
+
 /// Entry point implemented by every Tab plugin.
 @MainActor
 public protocol TabPlugin: AnyObject {

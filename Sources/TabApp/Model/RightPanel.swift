@@ -56,6 +56,11 @@ extension AppModel {
         plugins.sidebarPanels
     }
 
+    /// All left-sidebar footer buttons contributed by active plugins, in order.
+    public var sidebarFooterItems: [PluginSidebarFooterItem] {
+        plugins.sidebarFooterItems
+    }
+
     /// The panel open on the right, if any active plugin provides it.
     public var rightPanel: String? {
         guard activeTab?.zoomed == nil else { return nil }

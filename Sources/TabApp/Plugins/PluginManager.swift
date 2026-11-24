@@ -18,6 +18,7 @@ public final class PluginManager {
     private var states: [PluginId: PluginInstallState] = [:]
 
     private var panelsByPlugin: [PluginId: [PluginSidebarPanel]] = [:]
+    private var footerItemsByPlugin: [PluginId: [PluginSidebarFooterItem]] = [:]
     private var panesByPlugin: [PluginId: Set<PaneKind>] = [:]
     private var settingsViewByPlugin: [PluginId: @MainActor (SettingsStore) -> AnyView] = [:]
     private var filesHandlers: [PluginId: [@MainActor (ProjectId, FileChanges) -> Void]] = [:]
@@ -68,6 +69,26 @@ public final class PluginManager {
     /// Creates the content controller for a registered right-sidebar panel.
     public func makePanelContent(_ id: String) -> RightPanelContent? {
         sidebarPanel(id)?.makeContent(model)
+    }
+
+    /// All left-sidebar footer items contributed by currently active plugins, in order.
+    public var sidebarFooterItems: [PluginSidebarFooterItem] {
+        footerItemsByPlugin.values
+            .flatMap { $0 }
+            .sorted { lhs, rhs in
+                if lhs.order != rhs.order { return lhs.order < rhs.order }
+                return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+            }
+    }
+
+    /// A registered left-sidebar footer item, if its plugin is active.
+    public func sidebarFooterItem(_ id: String) -> PluginSidebarFooterItem? {
+        for items in footerItemsByPlugin.values {
+            if let match = items.first(where: { $0.id == id }) {
+                return match
+            }
+        }
+        return nil
     }
 
     /// Whether `id` is active and provides a Settings configuration page.
@@ -234,6 +255,9 @@ public final class PluginManager {
             }
         }
         settingsViewByPlugin.removeValue(forKey: id)
+        if footerItemsByPlugin.removeValue(forKey: id) != nil {
+            model.notify(.panel)
+        }
         filesHandlers.removeValue(forKey: id)
         gitHandlers.removeValue(forKey: id)
         reconnectHandlers.removeValue(forKey: id)
@@ -289,6 +313,10 @@ public final class PluginManager {
 
     func registerSidebarPanel(_ panel: PluginSidebarPanel, for pluginId: PluginId) {
         panelsByPlugin[pluginId, default: []].append(panel)
+    }
+
+    func registerSidebarFooterItem(_ item: PluginSidebarFooterItem, for pluginId: PluginId) {
+        footerItemsByPlugin[pluginId, default: []].append(item)
     }
 
     func registerPane(_ kind: PaneKind, factory: @escaping PaneRegistry.Factory, for pluginId: PluginId) {

@@ -3,6 +3,18 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.133.0 - 2026-11-24
+
+### Changed
+
+- Show agent usage in a floating sidebar card.
+
+## 0.132.3 - 2026-11-24
+
+### Changed
+
+- Agent usage is available from a floating card at the bottom of the sidebar.
+
 ## 0.132.2 - 2026-11-24
 
 ### Added

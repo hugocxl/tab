@@ -31,6 +31,11 @@ final class SidebarViewController: NSViewController {
     private let filter = SidebarFilterView()
     private let addButton = ChromeButton(ChromeIcon.addProject, label: "Add Project")
     private let serversButton = ChromeButton(ChromeIcon.globeBadgePlus, label: "Remote Servers")
+    private var pluginFooterButtons: [(id: String, button: ChromeButton)] = []
+    private var openFooterCardId: String?
+    private var footerCard: SidebarFooterCardContent?
+    private var footerCardHost: SidebarFloatingCardHost?
+    private var footerCardProject: ProjectId?
     private let resizeHandle = SidebarResizeHandle()
     private var snapshot: SidebarSnapshot?
     private var collapsedProjects: Set<ProjectId> = []
@@ -129,7 +134,86 @@ final class SidebarViewController: NSViewController {
     private func updateChrome(_ snapshot: SidebarSnapshot) {
         toggle.toolTip = isExpanded ? "Hide Sidebar" : "Show Sidebar"
         if filter.text != model.nameFilter { filter.text = model.nameFilter }
+        syncPluginFooterItems()
+        if !isExpanded {
+            closeFooterCard(animated: false)
+        } else if let footerCard {
+            let project = model.currentProject
+            if footerCardProject != project.id {
+                footerCardProject = project.id
+                footerCard.projectDidChange(project)
+            }
+        }
         root.needsLayout = true
+    }
+
+    // MARK: Plugin Footer Cards
+
+    var pluginFooterButtonIds: [String] { pluginFooterButtons.map(\.id) }
+    var isFooterCardOpen: Bool { footerCard != nil }
+
+    private func syncPluginFooterItems() {
+        let items = model.sidebarFooterItems
+        if items.map(\.id) != pluginFooterButtons.map(\.id) {
+            for (_, button) in pluginFooterButtons { button.removeFromSuperview() }
+            pluginFooterButtons = items.map { item in
+                let button = ChromeButton(item.icon, label: item.title)
+                button.onPress = { [weak self] _ in self?.toggleFooterCard(item.id) }
+                footer.addSubview(button)
+                return (item.id, button)
+            }
+            if let openId = openFooterCardId, !items.contains(where: { $0.id == openId }) {
+                closeFooterCard(animated: false)
+            }
+        }
+        updateFooterButtonStates()
+    }
+
+    private func updateFooterButtonStates() {
+        for (id, button) in pluginFooterButtons {
+            button.isOn = id == openFooterCardId
+        }
+    }
+
+    func toggleFooterCard(_ id: String) {
+        if openFooterCardId == id {
+            closeFooterCard(animated: true)
+            return
+        }
+        closeFooterCard(animated: false)
+        guard let item = model.plugins.sidebarFooterItem(id) else { return }
+        let content = item.makeCard(model) { [weak self] in
+            self?.closeFooterCard(animated: true)
+        }
+        content.onPreferredSizeChange = { [weak self] in
+            self?.root.needsLayout = true
+        }
+        let host = SidebarFloatingCardHost(content: content.view, theme: model.theme)
+        root.addSubview(host, positioned: .below, relativeTo: resizeHandle)
+        openFooterCardId = id
+        footerCard = content
+        footerCardHost = host
+        let project = model.currentProject
+        footerCardProject = project.id
+        updateFooterButtonStates()
+        content.projectDidChange(project)
+        content.didShow()
+        layoutRoot()
+        InterfaceMotion.animate(host, from: nil, style: model.appearance.animationStyle)
+    }
+
+    func closeFooterCard(animated: Bool) {
+        guard let host = footerCardHost, let card = footerCard else { return }
+        card.didHide()
+        if animated {
+            InterfaceMotion.dismiss(host, style: model.appearance.animationStyle)
+        }
+        host.removeFromSuperview()
+        openFooterCardId = nil
+        footerCard = nil
+        footerCardHost = nil
+        footerCardProject = nil
+        updateFooterButtonStates()
     }
 
     private func rebuild(_ snapshot: SidebarSnapshot) {
@@ -496,10 +580,18 @@ final class SidebarViewController: NSViewController {
         CircleButton.layOut([commandPalette, newTab], trailingAt: bounds.width - ChromeButton.gap, y: y)
         let footerHeight = ChromeButton.rowHeight
         footer.frame = CGRect(x: 0, y: bounds.height - footerHeight, width: bounds.width, height: footerHeight)
-        CircleButton.layOut([addButton, serversButton], trailingAt: bounds.width - ChromeButton.gap, y: y)
-        filter.frame = CGRect(x: Metrics.gutter, y: y, width: max(addButton.frame.minX - ChromeButton.gap - Metrics.gutter, side), height: side)
+        let rightButtons = pluginFooterButtons.map(\.button) + [addButton, serversButton]
+        CircleButton.layOut(rightButtons, trailingAt: bounds.width - ChromeButton.gap, y: y)
+        let firstRightX = rightButtons.first?.frame.minX ?? (bounds.width - ChromeButton.gap)
+        filter.frame = CGRect(x: Metrics.gutter, y: y, width: max(firstRightX - ChromeButton.gap - Metrics.gutter, side), height: side)
         let scrollTop = Self.titleBarHeight
         scroll.frame = CGRect(x: 0, y: scrollTop, width: bounds.width, height: max(footer.frame.minY - scrollTop, 0))
+        if let host = footerCardHost, let card = footerCard {
+            let width = max(bounds.width - Metrics.gutter - ChromeButton.gap, 140)
+            let maxHeight = min(max(footer.frame.minY - topRow.frame.maxY - Metrics.gutter, 80), 320)
+            let height = min(max(card.preferredHeight(forWidth: width), 56), maxHeight)
+            host.frame = CGRect(x: Metrics.gutter, y: footer.frame.minY - height, width: width, height: height)
+        }
         resizeHandle.frame = CGRect(x: bounds.width - 3, y: 0, width: 6, height: bounds.height)
     }
 }
@@ -518,6 +610,59 @@ final class SidebarRootView: ThemedView {
     override func layout() {
         super.layout()
         controller?.layoutRoot()
+    }
+}
+
+/// Floating glass card shell anchored above the left sidebar's footer.
+private final class SidebarFloatingCardHost: ThemedView {
+    private let clip = NSView()
+    private let glass = GlassView(style: .sidebarCard)
+    private let content: NSView
+
+    init(content: NSView, theme: AppTheme) {
+        self.content = content
+        super.init(frame: .zero)
+        self.theme = theme
+        layer?.masksToBounds = false
+        layer?.shadowColor = NSColor.black.cgColor
+        layer?.shadowOpacity = 0.24
+        layer?.shadowRadius = 14
+        layer?.shadowOffset = CGSize(width: 0, height: -4)
+
+        clip.wantsLayer = true
+        clip.layer?.cornerRadius = GlassView.Style.sidebarCard.cornerRadius
+        clip.layer?.cornerCurve = .continuous
+        clip.layer?.masksToBounds = true
+        clip.layer?.borderWidth = Metrics.border
+
+        content.translatesAutoresizingMaskIntoConstraints = true
+        clip.addSubview(glass)
+        clip.addSubview(content)
+        addSubview(clip)
+        applySurface()
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    override func themeDidChange() {
+        applySurface()
+    }
+
+    private func applySurface() {
+        glass.appearance = theme.nsAppearance
+        clip.layer?.backgroundColor = theme.card.withAlphaComponent(theme.glassEnabled ? 0.72 : 0.98).cgColor
+        clip.layer?.borderColor = theme.fg(alpha: 0.12).cgColor
+    }
+
+    override func layout() {
+        super.layout()
+        clip.frame = bounds
+        glass.frame = clip.bounds
+        content.frame = clip.bounds
+        layer?.shadowPath = CGPath(roundedRect: bounds, cornerWidth: GlassView.Style.sidebarCard.cornerRadius,
+                                   cornerHeight: GlassView.Style.sidebarCard.cornerRadius, transform: nil)
     }
 }
 

@@ -13,19 +13,13 @@ final class UsagePanelController: NSViewController {
     /// The side connection and, for a remote server, its name.
     typealias Resolve = @MainActor (ProjectId) -> (client: ServerAPI?, serverName: String?)?
 
-    private enum Load {
-        case loading(previous: AgentUsageLimitsReply?)
-        case loaded(AgentUsageLimitsReply, at: Date)
-        case failed(String)
-    }
-
     /// How long a reading shows before showing the panel asks again.
-    static let freshness: TimeInterval = 60
+    static let freshness: TimeInterval = UsageStore.freshness
 
     private let resolve: Resolve
     private let theme: AppTheme
+    private let store: UsageStore
     private var project: (id: ProjectId, server: ServerId)?
-    private var loads: [ServerId: Load] = [:]
     private(set) var config = UsageConfig()
     /// The provider the chips show alone; nil shows every account.
     private(set) var filter: AgentChatProvider?
@@ -47,10 +41,16 @@ final class UsagePanelController: NSViewController {
     private let stack = NSStackView()
     private let message = NativeMessageView()
 
-    init(theme: AppTheme, resolve: @escaping Resolve) {
+    init(theme: AppTheme, store: UsageStore? = nil, resolve: @escaping Resolve) {
         self.theme = theme
+        let store = store ?? UsageStore()
+        self.store = store
         self.resolve = resolve
         super.init(nibName: nil, bundle: nil)
+        store.observe(owner: self) { [weak self] server in
+            guard let self, self.project?.server == server else { return }
+            self.render()
+        }
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -143,7 +143,7 @@ final class UsagePanelController: NSViewController {
     /// relative times up to date.
     func tick() {
         guard visible, let project else { return }
-        if config.refreshMinutes > 0, case .loaded(_, let at) = loads[project.server],
+        if config.refreshMinutes > 0, case .loaded(_, let at) = store.load(for: project.server),
            Date().timeIntervalSince(at) >= TimeInterval(config.refreshMinutes * 60) - 5 {
             refresh(force: true)
         } else {
@@ -161,52 +161,14 @@ final class UsagePanelController: NSViewController {
 
     /// The server came back: what it reported before may be out of date.
     func reconnected(_ server: ServerId) {
-        guard case .failed = loads[server] else {
-            if project?.server == server { refresh(force: false) }
-            return
-        }
-        loads[server] = nil
+        store.clearFailure(for: server)
         if project?.server == server { refresh(force: false) }
     }
 
     /// Reads the limits again; without `force`, only when the last reading is stale.
     func refresh(force: Bool) {
         guard let project else { return }
-        let server = project.server
-        var previous: AgentUsageLimitsReply?
-        switch loads[server] {
-        case .loading:
-            return
-        case .loaded(let reply, let at):
-            if !force, Date().timeIntervalSince(at) < Self.freshness { return }
-            previous = reply
-        case .failed, nil:
-            break
-        }
-        guard let client = resolve(project.id)?.client else {
-            loads[server] = .failed("Connecting to the server…")
-            render()
-            return
-        }
-        loads[server] = .loading(previous: previous)
-        render()
-        Task { [weak self] in
-            let load: Load
-            do {
-                load = .loaded(try await client.agentUsageLimits(.init(forceRefresh: force)), at: Date())
-            } catch let error as ClientError {
-                if case .server(let reply) = error, reply.code == .unsupported {
-                    load = .failed("This server's Tab is too old to report AI usage. Update it to see your limits.")
-                } else {
-                    load = previous.map { .loaded($0, at: .distantPast) } ?? .failed(NativeErrors.friendly(error, folder: false))
-                }
-            } catch {
-                load = previous.map { .loaded($0, at: .distantPast) } ?? .failed(NativeErrors.friendly(error, folder: false))
-            }
-            guard let self else { return }
-            self.loads[server] = load
-            if self.project?.server == server { self.render() }
-        }
+        store.refresh(project: project, force: force, resolve: resolve)
     }
 
     /// The account cards shown now.
@@ -218,7 +180,7 @@ final class UsagePanelController: NSViewController {
 
     private func render() {
         guard isViewLoaded else { return }
-        let load = project.flatMap { loads[$0.server] }
+        let load = project.flatMap { store.load(for: $0.server) }
         let busy: Bool
         let reply: AgentUsageLimitsReply?
         switch load {
@@ -773,18 +735,18 @@ final class UsageLimitRow: NSView {
 /// A thin rounded bar filled to `fraction` in the limit's status color.
 @MainActor
 final class UsageBarView: NSView {
-    static let height: CGFloat = 6
+    nonisolated static let height: CGFloat = 6
     let fraction: Double
     private let color: NSColor
     private let track: NSColor
 
-    init(fraction: Double, color: NSColor, theme: AppTheme) {
+    init(fraction: Double, color: NSColor, height: CGFloat = UsageBarView.height, theme: AppTheme) {
         self.fraction = min(max(fraction, 0), 1)
         self.color = color
         track = theme.fg(alpha: 0.10)
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
-        heightAnchor.constraint(equalToConstant: Self.height).isActive = true
+        heightAnchor.constraint(equalToConstant: height).isActive = true
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }

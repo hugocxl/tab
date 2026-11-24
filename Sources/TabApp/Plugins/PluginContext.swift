@@ -28,6 +28,11 @@ public final class PluginContext {
         manager.registerSidebarPanel(panel, for: pluginId)
     }
 
+    /// Registers a left-sidebar footer button and its floating card owned by this plugin.
+    public func registerSidebarFooterItem(_ item: PluginSidebarFooterItem) {
+        manager.registerSidebarFooterItem(item, for: pluginId)
+    }
+
     /// Registers a pane content provider (such as `.diff`) owned by this plugin.
     public func registerPane(_ kind: PaneKind, factory: @escaping PaneRegistry.Factory) {
         manager.registerPane(kind, factory: factory, for: pluginId)
