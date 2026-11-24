@@ -336,6 +336,13 @@ extension ServerClient {
         try providersReply(await request(.maintainAgentProvider(id: id, action: action)))
     }
 
+    /// Checks `provider`, saved or not, without changing anything.
+    public func probeAgentProvider(_ provider: AgentProviderConfig) async throws -> AgentProviderHealth {
+        let reply = try await request(.probeAgentProvider(provider))
+        guard case .agentProviderHealth(let health) = reply else { throw unexpected(reply) }
+        return health
+    }
+
     private func providersReply(_ reply: ReplyBody) throws -> AgentProvidersState {
         guard case .agentProviders(let state) = reply else { throw unexpected(reply) }
         return state

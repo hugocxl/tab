@@ -94,6 +94,33 @@ final class AgentHistoryTests: XCTestCase {
         XCTAssertNil(history.sessionTitle(provider: .claude, session: claudeSession, directory: root.appendingPathComponent("elsewhere").path))
         XCTAssertNil(history.sessionTitle(provider: .claude, session: "../escape", directory: project.path))
     }
+    func testListsTheConversationsOfEachAddedAccountAndOnlyThose() throws {
+        // A second Claude account keeps its conversations in its own folder.
+        let workSession = "7a1c0b2d-0000-4000-8000-000000000003"
+        let work = root.appendingPathComponent("claude-work", isDirectory: true)
+        try write(work.appendingPathComponent("projects").appendingPathComponent(AgentHistory.claudeFolderName(project.path))
+            .appendingPathComponent(workSession + ".jsonl"), [
+                ["type": "user", "uuid": "w1", "cwd": project.path, "message": ["role": "user", "content": "Work task"]],
+                ["type": "ai-title", "aiTitle": "Quarterly report"],
+            ])
+        let settings = AgentProviderSettings(providers: [
+            AgentProviderConfig(id: "claude", kind: .claude),
+            AgentProviderConfig(id: "claude-work", kind: .claude, name: "Work", home: work.path),
+            AgentProviderConfig(id: "claude-again", kind: .claude, name: "Same folder"),
+        ])
+        let reply = history.list(settings, directory: project.path, excluding: [])
+        XCTAssertEqual(Set(reply.entries.map(\.providerSession)), [claudeSession, workSession],
+                       "Codex isn't added, and a folder two providers share is listed once")
+        XCTAssertEqual(reply.entries.first { $0.providerSession == workSession }?.providerID, "claude-work")
+        XCTAssertEqual(reply.entries.first { $0.providerSession == claudeSession }?.providerID, "claude")
+        XCTAssertEqual(history.of("claude-work", kind: .claude, settings: settings)
+            .sessionTitle(provider: .claude, session: workSession, directory: project.path), "Quarterly report")
+        XCTAssertNoThrow(try history.of("claude-work", kind: .claude, settings: settings)
+            .transcript(provider: .claude, session: workSession, directory: project.path))
+        XCTAssertTrue(history.list(AgentProviderSettings(), directory: project.path, excluding: []).entries.isEmpty,
+                      "with nothing added there is nothing to continue")
+    }
+
     func testListsOnlyThisFoldersConversationsWithTheirTitles() {
         let reply = history.list(directory: project.path, excluding: [])
         XCTAssertEqual(Set(reply.entries.map(\.providerSession)), [claudeSession, codexSession])

@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.136.0 - 2026-11-24
+
+### Changed
+
+- Show only the agent providers you add, with a guided setup form that keeps several accounts apart.
+
 ## 0.135.2 - 2026-11-24
 
 ### Changed

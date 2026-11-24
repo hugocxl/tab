@@ -365,6 +365,12 @@ public final class SettingsStore {
     }
 
     /// Adds a provider of `kind` and returns its ID.
+    /// What the server finds for `provider`, saved or not; nil when it can't check one it hasn't saved.
+    public func probeAgentProvider(_ provider: AgentProviderConfig) async -> AgentProviderHealth? {
+        guard let host, serverState == .running else { return nil }
+        return try? await host.probeAgentProvider(provider)
+    }
+
     @discardableResult
     /// Whether another provider fits; sets the list's error when it doesn't.
     public func canAddAgentProvider() -> Bool {

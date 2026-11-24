@@ -75,10 +75,67 @@ struct AgentHistory: Sendable {
     /// the provider sessions in `excluding`.
     func list(directory: String, excluding: Set<String>) -> AgentHistoryReply {
         var cwds = CwdMatcher(directory)
-        var entries = claudeEntries(&cwds, excluding: excluding) + codexEntries(&cwds, excluding: excluding)
-        entries.sort { $0.updatedAt > $1.updatedAt }
+        return Self.reply(claudeEntries(&cwds, excluding: excluding) + codexEntries(&cwds, excluding: excluding))
+    }
+
+    /// The conversations of `kind` only, each naming `providerID`.
+    func list(_ kind: AgentChatProvider, providerID: String?, directory: String, excluding: Set<String>) -> [AgentHistoryEntry] {
+        var cwds = CwdMatcher(directory)
+        let entries: [AgentHistoryEntry] = switch kind {
+        case .claude: claudeEntries(&cwds, excluding: excluding)
+        case .codex: codexEntries(&cwds, excluding: excluding)
+        case .antigravity, .gemini, .openCode, .grok, .kiro, .acp: []
+        }
+        return entries.map { entry in
+            var entry = entry
+            entry.providerID = providerID
+            return entry
+        }
+    }
+
+    private static func reply(_ entries: [AgentHistoryEntry]) -> AgentHistoryReply {
+        let entries = entries.sorted { $0.updatedAt > $1.updatedAt }
         let truncated = entries.count > AgentHistoryReply.maxEntries
         return AgentHistoryReply(entries: Array(entries.prefix(AgentHistoryReply.maxEntries)), truncated: truncated)
+    }
+
+    // MARK: Added providers
+
+    /// The history `provider` saves its conversations in: its own config folder, else its
+    /// kind's default one. A Codex account folder shares the Codex folder's conversations.
+    func of(_ provider: AgentProviderConfig) -> AgentHistory {
+        let home = provider.home.map(AgentProviderLaunch.expand).flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0, isDirectory: true) }
+        return AgentHistory(claude: provider.kind == .claude ? home ?? claude : claude,
+                            codex: provider.kind == .codex ? home ?? codex : codex)
+    }
+
+    /// The enabled providers whose conversations Tab can list, one per folder.
+    static func sources(_ settings: AgentProviderSettings) -> [AgentProviderConfig] {
+        var seen = Set<String>()
+        return settings.providers.filter { provider in
+            guard provider.enabled, provider.kind == .claude || provider.kind == .codex else { return false }
+            let home = provider.home.map(AgentProviderLaunch.expand) ?? ""
+            return seen.insert(provider.kind.rawValue + "\n" + home).inserted
+        }
+    }
+
+    /// The conversations of every added Claude Code and Codex provider started in `directory`.
+    func list(_ settings: AgentProviderSettings, directory: String, excluding: Set<String>) -> AgentHistoryReply {
+        Self.reply(Self.sources(settings).flatMap { provider in
+            of(provider).list(provider.kind, providerID: provider.id, directory: directory, excluding: excluding)
+        })
+    }
+
+    /// The provider that continues a conversation of `kind` saved by `id`'s folder: `id`'s,
+    /// else the first added one of the kind; nil when none is added.
+    static func source(_ id: String?, kind: AgentChatProvider, settings: AgentProviderSettings) -> AgentProviderConfig? {
+        if let found = settings.provider(id), found.kind == kind { return found }
+        return settings.providers.first { $0.kind == kind && $0.enabled } ?? settings.providers.first { $0.kind == kind }
+    }
+
+    /// The history `id`'s conversations of `kind` are in.
+    func of(_ id: String?, kind: AgentChatProvider, settings: AgentProviderSettings) -> AgentHistory {
+        Self.source(id, kind: kind, settings: settings).map(of) ?? self
     }
 
     /// The transcript of `session`, which must have started in `directory`.

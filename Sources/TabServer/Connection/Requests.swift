@@ -54,6 +54,10 @@ extension ClientConnection {
             Task { [self] in
                 reply(id, await asyncResult { .agentProviders(await server.agentProviders.check()) })
             }
+        case .probeAgentProvider(let provider):
+            Task { [self] in
+                reply(id, .agentProviderHealth(await server.agentProviders.probe(provider)))
+            }
         case .agentModelCatalog(let request):
             Task { [self] in
                 reply(id, await asyncResult { .agentModelCatalog(try await server.agentModelCatalog.handle(request)) })
@@ -72,14 +76,19 @@ extension ClientConnection {
                     let directory = try server.agentDirectory(request.project)
                     let open = server.agents.openProviderSessions()
                     let history = server.agentHistory
-                    var reply = try await runBlocking { history.list(directory: directory, excluding: open) }
+                    let settings = server.agentProviders.settings
+                    var reply = try await runBlocking { history.list(settings, directory: directory, excluding: open) }
                     reply.conversations = server.agents.savedConversations(project: request.project)
                     return .agentHistory(reply)
                 })
             }
-        case .importAgentHistory(let request):
+        case .importAgentHistory(let asked):
             Task { [self] in
-                let history = server.agentHistory
+                let settings = server.agentProviders.settings
+                let request = AgentHistoryImport(session: asked.session, project: asked.project, provider: asked.provider,
+                    providerSession: asked.providerSession,
+                    providerID: AgentHistory.source(asked.providerID, kind: asked.provider, settings: settings)?.id)
+                let history = server.agentHistory.of(request.providerID, kind: request.provider, settings: settings)
                 reply(id, await asyncResult {
                     .agentChat(try await server.agents.importHistory(request) { directory in
                         try history.transcript(provider: request.provider, session: request.providerSession, directory: directory)
@@ -319,7 +328,7 @@ extension ClientConnection {
             return .remoteAccess(remote.state())
 
         case .hello, .ping, .unknown, .authenticate, .pair, .git, .files, .exec, .cancelExec, .agentChat, .agentConversation, .agentCheckpoint, .agentAttachment,
-             .agentComposerContext, .agentModelCatalog, .agentUsageLimits, .checkAgentProviders, .agentHistory, .importAgentHistory, .openTunnel, .closeTunnel, .listSimulators, .simulatorAction, .attachSimulator,
+             .agentComposerContext, .agentModelCatalog, .agentUsageLimits, .checkAgentProviders, .probeAgentProvider, .agentHistory, .importAgentHistory, .openTunnel, .closeTunnel, .listSimulators, .simulatorAction, .attachSimulator,
              .detachSimulator, .simulatorScreenshot:
             throw ServiceError(.badRequest, "Unexpected request")
         }

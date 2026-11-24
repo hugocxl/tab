@@ -36,6 +36,7 @@ enum Panes {
         let record: JSONValue
         var started: AgentChatSnapshot?
         var message: String?
+        var providerID: String?
         switch pane.content {
         case .terminal(let selector?, _, _):
             let session = try await Sessions.calling(selector, client: client)
@@ -52,8 +53,10 @@ enum Panes {
             shown = AppPane(kind: .terminal, session: session.id, project: session.project, beside: caller,
                             placement: pane.placement, edge: pane.edge, anchor: pane.beside)
             record = Sessions.record(session)
-        case .agent(let provider, let text):
+        case .agent(let name, let text):
             let project = try await project(pane, client: client, target: target).id
+            let (provider, id) = try await Agents.provider(name, sending: text != nil, client: client)
+            providerID = id
             let snapshot = try await client.agentChat(.create(session: SessionId(), project: project, provider: provider))
             shown = AppPane(kind: .agent, session: snapshot.session, project: snapshot.project,
                             provider: snapshot.provider, beside: caller, placement: pane.placement,
@@ -89,7 +92,8 @@ enum Panes {
         if let started, let message {
             do {
                 _ = try await client.agentChat(.send(session: started.session, text: message, model: started.model,
-                                                     reasoningEffort: started.reasoningEffort))
+                                                     reasoningEffort: started.reasoningEffort,
+                                                     provider: providerID == nil ? nil : started.provider, providerID: providerID))
             } catch {
                 throw CLIError("started \(started.session), but could not send it the message: \(CLI.message(error))")
             }

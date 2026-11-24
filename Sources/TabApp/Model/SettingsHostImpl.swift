@@ -75,6 +75,9 @@ public final class SettingsHostImpl: SettingsHost {
         return state
     }
     public func checkAgentProviders() async throws -> AgentProvidersState { try await local().checkAgentProviders() }
+    public func probeAgentProvider(_ provider: AgentProviderConfig) async throws -> AgentProviderHealth {
+        try await local().probeAgentProvider(provider)
+    }
     public func maintainAgentProvider(_ id: String, action: AgentProviderMaintenance.Action) async throws -> AgentProvidersState {
         try await local().maintainAgentProvider(id, action: action)
     }

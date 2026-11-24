@@ -187,8 +187,8 @@ public enum SettingsCatalog {
         SettingItem("generated-titles", "Prefer generated titles", "", .terminal, "Titles"),
         SettingItem("startup-command", "Startup command", "", .terminal, "Shell"),
         // Agents
-        SettingItem("agent-providers", "Providers", "The coding agents configured on this Mac.", .agents, "Providers"),
-        SettingItem("agent-add-provider", "Add provider", "Add an account or coding agent: Claude Code, Codex, Antigravity CLI, Gemini CLI, OpenCode, Grok, Kiro or any that speaks the Agent Client Protocol.", .agents, "Providers"),
+        SettingItem("agent-providers", "Providers", "The coding agents and accounts you added. Agent panes, the model menu and AI usage offer only these.", .agents, "Providers"),
+        SettingItem("agent-add-provider", "Add provider", "Claude Code, Codex, Antigravity CLI, Gemini CLI, OpenCode, Grok, Kiro or any agent that speaks the Agent Client Protocol. Add one again for another account, such as work and personal.", .agents, "Providers"),
         SettingItem("agent-provider-enabled", "Provider", "", .agents, "Provider", subpage: .agentProvider),
         SettingItem("agent-provider-version", "Version", "The installed version, the latest release and the oldest one Tab works with.", .agents, "Provider", subpage: .agentProvider),
         SettingItem("agent-provider-sign-in", "Sign-in", "", .agents, "Provider", subpage: .agentProvider),

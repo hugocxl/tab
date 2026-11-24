@@ -27,6 +27,7 @@ public protocol ServerAPI: AnyObject, Sendable {
     func writeAgentProviders(_ settings: AgentProviderSettings) async throws -> AgentProvidersState
     func checkAgentProviders() async throws -> AgentProvidersState
     func maintainAgentProvider(_ id: String, action: AgentProviderMaintenance.Action) async throws -> AgentProvidersState
+    func probeAgentProvider(_ provider: AgentProviderConfig) async throws -> AgentProviderHealth
     func agentHistory(_ request: AgentHistoryRequest) async throws -> AgentHistoryReply
     func importAgentHistory(_ request: AgentHistoryImport) async throws -> AgentChatSnapshot
     func createSession(_ session: CreateSession) async throws -> SessionInfo
@@ -115,6 +116,10 @@ extension ServerAPI {
 
     public func maintainAgentProvider(_ id: String, action: AgentProviderMaintenance.Action) async throws -> AgentProvidersState {
         try await agentProviders()
+    }
+
+    public func probeAgentProvider(_ provider: AgentProviderConfig) async throws -> AgentProviderHealth {
+        throw ClientError.server(ErrorReply(code: .unsupported, message: "This server predates provider probes."))
     }
 
     public func agentComposerContext(_ request: AgentComposerContextRequest) async throws -> AgentComposerContextReply {

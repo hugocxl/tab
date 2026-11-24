@@ -123,11 +123,17 @@ final class AgentProviderStore: @unchecked Sendable {
         return state()
     }
 
+    /// Checks `provider` as `check` would, saved or not, changing nothing: the Add Provider
+    /// dialog's view of what it is filling in.
+    func probe(_ provider: AgentProviderConfig) async -> AgentProviderHealth {
+        await checked(provider, prepare: false)
+    }
+
     /// `provider`'s CLI, sign-in and version against its latest release.
-    private func checked(_ provider: AgentProviderConfig, freshLatest: Bool = false) async -> AgentProviderHealth {
+    private func checked(_ provider: AgentProviderConfig, freshLatest: Bool = false, prepare: Bool = true) async -> AgentProviderHealth {
         let environment = baseEnvironment()
         let at = now()
-        var health = (try? await runBlocking { Self.check(provider, environment: environment, now: at) })
+        var health = (try? await runBlocking { Self.check(provider, environment: environment, now: at, prepare: prepare) })
             ?? AgentProviderHealth(provider: provider.id, installed: false, checkedAt: at)
         await advise(&health, provider: provider, environment: environment, freshLatest: freshLatest)
         return health
@@ -320,7 +326,10 @@ final class AgentProviderStore: @unchecked Sendable {
     // MARK: Checking a CLI
 
     /// Runs `provider`'s CLI for its version and sign-in. Blocks for up to about 20 seconds.
-    static func check(_ provider: AgentProviderConfig, environment base: [String: String], now: Date) -> AgentProviderHealth {
+    /// Without `prepare`, a Codex account folder isn't linked, and a config folder that
+    /// doesn't exist yet counts as signed out rather than being made by the CLI.
+    static func check(_ provider: AgentProviderConfig, environment base: [String: String], now: Date,
+                      prepare: Bool = true) -> AgentProviderHealth {
         let environment = AgentProviderLaunch.environment(provider, base: base)
         let executable: URL
         do {
@@ -339,8 +348,15 @@ final class AgentProviderStore: @unchecked Sendable {
         var health = AgentProviderHealth(provider: provider.id, installed: true, version: version, checkedAt: now,
                                          executablePath: executable.path,
                                          signInCommand: AgentProviderLaunch.signInCommand(provider, executable: provider.executable.map { _ in executable.path }))
+        if !prepare, let home = AgentProviderLaunch.effectiveHome(provider),
+           !FileManager.default.fileExists(atPath: home), provider.environment.allSatisfy({ !provider.kind.spec.apiKeyVariables.contains($0.name) }) {
+            health.auth = .signedOut
+            health.message = "\(home) doesn't exist yet, so nothing is signed in there."
+            health.status = health.derivedStatus
+            return health
+        }
         do {
-            try AgentProviderLaunch.prepareShadowHome(provider)
+            if prepare { try AgentProviderLaunch.prepareShadowHome(provider) }
         } catch {
             health.message = error.localizedDescription
             health.status = .error

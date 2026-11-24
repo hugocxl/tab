@@ -46,6 +46,8 @@ final class SettingsModel: ObservableObject {
     private var pendingEdits: [String: () -> Void] = [:]
     private var observations: Set<AnyCancellable> = []
     private var reloadScheduled = false
+    /// Opens the Add Provider dialog once the providers are read.
+    private var addProviderWhenLoaded = false
 
     init(store: SettingsStore) {
         self.store = store
@@ -95,6 +97,13 @@ final class SettingsModel: ObservableObject {
         go(to: Location(category: subpage.category, subpage: subpage))
     }
 
+    /// Opens the Agents page with the Add Provider dialog, once the providers are read.
+    func addProvider() {
+        if subpage != nil || category != .agents { select(.agents) }
+        addProviderWhenLoaded = true
+        reload()
+    }
+
     /// Opens a coding agent's page.
     func openProvider(_ id: String) {
         go(to: Location(category: .agents, subpage: .agentProvider, provider: id))
@@ -126,6 +135,7 @@ final class SettingsModel: ObservableObject {
     }
 
     private func open(_ location: Location) {
+        addProviderWhenLoaded = false
         category = location.category
         subpage = location.subpage
         provider = location.provider
@@ -182,6 +192,10 @@ final class SettingsModel: ObservableObject {
             build(category, into: builder)
         }
         lastBuild = builder
+        if addProviderWhenLoaded, category == .agents, store.agentProviders != nil, window?.isVisible == true {
+            addProviderWhenLoaded = false
+            DispatchQueue.main.async { [weak self] in self?.showAddProvider() }
+        }
         if (store.pairing != nil || store.pairingBusy) && !builder.rowIds.contains("mobile-pair") {
             store.cancelPairing()
         }

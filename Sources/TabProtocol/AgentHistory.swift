@@ -17,14 +17,18 @@ public struct AgentHistoryEntry: Hashable, Codable, Sendable, Identifiable {
     public var providerSession: String
     public var title: String
     public var updatedAt: Date
+    /// The provider, such as `claude-work`, whose folder saved it, which continues it.
+    /// Nil from servers that read only each kind's default folder.
+    public var providerID: String?
 
-    public var id: String { provider.rawValue + ":" + providerSession }
+    public var id: String { (providerID ?? provider.rawValue) + ":" + providerSession }
 
-    public init(provider: AgentChatProvider, providerSession: String, title: String, updatedAt: Date) {
+    public init(provider: AgentChatProvider, providerSession: String, title: String, updatedAt: Date, providerID: String? = nil) {
         self.provider = provider
         self.providerSession = providerSession
         self.title = title
         self.updatedAt = updatedAt
+        self.providerID = providerID
     }
 
     /// Provider session IDs name files on the server, so only plain identifiers pass.
@@ -55,7 +59,7 @@ public struct AgentHistoryReply: Hashable, Codable, Sendable {
         guard entries.count <= Self.maxEntries else { throw .badRequest }
         for entry in entries {
             try AgentHistoryEntry.validate(providerSession: entry.providerSession)
-            guard entry.title.utf8.count <= Self.maxTitleBytes else { throw .badRequest }
+            guard entry.title.utf8.count <= Self.maxTitleBytes, (entry.providerID?.utf8.count ?? 0) <= 64 else { throw .badRequest }
         }
         guard (conversations?.count ?? 0) <= Self.maxEntries else { throw .badRequest }
         for conversation in conversations ?? [] {
@@ -74,15 +78,20 @@ public struct AgentHistoryImport: Hashable, Codable, Sendable {
     public var project: ProjectId
     public var provider: AgentChatProvider
     public var providerSession: String
+    /// The entry's `providerID`: the provider whose folder saved it, and that continues it.
+    public var providerID: String?
 
-    public init(session: SessionId, project: ProjectId, provider: AgentChatProvider, providerSession: String) {
+    public init(session: SessionId, project: ProjectId, provider: AgentChatProvider, providerSession: String,
+                providerID: String? = nil) {
         self.session = session
         self.project = project
         self.provider = provider
         self.providerSession = providerSession
+        self.providerID = providerID
     }
 
     public func validate() throws(ErrorCode) {
         try AgentHistoryEntry.validate(providerSession: providerSession)
+        if let providerID, !AgentProviderConfig.isValidID(providerID) { throw .badRequest }
     }
 }

@@ -139,8 +139,9 @@ public struct CLIPane: Hashable, Sendable {
     public enum Content: Hashable, Sendable {
         /// Shows `session`, or starts a terminal in `directory` and types `command`.
         case terminal(session: String?, directory: String?, command: String?)
-        /// A new conversation, sent `message` first when there is one.
-        case agent(provider: AgentChatProvider, message: String?)
+        /// A new conversation with `provider`, an added provider's ID or a kind of agent, or else
+        /// the first one added, sent `message` first when there is one.
+        case agent(provider: String?, message: String?)
         /// A copy of the conversation `agent`, or of the caller's, working in
         /// `project` or else in its source's, sent `message` first when there is one.
         case fork(agent: String?, project: String?, message: String?)

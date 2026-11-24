@@ -59,6 +59,13 @@ public struct AgentProviderConfig: Hashable, Codable, Sendable, Identifiable {
 
     public var isBuiltIn: Bool { kind.hasBuiltIn && id == kind.rawValue }
 
+    /// A built-in provider as older builds added it by themselves: nothing set but whether it is on.
+    var isUnchangedBuiltIn: Bool {
+        var unchanged = AgentProviderConfig.builtIn(kind)
+        unchanged.enabled = enabled
+        return isBuiltIn && self == unchanged
+    }
+
     /// The name the app shows: the chosen one, else the kind's.
     public var title: String {
         let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -73,6 +80,35 @@ public struct AgentProviderConfig: Hashable, Codable, Sendable, Identifiable {
 
     /// Whether the kind can keep an account's sign-in in a shadow home.
     public var supportsShadowHome: Bool { kind == .codex }
+
+    /// The API key it signs in with: the first of its kind's key variables that has a value.
+    public var apiKey: String? {
+        environment.first { kind.spec.apiKeyVariables.contains($0.name) && !$0.value.isEmpty }?.value
+    }
+
+    /// The folder its CLI keeps its sign-in in, written from `~`: a Codex account folder, else
+    /// its config folder, else its kind's default. Nil when the kind keeps one sign-in per
+    /// Mac, such as Antigravity CLI in the keychain.
+    public var signInFolder: String? {
+        guard homeVariable != nil else { return nil }
+        func folder(_ path: String?) -> String? {
+            var path = path?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            while path.count > 1, path.hasSuffix("/") { path.removeLast() }
+            guard !path.isEmpty else { return nil }
+            let home = NSHomeDirectory()
+            if path == home || path.hasPrefix(home + "/") { path = "~" + path.dropFirst(home.count) }
+            return path
+        }
+        return (supportsShadowHome ? folder(shadowHome) : nil) ?? folder(home) ?? folder(kind.spec.defaultHome)
+    }
+
+    /// Whether it and `other` would run signed in to the same account: the same API key, or
+    /// without one the same sign-in folder. Custom ACP agents are told apart by their commands.
+    public func sharesSignIn(with other: AgentProviderConfig) -> Bool {
+        guard kind == other.kind, kind != .acp else { return false }
+        if apiKey != nil || other.apiKey != nil { return apiKey == other.apiKey }
+        return signInFolder == other.signInFolder
+    }
 
     /// Marker colors the app offers for `accentColor`.
     public static let accentColors = ["#F2701B", "#E5484D", "#D6409F", "#8E4BF2", "#1F6FEB", "#1E9AA0", "#2FA84A", "#F29D1B"]
@@ -206,19 +242,39 @@ public struct AgentProviderSettings: Hashable, Codable, Sendable {
         normalize()
     }
 
-    private enum CodingKeys: String, CodingKey { case providers, healthCheckInterval }
+    /// 2 since providers are only ever added by the user. Older builds wrote none and
+    /// filled the list with every built-in kind.
+    static let revision = 2
+
+    private enum CodingKeys: String, CodingKey { case providers, healthCheckInterval, revision }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         providers = (try? c.decodeIfPresent(LossyProviders.self, forKey: .providers))?.providers ?? []
         healthCheckInterval = try c.decodeIfPresent(Int.self, forKey: .healthCheckInterval) ?? Self.defaultHealthCheckInterval
         normalize()
+        if (try? c.decodeIfPresent(Int.self, forKey: .revision)) == nil { dropSeededProviders() }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(providers, forKey: .providers)
+        try c.encode(healthCheckInterval, forKey: .healthCheckInterval)
+        try c.encode(Self.revision, forKey: .revision)
     }
 
     /// Drops repeated IDs.
     private mutating func normalize() {
         var seen = Set<String>()
         providers = providers.filter { seen.insert($0.id).inserted }
+    }
+
+    /// Older builds, and older apps saving to this server, list every built-in kind whether
+    /// the user added it or not. Such a list keeps only the providers the user changed.
+    private mutating func dropSeededProviders() {
+        let ids = Set(providers.map(\.id))
+        guard AgentChatProvider.builtIn.allSatisfy({ ids.contains($0.rawValue) }) else { return }
+        providers.removeAll(where: \.isUnchangedBuiltIn)
     }
 
     public func provider(_ id: String?) -> AgentProviderConfig? {

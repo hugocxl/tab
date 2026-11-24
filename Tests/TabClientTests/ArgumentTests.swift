@@ -263,9 +263,9 @@ final class ArgumentTests: XCTestCase {
                        CLIPane(placement: .pane, project: "App",
                                content: .terminal(session: nil, directory: "api", command: nil)))
         XCTAssertEqual(try pane(["pane", "new", "agent"]),
-                       CLIPane(placement: .pane, project: nil, content: .agent(provider: .claude, message: nil)))
+                       CLIPane(placement: .pane, project: nil, content: .agent(provider: nil, message: nil)))
         XCTAssertEqual(try pane(["pane", "new", "agent", "--project", "App", "--provider", "codex"]),
-                       CLIPane(placement: .pane, project: "App", content: .agent(provider: .codex, message: nil)))
+                       CLIPane(placement: .pane, project: "App", content: .agent(provider: "codex", message: nil)))
         XCTAssertEqual(try pane(["pane", "new", "agent", "--fork"]),
                        CLIPane(placement: .pane, project: nil, content: .fork(agent: nil, project: nil, message: nil)))
         XCTAssertEqual(try pane(["pane", "new", "agent", "--fork", id]),
@@ -288,22 +288,22 @@ final class ArgumentTests: XCTestCase {
         XCTAssertEqual(try pane(["pane", "new", "diff", "README.md", "--staged", "--project", "App"]),
                        CLIPane(placement: .pane, project: "App", content: .diff(path: "README.md", staged: true)))
         XCTAssertEqual(try pane(["pane", "new", "agent", "--", "Review the PR"]),
-                       CLIPane(placement: .pane, project: nil, content: .agent(provider: .claude, message: "Review the PR")))
+                       CLIPane(placement: .pane, project: nil, content: .agent(provider: nil, message: "Review the PR")))
         XCTAssertEqual(try pane(["tab", "new", "agent", "--", "Plan the release"]),
-                       CLIPane(placement: .tab, project: nil, content: .agent(provider: .claude, message: "Plan the release")))
+                       CLIPane(placement: .tab, project: nil, content: .agent(provider: nil, message: "Plan the release")))
         XCTAssertEqual(try pane(["pane", "new", "browser", "a.test", "--project", "App", "--profile", "Work"]),
                        CLIPane(placement: .pane, project: "App", content: .browser(url: "a.test", profile: "Work")))
         XCTAssertEqual(try pane(["tab", "new", "terminal", "--directory", "/tmp"]),
                        CLIPane(placement: .tab, project: nil, content: .terminal(session: nil, directory: "/tmp",
                                                                                  command: nil)))
         XCTAssertEqual(try pane(["tab", "new", "agent", "--provider", "codex"]),
-                       CLIPane(placement: .tab, project: nil, content: .agent(provider: .codex, message: nil)))
+                       CLIPane(placement: .tab, project: nil, content: .agent(provider: "codex", message: nil)))
         XCTAssertEqual(try pane(["tab", "new", "browser"]),
                        CLIPane(placement: .tab, project: nil, content: .browser(url: nil, profile: nil)))
         XCTAssertEqual(try command(["pane", "new", "agent", "--json"]),
-                       .pane(CLIPane(placement: .pane, project: nil, content: .agent(provider: .claude, message: nil)), json: true))
+                       .pane(CLIPane(placement: .pane, project: nil, content: .agent(provider: nil, message: nil)), json: true))
         for words in [
-            ["pane", "new", "agent", "--provider", "acp"], ["pane", "new", "agent", "--provider", "future"], ["pane", "new", "agent", "App"],
+            ["pane", "new", "agent", "--provider", "work account"], ["pane", "new", "agent", "--provider", ""], ["pane", "new", "agent", "App"],
             ["pane", "new", "agent", "--fork", "wispy-cedar"], ["pane", "new", "agent", "--fork", "--provider", "codex"],
             ["pane", "new", "editor", "a", "--line", "0"], ["pane", "new", "diff", "a", "b"],
             ["tab", "new", "editor", "a"], ["pane", "new", "simulator", "a", "b"],

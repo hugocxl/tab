@@ -1534,6 +1534,7 @@ final class AgentSessions: @unchecked Sendable {
             var snapshot = entries[request.session]?.snapshot
                 ?? AgentChatSnapshot(session: request.session, project: request.project, provider: request.provider)
             snapshot.provider = request.provider
+            snapshot.providerID = request.providerID
             snapshot.providerSession = request.providerSession
             snapshot.model = nil
             snapshot.reasoningEffort = nil
@@ -1544,7 +1545,7 @@ final class AgentSessions: @unchecked Sendable {
             snapshot.items = saved.items
             Self.finishItems(&snapshot.items)
             snapshot.items.append(AgentChatItem(kind: .notice,
-                text: "Continued from \(request.provider.name). New messages carry on this conversation."))
+                text: "Continued from \(providers(request.providerID, request.provider).title). New messages carry on this conversation."))
             let entry = Entry(snapshot, directory: directory)
             entry.hasSuccessfulTurn = true
             entries[request.session] = entry

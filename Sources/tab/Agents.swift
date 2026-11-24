@@ -22,6 +22,38 @@ enum Agents {
         }
     }
 
+    /// The provider a new conversation starts with: `name`, an added provider's ID or a kind
+    /// whose first added provider it means, else the first one added. A server that predates
+    /// provider settings runs `name`'s kind, Claude Code by default. With nothing added, the
+    /// pane opens asking for a provider, unless a message has to be sent.
+    static func provider(_ name: String?, sending: Bool, client: ServerClient) async throws -> (AgentChatProvider, String?) {
+        guard let state = try? await client.agentProviders() else {
+            guard let kind = AgentChatProvider(rawValue: name ?? AgentChatProvider.claude.rawValue), kind.hasBuiltIn else {
+                throw CLIError("--provider must be one of \(AgentChatProvider.builtIn.map(\.rawValue).joined(separator: ", ")) on this server")
+            }
+            return (kind, nil)
+        }
+        let added = state.settings.providers
+        let choices = added.filter(\.enabled).map(\.id).joined(separator: ", ")
+        guard let name else {
+            if let first = added.first(where: \.enabled) { return (first.kind, first.id) }
+            guard !sending else {
+                throw CLIError(added.isEmpty ? "no provider is added yet; add one in Settings › Agents"
+                                             : "every provider is off; turn one on in Settings › Agents")
+            }
+            return (.claude, nil)
+        }
+        if let provider = added.first(where: { $0.id == name }) {
+            guard provider.enabled else { throw CLIError("\(provider.title) is off; turn it on in Settings › Agents") }
+            return (provider.kind, provider.id)
+        }
+        if let kind = AgentChatProvider(rawValue: name) {
+            if let provider = added.first(where: { $0.kind == kind && $0.enabled }) { return (kind, provider.id) }
+            throw CLIError("\(kind.name) isn't added; add it in Settings › Agents" + (choices.isEmpty ? "" : ", or use \(choices)"))
+        }
+        throw CLIError("no provider \(name)" + (choices.isEmpty ? "; add one in Settings › Agents" : "; use \(choices)"))
+    }
+
     /// The Tab agent this command runs in, when it belongs to `server`.
     static func hostingAgent(server: ServerId,
                              environment: [String: String] = ProcessInfo.processInfo.environment) -> SessionId? {

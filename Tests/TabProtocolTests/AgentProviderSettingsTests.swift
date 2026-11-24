@@ -23,6 +23,58 @@ final class AgentProviderSettingsTests: XCTestCase {
         XCTAssertTrue(AgentProviderSettings().providers.isEmpty)
     }
 
+    func testProvidersOlderBuildsAddedByThemselvesAreDroppedAndChangedOnesKept() throws {
+        // Older builds listed every built-in kind, added or not, and wrote no revision.
+        let builtIns = AgentChatProvider.builtIn.map { kind -> String in
+            switch kind {
+            case .claude: #"{"id": "claude", "kind": "claude", "arguments": ["--chrome"]}"#
+            case .gemini: #"{"id": "gemini", "kind": "gemini", "enabled": false}"#
+            default: #"{"id": "\#(kind.rawValue)", "kind": "\#(kind.rawValue)", "enabled": true}"#
+            }
+        }
+        let legacy = #"{"providers": [\#((builtIns + [#"{"id": "claude-personal", "kind": "claude", "name": "Personal"}"#]).joined(separator: ","))]}"#
+        let migrated = try JSONDecoder().decode(AgentProviderSettings.self, from: Data(legacy.utf8))
+        XCTAssertEqual(migrated.providers.map(\.id), ["claude", "claude-personal"],
+                       "only the providers the user changed or added survive")
+
+        // Saved again, the list is the user's own and nothing is dropped any more.
+        let saved = try JSONEncoder().encode(migrated)
+        XCTAssertEqual(try JSONDecoder().decode(AgentProviderSettings.self, from: saved), migrated)
+        let explicit = AgentProviderSettings(providers: AgentChatProvider.builtIn.map { .builtIn($0) })
+        XCTAssertEqual(try JSONDecoder().decode(AgentProviderSettings.self, from: JSONEncoder().encode(explicit)).providers.count,
+                       AgentChatProvider.builtIn.count, "providers added by hand with nothing changed stay")
+
+        // A list without every built-in kind was the user's own already.
+        let partial = #"{"providers": [{"id": "claude", "kind": "claude"}, {"id": "codex", "kind": "codex"}]}"#
+        XCTAssertEqual(try JSONDecoder().decode(AgentProviderSettings.self, from: Data(partial.utf8)).providers.map(\.id),
+                       ["claude", "codex"])
+    }
+
+    func testAccountsThatSignInFromTheSamePlaceAreOneAccount() {
+        let claude = AgentProviderConfig(id: "claude", kind: .claude)
+        XCTAssertEqual(claude.signInFolder, "~/.claude")
+        XCTAssertTrue(claude.sharesSignIn(with: AgentProviderConfig(id: "claude-2", kind: .claude, home: NSHomeDirectory() + "/.claude/")),
+                      "the default folder written out is the same folder")
+        XCTAssertFalse(claude.sharesSignIn(with: AgentProviderConfig(id: "claude-work", kind: .claude, home: "~/.claude-work")))
+        let key = [AgentProviderVariable(name: "ANTHROPIC_API_KEY", value: "sk-1")]
+        XCTAssertFalse(claude.sharesSignIn(with: AgentProviderConfig(id: "claude-key", kind: .claude, environment: key)),
+                       "an API key is an account of its own")
+        XCTAssertTrue(AgentProviderConfig(id: "a", kind: .claude, environment: key)
+            .sharesSignIn(with: AgentProviderConfig(id: "b", kind: .claude, home: "~/.other", environment: key)))
+
+        let codex = AgentProviderConfig(id: "codex", kind: .codex)
+        XCTAssertFalse(codex.sharesSignIn(with: AgentProviderConfig(id: "codex-work", kind: .codex, shadowHome: "~/.codex-tab/work")),
+                       "a Codex account folder keeps its own sign-in while sharing the Codex folder")
+
+        let antigravity = AgentProviderConfig(id: "antigravity", kind: .antigravity)
+        XCTAssertNil(antigravity.signInFolder)
+        XCTAssertTrue(antigravity.sharesSignIn(with: AgentProviderConfig(id: "antigravity-2", kind: .antigravity)),
+                      "a kind with one sign-in per Mac is one account without an API key")
+        XCTAssertFalse(AgentProviderConfig(id: "acp", kind: .acp, executable: "qwen")
+            .sharesSignIn(with: AgentProviderConfig(id: "acp-2", kind: .acp, executable: "goose")))
+        XCTAssertFalse(claude.sharesSignIn(with: codex))
+    }
+
     func testAnOlderServersStateOffersOnlyTheKindsItRuns() throws {
         let checked = Date().timeIntervalSinceReferenceDate
         let old = """

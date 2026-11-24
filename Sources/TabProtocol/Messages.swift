@@ -299,6 +299,10 @@ public enum RequestBody: Hashable, Codable, Sendable {
     /// with the run in `maintenance`, which later reads follow until it finishes.
     /// Servers that predate it reply `unsupported`.
     case maintainAgentProvider(id: String, action: AgentProviderMaintenance.Action)
+    /// Checks a provider that may not be saved yet, such as one the Add Provider dialog is
+    /// filling in, without changing anything; replies `agentProviderHealth`. Servers that
+    /// predate it reply `unsupported`.
+    case probeAgentProvider(AgentProviderConfig)
     /// Refused with `serverBusy` while terminals run, unless `force`.
     case stopServer(force: Bool)
     case stopServerIfIdle
@@ -396,6 +400,7 @@ public enum RequestBody: Hashable, Codable, Sendable {
         case "writeAgentProviders": self = .writeAgentProviders(try c("settings"))
         case "checkAgentProviders": self = .checkAgentProviders
         case "maintainAgentProvider": self = .maintainAgentProvider(id: try c("id"), action: try c("action"))
+        case "probeAgentProvider": self = .probeAgentProvider(try c("provider"))
         case "stopServer": self = .stopServer(force: try c("force"))
         case "stopServerIfIdle": self = .stopServerIfIdle
         case "restartServer": self = .restartServer
@@ -559,6 +564,9 @@ public enum RequestBody: Hashable, Codable, Sendable {
             var c = try TaggedEncoding(encoder, "maintainAgentProvider")
             try c(id, "id")
             try c(action, "action")
+        case .probeAgentProvider(let provider):
+            var c = try TaggedEncoding(encoder, "probeAgentProvider")
+            try c(provider, "provider")
         case .stopServer(let force):
             var c = try TaggedEncoding(encoder, "stopServer")
             try c(force, "force")
@@ -678,6 +686,8 @@ public enum ReplyBody: Hashable, Codable, Sendable {
     case serverSettings(ServerSettingsDoc)
     case serverSettingsWritten
     case agentProviders(AgentProvidersState)
+    /// What a `probeAgentProvider` found.
+    case agentProviderHealth(AgentProviderHealth)
     case serverStopping
     /// Terminals are running, so the server didn't stop.
     case serverBusy
@@ -759,6 +769,7 @@ public enum ReplyBody: Hashable, Codable, Sendable {
         case "serverSettings": self = .serverSettings(try c("settings"))
         case "serverSettingsWritten": self = .serverSettingsWritten
         case "agentProviders": self = .agentProviders(try c("state"))
+        case "agentProviderHealth": self = .agentProviderHealth(try c("health"))
         case "serverStopping": self = .serverStopping
         case "serverBusy": self = .serverBusy
         case "serverRestarting": self = .serverRestarting
@@ -879,6 +890,9 @@ public enum ReplyBody: Hashable, Codable, Sendable {
         case .agentProviders(let state):
             var c = try TaggedEncoding(encoder, "agentProviders")
             try c(state, "state")
+        case .agentProviderHealth(let health):
+            var c = try TaggedEncoding(encoder, "agentProviderHealth")
+            try c(health, "health")
         case .serverStopping: try TaggedEncoding(encoder, "serverStopping")
         case .serverBusy: try TaggedEncoding(encoder, "serverBusy")
         case .serverRestarting: try TaggedEncoding(encoder, "serverRestarting")

@@ -75,6 +75,33 @@ final class AgentProviderStoreTests: XCTestCase {
         XCTAssertNotNil(store.state().health("codex"))
     }
 
+    func testProbingAProviderBeingAddedChangesNothing() async throws {
+        let directory = try root()
+        let claude = try fakeCLI(in: directory, version: "2.1.400",
+                                 auth: #"{"loggedIn":true,"subscriptionType":"max","email":"me@example.com"}"#)
+        let url = directory.appendingPathComponent("agent-providers.json")
+        let store = AgentProviderStore(url: url, environment: { ["PATH": "/usr/bin:/bin"] },
+                                       latestVersions: AgentProviderLatestVersions(lookup: { _ in nil }))
+        let found = await store.probe(AgentProviderConfig(id: "claude", kind: .claude, executable: claude.path))
+        XCTAssertEqual(found.version, "2.1.400")
+        XCTAssertEqual(found.email, "me@example.com")
+        XCTAssertEqual(found.executablePath, claude.path)
+
+        // Another account's folder doesn't exist until it signs in; probing it doesn't make it.
+        let work = directory.appendingPathComponent("claude-work").path
+        let fresh = await store.probe(AgentProviderConfig(id: "claude", kind: .claude, executable: claude.path, home: work))
+        XCTAssertTrue(fresh.installed)
+        XCTAssertEqual(fresh.auth, .signedOut)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: work))
+        let shadow = directory.appendingPathComponent("codex-personal").path
+        _ = await store.probe(AgentProviderConfig(id: "codex", kind: .codex, executable: claude.path, shadowHome: shadow))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: shadow), "a Codex account folder is linked only once it is added")
+
+        XCTAssertTrue(store.settings.providers.isEmpty)
+        XCTAssertTrue(store.state().health.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+    }
+
     func testAMissingCLIOrSignInSaysWhatToDo() throws {
         let directory = try root()
         let missing = AgentProviderStore.check(AgentProviderConfig(id: "claude", kind: .claude, executable: "/nonexistent/claude"),

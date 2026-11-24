@@ -66,6 +66,12 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
         showWindow(nil)
     }
 
+    /// Shows the Agents page with the Add Provider dialog on it.
+    public func addAgentProvider() {
+        show(.agents)
+        model.addProvider()
+    }
+
     /// Opens a page, as clicking it in the sidebar does.
     public func select(_ category: SettingsCategory) {
         model.select(category)

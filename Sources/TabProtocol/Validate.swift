@@ -240,6 +240,8 @@ extension RequestBody {
             try settings.validate()
         case .maintainAgentProvider(let id, _):
             if id.isEmpty || id.utf8.count > 64 { throw .badRequest }
+        case .probeAgentProvider(let provider):
+            try provider.validate()
         case .ping, .listSimulators, .listSessions, .attachWithoutResize, .endSession, .closeSession, .discardSession,
              .readSavedScreen, .identifyClient, .cancelCreation, .readCatalog, .listProjectSessions, .readTabs,
              .readServerSettings, .readAgentProviders, .checkAgentProviders, .stopServer, .stopServerIfIdle, .restartServer, .cancelExec, .readActivity,
@@ -390,6 +392,8 @@ extension ReplyBody {
         case .agentProviders(let state):
             try state.settings.validate()
             guard state.health.count <= AgentProviderSettings.maxProviders else { throw .badRequest }
+        case .agentProviderHealth(let health):
+            if health.provider.utf8.count > 64 { throw .badRequest }
         case .searchPage(let page):
             try page.validate()
         case .sessions(let sessions):

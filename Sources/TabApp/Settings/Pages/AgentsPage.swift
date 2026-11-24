@@ -12,8 +12,8 @@ extension SettingsModel {
         if state == nil {
             b.row("agent-providers", .label("Loading providers…", .secondary))
         } else if settings.providers.isEmpty {
-            b.row("agent-providers", .label("No providers configured yet", .secondary),
-                  description: "Add a provider to use agent panes and AI usage.")
+            b.row("agent-providers", .label("No providers yet", .secondary),
+                  description: "Add the coding agents you use. Agent panes, the model menu and AI usage offer only the ones added here.")
         }
         for provider in settings.providers where state != nil {
             let health = state?.health(provider.id)
@@ -56,8 +56,8 @@ extension SettingsModel {
 
     /// The Add Provider dialog, which opens the new provider's page.
     func showAddProvider() {
-        guard let state = store.agentProviders, store.canAddAgentProvider() else { return }
-        let sheet = AddProviderSheet(settings: state.settings, kinds: state.kinds) { [weak self] config, integrate in
+        guard window?.attachedSheet == nil, let state = store.agentProviders, store.canAddAgentProvider() else { return }
+        let sheet = AddProviderSheet(state: state, probe: { [store] in await store.probeAgentProvider($0) }) { [weak self] config, integrate in
             guard let self, let id = store.addAgentProvider(config, integrate: integrate) else { return }
             openProvider(id)
         }
@@ -80,6 +80,9 @@ extension SettingsModel {
         }, label: provider.title, description: Self.detail(provider, health: health),
            icon: AgentLogo.image(for: provider, lightBackground: light), iconSide: 28)
         buildStatus(b, provider: provider, health: health, run: state?.maintenance(id))
+        if let warning = Self.sharedAccountWarning(provider, state: state) {
+            b.note("agent-provider-sign-in", warning, error: true)
+        }
 
         // General
         b.row("agent-provider-name", b.field("agent-provider-name", provider.name ?? "", placeholder: provider.kind.name) { text in
@@ -440,7 +443,7 @@ extension SettingsModel {
         guard health.installed else { return "Not found" }
         var parts: [String]
         switch health.auth {
-        case .signedIn: parts = ["Signed in", health.account].compactMap { $0 }
+        case .signedIn: parts = [health.email.map { "Signed in as \($0)" } ?? "Signed in", health.account].compactMap { $0 }
         case .signedOut: parts = ["Not signed in"]
         case .unknown: parts = ["Installed"]
         }
@@ -464,6 +467,26 @@ extension SettingsModel {
         }
         if let account = health.account { parts.append(account) }
         return parts.joined(separator: " · ")
+    }
+
+    /// Why `provider` is the same account as another one, or nil: they sign in from the same
+    /// place, or their checks found the same signed-in address.
+    static func sharedAccountWarning(_ provider: AgentProviderConfig, state: AgentProvidersState?) -> String? {
+        guard let state else { return nil }
+        let others = state.settings.providers.filter { $0.id != provider.id && $0.kind == provider.kind }
+        if let other = others.first(where: provider.sharesSignIn) {
+            if provider.apiKey != nil { return "“\(other.title)” uses the same API key, so both are one account." }
+            guard let folder = provider.signInFolder else {
+                return "\(provider.kind.name) keeps one account sign-in per Mac, so this is the same account as “\(other.title)”. "
+                    + "Add an API key under Variables to use another account."
+            }
+            return "“\(other.title)” also signs in from \(folder), so both are one account. "
+                + "Set a folder of its own above, then sign in, to use another account."
+        }
+        guard let health = state.health(provider.id), health.auth == .signedIn, let email = health.email?.lowercased(),
+              let other = others.first(where: { state.health($0.id)?.auth == .signedIn && state.health($0.id)?.email?.lowercased() == email })
+        else { return nil }
+        return "Signed in as \(email), the same account as “\(other.title)”. Sign in to another account to tell them apart."
     }
 
     static func lastChecked(_ state: AgentProvidersState?, now: Date = Date()) -> String {

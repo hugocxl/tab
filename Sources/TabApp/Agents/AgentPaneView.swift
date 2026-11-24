@@ -90,9 +90,11 @@ final class AgentPaneView: ThemedView {
     private let notice = AgentSurfaceCard(style: .agentPanel)
     private let emptyTitle = makeLabel("What can I help with?", font: AppFont.system(21, weight: .medium))
     private let emptyDetail = makeLabel("Ask a question or make something new.", font: AppFont.body)
-    /// Shown on an empty pane when no agent providers have been configured in Settings › Agents.
-    let configureProviders = PillButton("Open Settings › Agents", style: .primary)
-    var noProvidersConfigured = false { didSet { if noProvidersConfigured != oldValue { needsLayout = true } } }
+    /// Why a new conversation has no provider to start with: none added in Settings › Agents, or every one turned off.
+    enum ProviderGap: Equatable { case noneAdded, allOff }
+    /// Shown, with its button, in place of the composer of a new conversation that has no provider to start with.
+    var providerGap: ProviderGap? { didSet { if providerGap != oldValue { needsLayout = true } } }
+    let configureProviders = PillButton("Add Provider…", style: .primary)
     /// What the agent waits for; pressing it scrolls to the request.
     private let activity = AgentPanelLine(accessibilityLabel: "Agent activity")
     private var busy = false
@@ -318,7 +320,7 @@ final class AgentPaneView: ThemedView {
         layoutComposerControls(width: width, top: controlsTop)
         let cardHeight = controlsTop + Self.controlSize + 10
         let empty = isEmptyConversation
-        let showNoProviders = empty && noProvidersConfigured
+        let showNoProviders = empty && providerGap != nil
         let cardY = empty ? floor((bounds.height - cardHeight) / 2) + 40 : bounds.height - 12 - cardHeight
         composerCard.isHidden = showNoProviders
         composerCard.frame = NSRect(x: left, y: max(0, cardY), width: width, height: cardHeight)
@@ -330,8 +332,12 @@ final class AgentPaneView: ThemedView {
         emptyDetail.isHidden = !empty
         configureProviders.isHidden = !showNoProviders
         if showNoProviders {
-            let title = "No agent providers configured"
-            let detail = "Add a provider in Settings › Agents to start a conversation."
+            let none = providerGap == .noneAdded
+            let title = none ? "Add a coding agent to get started" : "Every provider is off"
+            let detail = none ? "Connect Claude Code, Codex or another agent, with as many accounts as you need."
+                : "Turn one on in Settings › Agents to start a conversation."
+            let action = none ? "Add Provider…" : "Open Settings › Agents"
+            if configureProviders.title != action { configureProviders.title = action }
             if emptyTitle.stringValue != title { emptyTitle.stringValue = title }
             if emptyDetail.stringValue != detail { emptyDetail.stringValue = detail }
             emptyDetail.toolTip = nil

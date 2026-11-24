@@ -112,6 +112,8 @@ public protocol SettingsHost: AnyObject {
     func checkAgentProviders() async throws -> AgentProvidersState
     /// Starts installing or updating a provider's CLI on this Mac's server.
     func maintainAgentProvider(_ id: String, action: AgentProviderMaintenance.Action) async throws -> AgentProvidersState
+    /// Checks `provider`, saved or not, without changing anything; servers that predate it throw.
+    func probeAgentProvider(_ provider: AgentProviderConfig) async throws -> AgentProviderHealth
     /// `provider`'s models in the user's order, hidden ones included.
     func agentModels(_ provider: AgentProviderConfig, refresh: Bool) async throws -> [AgentModelDescriptor]
     /// What Tab installed in `provider`'s config folder; nil when `provider`'s kind has no Tab integration.
@@ -257,6 +259,11 @@ public final class PreviewSettingsHost: SettingsHost {
         return providers
     }
     public func checkAgentProviders() async throws -> AgentProvidersState { providers }
+    /// What `probeAgentProvider` finds, by provider ID; others aren't installed.
+    public var probes: [String: AgentProviderHealth] = [:]
+    public func probeAgentProvider(_ provider: AgentProviderConfig) async throws -> AgentProviderHealth {
+        probes[provider.id] ?? AgentProviderHealth(provider: provider.id, installed: false, checkedAt: Date())
+    }
     public func maintainAgentProvider(_ id: String, action: AgentProviderMaintenance.Action) async throws -> AgentProvidersState {
         providers
     }
