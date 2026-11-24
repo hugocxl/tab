@@ -59,8 +59,8 @@ public final class GlassView: NSView {
         /// Messages stacked above the agent composer: notices, questions, the prompt queue,
         /// running agents, task progress and what the agent waits for.
         public static let agentPanel = Style(cornerRadius: 16, fallbackMaterial: .popover, regular: true)
-        /// A floating card anchored at the bottom of the left sidebar.
-        public static let sidebarCard = Style(cornerRadius: 12, fallbackMaterial: .popover, regular: true)
+        /// A translucent card anchored at the bottom of the left sidebar, like the selected tab card.
+        public static let sidebarCard = Style(cornerRadius: 8, opacity: 0.4)
     }
 
     private let material: NSView

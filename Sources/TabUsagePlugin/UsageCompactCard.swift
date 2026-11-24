@@ -89,14 +89,13 @@ final class UsageStore {
 
 /// Compressed floating card anchored at the bottom of the left sidebar:
 /// one compact row per signed-in account with its logo, name, headline figure,
-/// reset countdown, and thin status bar.
+/// reset countdown, and thin status bar. A row opens the AI Usage panel.
 @MainActor
 final class UsageCompactCardController: NSViewController {
     private let theme: AppTheme
     private let store: UsageStore
     private let resolve: UsagePanelController.Resolve
     private let onOpenPanel: (() -> Void)?
-    private let onDismiss: (() -> Void)?
 
     var onPreferredSizeChange: (() -> Void)?
 
@@ -106,37 +105,26 @@ final class UsageCompactCardController: NSViewController {
     private var clock: Timer?
 
     private let root = ThemedView()
-    private let header = NSView()
-    private let titleLabel = makeLabel("AI Usage", font: AppFont.system(12, weight: .semibold))
-    private let refreshButton: ChromeButton
-    private let openPanelButton: ChromeButton
-    private let closeButton: ChromeButton
-    private let spinner = Spinner()
-    private let divider = NSView()
     private let scroll = ScrollView()
     private let stack = NSStackView()
     private let messageLabel = makeLabel("", font: AppFont.small)
 
-    private static let headerHeight: CGFloat = 34
     private static let rowSpacing: CGFloat = 8
-    private static let stackInsets = NSEdgeInsets(top: 8, left: 10, bottom: 10, right: 10)
+    /// The tab cards' padding: a border and 8pt above and below, 10pt to the sides.
+    private static let stackInsets = NSEdgeInsets(top: Metrics.border + 8, left: Metrics.border + 10,
+                                                  bottom: Metrics.border + 8, right: Metrics.border + 10)
 
     init(
         theme: AppTheme,
         store: UsageStore? = nil,
         onOpenPanel: (() -> Void)? = nil,
-        onDismiss: (() -> Void)? = nil,
         resolve: @escaping UsagePanelController.Resolve
     ) {
         self.theme = theme
         let store = store ?? UsageStore()
         self.store = store
         self.onOpenPanel = onOpenPanel
-        self.onDismiss = onDismiss
         self.resolve = resolve
-        refreshButton = ChromeButton(AppIcon.refresh, label: "Refresh", side: 22, glyph: 13)
-        openPanelButton = ChromeButton(ChromeIcon.panelRight, label: "Open AI Usage Panel", side: 22, glyph: 13)
-        closeButton = ChromeButton(AppIcon.close, label: "Close", side: 22, glyph: 12)
         super.init(nibName: nil, bundle: nil)
         store.observe(owner: self) { [weak self] server in
             guard let self, self.project?.server == server else { return }
@@ -150,42 +138,6 @@ final class UsageCompactCardController: NSViewController {
         root.theme = theme
         root.onColorsChange = { [weak self] in self?.render() }
         view = root
-
-        header.translatesAutoresizingMaskIntoConstraints = false
-        titleLabel.lineBreakMode = .byTruncatingTail
-        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-
-        refreshButton.onPress = { [weak self] _ in self?.refresh(force: true) }
-        openPanelButton.onPress = { [weak self] _ in self?.onOpenPanel?() }
-        closeButton.onPress = { [weak self] _ in self?.onDismiss?() }
-
-        spinner.isHidden = true
-        spinner.translatesAutoresizingMaskIntoConstraints = false
-
-        let controls = NSStackView(views: [refreshButton, openPanelButton, closeButton])
-        controls.orientation = .horizontal
-        controls.alignment = .centerY
-        controls.spacing = 2
-        controls.translatesAutoresizingMaskIntoConstraints = false
-        controls.setContentHuggingPriority(.required, for: .horizontal)
-        controls.setContentCompressionResistancePriority(.required, for: .horizontal)
-
-        header.addSubview(titleLabel)
-        header.addSubview(controls)
-        header.addSubview(spinner)
-        NSLayoutConstraint.activate([
-            header.heightAnchor.constraint(equalToConstant: Self.headerHeight),
-            titleLabel.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 10),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: controls.leadingAnchor, constant: -6),
-            titleLabel.centerYAnchor.constraint(equalTo: header.centerYAnchor),
-            controls.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -6),
-            controls.centerYAnchor.constraint(equalTo: header.centerYAnchor),
-            spinner.centerXAnchor.constraint(equalTo: refreshButton.centerXAnchor),
-            spinner.centerYAnchor.constraint(equalTo: refreshButton.centerYAnchor),
-        ])
-
-        divider.wantsLayer = true
-        divider.translatesAutoresizingMaskIntoConstraints = false
 
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -206,25 +158,17 @@ final class UsageCompactCardController: NSViewController {
         messageLabel.maximumNumberOfLines = 0
         messageLabel.isHidden = true
 
-        for subview in [header, divider, scroll, messageLabel] as [NSView] {
+        for subview in [scroll, messageLabel] as [NSView] {
             root.addSubview(subview)
         }
         NSLayoutConstraint.activate([
-            header.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            header.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            header.topAnchor.constraint(equalTo: root.topAnchor),
-            divider.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            divider.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            divider.topAnchor.constraint(equalTo: header.bottomAnchor),
-            divider.heightAnchor.constraint(equalToConstant: Metrics.border),
             scroll.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            scroll.topAnchor.constraint(equalTo: divider.bottomAnchor),
+            scroll.topAnchor.constraint(equalTo: root.topAnchor),
             scroll.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-            messageLabel.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
-            messageLabel.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -12),
-            messageLabel.topAnchor.constraint(equalTo: divider.bottomAnchor, constant: 12),
-            messageLabel.bottomAnchor.constraint(lessThanOrEqualTo: root.bottomAnchor, constant: -12),
+            messageLabel.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: Self.stackInsets.left),
+            messageLabel.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -Self.stackInsets.right),
+            messageLabel.centerYAnchor.constraint(equalTo: root.centerYAnchor),
         ])
         root.setAccessibilityLabel("AI Usage Summary")
         render()
@@ -289,54 +233,43 @@ final class UsageCompactCardController: NSViewController {
 
     func preferredHeight(forWidth width: CGFloat) -> CGFloat {
         loadViewIfNeeded()
-        let chrome = Self.headerHeight + Metrics.border
+        let insets = Self.stackInsets.top + Self.stackInsets.bottom
         if !messageLabel.isHidden {
-            let textWidth = max(width - 24, 80)
+            let textWidth = max(width - Self.stackInsets.left - Self.stackInsets.right, 80)
             let rect = (messageLabel.stringValue as NSString).boundingRect(
                 with: NSSize(width: textWidth, height: .greatestFiniteMagnitude),
                 options: [.usesLineFragmentOrigin, .usesFontLeading],
                 attributes: [.font: AppFont.small]
             )
-            return chrome + max(ceil(rect.height), 18) + 24
+            return insets + max(ceil(rect.height), 16)
         }
         let count = rows.count
-        guard count > 0 else { return chrome + 48 }
+        guard count > 0 else { return insets + 16 }
         let rowsHeight = rows.reduce(CGFloat(0)) { $0 + $1.compactHeight }
         let gaps = CGFloat(max(count - 1, 0)) * Self.rowSpacing
-        return chrome + Self.stackInsets.top + rowsHeight + gaps + Self.stackInsets.bottom
+        return insets + rowsHeight + gaps
     }
 
     // MARK: Rendering
 
     private func render() {
         guard isViewLoaded else { return }
-        titleLabel.textColor = theme.fg
         messageLabel.textColor = theme.fgMuted
-        divider.layer?.backgroundColor = theme.fg(alpha: 0.08).cgColor
 
         let load = project.flatMap { store.load(for: $0.server) }
-        let busy: Bool
         let reply: AgentUsageLimitsReply?
         switch load {
         case .loading(let previous):
-            busy = true
             reply = previous
         case .loaded(let loaded, _):
-            busy = false
             reply = loaded
         case .failed(let reason):
-            busy = false
             reply = nil
             showMessage(reason)
         case nil:
-            busy = false
             reply = nil
             showMessage(project == nil ? "Open a project to see AI usage" : "")
         }
-        spinner.isHidden = !busy
-        refreshButton.isHidden = busy
-        let serverName = project.flatMap { resolve($0.id)?.serverName }
-        titleLabel.stringValue = serverName.map { "AI Usage · \($0)" } ?? "AI Usage"
 
         if case .loading(nil) = load { showMessage("Loading…") }
         guard let reply else {

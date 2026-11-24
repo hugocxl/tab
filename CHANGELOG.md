@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.134.2 - 2026-11-24
+
+### Changed
+
+- Make AI usage compact, with a panel footer filter and a translucent sidebar card that keeps the last tab visible.
+
 ## 0.134.1 - 2026-11-24
 
 ### Fixed

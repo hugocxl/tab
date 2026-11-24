@@ -161,7 +161,8 @@ private final class RightSidebarEmptyView: ThemedView {
 }
 
 /// A right sidebar tab's footer row, laid out like the left sidebar's: a
-/// muted title on the left and the tab's buttons on the right. The inner
+/// muted title, or the left sidebar's filter, on the left and the tab's
+/// buttons on the right. The inner
 /// edge, beside the panes, keeps the button gap and the window edge the
 /// gutter, mirroring the left sidebar.
 public final class RightSidebarFooter: ThemedView {
@@ -175,6 +176,8 @@ public final class RightSidebarFooter: ThemedView {
     /// Shown over the last button while it is hidden, such as Refresh
     /// while a change runs.
     private var spinner: Spinner?
+    /// Shown in the title's place, as the left sidebar's footer shows it.
+    private var filter: SidebarFilterView?
 
     public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -203,6 +206,16 @@ public final class RightSidebarFooter: ThemedView {
         return button
     }
 
+    /// Shows `filter` in the title's place.
+    public func setFilter(_ filter: SidebarFilterView) {
+        self.filter?.removeFromSuperview()
+        self.filter = filter
+        filter.translatesAutoresizingMaskIntoConstraints = true
+        addSubview(filter)
+        titleLabel.isHidden = true
+        needsLayout = true
+    }
+
     /// Shows `spinner` where the last button is.
     public func setSpinner(_ spinner: Spinner) {
         self.spinner = spinner
@@ -226,6 +239,8 @@ public final class RightSidebarFooter: ThemedView {
         }
         let leading = Self.innerInset + (ChromeButton.side - ChromeButton.glyph) / 2
         let trailing = (buttons.first?.frame.minX ?? bounds.width - Self.outerInset) - ChromeButton.gap
+        filter?.frame = CGRect(x: Self.innerInset, y: y, width: max(trailing - Self.innerInset, ChromeButton.side),
+                               height: ChromeButton.side)
         let height = titleLabel.intrinsicContentSize.height
         titleLabel.frame = CGRect(x: leading, y: (y + (ChromeButton.side - height) / 2).rounded(),
                                   width: max(trailing - leading, 0), height: height)

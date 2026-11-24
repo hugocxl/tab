@@ -151,6 +151,9 @@ final class SidebarViewController: NSViewController {
 
     var pluginFooterButtonIds: [String] { pluginFooterButtons.map(\.id) }
     var isFooterCardOpen: Bool { footerCard != nil }
+    /// Where the list and the open footer card are, for tests.
+    var listFrame: CGRect { scroll.frame }
+    var footerCardFrame: CGRect? { footerCardHost?.frame }
 
     private func syncPluginFooterItems() {
         let items = model.sidebarFooterItems
@@ -214,6 +217,7 @@ final class SidebarViewController: NSViewController {
         footerCardHost = nil
         footerCardProject = nil
         updateFooterButtonStates()
+        root.needsLayout = true
     }
 
     private func rebuild(_ snapshot: SidebarSnapshot) {
@@ -584,14 +588,18 @@ final class SidebarViewController: NSViewController {
         CircleButton.layOut(rightButtons, trailingAt: bounds.width - ChromeButton.gap, y: y)
         let firstRightX = rightButtons.first?.frame.minX ?? (bounds.width - ChromeButton.gap)
         filter.frame = CGRect(x: Metrics.gutter, y: y, width: max(firstRightX - ChromeButton.gap - Metrics.gutter, side), height: side)
-        let scrollTop = Self.titleBarHeight
-        scroll.frame = CGRect(x: 0, y: scrollTop, width: bounds.width, height: max(footer.frame.minY - scrollTop, 0))
+        // An open footer card lines up with the tab cards and sits a gutter above the
+        // footer's buttons; the list ends a gutter above it, so its last card stays reachable.
+        var listBottom = footer.frame.minY
         if let host = footerCardHost, let card = footerCard {
-            let width = max(bounds.width - Metrics.gutter - ChromeButton.gap, 140)
+            let width = max(bounds.width - Metrics.gutter, 140)
             let maxHeight = min(max(footer.frame.minY - topRow.frame.maxY - Metrics.gutter, 80), 320)
-            let height = min(max(card.preferredHeight(forWidth: width), 56), maxHeight)
+            let height = min(max(card.preferredHeight(forWidth: width), 40), maxHeight)
             host.frame = CGRect(x: Metrics.gutter, y: footer.frame.minY - height, width: width, height: height)
+            listBottom = host.frame.minY - Metrics.gutter
         }
+        let scrollTop = Self.titleBarHeight
+        scroll.frame = CGRect(x: 0, y: scrollTop, width: bounds.width, height: max(listBottom - scrollTop, 0))
         resizeHandle.frame = CGRect(x: bounds.width - 3, y: 0, width: 6, height: bounds.height)
     }
 }
@@ -613,7 +621,8 @@ final class SidebarRootView: ThemedView {
     }
 }
 
-/// Floating glass card shell anchored above the left sidebar's footer.
+/// Translucent glass card anchored above the left sidebar's footer, drawn
+/// like the selected tab card.
 private final class SidebarFloatingCardHost: ThemedView {
     private let clip = NSView()
     private let glass = GlassView(style: .sidebarCard)
@@ -623,11 +632,6 @@ private final class SidebarFloatingCardHost: ThemedView {
         self.content = content
         super.init(frame: .zero)
         self.theme = theme
-        layer?.masksToBounds = false
-        layer?.shadowColor = NSColor.black.cgColor
-        layer?.shadowOpacity = 0.24
-        layer?.shadowRadius = 14
-        layer?.shadowOffset = CGSize(width: 0, height: -4)
 
         clip.wantsLayer = true
         clip.layer?.cornerRadius = GlassView.Style.sidebarCard.cornerRadius
@@ -652,8 +656,8 @@ private final class SidebarFloatingCardHost: ThemedView {
 
     private func applySurface() {
         glass.appearance = theme.nsAppearance
-        clip.layer?.backgroundColor = theme.card.withAlphaComponent(theme.glassEnabled ? 0.72 : 0.98).cgColor
-        clip.layer?.borderColor = theme.fg(alpha: 0.12).cgColor
+        clip.layer?.backgroundColor = theme.surface.cgColor
+        clip.layer?.borderColor = theme.fg(alpha: 0.08).cgColor
     }
 
     override func layout() {
@@ -661,8 +665,6 @@ private final class SidebarFloatingCardHost: ThemedView {
         clip.frame = bounds
         glass.frame = clip.bounds
         content.frame = clip.bounds
-        layer?.shadowPath = CGPath(roundedRect: bounds, cornerWidth: GlassView.Style.sidebarCard.cornerRadius,
-                                   cornerHeight: GlassView.Style.sidebarCard.cornerRadius, transform: nil)
     }
 }
 

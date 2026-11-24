@@ -63,11 +63,20 @@ final class UsagePluginTests: XCTestCase {
         model.plugins.activate(plugin: UsagePlugin())
         try await settle { sidebar.pluginFooterButtonIds == ["usage-summary"] }
 
+        let fullList = sidebar.listFrame
         sidebar.toggleFooterCard("usage-summary")
         XCTAssertTrue(sidebar.isFooterCardOpen)
+        // The list ends a gutter above the card, so its last card can scroll into view.
+        sidebar.view.layoutSubtreeIfNeeded()
+        let card = try XCTUnwrap(sidebar.footerCardFrame)
+        XCTAssertEqual(sidebar.listFrame.maxY, card.minY - Metrics.gutter)
+        XCTAssertEqual(card.minX, Metrics.gutter)
+        XCTAssertEqual(card.maxX, sidebar.view.bounds.width)
 
         sidebar.toggleFooterCard("usage-summary")
         XCTAssertFalse(sidebar.isFooterCardOpen)
+        sidebar.view.layoutSubtreeIfNeeded()
+        XCTAssertEqual(sidebar.listFrame, fullList)
 
         sidebar.toggleFooterCard("usage-summary")
         XCTAssertTrue(sidebar.isFooterCardOpen)
@@ -111,22 +120,32 @@ final class UsagePluginTests: XCTestCase {
         XCTAssertEqual(side.rows.map(\.usage.label), ["Weekly"])
         XCTAssertEqual(side.rows.first?.tone, .low)
         XCTAssertEqual(side.rows.first?.bar.fraction, 0.86)
-        XCTAssertEqual(controller.toolbar.chipTitles, ["All", "Claude", "Codex", "Grok"])
+        XCTAssertEqual(controller.filterMenu().items.map(\.title).prefix(4), ["All Providers  4", "Claude  2", "Codex  1", "Grok  1"])
         XCTAssertEqual(controller.cards.last?.limits.failure, "Grok is not signed in. Run `grok login` and try again.")
     }
 
-    func testChipsSwitchesAndDetailsChangeTheCards() async throws {
+    func testFilterMenuTextAndDetailsChangeTheCards() async throws {
         let (controller, _) = makePanel(Self.sample(now: Date()))
         try await settle { !controller.cards.isEmpty }
-        controller.toolbar.onFilter?(.claude)
+        controller.setFilter(.claude)
         XCTAssertEqual(controller.cards.map { $0.limits.providerId }, ["claude-side", "claude"])
-        controller.toolbar.onOrder?(.provider)
+        controller.setOrder(.provider)
         XCTAssertEqual(controller.cards.map { $0.limits.providerId }, ["claude", "claude-side"])
-        controller.toolbar.onFigure?(.left)
+        controller.setFigure(.left)
         XCTAssertEqual(controller.cards.last?.rows.first?.bar.fraction, 0.14)
         controller.cards.last?.onToggle?()
         XCTAssertEqual(controller.cards.last?.rows.map(\.usage.label), ["Weekly", "Session"])
-        controller.toolbar.onFilter?(nil)
+        controller.setFilter(nil)
+        XCTAssertEqual(controller.cards.count, 4)
+        // The text matches names, plans and accounts.
+        controller.setQuery("side")
+        XCTAssertEqual(controller.cards.map { $0.limits.providerId }, ["claude-side"])
+        controller.setQuery("plus")
+        XCTAssertEqual(controller.cards.map { $0.limits.providerId }, ["codex"])
+        controller.setQuery("nobody")
+        XCTAssertTrue(controller.cards.isEmpty)
+        XCTAssertEqual(controller.messageText, "No accounts match the filter.")
+        controller.setQuery("")
         XCTAssertEqual(controller.cards.count, 4)
     }
 

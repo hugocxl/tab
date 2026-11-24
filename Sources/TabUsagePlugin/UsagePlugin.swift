@@ -138,8 +138,7 @@ final class UsageCompactCardContent: SidebarFooterCardContent {
             onOpenPanel: { [weak model] in
                 model?.selectRightPanel(UsagePanelContent.id)
                 dismiss()
-            },
-            onDismiss: dismiss
+            }
         ) { [weak model] project in
             guard let model else { return nil }
             let server = model.state.projectServer(project)
