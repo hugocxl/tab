@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.135.2 - 2026-11-24
+
+### Changed
+
+- Show an icon placeholder card in empty right sidebar sections, such as Source Control outside a repository.
+
 ## 0.135.1 - 2026-11-24
 
 ### Changed

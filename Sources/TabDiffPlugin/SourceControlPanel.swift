@@ -29,6 +29,7 @@ public final class SourceControlController: NSViewController, NSTableViewDataSou
     let messageField = CommitMessageField(placeholder: "Message (⌘↩ to commit)")
     private let amendBox = NSButton(checkboxWithTitle: "Amend", target: nil, action: nil)
     let commitButton = PillButton("Commit")
+    private let commitRow = NSStackView()
     private let message = NativeMessageView("Loading changes…")
     private let table = NSTableView()
     private let scroll = NSScrollView()
@@ -64,7 +65,7 @@ public final class SourceControlController: NSViewController, NSTableViewDataSou
         commitButton.onPress = { [weak self] in self?.commit() }
         let spacer = NSView()
         spacer.setContentHuggingPriority(.init(1), for: .horizontal)
-        let commitRow = NSStackView(views: [amendBox, spacer, commitButton])
+        commitRow.setViews([amendBox, spacer, commitButton], in: .leading)
         commitRow.orientation = .horizontal
         commitRow.alignment = .centerY
         commitRow.spacing = Metrics.controlGap
@@ -92,6 +93,7 @@ public final class SourceControlController: NSViewController, NSTableViewDataSou
         scrollFade = ScrollEdgeFade(scroll)
 
         message.theme = theme
+        message.placeholderInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
         let stack = NSStackView(views: [messageField, commitRow, message, scroll])
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -110,10 +112,9 @@ public final class SourceControlController: NSViewController, NSTableViewDataSou
             messageField.widthAnchor.constraint(equalTo: stack.widthAnchor),
             commitRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             message.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            message.heightAnchor.constraint(equalToConstant: 32),
             scroll.widthAnchor.constraint(equalTo: stack.widthAnchor),
         ])
-        message.setContentHuggingPriority(.required, for: .vertical)
+        message.setContentHuggingPriority(.defaultLow, for: .vertical)
         themeDidChange()
         card.onColorsChange = { [weak self] in self?.themeDidChange() }
         setViewMode(host?.sourceControlTree == true ? .tree : .list, persist: false)
@@ -287,14 +288,23 @@ public final class SourceControlController: NSViewController, NSTableViewDataSou
             footer.title = host?.nativeProject.name ?? footer.title
         }
         if let error {
-            message.set(error)
+            message.setError(error, repositoryIcon: .gitBranch)
             message.isHidden = false
         } else if model.rows.isEmpty {
-            message.set(model.status == nil ? "Loading changes…" : "No changes")
+            if model.status == nil {
+                message.set("Loading changes…")
+            } else {
+                message.setPlaceholder("No changes", detail: "Edits to files in this repository appear here.",
+                                       icon: .circleCheck)
+            }
             message.isHidden = false
         } else {
             message.isHidden = true
         }
+        // Outside a repository there is nothing to commit.
+        let outside = error == NativeErrors.notRepository
+        messageField.isHidden = outside
+        commitRow.isHidden = outside
         scroll.isHidden = model.rows.isEmpty
         table.reloadData()
         updateCommitButton()

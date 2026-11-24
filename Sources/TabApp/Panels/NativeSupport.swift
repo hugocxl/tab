@@ -123,7 +123,7 @@ public enum NativeErrors {
             return notRepository
         }
         if lower.contains("badpath") || lower.contains("no such file or directory") || lower.contains("not found") {
-            return folder ? "Folder not found" : "File not found"
+            return folder ? folderNotFound : "File not found"
         }
         guard let separator = error.range(of: ": ") else { return error }
         let code = error[..<separator.lowerBound]
@@ -143,6 +143,7 @@ public enum NativeErrors {
     }
 
     public static let notRepository = "Not a Git repository"
+    public static let folderNotFound = "Folder not found"
     public static let notRepositoryHint = "Open a folder containing a Git repository to view changes."
     public static let unexpectedReply = "Unexpected reply"
 }
@@ -244,44 +245,141 @@ public final class NativePanelCard: ThemedView {
 public final class NativeMessageView: ThemedView {
     private let label: NSTextField
     private let detail: NSTextField
+    private let stack: NSStackView
+    /// The empty-state card: an icon, a title and a hint on a solid fill,
+    /// for a panel with nothing to show rather than nothing loaded yet.
+    private let box = NSView()
+    private let icon = NSImageView()
+    private let boxTitle = makeLabel("", font: AppFont.header)
+    private let boxDetail = makeLabel("", font: AppFont.body)
+    private var boxIcon: AppIcon?
+    private var boxInsetConstraints: [NSLayoutConstraint] = []
+
+    /// The space around the empty-state card, so it lines up with the rows
+    /// the panel shows otherwise.
+    public var placeholderInsets = NSEdgeInsets(top: Metrics.gutter, left: RightSidebarFooter.innerInset,
+                                                bottom: Metrics.gutter, right: RightSidebarFooter.outerInset) {
+        didSet { applyInsets() }
+    }
 
     public init(_ text: String = "") {
         label = makeLabel(text, font: AppFont.body)
         detail = makeLabel("", font: AppFont.footnote)
+        stack = NSStackView(views: [label, detail])
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
-        for field in [label, detail] {
+        for field in [label, detail, boxTitle, boxDetail] {
             field.alignment = .center
             field.lineBreakMode = .byWordWrapping
             field.maximumNumberOfLines = 0
         }
-        let stack = NSStackView(views: [label, detail])
+        for field in [boxTitle, boxDetail] {
+            field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        }
         stack.orientation = .vertical
         stack.spacing = 4
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
-        NSLayoutConstraint.activate([
+
+        box.wantsLayer = true
+        box.layer?.cornerRadius = Metrics.cardRadius
+        box.layer?.cornerCurve = .continuous
+        box.translatesAutoresizingMaskIntoConstraints = false
+        box.isHidden = true
+        icon.imageScaling = .scaleNone
+        let content = NSStackView(views: [icon, boxTitle, boxDetail])
+        content.orientation = .vertical
+        content.spacing = 4
+        content.setCustomSpacing(12, after: icon)
+        content.edgeInsets = NSEdgeInsets(top: 28, left: 16, bottom: 28, right: 16)
+        content.translatesAutoresizingMaskIntoConstraints = false
+        box.addSubview(content)
+        addSubview(box)
+        boxInsetConstraints = [
+            box.topAnchor.constraint(equalTo: topAnchor),
+            box.leadingAnchor.constraint(equalTo: leadingAnchor),
+            box.trailingAnchor.constraint(equalTo: trailingAnchor),
+        ]
+        let fits = box.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor)
+        fits.priority = .defaultHigh
+        NSLayoutConstraint.activate(boxInsetConstraints + [
+            fits,
+            content.leadingAnchor.constraint(equalTo: box.leadingAnchor),
+            content.trailingAnchor.constraint(equalTo: box.trailingAnchor),
+            content.topAnchor.constraint(equalTo: box.topAnchor),
+            content.bottomAnchor.constraint(equalTo: box.bottomAnchor),
+            boxTitle.widthAnchor.constraint(lessThanOrEqualTo: content.widthAnchor, constant: -32),
+            boxDetail.widthAnchor.constraint(lessThanOrEqualTo: content.widthAnchor, constant: -32),
             stack.centerXAnchor.constraint(equalTo: centerXAnchor),
             stack.centerYAnchor.constraint(equalTo: centerYAnchor),
             stack.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: Metrics.gutter),
             stack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -Metrics.gutter),
         ])
+        applyInsets()
         set(text)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    public var text: String { label.stringValue }
+    public var text: String { box.isHidden ? label.stringValue : boxTitle.stringValue }
 
+    /// Centered text, for loading and errors.
     public func set(_ text: String) {
         label.stringValue = text
         detail.stringValue = text == NativeErrors.notRepository ? NativeErrors.notRepositoryHint : ""
         detail.isHidden = detail.stringValue.isEmpty
+        stack.isHidden = false
+        box.isHidden = true
+    }
+
+    /// The empty-state card, for a panel with no data or none that applies
+    /// here, such as Git in a folder outside a repository.
+    public func setPlaceholder(_ title: String, detail text: String = "", icon glyph: AppIcon) {
+        boxTitle.stringValue = title
+        boxDetail.stringValue = text
+        boxDetail.isHidden = text.isEmpty
+        boxIcon = glyph
+        stack.isHidden = true
+        box.isHidden = false
+        themeDidChange()
+    }
+
+    /// The card for `NativeErrors.notRepository`, or centered text for any
+    /// other error.
+    public func setError(_ error: String, repositoryIcon: AppIcon) {
+        if error == NativeErrors.notRepository {
+            setPlaceholder(error, detail: NativeErrors.notRepositoryHint, icon: repositoryIcon)
+        } else {
+            set(error)
+        }
+    }
+
+    public override func layout() {
+        super.layout()
+        // Wrapping labels size to their width only once they know it.
+        let width = max(0, bounds.width - placeholderInsets.left - placeholderInsets.right - 32)
+        for field in [boxTitle, boxDetail] where field.preferredMaxLayoutWidth != width {
+            field.preferredMaxLayoutWidth = width
+            field.invalidateIntrinsicContentSize()
+        }
+    }
+
+    /// Whether the empty-state card shows rather than centered text.
+    public var showsPlaceholder: Bool { !box.isHidden }
+
+    private func applyInsets() {
+        boxInsetConstraints[0].constant = placeholderInsets.top
+        boxInsetConstraints[1].constant = placeholderInsets.left
+        boxInsetConstraints[2].constant = -placeholderInsets.right
     }
 
     public override func themeDidChange() {
         label.textColor = theme.fgMuted
         detail.textColor = theme.fgMuted
+        box.layer?.backgroundColor = theme.rowFill.cgColor
+        boxTitle.textColor = theme.fgMuted
+        boxDetail.textColor = theme.fgMuted
+        icon.image = boxIcon?.image(size: 36, color: theme.fgMuted)
     }
 }
 

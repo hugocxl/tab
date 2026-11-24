@@ -258,10 +258,15 @@ public final class GitGraphController: NSViewController, NSTableViewDataSource, 
         footer.title = model.currentBranch ?? model.summary?.head.map { String($0.prefix(7)) }
             ?? host?.nativeProject.name ?? footer.title
         if let error {
-            message.set(error)
+            message.setError(error, repositoryIcon: .gitGraph)
             message.isHidden = false
         } else if model.rowCount == 0 {
-            message.set(model.summary == nil ? "Loading history…" : "No commits yet")
+            if model.summary == nil {
+                message.set("Loading history…")
+            } else {
+                message.setPlaceholder("No commits yet", detail: "Commits appear here once you make the first one.",
+                                       icon: .gitGraph)
+            }
             message.isHidden = false
         } else {
             message.isHidden = true

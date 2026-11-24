@@ -36,6 +36,7 @@ public final class FilesPanelController: NSViewController, NSTableViewDataSource
     private(set) var newItemField: InlineNameField?
     private(set) var renameField: InlineNameField?
     private let statusLabel = makeLabel("", font: AppFont.footnote)
+    private let emptyView = NativeMessageView()
     let table = FilesTableView()
     private let scroll = NSScrollView()
     private var scrollFade: ScrollEdgeFade?
@@ -94,7 +95,10 @@ public final class FilesPanelController: NSViewController, NSTableViewDataSource
         scroll.borderType = .noBorder
         scrollFade = ScrollEdgeFade(scroll)
 
-        let stack = NSStackView(views: [editArea, statusLabel, scroll])
+        emptyView.theme = card.theme
+        emptyView.placeholderInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
+        emptyView.isHidden = true
+        let stack = NSStackView(views: [editArea, statusLabel, emptyView, scroll])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 4
@@ -111,6 +115,7 @@ public final class FilesPanelController: NSViewController, NSTableViewDataSource
             footer.bottomAnchor.constraint(equalTo: card.bottomAnchor),
             editArea.widthAnchor.constraint(equalTo: stack.widthAnchor),
             statusLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            emptyView.widthAnchor.constraint(equalTo: stack.widthAnchor),
             scroll.widthAnchor.constraint(equalTo: stack.widthAnchor),
         ])
         applyColors()
@@ -528,7 +533,20 @@ public final class FilesPanelController: NSViewController, NSTableViewDataSource
 
     private func updateStatus() {
         guard isViewLoaded else { return }
-        if let error {
+        let missing = error == NativeErrors.folderNotFound && rows.isEmpty
+        let empty = error == nil && rows.isEmpty && tree.isLoaded("")
+        if missing {
+            emptyView.setPlaceholder(NativeErrors.folderNotFound, detail: "The project's folder was moved or deleted.",
+                                     icon: .folder)
+        } else if empty {
+            emptyView.setPlaceholder("Empty folder", detail: "Files you add to this project appear here.",
+                                     icon: .folderOpen)
+        }
+        emptyView.isHidden = !(missing || empty)
+        scroll.isHidden = !emptyView.isHidden
+        if missing {
+            statusLabel.isHidden = true
+        } else if let error {
             statusLabel.stringValue = error
             statusLabel.textColor = card.theme.danger
             statusLabel.isHidden = false

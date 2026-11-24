@@ -256,7 +256,11 @@ final class UsagePanelController: NSViewController {
         case nil:
             busy = false
             reply = nil
-            showMessage(project == nil ? "Open a project to see AI usage" : "")
+            if project == nil {
+                showPlaceholder("No project open", detail: "Open a project to see AI usage.", icon: .chartLine)
+            } else {
+                showMessage("")
+            }
         }
         spinner.isHidden = !busy
         refreshButton?.isHidden = busy
@@ -264,7 +268,8 @@ final class UsagePanelController: NSViewController {
         if case .loading(nil) = load { showMessage("Loading…") }
         guard let reply else { return }
         if reply.providers.isEmpty {
-            showMessage("Add a provider in Settings › Agents to see your plan limits.")
+            showPlaceholder("No providers", detail: "Add a provider in Settings › Agents to see your plan limits.",
+                            icon: .gaugeMedium)
             return
         }
         populate(reply)
@@ -274,6 +279,13 @@ final class UsagePanelController: NSViewController {
         shown = nil
         message.set(text)
         message.isHidden = text.isEmpty
+        scroll.isHidden = true
+    }
+
+    private func showPlaceholder(_ title: String, detail: String, icon: AppIcon) {
+        shown = nil
+        message.setPlaceholder(title, detail: detail, icon: icon)
+        message.isHidden = false
         scroll.isHidden = true
     }
 
@@ -315,7 +327,7 @@ final class UsagePanelController: NSViewController {
             add(UsageAccountCard(limits: limits, figure: figure, lowThreshold: config.lowThreshold, now: now, theme: theme))
         }
         if ordered.isEmpty {
-            showMessage("No accounts match the filter.")
+            showPlaceholder("No accounts match the filter.", detail: "Try another provider or search.", icon: .search)
             // Kept, so the message is not built again until the inputs change.
             shown = next
         }
