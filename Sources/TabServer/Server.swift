@@ -113,7 +113,13 @@ public final class Server: @unchecked Sendable {
         })
         let composerService = agentComposerContext
         let modelCatalog = agentModelCatalog
-        agentProviders.onChange = { Task { await modelCatalog.invalidate() } }
+        let usageLimits = agentUsageLimits
+        agentProviders.onChange = {
+            Task {
+                await modelCatalog.invalidate()
+                await usageLimits.invalidate()
+            }
+        }
         agents.providers = { id, kind in agentProviders.provider(id, kind: kind) }
         agents.composerCatalog = { request in try await composerService.catalog(request) }
         agents.launchEnvironment = ["TAB_SERVER_ID": catalog.serverId.description]

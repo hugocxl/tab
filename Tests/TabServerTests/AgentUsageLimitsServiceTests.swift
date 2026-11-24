@@ -133,7 +133,8 @@ final class AgentUsageLimitsServiceTests: XCTestCase {
 
     func testRepliesAreCachedUntilForcedAndKeepProviderOrder() async {
         let probes = Counter()
-        let service = AgentUsageLimitsService(providers: { AgentProviderSettings().providers }, probe: { config in
+        let configured = AgentUsageLimitsService.providers.map(AgentProviderConfig.builtIn)
+        let service = AgentUsageLimitsService(providers: { configured }, probe: { config in
             await probes.increment()
             if config.kind == .claude { try? await Task.sleep(nanoseconds: 20_000_000) }
             return AgentUsageLimits(provider: config.kind, failure: "x")
@@ -151,13 +152,22 @@ final class AgentUsageLimitsServiceTests: XCTestCase {
     }
 
     func testDisabledAndMissingProvidersAreLeftOut() async {
-        let service = AgentUsageLimitsService(providers: {
-            AgentProviderSettings().providers.map { config in
-                var config = config
-                config.enabled = config.kind == .codex
-                return config
-            }
-        }, probe: { _ in nil })
+        let probes = Counter()
+        let empty = AgentUsageLimitsService(providers: { [] }, probe: { _ in
+            await probes.increment()
+            return nil
+        })
+        let emptyReply = await empty.handle(.init())
+        XCTAssertTrue(emptyReply.providers.isEmpty)
+        let emptyProbes = await probes.value
+        XCTAssertEqual(emptyProbes, 0)
+
+        let configured = AgentUsageLimitsService.providers.map { kind -> AgentProviderConfig in
+            var config = AgentProviderConfig.builtIn(kind)
+            config.enabled = kind == .codex
+            return config
+        }
+        let service = AgentUsageLimitsService(providers: { configured }, probe: { _ in nil })
         let reply = await service.handle(.init())
         XCTAssertTrue(reply.providers.isEmpty)
     }

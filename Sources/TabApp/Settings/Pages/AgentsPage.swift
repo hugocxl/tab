@@ -1,4 +1,5 @@
 import AppKit
+import TabClient
 import TabCore
 import TabProtocol
 
@@ -8,41 +9,56 @@ extension SettingsModel {
         let settings = state?.settings ?? AgentProviderSettings()
         let light = AppTheme.shared.palette.isLight
 
-        b.row("agent-check", b.button(store.checkingAgentProviders ? "Checking…" : "Check Now",
-                                      enabled: state != nil && !store.checkingAgentProviders) { [store] in
-            store.checkAgentProviders()
-        }, description: Self.lastChecked(state))
-        if let error = store.errors["agent-providers"] { b.note("agent-check", error, error: true) }
-
         if state == nil {
-            b.row("agent-providers", .label("Looking for providers…", .secondary))
+            b.row("agent-providers", .label("Loading providers…", .secondary))
+        } else if settings.providers.isEmpty {
+            b.row("agent-providers", .label("No providers configured yet", .secondary),
+                  description: "Add a provider to use agent panes and AI usage.")
         }
         for provider in settings.providers where state != nil {
             let health = state?.health(provider.id)
             let run = state?.maintenance(provider.id)
             let open = SettingControl.disclosure { [weak self] in self?.openProvider(provider.id) }
+            let actions = SettingControl.actions("\(provider.title) Actions", [
+                ButtonSpec(title: "Edit") { [weak self] in self?.openProvider(provider.id) },
+                ButtonSpec(title: "Remove…", style: .destructive) { [weak self] in
+                    self?.confirmRemoveProvider(provider, goBackAfter: false)
+                },
+            ])
             let badge = Self.badge(provider, health: health, run: run)
+            var trailing: [SettingControl] = []
+            if let badge { trailing.append(.label(badge, .badge)) }
+            trailing.append(actions)
+            trailing.append(open)
             b.item("agent-providers", key: provider.id, label: Self.listTitle(provider, health: health),
                    description: Self.status(provider, health: health, run: run),
                    icon: AgentLogo.image(for: provider, lightBackground: light),
-                   badge.map { .row([.label($0, .badge), open]) } ?? open)
+                   .row(trailing))
         }
+        if store.checkingAgentProviders && !settings.providers.isEmpty {
+            b.note("agent-providers", "Checking provider status…")
+        }
+        if let error = store.errors["agent-providers"] { b.note("agent-providers", error, error: true) }
         b.row("agent-add-provider", b.button("Add Provider…", enabled: state != nil) { [weak self] in self?.showAddProvider() })
-        buildTerminalIntegration(b)
-
-        b.row("agent-check-interval", b.stepper("agent-check-interval", Double(settings.healthCheckInterval / 60), range: 0 ... 1440,
-                                                unit: "minutes") { [store] minutes in
-            store.updateAgentProviders("agent-check-interval") { $0.healthCheckInterval = Int(minutes) * 60 }
-        })
+        buildTerminalMigration(b)
 
         if b.subpage == .agentProvider && !b.isSearching { buildProvider(b, state: state) }
+    }
+
+    private func confirmRemoveProvider(_ provider: AgentProviderConfig, goBackAfter: Bool) {
+        confirm("Remove “\(provider.title)”?",
+                "Its settings are deleted. Conversations that use it stay in their panes but can't continue.",
+                "Remove") { [weak self] in
+            self?.store.removeAgentProvider(provider.id)
+            if goBackAfter { self?.goBack() }
+        }
     }
 
     /// The Add Provider dialog, which opens the new provider's page.
     func showAddProvider() {
         guard let state = store.agentProviders, store.canAddAgentProvider() else { return }
-        let sheet = AddProviderSheet(settings: state.settings, kinds: state.kinds) { [weak self] config in
-            guard let self, let id = store.addAgentProvider(config) else { return }
+        let sheet = AddProviderSheet(settings: state.settings, kinds: state.kinds) { [weak self] config, integrate in
+            guard let self, let id = store.addAgentProvider(config, integrate: integrate) else { return }
             openProvider(id)
         }
         sheet.present(on: window)
@@ -51,7 +67,7 @@ extension SettingsModel {
     // MARK: A provider's page
 
     private func buildProvider(_ b: SettingsPageBuilder, state: AgentProvidersState?) {
-        let provider = shownProvider
+        guard let provider = shownProvider else { return }
         let id = provider.id
         let health = state?.health(id)
         let light = AppTheme.shared.palette.isLight
@@ -87,9 +103,12 @@ extension SettingsModel {
         }, description: spec.executable == nil ? "The agent to run: a command on PATH, or a full path. Required." : nil)
         if let variable = provider.homeVariable {
             b.row("agent-provider-home", b.field("agent-provider-home", provider.home ?? "",
-                                                 placeholder: spec.defaultHome ?? "", monospaced: true) { text in
+                                                 placeholder: spec.defaultHome ?? "", monospaced: true) { [store] text in
                 let path = text.trimmingCharacters(in: .whitespacesAndNewlines)
                 update("agent-provider-home") { $0.home = path.isEmpty ? nil : path }
+                var updated = provider
+                updated.home = path.isEmpty ? nil : path
+                store.loadAgentProviderIntegration(updated)
             }, label: "\(variable) folder", description: provider.supportsShadowHome
                 ? "The shared Codex folder, with its settings and conversations." : nil)
         }
@@ -123,15 +142,25 @@ extension SettingsModel {
 
         buildVariables(b, provider: provider, update: update)
         buildModels(b, provider: provider)
+        buildProviderIntegration(b, provider: provider)
 
-        b.row("agent-provider-remove", b.button("Remove…", style: .destructive, enabled: !provider.isBuiltIn) { [weak self] in
-            self?.confirm("Remove “\(provider.title)”?",
-                          "Its settings are deleted. Conversations that use it stay in their panes but can't continue.",
-                          "Remove") {
-                self?.store.removeAgentProvider(id)
-                self?.goBack()
-            }
-        }, description: provider.isBuiltIn ? "The built-in \(provider.kind.name) can be turned off but not removed." : nil)
+        b.row("agent-provider-remove", b.button("Remove…", style: .destructive) { [weak self] in
+            self?.confirmRemoveProvider(provider, goBackAfter: true)
+        })
+    }
+
+    private func buildProviderIntegration(_ b: SettingsPageBuilder, provider: AgentProviderConfig) {
+        guard CodingAgent(provider: provider.kind) != nil else { return }
+        let status = store.providerIntegrations[provider.id]
+        let busy = store.providerIntegrationBusy.contains(provider.id)
+        let enabled = status?.isIntegrated ?? false
+        let detail = busy ? "Updating…" : status.map(Self.integrationSummary) ?? "Checking…"
+        b.row("agent-provider-integration", b.toggle("agent-provider-integration", enabled, enabled: !busy) { [store] on in
+            store.setAgentProviderIntegration(provider, enabled: on)
+        }, description: detail)
+        if status?.agent == .codex && status?.hook == .installed {
+            b.note("agent-provider-integration", "Codex runs a new or changed hook only after you approve it: type /hooks in Codex.")
+        }
     }
 
     private func buildVariables(_ b: SettingsPageBuilder, provider: AgentProviderConfig,

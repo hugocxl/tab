@@ -187,16 +187,14 @@ public enum SettingsCatalog {
         SettingItem("generated-titles", "Prefer generated titles", "", .terminal, "Titles"),
         SettingItem("startup-command", "Startup command", "", .terminal, "Shell"),
         // Agents
-        SettingItem("agent-check", "Provider status", "", .agents, "Providers"),
-        SettingItem("agent-providers", "Providers", "The coding agents agent panes run on this Mac.", .agents, "Providers"),
-        SettingItem("agent-add-provider", "Add provider", "Add another account, such as a second Claude subscription, or another agent: Gemini CLI, OpenCode, Grok, Kiro or any that speaks the Agent Client Protocol.", .agents, "Providers"),
-        SettingItem("agent-check-interval", "Check again after", "Each provider's version, sign-in and latest release are checked again once the last check is this old. 0 checks only when you ask.", .agents, "Advanced"),
+        SettingItem("agent-providers", "Providers", "The coding agents configured on this Mac.", .agents, "Providers"),
+        SettingItem("agent-add-provider", "Add provider", "Add an account or coding agent: Claude Code, Codex, Antigravity CLI, Gemini CLI, OpenCode, Grok, Kiro or any that speaks the Agent Client Protocol.", .agents, "Providers"),
         SettingItem("agent-provider-enabled", "Provider", "", .agents, "Provider", subpage: .agentProvider),
         SettingItem("agent-provider-version", "Version", "The installed version, the latest release and the oldest one Tab works with.", .agents, "Provider", subpage: .agentProvider),
         SettingItem("agent-provider-sign-in", "Sign-in", "", .agents, "Provider", subpage: .agentProvider),
-        SettingItem("agent-provider-name", "Name", "Shown in the model menu and on agent panes.", .agents, "General", subpage: .agentProvider),
+        SettingItem("agent-provider-name", "Name", "Shown in the model menu, AI usage and on agent panes.", .agents, "General", subpage: .agentProvider),
         SettingItem("agent-provider-id", "ID", "Conversations name their provider by it.", .agents, "General", subpage: .agentProvider),
-        SettingItem("agent-provider-accent", "Accent color", "A dot beside the provider's logo in the model menu, to tell accounts apart.", .agents, "General", subpage: .agentProvider),
+        SettingItem("agent-provider-accent", "Accent color", "A dot beside the provider's logo in the model menu and AI usage, to tell accounts apart.", .agents, "General", subpage: .agentProvider),
         SettingItem("agent-provider-executable", "Executable", "The CLI to run: a command on PATH, or a full path.", .agents, "Runtime", subpage: .agentProvider),
         SettingItem("agent-provider-home", "Config folder", "Where the CLI keeps its sign-in, settings and conversations. Another folder can sign in to another account.", .agents, "Runtime", subpage: .agentProvider),
         SettingItem("agent-provider-shadow-home", "Account folder", "Keeps this account's sign-in apart while sharing conversations, skills and settings with the Codex folder. Empty signs in to the Codex folder itself.", .agents, "Runtime", subpage: .agentProvider),
@@ -205,9 +203,8 @@ public enum SettingsCatalog {
         SettingItem("agent-provider-variables", "Variables", "API keys, base URLs and other settings for the CLI, saved in plain text on this Mac.", .agents, "Environment", subpage: .agentProvider),
         SettingItem("agent-provider-models", "Models", "Favorites come first in the model menu, and hidden models stay out of it.", .agents, "Models", subpage: .agentProvider),
         SettingItem("agent-provider-custom-model", "Add model", "A model the CLI accepts but doesn't list, by its ID.", .agents, "Models", subpage: .agentProvider),
+        SettingItem("agent-provider-integration", "Tab integration", "Installs Tab's skill and session hooks into this provider's config folder so it works smoothly in Tab.", .agents, "Integration", subpage: .agentProvider),
         SettingItem("agent-provider-remove", "Remove provider", "Its conversations stay in their panes but can't continue.", .agents, "Removal", subpage: .agentProvider),
-        SettingItem("agent-integration", "Integrate with available agents", "Installs a Tab skill and session hooks for supported agents.", .agents, "Terminal Integration"),
-        SettingItem("agent-integration-agents", "Agents", "", .agents, "Terminal Integration"),
         SettingItem("terminal-migration", "Migrate from another terminal", "An agent reads that terminal's configuration and brings its shortcuts, font, cursor and colors into Tab.", .agents, "Migration"),
         // Plugins
         SettingItem("plugins", "Plugins", "Install, uninstall and configure optional plugins such as Explorer, Diff View and QuickShot.", .plugins, "Plugins"),
@@ -285,8 +282,7 @@ public enum SettingsCatalog {
 
     /// A line under a section's title.
     static let sectionSubtitles = ["Program Activity": "How status from processes and agents is handled",
-                                   "Providers": "The coding agents agent panes run on this Mac",
-                                   "Terminal Integration": "Agents you start in Tab's terminals"]
+                                   "Providers": "Only providers configured here appear in agent panes and AI usage"]
 
     private static let byId: [String: SettingItem] = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0) })
 

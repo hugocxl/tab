@@ -192,10 +192,10 @@ public struct AgentCustomModel: Hashable, Codable, Sendable {
 
 /// A server's coding agents, kept in its `agent-providers.json`.
 public struct AgentProviderSettings: Hashable, Codable, Sendable {
-    public static let maxProviders = 32
+    public static let maxProviders = 128
     public static let defaultHealthCheckInterval = 300
 
-    /// Every provider, built-in ones included, in the order the app lists them.
+    /// Configured providers, in the order the app lists them.
     public var providers: [AgentProviderConfig]
     /// Seconds between background checks of each provider's version and sign-in; 0 checks only on request.
     public var healthCheckInterval: Int
@@ -215,13 +215,10 @@ public struct AgentProviderSettings: Hashable, Codable, Sendable {
         normalize()
     }
 
-    /// Adds a missing built-in provider and drops repeated IDs.
+    /// Drops repeated IDs.
     private mutating func normalize() {
         var seen = Set<String>()
         providers = providers.filter { seen.insert($0.id).inserted }
-        for kind in AgentChatProvider.builtIn where !seen.contains(kind.rawValue) {
-            providers.append(.builtIn(kind))
-        }
     }
 
     public func provider(_ id: String?) -> AgentProviderConfig? {
@@ -229,10 +226,11 @@ public struct AgentProviderSettings: Hashable, Codable, Sendable {
         return providers.first { $0.id == id }
     }
 
-    /// The provider a conversation runs: `id`'s, or else its kind's built-in one. A custom
-    /// ACP agent has no built-in one, so a missing one is a provider with no command.
+    /// The provider a conversation runs: `id`'s, or the first configured provider of `kind`,
+    /// falling back to a default configuration for legacy conversations.
     public func provider(_ id: String?, kind: AgentChatProvider) -> AgentProviderConfig {
         if let found = provider(id), found.kind == kind { return found }
+        if id == nil, let first = providers.first(where: { $0.kind == kind }) { return first }
         return provider(kind.rawValue) ?? .builtIn(kind)
     }
 

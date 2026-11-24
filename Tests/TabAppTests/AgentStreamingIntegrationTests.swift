@@ -67,6 +67,7 @@ final class AgentStreamingIntegrationTests: XCTestCase {
             }
         }
         guard admin != nil else { throw Failure.timeout("tabd startup; \(serverLog)") }
+        _ = try await admin?.writeAgentProviders(AgentProviderSettings(providers: [.builtIn(.claude)]))
         let appRoot = root.appendingPathComponent("app", isDirectory: true)
         try FileManager.default.createDirectory(at: appRoot, withIntermediateDirectories: true)
         model = AppModel(dirs: TabDirs(root: appRoot),

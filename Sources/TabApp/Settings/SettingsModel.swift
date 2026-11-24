@@ -65,7 +65,7 @@ final class SettingsModel: ObservableObject {
     var isSearching: Bool { !query.trimmingCharacters(in: .whitespaces).isEmpty }
     var title: String {
         if isSearching { return "Search" }
-        if subpage == .agentProvider { return shownProvider.title }
+        if subpage == .agentProvider { return shownProvider?.title ?? "Provider" }
         if subpage == .pluginConfig, let pluginId {
             return PluginCatalog.descriptor(for: pluginId)?.name ?? pluginId.rawValue
         }
@@ -73,10 +73,10 @@ final class SettingsModel: ObservableObject {
     }
     private var location: Location { Location(category: category, subpage: subpage, provider: provider, pluginId: pluginId) }
 
-    /// The provider the open provider page shows, or the first while none is chosen.
-    var shownProvider: AgentProviderConfig {
+    /// The provider the open provider page shows, or nil when none is configured.
+    var shownProvider: AgentProviderConfig? {
         let settings = store.agentProviders?.settings ?? AgentProviderSettings()
-        return settings.provider(provider) ?? settings.providers.first ?? .builtIn(.claude)
+        return settings.provider(provider) ?? settings.providers.first
     }
 
     /// The page selected in the sidebar: none while searching.
@@ -135,14 +135,22 @@ final class SettingsModel: ObservableObject {
         if category == .mobile { store.loadRemoteAccess() }
         if category == .browser { store.refreshBrowserProfiles() }
         if category == .agents {
-            if subpage == .agentProvider {
-                store.loadAgentModels(shownProvider.id)
-            } else {
-                store.loadAgentProviders()
-                store.loadAgentIntegrations()
-            }
+            refreshAgentsPage()
         }
         reload()
+    }
+
+    /// Refreshes the currently open page (e.g. when reopening the Settings window).
+    func refreshCurrentPage() {
+        if category == .agents { refreshAgentsPage() }
+    }
+
+    private func refreshAgentsPage() {
+        if subpage == .agentProvider, let shown = shownProvider {
+            store.loadAgentModels(shown.id)
+            store.loadAgentProviderIntegration(shown)
+        }
+        store.loadAgentProviders(check: true)
     }
 
     /// Searches every page's settings, as typing in the search field does.

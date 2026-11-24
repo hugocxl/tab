@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import TabClient
 import TabCore
 import TabProtocol
@@ -139,8 +140,14 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     var loadProviders: (() async throws -> AgentProvidersState)?
     /// Runs a command, such as a provider's sign-in, in a new terminal beside the pane.
     var openTerminal: ((String) -> Void)?
+    /// Opens Settings › Agents so the user can add or configure providers.
+    var openAgentSettings: (() -> Void)?
     /// The providers the model menu offers, from the server's settings.
-    private var providers = AgentProviderSettings().providers
+    private var providers: [AgentProviderConfig] = []
+    /// Whether the server's provider list has been loaded at least once.
+    private var providersLoaded = false
+    /// Observes app settings changes so provider edits in Settings › Agents refresh this pane.
+    private var settingsObserver: AnyCancellable?
     /// What each provider's last check found, by provider ID.
     private var providerHealth: [String: AgentProviderHealth] = [:]
     /// The unavailable provider and reason the composer last warned about, so it warns once.
@@ -364,6 +371,14 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
             guard let model, let project = model.state.paneProject(pane) else { return }
             model.newTerminal(in: project, command: command)
         }
+        openAgentSettings = { [weak model] in
+            model?.showSettingsAction?(.agents)
+        }
+        settingsObserver = model.changes.sink { [weak self] changes in
+            guard changes.contains(.settings) else { return }
+            self?.modelCatalogLoadedAt = .distantPast
+            self?.refreshModelCatalog(force: false)
+        }
     }
 
     func restorePreferences(defaults: AgentComposerPreferences?, draft: AgentComposerPreferences?,
@@ -389,6 +404,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         surface.citationEnvironmentId = project.description
         surface.citationThreadId = session.description
         surface.composer.delegate = self
+        surface.configureProviders.onPress = { [weak self] in self?.openAgentSettings?() }
         surface.model.target = self
         surface.model.action = #selector(modelSelected(_:))
         surface.effort.target = self
@@ -2084,8 +2100,10 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         return true
     }
 
+    private var hasNoConfiguredProviders: Bool { providersLoaded && providers.isEmpty }
+
     private var canSend: Bool {
-        guard !needsAuthoritativeSnapshot, let snapshot else { return false }
+        guard !hasNoConfiguredProviders, !needsAuthoritativeSnapshot, let snapshot else { return false }
         return !restoringDraft && (snapshot.status == .idle || snapshot.status == .failed || snapshot.status == .working || snapshot.status == .waiting)
     }
 
@@ -2126,6 +2144,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
             : "Send message"
         surface.model.isEnabled = canEditSelection && !needsAuthoritativeSnapshot
         surface.effort.isEnabled = surface.model.isEnabled && !supportedEfforts.isEmpty
+        surface.noProvidersConfigured = hasNoConfiguredProviders
         surface.contextIndicator.update(usedTokens: snapshot?.contextUsage?.usedTokens,
                                         contextWindow: snapshot?.contextUsage?.contextWindow)
         let canCompact = composerCoordinator.providerCommands.contains("compact") && snapshot?.status == .idle && commandTask == nil
@@ -2261,8 +2280,14 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
             defer { if generation == self.connectionGeneration { self.modelCatalogTask = nil } }
             if let state = try? await self.loadProviders?() {
                 guard !Task.isCancelled, !self.disposed, generation == self.connectionGeneration else { return }
+                self.providersLoaded = true
                 self.providers = state.settings.providers
                 self.providerHealth = Dictionary(state.health.map { ($0.provider, $0) }, uniquingKeysWith: { _, last in last })
+                if !self.providers.isEmpty, self.snapshot?.providerSession == nil, !self.selectionEdited,
+                   !self.providers.contains(where: { $0.id == self.selection.providerKey && $0.enabled }),
+                   let preferred = self.providers.first(where: \.enabled) ?? self.providers.first {
+                    self.selection = AgentModelSelection(provider: preferred.kind, providerID: preferred.id, model: nil)
+                }
                 self.menuState = nil
                 self.updateControls()
                 self.warnIfUnavailable()
@@ -2290,10 +2315,10 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
             ?? modelCatalogs[selection.providerKey]?.first(where: \.isDefault)?.id
     }
 
-    /// The providers the model menu lists: the enabled ones whose CLI was found, and the
-    /// chosen one even when turned off or missing.
+    /// The providers the model menu lists: only enabled configured providers, plus the
+    /// active conversation's provider if it has already started.
     private var menuProviders: [AgentProviderConfig] {
-        providers.filter { ($0.enabled && providerHealth[$0.id]?.installed != false) || $0.id == selection.providerKey }
+        providers.filter { $0.enabled || (snapshot?.providerSession != nil && $0.id == selection.providerKey) }
     }
 
     /// Why a provider can't start a conversation now, as its last check found.
@@ -2445,6 +2470,8 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
             modelCatalogLoadedAt = .distantPast
             menuState = nil
             refreshModelCatalog(force: true)
+        } else if item.representedObject as? String == "open-agent-settings" {
+            openAgentSettings?()
         }
     }
 
@@ -2544,17 +2571,30 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
                 models.addItem(item)
             }
         }
+        if menuProviders.isEmpty && providersLoaded {
+            let empty = NSMenuItem(title: "No providers configured", action: nil, keyEquivalent: "")
+            empty.isEnabled = false
+            menu.addItem(empty)
+            if openAgentSettings != nil {
+                let open = NSMenuItem(title: "Open Settings › Agents…", action: #selector(modelSelected(_:)), keyEquivalent: "")
+                open.target = self
+                open.representedObject = "open-agent-settings"
+                menu.addItem(open)
+            }
+        }
         menu.addItem(.separator())
         let refreshModels = NSMenuItem(title: "Refresh models…", action: nil, keyEquivalent: "")
         refreshModels.representedObject = "refresh-models"
         menu.addItem(refreshModels)
         surface.model.menu = menu
         surface.model.menuLogos = menuLogos
-        surface.model.providerLogo = selection.provider.activityProvider
+        surface.model.providerLogo = (menuProviders.isEmpty && providersLoaded) ? nil : selection.provider.activityProvider
         surface.model.select(nil)
-        surface.model.displayedTitle = modelTitle(displayedSelection)
+        surface.model.displayedTitle = (menuProviders.isEmpty && providersLoaded) ? "No Provider" : modelTitle(displayedSelection)
         surface.model.icon = selection.provider == .claude ? .sparkles : .cpu
-        surface.model.toolTip = "Model · \(providerConfig(selection.providerKey, kind: selection.provider).title). Changes apply to the next message."
+        surface.model.toolTip = (menuProviders.isEmpty && providersLoaded)
+            ? "Add a provider in Settings › Agents to choose a model."
+            : "Model · \(providerConfig(selection.providerKey, kind: selection.provider).title). Changes apply to the next message."
 
         surface.effort.removeAllItems()
         surface.effort.addItem(withTitle: selectedModelDescriptor?.reasoningEfforts.isEmpty == true ? "Off" : "Auto")

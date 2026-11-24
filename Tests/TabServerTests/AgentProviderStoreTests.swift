@@ -37,7 +37,7 @@ final class AgentProviderStoreTests: XCTestCase {
 
         try Data("{ not json".utf8).write(to: url)
         let damaged = AgentProviderStore(url: url)
-        XCTAssertEqual(damaged.settings.providers.map(\.id), AgentChatProvider.builtIn.map(\.rawValue))
+        XCTAssertEqual(damaged.settings.providers, [])
         XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), "{ not json", "a file this build can't read is left for the user")
         XCTAssertThrowsError(try damaged.write(AgentProviderSettings(providers: [AgentProviderConfig(id: "has space", kind: .claude)])))
     }
@@ -49,12 +49,10 @@ final class AgentProviderStoreTests: XCTestCase {
         let store = AgentProviderStore(url: directory.appendingPathComponent("agent-providers.json"),
                                        environment: { ["PATH": "/usr/bin:/bin"] },
                                        latestVersions: AgentProviderLatestVersions(lookup: { _ in "2.1.500" }))
-        var settings = store.settings
-        settings.providers = settings.providers.map { provider in
-            var provider = provider
-            provider.executable = claude.path
-            return provider
-        }
+        var settings = AgentProviderSettings(providers: [
+            AgentProviderConfig(id: "claude", kind: .claude, executable: claude.path),
+            AgentProviderConfig(id: "codex", kind: .codex, executable: claude.path),
+        ])
         _ = try store.write(settings)
         let state = await store.check()
         let health = try XCTUnwrap(state.health("claude"))
@@ -177,6 +175,7 @@ final class AgentProviderStoreTests: XCTestCase {
         try JSONSerialization.data(withJSONObject: ["models": [row("alpha"), row("beta"), row("gamma")]])
             .write(to: work.appendingPathComponent("models_cache.json"))
         let settings = AgentProviderSettings(providers: [
+            .builtIn(.codex),
             AgentProviderConfig(id: "codex-2", kind: .codex, home: work.path,
                                 models: AgentProviderModels(favorites: ["gamma"], hidden: ["alpha"], custom: [AgentCustomModel(id: "next")])),
             AgentProviderConfig(id: "off", kind: .codex, enabled: false),
@@ -295,10 +294,9 @@ final class AgentProviderStoreTests: XCTestCase {
         let store = AgentProviderStore(url: directory.appendingPathComponent("agent-providers.json"),
                                        environment: { ["PATH": "/usr/bin:/bin"] },
                                        latestVersions: AgentProviderLatestVersions(lookup: { _ in "1.2.0" }))
-        var settings = store.settings
-        settings.providers = settings.providers.filter { $0.kind == .grok }
-        settings.providers[0].executable = cli.path
-        _ = try store.write(AgentProviderSettings(providers: settings.providers))
+        var grok = AgentProviderConfig.builtIn(.grok)
+        grok.executable = cli.path
+        _ = try store.write(AgentProviderSettings(providers: [grok]))
         let before = await store.check()
         XCTAssertEqual(before.health("grok")?.auth, .signedIn)
         XCTAssertEqual(before.health("grok")?.versionAdvisory?.status, .behindLatest)

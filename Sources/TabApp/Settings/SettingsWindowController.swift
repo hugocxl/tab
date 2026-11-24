@@ -61,7 +61,7 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
 
     /// Shows the window on `category`'s page.
     public func show(_ category: SettingsCategory? = nil) {
-        if let category { select(category) }
+        if let category { select(category) } else { model.refreshCurrentPage() }
         if window?.isVisible != true { window?.center() }
         showWindow(nil)
     }

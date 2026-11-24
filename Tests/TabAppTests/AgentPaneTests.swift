@@ -179,6 +179,9 @@ final class AgentPaneTests: XCTestCase {
             let pane = AgentPaneController(session: session, project: project, provider: .claude) { [self] in
                 try await request($0)
             }
+            pane.loadProviders = {
+                AgentProvidersState(settings: AgentProviderSettings(providers: [.builtIn(.claude), .builtIn(.codex)]))
+            }
             pane.loadModelCatalog = { provider, _ in
                 let options: [(String, String)] = provider.kind == .claude
                     ? [("claude-sonnet-5-5", "Claude Sonnet 5.5"), ("claude-opus-5-5", "Claude Opus 5.5")]

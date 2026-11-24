@@ -2856,6 +2856,7 @@ extension AgentSessionsTests {
         let root = try root()
         let box = AgentRuntimeBox()
         let settings = AgentProviderSettings(providers: [
+            .builtIn(.claude),
             AgentProviderConfig(id: "claude-2", kind: .claude, arguments: ["--chrome"]),
             AgentProviderConfig(id: "off", kind: .claude, enabled: false),
         ])

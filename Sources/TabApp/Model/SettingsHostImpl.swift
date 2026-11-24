@@ -70,7 +70,9 @@ public final class SettingsHostImpl: SettingsHost {
 
     public func agentProviders() async throws -> AgentProvidersState { try await local().agentProviders() }
     public func writeAgentProviders(_ settings: AgentProviderSettings) async throws -> AgentProvidersState {
-        try await local().writeAgentProviders(settings)
+        let state = try await local().writeAgentProviders(settings)
+        model.notify(.settings)
+        return state
     }
     public func checkAgentProviders() async throws -> AgentProvidersState { try await local().checkAgentProviders() }
     public func maintainAgentProvider(_ id: String, action: AgentProviderMaintenance.Action) async throws -> AgentProvidersState {
@@ -130,14 +132,14 @@ public final class SettingsHostImpl: SettingsHost {
 
     // MARK: Agents
 
-    public func agentIntegrations() async throws -> [AgentIntegrationStatus] {
-        try await Task.detached(priority: .userInitiated) { try AgentIntegrations.current().status() }.value
+    public func agentProviderIntegration(_ provider: AgentProviderConfig) async throws -> AgentIntegrationStatus? {
+        try await Task.detached(priority: .userInitiated) { try AgentIntegrations.current().status(for: provider) }.value
     }
 
-    public func setAgentIntegration(_ enabled: Bool) async throws -> [AgentIntegrationStatus] {
+    public func setAgentProviderIntegration(_ provider: AgentProviderConfig, enabled: Bool) async throws -> AgentIntegrationStatus? {
         try await Task.detached(priority: .userInitiated) {
             let integrations = try AgentIntegrations.current()
-            return enabled ? try integrations.install() : try integrations.remove()
+            return enabled ? try integrations.install(for: provider) : try integrations.remove(for: provider)
         }.value
     }
 

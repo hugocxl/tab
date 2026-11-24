@@ -28,10 +28,20 @@ actor AgentUsageLimitsService {
         self.probe = probe ?? { config in await AgentUsageLimitsProbe.read(config) }
     }
 
+    /// Forgets the cached reading, as after configured providers change.
+    func invalidate() {
+        cached = nil
+    }
+
     func handle(_ request: AgentUsageLimitsRequest) async -> AgentUsageLimitsReply {
         if !request.forceRefresh, let cached, now().timeIntervalSince(cached.0) < Self.freshness { return cached.1 }
         if let pending { return await pending.value }
         let accounts = Self.accounts(configs())
+        guard !accounts.isEmpty else {
+            let reply = AgentUsageLimitsReply(providers: [])
+            cached = (now(), reply)
+            return reply
+        }
         let probe = probe
         let task = Task.detached { () -> AgentUsageLimitsReply in
             await withTaskGroup(of: (Int, AgentUsageLimits?).self) { group in
@@ -362,13 +372,14 @@ private final class AgentUsageLimitsProbe: @unchecked Sendable {
         var environment = AgentProviderLaunch.environment(config, base: AgentProcess.environment())
         environment.removeValue(forKey: "CLAUDECODE")
         environment.removeValue(forKey: "TAB_SESSION_ID")
+        if provider == .codex { try? AgentProviderLaunch.prepareShadowHome(config) }
         guard let executable = try? AgentProviderLaunch.executable(config, environment: environment) else { return nil }
         let arguments: [String] = switch request {
         case .claudeControl:
             ["--print", "--verbose", "--input-format", "stream-json", "--output-format", "stream-json",
              "--no-session-persistence", "--safe-mode", "--strict-mcp-config", "--mcp-config", "{\"mcpServers\":{}}",
              "--tools", ""]
-        case .codexRPC: ["app-server"]
+        case .codexRPC: ["app-server"] + AgentProviderLaunch.homeArguments(config)
         case .acpExtension: provider.spec.sessionArguments
         case .command(let arguments, _): arguments
         }

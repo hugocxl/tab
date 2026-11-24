@@ -19,6 +19,16 @@ public enum CodingAgent: String, CaseIterable, Hashable, Codable, Sendable {
     /// Whether the agent runs a command when a session starts and reads what
     /// it prints, so Tab can tell it which terminal it runs in.
     public var supportsSessionHook: Bool { self == .claude || self == .codex }
+
+    /// Maps a configured provider kind to its coding agent integration, if Tab integrates with it.
+    public init?(provider: AgentChatProvider) {
+        switch provider {
+        case .claude: self = .claude
+        case .codex: self = .codex
+        case .openCode: self = .opencode
+        case .antigravity, .gemini, .grok, .kiro, .acp: return nil
+        }
+    }
 }
 
 /// What Tab installed for one agent.
@@ -102,16 +112,40 @@ public struct AgentIntegrations: Sendable {
     }
 
     public func skillFile(_ agent: CodingAgent) -> URL {
-        root(agent).appendingPathComponent("skills/\(AgentSkill.folderName)/SKILL.md")
+        skillFile(in: root(agent))
+    }
+
+    private func skillFile(in root: URL) -> URL {
+        root.appendingPathComponent("skills/\(AgentSkill.folderName)/SKILL.md")
     }
 
     /// The JSON file whose `hooks` run Tab's hooks.
     public func hookFile(_ agent: CodingAgent) -> URL? {
+        hookFile(agent, in: root(agent))
+    }
+
+    private func hookFile(_ agent: CodingAgent, in root: URL) -> URL? {
         switch agent {
-        case .claude: root(agent).appendingPathComponent("settings.json")
-        case .codex: root(agent).appendingPathComponent("hooks.json")
+        case .claude: root.appendingPathComponent("settings.json")
+        case .codex: root.appendingPathComponent("hooks.json")
         case .opencode, .pi: nil
         }
+    }
+
+    /// The coding agent and config folder for a configured provider, or nil if Tab doesn't integrate with its kind.
+    public func location(for provider: AgentProviderConfig) -> (agent: CodingAgent, root: URL)? {
+        guard let agent = CodingAgent(provider: provider.kind) else { return nil }
+        let trimmed = provider.home?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmed.isEmpty else { return (agent, root(agent)) }
+        let expanded: String
+        if trimmed == "~" {
+            expanded = home.path
+        } else if trimmed.hasPrefix("~/") {
+            expanded = home.path + String(trimmed.dropFirst())
+        } else {
+            expanded = trimmed
+        }
+        return (agent, URL(fileURLWithPath: expanded, isDirectory: true))
     }
 
     // MARK: Status
@@ -121,14 +155,24 @@ public struct AgentIntegrations: Sendable {
     }
 
     public func status(_ agent: CodingAgent) -> AgentIntegrationStatus {
+        status(agent, in: root(agent))
+    }
+
+    /// What Tab installed in `provider`'s own config folder; nil when `provider`'s kind has no Tab integration.
+    public func status(for provider: AgentProviderConfig) -> AgentIntegrationStatus? {
+        guard let (agent, folder) = location(for: provider) else { return nil }
+        return status(agent, in: folder)
+    }
+
+    private func status(_ agent: CodingAgent, in folder: URL) -> AgentIntegrationStatus {
         let skill: AgentIntegrationStatus.Part
-        switch try? String(contentsOf: skillFile(agent), encoding: .utf8) {
+        switch try? String(contentsOf: skillFile(in: folder), encoding: .utf8) {
         case nil: skill = .missing
         case AgentSkill.text?: skill = .installed
         default: skill = .outdated
         }
         var hook = AgentIntegrationStatus.Part.unsupported
-        if let file = hookFile(agent) {
+        if let file = hookFile(agent, in: folder) {
             let found = (try? HookDocument.read(file).tabHooks) ?? []
             if found.isEmpty {
                 hook = .missing
@@ -139,7 +183,7 @@ public struct AgentIntegrations: Sendable {
                 hook = found.allSatisfy { Executable.isExecutableFile($0.program) } ? .installed : .outdated
             }
         }
-        return AgentIntegrationStatus(agent: agent, found: isDirectory(root(agent)), skill: skill, hook: hook)
+        return AgentIntegrationStatus(agent: agent, found: isDirectory(folder), skill: skill, hook: hook)
     }
 
     /// Some agent has Tab's skill or hook.
@@ -148,6 +192,33 @@ public struct AgentIntegrations: Sendable {
     }
 
     // MARK: Changing
+
+    /// Installs the skill and hooks into `provider`'s config folder, creating it if needed.
+    @discardableResult
+    public func install(for provider: AgentProviderConfig) throws -> AgentIntegrationStatus? {
+        guard let (agent, folder) = location(for: provider) else { return nil }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try AtomicFile.write(Data(AgentSkill.text.utf8), to: skillFile(in: folder), permissions: 0o644)
+        if let file = hookFile(agent, in: folder) {
+            try HookDocument.update(file) { $0.setTabHooks(TabHook.all(for: agent), cli: cli) }
+        }
+        return status(agent, in: folder)
+    }
+
+    /// Removes Tab's skill and hooks from `provider`'s config folder, keeping everything else.
+    @discardableResult
+    public func remove(for provider: AgentProviderConfig) throws -> AgentIntegrationStatus? {
+        guard let (agent, folder) = location(for: provider) else { return nil }
+        let skill = skillFile(in: folder)
+        if FileManager.default.fileExists(atPath: skill.path) {
+            try FileManager.default.removeItem(at: skill)
+            rmdir(skill.deletingLastPathComponent().path)
+        }
+        if let file = hookFile(agent, in: folder), FileManager.default.fileExists(atPath: file.path) {
+            try HookDocument.update(file) { $0.setTabHooks([], cli: cli) }
+        }
+        return status(agent, in: folder)
+    }
 
     /// Installs the skill and hook into every agent found, replacing older
     /// copies. Fails when no agent is found, unless `required` is false.

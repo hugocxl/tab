@@ -114,10 +114,10 @@ public protocol SettingsHost: AnyObject {
     func maintainAgentProvider(_ id: String, action: AgentProviderMaintenance.Action) async throws -> AgentProvidersState
     /// `provider`'s models in the user's order, hidden ones included.
     func agentModels(_ provider: AgentProviderConfig, refresh: Bool) async throws -> [AgentModelDescriptor]
-    /// What Tab installed for each coding agent on this computer.
-    func agentIntegrations() async throws -> [AgentIntegrationStatus]
-    /// Installs or removes the skill and hooks of every agent found.
-    func setAgentIntegration(_ enabled: Bool) async throws -> [AgentIntegrationStatus]
+    /// What Tab installed in `provider`'s config folder; nil when `provider`'s kind has no Tab integration.
+    func agentProviderIntegration(_ provider: AgentProviderConfig) async throws -> AgentIntegrationStatus?
+    /// Installs or removes Tab's skill and hooks in `provider`'s config folder.
+    func setAgentProviderIntegration(_ provider: AgentProviderConfig, enabled: Bool) async throws -> AgentIntegrationStatus?
     /// The terminals whose settings an agent can bring into Tab.
     func migrationSources() -> [TerminalMigration.Source]
     /// Opens an agent tab in Home with `prompt` in its composer, not yet sent.
@@ -187,9 +187,7 @@ public final class PreviewSettingsHost: SettingsHost {
     public var importSources: [BrowserImportSource] = []
     public private(set) var agentPrompts: [String] = []
     public private(set) var terminalCommands: [String] = []
-    public var integrations = CodingAgent.allCases.map {
-        AgentIntegrationStatus(agent: $0, found: $0 != .pi, skill: .missing, hook: $0.supportsSessionHook ? .missing : .unsupported)
-    }
+    public var providerIntegrations: [String: AgentIntegrationStatus] = [:]
     public var migrations = Array(TerminalMigration.sources.prefix(2))
     public var providers = AgentProvidersState(settings: AgentProviderSettings())
     public var reportedModels: [AgentChatProvider: [AgentModelDescriptor]] = [:]
@@ -240,13 +238,18 @@ public final class PreviewSettingsHost: SettingsHost {
 
     public var privacy: [PrivacyPermission: PrivacyAccess] = [.camera: .allowed, .microphone: .denied]
     public func privacyAccess(_ permission: PrivacyPermission) -> PrivacyAccess { privacy[permission] ?? .notAsked }
-    public func agentIntegrations() async throws -> [AgentIntegrationStatus] { integrations }
-    public func setAgentIntegration(_ enabled: Bool) async throws -> [AgentIntegrationStatus] {
-        for index in integrations.indices where integrations[index].found {
-            integrations[index].skill = enabled ? .installed : .missing
-            if integrations[index].agent.supportsSessionHook { integrations[index].hook = enabled ? .installed : .missing }
-        }
-        return integrations
+    public func agentProviderIntegration(_ provider: AgentProviderConfig) async throws -> AgentIntegrationStatus? {
+        guard let agent = CodingAgent(provider: provider.kind) else { return nil }
+        return providerIntegrations[provider.id]
+            ?? AgentIntegrationStatus(agent: agent, found: true, skill: .missing, hook: agent.supportsSessionHook ? .missing : .unsupported)
+    }
+    public func setAgentProviderIntegration(_ provider: AgentProviderConfig, enabled: Bool) async throws -> AgentIntegrationStatus? {
+        guard let agent = CodingAgent(provider: provider.kind) else { return nil }
+        let status = AgentIntegrationStatus(agent: agent, found: true,
+                                            skill: enabled ? .installed : .missing,
+                                            hook: agent.supportsSessionHook ? (enabled ? .installed : .missing) : .unsupported)
+        providerIntegrations[provider.id] = status
+        return status
     }
     public func agentProviders() async throws -> AgentProvidersState { providers }
     public func writeAgentProviders(_ settings: AgentProviderSettings) async throws -> AgentProvidersState {

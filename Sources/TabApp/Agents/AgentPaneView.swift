@@ -90,6 +90,9 @@ final class AgentPaneView: ThemedView {
     private let notice = AgentSurfaceCard(style: .agentPanel)
     private let emptyTitle = makeLabel("What can I help with?", font: AppFont.system(21, weight: .medium))
     private let emptyDetail = makeLabel("Ask a question or make something new.", font: AppFont.body)
+    /// Shown on an empty pane when no agent providers have been configured in Settings › Agents.
+    let configureProviders = PillButton("Open Settings › Agents", style: .primary)
+    var noProvidersConfigured = false { didSet { if noProvidersConfigured != oldValue { needsLayout = true } } }
     /// What the agent waits for; pressing it scrolls to the request.
     private let activity = AgentPanelLine(accessibilityLabel: "Agent activity")
     private var busy = false
@@ -249,9 +252,11 @@ final class AgentPaneView: ThemedView {
             label.alignment = .center
             label.translatesAutoresizingMaskIntoConstraints = true
         }
+        configureProviders.translatesAutoresizingMaskIntoConstraints = true
+        configureProviders.isHidden = true
         // Suggestions sit behind the composer card so their lower edge tucks under it.
         // The transcript scrolls under everything that floats over its lower edge.
-        for child in [transcriptScroll, emptyTitle, emptyDetail, endButton, suggestions, composerCard, notice, panelScroll, activity] {
+        for child in [transcriptScroll, emptyTitle, emptyDetail, configureProviders, endButton, suggestions, composerCard, notice, panelScroll, activity] {
             addSubview(child)
         }
         panelScroll.documentView = panelDocument
@@ -313,7 +318,9 @@ final class AgentPaneView: ThemedView {
         layoutComposerControls(width: width, top: controlsTop)
         let cardHeight = controlsTop + Self.controlSize + 10
         let empty = isEmptyConversation
+        let showNoProviders = empty && noProvidersConfigured
         let cardY = empty ? floor((bounds.height - cardHeight) / 2) + 40 : bounds.height - 12 - cardHeight
+        composerCard.isHidden = showNoProviders
         composerCard.frame = NSRect(x: left, y: max(0, cardY), width: width, height: cardHeight)
         attachmentStrip.frame = NSRect(x: editorX, y: 8, width: editorWidth, height: attachmentHeight)
         attachmentStrip.isHidden = attachmentHeight == 0
@@ -321,14 +328,30 @@ final class AgentPaneView: ThemedView {
         composer.frame.size.height = max(editorHeight, ceil(usedHeight) + 12)
         emptyTitle.isHidden = !empty
         emptyDetail.isHidden = !empty
-        if empty {
+        configureProviders.isHidden = !showNoProviders
+        if showNoProviders {
+            let title = "No agent providers configured"
+            let detail = "Add a provider in Settings › Agents to start a conversation."
+            if emptyTitle.stringValue != title { emptyTitle.stringValue = title }
+            if emptyDetail.stringValue != detail { emptyDetail.stringValue = detail }
+            emptyDetail.toolTip = nil
+            let buttonSize = configureProviders.fittingSize
+            let blockHeight: CGFloat = 28 + 8 + 20 + 18 + buttonSize.height
+            let blockTop = floor((bounds.height - blockHeight) / 2)
+            emptyTitle.frame = NSRect(x: left, y: blockTop, width: width, height: 28)
+            emptyDetail.frame = NSRect(x: left, y: blockTop + 36, width: width, height: 20)
+            configureProviders.frame = NSRect(x: floor((bounds.width - buttonSize.width) / 2),
+                                              y: blockTop + 74, width: buttonSize.width, height: buttonSize.height)
+        } else if empty {
+            let title = "What can I help with?"
+            if emptyTitle.stringValue != title { emptyTitle.stringValue = title }
             let place = workspaceDescription?() ?? ""
             let detail = place.isEmpty ? "Ask a question or make something new." : "Ask a question or make something new in \(place)."
             if emptyDetail.stringValue != detail { emptyDetail.stringValue = detail }
             emptyDetail.toolTip = "Type / for commands, @ for files, or /resume to continue a past conversation."
+            emptyTitle.frame = NSRect(x: left, y: composerCard.frame.minY - 82, width: width, height: 28)
+            emptyDetail.frame = NSRect(x: left, y: composerCard.frame.minY - 48, width: width, height: 20)
         }
-        emptyTitle.frame = NSRect(x: left, y: composerCard.frame.minY - 82, width: width, height: 28)
-        emptyDetail.frame = NSRect(x: left, y: composerCard.frame.minY - 48, width: width, height: 20)
 
         // Glass cards stack above the composer, each the composer's width: a notice,
         // then questions, then the queue, then running agents, then task progress, then

@@ -1,4 +1,5 @@
 import AppKit
+import TabClient
 import TabCore
 import TabProtocol
 import XCTest
@@ -19,6 +20,7 @@ final class SettingsControlsTests: XCTestCase {
         dirs = TabDirs(root: root)
         host = PreviewSettingsHost()
         host.remoteAccess = RemoteAccessState(revision: 1, settings: RemoteAccessSettings(enabled: true), status: .listening)
+        host.providers = AgentProvidersState(settings: AgentProviderSettings(providers: [.builtIn(.claude)]))
     }
 
     override func tearDown() async throws {
@@ -50,11 +52,13 @@ final class SettingsControlsTests: XCTestCase {
         var server: ServerSettingsDoc
         var remote: RemoteAccessSettings
         var agents: AgentProviderSettings
+        var integrations: [String: AgentIntegrationStatus]
     }
 
     private func snapshot() -> Snapshot {
         Snapshot(settings: document(dirs.settings), terminal: document(dirs.terminalSettings),
-                 server: host.serverSettings, remote: host.remoteAccess.settings, agents: host.providers.settings)
+                 server: host.serverSettings, remote: host.remoteAccess.settings, agents: host.providers.settings,
+                 integrations: host.providerIntegrations)
     }
 
     private func written(since before: Snapshot) -> [String] {
@@ -64,6 +68,7 @@ final class SettingsControlsTests: XCTestCase {
         if before.server != after.server { paths.append("server") }
         if before.remote != after.remote { paths.append("remote") }
         if before.agents != after.agents { paths.append("agents") }
+        if before.integrations != after.integrations { paths.append("integrations") }
         return paths
     }
 
@@ -169,9 +174,9 @@ final class SettingsControlsTests: XCTestCase {
             "browser-enabled": "settings.json:browser.enabled",
             "mobile-access": "remote",
             "startup-command": "server",
-            "agent-check-interval": "agents",
             "agent-provider-name": "agents",
             "agent-provider-auto-compact": "agents",
+            "agent-provider-integration": "integrations",
         ]
         for (row, path) in expected {
             XCTAssertTrue(report[row]?.contains(path) ?? false, "\(row) wrote \(report[row] ?? []) instead of \(path)")

@@ -79,6 +79,7 @@ final class SettingsTests: XCTestCase {
     }
 
     func testEveryRowAPageShowsIsInTheSearchIndex() async throws {
+        host.providers = AgentProvidersState(settings: AgentProviderSettings(providers: [.builtIn(.claude), .builtIn(.codex)]))
         let store = makeStore()
         store.updateRemoteAccess(RemoteAccessState(revision: 1, settings: RemoteAccessSettings(enabled: true), status: .listening))
         store.loadServerSettings()
@@ -92,6 +93,7 @@ final class SettingsTests: XCTestCase {
             XCTAssertTrue(category == .changelog || !build.groups.isEmpty, "\(category) shows nothing")
             shown.formUnion(build.rowIds)
         }
+        try await Task.sleep(nanoseconds: 50_000_000)
         for subpage in SettingsSubpage.allCases {
             page.open(subpage)
             let build = try XCTUnwrap(page.lastBuild)
@@ -99,7 +101,7 @@ final class SettingsTests: XCTestCase {
             shown.formUnion(build.rowIds)
         }
         // A provider's page shows its kind's own rows, such as Codex's account folder.
-        for provider in AgentProviderSettings().providers {
+        for provider in host.providers.settings.providers {
             page.openProvider(provider.id)
             let build = try XCTUnwrap(page.lastBuild)
             XCTAssertEqual(build.unknownIds, [], "\(provider.id)'s page shows rows missing from the catalog")

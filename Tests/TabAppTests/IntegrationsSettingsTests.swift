@@ -1,6 +1,7 @@
 import AppKit
 import TabClient
 import TabCore
+import TabProtocol
 import XCTest
 @testable import TabApp
 
@@ -22,15 +23,22 @@ final class IntegrationsSettingsTests: XCTestCase {
     }
 
     private func toggle(_ page: SettingsModel) throws -> ToggleSpec {
-        let row = try XCTUnwrap(page.lastBuild?.rows.first { $0.id == "agent-integration" })
+        let row = try XCTUnwrap(page.lastBuild?.rows.first { $0.id == "agent-provider-integration" })
         guard case .toggle(let spec)? = row.control else { throw XCTSkip("not a toggle") }
         return spec
     }
 
-    func testTheSwitchInstallsIntoEveryAgentFoundAndRemovesAgain() async throws {
+    func testPerProviderIntegrationInstallsAndRemovesOnProviderPage() async throws {
+        let claude = AgentProviderConfig(id: "claude-work", kind: .claude, name: "Work", home: "~/.claude-work")
+        host.providers = AgentProvidersState(settings: AgentProviderSettings(providers: [claude]))
         let store = SettingsStore(dirs: dirs, host: host, theme: AppTheme(catalog: ThemeCatalog(entries: []), systemIsDark: true))
         let page = SettingsModel(store: store)
         page.select(.agents)
+        try await Task.sleep(nanoseconds: 50_000_000)
+        page.reload()
+        XCTAssertNil(page.lastBuild?.rows.first { $0.id == "agent-integration" }, "global terminal integration is removed")
+
+        page.openProvider(claude.id)
         try await Task.sleep(nanoseconds: 50_000_000)
         page.reload()
         XCTAssertFalse(try toggle(page).isOn)
@@ -40,15 +48,15 @@ final class IntegrationsSettingsTests: XCTestCase {
         page.reload()
 
         XCTAssertTrue(try toggle(page).isOn)
-        XCTAssertEqual(host.integrations.first { $0.agent == .claude }?.hook, .installed)
-        XCTAssertEqual(host.integrations.first { $0.agent == .pi }?.skill, .missing, "Pi isn't on this Mac")
+        XCTAssertEqual(host.providerIntegrations[claude.id]?.hook, .installed)
+        XCTAssertEqual(host.providerIntegrations[claude.id]?.skill, .installed)
 
         try toggle(page).change(false)
         try await Task.sleep(nanoseconds: 50_000_000)
         page.reload()
 
         XCTAssertFalse(try toggle(page).isOn)
-        XCTAssertFalse(AgentIntegrations.isEnabled(host.integrations))
+        XCTAssertEqual(host.providerIntegrations[claude.id]?.isIntegrated, false)
     }
 
     func testMigratingOpensAnAgentWithAPromptForThatTerminal() throws {

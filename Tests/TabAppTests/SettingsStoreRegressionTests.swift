@@ -271,8 +271,12 @@ private final class SettingsWriteHost: SettingsHost {
     func browserImportSources() -> [BrowserImportSource] { [] }
     func importBrowserData(from source: BrowserImportSource, cookies: Bool) async throws {}
     func privacyAccess(_ permission: PrivacyPermission) -> PrivacyAccess { base.privacyAccess(permission) }
-    func agentIntegrations() async throws -> [AgentIntegrationStatus] { try await base.agentIntegrations() }
-    func setAgentIntegration(_ enabled: Bool) async throws -> [AgentIntegrationStatus] { try await base.setAgentIntegration(enabled) }
+    func agentProviderIntegration(_ provider: AgentProviderConfig) async throws -> AgentIntegrationStatus? {
+        try await base.agentProviderIntegration(provider)
+    }
+    func setAgentProviderIntegration(_ provider: AgentProviderConfig, enabled: Bool) async throws -> AgentIntegrationStatus? {
+        try await base.setAgentProviderIntegration(provider, enabled: enabled)
+    }
     func migrationSources() -> [TerminalMigration.Source] { base.migrationSources() }
     func agentProviders() async throws -> AgentProvidersState { try await base.agentProviders() }
     func writeAgentProviders(_ settings: AgentProviderSettings) async throws -> AgentProvidersState {

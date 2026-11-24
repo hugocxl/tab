@@ -1,4 +1,5 @@
 import AppKit
+import TabClient
 import TabCore
 import TabProtocol
 
@@ -34,6 +35,8 @@ final class AddProviderSheet: SheetWindow {
         var useAPIKey = false
         var apiKeyVariable = ""
         var apiKey = ""
+        /// Installs Tab's skill and hooks into this provider's config folder on add.
+        var installIntegration = true
 
         init(kind: AgentChatProvider, settings: AgentProviderSettings) {
             self.kind = kind
@@ -46,6 +49,7 @@ final class AddProviderSheet: SheetWindow {
             self = Draft(empty: kind)
             id = settings.newID(kind, label: label)
             apiKeyVariable = kind.spec.apiKeyVariables.first ?? ""
+            installIntegration = CodingAgent(provider: kind) != nil
             guard settings.providers.contains(where: { $0.kind == kind }) else { return }
             let suffix = String(id.dropFirst(kind.rawValue.count).drop { $0 == "-" })
             let folder = suffix.isEmpty ? "2" : suffix
@@ -111,9 +115,11 @@ final class AddProviderSheet: SheetWindow {
 
     private let settings: AgentProviderSettings
     private let kinds: [AgentChatProvider]
-    private let add: (AgentProviderConfig) -> Void
+    private let add: (AgentProviderConfig, Bool) -> Void
     private(set) var draft: Draft
     private(set) var step = Step.provider
+    /// Detected CLI paths on this Mac, by provider kind.
+    private(set) var detected: [AgentChatProvider: String] = [:]
 
     private let steps = NSStackView()
     private let body = NSStackView()
@@ -123,10 +129,12 @@ final class AddProviderSheet: SheetWindow {
     private var tiles: [AgentChatProvider: NSButton] = [:]
     private var swatches: [String: NSButton] = [:]
 
-    init(settings: AgentProviderSettings, kinds: [AgentChatProvider], add: @escaping (AgentProviderConfig) -> Void) {
+    init(settings: AgentProviderSettings, kinds: [AgentChatProvider], detected: [AgentChatProvider: String]? = nil,
+         add: @escaping (AgentProviderConfig, Bool) -> Void) {
         self.settings = settings
         self.kinds = kinds
         self.add = add
+        self.detected = detected ?? [:]
         draft = Draft(kind: kinds.first ?? .claude, settings: settings)
         let content = NSStackView()
         super.init(content: content, width: 520)
@@ -155,6 +163,50 @@ final class AddProviderSheet: SheetWindow {
         onCancel = { [weak self] in self?.dismiss() }
         onDefault = { [weak self] in self?.next() }
         show(.provider)
+        if detected == nil {
+            let kindsToCheck = kinds
+            Task.detached(priority: .userInitiated) {
+                let found = Self.detectInstallations(kinds: kindsToCheck)
+                await MainActor.run { [weak self] in
+                    guard let self, !found.isEmpty else { return }
+                    self.detected = found
+                    if self.step == .provider || self.step == .config { self.show(self.step) }
+                }
+            }
+        }
+    }
+
+    /// Looks for each provider kind's default CLI on PATH and common macOS install directories.
+    nonisolated static func detectInstallations(kinds: [AgentChatProvider],
+                                                environment: [String: String] = ProcessInfo.processInfo.environment) -> [AgentChatProvider: String] {
+        let home = environment["HOME"] ?? NSHomeDirectory()
+        let pathEntries = (environment["PATH"] ?? "").split(separator: ":").map(String.init)
+        let extra = [
+            "/opt/homebrew/bin",
+            "/usr/local/bin",
+            "\(home)/.local/bin",
+            "\(home)/.npm-global/bin",
+            "\(home)/.bun/bin",
+            "\(home)/.volta/bin",
+            "\(home)/.cargo/bin",
+        ]
+        var directories: [String] = []
+        var seen = Set<String>()
+        for dir in pathEntries + extra where !dir.isEmpty && seen.insert(dir).inserted {
+            directories.append(dir)
+        }
+        var found: [AgentChatProvider: String] = [:]
+        for kind in kinds {
+            guard let executable = kind.spec.executable, !executable.isEmpty else { continue }
+            for dir in directories {
+                let candidate = (dir as NSString).appendingPathComponent(executable)
+                if FileManager.default.isExecutableFile(atPath: candidate) {
+                    found[kind] = candidate
+                    break
+                }
+            }
+        }
+        return found
     }
 
     // MARK: Steps
@@ -202,7 +254,7 @@ final class AddProviderSheet: SheetWindow {
         case .config:
             if let error = draft.configError() ?? draft.identityError(settings) { return fail(error) }
             dismiss()
-            add(draft.config)
+            add(draft.config, draft.installIntegration)
         }
     }
 
@@ -231,7 +283,9 @@ final class AddProviderSheet: SheetWindow {
     }
 
     private func tile(_ kind: AgentChatProvider) -> NSButton {
-        let title = kind.spec.vendor.map { "\(kind.name)  ·  \($0)" } ?? kind.name
+        let baseTitle = kind.spec.vendor.map { "\(kind.name)  ·  \($0)" } ?? kind.name
+        let installed = detected[kind] != nil
+        let title = installed ? "\(baseTitle)  ✓" : baseTitle
         let button = NSButton(title: title, target: self, action: #selector(chooseKind(_:)))
         button.setButtonType(.pushOnPushOff)
         button.isBordered = false
@@ -247,7 +301,8 @@ final class AddProviderSheet: SheetWindow {
         button.layer?.cornerRadius = 8
         button.layer?.borderWidth = 1
         button.tag = AgentChatProvider.allCases.firstIndex(of: kind) ?? 0
-        button.setAccessibilityLabel(kind.name)
+        button.toolTip = detected[kind].map { "Detected at \($0)" }
+        button.setAccessibilityLabel(installed ? "\(kind.name), installed" : kind.name)
         button.heightAnchor.constraint(equalToConstant: 40).isActive = true
         tiles[kind] = button
         style(button, selected: kind == draft.kind)
@@ -352,21 +407,39 @@ final class AddProviderSheet: SheetWindow {
                       DialogParts.note("Keeps this account's sign-in apart while sharing conversations, skills and settings "
                                        + "with the Codex folder. Empty signs in to the Codex folder itself.")]
         }
-        let executable = InsetTextField(value: draft.executable, placeholder: spec.executable ?? "e.g. qwen", label: "Executable",
-                                        width: nil, monospaced: true)
+        let executable = InsetTextField(value: draft.executable, placeholder: detected[draft.kind] ?? spec.executable ?? "e.g. qwen",
+                                        label: "Executable", width: nil, monospaced: true)
         executable.onChange = { [weak self] in self?.draft.executable = $0 }
-        views += [DialogParts.field("Executable", executable),
-                  DialogParts.note(spec.executable == nil ? "The agent to run: a command on PATH, or a full path."
-                                   : "Empty runs \(spec.executable ?? "") from PATH.")]
+        let executableNote: String
+        if spec.executable == nil {
+            executableNote = "The agent to run: a command on PATH, or a full path."
+        } else if let path = detected[draft.kind] {
+            executableNote = "Detected at \(path). Leave empty to use it, or enter a custom path for another version."
+        } else {
+            executableNote = "Empty runs \(spec.executable ?? "") from PATH."
+        }
+        views += [DialogParts.field("Executable", executable), DialogParts.note(executableNote)]
         let arguments = InsetTextField(value: draft.arguments, placeholder: spec.argumentsExample ?? "", label: "Launch arguments",
                                        width: nil, monospaced: true)
         arguments.onChange = { [weak self] in self?.draft.arguments = $0 }
         views += [DialogParts.field("Launch arguments", arguments),
                   DialogParts.note(SettingsModel.argumentsDescription(draft.kind))]
+        if CodingAgent(provider: draft.kind) != nil {
+            let toggle = NSButton(checkboxWithTitle: "Set up Tab integration (skill and hooks)",
+                                  target: self, action: #selector(toggleIntegration(_:)))
+            toggle.state = draft.installIntegration ? .on : .off
+            toggle.font = AppFont.body
+            views += [toggle,
+                      DialogParts.note("Installs Tab's skill and hooks into this provider's config folder so it operates smoothly in Tab.")]
+        }
         if !draft.useAPIKey, spec.signInCommand != nil {
             views.append(DialogParts.note("Once it is added, sign in from its page in Settings › Agents."))
         }
         return views
+    }
+
+    @objc private func toggleIntegration(_ sender: NSButton) {
+        draft.installIntegration = sender.state == .on
     }
 
     private func signIn(_ spec: AgentProviderSpec) -> [NSView] {

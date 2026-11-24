@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.134.0 - 2026-11-24
+
+### Changed
+
+- Require explicit agent provider setup with per-provider Tab integration and automatic status checks.
+
 ## 0.133.0 - 2026-11-24
 
 ### Changed

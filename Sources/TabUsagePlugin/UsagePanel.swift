@@ -207,7 +207,7 @@ final class UsagePanelController: NSViewController {
         if case .loading(nil) = load { showMessage("Loading…") }
         guard let reply else { return }
         if reply.providers.isEmpty {
-            showMessage("Sign in to Claude Code, Codex, Antigravity, OpenCode or Grok on this computer to see your plan limits.")
+            showMessage("Add a provider in Settings › Agents to see your plan limits.")
             return
         }
         message.isHidden = true

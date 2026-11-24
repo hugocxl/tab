@@ -44,9 +44,9 @@ public final class SettingsStore {
     public private(set) var backupBusy = false
     public private(set) var backupStatus = ""
     public private(set) var browserProfiles: [BrowserProfileSummary] = []
-    /// What Tab installed for each coding agent; `nil` until read.
-    public private(set) var agentIntegrations: [AgentIntegrationStatus]?
-    public private(set) var agentIntegrationBusy = false
+    /// Per-provider Tab integration status (skill and hooks), by provider ID.
+    public private(set) var providerIntegrations: [String: AgentIntegrationStatus] = [:]
+    public private(set) var providerIntegrationBusy: Set<String> = []
     /// This Mac's server's coding agents; `nil` until read.
     public private(set) var agentProviders: AgentProvidersState?
     /// Each provider's models as Settings lists them, hidden ones included, by provider ID.
@@ -209,42 +209,43 @@ public final class SettingsStore {
 
     // MARK: Integrations
 
-    /// Reads what Tab installed for each coding agent.
-    public func loadAgentIntegrations() {
-        changeAgentIntegrations(nil)
+    /// Reads what Tab installed in `provider`'s config folder.
+    public func loadAgentProviderIntegration(_ provider: AgentProviderConfig) {
+        changeAgentProviderIntegration(provider, enable: nil)
     }
 
-    /// Installs or removes the skill and hooks of every agent found.
-    public func setAgentIntegration(_ enabled: Bool) {
-        changeAgentIntegrations(enabled)
+    /// Installs or removes Tab's skill and hooks in `provider`'s config folder.
+    public func setAgentProviderIntegration(_ provider: AgentProviderConfig, enabled: Bool) {
+        changeAgentProviderIntegration(provider, enable: enabled)
     }
 
-    private func changeAgentIntegrations(_ enable: Bool?) {
-        guard !agentIntegrationBusy, let host else { return }
-        agentIntegrationBusy = true
+    private func changeAgentProviderIntegration(_ provider: AgentProviderConfig, enable: Bool?) {
+        let id = provider.id
+        guard !providerIntegrationBusy.contains(id), let host else { return }
+        providerIntegrationBusy.insert(id)
         changed()
         Task { [weak self] in
             do {
-                let statuses = if let enable {
-                    try await host.setAgentIntegration(enable)
+                let status = if let enable {
+                    try await host.setAgentProviderIntegration(provider, enabled: enable)
                 } else {
-                    try await host.agentIntegrations()
+                    try await host.agentProviderIntegration(provider)
                 }
-                self?.agentIntegrations = statuses
-                self?.errors["agent-integration"] = nil
+                if let status { self?.providerIntegrations[id] = status }
+                else { self?.providerIntegrations[id] = nil }
+                self?.errors["agent-provider-integration"] = nil
             } catch {
-                self?.errors["agent-integration"] = Self.message(error)
+                self?.errors["agent-provider-integration"] = Self.message(error)
             }
-            self?.agentIntegrationBusy = false
+            self?.providerIntegrationBusy.remove(id)
             self?.changed()
         }
     }
 
     // MARK: Agent providers
 
-    /// Reads the providers, then checks them again when the last check is
-    /// older than the server's interval.
-    public func loadAgentProviders() {
+    /// Reads the providers, then checks their status automatically when `check` is true.
+    public func loadAgentProviders(check: Bool = true) {
         guard let host, serverState == .running else { return }
         let edits = agentProviderEdits
         Task { [weak self] in
@@ -253,7 +254,9 @@ public final class SettingsStore {
                 guard let self else { return }
                 self.acceptAgentProviders(state, editsAtStart: edits)
                 self.errors["agent-providers"] = nil
-                if self.needsCheck(state) { self.checkAgentProviders() }
+                if check, state.settings.providers.contains(where: \.enabled) {
+                    self.checkAgentProviders()
+                }
             } catch {
                 self?.errors["agent-providers"] = Self.agentProvidersMessage(error)
             }
@@ -269,15 +272,6 @@ public final class SettingsStore {
         }
         agentProviders = AgentProvidersState(settings: local.settings, health: state.health,
                                              maintenance: state.maintenance, kinds: state.kinds)
-    }
-
-    private func needsCheck(_ state: AgentProvidersState) -> Bool {
-        let interval = TimeInterval(state.settings.healthCheckInterval)
-        return state.settings.providers.contains { provider in
-            guard provider.enabled else { return false }
-            guard let checked = state.health(provider.id)?.checkedAt else { return true }
-            return interval > 0 && Date().timeIntervalSince(checked) > interval
-        }
     }
 
     /// Checks every enabled provider's CLI version and sign-in.
@@ -383,17 +377,30 @@ public final class SettingsStore {
     }
 
     /// Adds `provider` as the Add Provider dialog made it; nil when it can't be added.
-    public func addAgentProvider(_ provider: AgentProviderConfig) -> String? {
+    /// When `integrate` is true and the provider's kind supports Tab integration, installs
+    /// Tab's skill and hooks into the provider's config folder.
+    public func addAgentProvider(_ provider: AgentProviderConfig, integrate: Bool = true) -> String? {
         guard canAddAgentProvider(), agentProviders?.settings.provider(provider.id) == nil else { return nil }
         updateAgentProviders("agent-providers") { $0.providers.append(provider) }
-        return agentProviders?.settings.provider(provider.id) == nil ? nil : provider.id
+        guard agentProviders?.settings.provider(provider.id) != nil else { return nil }
+        if integrate, CodingAgent(provider: provider.kind) != nil {
+            setAgentProviderIntegration(provider, enabled: true)
+        }
+        let write = agentProviderWrite
+        Task { [weak self] in
+            await write?.value
+            self?.checkAgentProviders()
+        }
+        return provider.id
     }
 
     public func removeAgentProvider(_ id: String) {
         updateAgentProviders("agent-providers") { settings in
-            settings.providers.removeAll { $0.id == id && !$0.isBuiltIn }
+            settings.providers.removeAll { $0.id == id }
         }
         agentModels[id] = nil
+        providerIntegrations[id] = nil
+        errors["agent-provider-integration"] = nil
     }
 
     /// Applies `change` at once and saves it on the server after any earlier

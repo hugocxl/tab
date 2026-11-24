@@ -110,7 +110,7 @@ public struct AgentUsageLimits: Hashable, Codable, Sendable {
 }
 
 public struct AgentUsageLimitsReply: Hashable, Codable, Sendable {
-    public static let maxProviders = 32
+    public static let maxProviders = 128
     public static let maxWindows = 32
     /// Providers this build doesn't know are left out rather than failing the reply.
     public var providers: [AgentUsageLimits]

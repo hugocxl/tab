@@ -4,43 +4,13 @@ import TabCore
 import TabProtocol
 
 extension SettingsModel {
-    /// Settings › Agents' sections for agents in Tab's terminals and for migrating
-    /// from another terminal.
-    func buildTerminalIntegration(_ b: SettingsPageBuilder) {
-        let statuses = store.agentIntegrations
-        let enabled = statuses.map(AgentIntegrations.isEnabled) ?? false
-        b.row("agent-integration", b.toggle("agent-integration", enabled, enabled: statuses != nil && !store.agentIntegrationBusy) { [store] in
-            store.setAgentIntegration($0)
-        })
-        b.note("agent-integration", "Agent panes always know how to use Tab. This also teaches Claude Code, Codex, "
-               + "OpenCode and Pi started in Tab's terminals.")
-        if let statuses {
-            let light = AppTheme.shared.palette.isLight
-            for status in statuses {
-                b.item("agent-integration-agents", key: status.agent.rawValue, label: status.agent.name, description: Self.summary(status),
-                       icon: AgentLogo.image(for: Self.provider(status.agent), lightBackground: light), nil)
-            }
-        } else {
-            b.row("agent-integration-agents", .label("Looking for agents…", .secondary))
-        }
-        if statuses?.contains(where: { $0.agent == .codex && $0.hook == .installed }) ?? false {
-            b.note("agent-integration-agents", "Codex runs a new or changed hook only after you approve it: type /hooks in Codex.")
-        }
+    /// Settings › Agents' section for migrating from another terminal.
+    func buildTerminalMigration(_ b: SettingsPageBuilder) {
         b.row("terminal-migration", migrationButtons(b), stacked: true)
     }
 
-    static func provider(_ agent: CodingAgent) -> AgentProvider {
-        switch agent {
-        case .claude: .claude
-        case .codex: .codex
-        case .opencode: .openCode
-        case .pi: .pi
-        }
-    }
-
-    /// One line about what Tab installed for an agent.
-    static func summary(_ status: AgentIntegrationStatus) -> String {
-        guard status.found else { return "Not found on this Mac" }
+    /// One line about what Tab installed for a provider.
+    static func integrationSummary(_ status: AgentIntegrationStatus) -> String {
         guard status.isIntegrated else { return "Not set up" }
         if status.skill == .outdated || status.hook == .outdated { return "Updates when Tab next opens" }
         switch (status.skill, status.hook) {

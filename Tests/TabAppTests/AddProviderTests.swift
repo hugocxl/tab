@@ -7,9 +7,16 @@ import XCTest
 @MainActor
 final class AddProviderTests: XCTestCase {
     func testAnotherAccountOfAKindGetsAFolderOfItsOwn() throws {
-        let settings = AgentProviderSettings()
+        let empty = AgentProviderSettings()
+        let firstClaude = AddProviderSheet.Draft(kind: .claude, settings: empty)
+        XCTAssertEqual(firstClaude.id, "claude")
+        XCTAssertEqual(firstClaude.home, "", "the first Claude uses its default config folder")
+        XCTAssertTrue(firstClaude.installIntegration, "Tab integration is enabled by default for supported kinds")
+
+        let settings = AgentProviderSettings(providers: [.builtIn(.claude), .builtIn(.codex)])
         var first = AddProviderSheet.Draft(kind: .acp, settings: settings)
         XCTAssertEqual(first.id, "acp")
+        XCTAssertFalse(first.installIntegration, "custom ACP agents have no built-in Tab integration")
         XCTAssertEqual(first.configError(), "Enter the agent's command.")
         first.executable = "qwen"
         first.arguments = "--acp"
@@ -55,5 +62,40 @@ final class AddProviderTests: XCTestCase {
         XCTAssertNil(AgentProviderUnavailability(codex, health: nil), "an unchecked provider isn't blocked")
         let unknown = AgentProviderHealth(provider: "codex", installed: true, auth: .unknown, checkedAt: Date())
         XCTAssertNil(AgentProviderUnavailability(codex, health: unknown), "a sign-in Tab can't read may still work")
+    }
+
+    func testEmptyProvidersShowEmptyStateInAgentPaneAndAnyProviderCanBeDeleted() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("tab-providers-ui-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let host = PreviewSettingsHost()
+        let store = SettingsStore(dirs: TabDirs(root: root), host: host,
+                                  theme: AppTheme(catalog: ThemeCatalog(entries: []), systemIsDark: true))
+        let page = SettingsModel(store: store)
+        page.select(.agents)
+        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertEqual(store.agentProviders?.settings.providers, [], "starts empty until providers are added")
+
+        let added = store.addAgentProvider(AgentProviderConfig(id: "claude", kind: .claude, name: "Personal"))
+        XCTAssertEqual(added, "claude")
+        XCTAssertEqual(store.agentProviders?.settings.providers.map(\.id), ["claude"])
+        store.removeAgentProvider("claude")
+        XCTAssertEqual(store.agentProviders?.settings.providers, [], "any configured provider can be deleted")
+
+        var openedSettings = false
+        let pane = AgentPaneController(session: SessionId(), project: ProjectId(), provider: .claude) { _ in
+            AgentChatSnapshot(session: SessionId(), project: ProjectId(), provider: .claude, accessMode: .fullAccess)
+        }
+        defer { pane.dispose() }
+        pane.loadProviders = { AgentProvidersState(settings: AgentProviderSettings()) }
+        pane.loadModelCatalog = { _, _ in [] }
+        pane.openAgentSettings = { openedSettings = true }
+        pane.refresh()
+        for _ in 0..<50 where !pane.surface.noProvidersConfigured {
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertTrue(pane.surface.noProvidersConfigured)
+        pane.surface.configureProviders.onPress?()
+        XCTAssertTrue(openedSettings)
     }
 }
