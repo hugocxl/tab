@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.135.1 - 2026-11-24
+
+### Changed
+
+- Show background agents in sidebar cards as nested rows with a background and a connector line.
+
 ## 0.135.0 - 2026-11-24
 
 ### Changed

@@ -86,7 +86,11 @@ final class SidebarCardView: HoverView {
         static let sectionGap: CGFloat = 5
         /// A pane row, and a footer row: the location and the project.
         static let row: CGFloat = PaneRowView.height
+        static let subtaskGap = SidebarCardView.subtaskGap
     }
+
+    /// Between two subtask rows, so their fills stay apart.
+    static let subtaskGap: CGFloat = 3
 
     /// Lets a title label wrap to `maxTitleLines`, ending in an ellipsis.
     static func wrap(_ label: NSTextField) {
@@ -113,11 +117,12 @@ final class SidebarCardView: HoverView {
     }
 
     /// The card's height for its sections: the padding, the project row, the
-    /// title's lines, one row per listed pane, then the footer's location row.
-    static func height(header: Bool, location: Bool, panes: Int, titleLines: Int = 1) -> CGFloat {
+    /// title's lines, one row per listed pane and the gaps between subtask
+    /// rows, then the footer's location row.
+    static func height(header: Bool, location: Bool, panes: Int, subtaskGaps: Int = 0, titleLines: Int = 1) -> CGFloat {
         var height = Line.padding * 2 + Line.title + CGFloat(titleLines - 1) * titleLineHeight
         if header { height += Line.row }
-        if panes > 0 { height += Line.sectionGap + CGFloat(panes) * Line.row }
+        if panes > 0 { height += Line.sectionGap + CGFloat(panes) * Line.row + CGFloat(subtaskGaps) * Line.subtaskGap }
         // Without panes the location follows the title directly.
         if location { height += (panes > 0 ? Line.sectionGap : 0) + Line.row }
         return height
@@ -222,7 +227,13 @@ final class SidebarCardView: HoverView {
 
     override var intrinsicContentSize: NSSize {
         NSSize(width: NSView.noIntrinsicMetric,
-               height: Self.height(header: headerLabel != nil, location: showsLocation, panes: listRows.count, titleLines: titleLines))
+               height: Self.height(header: headerLabel != nil, location: showsLocation, panes: listRows.count,
+                                   subtaskGaps: subtaskGaps, titleLines: titleLines))
+    }
+
+    /// How many subtask rows directly follow another one.
+    private var subtaskGaps: Int {
+        zip(listRows, listRows.dropFirst()).filter { $0 is SubtaskRowView && $1 is SubtaskRowView }.count
     }
 
     /// The title's lines at the card's current width.
@@ -387,9 +398,12 @@ final class SidebarCardView: HoverView {
         titleRow?.frame = CGRect(x: x, y: top, width: max(right - x, 0), height: titleBlock)
         top += titleBlock
         if !listRows.isEmpty { top += Line.sectionGap }
+        var previous: NSView?
         for row in listRows {
+            if row is SubtaskRowView, previous is SubtaskRowView { top += Line.subtaskGap }
             row.frame = CGRect(x: left, y: top, width: max(right - left, 0), height: Line.row)
             top += Line.row
+            previous = row
         }
         if !listRows.isEmpty, showsLocation { top += Line.sectionGap }
         if showsLocation {
@@ -588,6 +602,12 @@ final class SubtaskRowView: ThemedView {
     private let spinner: ActivityGlyph?
     private let titleLabel: NSTextField
     private let elapsedLabel = makeLabel("", font: .monospacedDigitSystemFont(ofSize: 11, weight: .regular))
+    /// A rounded fill from just before the spinner to just past the running time.
+    private let fill = CALayer()
+    /// The rounded elbow from the pane's icon column into the row, which
+    /// carries on down to the next row when the pane lists another.
+    private let elbow = CAShapeLayer()
+    private var continues = false
 
     /// The rows for a pane's subtasks: up to `maxShown`, then one that counts the rest.
     static func rows(for pane: ActivityCardData.PaneRow) -> [SubtaskRowView] {
@@ -597,6 +617,7 @@ final class SubtaskRowView: ThemedView {
         var rows = shown.map { SubtaskRowView(pane: pane.id, title: $0.title, since: $0.since, spins: true) }
         let rest = tasks.count - shown.count
         if rest > 0 { rows.append(SubtaskRowView(pane: pane.id, title: "\(rest) more running", since: nil, spins: false)) }
+        rows.dropLast().forEach { $0.continues = true }
         return rows
     }
 
@@ -607,6 +628,15 @@ final class SubtaskRowView: ThemedView {
         titleLabel.lineBreakMode = .byTruncatingTail
         spinner = spins ? ActivityGlyph() : nil
         super.init(frame: .zero)
+        fill.cornerRadius = 5
+        fill.cornerCurve = .continuous
+        fill.actions = ["bounds": NSNull(), "position": NSNull(), "backgroundColor": NSNull()]
+        layer?.addSublayer(fill)
+        elbow.fillColor = nil
+        elbow.lineWidth = 1
+        elbow.lineCap = .round
+        elbow.actions = ["path": NSNull(), "strokeColor": NSNull()]
+        layer?.addSublayer(elbow)
         for view in [spinner, titleLabel, elapsedLabel].compactMap({ $0 }) as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = true
             addSubview(view)
@@ -623,6 +653,8 @@ final class SubtaskRowView: ThemedView {
         titleLabel.textColor = theme.fgDim
         elapsedLabel.textColor = theme.fgDim
         spinner?.style = .ticks(theme.fgDim)
+        fill.backgroundColor = theme.fg(alpha: 0.05).cgColor
+        elbow.strokeColor = theme.fg(alpha: 0.18).cgColor
     }
 
     override func layout() {
@@ -631,6 +663,21 @@ final class SubtaskRowView: ThemedView {
         let side = SidebarCardView.iconSide
         // Under the pane's title, so the list reads as the pane's children.
         let x = SidebarCardView.textInset
+        fill.frame = CGRect(x: x - 4, y: 0, width: max(bounds.width - side - x + 4, 0), height: bounds.height)
+        // Down the pane icon's center line, turning into the fill's leading edge.
+        let lineX = (side / 2).rounded() + 0.5
+        let radius: CGFloat = 5
+        let path = CGMutablePath()
+        path.move(to: CGPoint(x: lineX, y: 0))
+        path.addLine(to: CGPoint(x: lineX, y: center - radius))
+        path.addQuadCurve(to: CGPoint(x: lineX + radius, y: center), control: CGPoint(x: lineX, y: center))
+        path.addLine(to: CGPoint(x: x - 7, y: center))
+        if continues {
+            // Through the gap to the next row's elbow.
+            path.move(to: CGPoint(x: lineX, y: center - radius))
+            path.addLine(to: CGPoint(x: lineX, y: bounds.height + SidebarCardView.subtaskGap))
+        }
+        elbow.path = path
         spinner?.frame = SidebarCardView.iconBox(x: x, centerY: center).insetBy(dx: 2, dy: 2)
         let textX = x + side + 6
         // Running times line up with the panes', left of their status column.
