@@ -3,6 +3,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
+git config core.hooksPath .githooks 2>/dev/null || true
 source "$ROOT/scripts/swift-settings.sh"
 [ -d vendor/GhosttyVT.xcframework ] || scripts/build-ghostty.sh
 mkdir -p build/validation

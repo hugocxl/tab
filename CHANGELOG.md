@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.132.1 - 2026-11-24
+
+### Changed
+
+- Standardize repository setup, worktree isolation, and shared workflows.
+
 ## 0.132.0 - 2026-11-24
 
 ### Changed
@@ -807,7 +813,6 @@ Changelog.
 ### Fixed
 
 - Releases no longer fail now and then while checking conversation mentions in the agent composer.
-||||||| parent of e69d4b5 (0.82.0: Draw every icon from Tab's own two-tone set)
 
 ## 0.81.0 - 2026-11-09
 

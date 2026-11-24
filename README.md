@@ -2,31 +2,46 @@
 
 ### Your terminal. Your agents. Your whole dev loop.
 
-**A fully native terminal multiplexer and agent development environment for the Mac.** Terminal, agent, simulator and browser panes sit side by side in one workspace, with its own background server included.
+**A fully native terminal multiplexer and agent development environment for the Mac.** Terminal, agent, simulator, and browser panes sit side by side in one workspace, with its own background server included.
 
 [Download for macOS](https://github.com/hugocxl/tab/releases/latest) · [Read the docs](https://hugocxl.github.io/tab/docs.html) · [Visit the website](https://hugocxl.github.io/tab/)
 
 [![A Tab workspace with agent conversations, terminals, an iPhone simulator, a browser pane and the file explorer](.github/preview.png)](https://hugocxl.github.io/tab/)
 
-## Four panes. Equal footing.
+## Highlights
 
-Your shell, your coding agent and the app you're building belong together. **Terminal** panes run commands, logs and development servers. **Agent** panes hold your Claude Code or Codex conversations. **Simulator** panes show iOS simulators and Android emulators. **Browser** panes keep your local app or the docs in view while you change the code behind them.
+- **Four panes, equal footing.** Terminals, Claude Code / Codex agent panes, iOS/Android simulators, and local browser panes in one split layout per project or Git worktree.
+- **Persistent background server.** Close the app and keep your terminals and workspaces running; connect to another Mac over SSH and its projects feel local.
+- **Fully native.** Written in Swift and AppKit with native shortcuts, split panes, and macOS glass surfaces — no Electron.
+- **Scriptable.** The `tab` CLI lets you and your agents open panes, read terminals, and drive browsers from any shell.
 
-Give each project or Git worktree its own tab, arrange the panes inside it, and keep parallel tasks apart with their files and Git diffs close at hand.
+## Development
 
-## Close the app. Keep your terminals.
+Requires macOS 14+ on Apple silicon, Xcode 27, Zig 0.17 (for `libghostty-vt`), and `ripgrep`.
 
-Tab's own server keeps your terminal sessions and workspace running when you quit, so you can come back later and pick up where you left off. Connect to another Mac over SSH and its projects, terminals and simulators feel just as local.
+```sh
+scripts/build-ghostty.sh          # once: build vendor/GhosttyVT.xcframework
+scripts/run-dev.sh                # build and launch this checkout's isolated dev app
+scripts/stop.sh                   # quit this checkout's dev app and stop its tabd
+scripts/validate.sh               # warnings-as-errors build, tests, debug bundle
+```
 
-## Made to feel at home
+Website (self-contained in `website/`):
 
-- **Fully native.** Written in Swift and built with AppKit, with native shortcuts, split panes and macOS glass surfaces. No Electron.
-- **Your agents, your way.** Native panes for the Claude Code or Codex you already use, and a terminal pane for any other agent.
-- **Easy to drive.** The `tab` command lets you, and your agents, open panes, read terminals and drive the browser from a shell.
-- **Free to use.** Open source, for macOS 14 or later on Apple silicon.
+```sh
+cd website && npm ci && npm run build:site && npm run check:site
+```
+
+Each Git worktree builds an isolated `Tab Dev (<worktree>)` app with its own bundle ID, profile, and `tabd` server so parallel worktrees never collide.
+
+## Releases
+
+Commits follow `<Added|Changed|Removed|Improved|Fixed>: <One user-facing sentence.>` — `.githooks/` automatically updates `CHANGELOG.md` and creates the matching `vX.Y.Z` tag. Pushing to `main` runs the Release workflow (validate, sign, notarize, publish DMG and `update.json`). One-time secret setup:
+
+```sh
+scripts/setup-release-secrets.sh /path/DeveloperID.p12 --api-key /path/AuthKey_KEYID.p8 <issuer-id> --update-key "Tab update signing key" tab-release
+```
 
 ## License
 
-Tab is [MIT licensed](LICENSE). The third-party code and artwork it includes keep their own licenses, listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-
-Made by [Hugo](https://github.com/hugocxl). Ideas and contributions are welcome: [open an issue](https://github.com/hugocxl/tab/issues).
+Tab is [MIT licensed](LICENSE). Third-party code and artwork keep their own licenses in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Made by [Hugo](https://github.com/hugocxl).
