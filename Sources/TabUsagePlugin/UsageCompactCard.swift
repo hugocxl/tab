@@ -186,8 +186,11 @@ final class UsageCompactCardController: NSViewController {
         render()
     }
 
+    /// Limits belong to the server, so another project on the same one keeps the rows.
     func show(project: (id: ProjectId, server: ServerId)?) {
+        let sameServer = isViewLoaded && project != nil && project?.server == self.project?.server
         self.project = project
+        if sameServer { return }
         loadViewIfNeeded()
         render()
         refresh(force: false)

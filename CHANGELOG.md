@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.135.0 - 2026-11-24
+
+### Changed
+
+- Show every AI usage limit per provider card with reset and pace, and keep the panel steady across tabs.
+
 ## 0.134.2 - 2026-11-24
 
 ### Changed

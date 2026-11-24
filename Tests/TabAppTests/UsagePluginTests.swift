@@ -117,7 +117,7 @@ final class UsagePluginTests: XCTestCase {
         try await settle { !controller.cards.isEmpty }
         XCTAssertEqual(controller.cards.map { $0.limits.providerId }, ["claude-side", "codex", "claude", "grok"])
         let side = try XCTUnwrap(controller.cards.first)
-        XCTAssertEqual(side.rows.map(\.usage.label), ["Weekly"])
+        XCTAssertEqual(side.rows.map(\.usage.label), ["Weekly", "Session"])
         XCTAssertEqual(side.rows.first?.tone, .low)
         XCTAssertEqual(side.rows.first?.bar.fraction, 0.86)
         XCTAssertEqual(controller.filterMenu().items.map(\.title).prefix(4), ["All Providers  4", "Claude  2", "Codex  1", "Grok  1"])
@@ -133,7 +133,6 @@ final class UsagePluginTests: XCTestCase {
         XCTAssertEqual(controller.cards.map { $0.limits.providerId }, ["claude", "claude-side"])
         controller.setFigure(.left)
         XCTAssertEqual(controller.cards.last?.rows.first?.bar.fraction, 0.14)
-        controller.cards.last?.onToggle?()
         XCTAssertEqual(controller.cards.last?.rows.map(\.usage.label), ["Weekly", "Session"])
         controller.setFilter(nil)
         XCTAssertEqual(controller.cards.count, 4)
@@ -147,6 +146,18 @@ final class UsagePluginTests: XCTestCase {
         XCTAssertEqual(controller.messageText, "No accounts match the filter.")
         controller.setQuery("")
         XCTAssertEqual(controller.cards.count, 4)
+    }
+
+    func testSwitchingProjectsOnTheSameServerKeepsTheCards() async throws {
+        let (controller, server) = makePanel(Self.sample(now: Date()))
+        try await settle { !controller.cards.isEmpty }
+        let before = controller.cards.map(ObjectIdentifier.init)
+        controller.show(project: (ProjectId(), server.server.server))
+        controller.tick()
+        XCTAssertEqual(controller.cards.map(ObjectIdentifier.init), before)
+        controller.setQuery("nobody")
+        controller.setQuery("nobody")
+        XCTAssertEqual(controller.messageText, "No accounts match the filter.")
     }
 
     func testSettingsChooseTheScheduleAndDefaults() throws {
@@ -198,7 +209,6 @@ final class UsagePluginTests: XCTestCase {
                 controller.view.bottomAnchor.constraint(equalTo: background.bottomAnchor),
             ])
             try await settle { !controller.cards.isEmpty }
-            if width > 400 { controller.cards.first?.onToggle?() }
             let view = try XCTUnwrap(window.contentView)
             view.layoutSubtreeIfNeeded()
             view.displayIfNeeded()

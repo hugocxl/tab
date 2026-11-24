@@ -4,9 +4,8 @@ import TabClient
 import TabCore
 import TabProtocol
 
-/// The AI Usage panel: one compact glass card per signed-in agent account with
-/// its plan, the limit closest to running out and when it resets, the other
-/// limits a click away. The footer's filter narrows by name, plan or account and
+/// The AI Usage panel: one glass card per signed-in agent account with its
+/// plan and every limit, each with its bar, reset and pace. The footer's filter narrows by name, plan or account and
 /// its menu picks a provider, the order and the figure. Reads the current
 /// project's server, and again on the configured schedule while it shows.
 @MainActor
@@ -30,9 +29,9 @@ final class UsagePanelController: NSViewController {
     private(set) var figure = UsageConfig().figure
     /// The providers of the last reading, in the order the menu lists them.
     private var kinds: [(kind: AgentChatProvider, count: Int)] = []
-    /// Cards showing every limit, by account.
-    private var expanded = Set<String>()
     private var visible = false
+    /// What the cards were last built from; a render that matches it keeps them.
+    private var shown: Shown?
     /// Ticks each minute while the panel shows: updates the countdowns and reads again when due.
     private var clock: Timer?
 
@@ -76,9 +75,10 @@ final class UsagePanelController: NSViewController {
 
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = ChromeButton.gap
-        stack.edgeInsets = NSEdgeInsets(top: Metrics.gutter, left: RightSidebarFooter.innerInset, bottom: Metrics.gutter,
-                                        right: RightSidebarFooter.outerInset)
+        // The top and footer rows and the panes' own inset already leave a gutter, so the
+        // cards sit a gutter from each of them, from the window's edge and from each other.
+        stack.spacing = Metrics.gutter
+        stack.edgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: RightSidebarFooter.outerInset)
         stack.translatesAutoresizingMaskIntoConstraints = false
         scroll.content.addSubview(stack)
         NSLayoutConstraint.activate([
@@ -89,7 +89,10 @@ final class UsagePanelController: NSViewController {
         ])
         message.theme = theme
         message.isHidden = true
-        card.onColorsChange = { [weak self] in self?.render() }
+        card.onColorsChange = { [weak self] in
+            self?.shown = nil
+            self?.render()
+        }
 
         for subview in [scroll, message, footer] as [NSView] {
             subview.translatesAutoresizingMaskIntoConstraints = false
@@ -154,8 +157,11 @@ final class UsagePanelController: NSViewController {
     }
 
     /// Shows the limits of `project`'s server, reading them when they are stale.
+    /// Limits belong to the server, so another project on the same one keeps the cards.
     func show(project: (id: ProjectId, server: ServerId)?) {
+        let sameServer = isViewLoaded && project != nil && project?.server == self.project?.server
         self.project = project
+        if sameServer { return }
         loadViewIfNeeded()
         render()
         refresh(force: false)
@@ -261,23 +267,39 @@ final class UsagePanelController: NSViewController {
             showMessage("Add a provider in Settings › Agents to see your plan limits.")
             return
         }
-        message.isHidden = true
-        scroll.isHidden = false
         populate(reply)
     }
 
     private func showMessage(_ text: String) {
+        shown = nil
         message.set(text)
         message.isHidden = text.isEmpty
         scroll.isHidden = true
     }
 
+    /// The inputs the cards are built from, the countdowns to the minute.
+    private struct Shown: Equatable {
+        let reply: AgentUsageLimitsReply
+        let filter: AgentChatProvider?
+        let query: String
+        let order: UsageConfig.Order
+        let figure: UsageConfig.Figure
+        let lowThreshold: Int
+        let minute: Int
+    }
+
     private func populate(_ reply: AgentUsageLimitsReply) {
+        let now = Date()
+        let next = Shown(reply: reply, filter: filter, query: query, order: order, figure: figure,
+                         lowThreshold: config.lowThreshold, minute: Int(now.timeIntervalSince1970 / 60))
+        guard next != shown else { return }
+        shown = next
+        message.isHidden = true
+        scroll.isHidden = false
         for view in stack.arrangedSubviews {
             stack.removeArrangedSubview(view)
             view.removeFromSuperview()
         }
-        let now = Date()
         kinds = []
         for limits in reply.providers {
             if let index = kinds.firstIndex(where: { $0.kind == limits.provider }) {
@@ -287,20 +309,16 @@ final class UsagePanelController: NSViewController {
             }
         }
         if let filter, !kinds.contains(where: { $0.kind == filter }) { self.filter = nil }
-        let shown = reply.providers.filter { (filter == nil || $0.provider == filter) && Self.matches($0, query) }
-        let ordered = order == .urgency ? UsageMath.byUrgency(shown, lowThreshold: config.lowThreshold) : shown
+        let matching = reply.providers.filter { (filter == nil || $0.provider == filter) && Self.matches($0, query) }
+        let ordered = order == .urgency ? UsageMath.byUrgency(matching, lowThreshold: config.lowThreshold) : matching
         for limits in ordered {
-            let key = Self.key(limits)
-            let card = UsageAccountCard(limits: limits, figure: figure, lowThreshold: config.lowThreshold,
-                                        expanded: expanded.contains(key), now: now, theme: theme)
-            card.onToggle = { [weak self] in
-                guard let self else { return }
-                if self.expanded.remove(key) == nil { self.expanded.insert(key) }
-                self.render()
-            }
-            add(card)
+            add(UsageAccountCard(limits: limits, figure: figure, lowThreshold: config.lowThreshold, now: now, theme: theme))
         }
-        if ordered.isEmpty { showMessage("No accounts match the filter.") }
+        if ordered.isEmpty {
+            showMessage("No accounts match the filter.")
+            // Kept, so the message is not built again until the inputs change.
+            shown = next
+        }
     }
 
     /// Whether the filter's text appears in the account's name, provider, plan or address.
@@ -315,11 +333,6 @@ final class UsagePanelController: NSViewController {
         stack.addArrangedSubview(view)
         view.widthAnchor.constraint(equalTo: stack.widthAnchor,
                                     constant: -(stack.edgeInsets.left + stack.edgeInsets.right)).isActive = true
-    }
-
-    /// Which account a card shows, kept across readings so an open card stays open.
-    private static func key(_ limits: AgentUsageLimits) -> String {
-        limits.providerId ?? limits.provider.rawValue
     }
 }
 
@@ -347,20 +360,17 @@ class UsageClickable: NSView {
     }
 }
 
-/// One account on a glass card like the selected tab's: its name and plan with
-/// the tightest limit's figure, that limit's bar, and which limit it is with its
-/// reset and the account. Expanded, every other limit below.
+/// One account on a glass card like the selected tab's: its logo, name and plan
+/// with the account on the right, then every limit the account reports.
 @MainActor
-final class UsageAccountCard: UsageClickable {
+final class UsageAccountCard: NSView {
     /// The card's padding, as the tab cards pad theirs.
-    static let insets = NSEdgeInsets(top: Metrics.border + 8, left: Metrics.border + 10,
-                                     bottom: Metrics.border + 8, right: Metrics.border + 10)
+    static let insets = NSEdgeInsets(top: Metrics.border + 10, left: Metrics.border + 10,
+                                     bottom: Metrics.border + 10, right: Metrics.border + 10)
 
     let limits: AgentUsageLimits
-    let expanded: Bool
-    /// The limit rows shown now, the headline first.
+    /// The limit rows, in the order the provider reports them.
     private(set) var rows: [UsageLimitRow] = []
-    var onToggle: (() -> Void)?
     private let glass = GlassView(style: .card)
 
     /// The provider's short name: "Claude", "Codex", "Antigravity".
@@ -368,10 +378,8 @@ final class UsageAccountCard: UsageClickable {
         provider == .claude ? "Claude" : provider.activityProvider.displayName
     }
 
-    init(limits: AgentUsageLimits, figure: UsageConfig.Figure, lowThreshold: Int, expanded: Bool, now: Date,
-         theme: AppTheme) {
+    init(limits: AgentUsageLimits, figure: UsageConfig.Figure, lowThreshold: Int, now: Date, theme: AppTheme) {
         self.limits = limits
-        self.expanded = expanded
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         wantsLayer = true
@@ -382,40 +390,29 @@ final class UsageAccountCard: UsageClickable {
         layer?.backgroundColor = theme.surface.cgColor
         glass.appearance = theme.nsAppearance
         addSubview(glass)
-        onClick = { [weak self] in self?.onToggle?() }
 
-        let provider = Self.providerTitle(limits.provider)
-        let name = limits.providerName ?? provider
-        let headline = UsageMath.headline(limits)
-
-        let logo = NSImageView(image: AgentLogo.mark(limits.provider.activityProvider).image(size: 14, theme: theme) ?? NSImage())
+        let name = limits.providerName ?? Self.providerTitle(limits.provider)
+        let logo = NSImageView(image: AgentLogo.mark(limits.provider.activityProvider).image(size: 16, theme: theme) ?? NSImage())
         logo.translatesAutoresizingMaskIntoConstraints = false
         let title = NSTextField(labelWithAttributedString: Self.title(name, plan: limits.plan, theme: theme))
         title.lineBreakMode = .byTruncatingTail
-        title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        title.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        var top: [NSView] = [logo, title]
-        if let headline {
-            let tone = UsageMath.tone(headline, lowThreshold: lowThreshold)
-            let value = makeLabel(UsageLimitRow.figureText(headline, figure),
-                                  font: .monospacedDigitSystemFont(ofSize: 13, weight: .semibold),
-                                  color: tone == .fine ? theme.fg : UsageLimitRow.color(tone, theme: theme))
-            value.setContentCompressionResistancePriority(.required, for: .horizontal)
-            value.setContentHuggingPriority(.required, for: .horizontal)
-            top.append(value)
+        title.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        title.setContentHuggingPriority(.required, for: .horizontal)
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        var top: [NSView] = [logo, title, spacer]
+        if let account = limits.account {
+            // An address has no spaces, so it truncates in the middle rather than losing its domain.
+            let label = makeLabel(account, font: AppFont.footnote, color: theme.fgMuted)
+            label.lineBreakMode = .byTruncatingMiddle
+            label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            top.append(label)
         }
         let header = NSStackView(views: top)
-        header.distribution = .fill
         header.alignment = .centerY
-        header.spacing = 6
+        header.spacing = Metrics.gutter
 
         var body: [NSView] = [header]
-        if let headline {
-            let row = UsageLimitRow(window: headline, figure: figure, lowThreshold: lowThreshold, now: now,
-                                    detail: limits.account, showsFigure: false, theme: theme)
-            rows.append(row)
-            body.append(row)
-        }
         if let failure = limits.failure {
             let warning = makeLabel(failure, font: AppFont.footnote, color: theme.warning)
             warning.lineBreakMode = .byWordWrapping
@@ -424,24 +421,21 @@ final class UsageAccountCard: UsageClickable {
             warning.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             body.append(warning)
         }
-        if expanded {
-            for window in limits.windows where window.id != headline?.id {
-                let row = UsageLimitRow(window: window, figure: figure, lowThreshold: lowThreshold, now: now,
-                                        detail: nil, showsFigure: true, theme: theme)
-                rows.append(row)
-                body.append(row)
-            }
+        for window in limits.windows {
+            let row = UsageLimitRow(window: window, figure: figure, lowThreshold: lowThreshold, now: now, theme: theme)
+            rows.append(row)
+            body.append(row)
         }
         let column = NSStackView(views: body)
         column.orientation = .vertical
         column.alignment = .leading
-        column.spacing = 6
+        column.spacing = Metrics.gutter + 4
+        column.setCustomSpacing(Metrics.gutter, after: header)
         column.translatesAutoresizingMaskIntoConstraints = false
-        if expanded, body.count > 2 { column.setCustomSpacing(10, after: body[1]) }
         addSubview(column)
         NSLayoutConstraint.activate([
-            logo.widthAnchor.constraint(equalToConstant: 14),
-            logo.heightAnchor.constraint(equalToConstant: 14),
+            logo.widthAnchor.constraint(equalToConstant: 16),
+            logo.heightAnchor.constraint(equalToConstant: 16),
             column.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.insets.left),
             column.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.insets.right),
             column.topAnchor.constraint(equalTo: topAnchor, constant: Self.insets.top),
@@ -451,17 +445,14 @@ final class UsageAccountCard: UsageClickable {
             view.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true
         }
 
-        var tip = [limits.account.map { "\(name) · \($0)" } ?? name, "Read \(UsageMath.ago(limits.checkedAt, now: now))"]
-        if let headline, let pace = UsageMath.paceSentence(headline, now: now) { tip.append(pace) }
-        toolTip = tip.joined(separator: "\n")
+        toolTip = [limits.account.map { "\(name) · \($0)" } ?? name, "Read \(UsageMath.ago(limits.checkedAt, now: now))"]
+            .joined(separator: "\n")
         setAccessibilityElement(true)
-        setAccessibilityRole(.button)
+        setAccessibilityRole(.group)
         var spoken = [limits.plan.map { "\(name), \($0)" } ?? name]
         if let account = limits.account { spoken.append(account) }
-        if let headline { spoken.append(UsageLimitRow.spoken(headline, figure: figure, lowThreshold: lowThreshold, now: now)) }
         if let failure = limits.failure { spoken.append(failure) }
         setAccessibilityLabel(spoken.joined(separator: ". "))
-        setAccessibilityHelp(expanded ? "Hides the other limits" : "Shows every limit")
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -471,9 +462,9 @@ final class UsageAccountCard: UsageClickable {
         glass.frame = bounds
     }
 
-    /// `Side project Pro`: the name in medium weight, the plan regular and muted.
+    /// `Side project Pro`: the name in semibold, the plan regular and muted.
     private static func title(_ name: String, plan: String?, theme: AppTheme) -> NSAttributedString {
-        let text = NSMutableAttributedString(string: name, attributes: [.font: AppFont.bodyMedium, .foregroundColor: theme.fg])
+        let text = NSMutableAttributedString(string: name, attributes: [.font: AppFont.header, .foregroundColor: theme.fg])
         if let plan {
             text.append(NSAttributedString(string: " \(plan)", attributes: [.font: AppFont.body, .foregroundColor: theme.fgMuted]))
         }
@@ -484,57 +475,49 @@ final class UsageAccountCard: UsageClickable {
     }
 }
 
-/// One limit: its bar, then `Weekly · 4d 22h` with the account or, in the
-/// expanded list, the figure on the right.
+/// One limit: its name with the figure on the right, its bar with a tick where
+/// even spending would be, then `Resets in 4d 22h · ahead of pace`.
 @MainActor
 final class UsageLimitRow: NSView {
     let usage: AgentUsageWindow
     let tone: UsageTone
     let bar: UsageBarView
 
-    init(window: AgentUsageWindow, figure: UsageConfig.Figure, lowThreshold: Int, now: Date, detail: String?,
-         showsFigure: Bool, theme: AppTheme) {
+    init(window: AgentUsageWindow, figure: UsageConfig.Figure, lowThreshold: Int, now: Date, theme: AppTheme) {
         self.usage = window
         tone = UsageMath.tone(window, lowThreshold: lowThreshold)
         let color = Self.color(tone, theme: theme)
-        bar = UsageBarView(fraction: Double(UsageMath.figure(window, figure)) / 100, color: color, height: 4, theme: theme)
+        // Even spending leaves as much of the bar as there is time left in the window.
+        let marker = UsageMath.paceRemainingPercent(window, now: now).map { Double(figure == .left ? $0 : 100 - $0) / 100 }
+        bar = UsageBarView(fraction: Double(UsageMath.figure(window, figure)) / 100, color: color, height: 4, marker: marker,
+                           theme: theme)
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
 
-        let caption = NSMutableAttributedString(string: window.label, attributes: [
-            .font: AppFont.footnoteMedium, .foregroundColor: showsFigure ? theme.fg : theme.fgMuted])
-        if let resetsIn = UsageMath.resetsIn(window, now: now) {
-            caption.append(NSAttributedString(string: " · \(resetsIn)", attributes: [
-                .font: AppFont.footnote, .foregroundColor: theme.fgMuted]))
-        }
-        let label = NSTextField(labelWithAttributedString: caption)
+        let label = makeLabel(window.label, font: AppFont.small, color: theme.fg)
         label.lineBreakMode = .byTruncatingTail
-        label.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
-        label.setContentHuggingPriority(.required, for: .horizontal)
-        if let resetsAt = window.resetsAt { label.toolTip = "Resets \(UsageMath.exact(resetsAt))" }
-        var line: [NSView] = [label]
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         let spacer = NSView()
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        line.append(spacer)
-        if showsFigure {
-            let value = makeLabel(Self.figureText(window, figure), font: .monospacedDigitSystemFont(ofSize: 11, weight: .semibold),
-                                  color: tone == .fine ? theme.fg : color)
-            value.setContentCompressionResistancePriority(.required, for: .horizontal)
-            line.append(value)
-        } else if let detail {
-            // An address has no spaces, so it truncates in the middle rather than losing its domain.
-            let account = makeLabel(detail, font: AppFont.footnote, color: theme.fgMuted)
-            account.lineBreakMode = .byTruncatingMiddle
-            account.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-            line.append(account)
-        }
-        let text = NSStackView(views: line)
-        text.spacing = 6
+        let value = makeLabel(Self.figureText(window, figure), font: .monospacedDigitSystemFont(ofSize: 12, weight: .semibold),
+                              color: tone == .fine ? theme.fg : color)
+        value.setContentCompressionResistancePriority(.required, for: .horizontal)
+        value.setContentHuggingPriority(.required, for: .horizontal)
+        let line = NSStackView(views: [label, spacer, value])
+        line.spacing = Metrics.gutter
 
-        let column = NSStackView(views: showsFigure ? [text, bar] : [bar, text])
+        var views: [NSView] = [line, bar]
+        if let caption = Self.caption(window, now: now, theme: theme) {
+            let detail = NSTextField(labelWithAttributedString: caption)
+            detail.lineBreakMode = .byTruncatingTail
+            detail.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            if let resetsAt = window.resetsAt { detail.toolTip = "Resets \(UsageMath.exact(resetsAt))" }
+            views.append(detail)
+        }
+        let column = NSStackView(views: views)
         column.orientation = .vertical
         column.alignment = .leading
-        column.spacing = 5
+        column.spacing = 6
         column.translatesAutoresizingMaskIntoConstraints = false
         addSubview(column)
         NSLayoutConstraint.activate([
@@ -542,9 +525,8 @@ final class UsageLimitRow: NSView {
             column.trailingAnchor.constraint(equalTo: trailingAnchor),
             column.topAnchor.constraint(equalTo: topAnchor),
             column.bottomAnchor.constraint(equalTo: bottomAnchor),
-            text.widthAnchor.constraint(equalTo: column.widthAnchor),
-            bar.widthAnchor.constraint(equalTo: column.widthAnchor),
         ])
+        for view in views { view.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true }
         bar.toolTip = UsageMath.summary(window, now: now)
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
@@ -552,6 +534,21 @@ final class UsageLimitRow: NSView {
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// `Resets in 4d 22h · ahead of pace`, the pace in the warning color when ahead.
+    private static func caption(_ window: AgentUsageWindow, now: Date, theme: AppTheme) -> NSAttributedString? {
+        let text = NSMutableAttributedString()
+        let muted: [NSAttributedString.Key: Any] = [.font: AppFont.footnote, .foregroundColor: theme.fgMuted]
+        if let resetsIn = UsageMath.resetsIn(window, now: now) {
+            text.append(NSAttributedString(string: resetsIn == "now" ? "Resets now" : "Resets in \(resetsIn)", attributes: muted))
+        }
+        if let pace = UsageMath.pace(window, now: now) {
+            if text.length > 0 { text.append(NSAttributedString(string: " · ", attributes: muted)) }
+            text.append(NSAttributedString(string: pace.short, attributes: [
+                .font: AppFont.footnote, .foregroundColor: pace == .ahead ? theme.warning : theme.fgMuted]))
+        }
+        return text.length > 0 ? text : nil
+    }
 
     /// `86%`, or `14% left` when the figure is what is left.
     static func figureText(_ window: AgentUsageWindow, _ figure: UsageConfig.Figure) -> String {
@@ -564,6 +561,7 @@ final class UsageLimitRow: NSView {
         if let resetsAt = window.resetsAt, resetsAt > now {
             parts.append("resets in \(UsageMath.spelledDuration(resetsAt.timeIntervalSince(now)))")
         }
+        if let pace = UsageMath.pace(window, now: now) { parts.append(pace.short) }
         return parts.joined(separator: ", ")
     }
 
@@ -577,18 +575,24 @@ final class UsageLimitRow: NSView {
     }
 }
 
-/// A thin rounded bar filled to `fraction` in the limit's status color.
+/// A thin rounded bar filled to `fraction` in the limit's status color, with an
+/// optional tick at `marker`.
 @MainActor
 final class UsageBarView: NSView {
     nonisolated static let height: CGFloat = 6
     let fraction: Double
+    /// Where even spending would fill the bar to, 0–1.
+    let marker: Double?
     private let color: NSColor
     private let track: NSColor
+    private let tick: NSColor
 
-    init(fraction: Double, color: NSColor, height: CGFloat = UsageBarView.height, theme: AppTheme) {
+    init(fraction: Double, color: NSColor, height: CGFloat = UsageBarView.height, marker: Double? = nil, theme: AppTheme) {
         self.fraction = min(max(fraction, 0), 1)
+        self.marker = marker.map { min(max($0, 0), 1) }
         self.color = color
         track = theme.fg(alpha: 0.10)
+        tick = theme.fg(alpha: 0.45)
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         heightAnchor.constraint(equalToConstant: height).isActive = true
@@ -603,9 +607,14 @@ final class UsageBarView: NSView {
         track.setFill()
         NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).fill()
         let width = (rect.width * fraction).rounded()
-        guard width > 0 else { return }
-        color.setFill()
-        NSBezierPath(roundedRect: NSRect(x: 0, y: 0, width: max(width, rect.height), height: rect.height),
-                     xRadius: radius, yRadius: radius).fill()
+        if width > 0 {
+            color.setFill()
+            NSBezierPath(roundedRect: NSRect(x: 0, y: 0, width: max(width, rect.height), height: rect.height),
+                         xRadius: radius, yRadius: radius).fill()
+        }
+        if let marker, marker > 0, marker < 1 {
+            tick.setFill()
+            NSRect(x: (rect.width * marker).rounded() - 1, y: 0, width: 2, height: rect.height).fill()
+        }
     }
 }

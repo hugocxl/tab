@@ -16,6 +16,15 @@ enum UsagePace: Equatable {
         case .under: return "Under pace: headroom left for the rest of the window"
         }
     }
+
+    /// The words after the reset countdown: `ahead of pace`.
+    var short: String {
+        switch self {
+        case .ahead: return "ahead of pace"
+        case .on: return "on pace"
+        case .under: return "under pace"
+        }
+    }
 }
 
 /// How close a window is to its limit, as Headroom words it.
