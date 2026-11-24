@@ -3,6 +3,13 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.132.2 - 2026-11-24
+
+### Added
+
+- The Usage panel shows plans, accounts and limits for supported agent providers, including separate sign-ins.
+- Usage settings let you choose refresh timing, ordering, displayed figures and low-limit alerts.
+
 ## 0.132.1 - 2026-11-24
 
 ### Changed

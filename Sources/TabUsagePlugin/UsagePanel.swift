@@ -4,9 +4,10 @@ import TabClient
 import TabCore
 import TabProtocol
 
-/// The AI Usage panel: each signed-in agent's plan windows as cards with a
-/// bar of what is left, a pace mark and the time to the next reset, as in
-/// T3 Code's Usage › Limits view. Reads the current project's server.
+/// The AI Usage panel: one card per signed-in agent account with its plan, the
+/// limit closest to running out and when it resets, the other limits a click
+/// away. Filters by provider and orders by urgency, as Headroom does. Reads the
+/// current project's server, and again on the configured schedule while it shows.
 @MainActor
 final class UsagePanelController: NSViewController {
     /// The side connection and, for a remote server, its name.
@@ -25,6 +26,18 @@ final class UsagePanelController: NSViewController {
     private let theme: AppTheme
     private var project: (id: ProjectId, server: ServerId)?
     private var loads: [ServerId: Load] = [:]
+    private(set) var config = UsageConfig()
+    /// The provider the chips show alone; nil shows every account.
+    private(set) var filter: AgentChatProvider?
+    private(set) var order = UsageConfig().order
+    private(set) var figure = UsageConfig().figure
+    /// Cards showing every limit, by account.
+    private var expanded = Set<String>()
+    private var visible = false
+    /// Ticks each minute while the panel shows: updates "7 min ago" and reads again when due.
+    private var clock: Timer?
+
+    let toolbar = UsageToolbar()
 
     private let card = NativePanelCard()
     private let footer = RightSidebarFooter()
@@ -54,7 +67,7 @@ final class UsagePanelController: NSViewController {
 
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 8
+        stack.spacing = 10
         stack.edgeInsets = NSEdgeInsets(top: 4, left: RightSidebarFooter.innerInset, bottom: 12,
                                         right: RightSidebarFooter.outerInset)
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -67,15 +80,23 @@ final class UsagePanelController: NSViewController {
         ])
         message.theme = theme
         message.isHidden = true
+        toolbar.isHidden = true
+        toolbar.onFilter = { [weak self] kind in self?.filter = kind; self?.render() }
+        toolbar.onOrder = { [weak self] order in self?.order = order; self?.render() }
+        toolbar.onFigure = { [weak self] figure in self?.figure = figure; self?.render() }
+        card.onColorsChange = { [weak self] in self?.render() }
 
-        for subview in [scroll, message, footer] as [NSView] {
+        for subview in [toolbar, scroll, message, footer] as [NSView] {
             subview.translatesAutoresizingMaskIntoConstraints = false
             card.addSubview(subview)
         }
         NSLayoutConstraint.activate([
             scroll.leadingAnchor.constraint(equalTo: card.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: card.trailingAnchor),
-            scroll.topAnchor.constraint(equalTo: card.topAnchor),
+            toolbar.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: RightSidebarFooter.innerInset),
+            toolbar.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -RightSidebarFooter.outerInset),
+            toolbar.topAnchor.constraint(equalTo: card.topAnchor, constant: 4),
+            scroll.topAnchor.constraint(equalTo: toolbar.bottomAnchor, constant: 8),
             scroll.bottomAnchor.constraint(equalTo: footer.topAnchor),
             message.leadingAnchor.constraint(equalTo: card.leadingAnchor),
             message.trailingAnchor.constraint(equalTo: card.trailingAnchor),
@@ -87,6 +108,47 @@ final class UsagePanelController: NSViewController {
         ])
         card.setAccessibilityLabel("AI Usage")
         render()
+    }
+
+    /// Applies the plugin's settings; a new display default replaces the panel's own choice.
+    func apply(_ next: UsageConfig) {
+        let previous = config
+        config = next
+        if next.order != previous.order { order = next.order }
+        if next.figure != previous.figure { figure = next.figure }
+        if next.refreshMinutes != previous.refreshMinutes { tick() }
+        render()
+    }
+
+    /// The panel came on screen: read again when stale and keep the readings current.
+    func didShow() {
+        visible = true
+        refresh(force: false)
+        guard clock == nil else { return }
+        let timer = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.tick() }
+        }
+        timer.tolerance = 10
+        RunLoop.main.add(timer, forMode: .common)
+        clock = timer
+    }
+
+    func didHide() {
+        visible = false
+        clock?.invalidate()
+        clock = nil
+    }
+
+    /// Reads again once the configured interval has passed, and otherwise brings the
+    /// relative times up to date.
+    func tick() {
+        guard visible, let project else { return }
+        if config.refreshMinutes > 0, case .loaded(_, let at) = loads[project.server],
+           Date().timeIntervalSince(at) >= TimeInterval(config.refreshMinutes * 60) - 5 {
+            refresh(force: true)
+        } else {
+            render()
+        }
     }
 
     /// Shows the limits of `project`'s server, reading them when they are stale.
@@ -147,10 +209,8 @@ final class UsagePanelController: NSViewController {
         }
     }
 
-    /// The window cards shown now.
-    var cards: [UsageWindowCard] { stack.arrangedSubviews.compactMap { $0 as? UsageWindowCard } }
-    /// The warnings shown now.
-    var warnings: [String] { stack.arrangedSubviews.compactMap { ($0 as? UsageWarningBanner)?.label.stringValue } }
+    /// The account cards shown now.
+    var cards: [UsageAccountCard] { stack.arrangedSubviews.compactMap { $0 as? UsageAccountCard } }
     /// The centered message, when one shows.
     var messageText: String { message.isHidden ? "" : message.text }
 
@@ -185,11 +245,12 @@ final class UsagePanelController: NSViewController {
         if case .loading(nil) = load { showMessage("Loading…") }
         guard let reply else { return }
         if reply.providers.isEmpty {
-            showMessage("Sign in to Claude Code or Codex on this computer to see your plan limits.")
+            showMessage("Sign in to Claude Code, Codex, Antigravity, OpenCode or Grok on this computer to see your plan limits.")
             return
         }
         message.isHidden = true
         scroll.isHidden = false
+        toolbar.isHidden = false
         populate(reply)
     }
 
@@ -197,6 +258,7 @@ final class UsagePanelController: NSViewController {
         message.set(text)
         message.isHidden = text.isEmpty
         scroll.isHidden = true
+        toolbar.isHidden = true
     }
 
     private func populate(_ reply: AgentUsageLimitsReply) {
@@ -205,19 +267,23 @@ final class UsagePanelController: NSViewController {
             view.removeFromSuperview()
         }
         let now = Date()
-        var failures: [(AgentChatProvider, String)] = []
-        for limits in reply.providers {
-            if let failure = limits.failure { failures.append((limits.provider, failure)) }
-            guard !limits.windows.isEmpty else { continue }
-            if stack.arrangedSubviews.count > 0 { stack.setCustomSpacing(16, after: stack.arrangedSubviews[stack.arrangedSubviews.count - 1]) }
-            add(UsageProviderHeader(provider: limits.provider, theme: theme))
-            for window in limits.windows {
-                add(UsageWindowCard(window: window, color: Self.color(limits.provider, theme: theme), now: now, theme: theme))
+        var kinds: [AgentChatProvider] = []
+        for limits in reply.providers where !kinds.contains(limits.provider) { kinds.append(limits.provider) }
+        if let filter, !kinds.contains(filter) { self.filter = nil }
+        toolbar.update(kinds: kinds.map { kind in (kind, reply.providers.filter { $0.provider == kind }.count) },
+                       total: reply.providers.count, filter: filter, order: order, figure: figure, theme: theme)
+        let shown = reply.providers.filter { filter == nil || $0.provider == filter }
+        let ordered = order == .urgency ? UsageMath.byUrgency(shown, lowThreshold: config.lowThreshold) : shown
+        for limits in ordered {
+            let key = Self.key(limits)
+            let card = UsageAccountCard(limits: limits, figure: figure, lowThreshold: config.lowThreshold,
+                                        expanded: expanded.contains(key), now: now, theme: theme)
+            card.onToggle = { [weak self] in
+                guard let self else { return }
+                if self.expanded.remove(key) == nil { self.expanded.insert(key) }
+                self.render()
             }
-        }
-        for (provider, failure) in failures {
-            if let last = stack.arrangedSubviews.last { stack.setCustomSpacing(16, after: last) }
-            add(UsageWarningBanner(text: "\(provider.name): \(failure)", theme: theme))
+            add(card)
         }
     }
 
@@ -227,295 +293,512 @@ final class UsagePanelController: NSViewController {
                                     constant: -(stack.edgeInsets.left + stack.edgeInsets.right)).isActive = true
     }
 
-    /// Each provider's bar color: Claude's orange, the foreground for Codex.
+    /// Which account a card shows, kept across readings so an open card stays open.
+    private static func key(_ limits: AgentUsageLimits) -> String {
+        limits.providerId ?? limits.provider.rawValue
+    }
+
+    /// Each provider's mark color, or the foreground for gray marks such as Codex's.
     static func color(_ provider: AgentChatProvider, theme: AppTheme) -> NSColor {
-        provider == .claude ? theme.iconColor(.orange) : theme.fg
+        guard let hue = AgentLogo.mark(provider.activityProvider).signatureHue, hue != .gray else { return theme.fg }
+        return theme.iconColor(hue)
     }
 }
 
 // MARK: - Views
 
-/// The provider's logo and name above its cards.
+/// The filter chips and the order and figure switches above the cards.
 @MainActor
-final class UsageProviderHeader: ThemedView {
-    private let icon = NSImageView()
-    private let label: NSTextField
-    private let provider: AgentChatProvider
+final class UsageToolbar: NSView {
+    var onFilter: ((AgentChatProvider?) -> Void)?
+    var onOrder: ((UsageConfig.Order) -> Void)?
+    var onFigure: ((UsageConfig.Figure) -> Void)?
 
-    init(provider: AgentChatProvider, theme: AppTheme) {
-        self.provider = provider
-        label = makeLabel(provider == .claude ? "Claude" : provider.name, font: AppFont.bodyMedium)
-        super.init(frame: .zero)
-        self.theme = theme
+    private let chips = NSStackView()
+    private let chipScroll = NSScrollView()
+    private let switches = NSStackView()
+    /// The chips shown now, for tests.
+    private(set) var chipTitles: [String] = []
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
         translatesAutoresizingMaskIntoConstraints = false
-        let row = NSStackView(views: [icon, label])
-        row.spacing = 8
+        chips.orientation = .horizontal
+        chips.spacing = 6
+        chips.translatesAutoresizingMaskIntoConstraints = false
+        let documentView = FlippedView()
+        documentView.translatesAutoresizingMaskIntoConstraints = false
+        documentView.addSubview(chips)
+        chipScroll.documentView = documentView
+        chipScroll.drawsBackground = false
+        chipScroll.hasHorizontalScroller = false
+        chipScroll.hasVerticalScroller = false
+        chipScroll.horizontalScrollElasticity = .allowed
+        chipScroll.verticalScrollElasticity = .none
+        chipScroll.translatesAutoresizingMaskIntoConstraints = false
+        switches.orientation = .horizontal
+        switches.spacing = 8
+        switches.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(chipScroll)
+        addSubview(switches)
+        NSLayoutConstraint.activate([
+            chips.leadingAnchor.constraint(equalTo: documentView.leadingAnchor),
+            chips.topAnchor.constraint(equalTo: documentView.topAnchor),
+            chips.bottomAnchor.constraint(equalTo: documentView.bottomAnchor),
+            documentView.trailingAnchor.constraint(equalTo: chips.trailingAnchor),
+            documentView.heightAnchor.constraint(equalTo: chipScroll.contentView.heightAnchor),
+            chipScroll.leadingAnchor.constraint(equalTo: leadingAnchor),
+            chipScroll.trailingAnchor.constraint(equalTo: trailingAnchor),
+            chipScroll.topAnchor.constraint(equalTo: topAnchor),
+            chipScroll.heightAnchor.constraint(equalToConstant: UsageChip.height),
+            switches.leadingAnchor.constraint(equalTo: leadingAnchor),
+            switches.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
+            switches.topAnchor.constraint(equalTo: chipScroll.bottomAnchor, constant: 8),
+            switches.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    func update(kinds: [(AgentChatProvider, Int)], total: Int, filter: AgentChatProvider?,
+                order: UsageConfig.Order, figure: UsageConfig.Figure, theme: AppTheme) {
+        for view in chips.arrangedSubviews + switches.arrangedSubviews { view.removeFromSuperview() }
+        var all = UsageChip(title: "All", count: total, logo: nil, selected: filter == nil, theme: theme)
+        all.onClick = { [weak self] in self?.onFilter?(nil) }
+        chips.addArrangedSubview(all)
+        chipTitles = ["All"]
+        for (kind, count) in kinds {
+            all = UsageChip(title: UsageAccountCard.providerTitle(kind), count: count,
+                            logo: AgentLogo.mark(kind.activityProvider), selected: filter == kind, theme: theme)
+            all.onClick = { [weak self] in self?.onFilter?(filter == kind ? nil : kind) }
+            chips.addArrangedSubview(all)
+            chipTitles.append(UsageAccountCard.providerTitle(kind))
+        }
+        let orders = UsageSegments(titles: ["By urgency", "By provider"], selected: order == .urgency ? 0 : 1, theme: theme)
+        orders.onSelect = { [weak self] index in self?.onOrder?(index == 0 ? .urgency : .provider) }
+        orders.setAccessibilityLabel("Order")
+        let figures = UsageSegments(titles: ["Left", "Used"], selected: figure == .left ? 0 : 1, theme: theme)
+        figures.onSelect = { [weak self] index in self?.onFigure?(index == 0 ? .left : .used) }
+        figures.setAccessibilityLabel("Show")
+        switches.addArrangedSubview(orders)
+        switches.addArrangedSubview(figures)
+    }
+}
+
+/// A scroll view's document that lays out from the top left.
+private final class FlippedView: NSView {
+    override var isFlipped: Bool { true }
+}
+
+/// A view that runs `onClick` when clicked, with a pointing hand.
+@MainActor
+class UsageClickable: NSView {
+    var onClick: (() -> Void)?
+
+    override func mouseDown(with event: NSEvent) {}
+
+    override func mouseUp(with event: NSEvent) {
+        guard bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
+        onClick?()
+    }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .pointingHand)
+    }
+
+    override func accessibilityPerformPress() -> Bool {
+        onClick?()
+        return true
+    }
+}
+
+/// A rounded chip: `All 13`, or a provider's mark, name and account count.
+@MainActor
+final class UsageChip: UsageClickable {
+    static let height: CGFloat = 30
+
+    init(title: String, count: Int, logo: AppIcon?, selected: Bool, theme: AppTheme) {
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true
+        layer?.cornerRadius = Self.height / 2
+        layer?.borderWidth = 1
+        layer?.borderColor = theme.fg(alpha: selected ? 0.16 : 0.09).cgColor
+        layer?.backgroundColor = (selected ? theme.fg(alpha: 0.10) : .clear).cgColor
+        var views: [NSView] = []
+        if let logo {
+            let icon = NSImageView(image: logo.image(size: 14, theme: theme) ?? NSImage())
+            icon.translatesAutoresizingMaskIntoConstraints = false
+            icon.widthAnchor.constraint(equalToConstant: 14).isActive = true
+            icon.heightAnchor.constraint(equalToConstant: 14).isActive = true
+            views.append(icon)
+        }
+        views.append(makeLabel(title, font: selected ? AppFont.bodyMedium : AppFont.body, color: theme.fg))
+        views.append(makeLabel("\(count)", font: .monospacedDigitSystemFont(ofSize: 13, weight: .regular), color: theme.fgMuted))
+        let row = NSStackView(views: views)
+        row.spacing = 6
         row.translatesAutoresizingMaskIntoConstraints = false
         addSubview(row)
         NSLayoutConstraint.activate([
-            icon.widthAnchor.constraint(equalToConstant: 16),
-            icon.heightAnchor.constraint(equalToConstant: 16),
-            row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2),
-            row.topAnchor.constraint(equalTo: topAnchor, constant: 4),
-            row.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -2),
-            row.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
+            heightAnchor.constraint(equalToConstant: Self.height),
+            row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            row.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
-        themeDidChange()
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+        setAccessibilityLabel("\(title), \(count)")
+        setAccessibilityValue(selected ? "selected" : nil)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    override func themeDidChange() {
-        let logo: AppIcon = provider == .claude ? .claude : .codex
-        icon.image = logo.image(size: 16, theme: theme)
-        icon.contentTintColor = theme.fg
-        label.textColor = theme.fg
-    }
 }
 
-/// One window: its name, the percentage left with a pace mark, and its bar.
+/// A pill of choices with the chosen one raised, such as `By urgency | By provider`.
 @MainActor
-final class UsageWindowCard: ThemedView {
-    let usage: AgentUsageWindow
-    private let title: NSTextField
-    private let percent: NSTextField
-    private let left = makeLabel("left", font: AppFont.body)
-    private let paceIcon = NSImageView()
-    private let pace: UsagePace?
-    let bar: UsageBarView
+final class UsageSegments: NSView {
+    var onSelect: ((Int) -> Void)?
+    private(set) var selected: Int
 
-    init(window: AgentUsageWindow, color: NSColor, now: Date, theme: AppTheme) {
-        self.usage = window
-        title = makeLabel(window.label, font: AppFont.bodyMedium)
-        percent = makeLabel("\(UsageMath.remainingPercent(window))%",
-                            font: NSFont.monospacedDigitSystemFont(ofSize: 28, weight: .semibold))
-        pace = UsageMath.pace(window, now: now)
-        bar = UsageBarView(window: window, color: color, now: now)
+    init(titles: [String], selected: Int, theme: AppTheme) {
+        self.selected = selected
         super.init(frame: .zero)
-        self.theme = theme
-        bar.theme = theme
         translatesAutoresizingMaskIntoConstraints = false
-        title.lineBreakMode = .byTruncatingTail
-        paceIcon.toolTip = pace?.label
-        paceIcon.setAccessibilityLabel(pace?.label)
-        paceIcon.isHidden = pace == nil
+        wantsLayer = true
+        layer?.cornerRadius = UsageChip.height / 2
+        layer?.backgroundColor = theme.fg(alpha: 0.06).cgColor
+        let row = NSStackView()
+        row.spacing = 0
+        row.translatesAutoresizingMaskIntoConstraints = false
+        for (index, title) in titles.enumerated() {
+            let segment = UsageClickable()
+            segment.translatesAutoresizingMaskIntoConstraints = false
+            segment.wantsLayer = true
+            segment.layer?.cornerRadius = (UsageChip.height - 6) / 2
+            segment.layer?.backgroundColor = (index == selected ? theme.fg(alpha: 0.12) : .clear).cgColor
+            let label = makeLabel(title, font: index == selected ? AppFont.bodyMedium : AppFont.body,
+                                  color: index == selected ? theme.fg : theme.fgMuted)
+            segment.addSubview(label)
+            NSLayoutConstraint.activate([
+                segment.heightAnchor.constraint(equalToConstant: UsageChip.height - 6),
+                label.leadingAnchor.constraint(equalTo: segment.leadingAnchor, constant: 10),
+                label.trailingAnchor.constraint(equalTo: segment.trailingAnchor, constant: -10),
+                label.centerYAnchor.constraint(equalTo: segment.centerYAnchor),
+            ])
+            segment.onClick = { [weak self] in self?.onSelect?(index) }
+            segment.setAccessibilityElement(true)
+            segment.setAccessibilityRole(.radioButton)
+            segment.setAccessibilityLabel(title)
+            segment.setAccessibilityValue(index == selected ? 1 : 0)
+            row.addArrangedSubview(segment)
+        }
+        addSubview(row)
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: UsageChip.height),
+            row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 3),
+            row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -3),
+            row.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+        setAccessibilityElement(true)
+        setAccessibilityRole(.radioGroup)
+    }
 
-        let figures = NSStackView(views: [percent, left, paceIcon])
-        figures.alignment = .firstBaseline
-        figures.spacing = 6
-        figures.setCustomSpacing(8, after: percent)
-        let column = NSStackView(views: [title, figures, bar])
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+}
+
+/// One account: who it is and on which plan, when it was read, and its tightest
+/// limit with how close it is and when it resets. Expanded, every limit.
+@MainActor
+final class UsageAccountCard: UsageClickable {
+    let limits: AgentUsageLimits
+    let expanded: Bool
+    /// The limit rows shown now, the headline first.
+    private(set) var rows: [UsageLimitRow] = []
+    var onToggle: (() -> Void)?
+
+    /// The provider's short name: "Claude", "Codex", "Antigravity".
+    static func providerTitle(_ provider: AgentChatProvider) -> String {
+        provider == .claude ? "Claude" : provider.activityProvider.displayName
+    }
+
+    init(limits: AgentUsageLimits, figure: UsageConfig.Figure, lowThreshold: Int, expanded: Bool, now: Date,
+         theme: AppTheme) {
+        self.limits = limits
+        self.expanded = expanded
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true
+        layer?.cornerRadius = 14
+        layer?.borderWidth = 1
+        layer?.borderColor = theme.fg(alpha: 0.09).cgColor
+        layer?.backgroundColor = theme.fg(alpha: 0.025).cgColor
+        onClick = { [weak self] in self?.onToggle?() }
+
+        let provider = Self.providerTitle(limits.provider)
+        let name = limits.providerName ?? provider
+        let title = NSTextField(labelWithAttributedString: Self.title(name, plan: limits.plan, theme: theme))
+        title.lineBreakMode = .byWordWrapping
+        title.maximumNumberOfLines = 2
+        title.translatesAutoresizingMaskIntoConstraints = false
+        title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        // An address has no spaces, so let it wrap after its `@` rather than mid-word.
+        let account = limits.account?.replacingOccurrences(of: "@", with: "@\u{200B}")
+        let subtitleText = [limits.providerName == nil ? nil : provider, account].compactMap { $0 }.joined(separator: " · ")
+        let subtitle = makeLabel(subtitleText, font: AppFont.small, color: theme.fgMuted)
+        subtitle.lineBreakMode = .byWordWrapping
+        subtitle.maximumNumberOfLines = 2
+        subtitle.cell?.truncatesLastVisibleLine = true
+        subtitle.toolTip = limits.account
+        subtitle.isHidden = subtitleText.isEmpty
+        subtitle.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let names = NSStackView(views: [title, subtitle])
+        names.orientation = .vertical
+        names.alignment = .leading
+        names.spacing = 2
+
+        let logo = NSImageView(image: AgentLogo.mark(limits.provider.activityProvider).image(size: 20, theme: theme) ?? NSImage())
+        logo.translatesAutoresizingMaskIntoConstraints = false
+
+        let fresh = limits.failure == nil && now.timeIntervalSince(limits.checkedAt) < 30 * 60
+        let dot = UsageDot(color: limits.failure != nil ? theme.danger : fresh ? theme.success : theme.fgMuted)
+        let ago = NSTextField(labelWithAttributedString: Self.dotted(UsageMath.ago(limits.checkedAt, now: now),
+                                                                     font: AppFont.small, color: theme.fgMuted))
+        ago.toolTip = "Read \(UsageMath.exact(limits.checkedAt))"
+        ago.lineBreakMode = .byClipping
+        ago.maximumNumberOfLines = 1
+        ago.setContentCompressionResistancePriority(.required, for: .horizontal)
+        let chevron = ChromeButton(expanded ? .chevronUp : .chevronDown, label: expanded ? "Hide details" : "Show details",
+                                   side: 22, glyph: 14) { [weak self] _ in self?.onToggle?() }
+        let status = NSStackView(views: [dot, ago, chevron])
+        status.spacing = 6
+        status.setCustomSpacing(4, after: ago)
+        status.setContentHuggingPriority(.required, for: .horizontal)
+        status.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        let header = NSStackView(views: [logo, names, status])
+        header.alignment = .centerY
+        names.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        header.spacing = 12
+        header.setCustomSpacing(8, after: names)
+
+        var body: [NSView] = [header]
+        let headline = UsageMath.headline(limits)
+        if let headline {
+            let row = UsageLimitRow(window: headline, figure: figure, lowThreshold: lowThreshold, now: now,
+                                    detailed: false, theme: theme)
+            rows.append(row)
+            body.append(row)
+        }
+        if let failure = limits.failure {
+            let warning = makeLabel(failure, font: AppFont.small, color: theme.warning)
+            warning.lineBreakMode = .byWordWrapping
+            warning.maximumNumberOfLines = 0
+            warning.isSelectable = true
+            warning.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            body.append(warning)
+        }
+        if expanded {
+            for window in limits.windows where window.id != headline?.id {
+                let row = UsageLimitRow(window: window, figure: figure, lowThreshold: lowThreshold, now: now,
+                                        detailed: true, theme: theme)
+                rows.append(row)
+                body.append(row)
+            }
+            if let first = rows.first, let sentence = UsageMath.paceSentence(first.usage, now: now) {
+                first.addPace(sentence, theme: theme)
+            }
+            let read = makeLabel("Read \(UsageMath.exact(limits.checkedAt)) from the \(limits.provider.name) CLI",
+                                 font: AppFont.footnote, color: theme.fgMuted)
+            body.append(read)
+        }
+        let column = NSStackView(views: body)
         column.orientation = .vertical
         column.alignment = .leading
-        column.spacing = 2
-        column.setCustomSpacing(10, after: figures)
+        column.spacing = 14
         column.translatesAutoresizingMaskIntoConstraints = false
         addSubview(column)
         NSLayoutConstraint.activate([
-            paceIcon.widthAnchor.constraint(equalToConstant: 14),
-            paceIcon.heightAnchor.constraint(equalToConstant: 14),
-            column.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            logo.widthAnchor.constraint(equalToConstant: 20),
+            logo.heightAnchor.constraint(equalToConstant: 20),
+            column.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
             column.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
-            column.topAnchor.constraint(equalTo: topAnchor, constant: 10),
-            column.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -12),
-            bar.widthAnchor.constraint(equalTo: column.widthAnchor),
-            title.widthAnchor.constraint(lessThanOrEqualTo: column.widthAnchor),
+            column.topAnchor.constraint(equalTo: topAnchor, constant: 14),
+            column.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -14),
+            header.widthAnchor.constraint(equalTo: column.widthAnchor),
         ])
+        for view in body.dropFirst() {
+            view.widthAnchor.constraint(equalTo: column.widthAnchor, constant: -4).isActive = true
+        }
+
         setAccessibilityElement(true)
-        setAccessibilityRole(.group)
-        setAccessibilityLabel("\(window.label): \(UsageMath.remainingPercent(window))% left")
-        themeDidChange()
+        setAccessibilityRole(.button)
+        var spoken = [limits.plan.map { "\(name), \($0)" } ?? name]
+        if let headline { spoken.append(UsageLimitRow.spoken(headline, figure: figure, lowThreshold: lowThreshold, now: now)) }
+        if let failure = limits.failure { spoken.append(failure) }
+        setAccessibilityLabel(spoken.joined(separator: ". "))
+        setAccessibilityHelp(expanded ? "Hides the other limits" : "Shows every limit")
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    override var wantsUpdateLayer: Bool { true }
-
-    override func updateLayer() {
-        guard let layer else { return }
-        layer.cornerRadius = 8
-        layer.borderWidth = Metrics.border
-        layer.borderColor = theme.rowBorder.cgColor
-        layer.backgroundColor = theme.fg.withAlphaComponent(0.02).cgColor
+    /// `Side project · Pro`, the plan in the muted color.
+    private static func title(_ name: String, plan: String?, theme: AppTheme) -> NSAttributedString {
+        let text = NSMutableAttributedString(string: name, attributes: [
+            .font: NSFont.systemFont(ofSize: 15, weight: .medium), .foregroundColor: theme.fg])
+        if let plan {
+            text.append(NSAttributedString(string: " · \(plan)", attributes: [
+                .font: NSFont.systemFont(ofSize: 15), .foregroundColor: theme.fgMuted]))
+        }
+        return text
     }
 
-    override func themeDidChange() {
-        title.textColor = theme.fg
-        percent.textColor = theme.fg
-        left.textColor = theme.fgMuted
-        let icon: AppIcon? = switch pace {
-        case .ahead: .trendingUp
-        case .under: .trendingDown
-        case .on: .gaugeMedium
-        case nil: nil
-        }
-        paceIcon.image = icon?.image(size: 14, color: theme.fgMuted)
-        needsDisplay = true
+    /// Text with a dotted underline, which hovers to the exact value.
+    static func dotted(_ text: String, font: NSFont, color: NSColor) -> NSAttributedString {
+        NSAttributedString(string: text, attributes: [
+            .font: font, .foregroundColor: color, .underlineColor: color.withAlphaComponent(0.6),
+            .underlineStyle: NSUnderlineStyle.single.rawValue | NSUnderlineStyle.patternDot.rawValue])
     }
 }
 
-/// The window's bar: what is left in the provider's color, the part a reset
-/// restores hatched, a tick where even spending would be, and the countdown.
+/// The freshness dot beside "7 min ago".
 @MainActor
-final class UsageBarView: ThemedView {
-    static let height: CGFloat = 24
-    private static let radius: CGFloat = 6
-    private static let gap: CGFloat = 3
-
-    let usage: AgentUsageWindow
-    private let color: NSColor
-    let remaining: Int
-    /// Where the pace tick sits, as a percentage of the bar from the left.
-    let tick: Int?
-    let resetsIn: String?
-
-    init(window: AgentUsageWindow, color: NSColor, now: Date) {
-        self.usage = window
-        self.color = color
-        remaining = UsageMath.remainingPercent(window)
-        tick = UsageMath.paceRemainingPercent(window, now: now)
-        resetsIn = UsageMath.resetsIn(window, now: now)
+final class UsageDot: NSView {
+    init(color: NSColor) {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
-        heightAnchor.constraint(equalToConstant: Self.height).isActive = true
-        let summary = UsageMath.summary(window, now: now)
-        toolTip = summary
+        wantsLayer = true
+        layer?.cornerRadius = 3.5
+        layer?.backgroundColor = color.cgColor
+        NSLayoutConstraint.activate([widthAnchor.constraint(equalToConstant: 7), heightAnchor.constraint(equalToConstant: 7)])
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+}
+
+/// One limit: `86% Weekly` with its status, the bar, and `Resets in 3 days 12 h`.
+@MainActor
+final class UsageLimitRow: NSView {
+    let usage: AgentUsageWindow
+    let tone: UsageTone
+    let bar: UsageBarView
+    private let column = NSStackView()
+
+    init(window: AgentUsageWindow, figure: UsageConfig.Figure, lowThreshold: Int, now: Date, detailed: Bool,
+         theme: AppTheme) {
+        self.usage = window
+        tone = UsageMath.tone(window, lowThreshold: lowThreshold)
+        let color = Self.color(tone, theme: theme)
+        bar = UsageBarView(fraction: Double(UsageMath.figure(window, figure)) / 100, color: color, theme: theme)
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+
+        let figureText = NSMutableAttributedString(string: "\(UsageMath.figure(window, figure))%", attributes: [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: detailed ? 13 : 14, weight: .semibold), .foregroundColor: theme.fg])
+        figureText.append(NSAttributedString(string: "  \(window.label)\(figure == .left ? " left" : "")", attributes: [
+            .font: detailed ? AppFont.small : AppFont.body, .foregroundColor: theme.fgMuted]))
+        let figureLabel = NSTextField(labelWithAttributedString: figureText)
+        figureLabel.lineBreakMode = .byTruncatingTail
+        figureLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        var top: [NSView] = [figureLabel]
+        if let label = tone.label {
+            let status = makeLabel(label, font: detailed ? AppFont.footnoteMedium : AppFont.bodyMedium, color: color)
+            status.setContentCompressionResistancePriority(.required, for: .horizontal)
+            top.append(status)
+        }
+        let topRow = NSStackView(views: top)
+        topRow.distribution = .fill
+        topRow.spacing = 8
+        if top.count > 1 { topRow.setHuggingPriority(.defaultLow, for: .horizontal) }
+
+        column.orientation = .vertical
+        column.alignment = .leading
+        column.spacing = 8
+        column.translatesAutoresizingMaskIntoConstraints = false
+        column.addArrangedSubview(topRow)
+        column.addArrangedSubview(bar)
+        if let resetsAt = window.resetsAt {
+            let line = NSMutableAttributedString(string: "Resets in ", attributes: [
+                .font: AppFont.small, .foregroundColor: theme.fgMuted])
+            let interval = resetsAt.timeIntervalSince(now)
+            if interval > 0 {
+                line.append(UsageAccountCard.dotted(UsageMath.spelledDuration(interval), font: AppFont.small, color: theme.fgMuted))
+            } else {
+                line.setAttributedString(NSAttributedString(string: "Resetting now", attributes: [
+                    .font: AppFont.small, .foregroundColor: theme.fgMuted]))
+            }
+            let reset = NSTextField(labelWithAttributedString: line)
+            reset.toolTip = "Resets \(UsageMath.exact(resetsAt))"
+            column.addArrangedSubview(reset)
+        }
+        addSubview(column)
+        NSLayoutConstraint.activate([
+            column.leadingAnchor.constraint(equalTo: leadingAnchor),
+            column.trailingAnchor.constraint(equalTo: trailingAnchor),
+            column.topAnchor.constraint(equalTo: topAnchor),
+            column.bottomAnchor.constraint(equalTo: bottomAnchor),
+            topRow.widthAnchor.constraint(equalTo: column.widthAnchor),
+            bar.widthAnchor.constraint(equalTo: column.widthAnchor),
+        ])
         setAccessibilityElement(true)
-        setAccessibilityRole(.image)
-        setAccessibilityLabel("\(window.label): " + summary.replacingOccurrences(of: "\n", with: ", "))
+        setAccessibilityRole(.group)
+        setAccessibilityLabel(Self.spoken(window, figure: figure, lowThreshold: lowThreshold, now: now))
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    override var isFlipped: Bool { true }
-
-    override func themeDidChange() {
-        needsDisplay = true
+    /// Adds what the pace means under the reset line.
+    func addPace(_ sentence: String, theme: AppTheme) {
+        column.addArrangedSubview(makeLabel(sentence, font: AppFont.small, color: theme.fgMuted))
     }
 
-    private var tickX: CGFloat? {
-        guard let tick, bounds.width >= 6 else { return nil }
-        return min(max(bounds.width * CGFloat(tick) / 100, Self.gap), bounds.width - Self.gap).rounded()
+    static func spoken(_ window: AgentUsageWindow, figure: UsageConfig.Figure, lowThreshold: Int, now: Date) -> String {
+        var parts = ["\(window.label): \(UsageMath.figure(window, figure))% \(figure == .left ? "left" : "used")"]
+        if let label = UsageMath.tone(window, lowThreshold: lowThreshold).label { parts.append(label) }
+        if let resetsAt = window.resetsAt, resetsAt > now {
+            parts.append("resets in \(UsageMath.spelledDuration(resetsAt.timeIntervalSince(now)))")
+        }
+        return parts.joined(separator: ", ")
     }
+
+    /// Green with room, yellow running low, red almost out or used up.
+    static func color(_ tone: UsageTone, theme: AppTheme) -> NSColor {
+        switch tone {
+        case .fine: return theme.success
+        case .low: return theme.warning
+        case .almostOut, .over: return theme.danger
+        }
+    }
+}
+
+/// A thin rounded bar filled to `fraction` in the limit's status color.
+@MainActor
+final class UsageBarView: NSView {
+    static let height: CGFloat = 6
+    let fraction: Double
+    private let color: NSColor
+    private let track: NSColor
+
+    init(fraction: Double, color: NSColor, theme: AppTheme) {
+        self.fraction = min(max(fraction, 0), 1)
+        self.color = color
+        track = theme.fg(alpha: 0.10)
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        heightAnchor.constraint(equalToConstant: Self.height).isActive = true
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     override func draw(_ dirtyRect: NSRect) {
         let rect = bounds
         guard rect.width > 0 else { return }
-        let fillWidth = (rect.width * CGFloat(remaining) / 100).rounded()
-
-        NSGraphicsContext.saveGraphicsState()
-        if let x = tickX {
-            let clip = NSBezierPath(rect: rect.insetBy(dx: -1, dy: -1))
-            clip.append(NSBezierPath(rect: NSRect(x: x - Self.gap, y: rect.minY - 1, width: Self.gap * 2, height: rect.height + 2)))
-            clip.windingRule = .evenOdd
-            clip.addClip()
-        }
-        NSBezierPath(roundedRect: rect, xRadius: Self.radius, yRadius: Self.radius).addClip()
-        theme.fg.withAlphaComponent(0.06).setFill()
-        rect.fill()
-        if fillWidth > 0 {
-            color.withAlphaComponent(0.35).setFill()
-            NSBezierPath(roundedRect: NSRect(x: 0, y: 0, width: fillWidth, height: rect.height),
-                         xRadius: Self.radius, yRadius: Self.radius).fill()
-        }
-        if remaining < 100, usage.resetsAt != nil {
-            let hatched = NSRect(x: fillWidth, y: 0, width: rect.width - fillWidth, height: rect.height)
-            NSGraphicsContext.saveGraphicsState()
-            hatched.clip()
-            let stripes = NSBezierPath()
-            var x = (hatched.minX / 7).rounded(.down) * 7 - rect.height
-            while x < hatched.maxX {
-                stripes.move(to: NSPoint(x: x, y: rect.maxY))
-                stripes.line(to: NSPoint(x: x + rect.height, y: rect.minY))
-                x += 7
-            }
-            stripes.lineWidth = 1
-            color.withAlphaComponent(0.22).setStroke()
-            stripes.stroke()
-            NSGraphicsContext.restoreGraphicsState()
-        }
-        NSGraphicsContext.restoreGraphicsState()
-
-        if let x = tickX {
-            theme.fg.setFill()
-            NSBezierPath(roundedRect: NSRect(x: x - 1, y: 2, width: 2, height: rect.height - 4), xRadius: 1, yRadius: 1).fill()
-        }
-        drawCountdown(in: rect)
-    }
-
-    /// The `↻ 4h 53m` pill at the bar's end, left out when the bar is too narrow.
-    private func drawCountdown(in rect: NSRect) {
-        guard let resetsIn else { return }
-        let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
-        let text = NSAttributedString(string: resetsIn, attributes: [.font: font, .foregroundColor: theme.fg])
-        let textSize = text.size()
-        let iconSide: CGFloat = 11
-        let width = (6 + iconSide + 4 + textSize.width + 6).rounded(.up)
-        let height = rect.height - 6
-        guard rect.width >= width + 24 else { return }
-        let pill = NSRect(x: rect.maxX - width - 3, y: 3, width: width, height: height)
-        theme.bg.withAlphaComponent(0.85).setFill()
-        NSBezierPath(roundedRect: pill, xRadius: 4, yRadius: 4).fill()
-        if let icon = AppIcon.refresh.image(size: iconSide, color: theme.fg) {
-            icon.draw(in: NSRect(x: pill.minX + 6, y: pill.midY - iconSide / 2, width: iconSide, height: iconSide),
-                      from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
-        }
-        text.draw(at: NSPoint(x: pill.minX + 6 + iconSide + 4, y: pill.midY - textSize.height / 2))
-    }
-}
-
-/// A provider that could not report its limits, such as a signed-out CLI.
-@MainActor
-final class UsageWarningBanner: ThemedView {
-    private let icon = NSImageView()
-    let label: NSTextField
-
-    init(text: String, theme: AppTheme) {
-        label = makeLabel(text, font: AppFont.small)
-        super.init(frame: .zero)
-        self.theme = theme
-        translatesAutoresizingMaskIntoConstraints = false
-        label.lineBreakMode = .byWordWrapping
-        label.maximumNumberOfLines = 0
-        label.isSelectable = true
-        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        for view in [icon, label] as [NSView] {
-            view.translatesAutoresizingMaskIntoConstraints = false
-            addSubview(view)
-        }
-        NSLayoutConstraint.activate([
-            icon.widthAnchor.constraint(equalToConstant: 14),
-            icon.heightAnchor.constraint(equalToConstant: 14),
-            icon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
-            icon.topAnchor.constraint(equalTo: label.topAnchor, constant: 1),
-            label.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 8),
-            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
-            label.topAnchor.constraint(equalTo: topAnchor, constant: 9),
-            label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -9),
-        ])
-        themeDidChange()
-    }
-
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    override var wantsUpdateLayer: Bool { true }
-
-    override func updateLayer() {
-        guard let layer else { return }
-        layer.cornerRadius = 8
-        layer.borderWidth = Metrics.border
-        layer.borderColor = theme.warning.withAlphaComponent(0.45).cgColor
-        layer.backgroundColor = theme.warning.withAlphaComponent(0.12).cgColor
-    }
-
-    override func layout() {
-        label.preferredMaxLayoutWidth = max(label.frame.width, 0)
-        super.layout()
-    }
-
-    override func themeDidChange() {
-        icon.image = AppIcon.triangleAlert.image(size: 14, color: theme.warning)
-        label.textColor = theme.warning
-        needsDisplay = true
+        let radius = rect.height / 2
+        track.setFill()
+        NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).fill()
+        let width = (rect.width * fraction).rounded()
+        guard width > 0 else { return }
+        color.setFill()
+        NSBezierPath(roundedRect: NSRect(x: 0, y: 0, width: max(width, rect.height), height: rect.height),
+                     xRadius: radius, yRadius: radius).fill()
     }
 }

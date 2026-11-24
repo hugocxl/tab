@@ -530,7 +530,8 @@ public enum AgentLogo {
         return image
     }
 
-    static func mark(_ provider: AgentProvider) -> AppIcon {
+    /// The provider's mark from @hugocxl/icons.
+    public static func mark(_ provider: AgentProvider) -> AppIcon {
         switch provider {
         case .claude: return .claude
         case .codex: return .codex

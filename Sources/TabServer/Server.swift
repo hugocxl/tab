@@ -103,7 +103,7 @@ public final class Server: @unchecked Sendable {
                 guard directory.isDirectory else { throw ServiceError(.badPath, "The agent's project folder is unavailable") }
                 return directory.url
             })
-        agentUsageLimits = AgentUsageLimitsService(providers: { kind in agentProviders.provider(nil, kind: kind) })
+        agentUsageLimits = AgentUsageLimitsService(providers: { agentProviders.settings.providers })
         agentHistory = AgentHistory(home: URL(fileURLWithPath: configuration.homeDirectory))
         agentTitles = AgentTitles(history: agentHistory)
         agents = try AgentSessions(root: dirs.root.appendingPathComponent("agents"), projectDirectory: { project in

@@ -18,8 +18,109 @@ enum UsagePace: Equatable {
     }
 }
 
+/// How close a window is to its limit, as Headroom words it.
+enum UsageTone: Int, Comparable {
+    /// Used up: nothing left until the reset.
+    case over
+    /// Under a tenth left.
+    case almostOut
+    /// Under the configured share left.
+    case low
+    case fine
+
+    static func < (lhs: UsageTone, rhs: UsageTone) -> Bool { lhs.rawValue < rhs.rawValue }
+
+    /// The label beside the figure; nil while there is room.
+    var label: String? {
+        switch self {
+        case .over: return "Limit reached"
+        case .almostOut: return "Almost out"
+        case .low: return "Running low"
+        case .fine: return nil
+        }
+    }
+}
+
 /// Window arithmetic shared by the panel's cards, matching T3 Code's limits view.
 enum UsageMath {
+    static func tone(_ window: AgentUsageWindow, lowThreshold: Int) -> UsageTone {
+        let left = 100 - window.usedPercent
+        if left <= 0 { return .over }
+        if left < 10 { return .almostOut }
+        if left < Double(lowThreshold) { return .low }
+        return .fine
+    }
+
+    /// The window an account's card leads with: the one closest to its limit, the
+    /// longer one when two are as close, since it takes longer to come back.
+    static func headline(_ limits: AgentUsageLimits) -> AgentUsageWindow? {
+        limits.windows.max { a, b in
+            a.usedPercent != b.usedPercent ? a.usedPercent < b.usedPercent
+                : (a.windowDurationMinutes ?? 0) < (b.windowDurationMinutes ?? 0)
+        }
+    }
+
+    /// Orders accounts closest to their limits first; accounts that could not be read go last.
+    static func byUrgency(_ accounts: [AgentUsageLimits], lowThreshold: Int) -> [AgentUsageLimits] {
+        func rank(_ limits: AgentUsageLimits) -> (Int, Double) {
+            guard let window = headline(limits) else { return (Int.max, 0) }
+            return (tone(window, lowThreshold: lowThreshold).rawValue, -window.usedPercent)
+        }
+        return accounts.enumerated().sorted { a, b in
+            let (x, y) = (rank(a.element), rank(b.element))
+            return x != y ? x < y : a.offset < b.offset
+        }.map(\.element)
+    }
+
+    /// `3 days 12 h`, `4 h 12 min` or `12 min`, as the reset line says it.
+    static func spelledDuration(_ interval: TimeInterval) -> String {
+        let minutesTotal = Int(max(interval, 0) / 60)
+        let days = minutesTotal / (24 * 60)
+        let hours = minutesTotal % (24 * 60) / 60
+        let minutes = minutesTotal % 60
+        if days > 0 { return hours > 0 ? "\(days) \(days == 1 ? "day" : "days") \(hours) h" : "\(days) \(days == 1 ? "day" : "days")" }
+        if hours > 0 { return minutes > 0 ? "\(hours) h \(minutes) min" : "\(hours) h" }
+        return minutes > 0 ? "\(minutes) min" : "under a minute"
+    }
+
+    /// `just now`, `7 min ago`, `2 h ago` or `3 days ago`.
+    static func ago(_ date: Date, now: Date) -> String {
+        let minutes = Int(max(now.timeIntervalSince(date), 0) / 60)
+        if minutes < 1 { return "just now" }
+        if minutes < 60 { return "\(minutes) min ago" }
+        if minutes < 24 * 60 { return "\(minutes / 60) h ago" }
+        let days = minutes / (24 * 60)
+        return "\(days) \(days == 1 ? "day" : "days") ago"
+    }
+
+    /// The whole percentage shown: what is used or what is left.
+    static func figure(_ window: AgentUsageWindow, _ figure: UsageConfig.Figure) -> Int {
+        figure == .left ? remainingPercent(window) : 100 - remainingPercent(window)
+    }
+
+    /// A date and time to hover over a relative one, such as "Thu, Nov 27, 14:00".
+    static func exact(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.setLocalizedDateFormatFromTemplate("EEE MMM d jj:mm")
+        return formatter.string(from: date)
+    }
+
+    /// What the pace means for the rest of the window, for the expanded card.
+    static func paceSentence(_ window: AgentUsageWindow, now: Date) -> String? {
+        guard let elapsed = elapsedShare(window, now: now), elapsed > 0.02, let resetsAt = window.resetsAt else { return nil }
+        switch pace(window, now: now) {
+        case .ahead:
+            // Spending at the rate so far, the rest lasts (left ÷ used) as long as the time gone.
+            guard window.usedPercent > 0, let minutes = window.windowDurationMinutes else { return nil }
+            let gone = Double(minutes) * 60 * elapsed
+            let runsOut = gone * (100 - window.usedPercent) / window.usedPercent
+            guard now.addingTimeInterval(runsOut) < resetsAt else { return "Ahead of pace" }
+            return "At this pace it runs out in \(spelledDuration(runsOut))"
+        case .on: return "On pace with the window"
+        case .under: return "Under pace, with room to spare"
+        case nil: return nil
+        }
+    }
     /// The whole percentage of the window left to spend.
     static func remainingPercent(_ window: AgentUsageWindow) -> Int {
         Int((100 - min(max(window.usedPercent, 0), 100)).rounded())

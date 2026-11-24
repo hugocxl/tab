@@ -62,27 +62,47 @@ public struct AgentUsageWindow: Hashable, Codable, Sendable, Identifiable {
     }
 }
 
-/// One agent provider's limits, or why they could not be read.
+/// One agent account's limits, or why they could not be read.
 public struct AgentUsageLimits: Hashable, Codable, Sendable {
     public var provider: AgentChatProvider
+    /// The provider configuration the limits belong to, such as `claude-work`, when the
+    /// server has several of one kind. Nil from servers that read one per kind.
+    public var providerId: String?
+    /// The configuration's own name, such as "Side project", when it has one.
+    public var providerName: String?
+    /// The plan the CLI reports, such as "Team", "Plus" or "SuperGrok Heavy".
+    public var plan: String?
+    /// Who is signed in: an email address or a workspace name.
+    public var account: String?
     public var windows: [AgentUsageWindow]
     /// Why the windows are missing, such as a signed-out CLI. Nil when they were read.
     public var failure: String?
     public var checkedAt: Date
 
-    public init(provider: AgentChatProvider, windows: [AgentUsageWindow] = [], failure: String? = nil,
-                checkedAt: Date = Date()) {
+    public init(provider: AgentChatProvider, providerId: String? = nil, providerName: String? = nil,
+                plan: String? = nil, account: String? = nil, windows: [AgentUsageWindow] = [],
+                failure: String? = nil, checkedAt: Date = Date()) {
         self.provider = provider
+        self.providerId = providerId
+        self.providerName = providerName
+        self.plan = plan
+        self.account = account
         self.windows = windows
         self.failure = failure
         self.checkedAt = checkedAt
     }
 
-    private enum CodingKeys: String, CodingKey { case provider, windows, failure, checkedAt }
+    private enum CodingKeys: String, CodingKey {
+        case provider, providerId, providerName, plan, account, windows, failure, checkedAt
+    }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         provider = try container.decode(AgentChatProvider.self, forKey: .provider)
+        providerId = try container.decodeIfPresent(String.self, forKey: .providerId)
+        providerName = try container.decodeIfPresent(String.self, forKey: .providerName)
+        plan = try container.decodeIfPresent(String.self, forKey: .plan)
+        account = try container.decodeIfPresent(String.self, forKey: .account)
         windows = try container.decodeIfPresent([AgentUsageWindow].self, forKey: .windows) ?? []
         failure = try container.decodeIfPresent(String.self, forKey: .failure)
         checkedAt = try container.decodeIfPresent(Date.self, forKey: .checkedAt) ?? Date()
@@ -114,7 +134,9 @@ public struct AgentUsageLimitsReply: Hashable, Codable, Sendable {
     public func validate() throws(ErrorCode) {
         guard providers.count <= Self.maxProviders else { throw .badRequest }
         for limits in providers {
-            guard limits.windows.count <= Self.maxWindows, (limits.failure?.utf8.count ?? 0) <= 1024 else { throw .badRequest }
+            guard limits.windows.count <= Self.maxWindows, (limits.failure?.utf8.count ?? 0) <= 1024,
+                  [limits.providerId, limits.providerName, limits.plan, limits.account]
+                      .allSatisfy({ ($0?.utf8.count ?? 0) <= 256 }) else { throw .badRequest }
             var ids = Set<String>()
             for window in limits.windows {
                 guard !window.id.isEmpty, window.id.utf8.count <= 128, !window.label.isEmpty, window.label.utf8.count <= 256,

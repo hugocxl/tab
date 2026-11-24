@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import TabApp
 import TabCore
 import TabProtocol
@@ -21,10 +22,12 @@ public final class UsagePluginFactory: TabPluginFactory {
 public final class UsagePlugin: TabPlugin {
     public let id: PluginId = .usage
     private weak var panelContent: UsagePanelContent?
+    private var config = UsageConfig()
 
     public init() {}
 
     public func activate(context: PluginContext) {
+        config = UsageConfig.current(in: context.model.settings)
         let panel = PluginSidebarPanel(
             id: UsagePanelContent.id,
             pluginId: id,
@@ -33,6 +36,7 @@ public final class UsagePlugin: TabPlugin {
             order: 30
         ) { [weak self] model in
             let content = UsagePanelContent(model: model)
+            content.controller.apply(self?.config ?? UsageConfig())
             self?.panelContent = content
             return content
         }
@@ -40,6 +44,16 @@ public final class UsagePlugin: TabPlugin {
 
         context.onReconnected { [weak self] server in
             self?.panelContent?.controller.reconnected(server)
+        }
+        context.onSettingsChanged { [weak self] settings in
+            guard let self else { return }
+            let next = UsageConfig.current(in: settings)
+            guard next != config else { return }
+            config = next
+            panelContent?.controller.apply(next)
+        }
+        context.registerSettingsView { store in
+            AnyView(UsageSettingsView(store: store, config: UsageConfig.current(in: store.settings)))
         }
     }
 
@@ -70,10 +84,12 @@ final class UsagePanelContent: RightPanelContent {
     }
 
     func didShow() {
-        controller.refresh(force: false)
+        controller.didShow()
     }
 
-    func didHide() {}
+    func didHide() {
+        controller.didHide()
+    }
 
     func focusContent() {
         view.window?.makeFirstResponder(view)

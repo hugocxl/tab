@@ -48,11 +48,51 @@ final class UsagePluginTests: XCTestCase {
         XCTAssertEqual(PluginCatalog.descriptor(for: .usage)?.panelIds, ["usage"])
     }
 
-    func testPanelShowsCardsAndWarnings() async throws {
+    func testPanelShowsOneCardPerAccountClosestToItsLimitFirst() async throws {
         let (controller, _) = makePanel(Self.sample(now: Date()))
         try await settle { !controller.cards.isEmpty }
-        XCTAssertEqual(controller.cards.map(\.usage.label), ["Session", "Weekly", "Weekly · Fable"])
-        XCTAssertEqual(controller.warnings, ["Codex: Codex CLI is not authenticated. Run `codex login` and try again."])
+        XCTAssertEqual(controller.cards.map { $0.limits.providerId }, ["claude-side", "codex", "claude", "grok"])
+        let side = try XCTUnwrap(controller.cards.first)
+        XCTAssertEqual(side.rows.map(\.usage.label), ["Weekly"])
+        XCTAssertEqual(side.rows.first?.tone, .low)
+        XCTAssertEqual(side.rows.first?.bar.fraction, 0.86)
+        XCTAssertEqual(controller.toolbar.chipTitles, ["All", "Claude", "Codex", "Grok"])
+        XCTAssertEqual(controller.cards.last?.limits.failure, "Grok is not signed in. Run `grok login` and try again.")
+    }
+
+    func testChipsSwitchesAndDetailsChangeTheCards() async throws {
+        let (controller, _) = makePanel(Self.sample(now: Date()))
+        try await settle { !controller.cards.isEmpty }
+        controller.toolbar.onFilter?(.claude)
+        XCTAssertEqual(controller.cards.map { $0.limits.providerId }, ["claude-side", "claude"])
+        controller.toolbar.onOrder?(.provider)
+        XCTAssertEqual(controller.cards.map { $0.limits.providerId }, ["claude", "claude-side"])
+        controller.toolbar.onFigure?(.left)
+        XCTAssertEqual(controller.cards.last?.rows.first?.bar.fraction, 0.14)
+        controller.cards.last?.onToggle?()
+        XCTAssertEqual(controller.cards.last?.rows.map(\.usage.label), ["Weekly", "Session"])
+        controller.toolbar.onFilter?(nil)
+        XCTAssertEqual(controller.cards.count, 4)
+    }
+
+    func testSettingsChooseTheScheduleAndDefaults() throws {
+        let decoded = try JSONDecoder().decode(UsageConfig.self, from: Data(#"{"refreshMinutes":-3,"order":"sideways","lowThreshold":99}"#.utf8))
+        XCTAssertEqual(decoded, UsageConfig(refreshMinutes: 0, order: .urgency, figure: .used, lowThreshold: 90))
+        XCTAssertEqual(UsageConfig.refreshTitle(5), "Every 5 minutes")
+        let controller = UsagePanelController(theme: AppTheme(systemIsDark: true)) { _ in nil }
+        controller.apply(UsageConfig(refreshMinutes: 15, order: .provider, figure: .left))
+        XCTAssertEqual(controller.order, .provider)
+        XCTAssertEqual(controller.figure, .left)
+    }
+
+    func testWordingFollowsHeadroom() {
+        XCTAssertEqual(UsageMath.spelledDuration(3 * 86_400 + 12 * 3600 + 59), "3 days 12 h")
+        XCTAssertEqual(UsageMath.spelledDuration(4 * 3600 + 12 * 60), "4 h 12 min")
+        XCTAssertEqual(UsageMath.ago(now.addingTimeInterval(-7 * 60 - 5), now: now), "7 min ago")
+        XCTAssertEqual(UsageMath.tone(window("a", used: 86, minutes: nil, resetsIn: nil), lowThreshold: 30), .low)
+        XCTAssertEqual(UsageMath.tone(window("b", used: 95, minutes: nil, resetsIn: nil), lowThreshold: 30), .almostOut)
+        XCTAssertEqual(UsageMath.tone(window("c", used: 100, minutes: nil, resetsIn: nil), lowThreshold: 30), .over)
+        XCTAssertEqual(UsageMath.tone(window("d", used: 63, minutes: nil, resetsIn: nil), lowThreshold: 30), .fine)
     }
 
     func testOldServerSaysItCannotReportUsage() async throws {
@@ -69,7 +109,7 @@ final class UsagePluginTests: XCTestCase {
         for (dark, width) in [(true, 300.0), (false, 300.0), (true, 480.0)] {
             let theme = AppTheme(catalog: ThemeCatalog.load(customDirectory: nil), systemIsDark: dark)
             let (controller, _) = makePanel(Self.sample(now: Date()), theme: theme)
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 560), styleMask: [.borderless],
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 720), styleMask: [.borderless],
                                   backing: .buffered, defer: false)
             window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
             let background = ThemedBackground(color: { $0.card })
@@ -84,6 +124,7 @@ final class UsagePluginTests: XCTestCase {
                 controller.view.bottomAnchor.constraint(equalTo: background.bottomAnchor),
             ])
             try await settle { !controller.cards.isEmpty }
+            if width > 400 { controller.cards.first?.onToggle?() }
             let view = try XCTUnwrap(window.contentView)
             view.layoutSubtreeIfNeeded()
             view.displayIfNeeded()
@@ -114,15 +155,25 @@ final class UsagePluginTests: XCTestCase {
 
     static func sample(now: Date) -> AgentUsageLimitsReply {
         AgentUsageLimitsReply(providers: [
-            AgentUsageLimits(provider: .claude, windows: [
+            AgentUsageLimits(provider: .claude, providerId: "claude", plan: "Team", account: "leila.quist@example.net", windows: [
                 .init(id: "five_hour", kind: .session, label: "Session", usedPercent: 1, windowDurationMinutes: 300,
                       resetsAt: now.addingTimeInterval(4 * 3600 + 53 * 60)),
                 .init(id: "seven_day", kind: .weekly, label: "Weekly", usedPercent: 53, windowDurationMinutes: 10_080,
                       resetsAt: now.addingTimeInterval(4 * 86_400 + 22 * 3600)),
-                .init(id: "seven_day_fable", kind: .weekly, label: "Weekly · Fable", usedPercent: 32,
-                      windowDurationMinutes: 10_080, resetsAt: now.addingTimeInterval(4 * 86_400 + 22 * 3600)),
-            ]),
-            AgentUsageLimits(provider: .codex, failure: "Codex CLI is not authenticated. Run `codex login` and try again."),
+            ], checkedAt: now.addingTimeInterval(-7 * 60)),
+            AgentUsageLimits(provider: .claude, providerId: "claude-side", providerName: "Side project", plan: "Pro",
+                             account: "leila.quist@example.net", windows: [
+                .init(id: "seven_day", kind: .weekly, label: "Weekly", usedPercent: 86, windowDurationMinutes: 10_080,
+                      resetsAt: now.addingTimeInterval(3 * 86_400 + 12 * 3600)),
+                .init(id: "five_hour", kind: .session, label: "Session", usedPercent: 40, windowDurationMinutes: 300,
+                      resetsAt: now.addingTimeInterval(2 * 3600)),
+            ], checkedAt: now.addingTimeInterval(-7 * 60)),
+            AgentUsageLimits(provider: .codex, providerId: "codex", plan: "Plus", account: "leilaquist@example.com", windows: [
+                .init(id: "secondary", kind: .weekly, label: "Weekly", usedPercent: 63, windowDurationMinutes: 10_080,
+                      resetsAt: now.addingTimeInterval(2 * 86_400 + 4 * 3600)),
+            ], checkedAt: now.addingTimeInterval(-6 * 60)),
+            AgentUsageLimits(provider: .grok, providerId: "grok", failure: "Grok is not signed in. Run `grok login` and try again.",
+                             checkedAt: now.addingTimeInterval(-6 * 60)),
         ])
     }
 }
