@@ -80,6 +80,14 @@ extension PaneContentController {
     public var icon: NSImage? { nil }
 }
 
+/// Content that can get ready while its tab is hidden, so that the tab's
+/// first showing finds it drawn.
+@MainActor
+protocol PanePrewarming: AnyObject {
+    /// Fetches and draws what the pane will show, as showing it would.
+    func prewarm()
+}
+
 /// The kinds of pane content, as `PaneContent` cases without their data.
 public enum PaneKind: Hashable, Sendable, CaseIterable {
     case terminal, agent, editor, diff, browser, simulator

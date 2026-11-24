@@ -22,7 +22,11 @@ final class SidebarViewController: NSViewController {
     private let newTab = ChromeButton(ChromeIcon.plusCircle, label: "New Tab")
     private let scroll = ScrollView()
     private var scrollFade: ScrollEdgeFade?
-    private let list = NSStackView()
+    private let list = SidebarListView()
+    /// The rows being built, then handed to the list.
+    private var rows: [SidebarRow] = []
+    /// Each project group's rows in the list, its header first.
+    private var groupRows: [(project: ProjectId, rows: Range<Int>)] = []
     private let footer = FlippedView()
     private let filter = SidebarFilterView()
     private let addButton = ChromeButton(ChromeIcon.addProject, label: "Add Project")
@@ -54,9 +58,8 @@ final class SidebarViewController: NSViewController {
     override func loadView() {
         root.controller = self
         view = root
-        list.orientation = .vertical
-        list.alignment = .leading
-        list.spacing = 6
+        // The list starts and ends a gutter from the chrome rows' buttons.
+        list.insets = NSEdgeInsets(top: ChromeButton.rowHeight - Self.titleBarHeight, left: Metrics.gutter, bottom: 0, right: 0)
         list.translatesAutoresizingMaskIntoConstraints = false
         scroll.content.addSubview(list)
         NSLayoutConstraint.activate([
@@ -130,32 +133,31 @@ final class SidebarViewController: NSViewController {
     }
 
     private func rebuild(_ snapshot: SidebarSnapshot) {
-        for view in list.arrangedSubviews {
-            list.removeArrangedSubview(view)
-            view.removeFromSuperview()
-        }
-        // The list starts and ends a gutter from the chrome rows' buttons.
-        list.edgeInsets = NSEdgeInsets(top: ChromeButton.rowHeight - Self.titleBarHeight, left: Metrics.gutter, bottom: 0, right: 0)
-        guard isExpanded else { return }
-        buildExpanded(snapshot)
+        rows = []
+        groupRows = []
+        if isExpanded { buildExpanded(snapshot) }
+        list.update(rows)
+        rows = []
+        connectDividers()
     }
 
-    private func add(_ view: NSView, fill: Bool = true) {
-        view.translatesAutoresizingMaskIntoConstraints = false
-        list.addArrangedSubview(view)
-        if fill {
-            view.widthAnchor.constraint(equalTo: list.widthAnchor, constant: -list.edgeInsets.left - list.edgeInsets.right).isActive = true
-        }
+    /// Rows follow each other 6pt apart unless said otherwise.
+    private nonisolated static let rowSpacing: CGFloat = 6
+
+    private func append(_ key: SidebarRowKey, _ content: any Equatable, spacing: CGFloat = rowSpacing,
+                        update: ((any Equatable, NSView) -> Bool)? = nil, make: @escaping () -> NSView) {
+        rows.append(SidebarRow(key: key, content: content, spacingBefore: spacing, make: make, update: update))
     }
 
     private func buildExpanded(_ snapshot: SidebarSnapshot) {
         var cardNumber = 0
         for (index, host) in snapshot.hosts.enumerated() {
             if snapshot.showsHostHeaders {
-                if index > 0, let previous = list.arrangedSubviews.last {
-                    list.setCustomSpacing(20, after: previous)
+                let title = host.title, remote = !host.server.isLocal, match = snapshot.query
+                append(.host(host.server), HostHeaderContent(title: title, remote: remote, match: match),
+                       spacing: index > 0 ? 20 : Self.rowSpacing) {
+                    HostHeaderRow(title: title, remote: remote, match: match)
                 }
-                add(HostHeaderRow(title: host.title, remote: !host.server.isLocal, match: snapshot.query))
             }
             buildHost(host, cardNumber: &cardNumber)
         }
@@ -163,70 +165,90 @@ final class SidebarViewController: NSViewController {
 
     private func buildHost(_ host: SidebarSnapshot.HostEntry, cardNumber: inout Int) {
         if let cards = host.openTabs { return buildOpenTabs(cards, creating: host.groups.flatMap(\.creating), cardNumber: &cardNumber) }
-        let terminals = host.terminals.map { cardView($0, hint: hint(.tabs, &cardNumber)) }
-        terminals.forEach { add($0) }
-        divide(terminals, in: list)
+        appendCards(host.terminals, cardNumber: &cardNumber)
         for group in host.groups {
-            let stack = NSStackView()
-            stack.orientation = .vertical
-            stack.spacing = list.spacing
-            stack.alignment = .leading
-            let header = headerView(group)
-            stack.addArrangedSubview(header)
-            stack.setCustomSpacing(2, after: header)
-            header.translatesAutoresizingMaskIntoConstraints = false
-            header.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-            var cards: [SidebarCardView] = []
-            for card in collapsedProjects.contains(group.project) ? [] : group.cards {
-                let view = cardView(card, hint: hint(.tabs, &cardNumber))
-                view.translatesAutoresizingMaskIntoConstraints = false
-                stack.addArrangedSubview(view)
-                view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-                cards.append(view)
-            }
-            divide(cards, in: stack)
-            let showCreating = !collapsedProjects.contains(group.project) || group.creating.contains(where: \.selected)
+            let first = rows.count
+            appendHeader(group)
+            let collapsed = collapsedProjects.contains(group.project)
+            appendCards(collapsed ? [] : group.cards, cardNumber: &cardNumber, firstSpacing: 2)
+            let showCreating = !collapsed || group.creating.contains(where: \.selected)
             for entry in showCreating ? group.creating : [] {
-                let row = CreatingRow(entry: entry)
-                row.onClick = { [weak self] in self?.model.selectWorktreeCreation(entry.id) }
-                row.translatesAutoresizingMaskIntoConstraints = false
-                stack.addArrangedSubview(row)
-                row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+                appendCreating(entry, spacing: rows.count == first + 1 ? 2 : Self.rowSpacing)
             }
-            add(stack)
+            groupRows.append((group.project, first..<rows.count))
         }
     }
 
     /// Open Tabs: the host's open tabs in the listing's order, each card
     /// naming its project.
     private func buildOpenTabs(_ cards: [SidebarSnapshot.CardEntry], creating: [SidebarSnapshot.CreatingEntry], cardNumber: inout Int) {
-        let views = cards.map { cardView($0, hint: hint(.tabs, &cardNumber)) }
-        views.forEach { add($0) }
-        divide(views, in: list)
-        for entry in creating {
-            let row = CreatingRow(entry: entry)
-            row.onClick = { [weak self] in self?.model.selectWorktreeCreation(entry.id) }
-            add(row)
-        }
+        appendCards(cards, cardNumber: &cardNumber)
+        for entry in creating { appendCreating(entry) }
     }
 
     /// Stacks consecutive cards with no gap and a hairline between them,
     /// clear beside the selected or hovered card.
-    private func divide(_ cards: [SidebarCardView], in stack: NSStackView) {
-        for (card, next) in zip(cards, cards.dropFirst()) {
-            guard let index = stack.arrangedSubviews.firstIndex(of: next) else { continue }
-            let divider = CardDivider()
-            divider.above = card
-            divider.below = next
-            card.dividers.append(divider)
-            next.dividers.append(divider)
-            divider.refresh()
-            divider.translatesAutoresizingMaskIntoConstraints = false
-            stack.insertArrangedSubview(divider, at: index)
-            divider.widthAnchor.constraint(equalTo: card.widthAnchor).isActive = true
-            stack.setCustomSpacing(0, after: card)
-            stack.setCustomSpacing(0, after: divider)
+    private func appendCards(_ cards: [SidebarSnapshot.CardEntry], cardNumber: inout Int, firstSpacing: CGFloat = rowSpacing) {
+        for (index, card) in cards.enumerated() {
+            if index > 0 {
+                append(.divider(above: cards[index - 1].target, below: card.target), 0, spacing: 0) { CardDivider() }
+            }
+            let hint = hint(.tabs, &cardNumber)
+            let content = CardContent(card: card, hint: hint)
+            append(.card(card.target), content, spacing: index == 0 ? firstSpacing : 0, update: { old, view in
+                // Selecting another card changes only which one is selected.
+                guard var old = old as? CardContent, let view = view as? SidebarCardView else { return false }
+                old.card.data.selected = card.data.selected
+                guard old == content else { return false }
+                view.setSelected(card.data.selected)
+                return true
+            }) { [unowned self] in
+                self.cardView(card, hint: hint)
+            }
         }
+    }
+
+    private func appendCreating(_ entry: SidebarSnapshot.CreatingEntry, spacing: CGFloat = rowSpacing) {
+        append(.creating(entry.id), entry, spacing: spacing) { [unowned self] in
+            let row = CreatingRow(entry: entry)
+            row.onClick = { [weak self] in self?.model.selectWorktreeCreation(entry.id) }
+            return row
+        }
+    }
+
+    /// Points each divider at the cards now above and below it.
+    private func connectDividers() {
+        let views = list.views
+        for case let card as SidebarCardView in views { card.dividers = [] }
+        for (index, view) in views.enumerated() {
+            guard let divider = view as? CardDivider, index > 0, index + 1 < views.count,
+                  let above = views[index - 1] as? SidebarCardView, let below = views[index + 1] as? SidebarCardView else { continue }
+            divider.above = above
+            divider.below = below
+            above.dividers.append(divider)
+            below.dividers.append(divider)
+            divider.refresh()
+        }
+    }
+
+    private struct HostHeaderContent: Equatable {
+        var title: String
+        var remote: Bool
+        var match: String
+    }
+
+    private struct CardContent: Equatable {
+        var card: SidebarSnapshot.CardEntry
+        var hint: String?
+    }
+
+    /// What a project header shows.
+    private struct HeaderContent: Equatable {
+        var group: SidebarSnapshot.GroupEntry
+        var status: ProjectStatus
+        var directory: ServerPath
+        var remoteName: String?
+        var match: String
     }
 
     private enum HintKind { case tabs }
@@ -249,29 +271,36 @@ final class SidebarViewController: NSViewController {
         let view = SidebarCardView(data: card.data, hint: hint, header: header)
         let target = card.target
         view.onClick = { [weak self] in self?.model.select(target) }
+        view.onHover = { [weak self] in self?.model.prepare(target) }
         view.onClose = { [weak self] in self?.model.close(target) }
         view.onPaneClick = { [weak self] pane in self?.model.focusPane(pane) }
         view.menuProvider = { [weak self, weak view] in self?.cardMenu(card, anchor: view) }
         return view
     }
 
-    private func headerView(_ group: SidebarSnapshot.GroupEntry) -> NSView {
-        guard let project = model.state.project(group.project) else { return NSView() }
-        let header = ProjectHeaderRow(
-            project: project, title: group.title, icon: group.icon,
-            remoteName: model.serverName(project.serverId), canCreateWorktree: group.canCreateWorktree,
-            match: model.nameFilter
-        )
-        header.onGear = { [weak self] anchor in
-            self?.projectMenu(project.id, anchor: anchor)?.popUp(below: anchor)
+    private func appendHeader(_ group: SidebarSnapshot.GroupEntry) {
+        guard let project = model.state.project(group.project) else { return }
+        var cardsOnly = group
+        cardsOnly.cards = []
+        cardsOnly.creating = []
+        let content = HeaderContent(group: cardsOnly, status: project.status, directory: project.directory,
+                                    remoteName: model.serverName(project.serverId), match: model.nameFilter)
+        append(.project(project.id), content) { [unowned self] in
+            let header = ProjectHeaderRow(
+                project: project, title: group.title, icon: group.icon, remoteName: content.remoteName,
+                canCreateWorktree: group.canCreateWorktree, match: content.match
+            )
+            header.onGear = { [weak self] anchor in
+                self?.projectMenu(project.id, anchor: anchor)?.popUp(below: anchor)
+            }
+            header.onNewWorktree = { [weak self] in self?.actions?.newWorktree(parent: project.id) }
+            header.menuProvider = { [weak self, weak header] in self?.projectMenu(project.id, anchor: header) }
+            header.onDrag = { [weak self, weak header] event in
+                guard let self, let header else { return }
+                self.dragProject(project.id, from: header, event: event)
+            }
+            return header
         }
-        header.onNewWorktree = { [weak self] in self?.actions?.newWorktree(parent: project.id) }
-        header.menuProvider = { [weak self, weak header] in self?.projectMenu(project.id, anchor: header) }
-        header.onDrag = { [weak self, weak header] event in
-            guard let self, let header else { return }
-            self.dragProject(project.id, from: header, event: event)
-        }
-        return header
     }
 
     // MARK: Reordering
@@ -301,10 +330,10 @@ final class SidebarViewController: NSViewController {
     }
 
     private func headerTarget(at point: NSPoint) -> ProjectId? {
-        for group in list.arrangedSubviews {
-            guard group.frame.contains(point), let stack = group as? NSStackView,
-                  let header = stack.arrangedSubviews.first as? ProjectHeaderRow else { continue }
-            return header.project
+        let views = list.views
+        for group in groupRows where group.rows.upperBound <= views.count {
+            let frame = group.rows.map { views[$0].frame }.reduce(views[group.rows.lowerBound].frame) { $0.union($1) }
+            if frame.contains(point) { return group.project }
         }
         return nil
     }

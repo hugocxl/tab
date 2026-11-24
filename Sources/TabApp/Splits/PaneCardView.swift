@@ -272,7 +272,10 @@ final class PaneCardView: HoverView {
         let gutter = Metrics.gutter
         header.frame = CGRect(x: 0, y: 0, width: bounds.width, height: Metrics.headerHeight)
         body.frame = CGRect(x: 0, y: Metrics.headerHeight, width: bounds.width, height: max(bounds.height - Metrics.headerHeight, 0))
-        controller?.view.frame = body.bounds.insetBy(dx: gutter, dy: gutter)
+        // A card not given its frame yet gives its content none either, rather
+        // than a sliver a terminal would size itself to.
+        let content = body.bounds.insetBy(dx: gutter, dy: gutter)
+        controller?.view.frame = content.width > 0 && content.height > 0 ? content : CGRect(x: gutter, y: gutter, width: 0, height: 0)
         let height = Metrics.headerHeight
         var x = gutter
         if let leadingView {

@@ -3,6 +3,16 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.132.0 - 2026-11-24
+
+### Changed
+
+- Switching between tabs is instant even with dozens open: each tab keeps its panes ready while hidden, and the cards beside the one you're on, or under the pointer, get ready before you pick them.
+
+### Fixed
+
+- A terminal shown for the first time no longer starts at a placeholder size and redraws once its pane has its real size.
+
 ## 0.131.0 - 2026-11-23
 
 ### Added

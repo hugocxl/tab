@@ -280,14 +280,45 @@ public final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation
     // MARK: Grid
 
     /// Replaces the grid, such as with a session's first or cached screen.
+    /// A screen like the one shown, as when a pane comes back to a terminal
+    /// that changed little meanwhile, redraws only the rows that differ.
     public func setGrid(_ grid: RunGrid?) {
+        let previous = self.grid
+        let wasSmoothScrolling = smoothOffset != 0
         self.grid = grid
         resetSmoothScroll()
         _ = self.grid?.takeChanges()
         lastCursorRow = grid.map { Int($0.cursor.row) }
         validateSelection()
-        needsDisplay = true
+        if !wasSmoothScrolling, let previous, let grid, let rows = Self.changedRows(from: previous, to: grid) {
+            let visible = rows.filteredIndexSet { $0 < Int(layout.viewport.rows) }
+            renderer.invalidate(rows: visible)
+            for row in visible { setNeedsDisplay(layout.rowRect(row)) }
+        } else {
+            needsDisplay = true
+        }
         updateScrollbar()
+    }
+
+    /// The screen rows that differ between two grids following live output
+    /// at the same size, or `nil` when anything may differ.
+    static func changedRows(from old: RunGrid, to new: RunGrid) -> IndexSet? {
+        guard old.size == new.size, old.scrollOffset == 0, new.scrollOffset == 0, old.graphics == new.graphics,
+              old.rows.count == new.rows.count else { return nil }
+        var changed = IndexSet()
+        for row in new.rows.indices where old.rows[row] != new.rows[row] { changed.insert(row) }
+        if old.cursor != new.cursor {
+            changed.insert(Int(old.cursor.row))
+            changed.insert(Int(new.cursor.row))
+        }
+        return changed
+    }
+
+    /// The host started or stopped being live, which shows or hides the
+    /// cursor and nothing else.
+    public func liveStateDidChange() {
+        invalidateCursor()
+        syncBlink()
     }
 
     /// Changes the grid in place and redraws only what changed. Returns
@@ -338,6 +369,18 @@ public final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation
 
     public override func viewWillDraw() {
         super.viewWillDraw()
+        prepareRows()
+    }
+
+    /// Lays out and rasterizes the visible rows ahead of the first draw, as
+    /// for a pane readied while its tab is hidden, so showing it only copies
+    /// them.
+    public func prerender() {
+        guard bounds.width > 0, bounds.height > 0 else { return }
+        prepareRows()
+    }
+
+    private func prepareRows() {
         if grid == nil, emptyGrid?.size != layout.viewport {
             emptyGrid = RunGrid(saved: SavedScreen(size: layout.viewport, rows: [], cursor: Cursor(visible: false)))
         }

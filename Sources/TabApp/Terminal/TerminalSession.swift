@@ -181,12 +181,33 @@ public extension TerminalSessionControllerDelegate {
         }
     }
 
-    /// Hidden panes detach and keep their screen; shown ones attach again.
+    /// Fetches the screen once while hidden, so a pane that never showed it
+    /// draws it the moment it appears. Showing the pane meanwhile turns the
+    /// fetch into its attachment.
+    public func fetchScreen() {
+        guard !visible, view.grid == nil, attachTask == nil, channel == nil else { return }
+        if case .ended = state { return }
+        let size = view.bounds.width > 0 ? view.viewport : Size(cols: 80, rows: 24)
+        attachTask = Task { [weak self, backend, session] in
+            do {
+                let attachment = try await backend.attachTerminal(session: session, size: size)
+                self?.attached(attachment)
+            } catch {
+                guard let self else { return }
+                // Only an attachment the pane waits for reports its failure.
+                if self.visible { self.attachFailed(error) } else { self.attachTask = nil }
+            }
+        }
+    }
+
+    /// Hidden panes detach and keep their screen; shown ones attach again,
+    /// once they have a size: attaching first would size the terminal to a
+    /// guess, and the program would redraw for it and again for the pane.
     public func setVisible(_ visible: Bool) {
         guard visible != self.visible else { return }
         self.visible = visible
         if visible {
-            attach()
+            if hasSize { attach() }
         } else {
             detach()
         }
@@ -210,18 +231,21 @@ public extension TerminalSessionControllerDelegate {
     func attached(_ attachment: TerminalAttachment) {
         attachTask = nil
         guard visible else {
+            // Hidden by now, or fetching ahead: keep the screen, drawn ready
+            // for the pane's return, and let the session go.
             Task { [backend] in try? await backend.detach(channel: attachment.channel) }
+            view.setGrid(grid(from: attachment.snapshot))
+            updateTitle(attachment.snapshot.title)
+            updateDirectory(attachment.snapshot.directory)
+            if let process = attachment.process { updateProcess(process) }
+            view.prerender()
             setState(.detached)
             return
         }
         channel = attachment.channel
         sentSize = attachment.snapshot.size
         sentCellSize = nil
-        var grid = RunGrid(snapshot: attachment.snapshot)
-        if let previous = view.grid, previous.scrollOffset > 0, previous.historyTotal == grid.historyTotal {
-            grid.scroll(by: previous.scrollOffset)
-        }
-        view.setGrid(grid)
+        view.setGrid(grid(from: attachment.snapshot))
         updateTitle(attachment.snapshot.title)
         updateDirectory(attachment.snapshot.directory)
         if let process = attachment.process { updateProcess(process) }
@@ -236,6 +260,16 @@ public extension TerminalSessionControllerDelegate {
             }
             self?.channelClosed(attachment.channel)
         }
+    }
+
+    /// The server's screen, scrolled where the view was when its history is
+    /// unchanged.
+    private func grid(from snapshot: AttachSnapshot) -> RunGrid {
+        var grid = RunGrid(snapshot: snapshot)
+        if let previous = view.grid, previous.scrollOffset > 0, previous.historyTotal == grid.historyTotal {
+            grid.scroll(by: previous.scrollOffset)
+        }
+        return grid
     }
 
     private func attachFailed(_ error: Error) {
@@ -255,7 +289,7 @@ public extension TerminalSessionControllerDelegate {
     private func setState(_ next: TerminalSessionState) {
         guard next != state else { return }
         state = next
-        view.needsDisplay = true
+        view.liveStateDidChange()
         delegate?.terminalSession(self, didChangeState: next)
     }
 
@@ -487,7 +521,12 @@ public extension TerminalSessionControllerDelegate {
         }
     }
 
+    /// Whether the view has its pane's size, the one to attach with.
+    private var hasSize: Bool { view.bounds.width > 0 && view.bounds.height > 0 }
+
     func terminalView(_ view: TerminalView, didChangeViewport viewport: Size) {
+        // A pane shown before it had a size attaches the moment it has one.
+        if visible, state == .detached, channel == nil, attachTask == nil, hasSize { attach() }
         sendCellSize()
         scheduleResize()
         if view.fontSize != reportedFontSize {

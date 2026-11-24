@@ -18,10 +18,12 @@ enum InterfaceMotion {
         view.layer?.presentation()?.frame ?? view.frame
     }
 
-    static func cancel(in view: NSView) {
+    /// Ends the transitions of `view` and of its subviews `depth` levels down.
+    static func cancel(in view: NSView, depth: Int = .max) {
         view.layer?.removeAnimation(forKey: "interface")
+        guard depth > 0 else { return }
         for child in view.subviews {
-            if child is MotionSnapshot { child.removeFromSuperview() } else { cancel(in: child) }
+            if child is MotionSnapshot { child.removeFromSuperview() } else { cancel(in: child, depth: depth - 1) }
         }
     }
 

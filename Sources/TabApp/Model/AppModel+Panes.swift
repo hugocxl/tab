@@ -558,6 +558,21 @@ extension AppModel {
         }
     }
 
+    /// Readies a card's tab while hidden, such as when the pointer comes
+    /// onto the card, so selecting it shows it at once.
+    public func prepare(_ target: SidebarListing.Target) {
+        let tab: TabId?
+        switch target {
+        case .tab(let id): tab = id
+        case .project(let id):
+            guard let project = state.project(id), project.status == .available else { return }
+            connectOnDemand(project.serverId)
+            let selected = state.window.selectedTab[id]
+            tab = (project.tabs.first { $0.id == selected } ?? project.tabs.first)?.id
+        }
+        if let tab { prepareTabAction?(tab) }
+    }
+
     /// Cmd+1–9: the sidebar's nth card.
     public func selectCard(_ index: Int) {
         let targets = sidebarListing.targets
@@ -612,16 +627,19 @@ extension AppModel {
         } ?? parent
     }
 
+    /// Puts `project` first among the recent ones. Switching projects only
+    /// reorders the sidebar, so the change is written shortly after, once for
+    /// a run of switches, rather than on every switch.
     func noteRecent(_ project: ProjectId) {
         guard appearance.projectRecent.first != project || appearance.worktreeRecent.first != project else { return }
-        updateAppearance { appearance in
-            appearance.projectRecent.removeAll { $0 == project }
-            appearance.projectRecent.insert(project, at: 0)
-            appearance.projectRecent = Array(appearance.projectRecent.prefix(50))
-            appearance.worktreeRecent.removeAll { $0 == project }
-            appearance.worktreeRecent.insert(project, at: 0)
-            appearance.worktreeRecent = Array(appearance.worktreeRecent.prefix(50))
-        }
+        settings.appearance.projectRecent.removeAll { $0 == project }
+        settings.appearance.projectRecent.insert(project, at: 0)
+        settings.appearance.projectRecent = Array(settings.appearance.projectRecent.prefix(50))
+        settings.appearance.worktreeRecent.removeAll { $0 == project }
+        settings.appearance.worktreeRecent.insert(project, at: 0)
+        settings.appearance.worktreeRecent = Array(settings.appearance.worktreeRecent.prefix(50))
+        notify(.state)
+        scheduleAppearanceSave()
     }
 }
 

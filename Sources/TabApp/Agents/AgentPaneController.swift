@@ -2682,3 +2682,8 @@ extension AgentPaneController {
         }
     }
 }
+
+extension AgentPaneController: PanePrewarming {
+    /// Loads the conversation while its tab is hidden, as showing it would.
+    func prewarm() { refresh() }
+}

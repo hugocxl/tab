@@ -30,8 +30,12 @@ final class HintBadge: ThemedView {
 /// branch with its pull request, then every pane and what it is doing when
 /// there are several.
 final class SidebarCardView: HoverView {
-    let data: ActivityCardData
+    private(set) var data: ActivityCardData
     var onClick: (() -> Void)?
+    /// The pointer rested on the card, which likely gets clicked next.
+    var onHover: (() -> Void)?
+    /// Waits for the pointer to rest, so passing over cards readies none.
+    private var hoverWork: DispatchWorkItem?
     /// Focuses a pane clicked in the card's list.
     var onPaneClick: ((PaneId) -> Void)?
     var menuProvider: (() -> NSMenu?)?
@@ -55,8 +59,8 @@ final class SidebarCardView: HoverView {
     /// The list in reading order: each pane, then what its agent runs.
     private let listRows: [NSView]
     private var elapsedTimer: Timer?
-    /// Only the selected card has glass; the sidebar rebuilds its cards often.
-    private let glass: GlassView?
+    /// Made when the card is first selected, and hidden while it isn't.
+    private var glass: GlassView?
     private let closeButton = ChromeButton(AppIcon.check, label: "Close Tab", side: 18, glyph: 11)
     /// The hairlines above and below, which hide while this card is filled.
     var dividers: [CardDivider] = []
@@ -227,8 +231,14 @@ final class SidebarCardView: HoverView {
         if let titleRow, !titleRow.wrapsTitle { return 1 }
         if hintBadge != nil { width -= 18 + 6 }
         if let titleRow { width -= titleRow.textInsets }
-        return Self.titleLines(data.title, width: width)
+        if let measuredTitle, measuredTitle.width == width { return measuredTitle.lines }
+        let lines = Self.titleLines(data.title, width: width)
+        measuredTitle = (width, lines)
+        return lines
     }
+
+    /// The title's lines at the last width measured, which most layouts reuse.
+    private var measuredTitle: (width: CGFloat, lines: Int)?
 
     override func setFrameSize(_ newSize: NSSize) {
         let widthChanged = newSize.width != frame.width
@@ -237,6 +247,23 @@ final class SidebarCardView: HoverView {
         if widthChanged { invalidateIntrinsicContentSize() }
     }
     override var mouseDownCanMoveWindow: Bool { false }
+
+    /// Shows the card selected or not: the one change a card takes in place,
+    /// so moving between tabs remakes no card.
+    func setSelected(_ selected: Bool) {
+        guard selected != data.selected else { return }
+        data.selected = selected
+        if selected, glass == nil {
+            let glass = GlassView(style: .card)
+            glass.appearance = theme.nsAppearance
+            addSubview(glass, positioned: .below, relativeTo: nil)
+            self.glass = glass
+            needsLayout = true
+        }
+        glass?.isHidden = !selected
+        needsDisplay = true
+        dividers.forEach { $0.refresh() }
+    }
 
     override func themeDidChange() {
         glass?.appearance = theme.nsAppearance
@@ -314,6 +341,17 @@ final class SidebarCardView: HoverView {
         needsDisplay = true
         updateCloseButton()
         dividers.forEach { $0.refresh() }
+        hoverWork?.cancel()
+        hoverWork = nil
+        guard isHovered, onHover != nil else { return }
+        let work = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.isHovered else { return }
+                self.onHover?()
+            }
+        }
+        hoverWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: work)
     }
 
     private func updateCloseButton() {

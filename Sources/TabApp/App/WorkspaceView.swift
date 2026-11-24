@@ -79,6 +79,7 @@ final class WorkspaceView: ThemedView {
         sidebarToggle.button.onPress = { [weak model] in model?.toggleSidebar() }
         rightSidebarToggle.onPress = { [weak model] in model?.toggleRightSidebar() }
         subscription = model.changes.sink { [weak self] changes in self?.modelChanged(changes) }
+        model.prepareTabAction = { [weak splits] tab in splits?.prepare(tab) }
         splits.onLayout = { [weak self] animated in
             guard let self, !self.inWorkspaceTransition else { return }
             self.cutVeil(animated: animated)
@@ -147,7 +148,8 @@ final class WorkspaceView: ThemedView {
 
     private func modelChanged(_ changes: Set<ModelChange>) {
         if changes.contains(.settings), InterfaceMotion.duration(model.appearance.animationStyle) == 0 {
-            InterfaceMotion.cancel(in: self)
+            // Cards, on their tabs' canvases, are the deepest views that move.
+            InterfaceMotion.cancel(in: self, depth: 3)
         }
         if changes.contains(.state) || changes.contains(.settings) {
             splits.reload()

@@ -176,7 +176,8 @@ struct ActivityCardData: Equatable {
         let shownId = shownTab.flatMap { model.state.shownPane($0) }
         let shownPane = shownTab?.displayedPane(active: shownId)
         let title = shownTab.map { $0.title(active: shownId).trimmingCharacters(in: .whitespaces) } ?? ""
-        let agent = shownPane.flatMap { model.agent(in: $0.id) }
+        // The pane is the project's, so its server is the project's.
+        let agent = shownPane?.content.activitySession.flatMap { model.connections[project.serverId]?.agent($0) }
         let headline: Headline
         switch shownPane?.content {
         case .agent(_, let seed)?:
@@ -531,9 +532,11 @@ struct ActivityCardData: Equatable {
         return task
     }
 
-    static var shellName: String {
+    /// Read once: the environment is copied whole on every read, and every
+    /// card asks for it on every change.
+    static let shellName: String = {
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? ""
         let name = shell.split(separator: "/").last.map(String.init) ?? ""
         return name.isEmpty ? "shell" : name
-    }
+    }()
 }

@@ -100,6 +100,8 @@ public final class AppModel {
     public private(set) lazy var browserAutomation = BrowserAutomation(host: self)
     /// Opens Settings, on a page when given; set by the window.
     public var showSettingsAction: ((SettingsCategory?) -> Void)?
+    /// Readies a hidden tab's panes; set by the window.
+    var prepareTabAction: ((TabId) -> Void)?
     var projectHosts: [ProjectId: ProjectHost] = [:]
     /// Makes the right panel's content; set by the panels module.
     public var rightPanelFactory: RightPanelFactory?
@@ -189,6 +191,9 @@ public final class AppModel {
     private var pending: Set<ModelChange> = []
     private var flushScheduled = false
     private var saveWork: DispatchWorkItem?
+    /// Writes `state.json` in order, off the main thread.
+    private let stateWriter = DispatchQueue(label: "Tab.state", qos: .utility)
+    private var appearanceSaveWork: DispatchWorkItem?
     var referencesWork: DispatchWorkItem?
     private var savedAppearance: Appearance
 
@@ -446,26 +451,52 @@ public final class AppModel {
     func scheduleSave() {
         saveWork?.cancel()
         let work = DispatchWorkItem { [weak self] in
-            MainActor.assumeIsolated { self?.saveNow() }
+            MainActor.assumeIsolated { self?.saveInBackground() }
         }
         saveWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
     }
 
-    /// Writes `state.json` now, such as when quitting.
+    /// Writes `state.json` and Appearance changes not yet saved now, such as
+    /// when quitting.
     public func saveNow() {
+        saveAppearanceNow()
         saveWork?.cancel()
         saveWork = nil
+        let (state, fontSizes, url) = stateToSave()
         do {
-            let ids = Set(state.projects.flatMap(\.tabs).flatMap(\.panes).map { $0.id.description })
-            terminalFontSizes = terminalFontSizes.filter { ids.contains($0.key) }
-            let encoded = try AppStateStore.encode(state)
-            var root = try JSONSerialization.jsonObject(with: encoded) as? [String: Any] ?? [:]
-            root["terminalFontSizes"] = terminalFontSizes
-            try AtomicFile.write(JSONSerialization.data(withJSONObject: root, options: [.sortedKeys, .prettyPrinted]), to: dirs.state)
+            try stateWriter.sync { try Self.writeState(state, fontSizes: fontSizes, to: url) }
         } catch {
             report(error)
         }
+    }
+
+    /// Writes `state.json` off the main thread: encoding it and making the
+    /// write durable would stall the window right after a tab switch.
+    private func saveInBackground() {
+        saveWork = nil
+        let (state, fontSizes, url) = stateToSave()
+        stateWriter.async { [weak self] in
+            do {
+                try Self.writeState(state, fontSizes: fontSizes, to: url)
+            } catch {
+                let message = (error as? LocalizedError)?.errorDescription ?? "\(error)"
+                DispatchQueue.main.async { MainActor.assumeIsolated { self?.report(message) } }
+            }
+        }
+    }
+
+    private func stateToSave() -> (AppState, [String: Double], URL) {
+        let ids = Set(state.projects.flatMap(\.tabs).flatMap(\.panes).map { $0.id.description })
+        terminalFontSizes = terminalFontSizes.filter { ids.contains($0.key) }
+        return (state, terminalFontSizes, dirs.state)
+    }
+
+    private nonisolated static func writeState(_ state: AppState, fontSizes: [String: Double], to url: URL) throws {
+        let encoded = try AppStateStore.encode(state)
+        var root = try JSONSerialization.jsonObject(with: encoded) as? [String: Any] ?? [:]
+        root["terminalFontSizes"] = fontSizes
+        try AtomicFile.write(JSONSerialization.data(withJSONObject: root, options: [.sortedKeys, .prettyPrinted]), to: url)
     }
 
     /// Saves what changed in Appearance, keeping edits made elsewhere.
@@ -474,6 +505,8 @@ public final class AppModel {
         change(&appearance)
         guard appearance != settings.appearance else { return }
         settings.appearance = appearance
+        appearanceSaveWork?.cancel()
+        appearanceSaveWork = nil
         do {
             let saved = try appearance.saveChanges(since: savedAppearance, to: dirs.settings)
             settings.appearance = saved
@@ -487,17 +520,54 @@ public final class AppModel {
         notify(.state)
     }
 
+    /// Writes Appearance changed only in memory, such as the recent
+    /// projects, a moment after the last change.
+    func scheduleAppearanceSave() {
+        appearanceSaveWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated { self?.saveAppearanceNow() }
+        }
+        appearanceSaveWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: work)
+    }
+
+    private func saveAppearanceNow() {
+        appearanceSaveWork?.cancel()
+        appearanceSaveWork = nil
+        guard settings.appearance != savedAppearance else { return }
+        do {
+            let saved = try settings.appearance.saveChanges(since: savedAppearance, to: dirs.settings)
+            savedAppearance = saved
+            // Edits made elsewhere meanwhile come back with the save.
+            guard saved != settings.appearance else { return }
+            settings.appearance = saved
+            theme.setInterface(saved)
+            theme.setThemes(dark: saved.darkTheme, light: saved.lightTheme)
+            notify(.settings)
+            notify(.state)
+        } catch {
+            report(error)
+        }
+    }
+
     /// Settings changed elsewhere, such as in the Settings window.
     public func apply(settings: Settings) {
         let servers = self.settings.servers
         let showsSidebar = !appearance.sidebarExpanded && settings.appearance.sidebarExpanded
+        let saved = settings.appearance
+        var settings = settings
+        if appearanceSaveWork != nil {
+            // Recent projects not written yet stay, and are written as planned.
+            settings.appearance.projectRecent = self.settings.appearance.projectRecent
+            settings.appearance.worktreeRecent = self.settings.appearance.worktreeRecent
+        }
         self.settings = settings
         // Showing the sidebar restores an expanded pane, as toggling it does.
         if showsSidebar, activeTab?.zoomed != nil { toggleZoom() }
         browserProfiles.defaultProfileId = settings.browser.defaultProfile
         for controller in browserProfiles.panes.all { controller.apply(settings: settings.browser) }
         updater.setSettings(settings.updates)
-        savedAppearance = settings.appearance
+        savedAppearance = saved
         theme.setInterface(settings.appearance)
         theme.setThemes(dark: settings.appearance.darkTheme, light: settings.appearance.lightTheme)
         if servers != settings.servers {

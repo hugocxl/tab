@@ -166,7 +166,9 @@ final class TerminalPane: PaneContentController {
             MainActor.assumeIsolated {
                 guard let self, let controller, self.session === controller, self.visible else { return }
                 self.host.layoutSubtreeIfNeeded()
-                guard controller.view.viewport.cols > 0, controller.view.viewport.rows > 0 else {
+                // The viewport is never under 1×1, so only the bounds tell a
+                // laid-out view from one still waiting for its pane's size.
+                guard controller.view.bounds.width > 0, controller.view.bounds.height > 0 else {
                     self.attachWhenLaidOut(controller, attempt: attempt + 1)
                     return
                 }
@@ -236,6 +238,14 @@ final class TerminalPane: PaneContentController {
     /// Runs a terminal command on this pane, from the menu bar or palette.
     func perform(_ command: TerminalCommand) {
         session?.view.perform(command)
+    }
+}
+
+extension TerminalPane: PanePrewarming {
+    func prewarm() {
+        guard !visible else { return }
+        refresh()
+        session?.fetchScreen()
     }
 }
 

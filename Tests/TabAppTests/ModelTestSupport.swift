@@ -222,7 +222,22 @@ final class ModelFakeServer: ServerAPI, TerminalBackend, @unchecked Sendable {
 
     // MARK: TerminalBackend
 
-    func attachTerminal(session: SessionId, size: Size) async throws -> TerminalAttachment { throw ClientError.disconnected }
+    /// The screen a terminal shows when attached; attaching fails without one.
+    var screen: (@Sendable (SessionId, Size) -> AttachSnapshot)?
+    private var _attached: [SessionId] = []
+    private var _channels: [AsyncStream<ChannelEvent>.Continuation] = []
+    var attached: [SessionId] { locked { _attached } }
+
+    func attachTerminal(session: SessionId, size: Size) async throws -> TerminalAttachment {
+        guard let screen else { throw ClientError.disconnected }
+        let (events, continuation) = AsyncStream<ChannelEvent>.makeStream()
+        let channel = locked {
+            _attached.append(session)
+            _channels.append(continuation)
+            return ChannelId(UInt32(_channels.count))
+        }
+        return TerminalAttachment(channel: channel, snapshot: screen(session, size), process: nil, events: events)
+    }
     func detach(channel: ChannelId) async throws {}
     func sendInput(channel: ChannelId, _ input: TerminalInput) throws {}
     func ack(channel: ChannelId, seq: UInt64) throws {}

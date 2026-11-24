@@ -140,7 +140,9 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, A
         let project = model.currentProject
         let title = project.home ? (model.activeTab?.title(active: model.activePane) ?? Release.appName) : model.title(of: project)
         if window?.title != title { window?.title = title }
-        window?.representedURL = project.serverId.isLocal ? URL(fileURLWithPath: project.directory.rawValue) : nil
+        // Setting it looks up the folder's icon, so only when it changes.
+        let url = project.serverId.isLocal ? URL(fileURLWithPath: project.directory.rawValue) : nil
+        if window?.representedURL != url { window?.representedURL = url }
         window?.standardWindowButton(.documentIconButton)?.isHidden = true
     }
 
