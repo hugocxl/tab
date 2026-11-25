@@ -50,6 +50,8 @@ public struct TabDirs: Sendable, Equatable {
     public var serverSettings: URL { file("server.json") }
     /// The coding agents the server runs in agent panes.
     public var agentProviders: URL { file("agent-providers.json") }
+    /// The user's computers as their app last described them, for agents.
+    public var infrastructure: URL { file("infrastructure.json") }
     public var serverLog: URL { file("server.log") }
     public var serverSocket: URL { file("server.sock") }
     /// The server's single-instance lock, holding its pid.

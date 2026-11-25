@@ -1,9 +1,20 @@
 import Foundation
 
-/// Another computer whose Tab server this app reaches over SSH.
-public struct ServerEntry: Codable, Equatable, Sendable, Identifiable {
+/// Another computer reached over SSH: either a Tab server running `tabd`,
+/// or a plain SSH host without Tab installed.
+public struct ServerEntry: Codable, Equatable, Hashable, Sendable, Identifiable {
+    /// How Tab interacts with this remote computer.
+    public enum Kind: String, Codable, Equatable, Hashable, Sendable, CaseIterable {
+        /// A remote Mac running Tab (`tabd`): projects, agents, Git, tunnels and simulators.
+        case tab
+        /// A plain SSH host without Tab: SSH terminals and agent awareness only.
+        case ssh
+    }
+
     public var id: ServerId
     public var name: String
+    /// Whether this host runs Tab (`tabd`) or is a plain SSH host.
+    public var kind: Kind
     /// An SSH destination: a `~/.ssh/config` alias, `user@host`, or
     /// `ssh://user@host:port`. It is fully checked when connecting.
     public var ssh: String
@@ -21,6 +32,7 @@ public struct ServerEntry: Codable, Equatable, Sendable, Identifiable {
     public init(
         id: ServerId = ServerId(),
         name: String,
+        kind: Kind = .tab,
         ssh: String,
         sshCommand: String? = nil,
         identityFile: String? = nil,
@@ -30,6 +42,7 @@ public struct ServerEntry: Codable, Equatable, Sendable, Identifiable {
     ) {
         self.id = id
         self.name = name
+        self.kind = kind
         self.ssh = ssh
         self.sshCommand = sshCommand
         self.identityFile = identityFile
@@ -42,6 +55,7 @@ public struct ServerEntry: Codable, Equatable, Sendable, Identifiable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(ServerId.self, forKey: .id)
         name = try container.decode(String.self, forKey: .name)
+        kind = try container.decodeIfPresent(Kind.self, forKey: .kind) ?? .tab
         ssh = try container.value(.ssh, "")
         sshCommand = try container.decodeIfPresent(String.self, forKey: .sshCommand)
         identityFile = try container.decodeIfPresent(String.self, forKey: .identityFile)
@@ -52,6 +66,28 @@ public struct ServerEntry: Codable, Equatable, Sendable, Identifiable {
 
     /// What the connection runs: the custom command, else the destination.
     public var destination: String { sshCommand ?? ssh }
+
+    /// Whether this server runs Tab (`tabd`).
+    public var isTabServer: Bool { kind == .tab }
+
+    /// A shell command that opens an interactive SSH session to this server.
+    public var interactiveSSHCommand: String {
+        if let sshCommand { return sshCommand }
+        var parts = ["ssh"]
+        if let port { parts += ["-p", String(port)] }
+        if let identityFile { parts += ["-i", Self.shellQuote(identityFile)] }
+        parts.append(Self.shellQuote(ssh))
+        return parts.joined(separator: " ")
+    }
+
+    private static func shellQuote(_ value: String) -> String {
+        let safe = value.unicodeScalars.allSatisfy { scalar in
+            (scalar >= "a" && scalar <= "z") || (scalar >= "A" && scalar <= "Z")
+                || (scalar >= "0" && scalar <= "9") || "._:@/-~".unicodeScalars.contains(scalar)
+        }
+        guard !safe || value.isEmpty else { return value }
+        return "'" + value.replacingOccurrences(of: "'", with: #"'\''"#) + "'"
+    }
 
     public func validate() throws {
         if id.isLocal {

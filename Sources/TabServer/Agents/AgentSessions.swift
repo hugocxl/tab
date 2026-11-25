@@ -255,6 +255,9 @@ final class AgentSessions: @unchecked Sendable {
     var cliDirectory: String?
     /// The project an agent works in, as its instructions describe it.
     var projectContext: @Sendable (ProjectId) -> AgentContext.Project? = { _ in nil }
+    /// The user's computers and this one, so an agent knows where it runs.
+    var infrastructure: @Sendable () -> Infrastructure? = { nil }
+    var machine: MachineInfo?
     var stageToolImages: @Sendable ([AgentChatAttachment], URL) throws -> Void = { images, directory in
         let staged = try AgentAttachments.stageToolImages(images, root: directory)
         try AgentAttachments.record(staged, root: directory)
@@ -1144,7 +1147,8 @@ final class AgentSessions: @unchecked Sendable {
                 environment[AgentContext.providedVariable] = "1"
                 let context = AgentContext(place: .agentPane(agent: id.description),
                                            project: projectContext(entry.snapshot.project),
-                                           cli: cliDirectory.map { ($0 as NSString).appendingPathComponent(Executable.cli) })
+                                           cli: cliDirectory.map { ($0 as NSString).appendingPathComponent(Executable.cli) },
+                                           infrastructure: infrastructure(), machine: machine)
                 runtime.prepare(AgentLaunch(environment: environment, path: cliDirectory, forkSource: entry.forkSource,
                                             forkPoint: entry.forkPoint, instructions: context.text,
                                             provider: providers(entry.snapshot.providerID, entry.snapshot.provider)))

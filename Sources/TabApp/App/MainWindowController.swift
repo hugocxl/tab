@@ -308,11 +308,12 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, A
     }
 
     public func addProject(anchor: NSView?) {
-        guard !model.settings.servers.isEmpty, let anchor else {
+        let tabServers = model.settings.servers.filter(\.isTabServer)
+        guard !tabServers.isEmpty, let anchor else {
             openPalette(.addProject(.local))
             return
         }
-        var remote: [NSMenuItem] = serversByGroup(model.settings.servers, entry: { $0 }).flatMap { group, servers in
+        var remote: [NSMenuItem] = serversByGroup(tabServers, entry: { $0 }).flatMap { group, servers in
             let items: [NSMenuItem] = servers.map { server in
                 ClosureMenuItem(server.name) { [weak self] in self?.openPalette(.addProject(server.id)) }
             }

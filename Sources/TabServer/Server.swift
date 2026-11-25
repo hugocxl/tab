@@ -45,6 +45,10 @@ public final class Server: @unchecked Sendable {
     let agentModelCatalog: AgentModelCatalogService
     let agentUsageLimits: AgentUsageLimitsService
     let agentProviders: AgentProviderStore
+    /// The user's computers, for agents' instructions.
+    let infrastructure: InfrastructureStore
+    /// The computer this server runs on.
+    let machine: MachineInfo
     let agentHistory: AgentHistory
     let agentTitles: AgentTitles
     let shellIntegration: ShellIntegration?
@@ -130,6 +134,12 @@ public final class Server: @unchecked Sendable {
                 ? .worktree(of: project.parentId.flatMap { try? catalog.project($0).name }) : .project
             return AgentContext.Project(name: project.name, directory: project.directory.rawValue, kind: kind)
         }
+        let infrastructure = InfrastructureStore(url: dirs.infrastructure)
+        self.infrastructure = infrastructure
+        let machine = MachineInfo.current()
+        self.machine = machine
+        agents.machine = machine
+        agents.infrastructure = { infrastructure.infrastructure }
         agents.cliDirectory = Executable.currentURL().map { $0.deletingLastPathComponent() }
             .flatMap { Executable.isExecutableFile($0.appendingPathComponent("tab")) ? $0.path : nil }
         uploads = Uploads(directory: configuration.uploads)
@@ -143,7 +153,7 @@ public final class Server: @unchecked Sendable {
         let unclean = FileManager.default.fileExists(atPath: dirs.serverRunning.path)
         if unclean { ServerLog.error("the previous server stopped without ending its sessions") }
         info = ServerInfo(build: BuildInfo(version: Release.version), instance: UInt64.random(in: 1...UInt64.max),
-                          server: catalog.serverId, previousStopUnclean: unclean)
+                          server: catalog.serverId, previousStopUnclean: unclean, machine: machine)
         catalog.onChange = { [weak self] revision in self?.catalogChanged(revision) }
         tabs.onChange = { [weak self] revision in self?.tabsChanged(revision) }
         activity.onChange = { [weak self] revision in self?.activityChanged(revision) }

@@ -8,7 +8,12 @@ enum Integrations {
         switch action {
         case .context:
             let cli = Executable.currentURL()
-            if let context = AgentIntegrations.context(environment: ProcessInfo.processInfo.environment, cli: cli) {
+            let environment = ProcessInfo.processInfo.environment
+            // The server's copy, which says which of the user's computers this is.
+            let infrastructure = (try? TabDirs.profile(environment: environment).infrastructure).flatMap(Infrastructure.read)
+            let machine = infrastructure.map { _ in MachineInfo.current() }
+            if let context = AgentIntegrations.context(environment: environment, cli: cli,
+                                                       infrastructure: infrastructure, machine: machine) {
                 Output.line(context)
             }
             return

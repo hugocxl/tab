@@ -1,0 +1,1 @@
+{"body":{"infrastructure":{"computers":[{"id":"seat","machine":{"chip":"Apple M2","name":"MacBook Air"},"name":"MacBook Air","role":"seat"},{"address":"me@mac-mini-i5","id":"i5","name":"Mac Mini i5","role":"sshHost","ssh":"ssh mac-mini-i5"}],"receiver":"seat"},"type":"describeInfrastructure"},"id":1,"type":"request"}

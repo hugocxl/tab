@@ -317,6 +317,13 @@ extension ServerClient {
         guard case .serverSettingsWritten = reply else { throw unexpected(reply) }
     }
 
+    /// Tells the server about the user's computers, for its agents. Servers
+    /// that predate it reply `unsupported`.
+    public func describeInfrastructure(_ infrastructure: Infrastructure) async throws {
+        let reply = try await request(.describeInfrastructure(infrastructure))
+        guard case .infrastructureDescribed = reply else { throw unexpected(reply) }
+    }
+
     /// The server's coding agents and what their last checks found.
     public func agentProviders() async throws -> AgentProvidersState {
         try providersReply(await request(.readAgentProviders))

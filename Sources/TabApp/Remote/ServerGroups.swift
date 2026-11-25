@@ -24,7 +24,8 @@ public func shownServers(_ servers: [RemoteServerStatus], query: String) -> [(gr
     let words = query.lowercased().split(whereSeparator: \.isWhitespace)
     return serversByGroup(servers, entry: \.entry).compactMap { group, members in
         let kept = members.filter { server in
-            let text = "\(server.entry.name) \(server.entry.destination) \(server.entry.group ?? "")".lowercased()
+            let kind = server.entry.isTabServer ? "tab" : "ssh"
+            let text = "\(server.entry.name) \(server.entry.destination) \(server.entry.group ?? "") \(kind)".lowercased()
             return words.allSatisfy { text.contains($0) }
         }
         return kept.isEmpty ? nil : (group, kept)
@@ -87,8 +88,9 @@ public enum ConnectChoice: Equatable, Sendable {
     case reconnect(count: Int)
 
     public init(_ members: [RemoteServerStatus]) {
-        let offline = members.filter { $0.state == .offline }.count
-        self = offline == 0 ? .reconnect(count: members.count) : .connect(count: offline)
+        let tab = members.filter(\.isTabServer)
+        let offline = tab.filter { $0.state == .offline }.count
+        self = offline == 0 ? .reconnect(count: tab.count) : .connect(count: offline)
     }
 
     public var title: String {

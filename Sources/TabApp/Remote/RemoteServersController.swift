@@ -52,7 +52,7 @@ public final class RemoteServersController {
         builder.add("All hosts", icon: .layers, checked: selected == .all) { choose(.all) }
         builder.section()
         builder.add("This Mac", icon: .laptop, checked: selected == .local) { choose(.local) }
-        for server in model.listedIDs.compactMap(model.status(of:)) {
+        for server in model.listedIDs.compactMap(model.status(of:)) where server.isTabServer {
             builder.add(server.entry.name, icon: .globe, checked: selected == .server(server.id)) { choose(.server(server.id)) }
         }
         return builder.menu
@@ -68,13 +68,18 @@ public final class RemoteServersController {
         }
         guard let server = model.status(of: id) else { return nil }
         var builder = MenuBuilder()
-        builder.add("New Terminal") { [weak self] in self?.host?.openRemoteHome(on: id) }
-        builder.add("Add Project…") { [weak self] in self?.host?.addRemoteProject(on: id) }
-        builder.section()
-        addConnectionItems(&builder, [server])
+        if server.isTabServer {
+            builder.add("New Terminal") { [weak self] in self?.host?.openRemoteHome(on: id) }
+            builder.add("Add Project…") { [weak self] in self?.host?.addRemoteProject(on: id) }
+            builder.section()
+            addConnectionItems(&builder, [server])
+        } else {
+            builder.add("Open SSH Terminal") { [weak self] in self?.host?.openRemoteHome(on: id) }
+            builder.section()
+        }
         builder.add("Edit…") { [weak self] in self?.editServer(id) }
         builder.submenu("Move to Group", moveMenu([id]))
-        if server.state == .connected {
+        if server.isTabServer && server.state == .connected {
             builder.section()
             builder.add("Restart Server…") { [weak self] in self?.confirmControl(id, restart: true) }
             builder.add("Stop Server…") { [weak self] in self?.confirmControl(id, restart: false) }
@@ -144,15 +149,17 @@ public final class RemoteServersController {
     }
 
     private func addConnectionItems(_ builder: inout MenuBuilder, _ members: [RemoteServerStatus]) {
-        let choice = ConnectChoice(members)
-        let ids = members.map(\.id)
+        let tab = members.filter(\.isTabServer)
+        guard !tab.isEmpty else { return }
+        let choice = ConnectChoice(tab)
+        let ids = tab.map(\.id)
         builder.add(choice.title) { [weak self] in
             switch choice {
             case .connect: self?.model.connect(ids)
             case .reconnect: self?.model.reconnect(ids)
             }
         }
-        let live = members.filter { $0.state.isLive || $0.waitingToRetry }.map(\.id)
+        let live = tab.filter { $0.state.isLive || $0.waitingToRetry }.map(\.id)
         guard !live.isEmpty else { return }
         builder.add(live.count == 1 ? "Disconnect" : "Disconnect \(live.count) Servers") { [weak self] in
             self?.model.disconnect(live)

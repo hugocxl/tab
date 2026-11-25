@@ -299,8 +299,14 @@ final class PaletteSource: PaletteDataSource {
         page(ShortcutId.addProject.rawValue, "Open Project…", .projects, .addProject(.local), shortcut: .addProject,
              keywords: "add project folder")
         for server in model.settings.servers {
-            page("add_project_on:\(server.id)", "Add Project on \(server.name)…", .projects, .addProject(server.id),
-                 keywords: server.destination)
+            if server.isTabServer {
+                page("add_project_on:\(server.id)", "Add Project on \(server.name)…", .projects, .addProject(server.id),
+                     keywords: server.destination)
+            } else {
+                commands.append(RootCommand(id: "ssh_terminal:\(server.id)", title: "Open SSH Terminal on \(server.name)",
+                                            keywords: server.destination, category: .remote,
+                                            target: .run { [weak self] in self?.model.openRemoteHome(on: server.id) }))
+            }
         }
         command(.toggleSidebar, "Toggle Sidebar", .view)
         page(ShortcutId.toggleThemePicker.rawValue, "Change Theme…", .view, .themes, shortcut: .toggleThemePicker,

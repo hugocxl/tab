@@ -12,7 +12,7 @@ extension AppModel {
     public func connection(_ server: ServerId) -> ServerConnection? {
         if let existing = connections[server] { return existing }
         let entry = server.isLocal ? nil : settings.server(server)
-        guard server.isLocal || entry != nil, let connector = connector(server, entry) else { return nil }
+        guard server.isLocal || entry?.isTabServer == true, let connector = connector(server, entry) else { return nil }
         let connection = ServerConnection(id: server, connector: connector, sshTarget: entry.flatMap { try? ServerForm.target(for: $0, proxy: sshProxy) })
         connection.onReady = { [weak self] connection in self?.serverReady(connection) }
         connection.onEvent = { [weak self] connection, event in self?.receive(event, from: connection) }
@@ -28,31 +28,36 @@ extension AppModel {
         connection.start()
     }
 
-    /// Connects every listed remote server so its cards show live agents,
+    /// Connects every listed remote Tab server so its cards show live agents,
     /// branches and activity. Servers that log in with a password wait until
     /// one of their projects is opened, so launching never asks.
     func startServers() {
-        for entry in settings.servers where !entry.passwordLogin {
+        for entry in settings.servers where entry.isTabServer && !entry.passwordLogin {
             connectOnDemand(entry.id)
         }
     }
 
-    /// Every server the app knows, this computer's first.
+    /// Every Tab server the app knows, this computer's first.
     public var knownServers: [ServerId] {
-        [.local] + settings.servers.map(\.id)
+        [.local] + settings.servers.filter(\.isTabServer).map(\.id)
     }
 
     func serversDidChange(old: [ServerEntry]) {
-        let current = Set(settings.servers.map(\.id))
-        for entry in old where !current.contains(entry.id) {
+        defer { describeInfrastructure() }
+        let currentTab = Set(settings.servers.filter(\.isTabServer).map(\.id))
+        for entry in old where !currentTab.contains(entry.id) {
             connections.removeValue(forKey: entry.id)?.disconnect()
             browserProxies.removeValue(forKey: entry.id)?.stop()
             portForwards.removeValue(forKey: entry.id)?.values.forEach { $0.stop() }
         }
-        for entry in settings.servers {
-            guard let previous = old.first(where: { $0.id == entry.id }), !previous.hasSameConnection(as: entry) else { continue }
+        for entry in settings.servers where entry.isTabServer {
+            guard let previous = old.first(where: { $0.id == entry.id }) else {
+                if !entry.passwordLogin { connectOnDemand(entry.id) }
+                continue
+            }
+            guard !previous.hasSameConnection(as: entry) else { continue }
             connections.removeValue(forKey: entry.id)?.disconnect()
-            connectOnDemand(entry.id)
+            if !entry.passwordLogin { connectOnDemand(entry.id) }
         }
     }
 
@@ -84,6 +89,9 @@ extension AppModel {
         Task {
             do {
                 reportUncleanStop(server, main.server)
+                serverMachines[server] = main.server.machine
+                describedInfrastructure[server] = nil
+                describeInfrastructure()
                 let sessions = try await main.sessions()
                 if server.isLocal {
                     localSessionCount = sessions.count
@@ -570,7 +578,7 @@ extension AppModel {
 extension ServerEntry {
     /// Presentation edits preserve the SSH connection and its attachments.
     func hasSameConnection(as other: ServerEntry) -> Bool {
-        ssh == other.ssh && port == other.port && identityFile == other.identityFile
+        kind == other.kind && ssh == other.ssh && port == other.port && identityFile == other.identityFile
             && sshCommand == other.sshCommand && passwordLogin == other.passwordLogin
     }
 }

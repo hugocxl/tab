@@ -75,7 +75,7 @@ final class RemoteServersSettingsView: ThemedView {
     /// Rebuilds when what the page shows changed.
     func reload(force: Bool) {
         let servers = model.servers
-        var key = servers.map { "\($0.id)|\($0.entry.name)|\($0.entry.group ?? "")|\($0.label)|\($0.detail ?? "")" }
+        var key = servers.map { "\($0.id)|\($0.entry.name)|\($0.entry.kind.rawValue)|\($0.entry.group ?? "")|\($0.label)|\($0.detail ?? "")" }
         key.append(model.selection.ids.map(\.description).joined(separator: ","))
         key.append(search.stringValue)
         guard force || key != renderedKey else { return }
@@ -149,10 +149,11 @@ private final class SelectionBar: ThemedView {
         box.action = #selector(BlockTarget.run)
         if any {
             let ids = selected.map(\.id)
+            let tabSelected = selected.filter(\.isTabServer)
             let connect = PillButton("Connect") { model.connect(ids) }
-            connect.isEnabled = selected.contains { $0.state == .offline }
+            connect.isEnabled = tabSelected.contains { $0.state == .offline }
             let disconnect = PillButton("Disconnect") { model.disconnect(ids) }
-            disconnect.isEnabled = selected.contains { $0.state.isLive || $0.waitingToRetry }
+            disconnect.isEnabled = tabSelected.contains { $0.state.isLive || $0.waitingToRetry }
             let move = PillButton("Move to Group…")
             move.onPress = { [weak move] in
                 guard let move else { return }
@@ -193,21 +194,27 @@ private final class GroupHeading: ThemedView {
         super.init(frame: .zero)
         let title = makeLabel(group ?? "Ungrouped", font: AppFont.header)
         let count = makeLabel("\(members.count)", font: AppFont.footnote, color: AppTheme.shared.fgMuted)
-        let choice = ConnectChoice(members)
-        let ids = members.map(\.id)
-        let connect = PillButton(choice == .reconnect(count: members.count) ? "Reconnect" : "Connect", style: .plain) {
-            switch choice {
-            case .connect: controller.model.connect(ids)
-            case .reconnect: controller.model.reconnect(ids)
-            }
-        }
+        let tabMembers = members.filter(\.isTabServer)
         let more = IconButton(.ellipsis, label: "Group Actions")
         more.toolTip = "Group Actions"
         more.onPress = { [weak more] in
             guard let more else { return }
             controller.groupMenu(group)?.popUp(positioning: nil, at: NSPoint(x: 0, y: more.bounds.maxY + 4), in: more)
         }
-        let row = DialogParts.row([title, count, DialogParts.spacer(), connect, more])
+        var items: [NSView] = [title, count, DialogParts.spacer()]
+        if !tabMembers.isEmpty {
+            let choice = ConnectChoice(tabMembers)
+            let ids = tabMembers.map(\.id)
+            let connect = PillButton(choice == .reconnect(count: tabMembers.count) ? "Reconnect" : "Connect", style: .plain) {
+                switch choice {
+                case .connect: controller.model.connect(ids)
+                case .reconnect: controller.model.reconnect(ids)
+                }
+            }
+            items.append(connect)
+        }
+        items.append(more)
+        let row = DialogParts.row(items)
         addSubview(row)
         row.pinEdges(to: self, insets: NSEdgeInsets(top: 4, left: 4, bottom: 0, right: 0))
     }
@@ -244,11 +251,13 @@ private final class SettingsServerRow: HoverView {
         let name = makeLabel(server.entry.name, font: AppFont.bodyMedium)
         name.lineBreakMode = .byTruncatingTail
         name.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let badge = Badge(server.label.uppercased())
+        let titleViews: [NSView] = server.isTabServer
+            ? [name, Badge("TAB"), Badge(server.label.uppercased())]
+            : [name, Badge("SSH")]
         let destination = makeLabel(server.entry.destination, font: AppFont.footnote, color: AppTheme.shared.fgMuted)
         destination.lineBreakMode = .byTruncatingMiddle
         destination.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        var lines: [NSView] = [DialogParts.row([name, badge]), destination]
+        var lines: [NSView] = [DialogParts.row(titleViews), destination]
         var errorLabel: NSTextField?
         if let detail = server.detail {
             let error = DialogParts.note(detail, color: AppTheme.shared.danger)
@@ -258,8 +267,9 @@ private final class SettingsServerRow: HoverView {
         }
         let text = DialogParts.column(lines, spacing: 2)
         text.alignment = .leading
-        let terminal = IconButton(.terminal, label: "New Terminal") { controller.host?.openRemoteHome(on: id) }
-        terminal.toolTip = "New Terminal"
+        let terminalLabel = server.isTabServer ? "New Terminal" : "Open SSH Terminal"
+        let terminal = IconButton(.terminal, label: terminalLabel) { controller.host?.openRemoteHome(on: id) }
+        terminal.toolTip = terminalLabel
         let edit = IconButton(.pencil, label: "Edit…") { controller.editServer(id) }
         edit.toolTip = "Edit…"
         let more = IconButton(.ellipsis, label: "More Actions")

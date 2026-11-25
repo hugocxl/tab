@@ -276,14 +276,17 @@ public struct AgentIntegrations: Sendable {
 
     /// What the hook prints for an agent: nothing outside a Tab terminal or
     /// agent pane, nor in an agent pane whose system prompt Tab already gave it.
-    public static func context(environment: [String: String], cli: URL?) -> String? {
+    public static func context(environment: [String: String], cli: URL?, infrastructure: Infrastructure? = nil,
+                               machine: MachineInfo? = nil) -> String? {
         if let agent = environment["TAB_AGENT_ID"], !agent.isEmpty {
             guard environment[AgentContext.providedVariable] == nil else { return nil }
-            return AgentContext(place: .agentPane(agent: agent), cli: cli?.path).text
+            return AgentContext(place: .agentPane(agent: agent), cli: cli?.path, infrastructure: infrastructure,
+                                machine: machine).text
         }
         guard let session = environment["TAB_SESSION_ID"], !session.isEmpty else { return nil }
         let name = SessionId(string: session).map(SessionName.of)
-        return AgentContext(place: .terminal(session: session, name: name), cli: cli?.path).text
+        return AgentContext(place: .terminal(session: session, name: name), cli: cli?.path,
+                            infrastructure: infrastructure, machine: machine).text
     }
 }
 

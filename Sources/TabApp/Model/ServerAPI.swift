@@ -53,6 +53,7 @@ public protocol ServerAPI: AnyObject, Sendable {
 
     func serverSettings() async throws -> ServerSettingsDoc
     func writeServerSettings(_ settings: ServerSettingsDoc) async throws
+    func describeInfrastructure(_ infrastructure: Infrastructure) async throws
     func stopServer(force: Bool) async throws -> Bool
     func stopServerIfIdle() async throws -> Bool
     func restartServer() async throws
@@ -81,6 +82,8 @@ extension ServerClient: ServerAPI {
 
 extension ServerAPI {
     public func supports(_ feature: Feature) -> Bool { false }
+
+    public func describeInfrastructure(_ infrastructure: Infrastructure) async throws {}
 
     public func agentAttachment(_ request: AgentAttachmentRequest) async throws -> AgentAttachmentReply {
         throw ModelError("Conversation attachment previews are unsupported by this server.")

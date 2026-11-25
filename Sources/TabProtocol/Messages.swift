@@ -288,6 +288,9 @@ public enum RequestBody: Hashable, Codable, Sendable {
     // Server
     case readServerSettings
     case writeServerSettings(ServerSettingsDoc)
+    /// The user's computers, which the server keeps for its agents; replies
+    /// `infrastructureDescribed`. Servers that predate it reply `unsupported`.
+    case describeInfrastructure(Infrastructure)
     /// The server's coding agents and their last checks; replies `agentProviders`.
     /// Servers that predate it reply `unsupported`.
     case readAgentProviders
@@ -396,6 +399,7 @@ public enum RequestBody: Hashable, Codable, Sendable {
         case "mutateTabs": self = .mutateTabs(try c("intent"))
         case "readServerSettings": self = .readServerSettings
         case "writeServerSettings": self = .writeServerSettings(try c("settings"))
+        case "describeInfrastructure": self = .describeInfrastructure(try c("infrastructure"))
         case "readAgentProviders": self = .readAgentProviders
         case "writeAgentProviders": self = .writeAgentProviders(try c("settings"))
         case "checkAgentProviders": self = .checkAgentProviders
@@ -555,6 +559,9 @@ public enum RequestBody: Hashable, Codable, Sendable {
         case .writeServerSettings(let settings):
             var c = try TaggedEncoding(encoder, "writeServerSettings")
             try c(settings, "settings")
+        case .describeInfrastructure(let infrastructure):
+            var c = try TaggedEncoding(encoder, "describeInfrastructure")
+            try c(infrastructure, "infrastructure")
         case .readAgentProviders: try TaggedEncoding(encoder, "readAgentProviders")
         case .writeAgentProviders(let settings):
             var c = try TaggedEncoding(encoder, "writeAgentProviders")
@@ -685,6 +692,7 @@ public enum ReplyBody: Hashable, Codable, Sendable {
     // Server
     case serverSettings(ServerSettingsDoc)
     case serverSettingsWritten
+    case infrastructureDescribed
     case agentProviders(AgentProvidersState)
     /// What a `probeAgentProvider` found.
     case agentProviderHealth(AgentProviderHealth)
@@ -768,6 +776,7 @@ public enum ReplyBody: Hashable, Codable, Sendable {
         case "folders": self = .folders(try c("names"))
         case "serverSettings": self = .serverSettings(try c("settings"))
         case "serverSettingsWritten": self = .serverSettingsWritten
+        case "infrastructureDescribed": self = .infrastructureDescribed
         case "agentProviders": self = .agentProviders(try c("state"))
         case "agentProviderHealth": self = .agentProviderHealth(try c("health"))
         case "serverStopping": self = .serverStopping
@@ -887,6 +896,7 @@ public enum ReplyBody: Hashable, Codable, Sendable {
             var c = try TaggedEncoding(encoder, "serverSettings")
             try c(settings, "settings")
         case .serverSettingsWritten: try TaggedEncoding(encoder, "serverSettingsWritten")
+        case .infrastructureDescribed: try TaggedEncoding(encoder, "infrastructureDescribed")
         case .agentProviders(let state):
             var c = try TaggedEncoding(encoder, "agentProviders")
             try c(state, "state")

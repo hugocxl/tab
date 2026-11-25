@@ -5,6 +5,7 @@ import TabCore
 /// What the Add Server and Edit Server dialog holds, before it is saved.
 public struct ServerForm: Equatable, Sendable {
     public var name = ""
+    public var kind: ServerEntry.Kind = .tab
     /// A host or `~/.ssh/config` alias, or a whole destination such as
     /// `user@host` or `ssh://user@host:port` when user and port are empty.
     public var host = ""
@@ -24,6 +25,7 @@ public struct ServerForm: Equatable, Sendable {
     /// The form for an existing entry.
     public init(_ entry: ServerEntry) {
         name = entry.name
+        kind = entry.kind
         group = entry.group ?? ""
         if let command = entry.sshCommand {
             customCommand = command
@@ -38,15 +40,16 @@ public struct ServerForm: Equatable, Sendable {
     /// The SSH destination, or the custom command: what a Test Connection
     /// tried, so a result is shown only for the same form.
     public var probeKey: String {
-        if let customCommand { return customCommand.trimmingCharacters(in: .whitespaces) }
+        if let customCommand { return "\(kind.rawValue)|\(customCommand.trimmingCharacters(in: .whitespaces))" }
         let login = (try? destination()) ?? host.trimmingCharacters(in: .whitespaces)
         let port = port.trimmingCharacters(in: .whitespaces)
-        return port.isEmpty ? login : "\(login) -p \(port)"
+        let target = port.isEmpty ? login : "\(login) -p \(port)"
+        return "\(kind.rawValue)|\(target)"
     }
 
     /// The settings entry: `id`'s, or a new one. Throws a message to show.
     public func entry(id: ServerId? = nil) throws -> ServerEntry {
-        var entry = ServerEntry(id: id ?? ServerId(), name: "", ssh: "")
+        var entry = ServerEntry(id: id ?? ServerId(), name: "", kind: kind, ssh: "")
         if let customCommand {
             let command = customCommand.trimmingCharacters(in: .whitespaces)
             guard !command.isEmpty else { throw ServerFormError("Enter the command that reaches the server") }
@@ -141,6 +144,8 @@ public enum ConnectionTest: Equatable, Sendable {
     case installFailed(String)
     /// It connected; this is the version of Tab there.
     case succeeded(String)
+    /// Plain SSH host connected.
+    case sshSucceeded
     case failed(String)
 
     /// What the dialog says, and whether it is an error, a warning or good news.
@@ -154,6 +159,7 @@ public enum ConnectionTest: Equatable, Sendable {
             return ("\(details)\n\nVerify this fingerprint with your server administrator before trusting it.", .warning)
         case .installing: return ("Installing Tab, then testing the connection…", .muted)
         case .succeeded(let version): return ("Connection succeeded · Tab \(version)", .good)
+        case .sshSucceeded: return ("SSH connection succeeded", .good)
         case .notInstalled:
             guard let version = RemoteRelease.installableVersion else {
                 return ("SSH connected, but Tab isn't installed there. Install a matching build there by hand.", .error)

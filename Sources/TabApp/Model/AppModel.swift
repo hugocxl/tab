@@ -182,6 +182,12 @@ public final class AppModel {
     let sidebarMemory: SidebarMemory
     /// Remote Homes asked for before their server's catalog arrived.
     var pendingRemoteHomes: Set<ServerId> = []
+    /// What each remote server said it runs on, kept while offline.
+    var serverMachines: [ServerId: MachineInfo] = [:]
+    /// `user@host` as this Mac's SSH config resolves each server, by destination.
+    var resolvedAddresses: [String: String] = [:]
+    /// The description each server last got, so it is sent only on change.
+    var describedInfrastructure: [ServerId: Infrastructure] = [:]
     /// Terminals on this computer's server, for the updater.
     var localSessionCount = 0 {
         didSet { if localSessionCount != oldValue { notify(.activity) } }
@@ -270,7 +276,7 @@ public final class AppModel {
         browserProfiles.defaultProfileId = settings.browser.defaultProfile
         browserProfiles.notify = { [weak self] message, isError in self?.presenter?.showToast(message, error: isError) }
         browserProfiles.proxy = { [weak self] server in self?.browserProxy(server)?.configuration }
-        browserProfiles.remoteServers = { [weak self] in self?.settings.servers.map(\.id) ?? [] }
+        browserProfiles.remoteServers = { [weak self] in self?.settings.servers.filter(\.isTabServer).map(\.id) ?? [] }
         for cache in [iconCache, remoteIconCache] {
             cache.onChange = { [weak self] _ in self?.notify(.activity) }
             cache.remembered = { [weak self] key in self?.sidebarMemory.iconPNG(key) }

@@ -78,6 +78,11 @@ extension AppModel: RemoteServersHost {
     }
 
     public func openRemoteHome(on server: ServerId) {
+        if let entry = settings.server(server), !entry.isTabServer {
+            guard let home = state.serverHome(.local) else { return }
+            newTerminal(in: home.id, command: entry.interactiveSSHCommand)
+            return
+        }
         connectOnDemand(server)
         guard let home = state.serverHome(server) else {
             pendingRemoteHomes.insert(server)
@@ -128,7 +133,7 @@ extension AppModel: ProxyHost {
 
     public func proxyDidChange(_ model: ProxyModel) {
         updater.setSessionConfiguration(model.sessionConfiguration())
-        for entry in settings.servers {
+        for entry in settings.servers where entry.isTabServer {
             guard let connection = connections[entry.id],
                   connection.sshTarget != (try? ServerForm.target(for: entry, proxy: sshProxy)) else { continue }
             let active: Bool

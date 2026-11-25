@@ -37,11 +37,18 @@ public struct AgentContext: Hashable, Sendable {
     public var project: Project?
     /// The `tab` program, when known.
     public var cli: String?
+    /// The user's computers, as their app last described them to this server.
+    public var infrastructure: Infrastructure?
+    /// The computer the agent runs on.
+    public var machine: MachineInfo?
 
-    public init(place: Place, project: Project? = nil, cli: String? = nil) {
+    public init(place: Place, project: Project? = nil, cli: String? = nil,
+                infrastructure: Infrastructure? = nil, machine: MachineInfo? = nil) {
         self.place = place
         self.project = project
         self.cli = cli
+        self.infrastructure = infrastructure
+        self.machine = machine
     }
 
     /// Set in an agent pane's environment when its system prompt already
@@ -50,7 +57,7 @@ public struct AgentContext: Hashable, Sendable {
 
     /// The instructions, in Markdown.
     public var text: String {
-        [location, vocabulary, rules].joined(separator: "\n\n")
+        [location, vocabulary, computers, rules].compactMap { $0 }.joined(separator: "\n\n")
     }
 
     private var command: String {
@@ -113,6 +120,75 @@ public struct AgentContext: Hashable, Sendable {
         the worktree. If that would lose anything, the command fails and says what: ask the user, and with their \
         yes add `--force`.
         """
+    }
+
+    /// Where the agent runs among the user's computers, and how to reach the
+    /// others. Left out for someone with one computer, where it says nothing.
+    private var computers: String? {
+        guard let infrastructure, infrastructure.computers.count > 1 else { return nil }
+        let here = infrastructure.receiver.flatMap { id in infrastructure.computers.first { $0.id == id } }
+        let seat = infrastructure.seat
+        let atSeat = here.map { $0.role == .seat } ?? false
+        let hereName = here?.name ?? machine?.name
+        let hardware = (machine ?? here?.machine).map(\.summary).flatMap { $0.isEmpty ? nil : " (\($0))" } ?? ""
+
+        var opening: String
+        switch (hereName, atSeat) {
+        case (let name?, true):
+            opening = "You run on **\(name)**\(hardware), the Mac the user sits at, so its files, processes and " +
+                "`localhost` are the ones the user works with."
+        case (let name?, false):
+            let seatName = seat.map { "**\($0.name)**" } ?? "another Mac"
+            opening = "You run on **\(name)**\(hardware), a Tab server. The user sits at \(seatName) and sees you " +
+                "through Tab there: files, processes and `localhost` here are \(name)'s, not \(seat?.name ?? "theirs"). " +
+                "Tab's browser panes reach this computer's `localhost` through a tunnel."
+        case (nil, _):
+            opening = "You run on one of the user's computers below."
+        }
+
+        let lines = infrastructure.computers.map { computer -> String in
+            let you = computer.id == here?.id ? " (you)" : ""
+            let specs = computer.machine.map(\.summary).flatMap { $0.isEmpty ? nil : " — \($0)" } ?? ""
+            let group = computer.group.map { ", group \($0)" } ?? ""
+            let what: String
+            switch computer.role {
+            case .seat: what = "where the user sits, running the Tab app"
+            case .tabServer: what = "Tab server" + reach(computer, fromSeat: atSeat)
+            case .sshHost: what = "SSH only, no Tab" + reach(computer, fromSeat: atSeat)
+            case .unknown: what = "another computer" + reach(computer, fromSeat: atSeat)
+            }
+            return "- **\(computer.name)**\(you): \(what)\(group)\(specs)"
+        }
+
+        let dest = atSeat ? "the host in its `ssh` command, such as an SSH config alias" : "the address after `ssh`"
+        return """
+        ## The user's computers
+
+        \(opening) When the user names one of these computers, they mean it; don't search for it.
+
+        \(lines.joined(separator: "\n"))
+
+        To send work to a Tab server, run it there so it keeps running and shows in Tab: \
+        `tab --host DEST session new --project PROJECT -- COMMAND` starts a terminal (follow it with \
+        `tab --host DEST session read` or `session wait`), and `tab --host DEST exec PROJECT -- PROGRAM` runs a \
+        short program; `tab --host DEST project list` names its projects. On an SSH-only computer, run \
+        `ssh DEST 'COMMAND'`, or open a shell the user can watch with `tab pane new terminal -- ssh DEST`. \
+        DEST is \(dest). Pick a computer that fits the work: its chip, architecture and memory are listed.
+        """
+    }
+
+    /// How this agent's computer reaches `computer`: the seat's own SSH
+    /// settings there, the resolved address anywhere else.
+    private func reach(_ computer: Infrastructure.Computer, fromSeat: Bool) -> String {
+        if fromSeat {
+            if let command = computer.sshCommand { return ", reached with `\(command)`" }
+            guard let ssh = computer.ssh else { return "" }
+            let resolved = computer.address.map { " (\($0))" } ?? ""
+            return ", `\(ssh)`\(resolved)"
+        }
+        if let address = computer.address { return ", `ssh \(address)`" }
+        if computer.sshCommand != nil { return ", reachable only from the user's Mac" }
+        return computer.ssh.map { ", `\($0)` on the user's Mac" } ?? ""
     }
 
     private var rules: String {

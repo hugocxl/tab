@@ -87,12 +87,16 @@ public struct RemoteServerStatus: Equatable, Sendable {
 
     public var id: ServerId { entry.id }
 
+    /// Whether this server runs Tab (`tabd`).
+    public var isTabServer: Bool { entry.isTabServer }
+
     /// Tab isn't installed there.
-    public var missing: Bool { failure == .notInstalled }
+    public var missing: Bool { isTabServer && failure == .notInstalled }
     /// Tab there can't talk to this app.
-    public var incompatible: Bool { failure == .incompatible }
+    public var incompatible: Bool { isTabServer && failure == .incompatible }
 
     public var glyph: RemoteStatusGlyph {
+        guard isTabServer else { return .offline }
         switch state {
         case .connected: return .connected
         case .connecting, .restarting, .stopping: return .connecting
@@ -103,6 +107,7 @@ public struct RemoteServerStatus: Equatable, Sendable {
 
     /// The short state shown at the end of a row.
     public var label: String {
+        guard isTabServer else { return "SSH" }
         if needsPassword && state == .offline { return "Password needed" }
         if install == .running { return "Installing…" }
         return state.label
@@ -110,6 +115,7 @@ public struct RemoteServerStatus: Equatable, Sendable {
 
     /// The line under a row: why it failed or how its install went.
     public var detail: String? {
+        guard isTabServer else { return nil }
         if let installError { return "Install failed: \(installError)" }
         return error
     }

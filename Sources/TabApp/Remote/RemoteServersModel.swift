@@ -89,11 +89,12 @@ public final class RemoteServersModel {
 
     /// It logs in with a password that hasn't been typed this session.
     public func needsPassword(_ id: ServerId) -> Bool {
-        guard let entry = entry(id), entry.passwordLogin, entry.sshCommand == nil else { return false }
+        guard let entry = entry(id), entry.isTabServer, entry.passwordLogin, entry.sshCommand == nil else { return false }
         return !askpass.hasPassword(for: id.description)
     }
 
     private func status(_ entry: ServerEntry) -> RemoteServerStatus {
+        guard entry.isTabServer else { return RemoteServerStatus(entry: entry, state: .offline) }
         let snapshot = host?.remoteConnection(entry.id) ?? .offline
         let id = entry.id
         var status = RemoteServerStatus(
@@ -167,7 +168,7 @@ public final class RemoteServersModel {
     /// Connects, or connects again, each of `ids`: a fresh SSH login and
     /// server check. Only the first one needing a password asks for it.
     public func reconnect(_ ids: [ServerId]) {
-        let listed = ids.filter { entry($0) != nil }
+        let listed = ids.filter { entry($0)?.isTabServer == true }
         let asking = listed.filter(needsPassword)
         for id in listed where !asking.contains(id) {
             host?.connectRemoteServer(id, fresh: true)
@@ -179,7 +180,7 @@ public final class RemoteServersModel {
     /// Hangs up, without ending terminals there.
     public func disconnect(_ ids: [ServerId]) {
         for id in ids {
-            guard stopping[id] == nil, let status = status(of: id),
+            guard entry(id)?.isTabServer == true, stopping[id] == nil, let status = status(of: id),
                   status.state != .offline || status.waitingToRetry else { continue }
             host?.disconnectRemoteServer(id)
         }
@@ -442,6 +443,14 @@ struct TestProbe: Sendable {
             }
         } catch {
             return .failed(error.localizedDescription)
+        }
+        if !entry.isTabServer {
+            do {
+                _ = try await tools.run(target, "true")
+                return .sshSucceeded
+            } catch {
+                return await explain(ClientError.wrapping(error), target: target, owner: owner)
+            }
         }
         if install {
             guard let version = RemoteRelease.installableVersion else {

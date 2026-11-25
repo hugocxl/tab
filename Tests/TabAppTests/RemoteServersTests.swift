@@ -425,6 +425,48 @@ final class RemoteServersModelTests: XCTestCase {
         model.testConnection(form, id: nil)
         XCTAssertEqual(model.testResult(for: form), .failed("Enter the password to test logging in with it."))
     }
+
+    func testSSHOnlyServerStatusMenuAndTestConnection() async throws {
+        let url = folder.appendingPathComponent("settings.json")
+        let host = FakeRemoteHost(settingsURL: url)
+        let sshEntry = ServerEntry(name: "Mac Mini i5", kind: .ssh, ssh: "mac-mini-i5")
+        host.snapshots[sshEntry.id] = RemoteConnectionSnapshot(
+            state: .offline,
+            failure: .remote(RemoteFailure(reason: .notInstalled, destination: "mac-mini-i5", detail: ""))
+        )
+        let ran = OpenedTargets()
+        let tools = RemoteServersModel.Tools(
+            connect: { _ in XCTFail("SSH-only server must not connect to tabd"); throw ClientError.disconnected },
+            run: { target, command in
+                XCTAssertEqual(command, "true")
+                await ran.add(target)
+                return ""
+            },
+            login: { _ in "me@mac-mini-i5" }
+        )
+        let model = RemoteServersModel(entries: [sshEntry], askpass: askpass, tools: tools)
+        model.host = host
+        let status = try XCTUnwrap(model.status(of: sshEntry.id))
+        XCTAssertFalse(status.isTabServer)
+        XCTAssertEqual(status.label, "SSH")
+        XCTAssertNil(status.detail)
+        XCTAssertFalse(status.missing)
+        XCTAssertEqual(status.glyph, .offline)
+
+        let controller = RemoteServersController(model: model)
+        let menuTitles = controller.serverMenu(sshEntry.id)?.items.map(\.title).filter { !$0.isEmpty } ?? []
+        XCTAssertEqual(menuTitles, ["Open SSH Terminal", "Edit…", "Move to Group", "Forget…"])
+
+        let form = ServerForm(sshEntry)
+        XCTAssertEqual(form.kind, .ssh)
+        model.testConnection(form, id: sshEntry.id)
+        for _ in 0..<100 where model.testResult(for: form) == .testing {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertEqual(model.testResult(for: form), .sshSucceeded)
+        let targets = await ran.targets
+        XCTAssertEqual(targets.map(\.destination), ["mac-mini-i5"])
+    }
 }
 
 private actor OpenedTargets {

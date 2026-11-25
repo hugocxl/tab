@@ -55,6 +55,7 @@ final class CoreServerTests: XCTestCase {
         XCTAssertEqual(try phone.request(.stopServer(force: true)).errorCode, .unauthorized)
         XCTAssertEqual(try phone.request(.restartServer).errorCode, .unauthorized)
         XCTAssertEqual(try phone.request(.writeServerSettings(ServerSettingsDoc())).errorCode, .unauthorized)
+        XCTAssertEqual(try phone.request(.describeInfrastructure(Infrastructure(computers: []))).errorCode, .unauthorized)
         XCTAssertEqual(try phone.request(.exec(ExecRequest(job: 1, project: home, argv: ["/bin/echo"]))).errorCode,
                        .unauthorized)
         XCTAssertEqual(try phone.request(.readRemoteAccess).errorCode, .unauthorized)
@@ -69,6 +70,19 @@ final class CoreServerTests: XCTestCase {
         XCTAssertEqual(try client.request(.unknown("fromTheFuture")).errorCode, .unsupported)
         XCTAssertEqual(try client.request(.git(GitRequest(project: try client.home(), action: .summary))).errorCode,
                        .unsupported, "a server without Git says so")
+    }
+
+    func testInfrastructureOutlivesTheServerForAgents() throws {
+        let server = try CoreTestServer()
+        let infrastructure = Infrastructure(computers: [
+            .init(id: "seat", name: "MacBook Air", role: .seat),
+            .init(id: "pro", name: "Mac Mini M2 Pro", role: .tabServer, ssh: "ssh mac-mini-m2-pro"),
+        ], receiver: "pro")
+        XCTAssertEqual(try server.connect().request(.describeInfrastructure(infrastructure)), .infrastructureDescribed)
+        try server.restart()
+        XCTAssertEqual(Infrastructure.read(from: TabDirs(root: server.root).infrastructure), infrastructure)
+        XCTAssertEqual(server.server.infrastructure.infrastructure, infrastructure)
+        XCTAssertNotNil(server.server.info.machine?.architecture)
     }
 
     func testSettingsRoundTripThroughTheFile() throws {

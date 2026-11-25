@@ -200,6 +200,8 @@ extension RequestBody {
             try intent.mutation.validate()
         case .writeServerSettings(let settings):
             try settings.validate()
+        case .describeInfrastructure(let infrastructure):
+            try infrastructure.validate()
         case .searchHistory(let source, let query, _, _, let maxResults):
             if source == .live(.control) { throw .unknownChannel }
             try Validation.search(query: query, maxResults: maxResults)
@@ -423,7 +425,7 @@ extension ReplyBody {
             for simulator in simulators { try simulator.simulator.validate() }
         case .versionUnsupported, .pong, .error, .detached, .sessionEnded, .sessionClosed, .sessionDiscarded,
              .creationCancelled, .screenCleared, .terminalColorsSet, .sessionReferencesSynced, .clientIdentified,
-             .inputWritten, .agentStateReported, .projectMutated, .tabsMutated, .serverSettingsWritten, .serverStopping, .serverBusy,
+             .inputWritten, .agentStateReported, .projectMutated, .tabsMutated, .serverSettingsWritten, .infrastructureDescribed, .serverStopping, .serverBusy,
              .serverRestarting, .git, .execCancelled, .activityAcknowledged, .authenticated, .tunnelFailed, .tunnelClosed,
              .simulatorSettings, .simulatorDetached, .simulatorScreenshot, .unknown:
             break
@@ -952,5 +954,21 @@ extension PairingInvite {
 extension Paired {
     public func validate() throws(ErrorCode) {
         if Validation.isBlank(name) || name.utf8.count > 255 || Validation.hasControl(name) { throw .badRequest }
+    }
+}
+
+extension Infrastructure {
+    /// A few hundred computers of short text: it goes into agents' prompts.
+    public func validate() throws(ErrorCode) {
+        if computers.count > 256 { throw .badRequest }
+        for computer in computers {
+            try Validation.name(computer.id)
+            try Validation.name(computer.name)
+            for text in [computer.ssh, computer.sshCommand, computer.address, computer.group, computer.machine?.chip,
+                         computer.machine?.architecture, computer.machine?.system, computer.machine?.name]
+            where text.map({ $0.utf8.count > 1024 || $0.contains("\0") }) == true {
+                throw .badRequest
+            }
+        }
     }
 }

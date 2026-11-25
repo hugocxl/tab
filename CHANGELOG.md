@@ -3,6 +3,14 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.138.0 - 2026-11-25
+
+### Added
+
+- Mark a remote server as SSH Only to open SSH terminals on a computer without Tab, such as an Intel Mac.
+- Tell agents which of your computers they run on, where you sit, and how to reach and pick among your other
+  servers.
+
 ## 0.137.6 - 2026-11-25
 
 ### Changed

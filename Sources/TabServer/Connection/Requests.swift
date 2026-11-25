@@ -176,7 +176,7 @@ extension ClientConnection {
     func permit(_ body: RequestBody) throws {
         guard case .mobile = origin else { return }
         switch body {
-        case .stopServer, .stopServerIfIdle, .restartServer, .writeServerSettings, .exec, .cancelExec,
+        case .stopServer, .stopServerIfIdle, .restartServer, .writeServerSettings, .describeInfrastructure, .exec, .cancelExec,
              .readRemoteAccess, .writeRemoteAccess, .startPairing, .cancelPairing, .revokeDevice:
             throw ServiceError(.unauthorized, "Not available to paired devices")
         case .identifyClient(let kind) where kind != .mobile:
@@ -289,6 +289,9 @@ extension ClientConnection {
         case .writeServerSettings(let settings):
             try server.settings.write(settings)
             return .serverSettingsWritten
+        case .describeInfrastructure(let infrastructure):
+            try server.infrastructure.write(infrastructure)
+            return .infrastructureDescribed
         case .readAgentProviders:
             return .agentProviders(server.agentProviders.refreshingState())
         case .writeAgentProviders(let settings):

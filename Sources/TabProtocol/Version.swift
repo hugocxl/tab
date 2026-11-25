@@ -209,11 +209,15 @@ public struct ServerInfo: Hashable, Codable, Sendable {
     /// The previous server of this profile stopped without ending its
     /// sessions, such as in a crash; older servers leave it out.
     public var previousStopUnclean: Bool?
+    /// The computer the server runs on; older servers leave it out.
+    public var machine: MachineInfo?
 
-    public init(build: BuildInfo, instance: UInt64, server: ServerId, previousStopUnclean: Bool? = nil) {
+    public init(build: BuildInfo, instance: UInt64, server: ServerId, previousStopUnclean: Bool? = nil,
+                machine: MachineInfo? = nil) {
         self.build = build
         self.instance = instance
         self.server = server
         self.previousStopUnclean = previousStopUnclean
+        self.machine = machine
     }
 }

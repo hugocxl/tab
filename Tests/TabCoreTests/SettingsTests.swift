@@ -485,4 +485,72 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(try Executable.commandArguments(#"tmux new -A -s "my session""#), ["tmux", "new", "-A", "-s", "my session"])
         XCTAssertThrowsError(try Executable.commandArguments(#"zsh "unclosed"#))
     }
+
+    func testServerEntryKindDefaultsToTabAndBuildsSSHCommand() throws {
+        let legacyJSON = #"{"id":"11111111-1111-1111-1111-111111111111","name":"Mini M2","ssh":"mac-mini-m2"}"#
+        let legacy = try JSONDecoder().decode(ServerEntry.self, from: Data(legacyJSON.utf8))
+        XCTAssertEqual(legacy.kind, .tab)
+        XCTAssertTrue(legacy.isTabServer)
+        XCTAssertEqual(legacy.interactiveSSHCommand, "ssh mac-mini-m2")
+
+        let sshEntry = ServerEntry(
+            name: "Mini i5", kind: .ssh, ssh: "mac-mini-i5",
+            identityFile: "/Users/me/my keys/id_ed25519", port: 2222
+        )
+        let decoded = try JSONDecoder().decode(ServerEntry.self, from: JSONEncoder().encode(sshEntry))
+        XCTAssertEqual(decoded.kind, .ssh)
+        XCTAssertFalse(decoded.isTabServer)
+        XCTAssertEqual(decoded.interactiveSSHCommand, "ssh -p 2222 -i '/Users/me/my keys/id_ed25519' mac-mini-i5")
+
+        let custom = ServerEntry(name: "VM", kind: .ssh, ssh: "", sshCommand: "vm ssh devbox")
+        XCTAssertEqual(custom.interactiveSSHCommand, "vm ssh devbox")
+    }
+
+    private var homeLab: Infrastructure {
+        Infrastructure(computers: [
+            .init(id: "seat", name: "MacBook Air", role: .seat,
+                  machine: MachineInfo(name: "MacBook Air", chip: "Apple M2", architecture: "arm64")),
+            .init(id: "pro", name: "Mac Mini M2 Pro", role: .tabServer, ssh: "ssh mac-mini-m2-pro",
+                  address: "hugo@mac-mini-m2-pro.ts.net",
+                  machine: MachineInfo(name: "Mac Mini M2 Pro", chip: "Apple M2 Pro", architecture: "arm64", cores: 12,
+                                       memoryBytes: 32 * 1_073_741_824)),
+            .init(id: "i5", name: "Mac Mini i5", role: .sshHost, ssh: "ssh mac-mini-i5",
+                  address: "hugo@mac-mini-i5.ts.net", group: "Lab"),
+        ])
+    }
+
+    func testAgentContextNamesComputersOnlyWhenThereAreSeveral() {
+        XCTAssertFalse(AgentContext(place: .agentPane(agent: "a1")).text.contains("computers"))
+        let alone = Infrastructure(computers: [.init(id: "seat", name: "MacBook Air", role: .seat)], receiver: "seat")
+        XCTAssertFalse(AgentContext(place: .agentPane(agent: "a1"), infrastructure: alone).text.contains("computers"))
+    }
+
+    func testAgentContextOnTheSeatUsesItsSSHAliases() {
+        let text = AgentContext(place: .agentPane(agent: "a1"), infrastructure: homeLab.received(by: "seat")).text
+        XCTAssertTrue(text.contains("## The user's computers"))
+        XCTAssertTrue(text.contains("You run on **MacBook Air**"))
+        XCTAssertTrue(text.contains("the Mac the user sits at"))
+        XCTAssertTrue(text.contains("- **MacBook Air** (you): where the user sits"))
+        XCTAssertTrue(text.contains("- **Mac Mini M2 Pro**: Tab server, `ssh mac-mini-m2-pro` (hugo@mac-mini-m2-pro.ts.net)"))
+        XCTAssertTrue(text.contains("Apple M2 Pro, arm64, 12 cores, 32 GB"))
+        XCTAssertTrue(text.contains("- **Mac Mini i5**: SSH only, no Tab, `ssh mac-mini-i5`"))
+        XCTAssertTrue(text.contains("tab --host DEST session new"))
+    }
+
+    func testAgentContextOnAServerSaysTheUserIsElsewhereAndUsesAddresses() {
+        let text = AgentContext(place: .terminal(session: "s1", name: nil), infrastructure: homeLab.received(by: "pro"),
+                                machine: MachineInfo(name: "mini", chip: "Apple M2 Pro", architecture: "arm64")).text
+        XCTAssertTrue(text.contains("You run on **Mac Mini M2 Pro** (Apple M2 Pro, arm64), a Tab server."))
+        XCTAssertTrue(text.contains("The user sits at **MacBook Air**"))
+        XCTAssertTrue(text.contains("- **Mac Mini M2 Pro** (you): Tab server"))
+        XCTAssertTrue(text.contains("- **Mac Mini i5**: SSH only, no Tab, `ssh hugo@mac-mini-i5.ts.net`, group Lab"))
+        XCTAssertFalse(text.contains("`ssh mac-mini-i5`"), "the seat's aliases may not exist here")
+    }
+
+    func testInfrastructureKeepsRolesFromNewerApps() throws {
+        let json = #"{"computers":[{"id":"x","name":"Box","role":"linuxBox","future":1}],"receiver":"x"}"#
+        let decoded = try JSONDecoder().decode(Infrastructure.self, from: Data(json.utf8))
+        XCTAssertEqual(decoded.computers.first?.role, .unknown("linuxBox"))
+        XCTAssertEqual(try JSONDecoder().decode(Infrastructure.self, from: JSONEncoder().encode(decoded)), decoded)
+    }
 }

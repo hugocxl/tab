@@ -18,6 +18,8 @@ final class ServerFormSheet: SheetWindow {
     private var subscription: AnyCancellable?
 
     private let name: InsetTextField
+    private let kindPopUp: PopUp
+    private let kindNote = DialogParts.note("")
     private let groupPopUp: PopUp
     private let newGroup: InsetTextField
     private let customSwitch: Switch
@@ -45,6 +47,14 @@ final class ServerFormSheet: SheetWindow {
         self.editing = editing
         let form = editing.flatMap(controller.model.entry).map(ServerForm.init) ?? ServerForm()
         name = InsetTextField(value: form.name, placeholder: "Shown in the sidebar", label: "Name", width: nil)
+        kindPopUp = PopUp(
+            items: [
+                PopUp.Item(id: ServerEntry.Kind.tab.rawValue, title: "Tab Server"),
+                PopUp.Item(id: ServerEntry.Kind.ssh.rawValue, title: "SSH Only"),
+            ],
+            selected: form.kind.rawValue,
+            label: "Type"
+        )
         let groups = controller.model.groups
         var items = [PopUp.Item(id: Self.noGroupID, title: "No Group")]
         items += groups.map { PopUp.Item(id: $0, title: $0) }
@@ -71,6 +81,10 @@ final class ServerFormSheet: SheetWindow {
 
     private func build(_ content: NSStackView) {
         let title = DialogParts.title(editing == nil ? "Add Remote Server" : "Edit Remote Server")
+        let kindRow = DialogParts.column([
+            DialogParts.row([makeLabel("Type", font: AppFont.body), DialogParts.spacer(), kindPopUp]),
+            kindNote,
+        ], spacing: 4)
         let groupRow = DialogParts.row([makeLabel("Group", font: AppFont.body), DialogParts.spacer(), groupPopUp])
         newGroupField = DialogParts.field("New group", newGroup)
         newGroupField.isHidden = true
@@ -108,6 +122,7 @@ final class ServerFormSheet: SheetWindow {
         let rows: [NSView] = [
             title,
             DialogParts.field("Name", name),
+            kindRow,
             groupRow,
             newGroupField,
             custom,
@@ -131,6 +146,7 @@ final class ServerFormSheet: SheetWindow {
         }
         password.onCommit = nil
         password.onChange = { [weak self] in self?.formChanged() }
+        kindPopUp.onChange = { [weak self] _ in self?.formChanged() }
         groupPopUp.onChange = { [weak self] _ in
             guard let self else { return }
             self.newGroupField.isHidden = self.groupPopUp.selectedId != Self.newGroupID
@@ -150,6 +166,7 @@ final class ServerFormSheet: SheetWindow {
     var form: ServerForm {
         var form = ServerForm()
         form.name = name.stringValue
+        form.kind = ServerEntry.Kind(rawValue: kindPopUp.selectedId) ?? .tab
         let group = groupPopUp.selectedId
         form.group = group == Self.newGroupID ? newGroup.stringValue : (group == Self.noGroupID ? "" : group)
         if customSwitch.isOn {
@@ -172,6 +189,10 @@ final class ServerFormSheet: SheetWindow {
     }
 
     private func refresh() {
+        let kind = ServerEntry.Kind(rawValue: kindPopUp.selectedId) ?? .tab
+        kindNote.stringValue = kind == .tab
+            ? "Runs Tab on the remote Mac for projects, agents, Git, tunnels, and simulators."
+            : "Simple SSH host without Tab installed. Opens SSH terminals and lets agents reach this host."
         let custom = customSwitch.isOn
         commandFields.isHidden = !custom
         sshFields.isHidden = custom
