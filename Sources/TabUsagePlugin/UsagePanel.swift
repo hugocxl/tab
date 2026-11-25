@@ -168,8 +168,21 @@ final class UsagePanelController: NSViewController {
     }
 
     /// The server came back: what it reported before may be out of date.
+    /// What to do when a computer has no providers: another computer's are added, or
+    /// copied from this Mac, in its own list in Settings › Agents.
+    nonisolated static func noProvidersDetail(on computer: String?) -> String {
+        guard let computer else { return "Add a provider in Settings › Agents to see your plan limits." }
+        return "Add providers for \(computer), or copy this Mac's, in Settings › Agents to see its plan limits."
+    }
+
     func reconnected(_ server: ServerId) {
         store.clearFailure(for: server)
+        if project?.server == server { refresh(force: false) }
+    }
+
+    /// Reads `server`'s limits again, as its providers were added, copied or removed.
+    func providersChanged(_ server: ServerId) {
+        store.markStale(server)
         if project?.server == server { refresh(force: false) }
     }
 
@@ -268,7 +281,7 @@ final class UsagePanelController: NSViewController {
         if case .loading(nil) = load { showMessage("Loading…") }
         guard let reply else { return }
         if reply.providers.isEmpty {
-            showPlaceholder("No providers", detail: "Add a provider in Settings › Agents to see your plan limits.",
+            showPlaceholder("No providers", detail: UsagePanelController.noProvidersDetail(on: project.flatMap { resolve($0.id)?.serverName }),
                             icon: .gaugeMedium)
             return
         }

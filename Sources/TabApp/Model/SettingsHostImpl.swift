@@ -21,6 +21,7 @@ public final class SettingsHostImpl: SettingsHost {
                 self.store?.updateServerState(self.serverState)
                 self.store?.updateUpdaterSummary(self.updaterSummary)
             }
+            if !changes.isDisjoint(with: [.activity, .settings]) { self.store?.agentComputersChanged() }
             if changes.contains(.remoteAccess) { self.refreshRemoteAccess() }
             if !changes.isDisjoint(with: [.panel, .settings]) { self.store?.pluginsDidChange() }
         }
@@ -68,22 +69,46 @@ public final class SettingsHostImpl: SettingsHost {
 
     public func readServerSettings() async throws -> ServerSettingsDoc { try await local().serverSettings() }
 
-    public func agentProviders() async throws -> AgentProvidersState { try await local().agentProviders() }
-    public func writeAgentProviders(_ settings: AgentProviderSettings) async throws -> AgentProvidersState {
-        let state = try await local().writeAgentProviders(settings)
-        model.notify(.settings)
+    public var agentComputers: [AgentComputer] {
+        [AgentComputer(id: .local, name: "This Mac", connected: model.connectionState(.local).isReady)]
+            + model.settings.servers.map { AgentComputer(id: $0.id, name: $0.name, connected: model.connectionState($0.id).isReady) }
+    }
+
+    /// `server`'s connection, connecting it when it isn't.
+    private func client(_ server: ServerId) throws -> ServerAPI {
+        if server.isLocal { return try local() }
+        guard let client = model.connections[server]?.main, model.connectionState(server).isReady else {
+            model.connection(server)?.retryNow()
+            throw ModelError("\(model.serverName(server) ?? "This server") isn't connected.")
+        }
+        return client
+    }
+
+    public func agentProviders(on server: ServerId) async throws -> AgentProvidersState { try await client(server).agentProviders() }
+    public func writeAgentProviders(_ settings: AgentProviderSettings, on server: ServerId) async throws -> AgentProvidersState {
+        let state = try await client(server).writeAgentProviders(settings)
+        agentProvidersDidChange(on: server)
         return state
     }
-    public func checkAgentProviders() async throws -> AgentProvidersState { try await local().checkAgentProviders() }
-    public func probeAgentProvider(_ provider: AgentProviderConfig) async throws -> AgentProviderHealth {
-        try await local().probeAgentProvider(provider)
+    public func agentProvidersDidChange(on server: ServerId) {
+        model.notify(.settings)
+        model.plugins.dispatchAgentProvidersChanged(server)
     }
-    public func maintainAgentProvider(_ id: String, action: AgentProviderMaintenance.Action) async throws -> AgentProvidersState {
-        try await local().maintainAgentProvider(id, action: action)
+    public func checkAgentProviders(on server: ServerId) async throws -> AgentProvidersState {
+        try await client(server).checkAgentProviders()
     }
-    public func agentModels(_ provider: AgentProviderConfig, refresh: Bool) async throws -> [AgentModelDescriptor] {
-        try await local().agentModelCatalog(.init(project: model.state.home.id, provider: provider.kind, forceRefresh: refresh,
-                                                  providerID: provider.id, includeHidden: true)).models
+    public func probeAgentProvider(_ provider: AgentProviderConfig, on server: ServerId) async throws -> AgentProviderHealth {
+        try await client(server).probeAgentProvider(provider)
+    }
+    public func maintainAgentProvider(_ id: String, action: AgentProviderMaintenance.Action,
+                                      on server: ServerId) async throws -> AgentProvidersState {
+        try await client(server).maintainAgentProvider(id, action: action)
+    }
+    public func agentModels(_ provider: AgentProviderConfig, refresh: Bool, on server: ServerId) async throws -> [AgentModelDescriptor] {
+        let home = server.isLocal ? model.state.home.id : model.state.serverHome(server)?.id
+        guard let home else { throw ModelError("\(model.serverName(server) ?? "This server")'s Home isn't loaded yet.") }
+        return try await client(server).agentModelCatalog(.init(project: home, provider: provider.kind, forceRefresh: refresh,
+                                                                providerID: provider.id, includeHidden: true)).models
     }
     public func writeServerSettings(_ settings: ServerSettingsDoc) async throws { try await local().writeServerSettings(settings) }
 
@@ -155,8 +180,10 @@ public final class SettingsHostImpl: SettingsHost {
         model.draftAgentPrompt(prompt, in: pane)
     }
 
-    public func openTerminal(command: String) {
-        model.newTerminal(in: model.state.home.id, command: command)
+    public func openTerminal(command: String, on server: ServerId) {
+        // Never on this Mac in place of another computer, whose CLI the command signs in.
+        guard let home = server.isLocal ? model.state.home : model.state.serverHome(server) else { return }
+        model.newTerminal(in: home.id, command: command)
         NSApp.activate(ignoringOtherApps: true)
         model.presenter?.window?.makeKeyAndOrderFront(nil)
     }

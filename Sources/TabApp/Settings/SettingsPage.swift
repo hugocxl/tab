@@ -342,6 +342,7 @@ private struct ChoiceView: View {
         if spec.isMenu {
             Menu(spec.placeholder ?? spec.label) {
                 ForEach(spec.items.indices, id: \.self) { index in
+                    if spec.items[index].separatorBefore { SwiftUI.Divider() }
                     Button(spec.items[index].title) { spec.change(spec.items[index].id) }
                 }
             }

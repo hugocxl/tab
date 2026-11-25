@@ -35,13 +35,19 @@ struct AgentProviderUnavailability: Equatable {
     /// The command line that signs it in, when signing in is the fix.
     var signInCommand: String?
 
-    /// Nil when the provider can run, or hasn't been checked.
-    init?(_ provider: AgentProviderConfig, health: AgentProviderHealth?) {
+    /// What the model menu offers to fix it in Settings, such as "Install in Settings…".
+    var setUpTitle = "Open in Settings…"
+
+    /// Nil when the provider can run, or hasn't been checked. `computer` names the remote
+    /// computer the pane runs on; nil on this Mac.
+    init?(_ provider: AgentProviderConfig, health: AgentProviderHealth?, computer: String? = nil) {
         guard provider.enabled, let health, health.status == .error else { return nil }
         if !health.installed {
-            (badge, reason) = ("Not installed", "\(provider.kind.name) wasn't found on this computer")
+            (badge, reason) = ("Not installed", "\(provider.kind.name) wasn't found on \(computer ?? "this Mac")")
+            setUpTitle = "Install in Settings…"
         } else if health.versionAdvisory?.status == .unsupported {
             badge = "Update needed"
+            setUpTitle = "Update in Settings…"
             reason = health.versionAdvisory?.minimumVersion.map { "Needs \(provider.kind.name) \($0) or later" } ?? "This version is too old"
         } else if health.auth == .signedOut {
             (badge, reason) = ("Signed out", "Not signed in")

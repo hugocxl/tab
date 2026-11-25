@@ -4,7 +4,7 @@ import TabCore
 import TabProtocol
 
 /// The Add Provider dialog in three steps: the kind of agent, the provider's label, ID
-/// and accent color, then how it runs and signs in. What this Mac's server finds, such
+/// and accent color, then how it runs and signs in. What the computer's server finds, such
 /// as the installed CLI and who it is signed in as, fills in and checks the form as it
 /// goes. Another provider of a kind gets a folder of its own, so it can sign in to
 /// another account.
@@ -168,6 +168,10 @@ final class AddProviderSheet: SheetWindow {
     private var settings: AgentProviderSettings { state.settings }
     private let kinds: [AgentChatProvider]
     private let add: (AgentProviderConfig, Bool) -> Void
+    /// The remote computer the provider is for, by name; nil for this Mac.
+    private let computer: String?
+    /// Where the CLI runs, as the dialog words it, such as "this Mac".
+    private var place: String { computer ?? "this Mac" }
     /// Checks a provider on the server; nil when the server can't.
     private var probe: Probe?
     private(set) var draft: Draft
@@ -196,13 +200,15 @@ final class AddProviderSheet: SheetWindow {
     private let executableNote = DialogParts.note("")
     private weak var executableField: InsetTextField?
 
-    init(state: AgentProvidersState, probe: Probe?, detected: [AgentChatProvider: String]? = nil,
+    init(state: AgentProvidersState, probe: Probe?, detected: [AgentChatProvider: String]? = nil, computer: String? = nil,
          add: @escaping (AgentProviderConfig, Bool) -> Void) {
         self.state = state
         kinds = state.kinds
         self.probe = probe
         self.add = add
-        let detected = detected ?? Self.detectInstallations(kinds: state.kinds)
+        self.computer = computer
+        // This Mac's folders say nothing of another computer's, whose server alone can tell.
+        let detected = detected ?? (computer == nil ? Self.detectInstallations(kinds: state.kinds) : [:])
         self.detected = detected
         let added = Set(state.settings.providers.map(\.kind))
         let initial = state.kinds.first { detected[$0] != nil && !added.contains($0) }
@@ -221,7 +227,7 @@ final class AddProviderSheet: SheetWindow {
         body.spacing = 12
         errorLabel.isHidden = true
         let intro = state.settings.providers.isEmpty
-            ? "Choose the coding agent to use in agent panes. Tab fills in what it finds on this Mac; you can change any of it now or later."
+            ? "Choose the coding agent to use in agent panes. Tab fills in what it finds on \(place); you can change any of it now or later."
             : "Add another coding agent, or another account of one you already use, such as a work and a personal subscription."
         let rows: [NSView] = [
             DialogParts.title("Add Provider"),
@@ -563,7 +569,7 @@ final class AddProviderSheet: SheetWindow {
         arguments.onChange = { [weak self] in self?.draft.arguments = $0 }
         views += [DialogParts.field("Launch arguments", arguments),
                   DialogParts.note(SettingsModel.argumentsDescription(draft.kind))]
-        if CodingAgent(provider: draft.kind) != nil {
+        if computer == nil, CodingAgent(provider: draft.kind) != nil {
             let toggle = NSButton(checkboxWithTitle: "Set up Tab integration (skill and hooks)",
                                   target: self, action: #selector(toggleIntegration(_:)))
             toggle.state = draft.installIntegration ? .on : .off
@@ -611,7 +617,7 @@ final class AddProviderSheet: SheetWindow {
         let changeKey = edit { $0.apiKey = $1 }
         key.onChange = { [weak key] in changeKey(key?.stringValue ?? "") }
         views += [DialogParts.field("API key", key),
-                  DialogParts.note("Saved as \(draft.apiKeyVariable) under the provider's variables, in plain text on this Mac.")]
+                  DialogParts.note("Saved as \(draft.apiKeyVariable) under the provider's variables, in plain text on \(place).")]
         return views
     }
 
@@ -638,7 +644,7 @@ final class AddProviderSheet: SheetWindow {
         if let path = draftHealth?.executablePath, draftHealth?.installed == true {
             return typed.isEmpty || typed == path ? "Runs \(path)." : "Runs \(path). Empty runs \(name) from PATH."
         }
-        if !typed.isEmpty, typed == draft.suggestedExecutable { return "Found on this Mac. Empty runs \(name) from PATH." }
+        if !typed.isEmpty, typed == draft.suggestedExecutable { return "Found on \(place). Empty runs \(name) from PATH." }
         return "Empty runs \(name) from PATH."
     }
 

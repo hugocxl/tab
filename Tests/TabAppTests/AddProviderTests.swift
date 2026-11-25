@@ -161,4 +161,95 @@ final class AddProviderTests: XCTestCase {
         pane.surface.configureProviders.onPress?()
         XCTAssertTrue(openedSettings)
     }
+
+    func testAnotherComputersProvidersAreEditedThereAndCopiedFromThisMac() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("tab-providers-remote-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let host = PreviewSettingsHost()
+        let mini = ServerId()
+        host.remoteComputers = [AgentComputer(id: mini, name: "mini", connected: true)]
+        let work = AgentProviderConfig(id: "claude-work", kind: .claude, name: "Work",
+                                       home: NSHomeDirectory() + "/.claude-work", environment: [AgentProviderVariable(name: "A", value: "1")])
+        host.providers = AgentProvidersState(settings: AgentProviderSettings(providers: [.builtIn(.codex), work]))
+        host.remoteProviders[mini] = AgentProvidersState(settings: AgentProviderSettings(providers: [.builtIn(.codex)]))
+        let store = SettingsStore(dirs: TabDirs(root: root), host: host,
+                                  theme: AppTheme(catalog: ThemeCatalog(entries: []), systemIsDark: true))
+        let page = SettingsModel(store: store)
+        page.select(.agents)
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        page.showAgents(on: mini)
+        XCTAssertNil(store.agentProviders, "this Mac's providers aren't shown as the other computer's")
+        for _ in 0..<50 where store.copyableAgentProviders.isEmpty {
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertEqual(store.agentComputerName, "mini")
+        XCTAssertEqual(store.agentProviders?.settings.providers.map(\.id), ["codex"])
+        XCTAssertEqual(store.copyableAgentProviders.map(\.id), ["claude-work"], "only what the other computer lacks")
+        XCTAssertTrue(page.lastBuild?.rowIds.contains("agent-computer") == true)
+
+        store.copyAgentProviders(["claude-work"])
+        for _ in 0..<50 where host.remoteProviders[mini]?.settings.providers.count != 2 {
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        let copied = try XCTUnwrap(host.remoteProviders[mini]?.settings.provider("claude-work"))
+        XCTAssertEqual(copied.home, "~/.claude-work", "a folder in this Mac's home names the same folder in the other's")
+        XCTAssertEqual(copied.environment, work.environment)
+        XCTAssertEqual(host.providers.settings.providers.count, 2, "this Mac's providers are left alone")
+        XCTAssertTrue(store.copyableAgentProviders.isEmpty)
+
+        store.removeAgentProvider("codex")
+        for _ in 0..<50 where host.remoteProviders[mini]?.settings.provider("codex") != nil {
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertNil(host.remoteProviders[mini]?.settings.provider("codex"))
+        XCTAssertNotNil(host.providers.settings.provider("codex"), "removing it there keeps this Mac's")
+
+        page.showAgents(on: .local)
+        for _ in 0..<50 where store.agentProviders == nil {
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertEqual(store.agentProviders?.settings.providers.map(\.id), ["codex", "claude-work"])
+        XCTAssertTrue(store.copyableAgentProviders.isEmpty, "nothing to copy into this Mac itself")
+    }
+
+    func testAProviderForAnotherComputerIsntSuggestedFromThisMac() {
+        let state = AgentProvidersState(settings: AgentProviderSettings())
+        let sheet = AddProviderSheet(state: state, probe: nil, computer: "mini") { _, _ in }
+        XCTAssertTrue(sheet.detected.isEmpty, "this Mac's CLIs say nothing of the other computer's")
+        let missing = AgentProviderHealth(provider: "codex", installed: false, checkedAt: Date())
+        XCTAssertEqual(AgentProviderUnavailability(.builtIn(.codex), health: missing, computer: "mini")?.reason,
+                       "Codex wasn't found on mini")
+        XCTAssertEqual(AgentProviderUnavailability(.builtIn(.codex), health: missing)?.setUpTitle, "Install in Settings…")
+    }
+
+    /// An install that finishes from Settings refreshes what depends on the CLI being there,
+    /// such as AI usage, as a saved change does.
+    func testAFinishedInstallTellsAgentPanesAndPlugins() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("tab-providers-install-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let host = PreviewSettingsHost()
+        let running = AgentProviderMaintenance(provider: "codex", action: .install, command: "npm i -g @openai/codex",
+                                               status: .running, startedAt: Date())
+        host.providers = AgentProvidersState(settings: AgentProviderSettings(providers: [.builtIn(.codex)]), maintenance: [running])
+        let store = SettingsStore(dirs: TabDirs(root: root), host: host,
+                                  theme: AppTheme(catalog: ThemeCatalog(entries: []), systemIsDark: true))
+        let page = SettingsModel(store: store)
+        page.select(.agents)
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        store.maintainAgentProvider("codex", action: .install)
+        try await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertEqual(host.changedProviders, [], "nothing changes while it runs")
+        var finished = running
+        finished.status = .succeeded
+        finished.finishedAt = Date()
+        host.providers.maintenance = [finished]
+        for _ in 0..<150 where host.changedProviders.isEmpty {
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertEqual(host.changedProviders, [.local])
+    }
 }

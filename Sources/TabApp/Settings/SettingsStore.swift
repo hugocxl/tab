@@ -47,8 +47,13 @@ public final class SettingsStore {
     /// Per-provider Tab integration status (skill and hooks), by provider ID.
     public private(set) var providerIntegrations: [String: AgentIntegrationStatus] = [:]
     public private(set) var providerIntegrationBusy: Set<String> = []
-    /// This Mac's server's coding agents; `nil` until read.
+    /// The computer whose coding agents Settings › Agents shows: this Mac or a remote server.
+    public private(set) var agentComputer: ServerId = .local
+    /// `agentComputer`'s coding agents; `nil` until read.
     public private(set) var agentProviders: AgentProvidersState?
+    /// This Mac's providers while another computer's are shown, to copy from; `nil` until read.
+    public private(set) var localAgentProviders: [AgentProviderConfig]?
+    private var lastAgentComputers: [AgentComputer] = []
     /// Each provider's models as Settings lists them, hidden ones included, by provider ID.
     public private(set) var agentModels: [String: [AgentModelDescriptor]] = [:]
     /// Providers whose model list couldn't be read.
@@ -244,21 +249,76 @@ public final class SettingsStore {
 
     // MARK: Agent providers
 
+    /// This Mac, then each remote server.
+    public var agentComputers: [AgentComputer] { host?.agentComputers ?? [] }
+
+    /// The shown computer's name, such as "This Mac".
+    public var agentComputerName: String {
+        agentComputers.first { $0.id == agentComputer }?.name ?? "This Mac"
+    }
+
+    /// Whether the shown computer's server is connected.
+    public var agentComputerConnected: Bool {
+        agentComputer.isLocal ? serverState == .running : agentComputers.first { $0.id == agentComputer }?.connected == true
+    }
+
+    /// Shows `server`'s providers instead, dropping what was read from the other computer.
+    public func selectAgentComputer(_ server: ServerId) {
+        guard server != agentComputer, server.isLocal || agentComputers.contains(where: { $0.id == server }) else { return }
+        agentComputer = server
+        agentProviders = nil
+        localAgentProviders = nil
+        agentModels = [:]
+        agentModelsUnavailable = []
+        providerIntegrations = [:]
+        checkingAgentProviders = false
+        maintenanceFollower?.cancel()
+        maintenanceFollower = nil
+        agentProviderEdits += 1
+        for key in errors.keys where key.hasPrefix("agent-") { errors[key] = nil }
+        changed()
+        loadAgentProviders(check: true)
+    }
+
+    /// Reads the shown computer's providers again when its connection changed, such as
+    /// a remote server that connected while Settings showed it.
+    public func agentComputersChanged() {
+        let computers = agentComputers
+        guard computers != lastAgentComputers else { return }
+        lastAgentComputers = computers
+        if !agentComputer.isLocal, !computers.contains(where: { $0.id == agentComputer }) {
+            return selectAgentComputer(.local)
+        }
+        if agentProviders == nil, agentComputerConnected { loadAgentProviders(check: true) }
+        changed()
+    }
+
     /// Reads the providers, then checks their status automatically when `check` is true.
+    /// Another computer's server is asked even when it isn't connected, which connects it.
     public func loadAgentProviders(check: Bool = true) {
-        guard let host, serverState == .running else { return }
+        guard let host, !agentComputer.isLocal || serverState == .running else { return }
         let edits = agentProviderEdits
+        let server = agentComputer
+        if !server.isLocal, serverState == .running {
+            Task { [weak self] in
+                let local = try? await host.agentProviders(on: .local)
+                guard let self, agentComputer == server else { return }
+                localAgentProviders = local?.settings.providers ?? []
+                changed()
+            }
+        }
         Task { [weak self] in
             do {
-                let state = try await host.agentProviders()
-                guard let self else { return }
+                let state = try await host.agentProviders(on: server)
+                guard let self, self.agentComputer == server else { return }
                 self.acceptAgentProviders(state, editsAtStart: edits)
                 self.errors["agent-providers"] = nil
                 if check, state.settings.providers.contains(where: \.enabled) {
                     self.checkAgentProviders()
                 }
             } catch {
-                self?.errors["agent-providers"] = Self.agentProvidersMessage(error)
+                guard self?.agentComputer == server else { return }
+                self?.errors["agent-providers"] = self?.agentProvidersMessage(error)
             }
             self?.changed()
         }
@@ -280,13 +340,16 @@ public final class SettingsStore {
         checkingAgentProviders = true
         changed()
         let edits = agentProviderEdits
+        let server = agentComputer
         Task { [weak self] in
             do {
-                let state = try await host.checkAgentProviders()
+                let state = try await host.checkAgentProviders(on: server)
+                guard self?.agentComputer == server else { return }
                 self?.acceptAgentProviders(state, editsAtStart: edits)
                 self?.errors["agent-providers"] = nil
             } catch {
-                self?.errors["agent-providers"] = Self.agentProvidersMessage(error)
+                guard self?.agentComputer == server else { return }
+                self?.errors["agent-providers"] = self?.agentProvidersMessage(error)
             }
             self?.checkingAgentProviders = false
             self?.changed()
@@ -297,14 +360,17 @@ public final class SettingsStore {
     public func maintainAgentProvider(_ id: String, action: AgentProviderMaintenance.Action) {
         guard let host else { return }
         let edits = agentProviderEdits
+        let server = agentComputer
         Task { [weak self] in
             do {
-                let state = try await host.maintainAgentProvider(id, action: action)
+                let state = try await host.maintainAgentProvider(id, action: action, on: server)
+                guard self?.agentComputer == server else { return }
                 self?.acceptAgentProviders(state, editsAtStart: edits)
                 self?.errors["agent-provider-version"] = nil
                 self?.followMaintenance()
             } catch {
-                self?.errors["agent-provider-version"] = Self.agentProvidersMessage(error)
+                guard self?.agentComputer == server else { return }
+                self?.errors["agent-provider-version"] = self?.agentProvidersMessage(error)
             }
             self?.changed()
         }
@@ -313,30 +379,36 @@ public final class SettingsStore {
     /// Reads the providers every second and a half while an install or update runs.
     private func followMaintenance() {
         guard maintenanceFollower == nil, let host else { return }
+        let server = agentComputer
         maintenanceFollower = Task { [weak self] in
             defer { self?.maintenanceFollower = nil }
             while self?.agentProviders?.maintenance.contains(where: \.isRunning) == true {
                 try? await Task.sleep(for: .milliseconds(1500))
                 guard let self, !Task.isCancelled else { return }
                 let edits = agentProviderEdits
-                guard let state = try? await host.agentProviders() else { return }
+                guard let state = try? await host.agentProviders(on: server), agentComputer == server else { return }
                 acceptAgentProviders(state, editsAtStart: edits)
                 changed()
             }
-            // The CLI may list other models now.
+            // The CLI may list other models now, and report usage where it was missing.
             guard let self else { return }
             for id in agentModels.keys { loadAgentModels(id) }
+            host.agentProvidersDidChange(on: server)
         }
     }
 
     /// Lists `id`'s models, asking its CLI again when `refresh`.
     public func loadAgentModels(_ id: String, refresh: Bool = false) {
         guard let host, let provider = agentProviders?.settings.provider(id) else { return }
+        let server = agentComputer
         Task { [weak self] in
             do {
-                self?.agentModels[id] = try await host.agentModels(provider, refresh: refresh)
+                let models = try await host.agentModels(provider, refresh: refresh, on: server)
+                guard self?.agentComputer == server else { return }
+                self?.agentModels[id] = models
                 self?.agentModelsUnavailable.remove(id)
             } catch {
+                guard self?.agentComputer == server else { return }
                 self?.agentModelsUnavailable.insert(id)
             }
             self?.changed()
@@ -367,8 +439,8 @@ public final class SettingsStore {
     /// Adds a provider of `kind` and returns its ID.
     /// What the server finds for `provider`, saved or not; nil when it can't check one it hasn't saved.
     public func probeAgentProvider(_ provider: AgentProviderConfig) async -> AgentProviderHealth? {
-        guard let host, serverState == .running else { return nil }
-        return try? await host.probeAgentProvider(provider)
+        guard let host, agentComputerConnected else { return nil }
+        return try? await host.probeAgentProvider(provider, on: agentComputer)
     }
 
     @discardableResult
@@ -389,7 +461,8 @@ public final class SettingsStore {
         guard canAddAgentProvider(), agentProviders?.settings.provider(provider.id) == nil else { return nil }
         updateAgentProviders("agent-providers") { $0.providers.append(provider) }
         guard agentProviders?.settings.provider(provider.id) != nil else { return nil }
-        if integrate, CodingAgent(provider: provider.kind) != nil {
+        // Tab's skill and hooks are installed from this Mac, so only into its own config folders.
+        if integrate, agentComputer.isLocal, CodingAgent(provider: provider.kind) != nil {
             setAgentProviderIntegration(provider, enabled: true)
         }
         let write = agentProviderWrite
@@ -426,28 +499,68 @@ public final class SettingsStore {
         errors[row] = nil
         changed()
         let previous = agentProviderWrite
+        let server = agentComputer
         agentProviderWrite = Task { [weak self] in
             await previous?.value
-            guard let self, let current = agentProviders?.settings else { return }
+            guard let self, agentComputer == server, let current = agentProviders?.settings else { return }
             do {
-                let saved = try await host.writeAgentProviders(current)
-                if agentProviders?.settings == current {
+                let saved = try await host.writeAgentProviders(current, on: server)
+                if agentComputer == server, agentProviders?.settings == current {
                     agentProviders?.health = saved.health
                     agentProviders?.maintenance = saved.maintenance
                 }
             } catch {
-                errors[row] = Self.agentProvidersMessage(error)
-                if let state = try? await host.agentProviders() { agentProviders = state }
+                guard agentComputer == server else { return }
+                errors[row] = agentProvidersMessage(error)
+                if let state = try? await host.agentProviders(on: server), agentComputer == server { agentProviders = state }
             }
             changed()
         }
     }
 
-    private static func agentProvidersMessage(_ error: Error) -> String {
-        if case ClientError.server(let reply) = error, reply.code == .unsupported {
-            return "This Mac's server is older than this app. Restart it from Settings › Server to manage providers."
+    /// This Mac's providers the shown computer lacks, by ID, which `copyAgentProviders` can add.
+    public var copyableAgentProviders: [AgentProviderConfig] {
+        guard !agentComputer.isLocal, let local = localAgentProviders, let shown = agentProviders?.settings else { return [] }
+        return local.filter { shown.provider($0.id) == nil }
+    }
+
+    /// Adds this Mac's providers `ids` to the shown computer, with folders under this Mac's
+    /// home written from `~` so they name the same folders in the other computer's home.
+    /// Its CLIs are then checked there, as they may be missing.
+    public func copyAgentProviders(_ ids: [String]) {
+        let copies = copyableAgentProviders.filter { ids.contains($0.id) }.map { Self.portable($0) }
+        guard !copies.isEmpty, let settings = agentProviders?.settings else { return }
+        guard settings.providers.count + copies.count <= AgentProviderSettings.maxProviders else {
+            return setError("agent-providers", "Remove a provider before copying more.")
         }
-        return message(error)
+        updateAgentProviders("agent-providers") { $0.providers += copies }
+        let write = agentProviderWrite
+        Task { [weak self] in
+            await write?.value
+            self?.checkAgentProviders()
+        }
+    }
+
+    /// `provider` with paths under this Mac's home written from `~`.
+    static func portable(_ provider: AgentProviderConfig, home: String = NSHomeDirectory()) -> AgentProviderConfig {
+        func portable(_ path: String?) -> String? {
+            guard let path else { return nil }
+            return TabDirs.abbreviateHome(path, home: home) ?? path
+        }
+        var copy = provider
+        copy.executable = portable(provider.executable)
+        copy.home = portable(provider.home)
+        copy.shadowHome = portable(provider.shadowHome)
+        return copy
+    }
+
+    private func agentProvidersMessage(_ error: Error) -> String {
+        if case ClientError.server(let reply) = error, reply.code == .unsupported {
+            return agentComputer.isLocal
+                ? "This Mac's server is older than this app. Restart it from Settings › Server to manage providers."
+                : "\(agentComputerName) runs an older Tab. Update it from Settings › Remote Servers to manage its providers."
+        }
+        return Self.message(error)
     }
 
     // MARK: Appearance

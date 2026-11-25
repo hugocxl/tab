@@ -53,6 +53,11 @@ public final class PluginContext {
         manager.addReconnectedHandler(handler, for: pluginId)
     }
 
+    /// Subscribes to changes Settings saves to a server's coding agents.
+    public func onAgentProvidersChanged(_ handler: @escaping @MainActor (ServerId) -> Void) {
+        manager.addAgentProvidersChangedHandler(handler, for: pluginId)
+    }
+
     /// Subscribes to Home terminal folder changes (used by Explorer).
     public func onUpdateFilesRoot(_ handler: @escaping @MainActor (Project) -> Void) {
         manager.addUpdateFilesRootHandler(handler, for: pluginId)

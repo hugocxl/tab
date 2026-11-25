@@ -107,6 +107,16 @@ final class SettingsTests: XCTestCase {
             XCTAssertEqual(build.unknownIds, [], "\(provider.id)'s page shows rows missing from the catalog")
             shown.formUnion(build.rowIds)
         }
+        // Another computer's providers add its picker and copying this Mac's.
+        let remote = ServerId()
+        host.remoteComputers = [AgentComputer(id: remote, name: "mini", connected: true)]
+        store.agentComputersChanged()
+        page.showAgents(on: remote)
+        for _ in 0..<50 where store.copyableAgentProviders.isEmpty {
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        page.reload()
+        shown.formUnion(try XCTUnwrap(page.lastBuild).rowIds)
         for item in SettingsCatalog.items {
             XCTAssertTrue(shown.contains(item.id), "\(item.id) is in the catalog but no page shows it")
         }

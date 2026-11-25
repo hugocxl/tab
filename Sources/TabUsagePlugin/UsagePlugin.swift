@@ -65,6 +65,10 @@ public final class UsagePlugin: TabPlugin {
             self?.panelContent?.controller.reconnected(server)
             self?.compactCard?.controller.reconnected(server)
         }
+        context.onAgentProvidersChanged { [weak self] server in
+            self?.panelContent?.controller.providersChanged(server)
+            self?.compactCard?.controller.providersChanged(server)
+        }
         context.onSettingsChanged { [weak self] settings in
             guard let self else { return }
             let next = UsageConfig.current(in: settings)

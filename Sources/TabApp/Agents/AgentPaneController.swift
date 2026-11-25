@@ -140,10 +140,14 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     var loadProviders: (() async throws -> AgentProvidersState)?
     /// Runs a command, such as a provider's sign-in, in a new terminal beside the pane.
     var openTerminal: ((String) -> Void)?
-    /// Opens Settings › Agents so the user can add or configure providers.
+    /// Opens Settings › Agents on the pane's computer so the user can add or configure providers.
     var openAgentSettings: (() -> Void)?
-    /// Opens Settings › Agents with the Add Provider dialog.
+    /// Opens Settings › Agents on the pane's computer with the Add Provider dialog.
     var addAgentProvider: (() -> Void)?
+    /// Opens a provider's page in Settings › Agents on the pane's computer, to install or update its CLI.
+    var openProviderSettings: ((String) -> Void)?
+    /// The remote computer the pane runs on, by name; nil on this Mac.
+    var computerName: (() -> String?)?
     /// The providers the model menu offers, from the server's settings.
     private var providers: [AgentProviderConfig] = []
     /// Whether the server's provider list has been loaded at least once.
@@ -373,12 +377,17 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
             guard let model, let project = model.state.paneProject(pane) else { return }
             model.newTerminal(in: project, command: command)
         }
+        let server = { [weak model] in model?.state.paneServer(pane) ?? .local }
         openAgentSettings = { [weak model] in
-            model?.showSettingsAction?(.agents)
+            model?.showAgentProvidersAction?(server(), nil)
         }
         addAgentProvider = { [weak model] in
-            model?.addAgentProviderAction?()
+            model?.addAgentProviderAction?(server())
         }
+        openProviderSettings = { [weak model] provider in
+            model?.showAgentProvidersAction?(server(), provider)
+        }
+        computerName = { [weak model] in model?.serverName(server()) }
         settingsObserver = model.changes.sink { [weak self] changes in
             guard changes.contains(.settings) else { return }
             self?.modelCatalogLoadedAt = .distantPast
@@ -2350,7 +2359,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
 
     /// Why a provider can't start a conversation now, as its last check found.
     private func unavailability(_ config: AgentProviderConfig) -> AgentProviderUnavailability? {
-        AgentProviderUnavailability(config, health: providerHealth[config.id])
+        AgentProviderUnavailability(config, health: providerHealth[config.id], computer: computerName?() ?? nil)
     }
 
     /// Warns in the composer, once, that the chosen provider can't run, as a new
@@ -2502,6 +2511,11 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         }
     }
 
+    @objc private func setUpSelected(_ sender: NSMenuItem) {
+        guard let provider = sender.representedObject as? String else { return }
+        openProviderSettings?(provider)
+    }
+
     @objc private func signInSelected(_ sender: NSMenuItem) {
         guard let command = sender.representedObject as? String else { return }
         openTerminal?(command)
@@ -2563,6 +2577,12 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
                     signIn.representedObject = command
                     signIn.toolTip = "Runs \(command)"
                     models.addItem(signIn)
+                } else if openProviderSettings != nil {
+                    let setUp = NSMenuItem(title: unavailable.setUpTitle, action: #selector(setUpSelected(_:)), keyEquivalent: "")
+                    setUp.target = self
+                    setUp.representedObject = key
+                    setUp.toolTip = "Opens \(config.title) in Settings › Agents"
+                    models.addItem(setUp)
                 }
                 models.addItem(.separator())
             }

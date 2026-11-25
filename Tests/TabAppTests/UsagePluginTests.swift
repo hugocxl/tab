@@ -148,6 +148,28 @@ final class UsagePluginTests: XCTestCase {
         XCTAssertEqual(controller.cards.count, 4)
     }
 
+    /// Providers added or copied to a computer in Settings show in its usage at once,
+    /// not after the next scheduled reading; a computer without any says where to add them.
+    func testChangingAComputersProvidersReadsItsUsageAgain() async throws {
+        let theme = AppTheme(systemIsDark: true)
+        let identity = ServerId()
+        let home = ProjectDescriptor.home(directory: ServerPath(NSHomeDirectory()))
+        let server = ModelFakeServer(identity: identity, catalog: CatalogPage(server: identity, home: home.id, revision: 1, projects: [home]))
+        server.usageLimits = AgentUsageLimitsReply(providers: [])
+        let panel = UsagePanelController(theme: theme, store: UsageStore()) { _ in (server, "mini") }
+        panel.show(project: (ProjectId(), identity))
+        try await settle { panel.messageText == "No providers" }
+        XCTAssertEqual(UsagePanelController.noProvidersDetail(on: "mini"),
+                       "Add providers for mini, or copy this Mac's, in Settings › Agents to see its plan limits.")
+
+        server.usageLimits = Self.sample(now: Date())
+        panel.providersChanged(ServerId())
+        panel.tick()
+        XCTAssertTrue(panel.cards.isEmpty, "another computer's change leaves this one's reading")
+        panel.providersChanged(identity)
+        try await settle { panel.cards.count == 4 }
+    }
+
     func testSwitchingProjectsOnTheSameServerKeepsTheCards() async throws {
         let (controller, server) = makePanel(Self.sample(now: Date()))
         try await settle { !controller.cards.isEmpty }

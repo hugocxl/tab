@@ -278,21 +278,24 @@ private final class SettingsWriteHost: SettingsHost {
         try await base.setAgentProviderIntegration(provider, enabled: enabled)
     }
     func migrationSources() -> [TerminalMigration.Source] { base.migrationSources() }
-    func agentProviders() async throws -> AgentProvidersState { try await base.agentProviders() }
-    func writeAgentProviders(_ settings: AgentProviderSettings) async throws -> AgentProvidersState {
-        try await base.writeAgentProviders(settings)
+    var agentComputers: [AgentComputer] { base.agentComputers }
+    func agentProviders(on server: ServerId) async throws -> AgentProvidersState { try await base.agentProviders(on: server) }
+    func writeAgentProviders(_ settings: AgentProviderSettings, on server: ServerId) async throws -> AgentProvidersState {
+        try await base.writeAgentProviders(settings, on: server)
     }
-    func checkAgentProviders() async throws -> AgentProvidersState { try await base.checkAgentProviders() }
-    func probeAgentProvider(_ provider: AgentProviderConfig) async throws -> AgentProviderHealth {
-        try await base.probeAgentProvider(provider)
+    func checkAgentProviders(on server: ServerId) async throws -> AgentProvidersState { try await base.checkAgentProviders(on: server) }
+    func agentProvidersDidChange(on server: ServerId) { base.agentProvidersDidChange(on: server) }
+    func probeAgentProvider(_ provider: AgentProviderConfig, on server: ServerId) async throws -> AgentProviderHealth {
+        try await base.probeAgentProvider(provider, on: server)
     }
-    func maintainAgentProvider(_ id: String, action: AgentProviderMaintenance.Action) async throws -> AgentProvidersState {
-        try await base.maintainAgentProvider(id, action: action)
+    func maintainAgentProvider(_ id: String, action: AgentProviderMaintenance.Action,
+                               on server: ServerId) async throws -> AgentProvidersState {
+        try await base.maintainAgentProvider(id, action: action, on: server)
     }
-    func agentModels(_ provider: AgentProviderConfig, refresh: Bool) async throws -> [AgentModelDescriptor] {
-        try await base.agentModels(provider, refresh: refresh)
+    func agentModels(_ provider: AgentProviderConfig, refresh: Bool, on server: ServerId) async throws -> [AgentModelDescriptor] {
+        try await base.agentModels(provider, refresh: refresh, on: server)
     }
     func openAgent(prompt: String) throws { try base.openAgent(prompt: prompt) }
-    func openTerminal(command: String) { base.openTerminal(command: command) }
+    func openTerminal(command: String, on server: ServerId) { base.openTerminal(command: command, on: server) }
     func backupState() throws -> Data { try base.backupState() }
 }

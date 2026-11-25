@@ -8,12 +8,16 @@ extension SettingsModel {
         let state = store.agentProviders
         let settings = state?.settings ?? AgentProviderSettings()
         let light = AppTheme.shared.palette.isLight
+        let remote = !store.agentComputer.isLocal
+        buildComputer(b)
 
         if state == nil {
-            b.row("agent-providers", .label("Loading providers…", .secondary))
+            b.row("agent-providers", .label(store.errors["agent-providers"] == nil ? "Loading providers…" : "Providers unavailable", .secondary))
         } else if settings.providers.isEmpty {
             b.row("agent-providers", .label("No providers yet", .secondary),
-                  description: "Add the coding agents you use. Agent panes, the model menu and AI usage offer only the ones added here.")
+                  description: remote
+                    ? "Add the coding agents to run on \(store.agentComputerName), or copy this Mac's. Agent panes there offer only these."
+                    : "Add the coding agents you use. Agent panes, the model menu and AI usage offer only the ones added here.")
         }
         for provider in settings.providers where state != nil {
             let health = state?.health(provider.id)
@@ -40,9 +44,32 @@ extension SettingsModel {
         }
         if let error = store.errors["agent-providers"] { b.note("agent-providers", error, error: true) }
         b.row("agent-add-provider", b.button("Add Provider…", enabled: state != nil) { [weak self] in self?.showAddProvider() })
-        buildTerminalMigration(b)
+        buildCopyProviders(b)
+        if !remote { buildTerminalMigration(b) }
 
         if b.subpage == .agentProvider && !b.isSearching { buildProvider(b, state: state) }
+    }
+
+    /// Which computer's providers the page shows, when there are remote servers.
+    private func buildComputer(_ b: SettingsPageBuilder) {
+        let computers = store.agentComputers
+        guard computers.count > 1 else { return }
+        let choices = computers.map { Choice(id: $0.id.description, title: $0.connected ? $0.name : "\($0.name) (not connected)") }
+        b.row("agent-computer", b.popUp("agent-computer", choices, selected: store.agentComputer.description) { [weak self] id in
+            guard let server = computers.first(where: { $0.id.description == id })?.id else { return }
+            self?.showAgents(on: server)
+        })
+    }
+
+    /// Adds this Mac's providers that another computer lacks, one or all at once.
+    private func buildCopyProviders(_ b: SettingsPageBuilder) {
+        let copyable = store.copyableAgentProviders
+        guard !copyable.isEmpty else { return }
+        var choices = copyable.map { Choice(id: $0.id, title: $0.title) }
+        if copyable.count > 1 { choices.append(Choice(id: "", title: "All \(copyable.count) Providers", separatorBefore: true)) }
+        b.row("agent-copy-providers", b.menu("agent-copy-providers", "Copy from This Mac", choices) { [store] id in
+            store.copyAgentProviders(id.isEmpty ? copyable.map(\.id) : [id])
+        }, description: "Adds them with the same settings, folders and variables. Tab then checks each CLI on \(store.agentComputerName).")
     }
 
     private func confirmRemoveProvider(_ provider: AgentProviderConfig, goBackAfter: Bool) {
@@ -57,7 +84,9 @@ extension SettingsModel {
     /// The Add Provider dialog, which opens the new provider's page.
     func showAddProvider() {
         guard window?.attachedSheet == nil, let state = store.agentProviders, store.canAddAgentProvider() else { return }
-        let sheet = AddProviderSheet(state: state, probe: { [store] in await store.probeAgentProvider($0) }) { [weak self] config, integrate in
+        let computer = store.agentComputer.isLocal ? nil : store.agentComputerName
+        let sheet = AddProviderSheet(state: state, probe: { [store] in await store.probeAgentProvider($0) },
+                                     computer: computer) { [weak self] config, integrate in
             guard let self, let id = store.addAgentProvider(config, integrate: integrate) else { return }
             openProvider(id)
         }
@@ -153,7 +182,8 @@ extension SettingsModel {
     }
 
     private func buildProviderIntegration(_ b: SettingsPageBuilder, provider: AgentProviderConfig) {
-        guard CodingAgent(provider: provider.kind) != nil else { return }
+        // Tab installs its skill and hooks from this Mac, so only into this Mac's config folders.
+        guard store.agentComputer.isLocal, CodingAgent(provider: provider.kind) != nil else { return }
         let status = store.providerIntegrations[provider.id]
         let busy = store.providerIntegrationBusy.contains(provider.id)
         let enabled = status?.isIntegrated ?? false
@@ -366,8 +396,9 @@ extension SettingsModel {
     private func signInButton(_ b: SettingsPageBuilder, _ health: AgentProviderHealth) -> SettingControl? {
         guard let command = health.signInCommand else { return nil }
         return b.button("Sign In…", help: "Runs \(command) in a new terminal tab") { [weak self] in
-            self?.store.host?.openTerminal(command: command)
-            self?.window?.close()
+            guard let self else { return }
+            store.host?.openTerminal(command: command, on: store.agentComputer)
+            window?.close()
         }
     }
 

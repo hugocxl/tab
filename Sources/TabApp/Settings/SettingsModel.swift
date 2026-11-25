@@ -48,6 +48,8 @@ final class SettingsModel: ObservableObject {
     private var reloadScheduled = false
     /// Opens the Add Provider dialog once the providers are read.
     private var addProviderWhenLoaded = false
+    /// Lists the open provider's models once another computer's providers are read.
+    private var loadProviderWhenLoaded = false
 
     init(store: SettingsStore) {
         self.store = store
@@ -104,6 +106,23 @@ final class SettingsModel: ObservableObject {
         reload()
     }
 
+    /// Opens the Agents page on `server`'s providers, then `provider`'s page when it is given.
+    func showAgents(on server: ServerId, provider: String? = nil) {
+        if server != store.agentComputer {
+            store.selectAgentComputer(server)
+            loadProviderWhenLoaded = provider != nil
+            // A provider page of the other computer would show one of this one's.
+            if subpage == .agentProvider { backStack = []; forwardStack = [] }
+        }
+        if let provider {
+            openProvider(provider)
+        } else if category != .agents || subpage != nil {
+            go(to: Location(category: .agents))
+        } else {
+            reload()
+        }
+    }
+
     /// Opens a coding agent's page.
     func openProvider(_ id: String) {
         go(to: Location(category: .agents, subpage: .agentProvider, provider: id))
@@ -156,11 +175,16 @@ final class SettingsModel: ObservableObject {
     }
 
     private func refreshAgentsPage() {
+        loadProviderPage()
+        store.loadAgentProviders(check: true)
+    }
+
+    /// Lists the open provider's models and reads its Tab integration.
+    private func loadProviderPage() {
         if subpage == .agentProvider, let shown = shownProvider {
             store.loadAgentModels(shown.id)
             store.loadAgentProviderIntegration(shown)
         }
-        store.loadAgentProviders(check: true)
     }
 
     /// Searches every page's settings, as typing in the search field does.
@@ -195,6 +219,10 @@ final class SettingsModel: ObservableObject {
         if addProviderWhenLoaded, category == .agents, store.agentProviders != nil, window?.isVisible == true {
             addProviderWhenLoaded = false
             DispatchQueue.main.async { [weak self] in self?.showAddProvider() }
+        }
+        if loadProviderWhenLoaded, store.agentProviders != nil {
+            loadProviderWhenLoaded = false
+            loadProviderPage()
         }
         if (store.pairing != nil || store.pairingBusy) && !builder.rowIds.contains("mobile-pair") {
             store.cancelPairing()

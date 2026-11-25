@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.137.3 - 2026-11-25
+
+### Changed
+
+- Manage each computer's agent providers in Settings, copy this Mac's to a remote, and see missing CLIs.
+
 ## 0.137.2 - 2026-11-25
 
 ### Changed

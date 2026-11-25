@@ -172,6 +172,16 @@ final class AgentUsageLimitsServiceTests: XCTestCase {
         XCTAssertTrue(reply.providers.isEmpty)
     }
 
+    /// An added provider whose CLI this computer lacks, such as a remote server without
+    /// Claude Code, shows in AI usage as not installed rather than not at all.
+    func testAProviderWithoutItsCLIIsReportedNotLeftOut() async {
+        let missing = AgentProviderConfig(id: "claude-work", kind: .claude, executable: "/nonexistent/tab-test/claude")
+        let limits = await AgentUsageLimitsProbe.read(missing)
+        XCTAssertEqual(limits?.provider, .claude)
+        XCTAssertEqual(limits?.failure, "Claude Code isn't installed on this computer.")
+        XCTAssertEqual(limits?.windows, [])
+    }
+
     /// A second Claude signed in through its own folder is a second account; a second
     /// Antigravity shares the keychain sign-in, so it is the same one.
     func testEachSignedInAccountIsReadOnce() {

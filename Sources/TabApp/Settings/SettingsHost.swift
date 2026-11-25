@@ -19,6 +19,20 @@ public enum ServerConnectionState: Equatable, Sendable {
     }
 }
 
+/// A computer whose coding agents Settings › Agents can manage: this Mac, or a remote server.
+public struct AgentComputer: Equatable, Sendable {
+    public var id: ServerId
+    public var name: String
+    /// Whether its server is connected, so its providers can be read and changed.
+    public var connected: Bool
+
+    public init(id: ServerId, name: String, connected: Bool) {
+        self.id = id
+        self.name = name
+        self.connected = connected
+    }
+}
+
 /// A browser profile as Settings lists it.
 public struct BrowserProfileSummary: Equatable, Sendable {
     public var id: String
@@ -105,17 +119,22 @@ public protocol SettingsHost: AnyObject {
 
     // MARK: Agents
 
-    /// This Mac's server's coding agents and what their last checks found.
-    func agentProviders() async throws -> AgentProvidersState
-    func writeAgentProviders(_ settings: AgentProviderSettings) async throws -> AgentProvidersState
-    /// Checks each enabled provider's CLI now.
-    func checkAgentProviders() async throws -> AgentProvidersState
-    /// Starts installing or updating a provider's CLI on this Mac's server.
-    func maintainAgentProvider(_ id: String, action: AgentProviderMaintenance.Action) async throws -> AgentProvidersState
-    /// Checks `provider`, saved or not, without changing anything; servers that predate it throw.
-    func probeAgentProvider(_ provider: AgentProviderConfig) async throws -> AgentProviderHealth
-    /// `provider`'s models in the user's order, hidden ones included.
-    func agentModels(_ provider: AgentProviderConfig, refresh: Bool) async throws -> [AgentModelDescriptor]
+    /// This Mac, then each remote server, whose coding agents Settings can manage.
+    var agentComputers: [AgentComputer] { get }
+    /// `server`'s coding agents and what their last checks found.
+    func agentProviders(on server: ServerId) async throws -> AgentProvidersState
+    func writeAgentProviders(_ settings: AgentProviderSettings, on server: ServerId) async throws -> AgentProvidersState
+    /// Checks each enabled provider's CLI on `server` now.
+    func checkAgentProviders(on server: ServerId) async throws -> AgentProvidersState
+    /// Starts installing or updating a provider's CLI on `server`.
+    func maintainAgentProvider(_ id: String, action: AgentProviderMaintenance.Action, on server: ServerId) async throws -> AgentProvidersState
+    /// Checks `provider` on `server`, saved or not, without changing anything; servers that predate it throw.
+    func probeAgentProvider(_ provider: AgentProviderConfig, on server: ServerId) async throws -> AgentProviderHealth
+    /// Tells agent panes and plugins, such as AI usage, that `server`'s providers changed
+    /// without a save from Settings, as when an install or update finished there.
+    func agentProvidersDidChange(on server: ServerId)
+    /// `provider`'s models on `server` in the user's order, hidden ones included.
+    func agentModels(_ provider: AgentProviderConfig, refresh: Bool, on server: ServerId) async throws -> [AgentModelDescriptor]
     /// What Tab installed in `provider`'s config folder; nil when `provider`'s kind has no Tab integration.
     func agentProviderIntegration(_ provider: AgentProviderConfig) async throws -> AgentIntegrationStatus?
     /// Installs or removes Tab's skill and hooks in `provider`'s config folder.
@@ -124,8 +143,8 @@ public protocol SettingsHost: AnyObject {
     func migrationSources() -> [TerminalMigration.Source]
     /// Opens an agent tab in Home with `prompt` in its composer, not yet sent.
     func openAgent(prompt: String) throws
-    /// Opens a terminal tab in this Mac's Home running `command`, such as an agent's sign-in.
-    func openTerminal(command: String)
+    /// Opens a terminal tab in `server`'s Home running `command`, such as an agent's sign-in.
+    func openTerminal(command: String, on server: ServerId)
 
     // MARK: Updates
 
@@ -253,26 +272,40 @@ public final class PreviewSettingsHost: SettingsHost {
         providerIntegrations[provider.id] = status
         return status
     }
-    public func agentProviders() async throws -> AgentProvidersState { providers }
-    public func writeAgentProviders(_ settings: AgentProviderSettings) async throws -> AgentProvidersState {
-        providers.settings = settings
-        return providers
+    /// Remote servers listed after this Mac, with their providers.
+    public var remoteComputers: [AgentComputer] = []
+    public var remoteProviders: [ServerId: AgentProvidersState] = [:]
+    public var agentComputers: [AgentComputer] {
+        [AgentComputer(id: .local, name: "This Mac", connected: serverState == .running)] + remoteComputers
     }
-    public func checkAgentProviders() async throws -> AgentProvidersState { providers }
+    private func providers(_ server: ServerId) -> AgentProvidersState {
+        server.isLocal ? providers : remoteProviders[server] ?? AgentProvidersState(settings: AgentProviderSettings())
+    }
+    public func agentProviders(on server: ServerId) async throws -> AgentProvidersState { providers(server) }
+    public func writeAgentProviders(_ settings: AgentProviderSettings, on server: ServerId) async throws -> AgentProvidersState {
+        var state = providers(server)
+        state.settings = settings
+        if server.isLocal { providers = state } else { remoteProviders[server] = state }
+        return state
+    }
+    public func checkAgentProviders(on server: ServerId) async throws -> AgentProvidersState { providers(server) }
+    public private(set) var changedProviders: [ServerId] = []
+    public func agentProvidersDidChange(on server: ServerId) { changedProviders.append(server) }
     /// What `probeAgentProvider` finds, by provider ID; others aren't installed.
     public var probes: [String: AgentProviderHealth] = [:]
-    public func probeAgentProvider(_ provider: AgentProviderConfig) async throws -> AgentProviderHealth {
+    public func probeAgentProvider(_ provider: AgentProviderConfig, on server: ServerId) async throws -> AgentProviderHealth {
         probes[provider.id] ?? AgentProviderHealth(provider: provider.id, installed: false, checkedAt: Date())
     }
-    public func maintainAgentProvider(_ id: String, action: AgentProviderMaintenance.Action) async throws -> AgentProvidersState {
-        providers
+    public func maintainAgentProvider(_ id: String, action: AgentProviderMaintenance.Action,
+                                      on server: ServerId) async throws -> AgentProvidersState {
+        providers(server)
     }
-    public func agentModels(_ provider: AgentProviderConfig, refresh: Bool) async throws -> [AgentModelDescriptor] {
+    public func agentModels(_ provider: AgentProviderConfig, refresh: Bool, on server: ServerId) async throws -> [AgentModelDescriptor] {
         provider.models.arrange(reportedModels[provider.kind] ?? [])
     }
     public func migrationSources() -> [TerminalMigration.Source] { migrations }
     public func openAgent(prompt: String) throws { agentPrompts.append(prompt) }
-    public func openTerminal(command: String) { terminalCommands.append(command) }
+    public func openTerminal(command: String, on server: ServerId) { terminalCommands.append(command) }
 
     public var installedPlugins: Set<PluginId> = []
     public var pluginSettingsViews: [PluginId: @MainActor (SettingsStore) -> AnyView] = [:]

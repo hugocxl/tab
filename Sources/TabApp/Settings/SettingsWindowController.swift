@@ -2,6 +2,7 @@ import AppKit
 import Combine
 import SwiftUI
 import TabCore
+import TabProtocol
 
 /// The Settings window: a small System Settings–style window whose SwiftUI
 /// content brings its own toolbar (back, forward, title) and sidebar search.
@@ -66,10 +67,17 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
         showWindow(nil)
     }
 
-    /// Shows the Agents page with the Add Provider dialog on it.
-    public func addAgentProvider() {
+    /// Shows the Agents page on `server`'s providers with the Add Provider dialog on it.
+    public func addAgentProvider(on server: ServerId = .local) {
         show(.agents)
+        model.showAgents(on: server)
         model.addProvider()
+    }
+
+    /// Shows `server`'s providers in the Agents page, or `provider`'s page among them.
+    public func showAgents(on server: ServerId, provider: String? = nil) {
+        show(.agents)
+        model.showAgents(on: server, provider: provider)
     }
 
     /// Opens a page, as clicking it in the sidebar does.

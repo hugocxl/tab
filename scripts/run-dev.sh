@@ -3,7 +3,9 @@
 # Each worktree's build is its own app (see bundle.sh), so this quits only this
 # checkout's build and leaves other worktrees' builds and the release app alone.
 # A new worktree profile starts with a copy of the main Tab Dev profile's
-# settings, so remote servers and preferences carry over.
+# settings, so remote servers and preferences carry over. A worktree profile
+# without agent providers gets a copy of the ones last saved by any Tab or Tab
+# Dev profile, so they are added once rather than per worktree.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APP="$("$ROOT/scripts/bundle.sh" debug | tail -1)"
@@ -18,6 +20,11 @@ if [ "$APP_NAME" != "Tab Dev" ] && [ ! -d "$PROFILE" ]; then
     for file in settings.json server.json; do
         [ -f "$SUPPORT/Tab Dev/$file" ] && cp "$SUPPORT/Tab Dev/$file" "$PROFILE/$file"
     done
+fi
+if [ "$APP_NAME" != "Tab Dev" ] && [ ! -f "$PROFILE/agent-providers.json" ]; then
+    mkdir -m 700 -p "$PROFILE"
+    LATEST="$(ls -t "$SUPPORT"/Tab/agent-providers.json "$SUPPORT"/Tab\ Dev*/agent-providers.json 2>/dev/null | head -1 || true)"
+    [ -n "$LATEST" ] && cp "$LATEST" "$PROFILE/agent-providers.json"
 fi
 
 osascript -e "quit app id \"$BUNDLE_ID\"" 2>/dev/null || true

@@ -100,8 +100,10 @@ public final class AppModel {
     public private(set) lazy var browserAutomation = BrowserAutomation(host: self)
     /// Opens Settings, on a page when given; set by the window.
     public var showSettingsAction: ((SettingsCategory?) -> Void)?
-    /// Opens Settings › Agents with the Add Provider dialog.
-    public var addAgentProviderAction: (() -> Void)?
+    /// Opens Settings › Agents on a computer's providers with the Add Provider dialog.
+    public var addAgentProviderAction: ((ServerId) -> Void)?
+    /// Opens Settings › Agents on a computer's providers, or on one provider's page.
+    public var showAgentProvidersAction: ((ServerId, String?) -> Void)?
     /// Readies a hidden tab's panes; set by the window.
     var prepareTabAction: ((TabId) -> Void)?
     var projectHosts: [ProjectId: ProjectHost] = [:]

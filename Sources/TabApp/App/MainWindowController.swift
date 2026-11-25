@@ -79,7 +79,8 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, A
         settingsHost.store = settingsStore
         model.presenter = self
         model.showSettingsAction = { [weak self] category in self?.showSettings(category) }
-        model.addAgentProviderAction = { [weak self] in self?.showAddAgentProvider() }
+        model.addAgentProviderAction = { [weak self] server in self?.showAddAgentProvider(on: server) }
+        model.showAgentProvidersAction = { [weak self] server, provider in self?.showAgentProviders(on: server, provider: provider) }
         model.changes.sink { [weak self] changes in self?.modelChanged(changes) }.store(in: &subscriptions)
         model.theme.$palette.sink { [weak workspace] palette in workspace?.appearance = AppTheme.nsAppearance(palette) }
             .store(in: &subscriptions)
@@ -336,11 +337,18 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, A
         controller.show(category)
     }
 
-    /// Settings › Agents with the Add Provider dialog open.
-    func showAddAgentProvider() {
+    /// Settings › Agents on `server`'s providers with the Add Provider dialog open.
+    func showAddAgentProvider(on server: ServerId = .local) {
         let controller = settingsWindow ?? SettingsWindowController(store: settingsStore, remoteController: model.remoteController)
         settingsWindow = controller
-        controller.addAgentProvider()
+        controller.addAgentProvider(on: server)
+    }
+
+    /// Settings › Agents on `server`'s providers, or on `provider`'s page.
+    func showAgentProviders(on server: ServerId, provider: String?) {
+        let controller = settingsWindow ?? SettingsWindowController(store: settingsStore, remoteController: model.remoteController)
+        settingsWindow = controller
+        controller.showAgents(on: server, provider: provider)
     }
 
     // MARK: Quitting

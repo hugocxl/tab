@@ -41,6 +41,13 @@ final class UsageStore {
         }
     }
 
+    /// Reads `server`'s limits again on the next refresh, still showing the last reading
+    /// until then, as after its providers changed.
+    func markStale(_ server: ServerId) {
+        guard case .loaded(let reply, _) = loads[server] else { return clearFailure(for: server) }
+        loads[server] = .loaded(reply, at: .distantPast)
+    }
+
     func refresh(project: (id: ProjectId, server: ServerId), force: Bool, resolve: UsagePanelController.Resolve) {
         let server = project.server
         var previous: AgentUsageLimitsReply?
@@ -219,6 +226,11 @@ final class UsageCompactCardController: NSViewController {
         if project?.server == server { refresh(force: false) }
     }
 
+    func providersChanged(_ server: ServerId) {
+        store.markStale(server)
+        if project?.server == server { refresh(force: false) }
+    }
+
     func refresh(force: Bool) {
         guard let project else { return }
         store.refresh(project: project, force: force, resolve: resolve)
@@ -280,7 +292,7 @@ final class UsageCompactCardController: NSViewController {
             return
         }
         if reply.providers.isEmpty {
-            showMessage("Sign in to Claude Code, Codex, Antigravity, OpenCode or Grok to see your limits.")
+            showMessage(UsagePanelController.noProvidersDetail(on: project.flatMap { resolve($0.id)?.serverName }))
             onPreferredSizeChange?()
             return
         }

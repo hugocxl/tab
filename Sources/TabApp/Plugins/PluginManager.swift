@@ -26,6 +26,7 @@ public final class PluginManager {
     private var reconnectHandlers: [PluginId: [@MainActor (ServerId) -> Void]] = [:]
     private var filesRootHandlers: [PluginId: [@MainActor (Project) -> Void]] = [:]
     private var settingsHandlers: [PluginId: [@MainActor (Settings) -> Void]] = [:]
+    private var agentProvidersHandlers: [PluginId: [@MainActor (ServerId) -> Void]] = [:]
 
     public init(model: AppModel, installer: PluginInstaller? = nil) {
         self.model = model
@@ -263,6 +264,7 @@ public final class PluginManager {
         reconnectHandlers.removeValue(forKey: id)
         filesRootHandlers.removeValue(forKey: id)
         settingsHandlers.removeValue(forKey: id)
+        agentProvidersHandlers.removeValue(forKey: id)
     }
 
     // MARK: Dynamic Bundle Loading
@@ -336,6 +338,10 @@ public final class PluginManager {
         reconnectHandlers[pluginId, default: []].append(handler)
     }
 
+    func addAgentProvidersChangedHandler(_ handler: @escaping @MainActor (ServerId) -> Void, for pluginId: PluginId) {
+        agentProvidersHandlers[pluginId, default: []].append(handler)
+    }
+
     func addUpdateFilesRootHandler(_ handler: @escaping @MainActor (Project) -> Void, for pluginId: PluginId) {
         filesRootHandlers[pluginId, default: []].append(handler)
     }
@@ -364,6 +370,12 @@ public final class PluginManager {
 
     func dispatchReconnected(_ server: ServerId) {
         for handlers in reconnectHandlers.values {
+            for handler in handlers { handler(server) }
+        }
+    }
+
+    func dispatchAgentProvidersChanged(_ server: ServerId) {
+        for handlers in agentProvidersHandlers.values {
             for handler in handlers { handler(server) }
         }
     }

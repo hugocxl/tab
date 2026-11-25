@@ -308,7 +308,7 @@ actor AgentUsageLimitsService {
 
 /// One bounded, short-lived CLI that answers a single limits request. All mutable
 /// state lives on its queue.
-private final class AgentUsageLimitsProbe: @unchecked Sendable {
+final class AgentUsageLimitsProbe: @unchecked Sendable {
     static let timeout: TimeInterval = 20
     private static let maxBytes = 4 * 1024 * 1024
 
@@ -365,7 +365,9 @@ private final class AgentUsageLimitsProbe: @unchecked Sendable {
         self.request = request
     }
 
-    /// Nil when the CLI isn't installed or reports no plan limits, so the provider is left out.
+    /// Nil when the CLI reports no plan limits, so the provider is left out. A CLI that
+    /// isn't installed reads as a failure, so an added provider doesn't vanish from AI usage
+    /// on a computer that lacks it.
     static func read(_ config: AgentProviderConfig) async -> AgentUsageLimits? {
         let provider = config.kind
         guard let request = request(provider) else { return nil }
@@ -373,7 +375,9 @@ private final class AgentUsageLimitsProbe: @unchecked Sendable {
         environment.removeValue(forKey: "CLAUDECODE")
         environment.removeValue(forKey: "TAB_SESSION_ID")
         if provider == .codex { try? AgentProviderLaunch.prepareShadowHome(config) }
-        guard let executable = try? AgentProviderLaunch.executable(config, environment: environment) else { return nil }
+        guard let executable = try? AgentProviderLaunch.executable(config, environment: environment) else {
+            return AgentUsageLimits(provider: provider, failure: "\(provider.name) isn't installed on this computer.")
+        }
         let arguments: [String] = switch request {
         case .claudeControl:
             ["--print", "--verbose", "--input-format", "stream-json", "--output-format", "stream-json",
