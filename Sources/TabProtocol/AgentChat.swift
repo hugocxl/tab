@@ -154,9 +154,17 @@ extension AgentChatItem {
 
     public var isAgentReport: Bool { kind == .user && workContext?.itemType == Self.agentReportType }
 
-    /// A user-kind row that opens a turn nobody typed: one the provider began, or a report
-    /// from an agent this conversation started. It is shown as a note, not as the user's.
-    public var isAutomaticTurn: Bool { isProviderTurn || isAgentReport }
+    /// `workContext.itemType` of the user-kind row that opens the turn carrying on work the
+    /// server stopping cut short. The server wrote it; nobody typed it. Builds that predate
+    /// it show it as a user message.
+    public static let restartResumeType = "restart_resume"
+
+    public var isRestartResume: Bool { kind == .user && workContext?.itemType == Self.restartResumeType }
+
+    /// A user-kind row that opens a turn nobody typed: one the provider began, a report
+    /// from an agent this conversation started, or work carried on after a server restart.
+    /// It is shown as a note, not as the user's.
+    public var isAutomaticTurn: Bool { isProviderTurn || isAgentReport || isRestartResume }
 }
 
 /// What a new conversation starts with instead of its provider's defaults. A conversation

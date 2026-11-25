@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.140.2 - 2026-11-25
+
+### Changed
+
+- Keep agents working through server restarts, continuing each interrupted turn when the server starts again.
+
 ## 0.140.1 - 2026-11-25
 
 ### Fixed

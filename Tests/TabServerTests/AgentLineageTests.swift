@@ -408,7 +408,7 @@ final class AgentLineageTests: XCTestCase {
         defer { second.shutdown() }
         let loaded = try await second.handle(.read(session: parent))
         XCTAssertEqual(loaded.queuedPrompts ?? [], [], "Nothing is queued before the server is set up")
-        second.reportWorkEndedByRestart()
+        second.resumeWorkEndedByRestart()
         let recovered = try await until(second, parent) { $0.queuedPrompts?.count == 1 }
         let report = try XCTUnwrap(recovered.queuedPrompts?.first)
         XCTAssertTrue(report.text.contains("failed: Agent interrupted when the server stopped"))

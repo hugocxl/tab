@@ -169,7 +169,7 @@ public final class Server: @unchecked Sendable {
         agents.checkDirectory = { [weak self] directory in
             try self?.services.worktreeGuard?.checkSession(directory: directory)
         }
-        agents.reportWorkEndedByRestart()
+        agents.resumeWorkEndedByRestart()
         resumeCleanup()
         pruneExpiredSessions()
     }

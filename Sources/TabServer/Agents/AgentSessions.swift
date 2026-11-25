@@ -163,6 +163,9 @@ final class AgentSessions: @unchecked Sendable {
         var deliveringByParent = false
         /// What the parent's sidebar entry last showed of this conversation.
         var shownToParent: String?
+        /// The server stopped during a turn that carries on when it starts again; see
+        /// `AgentRestartResume`.
+        var resumeAfterRestart = false
 
         init(_ snapshot: AgentChatSnapshot, directory: String) {
             self.snapshot = snapshot
@@ -193,6 +196,7 @@ final class AgentSessions: @unchecked Sendable {
         var retention: AgentConversationRetention?
         var owesReport: Bool?
         var reportedOutcome: String?
+        var resumeAfterRestart: Bool?
     }
 
     /// Where a request's snapshot goes: a waiting caller, or a queued delivery that
@@ -339,6 +343,8 @@ final class AgentSessions: @unchecked Sendable {
                 entry.alwaysAllowedTools = Set(saved.alwaysAllowedTools ?? [])
                 entry.owesReport = saved.owesReport == true
                 entry.reportedOutcome = saved.reportedOutcome
+                entry.resumeAfterRestart = saved.resumeAfterRestart == true && !entry.archived
+                    && entry.snapshot.status == .failed
                 // Snapshots saved before tool bodies were stored once still carry both copies.
                 for index in entry.snapshot.items.indices { Self.dropDuplicateDetail(&entry.snapshot.items[index]) }
                 bound(entry)
@@ -354,7 +360,11 @@ final class AgentSessions: @unchecked Sendable {
                 writer.async { self.retainedCheckpointIDs[sessionID] = checkpointIDs }
                 restoreCheckpoints(entry)
                 if entry.snapshot.status == .working || entry.snapshot.status == .waiting {
-                    interrupted(entry, message: "Agent interrupted when the server stopped. Send a message to resume.")
+                    // The previous server ended without stopping the turn, as when it crashed.
+                    entry.resumeAfterRestart = !entry.archived
+                        && AgentRestartResume.resumes(entry.snapshot, handoff: entry.handoffFrom != nil)
+                    interrupted(entry, message: entry.resumeAfterRestart ? AgentRestartResume.stoppedNotice
+                        : AgentRestartResume.interruptedNotice)
                 } else {
                     updateTurn(entry, status: entry.snapshot.status)
                 }
@@ -368,11 +378,32 @@ final class AgentSessions: @unchecked Sendable {
         parents = Set(entries.values.compactMap(\.snapshot.parent))
     }
 
-    /// Reports work a parent asked for that ended with the previous server. The server calls
-    /// it once it has set up how providers launch, as a report may start a parent's turn.
-    func reportWorkEndedByRestart() {
+    /// Carries on turns the previous server stopping cut short, and reports work a parent
+    /// asked for that ended with it. The server calls it once it has set up how providers
+    /// launch, as a resume starts a provider and a report may start a parent's turn.
+    func resumeWorkEndedByRestart() {
         queue.async { [self] in
+            for entry in entries.values where entry.resumeAfterRestart { resumeAfterRestart(entry) }
             for entry in entries.values where entry.owesReport { reportIfDue(entry) }
+        }
+    }
+
+    /// Relaunches `entry`'s provider on its conversation and asks it to continue the turn the
+    /// server stopping cut short. Call on `queue`.
+    private func resumeAfterRestart(_ entry: Entry) {
+        entry.resumeAfterRestart = false
+        guard !stopping, entry.snapshot.status == .failed else { persist(entry); return }
+        let snapshot = entry.snapshot
+        do {
+            try begin(.send(session: snapshot.session, text: AgentRestartResume.prompt, model: snapshot.model,
+                            reasoningEffort: snapshot.reasoningEffort, provider: snapshot.provider,
+                            attachments: nil, providerID: snapshot.providerID),
+                      continuation: Reply { _ in }, restartResume: true)
+        } catch {
+            entry.snapshot.items.append(AgentChatItem(kind: .notice, text:
+                "The agent couldn't continue after the restart: \(error.localizedDescription) Send a message to resume."))
+            touch(entry)
+            persist(entry)
         }
     }
 
@@ -706,8 +737,10 @@ final class AgentSessions: @unchecked Sendable {
 
     /// `caller` is the agent conversation asking, nil for the user and for the server's own
     /// deliveries; `authorize` already let it through.
+    /// `restartResume` carries on a turn the server stopping cut short; see `AgentRestartResume`.
     private func begin(_ request: AgentChatRequest,
-                       continuation: Reply, deliveryID: String? = nil, caller: SessionId? = nil) throws {
+                       continuation: Reply, deliveryID: String? = nil, caller: SessionId? = nil,
+                       restartResume: Bool = false) throws {
         if case .create(let id, let project, let provider, let options) = request {
             if let entry = entries[id] {
                 guard entry.snapshot.project == project else {
@@ -1024,13 +1057,16 @@ final class AgentSessions: @unchecked Sendable {
             let delivering = deliveryID != nil && deliveryID == entry.deliveryID
             let reported = delivering && entry.deliveringReport
             // The parent hears how a turn it asked for ends; a turn the user or another agent
-            // starts is theirs. A report's turn carries on whatever this one owes.
-            if !reported {
+            // starts is theirs. A report's turn, and one carrying on after a restart, carry on
+            // whatever this one owes.
+            if !reported, !restartResume {
                 entry.owesReport = delivering ? entry.deliveringByParent : caller != nil && caller == entry.snapshot.parent
             }
-            let user = AgentChatItem(id: userID, kind: .user, text: text,
+            entry.resumeAfterRestart = false
+            let itemType = restartResume ? AgentChatItem.restartResumeType : reported ? AgentChatItem.agentReportType : nil
+            let user = AgentChatItem(id: userID, kind: .user, text: restartResume ? AgentRestartResume.note : text,
                                      attachments: attachments?.map(\.descriptor),
-                                     workContext: reported ? .init(itemType: AgentChatItem.agentReportType) : nil)
+                                     workContext: itemType.map { .init(itemType: $0) })
             let firstMessage = !entry.snapshot.items.contains { $0.kind == .user && !$0.isProviderTurn }
             entry.snapshot.items.append(observedItem(user, entry: entry))
             if let session = entry.snapshot.providerSession, let message = entry.lastProviderMessage {
@@ -2398,7 +2434,11 @@ final class AgentSessions: @unchecked Sendable {
                 if let runtime = entry.runtime { runtimes.append(runtime) }
                 entry.runtime = nil
                 if entry.snapshot.status == .working || entry.snapshot.status == .waiting {
-                    interrupted(entry, message: "Agent interrupted when the server stopped. Send a message to resume.")
+                    // A turn the user was stopping stays stopped.
+                    entry.resumeAfterRestart = entry.interrupting == nil && !entry.archived
+                        && AgentRestartResume.resumes(entry.snapshot, handoff: entry.handoffFrom != nil)
+                    interrupted(entry, message: entry.resumeAfterRestart ? AgentRestartResume.stoppedNotice
+                        : AgentRestartResume.interruptedNotice)
                 }
                 entry.submitting = false
                 entry.approving.removeAll()
@@ -2813,7 +2853,8 @@ final class AgentSessions: @unchecked Sendable {
                           lastProviderMessage: entry.lastProviderMessage, handoffFrom: entry.handoffFrom,
                           archived: entry.archived ? true : nil,
                           closedAt: entry.closedAt, retention: entry.retention == .keep ? nil : entry.retention,
-                          owesReport: entry.owesReport ? true : nil, reportedOutcome: entry.reportedOutcome)
+                          owesReport: entry.owesReport ? true : nil, reportedOutcome: entry.reportedOutcome,
+                          resumeAfterRestart: entry.resumeAfterRestart ? true : nil)
         let file = root.appendingPathComponent(entry.snapshot.session.description + ".json")
         writer.async {
             do {

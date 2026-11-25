@@ -47,7 +47,7 @@ struct AgentHandoff: Sendable {
         case .user:
             let attached = (item.attachments ?? []).map(\.name)
             let files = attached.isEmpty ? "" : "\n(Attached: \(attached.joined(separator: ", ")))"
-            return (item.isProviderTurn ? "[Event]\n" : "[User]\n") + item.text + files
+            return (item.isProviderTurn || item.isRestartResume ? "[Event]\n" : "[User]\n") + item.text + files
         case .assistant:
             let text = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
             return text.isEmpty ? nil : "[Assistant]\n" + text
