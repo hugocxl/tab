@@ -28,7 +28,7 @@ final class ChromeButtonTests: XCTestCase {
     func testEveryChromeIconHasAnImage() {
         for icon in ChromeIcon.allCases {
             let image = icon.image(size: ChromeButton.glyph)
-            XCTAssertNotNil(image, "\(icon.stroke.rawValue) did not load")
+            XCTAssertNotNil(image, "\(icon.symbolName) did not load")
             XCTAssertEqual(image?.size, NSSize(width: ChromeButton.glyph, height: ChromeButton.glyph))
         }
     }

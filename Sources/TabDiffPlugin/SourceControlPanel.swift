@@ -635,7 +635,7 @@ extension TextGlyphButton {
     }
 }
 
-/// A collapsible Git folder using stroke artwork.
+/// A collapsible Git folder using outline symbols.
 final class ChangeFolderCell: HoverView {
     static let indent: CGFloat = 12
     static let rowHeight: CGFloat = 24

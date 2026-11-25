@@ -65,13 +65,6 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-## @hugocxl/icons
-
-Tab's icons come from @hugocxl/icons, the `Icons` library of the hugocxlStack
-Swift package: https://github.com/hugocxl/stack. The set adapts `@pierre/icons`,
-Pierre's file icons, Simple Icons, LobeHub Icons and Devicon; its `NOTICE` and
-`THIRD_PARTY_LICENSES.md` ship inside the package's resource bundle.
-
 ## herdr
 
 Agent detection manifests and region extraction are adapted from herdr.

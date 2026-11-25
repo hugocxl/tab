@@ -1,8 +1,6 @@
 import AppKit
-import Icons
 
-/// The stroke icons of the sidebar chrome and pane headers, from
-/// @hugocxl/icons' stroke set.
+/// The SF Symbols of the sidebar chrome and pane headers.
 public enum ChromeIcon: String, CaseIterable, Sendable {
     case panelLeft
     case panelRight
@@ -32,35 +30,36 @@ public enum ChromeIcon: String, CaseIterable, Sendable {
     case restore
     case close
 
-    var stroke: StrokeIcon {
+    /// The SF Symbol drawn for this icon.
+    var symbolName: String {
         switch self {
-        case .panelLeft: return .panelLeft
-        case .panelRight: return .panelRight
-        case .command: return .command
-        case .plusCircle: return .circlePlus
-        case .addProject: return .rectangleStackPlus
-        case .globeBadgePlus: return .globePlus
-        case .filter: return .circleListFilter
-        case .clearField: return .circleX
-        case .terminal: return .terminal
-        case .code: return .code
-        case .file: return .file
-        case .gitBranch: return .gitBranch
-        case .globe: return .globe
-        case .phone: return .phone
-        case .chevronLeft: return .chevronLeft
-        case .home: return .home
-        case .rotate: return .rotateLeft
-        case .keyboard: return .keyboard
-        case .appearance: return .contrast
-        case .camera: return .camera
-        case .ellipsis: return .ellipsis
-        case .network: return .network
-        case .columns: return .columns
-        case .rows: return .rows
-        case .maximize: return .maximize2
-        case .restore: return .minimize2
-        case .close: return .close
+        case .panelLeft: return "sidebar.left"
+        case .panelRight: return "sidebar.right"
+        case .command: return "command"
+        case .plusCircle: return "plus.circle"
+        case .addProject: return "rectangle.stack.badge.plus"
+        case .globeBadgePlus: return "safari"
+        case .filter: return "line.3.horizontal.decrease.circle"
+        case .clearField: return "xmark.circle"
+        case .terminal: return "terminal"
+        case .code: return "chevron.left.forwardslash.chevron.right"
+        case .file: return "doc"
+        case .gitBranch: return "arrow.triangle.branch"
+        case .globe: return "globe"
+        case .phone: return "iphone"
+        case .chevronLeft: return "chevron.left"
+        case .home: return "house"
+        case .rotate: return "rotate.left"
+        case .keyboard: return "keyboard"
+        case .appearance: return "circle.lefthalf.filled"
+        case .camera: return "camera"
+        case .ellipsis: return "ellipsis"
+        case .network: return "network"
+        case .columns: return "rectangle.split.2x1"
+        case .rows: return "rectangle.split.1x2"
+        case .maximize: return "arrow.up.left.and.arrow.down.right"
+        case .restore: return "arrow.down.right.and.arrow.up.left"
+        case .close: return "xmark"
         }
     }
 
@@ -69,7 +68,7 @@ public enum ChromeIcon: String, CaseIterable, Sendable {
     public func image(size: CGFloat = Metrics.glyph) -> NSImage? {
         let key = "\(rawValue)-\(size)"
         if let cached = Self.images[key] { return cached }
-        guard let source = stroke.nsImage, source.size.width > 0, source.size.height > 0 else { return nil }
+        guard let source = SFSymbol.image(symbolName, pointSize: size), source.size.width > 0, source.size.height > 0 else { return nil }
         let fit = min(size / source.size.width, size / source.size.height)
         let fitted = NSSize(width: source.size.width * fit, height: source.size.height * fit)
         let image = NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
