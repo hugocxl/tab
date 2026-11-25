@@ -456,7 +456,6 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         surface.onCopyConversation = { [weak self] in self?.copyConversation() }
         surface.newConversation.onPress = { [weak self] in self?.onNewConversation?() }
         surface.dismissNotice.onPress = { [weak self] in self?.dismissNoticePressed() }
-        surface.sendNow.onPress = { [weak self] in self?.sendNow() }
         surface.composer.extraMenuItems = { [weak self] in self?.composerMenuItems() ?? [] }
         surface.onOpenToolDiff = { [weak self] id, activity in
             guard let self else { return }
@@ -555,13 +554,14 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     var keyDisplay: ((ShortcutId) -> String?)?
 
     /// Stops the agent from the keyboard, as the Stop button does, when the composer or
-    /// the transcript has the keyboard, the agent works, and nothing else in the pane
+    /// the transcript has the keyboard, the agent works, Stop shows (a draft must be sent
+    /// or cleared first), and nothing else in the pane
     /// wants the key: the suggestion list, Find, the selection toolbar or an input method.
     /// False lets the key go on.
     func performKeyboardStop() -> Bool {
         guard let responder = surface.window?.firstResponder as? NSView,
               responder === surface.composer || responder === surface || responder.isDescendant(of: surface.transcriptScroll),
-              surface.stop.isEnabled, surface.suggestions.isHidden, !surface.isFindOpen, surface.selectionToolbar.isHidden,
+              surface.stop.isEnabled, !surface.stop.isHidden, surface.suggestions.isHidden, !surface.isFindOpen, surface.selectionToolbar.isHidden,
               !surface.composer.hasMarkedText(), (responder as? NSTextView)?.hasMarkedText() != true else { return false }
         try? surface.actions.interrupt()
         return true
@@ -2271,7 +2271,6 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         // A keystroke changes only what depends on the draft; the conversation's own
         // controls wait for the conversation to change.
         surface.send.isEnabled = canSendDraft
-        surface.sendNow.isEnabled = canSendDraft && sendNowUnavailableReason == nil
         surface.refreshComposer()
         composerCoordinator.changed()
     }

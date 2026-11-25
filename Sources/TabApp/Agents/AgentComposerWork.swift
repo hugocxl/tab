@@ -315,13 +315,11 @@ extension AgentPaneController {
     }
 
     func updateComposerWorkControls() {
-        // The surface shows it only beside Send, so only while there is a draft.
+        // Send is the one action while there is a draft; while the agent works its
+        // tooltip names the Send Now shortcut when the draft could steer the turn.
         let working = snapshot?.status == .working || snapshot?.status == .waiting
-        let reason = sendNowUnavailableReason
-        surface.offersSendNow = working && !submitting
-        surface.sendNow.isEnabled = canSendDraft && reason == nil
-        surface.sendNow.toolTip = reason ?? ("Send now: add this prompt to the running turn"
-            + (keyDisplay?(.sendAgentPromptNow).map { " (\($0))" } ?? ""))
+        guard working, sendNowUnavailableReason == nil, let key = keyDisplay?(.sendAgentPromptNow) else { return }
+        surface.send.toolTip = "Queue this prompt for the next response · \(key) adds it to the running turn now"
     }
 
     // MARK: Stashed drafts

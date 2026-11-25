@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.137.1 - 2026-11-25
+
+### Changed
+
+- Give the agent composer's controls one style on glass, and show one action at a time: send, stop or dictate.
+
 ## 0.137.0 - 2026-11-24
 
 ### Added

@@ -234,9 +234,21 @@ class AgentTextPopUp: NSPopUpButton {
     }
 }
 
+/// The composer's bottom row: every control has one height, one font and a rounded fill
+/// that always shows, its corners concentric with the composer card's.
+enum AgentComposerMetrics {
+    static let controlHeight: CGFloat = 32
+    /// Between the composer card's edge and its controls.
+    static let padding: CGFloat = 10
+    static let controlRadius = GlassView.Style.agentComposer.cornerRadius - padding
+    static var font: NSFont { AppFont.body }
+}
+
 /// Keeps native button keyboard activation, focus masks and mouse tracking around custom artwork.
 @MainActor
 class AgentComposerButton: NSButton {
+    /// A rounded rectangle for the composer row's controls; nil draws a capsule.
+    var cornerRadius: CGFloat?
     var onFocusChange: ((Bool) -> Void)?
     override func becomeFirstResponder() -> Bool {
         let accepted = super.becomeFirstResponder()
@@ -261,7 +273,8 @@ class AgentComposerButton: NSButton {
 
     override var focusRingMaskBounds: NSRect { bounds }
     override func drawFocusRingMask() {
-        NSBezierPath(roundedRect: bounds, xRadius: bounds.height / 2, yRadius: bounds.height / 2).fill()
+        let radius = cornerRadius ?? bounds.height / 2
+        NSBezierPath(roundedRect: bounds, xRadius: radius, yRadius: radius).fill()
     }
 
     override func updateTrackingAreas() {
@@ -274,12 +287,23 @@ class AgentComposerButton: NSButton {
 
     override func mouseEntered(with event: NSEvent) { hovered = true; needsDisplay = true }
     override func mouseExited(with event: NSEvent) { hovered = false; needsDisplay = true }
+
+    /// The composer row's fill: always shown, stronger on hover and press. `tint` colors
+    /// it, such as the accent while plan mode or dictation is on.
+    func drawControlFill(_ theme: AppTheme, tint: NSColor? = nil) {
+        let interactive = isEnabled && (hovered || isHighlighted)
+        let rest: CGFloat = tint == nil ? 0.06 : 0.14
+        let alpha = rest + (interactive ? (isHighlighted ? 0.08 : 0.04) : 0)
+        (tint ?? theme.fg).withAlphaComponent(alpha).setFill()
+        let radius = cornerRadius ?? bounds.height / 2
+        NSBezierPath(roundedRect: bounds, xRadius: radius, yRadius: radius).fill()
+    }
 }
 
-/// Native composer actions; callers control placement, visibility and enabled state.
+/// The composer's one primary action: send, stop or dictate share a slot, and the pane
+/// shows one at a time. Callers control placement, visibility and enabled state.
 @MainActor
 final class AgentRoundButton: AgentComposerButton {
-    /// Stop remains available beside Send while drafting during active work.
     enum Kind { case send, stop, dictate }
     let kind: Kind
     var onPress: (() -> Void)?
@@ -298,6 +322,7 @@ final class AgentRoundButton: AgentComposerButton {
         setAccessibilityLabel(title)
         setButtonType(.momentaryPushIn)
         isBordered = false
+        cornerRadius = AgentComposerMetrics.controlRadius
         target = self
         action = #selector(pressed)
     }
@@ -307,22 +332,18 @@ final class AgentRoundButton: AgentComposerButton {
 
     override var isEnabled: Bool { didSet { needsDisplay = true } }
 
-    /// Send is the one bright button; Stop and an idle Dictate are quieter, so the
-    /// primary action stands out beside them.
-    private var quiet: Bool { kind == .stop || (kind == .dictate && !active) }
+    /// Send reads brightest; an idle Dictate is quieter.
+    private var quiet: Bool { kind == .dictate && !active }
 
     override func draw(_ dirtyRect: NSRect) {
-        if isEnabled && (hovered || isHighlighted) {
-            chatTheme.fg.withAlphaComponent(isHighlighted ? 0.10 : 0.06).setFill()
-            NSBezierPath(ovalIn: bounds).fill()
-        }
+        drawControlFill(chatTheme, tint: active ? chatTheme.accent : nil)
         let ink = !isEnabled ? chatTheme.fgDim : active ? chatTheme.accent : quiet ? chatTheme.fgMuted : chatTheme.fg
         let icon: AppIcon
         let size: CGFloat
         switch kind {
-        case .send: icon = .circleArrowUp; size = 24
-        case .stop: icon = .square; size = 16
-        case .dictate: icon = .microphone; size = 16
+        case .send: icon = .arrowUp; size = 16
+        case .stop: icon = .square; size = 14
+        case .dictate: icon = .waveform; size = 17
         }
         icon.image(size: size, color: ink)?.draw(
             in: NSRect(x: floor(bounds.midX - size / 2), y: floor(bounds.midY - size / 2), width: size, height: size),
@@ -350,6 +371,7 @@ final class AgentModelPicker: AgentComposerButton {
         title = "Model and reasoning effort"
         setAccessibilityLabel(title)
         isBordered = false
+        cornerRadius = AgentComposerMetrics.controlRadius
         setButtonType(.momentaryPushIn)
         target = self
         action = #selector(showMenu)
@@ -374,19 +396,16 @@ final class AgentModelPicker: AgentComposerButton {
     }
 
     override var intrinsicContentSize: NSSize {
-        let width = (labelText as NSString).size(withAttributes: [.font: AppFont.body]).width
-        return NSSize(width: ceil(width) + 34, height: 32)
+        let width = (labelText as NSString).size(withAttributes: [.font: AgentComposerMetrics.font]).width
+        return NSSize(width: ceil(width) + 34, height: AgentComposerMetrics.controlHeight)
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        if isEnabled && (hovered || isHighlighted) {
-            chatTheme.fg.withAlphaComponent(isHighlighted ? 0.10 : 0.06).setFill()
-            NSBezierPath(roundedRect: bounds, xRadius: bounds.height / 2, yRadius: bounds.height / 2).fill()
-        }
+        drawControlFill(chatTheme)
         let color = isEnabled ? chatTheme.fgMuted : chatTheme.fgDim
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = .byTruncatingTail
-        let attributes: [NSAttributedString.Key: Any] = [.font: AppFont.body, .foregroundColor: color, .paragraphStyle: paragraph]
+        let attributes: [NSAttributedString.Key: Any] = [.font: AgentComposerMetrics.font, .foregroundColor: color, .paragraphStyle: paragraph]
         let textHeight = ceil((labelText as NSString).size(withAttributes: attributes).height)
         (labelText as NSString).draw(in: NSRect(x: 12, y: floor((bounds.height - textHeight) / 2), width: max(0, bounds.width - 34), height: textHeight),
                                      withAttributes: attributes)
@@ -525,6 +544,13 @@ final class AgentIconButton: AgentComposerButton {
     var onPress: (() -> Void)?
     var chatTheme: AppTheme = .shared { didSet { needsDisplay = true } }
     var icon: AppIcon { didSet { needsDisplay = true } }
+    /// A composer-row control: a rounded rectangle whose fill always shows.
+    var filled = false {
+        didSet {
+            cornerRadius = filled ? AgentComposerMetrics.controlRadius : nil
+            needsDisplay = true
+        }
+    }
     private let iconSize: CGFloat
 
     init(icon: AppIcon, label: String, iconSize: CGFloat = 16) {
@@ -546,7 +572,9 @@ final class AgentIconButton: AgentComposerButton {
     override var contentTintColor: NSColor? { didSet { needsDisplay = true } }
 
     override func draw(_ dirtyRect: NSRect) {
-        if isEnabled && (hovered || isHighlighted) {
+        if filled {
+            drawControlFill(chatTheme)
+        } else if isEnabled && (hovered || isHighlighted) {
             chatTheme.fg.withAlphaComponent(isHighlighted ? 0.10 : 0.05).setFill()
             NSBezierPath(ovalIn: bounds).fill()
         }
@@ -577,6 +605,7 @@ final class AgentPlanButton: AgentComposerButton {
         super.init(frame: frame)
         title = "Plan"
         isBordered = false
+        cornerRadius = AgentComposerMetrics.controlRadius
         setButtonType(.momentaryPushIn)
         target = self
         action = #selector(pressed)
@@ -585,23 +614,19 @@ final class AgentPlanButton: AgentComposerButton {
     override var isFlipped: Bool { true }
 
     override var intrinsicContentSize: NSSize {
-        let text = ("Plan" as NSString).size(withAttributes: [.font: AppFont.small]).width
-        return NSSize(width: ceil(10 + 14 + 5 + text + (active ? 8 + 8 + 9 : 10)), height: 28)
+        let text = ("Plan" as NSString).size(withAttributes: [.font: AgentComposerMetrics.font]).width
+        return NSSize(width: ceil(10 + 14 + 6 + text + (active ? 8 + 8 + 9 : 12)), height: AgentComposerMetrics.controlHeight)
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        let color = active ? chatTheme.accent : chatTheme.fgDim
-        let fill: CGFloat = active ? (hovered ? 0.20 : 0.13) : (hovered ? 0.08 : 0)
-        if fill > 0 {
-            color.withAlphaComponent(fill).setFill()
-            NSBezierPath(roundedRect: bounds, xRadius: bounds.height / 2, yRadius: bounds.height / 2).fill()
-        }
+        drawControlFill(chatTheme, tint: active ? chatTheme.accent : nil)
+        let color = active ? chatTheme.accent : chatTheme.fgMuted
         let middle = bounds.midY
         AppIcon.listTodo.image(size: 14, color: color)?.draw(in: NSRect(x: 10, y: middle - 7, width: 14, height: 14),
             from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
-        let attributes: [NSAttributedString.Key: Any] = [.font: AppFont.small, .foregroundColor: color]
+        let attributes: [NSAttributedString.Key: Any] = [.font: AgentComposerMetrics.font, .foregroundColor: color]
         let textHeight = ("Plan" as NSString).size(withAttributes: attributes).height
-        ("Plan" as NSString).draw(at: NSPoint(x: 29, y: floor(middle - textHeight / 2)), withAttributes: attributes)
+        ("Plan" as NSString).draw(at: NSPoint(x: 30, y: floor(middle - textHeight / 2)), withAttributes: attributes)
         guard active else { return }
         AppIcon.close.image(size: 8, color: color)?.draw(in: NSRect(x: bounds.width - 17, y: middle - 4, width: 8, height: 8),
             from: .zero, operation: .sourceOver, fraction: hovered ? 1 : 0.65, respectFlipped: true, hints: nil)

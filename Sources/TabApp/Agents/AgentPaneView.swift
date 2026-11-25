@@ -22,14 +22,10 @@ final class AgentPaneView: ThemedView {
     let questions = AgentQuestionView(frame: .zero)
     var citationEnvironmentId: String?
     var citationThreadId: String?
+    /// Send, Stop and Dictate share one slot, and only one shows: see `updatePrimaryAction`.
     let send = AgentRoundButton(kind: .send)
     let stop = AgentRoundButton(kind: .stop)
-    /// Steers the draft into the running turn instead of queueing it; shown beside Send
-    /// while the agent works and the controller offers it.
-    let sendNow = AgentIconButton(icon: .arrowUp, label: "Send now", iconSize: 15)
-    var offersSendNow = false { didSet { if offersSendNow != oldValue { updatePrimaryAction(); needsLayout = true } } }
     let contextIndicator = AgentContextIndicator(frame: .zero)
-    /// Dictation shares the send and stop slot: it shows while the draft is empty and idle.
     let microphone = AgentRoundButton(kind: .dictate)
     let attach = AgentIconButton(icon: .plus, label: "Attach files", iconSize: 18)
     /// The model and reasoning effort, chosen together; `model` and `effort` hold the menus.
@@ -227,13 +223,13 @@ final class AgentPaneView: ThemedView {
         // The pop-ups keep the menus and selection; the combined picker presents them.
         model.isHidden = true
         effort.isHidden = true
-        for child in [composerScroll, attachmentStrip, attach, plan, model, effort, modelPicker, contextIndicator, microphone, send, stop, sendNow] {
+        attach.filled = true
+        for child in [composerScroll, attachmentStrip, attach, plan, model, effort, modelPicker, contextIndicator, microphone, send, stop] {
             composerCard.addSubview(child)
             // This surface uses measured frames: controls must not bring their own size constraints.
             child.translatesAutoresizingMaskIntoConstraints = true
         }
         stop.isHidden = true
-        sendNow.isHidden = true
         model.toolTip = "Choose the provider and model for the next message"
         effort.toolTip = "Choose the reasoning effort for the next message"
         activity.onPress = { [weak self] in self?.revealPendingRequest() }
@@ -318,7 +314,7 @@ final class AgentPaneView: ThemedView {
         let editorTop: CGFloat = attachmentHeight > 0 ? 10 + attachmentHeight : 10
         let controlsTop = editorTop + editorHeight + 2
         layoutComposerControls(width: width, top: controlsTop)
-        let cardHeight = controlsTop + Self.controlSize + 10
+        let cardHeight = controlsTop + Self.controlSize + AgentComposerMetrics.padding
         let empty = isEmptyConversation
         let showNoProviders = empty && providerGap != nil
         let cardY = empty ? floor((bounds.height - cardHeight) / 2) + 40 : bounds.height - 12 - cardHeight
@@ -415,7 +411,7 @@ final class AgentPaneView: ThemedView {
         super.layout()
     }
 
-    private static let controlSize: CGFloat = 32
+    private static let controlSize = AgentComposerMetrics.controlHeight
     /// The notice wraps to this many lines before truncating; its tooltip keeps the rest.
     private static let noticeMaximumLines = 3
     private static let noticeMinimumHeight = AgentPanelMetrics.compactHeight
@@ -507,48 +503,39 @@ final class AgentPaneView: ThemedView {
         (snapshot?.items.isEmpty ?? true) && (snapshot?.queuedPrompts?.isEmpty ?? true) && !submitting && activityStatus == .idle
     }
 
-    /// Send queues a draft while working; Stop remains beside it. Dictate appears while idle.
+    /// One action at a time: dictating offers only finishing it; a draft offers only Send
+    /// (it queues while the agent works), so stopping first takes sending or clearing the
+    /// draft; then Stop while the agent works, else Dictate.
     func updatePrimaryAction() {
         let hasDraft = !composer.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || attachmentStrip.hasAttachments
         // While a submission is in flight its draft is still shown, but the slot offers Stop.
         let showSend = hasDraft && !dictating && !submitting
-        let showStop = busy && !dictating
+        let showStop = busy && !dictating && !showSend
         send.isHidden = !showSend
         stop.isHidden = !showStop
-        sendNow.isHidden = !(showSend && busy && offersSendNow)
         microphone.isHidden = showSend || showStop
     }
 
     /// Lays out the composer's single control row at `top`: attach and the plan chip on
     /// the left; usage, the model picker and the primary action on the right.
     private func layoutComposerControls(width: CGFloat, top: CGFloat) {
-        let padding: CGFloat = 10, size = Self.controlSize, gap: CGFloat = 6
+        let padding = AgentComposerMetrics.padding, size = Self.controlSize, gap: CGFloat = 6
         let action = NSRect(x: width - padding - size, y: top, width: size, height: size)
         for button in [send, stop, microphone] { button.frame = action }
         var right = action.minX - gap
-        if !send.isHidden && !stop.isHidden {
-            right -= size
-            stop.frame = NSRect(x: right, y: top, width: size, height: size)
-            right -= gap
-        }
-        if !sendNow.isHidden {
-            right -= size
-            sendNow.frame = NSRect(x: right, y: top, width: size, height: size)
-            right -= gap
-        }
         // Usage stays out of the way until the context window is half full.
         contextIndicator.isHidden = (contextIndicator.fractionUsed ?? 0) < 0.5
         if !contextIndicator.isHidden {
-            right -= 28
-            contextIndicator.frame = NSRect(x: right, y: top + 2, width: 28, height: 28)
-            right -= 2
+            right -= size
+            contextIndicator.frame = NSRect(x: right, y: top, width: size, height: size)
+            right -= gap
         }
         var x = padding
         attach.frame = NSRect(x: x, y: top, width: size, height: size)
         x += size + gap
         if !plan.isHidden {
             let planWidth = plan.intrinsicContentSize.width
-            plan.frame = NSRect(x: x, y: top + 2, width: planWidth, height: 28)
+            plan.frame = NSRect(x: x, y: top, width: planWidth, height: size)
             x += planWidth + gap
         }
         let pickerWidth = max(0, min(modelPicker.intrinsicContentSize.width, right - x))

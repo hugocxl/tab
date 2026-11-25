@@ -414,8 +414,12 @@ final class AgentComposerWorkTests: XCTestCase {
         defer { pane.dispose() }
         pane.surface.composer.string = "Change direction"
         pane.updateControls()
-        XCTAssertTrue(pane.surface.offersSendNow)
-        XCTAssertTrue(pane.surface.sendNow.isEnabled)
+        XCTAssertNil(pane.sendNowUnavailableReason)
+        // One action at a time: the draft offers Send, never Stop beside it.
+        pane.surface.layoutSubtreeIfNeeded()
+        XCTAssertFalse(pane.surface.send.isHidden)
+        XCTAssertTrue(pane.surface.stop.isHidden)
+        XCTAssertTrue(pane.surface.microphone.isHidden)
         pane.sendNow()
         try await wait { pane.notice?.text == "Sent." }
         XCTAssertEqual(backend.submissions.count, 1)
@@ -437,8 +441,7 @@ final class AgentComposerWorkTests: XCTestCase {
         defer { pane.dispose() }
         pane.surface.composer.string = "After the approval"
         pane.updateControls()
-        XCTAssertFalse(pane.surface.sendNow.isEnabled)
-        XCTAssertTrue(pane.surface.sendNow.toolTip?.contains("waiting") == true)
+        XCTAssertTrue(pane.sendNowUnavailableReason?.contains("waiting") == true)
         pane.sendNow()
         try await wait { backend.submissions.count == 1 && pane.commandTask == nil }
         XCTAssertEqual(backend.deliveries, 0)
@@ -454,13 +457,13 @@ final class AgentComposerWorkTests: XCTestCase {
         pane.surface.composer.string = "Not yet"
         backend.gateNextRead = true
         pane.connectionChanged()
-        XCTAssertFalse(pane.surface.sendNow.isEnabled)
+        XCTAssertNotNil(pane.sendNowUnavailableReason)
         pane.sendNow()
         XCTAssertTrue(backend.submissions.isEmpty)
         try await wait { backend.readGate != nil }
         backend.readGate?.resume()
         try await wait { !pane.needsAuthoritativeSnapshot }
-        XCTAssertTrue(pane.surface.sendNow.isEnabled)
+        XCTAssertNil(pane.sendNowUnavailableReason)
     }
 
     func testATurnEndingBetweenClickAndDispatchDeliversOnceAndSaysSo() async throws {

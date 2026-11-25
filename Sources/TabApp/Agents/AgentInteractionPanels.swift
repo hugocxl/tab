@@ -31,10 +31,9 @@ final class AgentSurfaceCard: ThemedView {
         layer.borderWidth = Metrics.border
         layer.borderColor = theme.fg.withAlphaComponent(theme.palette.isLight ? 0.10 : 0.12).cgColor
         // Enough of the theme's composer color to keep text legible over a busy transcript,
-        // while the conversation still reads through the glass. The panels above the
-        // composer let more of it through, so they read as messages over the conversation.
-        let glassOpacity: CGFloat = style.cornerRadius == GlassView.Style.agentComposer.cornerRadius ? 0.45 : 0.3
-        fill.layer?.backgroundColor = theme.agentComposer.withAlphaComponent(theme.glassEnabled ? glassOpacity : 0.82).cgColor
+        // while the conversation still reads through the glass; the composer and the
+        // panels above it are one glass.
+        fill.layer?.backgroundColor = theme.agentComposer.withAlphaComponent(theme.glassEnabled ? 0.3 : 0.82).cgColor
     }
 
     override func layout() {
