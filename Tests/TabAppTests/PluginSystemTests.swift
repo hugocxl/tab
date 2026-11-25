@@ -103,7 +103,7 @@ final class PluginSystemTests: XCTestCase {
         let dirs = try! ModelFixtures.profile()
         addTeardownBlock { try? FileManager.default.removeItem(at: dirs.root) }
         let host = PreviewSettingsHost()
-        let store = SettingsStore(dirs: dirs, host: host, theme: AppTheme(systemIsDark: true))
+        let store = SettingsStore(dirs: dirs, configFile: dirs.root.appendingPathComponent("user-settings.json"), host: host, theme: AppTheme(systemIsDark: true))
 
         XCTAssertEqual(store.pluginState(.explorer), .notInstalled)
         store.installPlugin(.explorer)

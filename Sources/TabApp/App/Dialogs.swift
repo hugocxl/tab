@@ -75,7 +75,8 @@ final class TextPrompt: NSObject, NSPopoverDelegate {
 }
 
 /// New Worktree…: a name, a new branch from a base or an existing branch,
-/// where its folder goes, and the setup hooks to run, as a sheet.
+/// and its folder, as a sheet. The folder defaults to where the settings put
+/// worktrees; the server runs their `open` commands once it is created.
 @MainActor
 final class NewWorktreeDialog: NSObject {
     private unowned let model: AppModel
@@ -86,14 +87,12 @@ final class NewWorktreeDialog: NSObject {
     private let branch = InsetTextField(value: "", placeholder: "Branch name", label: "Branch name", width: 320)
     private let base = PopUp(items: [], selected: "", label: "Base branch")
     private let existing = PopUp(items: [], selected: "", label: "Existing branch")
-    private let location = SegmentedPill(["Default", "Template", "Folder"], selected: 0)
-    private let path = InsetTextField(value: "", placeholder: "", label: "Location", width: 320)
+    private let path = InsetTextField(value: "", placeholder: "", label: "Folder", width: 320)
     private let chooseFolder = PillButton("Choose Folder…")
-    private let locationNote = makeLabel("", font: AppFont.footnote)
-    private let hooksStack = NSStackView()
+    private let commandsNote = makeLabel("", font: AppFont.footnote)
     private let error = makeLabel("", font: AppFont.footnote)
     private let create = PillButton("Create", style: .primary)
-    private var hooks: [(WorktreeHook, Switch)] = []
+    private var settings: BranchSettings?
     private var branchEdited = false
     private static var open: NewWorktreeDialog?
 
@@ -108,7 +107,7 @@ final class NewWorktreeDialog: NSObject {
     private init(model: AppModel, parent: ProjectId) {
         self.model = model
         self.parent = parent
-        panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 460, height: 400), styleMask: [.titled], backing: .buffered, defer: true)
+        panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 460, height: 360), styleMask: [.titled], backing: .buffered, defer: true)
         super.init()
         panel.appearance = AppTheme.shared.nsAppearance
         let projectName = model.state.project(parent).map { model.title(of: $0) } ?? ""
@@ -117,31 +116,25 @@ final class NewWorktreeDialog: NSObject {
         create.onPress = { [weak self] in self?.submit() }
         chooseFolder.onPress = { [weak self] in self?.pickFolder() }
         name.onChange = { [weak self] text in
-            guard let self, !self.branchEdited else { return }
-            self.branch.stringValue = sanitizedComponent(text, fallback: "")
+            guard let self else { return }
+            if !self.branchEdited { self.branch.stringValue = sanitizedComponent(text, fallback: "") }
+            self.updateFolder()
         }
-        branch.onChange = { [weak self] _ in self?.branchEdited = true }
+        branch.onChange = { [weak self] _ in
+            self?.branchEdited = true
+            self?.updateFolder()
+        }
+        existing.onChange = { [weak self] _ in self?.updateFolder() }
         mode.onChange = { [weak self] _ in self?.updateVisibility() }
-        location.onChange = { [weak self] _ in self?.updateVisibility() }
-        let saved = model.settings.worktrees.projects[parent] ?? WorktreeLocation()
-        if !saved.pathTemplate.isEmpty {
-            location.select(1)
-            path.stringValue = saved.pathTemplate
-        } else if !saved.parentPath.isEmpty {
-            location.select(2)
-            path.stringValue = saved.parentPath
-        }
         error.textColor = AppTheme.shared.danger
         error.isHidden = true
-        locationNote.textColor = AppTheme.shared.fgMuted
-        hooksStack.orientation = .vertical
-        hooksStack.alignment = .leading
-        hooksStack.spacing = 6
+        commandsNote.textColor = AppTheme.shared.fgMuted
+        commandsNote.isHidden = true
         let buttons = NSStackView(views: [NSView(), cancel, create])
         buttons.spacing = 8
         let rows: [NSView] = [
             title, row("Name", name), row("Branch", mode), row("", branch), row("Base", base), row("", existing),
-            row("Location", location), row("", path), row("", chooseFolder), row("", locationNote), hooksStack, error, buttons,
+            row("Folder", path), row("", chooseFolder), row("", commandsNote), error, buttons,
         ]
         let stack = NSStackView(views: rows)
         stack.orientation = .vertical
@@ -154,6 +147,8 @@ final class NewWorktreeDialog: NSObject {
         stack.pinEdges(to: background)
         panel.contentView = background
         panel.initialFirstResponder = name.field
+        let local = model.state.projectServer(parent)?.isLocal ?? true
+        chooseFolder.superview?.isHidden = !local
         updateVisibility()
     }
 
@@ -175,26 +170,19 @@ final class NewWorktreeDialog: NSObject {
                 let free = branches.filter { !$0.checkedOut }.map { PopUp.Item(id: $0.name, title: $0.name) }
                 existing.setItems(free, selected: free.first?.id ?? "")
             }
-            switch await model.worktreeHooks(parent: parent, teardown: false) {
-            case .success(let list):
-                hooks = list.map { hook in
-                    let label = "\(hook.project ? "Project" : "Per-machine"): \(hook.name ?? hook.command)"
-                    let toggle = Switch(isOn: false, label: label)
-                    let text = makeLabel(label, font: AppFont.small, color: AppTheme.shared.fgMuted)
-                    text.toolTip = hook.command
-                    let line = NSStackView(views: [toggle, text])
-                    line.spacing = 8
-                    hooksStack.addArrangedSubview(line)
-                    return (hook, toggle)
-                }
-                if !list.isEmpty {
-                    hooksStack.insertArrangedSubview(makeLabel("Setup commands (review before enabling)", font: AppFont.footnoteMedium,
-                                                               color: AppTheme.shared.fgMuted), at: 0)
-                }
+            switch await model.loadBranchSettings(parent: parent) {
+            case .success(let loaded):
+                settings = loaded
+                let open = loaded.worktreeCommands.open
+                commandsNote.stringValue = open.isEmpty ? "" : "Then runs: " + open.map(\.label).joined(separator: ", ")
+                commandsNote.toolTip = open.map(\.command).joined(separator: "\n")
+                commandsNote.superview?.isHidden = open.isEmpty
             case .failure(let failure):
-                hooksStack.addArrangedSubview(makeLabel("Setup hooks could not be loaded: \(failure.message)", font: AppFont.footnote,
-                                                        color: AppTheme.shared.warning))
+                commandsNote.stringValue = "Settings could not be read: \(failure.message)"
+                commandsNote.textColor = AppTheme.shared.warning
+                commandsNote.superview?.isHidden = false
             }
+            updateFolder()
         }
     }
 
@@ -203,19 +191,18 @@ final class NewWorktreeDialog: NSObject {
         branch.superview?.isHidden = existingBranch
         base.superview?.isHidden = existingBranch
         existing.superview?.isHidden = !existingBranch
-        let choice = location.selectedIndex
-        path.superview?.isHidden = choice == 0
-        let local = model.state.projectServer(parent)?.isLocal ?? true
-        chooseFolder.superview?.isHidden = choice != 2 || !local
-        path.field.placeholderString = choice == 1 ? WorktreeLocation.suggestedTemplate : "~/worktrees"
-        let defaults = model.settings.worktrees.defaultLocation
-        if choice == 0 {
-            locationNote.stringValue = !defaults.pathTemplate.isEmpty ? "Global template: \(defaults.pathTemplate)"
-                : !defaults.parentPath.isEmpty ? "Global folder: \(defaults.parentPath)" : TabDirs.defaultWorktreeFolder
-        } else {
-            locationNote.stringValue = ""
-        }
-        locationNote.superview?.isHidden = choice != 0
+        updateFolder()
+    }
+
+    private var branchName: String {
+        mode.selectedIndex == 1 ? existing.selectedId : branch.stringValue.trimmingCharacters(in: .whitespaces)
+    }
+
+    /// Shows where the settings put the worktree, as the folder's placeholder.
+    private func updateFolder() {
+        let branch = branchName.isEmpty ? "branch" : branchName
+        path.field.placeholderString = (try? model.worktreeDirectory(parent: parent, location: settings?.worktreeLocation,
+                                                                     branch: branch)) ?? ""
     }
 
     private func pickFolder() {
@@ -238,27 +225,24 @@ final class NewWorktreeDialog: NSObject {
         let worktreeName = name.stringValue.trimmingCharacters(in: .whitespaces)
         guard !worktreeName.isEmpty else { return fail("Enter a name.") }
         let useExisting = mode.selectedIndex == 1
-        let branchName = useExisting ? existing.selectedId : branch.stringValue.trimmingCharacters(in: .whitespaces)
+        let branchName = self.branchName
         guard !branchName.isEmpty else { return fail(useExisting ? "Choose a branch." : "Enter a branch name.") }
         let text = path.stringValue.trimmingCharacters(in: .whitespaces)
-        let choice = location.selectedIndex
-        if choice != 0 && text.isEmpty { return fail(choice == 1 ? "Path template is required." : "Folder is required.") }
-        let chosen = WorktreeLocation(pathTemplate: choice == 1 ? text : "", parentPath: choice == 2 ? text : "")
         let directory: String
         do {
-            directory = try model.worktreeDirectory(parent: parent, location: chosen, name: worktreeName, branch: branchName)
+            directory = text.isEmpty
+                ? try model.worktreeDirectory(parent: parent, location: settings?.worktreeLocation, branch: branchName)
+                : try model.worktreeFolder(parent: parent, path: text)
         } catch {
             return fail(error.message)
         }
-        model.saveWorktreeLocation(chosen, for: parent)
-        let approved = hooks.filter { $0.1.isOn }.map(\.0)
         let baseBranch = useExisting ? nil : (base.selectedId.isEmpty ? nil : base.selectedId)
         let model = self.model
         let parent = self.parent
         close()
         Task {
             if let message = await model.createWorktree(parent: parent, name: worktreeName, branch: branchName, base: baseBranch,
-                                                        directory: directory, hooks: approved.isEmpty ? nil : approved) {
+                                                        directory: directory) {
                 model.report(message)
             }
         }

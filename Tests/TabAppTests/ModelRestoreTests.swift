@@ -144,7 +144,7 @@ final class ModelRestoreActivationTests: XCTestCase {
         let ready = await ModelFixtures.wait { model.connectionState(.local).isReady }
         XCTAssertTrue(ready)
         let host = SettingsHostImpl(model: model)
-        let store = SettingsStore(dirs: dirs, host: host, theme: model.theme)
+        let store = SettingsStore(dirs: dirs, configFile: dirs.root.appendingPathComponent("user-settings.json"), host: host, theme: model.theme)
         host.store = store
         XCTAssertNil(store.remoteAccess)
         server.send(.changed(topic: .remoteAccess, revision: 1))

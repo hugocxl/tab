@@ -24,7 +24,7 @@ final class SettingsStoreRegressionTests: XCTestCase {
     }
 
     private func store() -> SettingsStore {
-        SettingsStore(dirs: dirs, host: host)
+        SettingsStore(dirs: dirs, configFile: dirs.root.appendingPathComponent("user-settings.json"), host: host)
     }
 
     private func settle(_ condition: () -> Bool) async throws {
@@ -119,13 +119,13 @@ final class SettingsStoreRegressionTests: XCTestCase {
 
     func testClosingSettingsSavesFieldsBeingTyped() throws {
         let controller = SettingsWindowController(store: store())
-        for (category, id, text) in [(SettingsCategory.general, "worktree-template", "../{branch}")] {
+        for (category, id, text) in [(SettingsCategory.general, "worktree-location", "../{branch}")] {
             controller.select(category)
             let field = try XCTUnwrap(controller.model.fields[id])
             controller.model.editing(id) { field.commit(text) }
         }
         controller.window?.close()
-        XCTAssertEqual(try Settings.load(dirs.settings).worktrees.defaultLocation.pathTemplate, "../{branch}")
+        XCTAssertEqual(try TabConfig.worktreeLocation(in: dirs.root.appendingPathComponent("user-settings.json")), "../{branch}")
     }
 
     private func buttons(in control: SettingControl?) -> [ButtonSpec] {

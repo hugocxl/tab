@@ -339,18 +339,20 @@ public enum AgentSkill {
     tab project list
     tab project new ~/code/app --reuse               # prints the existing project if there is one
     tab ~/code/app                                   # open a folder as a project in the app
-    tab worktree new MyProject login                 # branch "login" from HEAD, default location
-    tab worktree new MyProject fix --branch fix/x --base main --hooks
+    tab worktree new MyProject login                 # branch "login" from the default branch, default location
+    tab worktree new MyProject fix --branch fix/x --base main
     tab worktree new MyProject --pr 42               # check out pull request 42
     tab worktree list MyProject
     tab worktree remove login --yes
     ```
 
     `worktree new` and `project new` print the project's ID, name and folder,
-    separated by tabs. `--hooks` runs the setup or teardown commands from
-    `.tab/worktree.json` and `~/.config/tab/worktree.json`; ask the user before
-    using it. `worktree remove` refuses uncommitted changes unless `--force` is
-    given; never pass `--force` without the user's consent.
+    separated by tabs. A worktree starts from the default branch that the
+    project's `.config/tab/settings.json` or `~/.config/tab/settings.json` names,
+    else HEAD, and goes where their `worktrees.location` says. Creating it runs
+    their `worktrees.open` commands and removing it their `worktrees.close`
+    commands, on their own. `worktree remove` refuses uncommitted changes unless
+    `--force` is given; never pass `--force` without the user's consent.
 
     `tab exec MyProject -- git status` runs a program in a project's folder on its
     server, without a terminal, and prints what it prints.

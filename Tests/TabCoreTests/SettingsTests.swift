@@ -127,46 +127,6 @@ final class SettingsTests: XCTestCase {
         }
     }
 
-    // MARK: Worktrees
-
-    func testWorktreeTemplatesRequireABranchThatSurvivesNormalization() {
-        for template in ["../fixed", "../{branch}/../fixed", "  "] {
-            XCTAssertEqual((try? WorktreeLocation(pathTemplate: template).validate()) != nil, template.trimmingCharacters(in: .whitespaces).isEmpty, template)
-        }
-        XCTAssertNoThrow(try WorktreeLocation(pathTemplate: WorktreeLocation.suggestedTemplate).validate())
-        XCTAssertEqual(sanitizedComponent("feature/a b", fallback: "name"), "feature-a-b")
-        XCTAssertEqual(sanitizedComponent("..", fallback: "name"), "name")
-    }
-
-    func testWorktreeLocationPrecedenceAndSavedPreferences() throws {
-        let home = "/Users/dev"
-        var settings = Settings()
-        let defaultChoice = WorktreeLocation()
-        func directory(_ location: WorktreeLocation, name: String = "Feature A") throws -> String {
-            try settings.worktrees.directory(projectName: "My Project", projectDirectory: "/code/repo", location: location, name: name, branch: "feature/a", home: home)
-        }
-        XCTAssertEqual(try directory(defaultChoice), "/Users/dev/.tab/worktrees/My-Project/Feature-A")
-        settings.worktrees.defaultLocation.parentPath = "  "
-        XCTAssertEqual(try directory(defaultChoice), "/Users/dev/.tab/worktrees/My-Project/Feature-A")
-        settings.worktrees.defaultLocation.parentPath = "/trees"
-        XCTAssertEqual(try directory(defaultChoice), "/trees/My-Project/Feature-A")
-        settings.worktrees.defaultLocation.parentPath = "~/trees"
-        XCTAssertEqual(try directory(defaultChoice), "/Users/dev/trees/My-Project/Feature-A")
-        settings.worktrees.defaultLocation.parentPath = "/trees"
-        XCTAssertEqual(try directory(WorktreeLocation(parentPath: "../trees")), "/code/trees/Feature-A")
-        let template = WorktreeLocation(pathTemplate: "../{base-dir}.{branch}/{project-name}")
-        XCTAssertEqual(try directory(template, name: "ignored"), "/code/repo.feature-a/My-Project")
-
-        let project = ProjectId()
-        settings.worktrees.projects[project] = template
-        let files = try TemporaryDirectory()
-        let path = files.file("settings.json")
-        try settings.saveWorktrees(to: path)
-        XCTAssertEqual(try Settings.load(path).worktrees, settings.worktrees)
-        settings.worktrees.projects[project] = WorktreeLocation(pathTemplate: "../fixed")
-        XCTAssertThrowsError(try settings.saveWorktrees(to: path))
-    }
-
     // MARK: Servers
 
     private func names(_ settings: Settings) -> [String] { settings.servers.map(\.name) }

@@ -32,7 +32,7 @@ final class SettingsSnapshotTests: XCTestCase {
             theme.setSystemDark(wasDark)
         }
         theme.setCatalog(ThemeCatalog.load(customDirectory: nil))
-        let store = SettingsStore(dirs: TabDirs(root: root), host: host, theme: theme)
+        let store = SettingsStore(dirs: TabDirs(root: root), configFile: root.appendingPathComponent("user-settings.json"), host: host, theme: theme)
         let controller = SettingsWindowController(store: store)
         let window = try XCTUnwrap(controller.window)
         window.setFrameOrigin(NSPoint(x: -20000, y: -20000))

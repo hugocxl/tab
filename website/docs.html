@@ -84,6 +84,24 @@
         </div>
         <p>Add <code>--host</code> to work with another Mac’s server over SSH. <span class="ds-muted"><code>tab help</code> followed by a command explains it in full.</span></p>
       </section>
+      <section class="ds-section" id="branch-settings">
+        <h2>Branch settings</h2>
+        <p>Every checkout Tab opens is a branch: a project’s own folder is its default branch, and each worktree is another branch. <span class="ds-muted">A <code>settings.json</code> says where worktrees go and what runs when a branch opens or closes in Tab, without asking.</span></p>
+        <div class="ds-code"><pre tabindex="0"><code>{
+  "defaultBranch": {
+    "name": "main",
+    "open": ["npm ci"],
+    "close": [{ "name": "Stop services", "command": "docker compose down" }]
+  },
+  "worktrees": {
+    "location": "../{base-dir}.{branch}",
+    "open": ["npm ci", "cp \"$TAB_PROJECT_PATH/.env\" ."],
+    "close": ["docker compose down"]
+  }
+}</code></pre><button type="button">Copy</button></div>
+        <p>Put it in <code>~/.config/tab/settings.json</code> for every project, or commit it as <code>.config/tab/settings.json</code> in a project. <span class="ds-muted">The project’s <code>name</code> and <code>location</code> win; commands add up, yours first on open and the project’s first on close. Every key is optional.</span></p>
+        <p>The default branch’s <code>open</code> runs when the project is added and <code>close</code> when it is removed. A worktree’s run after it is created and before it is removed. <span class="ds-muted">Commands run in the branch’s folder with <code>TAB_PROJECT_PATH</code>, <code>TAB_BRANCH</code> and <code>TAB_BRANCH_PATH</code>, plus <code>TAB_WORKTREE_ID</code> and <code>TAB_WORKTREE_NAME</code> for worktrees.</span></p>
+      </section>
       <section class="ds-section" id="agent-integrations">
         <h2>Teach your agents to use Tab</h2>
         <p>One command installs the <code>tab-cli</code> skill into Claude Code, Codex, OpenCode and Pi, and hooks into Claude Code and Codex. <span class="ds-muted">Agents then know how to open panes, read terminals and drive the browser, and Tab sees whether each one is working, blocked or idle.</span></p>

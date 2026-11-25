@@ -230,11 +230,19 @@ public struct CLIAgentStart: Hashable, Sendable {
 
 public enum CLIWorktree: Hashable, Sendable {
     case list(project: String)
-    /// `base == nil` checks out an existing branch.
-    case new(project: String, name: String, branch: String, base: String?, directory: String?, hooks: Bool)
-    case pullRequest(project: String, number: UInt64, name: String?, directory: String?, hooks: Bool)
+    case new(project: String, name: String, branch: String, base: CLIWorktreeBase, directory: String?)
+    case pullRequest(project: String, number: UInt64, name: String?, directory: String?)
     case register(project: String, directory: String)
-    case remove(worktree: String, force: Bool, hooks: Bool)
+    case remove(worktree: String, force: Bool)
+}
+
+/// What a new worktree's branch starts from.
+public enum CLIWorktreeBase: Hashable, Sendable {
+    /// The default branch the project's settings name, else HEAD.
+    case defaultBranch
+    case ref(String)
+    /// The branch exists already; check it out.
+    case existing
 }
 
 public enum CLIMobile: Hashable, Sendable {

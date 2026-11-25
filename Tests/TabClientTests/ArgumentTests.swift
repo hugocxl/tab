@@ -408,18 +408,18 @@ final class ArgumentTests: XCTestCase {
 
     func testWorktreeCommands() throws {
         XCTAssertEqual(try action(["worktree", "new", "App", "login"]),
-                       .worktree(.new(project: "App", name: "login", branch: "login", base: "HEAD", directory: nil,
-                                      hooks: false)))
+                       .worktree(.new(project: "App", name: "login", branch: "login", base: .defaultBranch, directory: nil)))
+        XCTAssertEqual(try action(["worktree", "new", "App", "login", "--base", "main"]),
+                       .worktree(.new(project: "App", name: "login", branch: "login", base: .ref("main"), directory: nil)))
         XCTAssertEqual(try action(["worktree", "new", "App", "fix", "--branch", "fix/x", "--existing",
-                                   "--directory", "/tmp/fix", "--hooks"]),
-                       .worktree(.new(project: "App", name: "fix", branch: "fix/x", base: nil, directory: "/tmp/fix",
-                                      hooks: true)))
+                                   "--directory", "/tmp/fix"]),
+                       .worktree(.new(project: "App", name: "fix", branch: "fix/x", base: .existing, directory: "/tmp/fix")))
         XCTAssertEqual(try action(["worktree", "new", "App", "--pr", "#12"]),
-                       .worktree(.pullRequest(project: "App", number: 12, name: nil, directory: nil, hooks: false)))
-        XCTAssertEqual(try action(["worktree", "new", "App", "review", "--pr", "12", "--hooks"]),
-                       .worktree(.pullRequest(project: "App", number: 12, name: "review", directory: nil, hooks: true)))
-        XCTAssertEqual(try action(["worktree", "remove", "login", "--yes", "--force", "--hooks"]),
-                       .worktree(.remove(worktree: "login", force: true, hooks: true)))
+                       .worktree(.pullRequest(project: "App", number: 12, name: nil, directory: nil)))
+        XCTAssertEqual(try action(["worktree", "new", "App", "review", "--pr", "12"]),
+                       .worktree(.pullRequest(project: "App", number: 12, name: "review", directory: nil)))
+        XCTAssertEqual(try action(["worktree", "remove", "login", "--yes", "--force"]),
+                       .worktree(.remove(worktree: "login", force: true)))
         XCTAssertEqual(try action(["worktree", "list", "App"]), .worktree(.list(project: "App")))
         XCTAssertEqual(try action(["worktree", "register", "App", "/srv/w"]),
                        .worktree(.register(project: "App", directory: "/srv/w")))
@@ -427,6 +427,7 @@ final class ArgumentTests: XCTestCase {
             ["worktree", "new", "Home", "w", "--branch", "x", "--base", "main", "--existing"],
             ["worktree", "new", "Home", " "], ["worktree", "new", "Home"], ["worktree", "new", "Home", "--pr", "0"],
             ["worktree", "new", "Home", "--pr", "twelve"], ["worktree", "new", "Home", "--pr", "1", "--base", "main"],
+            ["worktree", "new", "Home", "w", "--hooks"], ["worktree", "remove", "w", "--yes", "--hooks"],
         ] {
             assertRefused(words)
         }

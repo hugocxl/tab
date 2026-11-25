@@ -133,8 +133,10 @@ struct GitRepository: Sendable {
     /// The Git config key recording the branch `branch` started from.
     static func baseKey(_ branch: String) -> String { "branch.\(branch).tabBase" }
 
-    func branches() throws -> [GitBranch] {
-        let defaultBranch = git.optionalText(path, ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"])
+    /// The local branches; `isDefault` marks `configured`, else the one
+    /// `origin/HEAD` names, else `main` or `master`.
+    func branches(defaultBranch configured: String? = nil) throws -> [GitBranch] {
+        let defaultBranch = configured ?? git.optionalText(path, ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"])
             .flatMap { $0.hasPrefix("origin/") ? String($0.dropFirst(7)) : nil }
         let output = try git.text(path, ["for-each-ref", "--format=%(refname:short)%00%(HEAD)", "refs/heads/"])
         let checkedOut = Set(try worktrees().compactMap(\.branch))

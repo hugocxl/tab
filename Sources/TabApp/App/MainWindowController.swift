@@ -19,7 +19,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, A
     private var pendingFolderBrowser: ServerId?
     private var settingsWindow: SettingsWindowController?
     let settingsHost: SettingsHostImpl
-    private lazy var settingsStore = SettingsStore(dirs: model.dirs, host: settingsHost, theme: model.theme)
+    private lazy var settingsStore = SettingsStore(dirs: model.dirs, configFile: TabConfig.userFile(), host: settingsHost, theme: model.theme)
     private var subscriptions: Set<AnyCancellable> = []
 
     /// The window buttons' left edge.

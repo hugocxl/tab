@@ -43,12 +43,48 @@ final class SidebarListingTests: XCTestCase {
         let parent = try XCTUnwrap(model.addProject(try ModelFixtures.folder("app")))
         _ = await ModelFixtures.wait { self.model.state.projectIntents(.local).isEmpty }
         _ = await model.createWorktree(parent: parent, name: "feature", branch: "feature", base: "main",
-                                       directory: "/tmp/worktrees/feature", hooks: nil)
+                                       directory: "/tmp/worktrees/feature")
         let request = try XCTUnwrap(server.gitRequests.last)
         guard case .worktree(let intent) = request.action,
               case .create(let project, _, _, _) = intent.action else { return XCTFail("Expected a worktree creation") }
         XCTAssertEqual(request.project, parent)
         XCTAssertNotEqual(project, parent)
+        XCTAssertEqual(intent.options?.runCommands, true, "the server runs the open commands of a dialog's worktree")
+    }
+
+    /// A quick worktree goes where the settings say, and leaves their open
+    /// commands to its first terminal instead of the server.
+    func testQuickWorktreeGoesWhereTheSettingsSayAndRunsTheirCommandsInItsTerminal() async throws {
+        let folder = try ModelFixtures.folder("app")
+        let parent = try XCTUnwrap(model.addProject(folder))
+        _ = await ModelFixtures.wait { self.model.state.projectIntents(.local).isEmpty }
+        server.gitReply = { request in
+            switch request.action {
+            case .branchSettings:
+                return .branchSettings(BranchSettings(
+                    worktreeLocation: "../{base-dir}.{branch}",
+                    worktreeCommands: BranchCommands(open: [BranchCommand(command: "npm ci", project: true)])))
+            case .branches:
+                return .branches([GitBranch(name: "main", current: true, checkedOut: true, isDefault: true)])
+            default:
+                return .summary(nil)
+            }
+        }
+        model.quickWorktree(parent: parent, name: "login", opening: .terminal)
+        func creation() -> WorktreeIntent? {
+            for request in self.server.gitRequests {
+                if case .worktree(let intent) = request.action { return intent }
+            }
+            return nil
+        }
+        _ = await ModelFixtures.wait { creation() != nil }
+        let intent = try XCTUnwrap(creation())
+        guard case .create(_, let directory, let branch, let base) = intent.action else { return XCTFail("creation") }
+        XCTAssertEqual(directory.rawValue, (folder as NSString).deletingLastPathComponent + "/" + (folder as NSString).lastPathComponent + ".login")
+        XCTAssertEqual(branch, "login")
+        XCTAssertEqual(base, "main")
+        XCTAssertNil(intent.options?.runCommands)
+        XCTAssertNil(intent.options?.hooks)
     }
 
     func testQuickWorktreeNavigatesImmediatelyAndClearsSelectionWhenSwitchingAway() async throws {

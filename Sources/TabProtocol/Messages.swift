@@ -984,6 +984,9 @@ public enum EventBody: Hashable, Codable, Sendable {
     case progress(session: SessionId, progress: SessionProgress)
     case sessionEnded(session: SessionId, reason: ExitReason)
     case gitChanged(project: ProjectId)
+    /// A project's default-branch `open` or `close` commands failed; the
+    /// message names the project and says what failed.
+    case branchCommandsFailed(project: ProjectId, message: String)
     case filesChanged(project: ProjectId, changes: FileChanges)
     /// The server is about to restart; reconnect.
     case serverRestarting
@@ -1000,6 +1003,7 @@ public enum EventBody: Hashable, Codable, Sendable {
         case "progress": self = .progress(session: try c("session"), progress: try c("progress"))
         case "sessionEnded": self = .sessionEnded(session: try c("session"), reason: try c("reason"))
         case "gitChanged": self = .gitChanged(project: try c("project"))
+        case "branchCommandsFailed": self = .branchCommandsFailed(project: try c("project"), message: try c("message"))
         case "filesChanged": self = .filesChanged(project: try c("project"), changes: try c("changes"))
         case "serverRestarting": self = .serverRestarting
         case "fatal": self = .fatal(try c("error"))
@@ -1032,6 +1036,10 @@ public enum EventBody: Hashable, Codable, Sendable {
         case .gitChanged(let project):
             var c = try TaggedEncoding(encoder, "gitChanged")
             try c(project, "project")
+        case .branchCommandsFailed(let project, let message):
+            var c = try TaggedEncoding(encoder, "branchCommandsFailed")
+            try c(project, "project")
+            try c(message, "message")
         case .filesChanged(let project, let changes):
             var c = try TaggedEncoding(encoder, "filesChanged")
             try c(project, "project")

@@ -99,7 +99,9 @@ enum Samples {
         .worktree(WorktreeIntent(operation: operation, action: .remove(expected: removal))),
         .worktree(WorktreeIntent(operation: operation,
                                  action: .checkoutPullRequest(project: project, directory: "/tmp/pr", number: 4))),
-        .inspectRemoval, .worktreeHooks(teardown: true),
+        .inspectRemoval, .worktreeHooks(teardown: true), .branchSettings,
+        .worktree(WorktreeIntent(operation: operation, action: .remove(expected: removal),
+                                 options: WorktreeOptions(runCommands: true))),
         .pullRequest(.info), .pullRequest(.number), .pullRequest(.diff(number: 3, lineLimit: nil)),
         .pullRequest(.preview(host: "github.com", repository: "example/repository", number: 3)),
         .pullRequest(.list(filter: .merged, limit: 20, checks: true)),
@@ -146,6 +148,13 @@ enum Samples {
         .baseSwitch(.updated), .baseSwitch(.checkedOutElsewhere(directory)),
         .worktreeHooks([WorktreeHook(command: "npm i", project: false)]),
         .worktreeSetupFailed(project: descriptor, message: "hook failed"),
+        .branchSettings(BranchSettings(
+            defaultBranch: "main",
+            defaultBranchCommands: BranchCommands(open: [BranchCommand(command: "npm ci", project: true)]),
+            worktreeLocation: "../{base-dir}.{branch}",
+            worktreeCommands: BranchCommands(open: [BranchCommand(command: "make", name: "Build", project: false)],
+                                             close: [BranchCommand(command: "docker compose down", project: true)]))),
+        .commandsFailed(message: "“down” failed"),
     ]
 
     static let filesActions: [FilesAction] = [
@@ -340,6 +349,7 @@ enum Samples {
         .sessionEnded(session: session, reason: .signaled(9)), .sessionEnded(session: session, reason: .ended),
         .sessionEnded(session: session, reason: .serverStopped),
         .gitChanged(project: project), .filesChanged(project: project, changes: FileChanges(paths: ["a"])),
+        .branchCommandsFailed(project: project, message: "“App”: its open commands failed"),
         .serverRestarting, .fatal(ErrorReply(code: .unauthorized, message: "no")), .unknown("someFutureEvent"),
     ]
 

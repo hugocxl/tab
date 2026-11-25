@@ -13,6 +13,8 @@ import TabProtocol
 @MainActor
 public final class SettingsStore {
     public let dirs: TabDirs
+    /// The user's hand-edited `~/.config/tab/settings.json` (see `TabConfig`).
+    public let configFile: URL
     public weak var host: SettingsHost?
     public let theme: AppTheme
 
@@ -73,8 +75,10 @@ public final class SettingsStore {
 
     /// Loads `settings.json` and `terminal.json` from `dirs`. A file that
     /// does not load leaves the defaults in place and its problem on the page.
-    public init(dirs: TabDirs, host: SettingsHost?, theme: AppTheme? = nil) {
+    /// `configFile` is the user's `~/.config/tab/settings.json`.
+    public init(dirs: TabDirs, configFile: URL, host: SettingsHost?, theme: AppTheme? = nil) {
         self.dirs = dirs
+        self.configFile = configFile
         self.host = host
         self.theme = theme ?? .shared
         serverState = host?.serverState ?? .stopped
@@ -162,17 +166,17 @@ public final class SettingsStore {
         }
     }
 
-    public func setWorktreeLocation(_ id: String, _ text: String) {
-        attempt(id) {
-            var next = settings
-            if id == "worktree-template" {
-                next.worktrees.defaultLocation.pathTemplate = text
-            } else {
-                next.worktrees.defaultLocation.parentPath = text
-            }
-            try next.saveWorktrees(to: dirs.settings)
-            settings = next
-            applySettings()
+    /// The `worktrees.location` of the user's `settings.json`; empty when
+    /// unset or unreadable.
+    public var worktreeLocation: String {
+        (try? TabConfig.worktreeLocation(in: configFile)) ?? ""
+    }
+
+    /// Saves `worktrees.location` in the user's `settings.json`, keeping the
+    /// rest of the file; empty removes it.
+    public func setWorktreeLocation(_ text: String) {
+        attempt("worktree-location") {
+            try TabConfig.setWorktreeLocation(text, in: configFile)
         }
     }
 

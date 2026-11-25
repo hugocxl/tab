@@ -22,7 +22,7 @@ final class SettingsTests: XCTestCase {
     }
 
     private func makeStore() -> SettingsStore {
-        SettingsStore(dirs: dirs, host: host, theme: AppTheme(catalog: ThemeCatalog(entries: []), systemIsDark: true))
+        SettingsStore(dirs: dirs, configFile: dirs.root.appendingPathComponent("user-settings.json"), host: host, theme: AppTheme(catalog: ThemeCatalog(entries: []), systemIsDark: true))
     }
 
     func testTerminalPageShowsExactlyItsSectionsAndTheStartupCommandSavesOnTheServer() async throws {

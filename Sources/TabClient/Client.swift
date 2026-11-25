@@ -13,6 +13,8 @@ public enum ClientEvent: Hashable, Sendable {
     case sessionEnded(session: SessionId, reason: ExitReason)
     case gitChanged(project: ProjectId)
     case filesChanged(project: ProjectId, changes: FileChanges)
+    /// A project's default-branch commands from `settings.json` failed.
+    case branchCommandsFailed(project: ProjectId, message: String)
     /// The server is about to restart; connect again.
     case serverRestarting
     /// The connection closed; always the last event.
@@ -499,6 +501,7 @@ private final class State: @unchecked Sendable {
         case .progress(let session, let progress): mapped = .progress(session: session, progress: progress)
         case .sessionEnded(let session, let reason): mapped = .sessionEnded(session: session, reason: reason)
         case .gitChanged(let project): mapped = .gitChanged(project: project)
+        case .branchCommandsFailed(let project, let message): mapped = .branchCommandsFailed(project: project, message: message)
         case .filesChanged(let project, let changes): mapped = .filesChanged(project: project, changes: changes)
         case .serverRestarting: mapped = .serverRestarting
         case .fatal(let error):

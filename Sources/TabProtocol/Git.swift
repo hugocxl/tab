@@ -51,8 +51,13 @@ public enum GitAction: Hashable, Codable, Sendable {
     case worktree(WorktreeIntent)
     /// Inspects the project's worktree before removing it.
     case inspectRemoval
-    /// The hooks configured for worktrees, for explicit approval.
+    /// The worktree `open` (or with `teardown`, `close`) commands from
+    /// `settings.json`, for clients older than `branchSettings`.
     case worktreeHooks(teardown: Bool)
+    /// The project's branch settings: its `.config/tab/settings.json` over
+    /// the user's `~/.config/tab/settings.json`. Older servers reply
+    /// `unsupported`.
+    case branchSettings
     case pullRequest(GitPullRequestAction)
     /// Replaces this connection's working tree watch with the project's.
     case watch
@@ -106,6 +111,7 @@ public enum GitAction: Hashable, Codable, Sendable {
         case "worktree": self = .worktree(try c("intent"))
         case "inspectRemoval": self = .inspectRemoval
         case "worktreeHooks": self = .worktreeHooks(teardown: try c("teardown"))
+        case "branchSettings": self = .branchSettings
         case "pullRequest": self = .pullRequest(try c("action"))
         case "watch": self = .watch
         case "unwatch": self = .unwatch
@@ -205,6 +211,7 @@ public enum GitAction: Hashable, Codable, Sendable {
         case .worktreeHooks(let teardown):
             var c = try TaggedEncoding(encoder, "worktreeHooks")
             try c(teardown, "teardown")
+        case .branchSettings: try TaggedEncoding(encoder, "branchSettings")
         case .pullRequest(let action):
             var c = try TaggedEncoding(encoder, "pullRequest")
             try c(action, "action")
@@ -323,31 +330,108 @@ public enum WorktreeAction: Hashable, Codable, Sendable {
 public struct WorktreeOptions: Hashable, Codable, Sendable {
     /// The new project's name.
     public var name: String?
-    /// `nil` skips hooks; otherwise approves exactly these commands.
+    /// Commands an older client asks the server to run; `runCommands`
+    /// replaces it.
     public var hooks: [WorktreeHook]?
     /// Fetch the base branch from its remote first and start from the
     /// remote's copy when there is one. Older servers ignore it and start
     /// from the local branch.
     public var fetchBase: Bool?
+    /// Run the worktree's `open` commands after creating it, or its `close`
+    /// commands before removing it, from `settings.json`. Unset leaves them
+    /// to the client, which runs `open` in the worktree's first terminal.
+    public var runCommands: Bool?
 
-    public init(name: String? = nil, hooks: [WorktreeHook]? = nil, fetchBase: Bool? = nil) {
+    public init(name: String? = nil, hooks: [WorktreeHook]? = nil, fetchBase: Bool? = nil, runCommands: Bool? = nil) {
         self.name = name
         self.hooks = hooks
         self.fetchBase = fetchBase
+        self.runCommands = runCommands
     }
 }
 
-/// A setup or teardown command, approved as an exact, ordered preview.
+/// A command as older clients see it in `worktreeHooks`.
 public struct WorktreeHook: Hashable, Codable, Sendable {
     public var command: String
     public var name: String?
-    /// From the project's `.tab/worktree.json` rather than the user's.
+    /// From the project's settings rather than the user's.
     public var project: Bool
 
     public init(command: String, name: String? = nil, project: Bool) {
         self.command = command
         self.name = name
         self.project = project
+    }
+}
+
+// MARK: - Branch settings
+
+/// A command from `settings.json` that runs in a branch's folder when the
+/// branch opens or closes in Tab.
+public struct BranchCommand: Hashable, Codable, Sendable {
+    public var command: String
+    public var name: String?
+    /// From the project's `.config/tab/settings.json` rather than the user's.
+    public var project: Bool
+
+    public init(command: String, name: String? = nil, project: Bool) {
+        self.command = command
+        self.name = name
+        self.project = project
+    }
+
+    /// What progress and failures call it.
+    public var label: String { name ?? command }
+}
+
+/// What runs when a kind of branch opens in Tab and when it closes, in run order.
+public struct BranchCommands: Hashable, Codable, Sendable {
+    public var open: [BranchCommand]
+    public var close: [BranchCommand]
+
+    public init(open: [BranchCommand] = [], close: [BranchCommand] = []) {
+        self.open = open
+        self.close = close
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        open = try container.decodeIfPresent([BranchCommand].self, forKey: .open) ?? []
+        close = try container.decodeIfPresent([BranchCommand].self, forKey: .close) ?? []
+    }
+
+    public var isEmpty: Bool { open.isEmpty && close.isEmpty }
+}
+
+/// A project's branch settings, its `.config/tab/settings.json` over the
+/// user's `~/.config/tab/settings.json`: the default branch is the
+/// project's own folder, and worktrees are every other branch.
+public struct BranchSettings: Hashable, Codable, Sendable {
+    /// The branch new worktrees start from and pull requests target; nil
+    /// detects it from the remote.
+    public var defaultBranch: String?
+    /// Runs when the project is added to Tab, and when it is removed.
+    public var defaultBranchCommands: BranchCommands
+    /// Where new worktrees go: a path template with `{branch}`, and
+    /// optionally `{project-name}` and `{base-dir}`. Nil is the default.
+    public var worktreeLocation: String?
+    /// Runs after a worktree is created, and before it is removed.
+    public var worktreeCommands: BranchCommands
+
+    public init(defaultBranch: String? = nil, defaultBranchCommands: BranchCommands = BranchCommands(),
+                worktreeLocation: String? = nil, worktreeCommands: BranchCommands = BranchCommands()) {
+        self.defaultBranch = defaultBranch
+        self.defaultBranchCommands = defaultBranchCommands
+        self.worktreeLocation = worktreeLocation
+        self.worktreeCommands = worktreeCommands
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        defaultBranch = try container.decodeIfPresent(String.self, forKey: .defaultBranch)
+        defaultBranchCommands = try container.decodeIfPresent(BranchCommands.self, forKey: .defaultBranchCommands) ?? BranchCommands()
+        worktreeLocation = try container.decodeIfPresent(String.self, forKey: .worktreeLocation)
+        worktreeCommands = try container.decodeIfPresent(BranchCommands.self, forKey: .worktreeCommands) ?? BranchCommands()
     }
 }
 
@@ -991,6 +1075,10 @@ public enum GitReply: Hashable, Codable, Sendable {
     case worktreeHooks([WorktreeHook])
     /// The worktree was created but its setup failed; it remains available.
     case worktreeSetupFailed(project: ProjectDescriptor, message: String)
+    case branchSettings(BranchSettings)
+    /// The action finished, but commands from `settings.json` failed. Only
+    /// for requests with `WorktreeOptions.runCommands`.
+    case commandsFailed(message: String)
 
     public init(from decoder: Decoder) throws {
         let c = try TaggedDecoding(decoder)
@@ -1017,6 +1105,8 @@ public enum GitReply: Hashable, Codable, Sendable {
         case "baseSwitch": self = .baseSwitch(try c("result"))
         case "worktreeHooks": self = .worktreeHooks(try c("hooks"))
         case "worktreeSetupFailed": self = .worktreeSetupFailed(project: try c("project"), message: try c("message"))
+        case "branchSettings": self = .branchSettings(try c("settings"))
+        case "commandsFailed": self = .commandsFailed(message: try c("message"))
         default: throw unknownCase(c.type, decoder)
         }
     }
@@ -1087,6 +1177,12 @@ public enum GitReply: Hashable, Codable, Sendable {
         case .worktreeSetupFailed(let project, let message):
             var c = try TaggedEncoding(encoder, "worktreeSetupFailed")
             try c(project, "project")
+            try c(message, "message")
+        case .branchSettings(let settings):
+            var c = try TaggedEncoding(encoder, "branchSettings")
+            try c(settings, "settings")
+        case .commandsFailed(let message):
+            var c = try TaggedEncoding(encoder, "commandsFailed")
             try c(message, "message")
         }
     }

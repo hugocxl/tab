@@ -60,7 +60,9 @@ final class GitHub: @unchecked Sendable {
 
     // MARK: - Actions
 
-    func apply(_ action: GitPullRequestAction, in repository: GitRepository) throws -> GitReply {
+    /// `defaultBranch` is the one the project's settings name, which new
+    /// pull requests target unless they say otherwise.
+    func apply(_ action: GitPullRequestAction, in repository: GitRepository, defaultBranch configured: String? = nil) throws -> GitReply {
         let identity: String
         if case .preview = action { identity = "" } else { identity = try self.identity(repository) }
         switch action {
@@ -87,8 +89,8 @@ final class GitHub: @unchecked Sendable {
                                  truncate: GitCommand.diffLimit)
             return .rawDiff(GitParsing.bounded(output.stdout, truncated: output.truncated, lineLimit: lineLimit))
         case .create(let title, let body, let baseBranch, let draft):
-            return try create(repository, identity: identity, title: title, body: body, baseBranch: baseBranch,
-                              draft: draft)
+            return try create(repository, identity: identity, title: title, body: body,
+                              baseBranch: baseBranch ?? configured, draft: draft)
         case .merge(let number, let method, let deleteBranch, let expectedHead):
             var arguments = ["pr", "merge", String(number), "--repo", identity, "--\(method.rawValue)"]
             if deleteBranch { arguments.append("--delete-branch") }

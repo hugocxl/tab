@@ -259,21 +259,22 @@ enum CLICommands {
                            json: true) { a in
                 manage(a, .worktree(.list(project: a.word(0))))
             },
-            CLICommandSpec("worktree new", ["PROJECT NAME [--branch NAME] [--base REF | --existing] [--directory DIR] [--hooks]",
-                                            "PROJECT --pr NUMBER [NAME] [--directory DIR] [--hooks]"],
+            CLICommandSpec("worktree new", ["PROJECT NAME [--branch NAME] [--base REF | --existing] [--directory DIR]",
+                                            "PROJECT --pr NUMBER [NAME] [--directory DIR]"],
                            "Create a worktree and its project, on a new branch or a pull request's",
                            words: 1 ... 2, values: ["--branch", "--base", "--directory", "--pr"],
-                           flags: ["--existing", "--hooks"], json: true) { a in
+                           flags: ["--existing"], json: true) { a in
                 let name = try a.optional(1).map(projectName)
                 guard let number = a.value("--pr") else {
                     guard let name else { throw a.usage }
                     if a.flag("--existing"), a.value("--base") != nil {
                         throw CLIError("--base and --existing can't be combined")
                     }
+                    let base: CLIWorktreeBase = a.flag("--existing") ? .existing
+                        : a.value("--base").map(CLIWorktreeBase.ref) ?? .defaultBranch
                     return manage(a, .worktree(.new(project: a.word(0), name: name,
-                                                    branch: a.value("--branch") ?? name,
-                                                    base: a.flag("--existing") ? nil : a.value("--base") ?? "HEAD",
-                                                    directory: a.value("--directory"), hooks: a.flag("--hooks"))))
+                                                    branch: a.value("--branch") ?? name, base: base,
+                                                    directory: a.value("--directory"))))
                 }
                 guard a.value("--branch") == nil, a.value("--base") == nil, !a.flag("--existing") else {
                     throw CLIError("--pr checks out the pull request's branch; leave out --branch, --base and --existing")
@@ -284,28 +285,29 @@ enum CLICommands {
                     throw CLIError("--pr must be a pull request number")
                 }
                 return manage(a, .worktree(.pullRequest(project: a.word(0), number: parsed, name: name,
-                                                        directory: a.value("--directory"), hooks: a.flag("--hooks"))))
+                                                        directory: a.value("--directory"))))
             },
             CLICommandSpec("worktree register", ["PROJECT DIRECTORY"],
                            "Add a worktree that already exists on disk as a project", words: 2 ... 2,
                            json: true) { a in
                 manage(a, .worktree(.register(project: a.word(0), directory: a.word(1))))
             },
-            CLICommandSpec("worktree remove", ["WORKTREE --yes [--force] [--hooks]"],
+            CLICommandSpec("worktree remove", ["WORKTREE --yes [--force]"],
                            "Delete the worktree's folder and project, ending its terminals", words: 1 ... 1,
-                           flags: ["--yes", "--force", "--hooks"]) { a in
+                           flags: ["--yes", "--force"]) { a in
                 try a.confirm()
-                return manage(a, .worktree(.remove(worktree: a.word(0), force: a.flag("--force"),
-                                                   hooks: a.flag("--hooks"))))
+                return manage(a, .worktree(.remove(worktree: a.word(0), force: a.flag("--force"))))
             },
         ],
         notes: """
-        new branches from HEAD, or --base, under the worktree's name or --branch;
-        --existing checks out a branch that exists instead. --pr checks out a pull
-        request, named pr-NUMBER unless a name is given. The folder defaults to
-        ~/.tab/worktrees/PROJECT/NAME.
-        --hooks runs the setup or teardown commands of .tab/worktree.json and
-        ~/.config/tab/worktree.json, printing each one; without it none run.
+        new branches from --base, else the default branch the project's settings
+        name, else HEAD, under the worktree's name or --branch; --existing checks
+        out a branch that exists instead. --pr checks out a pull request, named
+        pr-NUMBER unless a name is given. The folder is --directory, else the
+        settings' worktrees.location, else ~/.tab/worktrees/PROJECT/BRANCH.
+        Settings come from the project's .config/tab/settings.json over
+        ~/.config/tab/settings.json. new runs the worktrees.open commands and
+        remove the worktrees.close commands they list.
         remove refuses uncommitted changes unless --force is given.
         list prints the columns projectId, branch and directory.
         """)

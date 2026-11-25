@@ -7,7 +7,6 @@ public struct Settings: Codable, Equatable, Sendable {
     public var window: WindowSettings
     public var keymap: Keymap
     public var projects: ProjectSettings
-    public var worktrees: WorktreeSettings
     public var openers: OpenerSettings
     public var browser: BrowserSettings
     public var notifications: NotificationSettings
@@ -25,7 +24,6 @@ public struct Settings: Codable, Equatable, Sendable {
         window = WindowSettings()
         keymap = Keymap()
         projects = ProjectSettings()
-        worktrees = WorktreeSettings()
         openers = OpenerSettings()
         browser = BrowserSettings()
         notifications = NotificationSettings()
@@ -42,7 +40,6 @@ public struct Settings: Codable, Equatable, Sendable {
         window = try container.value(.window, defaults.window)
         keymap = try container.value(.keymap, defaults.keymap)
         projects = try container.value(.projects, defaults.projects)
-        worktrees = try container.value(.worktrees, defaults.worktrees)
         openers = try container.value(.openers, defaults.openers)
         browser = try container.value(.browser, defaults.browser)
         notifications = try container.value(.notifications, defaults.notifications)
@@ -116,12 +113,6 @@ public struct Settings: Codable, Equatable, Sendable {
 
     public func savePlugins(to url: URL) throws {
         try saveSection("plugins", plugins, to: url)
-    }
-
-    public func saveWorktrees(to url: URL) throws {
-        try worktrees.defaultLocation.validate()
-        for location in worktrees.projects.values { try location.validate() }
-        try saveSection("worktrees", worktrees, to: url)
     }
 
     /// Saves whether closing asks first while a program runs. The setting

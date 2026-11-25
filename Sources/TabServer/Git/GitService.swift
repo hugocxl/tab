@@ -11,7 +11,7 @@ public final class GitService: GitServiceProtocol, @unchecked Sendable {
     let events: ServiceEvents
     let git: GitCommand
     let github: GitHub
-    let hooks: WorktreeHooks
+    let commands: BranchCommandRunner
     let operations = WorktreeOperations()
 
     private let repositoryLocks = LockTable<String, ReadWriteLock> { ReadWriteLock() }
@@ -34,15 +34,15 @@ public final class GitService: GitServiceProtocol, @unchecked Sendable {
     /// `catalog` resolves projects and records worktree projects; `events`
     /// delivers `gitChanged` to watching clients.
     public convenience init(projects catalog: WorktreeCatalog, events: ServiceEvents) {
-        self.init(projects: catalog, events: events, lookup: .system, hooks: WorktreeHooks())
+        self.init(projects: catalog, events: events, lookup: .system, commands: BranchCommandRunner())
     }
 
-    init(projects catalog: WorktreeCatalog, events: ServiceEvents, lookup: ExecutableLookup, hooks: WorktreeHooks) {
+    init(projects catalog: WorktreeCatalog, events: ServiceEvents, lookup: ExecutableLookup, commands: BranchCommandRunner) {
         self.catalog = catalog
         self.events = events
         self.git = GitCommand(lookup: lookup)
         self.github = GitHub(lookup: lookup)
-        self.hooks = hooks
+        self.commands = commands
     }
 
     /// Lets the core refuse catalog changes and sessions that would race a
@@ -67,6 +67,8 @@ public final class GitService: GitServiceProtocol, @unchecked Sendable {
         switch request.action {
         case .worktree(let intent):
             return try worktree(owner: request.project, intent: intent)
+        case .branchSettings:
+            return .branchSettings(try commands.settings(projectDirectory: try root(of: request.project).directory.rawValue))
         case .unwatch:
             clientDisconnected(client)
             return .done
@@ -110,7 +112,7 @@ public final class GitService: GitServiceProtocol, @unchecked Sendable {
 
     static func isRead(_ action: GitAction) -> Bool {
         switch action {
-        case .summary, .branches, .changes, .worktrees, .worktreeHooks, .inspectRemoval, .status, .repoInfo,
+        case .summary, .branches, .changes, .worktrees, .worktreeHooks, .branchSettings, .inspectRemoval, .status, .repoInfo,
              .remoteBranches, .log, .graph, .diff, .rawDiff, .branchDiff, .changesPreview, .stagedPreview:
             return true
         case .pullRequest(let action):
@@ -127,7 +129,7 @@ public final class GitService: GitServiceProtocol, @unchecked Sendable {
                           common: String) throws -> GitReply {
         switch action {
         case .summary: return .summary(try repository.summary())
-        case .branches: return .branches(try repository.branches())
+        case .branches: return .branches(try repository.branches(defaultBranch: configuredDefaultBranch(project)))
         case .changes: return .changes(try repository.changes())
         case .status(let local):
             let pullRequest: GitPullRequest? = local ? nil : {
@@ -136,10 +138,11 @@ public final class GitService: GitServiceProtocol, @unchecked Sendable {
             }()
             // One `git status` serves both the summary and the files.
             let status = try repository.status()
+            let configured = configuredDefaultBranch(project)
             return .status(GitStatus(summary: try repository.summary(of: status),
-                                     defaultBranch: github.defaultBranch(repository, common: common),
-                                     branches: try repository.branches(), files: try repository.fileStatus(of: status.files),
-                                     pullRequest: pullRequest))
+                                     defaultBranch: configured ?? github.defaultBranch(repository, common: common),
+                                     branches: try repository.branches(defaultBranch: configured),
+                                     files: try repository.fileStatus(of: status.files), pullRequest: pullRequest))
         case .repoInfo: return .repoInfo(try repository.repoInfo())
         case .remoteBranches: return .remoteBranches(try repository.remoteBranches())
         case .log(let maxCount, let skip): return .log(try repository.log(maxCount: maxCount, skip: skip))
@@ -163,7 +166,8 @@ public final class GitService: GitServiceProtocol, @unchecked Sendable {
             try repository.publish(branch: branch, expected: destination)
             return .done
         case .switchToBase(let base): return .baseSwitch(try repository.switchToBase(base))
-        case .pullRequest(let action): return try github.apply(action, in: repository)
+        case .pullRequest(let action):
+            return try github.apply(action, in: repository, defaultBranch: configuredDefaultBranch(project))
         case .commit(let message, let stageAll, let amend):
             return .commit(try repository.commit(message: message, stageAll: stageAll, amend: amend))
         case .push(let setUpstream): try repository.push(setUpstream: setUpstream)
@@ -190,10 +194,11 @@ public final class GitService: GitServiceProtocol, @unchecked Sendable {
                 return worktree
             })
         case .worktreeHooks(let teardown):
-            let source = try project.parentId.map { try catalog.project($0) } ?? project
-            return .worktreeHooks(try hooks.resolve(repository: source.directory.rawValue, teardown: teardown))
+            let settings = try commands.settings(projectDirectory: try root(of: project.id).directory.rawValue)
+            let list = teardown ? settings.worktreeCommands.close : settings.worktreeCommands.open
+            return .worktreeHooks(list.map { WorktreeHook(command: $0.command, name: $0.name, project: $0.project) })
         case .inspectRemoval: return .removal(try inspectRemoval(project))
-        case .worktree, .initRepository, .watch, .unwatch:
+        case .worktree, .branchSettings, .initRepository, .watch, .unwatch:
             throw ServiceError(.badRequest, "Unsupported Git action")
         }
         return .done
@@ -216,6 +221,41 @@ public final class GitService: GitServiceProtocol, @unchecked Sendable {
         if let watch { watches[client] = watch }
         mutex.unlock()
         previous?.stop()
+    }
+
+    // MARK: - Branch settings
+
+    /// The project that owns `project`'s settings: its parent for a worktree.
+    func root(of project: ProjectId) throws -> ProjectDescriptor {
+        let descriptor = try catalog.project(project)
+        return try descriptor.parentId.map { try catalog.project($0) } ?? descriptor
+    }
+
+    /// The default branch the project's settings name; nil when they name
+    /// none or can't be read, so a broken file never breaks Git.
+    func configuredDefaultBranch(_ project: ProjectDescriptor) -> String? {
+        let folder = (try? project.parentId.map { try catalog.project($0) } ?? project)?.directory.rawValue
+        return folder.flatMap { try? commands.settings(projectDirectory: $0).defaultBranch }
+    }
+
+    public func runDefaultBranchCommands(_ project: ProjectDescriptor, closing: Bool) {
+        guard !project.home, project.kind == nil, project.parentId == nil else { return }
+        let directory = project.directory.rawValue
+        DispatchQueue.global(qos: .utility).async { [commands, git, events] in
+            do {
+                let settings = try commands.settings(projectDirectory: directory)
+                let list = closing ? settings.defaultBranchCommands.close : settings.defaultBranchCommands.open
+                guard !list.isEmpty else { return }
+                guard Self.isDirectory(directory) else { throw gitError("its folder is missing") }
+                let branch = git.optionalText(directory, ["branch", "--show-current"]) ?? ""
+                try commands.run(list, in: directory, variables: BranchCommandRunner.variables(
+                    project: directory, directory: directory, branch: branch))
+            } catch {
+                let message = "“\(project.name)”: its \(closing ? "close" : "open") commands failed: \((error as? ServiceError)?.message ?? String(describing: error))"
+                ServerLog.error(message)
+                events.broadcast(.branchCommandsFailed(project: project.id, message: message))
+            }
+        }
     }
 
     // MARK: - Helpers

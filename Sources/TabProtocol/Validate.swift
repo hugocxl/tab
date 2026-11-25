@@ -445,6 +445,8 @@ extension EventBody {
             try metadata.directory.validate()
         case .progress(_, let progress):
             if let percent = progress.progress?.percent, percent > 100 { throw .badRequest }
+        case .branchCommandsFailed(_, let message):
+            if message.utf8.count > 64 * 1024 { throw .badRequest }
         case .changed, .agentChatChanged, .sessionEnded, .gitChanged, .serverRestarting, .fatal, .unknown:
             break
         }
@@ -721,7 +723,7 @@ extension GitRequest {
         case .worktree(let intent):
             try intent.validate()
         case .summary, .branches, .remoteBranches, .changes, .status, .repoInfo, .initRepository, .pull, .push,
-             .fetch, .worktrees, .inspectRemoval, .worktreeHooks, .watch, .unwatch:
+             .fetch, .worktrees, .inspectRemoval, .worktreeHooks, .branchSettings, .watch, .unwatch:
             break
         }
     }
@@ -764,6 +766,7 @@ extension WorktreeOptions {
         if fetchBase == true {
             guard case .create(_, _, _, let base) = action, base != nil else { throw .badRequest }
         }
+        if runCommands == true, case .register = action { throw .badRequest }
     }
 }
 

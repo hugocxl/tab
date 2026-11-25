@@ -490,11 +490,29 @@ public final class Server: @unchecked Sendable {
         case .create:
             break
         }
+        // A retried operation must not run the default branch's commands again.
+        let existing: ProjectDescriptor? = switch intent.mutation {
+        case .create(let project): try? catalog.project(project.id)
+        case .delete(let project): try? catalog.project(project)
+        case .rename, .pruneWorktree: nil
+        }
         let revision = try catalog.mutate(intent)
         switch intent.mutation {
         case .delete: try finishDeletions()
         case .pruneWorktree: try pruneTabs()
         case .create, .rename: break
+        }
+        switch intent.mutation {
+        case .create(let project):
+            if existing == nil, let added = try? catalog.project(project.id) {
+                services.git?.runDefaultBranchCommands(added, closing: false)
+            }
+        case .delete(let project):
+            if let existing, (try? catalog.project(project)) == nil {
+                services.git?.runDefaultBranchCommands(existing, closing: true)
+            }
+        case .rename, .pruneWorktree:
+            break
         }
         return max(revision, catalog.revision)
     }

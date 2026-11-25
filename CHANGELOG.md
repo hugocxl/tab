@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.139.0 - 2026-11-25
+
+### Changed
+
+- Set worktree locations, default branches and open and close commands in your and each project's settings.
+
 ## 0.138.2 - 2026-11-25
 
 ### Fixed

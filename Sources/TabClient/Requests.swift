@@ -428,10 +428,11 @@ extension ServerClient {
         } while true
     }
 
-    /// The reply budget of a Git action: worktree hooks have five minutes of
-    /// their own on the server, on top of the Git work.
+    /// The reply budget of a Git action: a worktree's commands have five
+    /// minutes of their own on the server, on top of the Git work.
     static func gitTimeout(_ action: GitAction) -> TimeInterval {
-        if case .worktree(let intent) = action, let hooks = intent.options?.hooks, !hooks.isEmpty {
+        if case .worktree(let intent) = action,
+           intent.options?.runCommands == true || !(intent.options?.hooks ?? []).isEmpty {
             return 610
         }
         return 300

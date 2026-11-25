@@ -132,7 +132,7 @@ final class AddProviderTests: XCTestCase {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let host = PreviewSettingsHost()
-        let store = SettingsStore(dirs: TabDirs(root: root), host: host,
+        let store = SettingsStore(dirs: TabDirs(root: root), configFile: root.appendingPathComponent("user-settings.json"), host: host,
                                   theme: AppTheme(catalog: ThemeCatalog(entries: []), systemIsDark: true))
         let page = SettingsModel(store: store)
         page.select(.agents)
@@ -173,7 +173,7 @@ final class AddProviderTests: XCTestCase {
                                        home: NSHomeDirectory() + "/.claude-work", environment: [AgentProviderVariable(name: "A", value: "1")])
         host.providers = AgentProvidersState(settings: AgentProviderSettings(providers: [.builtIn(.codex), work]))
         host.remoteProviders[mini] = AgentProvidersState(settings: AgentProviderSettings(providers: [.builtIn(.codex)]))
-        let store = SettingsStore(dirs: TabDirs(root: root), host: host,
+        let store = SettingsStore(dirs: TabDirs(root: root), configFile: root.appendingPathComponent("user-settings.json"), host: host,
                                   theme: AppTheme(catalog: ThemeCatalog(entries: []), systemIsDark: true))
         let page = SettingsModel(store: store)
         page.select(.agents)
@@ -234,7 +234,7 @@ final class AddProviderTests: XCTestCase {
         let running = AgentProviderMaintenance(provider: "codex", action: .install, command: "npm i -g @openai/codex",
                                                status: .running, startedAt: Date())
         host.providers = AgentProvidersState(settings: AgentProviderSettings(providers: [.builtIn(.codex)]), maintenance: [running])
-        let store = SettingsStore(dirs: TabDirs(root: root), host: host,
+        let store = SettingsStore(dirs: TabDirs(root: root), configFile: root.appendingPathComponent("user-settings.json"), host: host,
                                   theme: AppTheme(catalog: ThemeCatalog(entries: []), systemIsDark: true))
         let page = SettingsModel(store: store)
         page.select(.agents)
@@ -300,7 +300,7 @@ final class AddProviderTests: XCTestCase {
             AgentProviderConfig(id: "antigravity", kind: .antigravity, executable: "/opt/homebrew/bin/agy"),
         ]))
         host.remoteProviders[mini] = AgentProvidersState(settings: AgentProviderSettings())
-        let store = SettingsStore(dirs: TabDirs(root: root), host: host,
+        let store = SettingsStore(dirs: TabDirs(root: root), configFile: root.appendingPathComponent("user-settings.json"), host: host,
                                   theme: AppTheme(catalog: ThemeCatalog(entries: []), systemIsDark: true))
         let page = SettingsModel(store: store)
         page.select(.agents)

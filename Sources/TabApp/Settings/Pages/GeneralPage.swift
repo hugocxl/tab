@@ -11,11 +11,8 @@ extension SettingsModel {
             store.setConfirmRunningProcess($0)
         })
         b.row("file-opener", fileOpenerPopUp(b))
-        b.row("worktree-template", b.field("worktree-template", settings.worktrees.defaultLocation.pathTemplate, placeholder: WorktreeLocation.suggestedTemplate) { [store] in
-            store.setWorktreeLocation("worktree-template", $0)
-        })
-        b.row("worktree-folder", b.field("worktree-folder", settings.worktrees.defaultLocation.parentPath, placeholder: TabDirs.defaultWorktreeFolder) { [store] in
-            store.setWorktreeLocation("worktree-folder", $0)
+        b.row("worktree-location", b.field("worktree-location", store.worktreeLocation, placeholder: TabConfig.defaultWorktreeLocation) { [store] in
+            store.setWorktreeLocation($0)
         })
         let summary = store.updaterSummary
         let actionControl: SettingControl

@@ -94,12 +94,8 @@ public struct TabDirs: Sendable, Equatable {
         root.appendingPathComponent(name, isDirectory: true)
     }
 
-    /// Where new worktrees go by default, before the project's folder name:
-    /// `~/.tab/worktrees/<project>/<name>`.
-    public static let defaultWorktreeFolder = "~/.tab/worktrees"
-
-    /// `$XDG_CONFIG_HOME/tab`, else `~/.config/tab`, which holds user-wide
-    /// worktree hooks.
+    /// `$XDG_CONFIG_HOME/tab`, else `~/.config/tab`, which holds the user's
+    /// hand-edited `settings.json` (see `TabConfig`).
     public static func configHome(environment: [String: String] = ProcessInfo.processInfo.environment) -> URL {
         if let xdg = environment["XDG_CONFIG_HOME"], xdg.hasPrefix("/") {
             return URL(fileURLWithPath: xdg, isDirectory: true).appendingPathComponent("tab", isDirectory: true)

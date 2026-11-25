@@ -182,22 +182,21 @@ final class ServerParityEndToEndTests: XCTestCase {
         }
     }
 
-    func testUserAndProjectHooksThroughCLIWithOverriddenHome() async throws {
+    func testUserAndProjectSettingsThroughCLIWithOverriddenHome() async throws {
         let client = try await start()
         let parent = try await project(client)
-        try write("home/.config/tab/worktree.json", #"{"setup":["printf user > order"],"teardown":["printf user >> \"$TAB_PROJECT_PATH/removed\""]}"#)
-        try write("repo/.tab/worktree.json", #"{"setup":["printf project >> order","printf '%s\\n' \"$TAB_PROJECT_PATH\" \"$TAB_WORKTREE_PATH\" \"$TAB_WORKTREE_NAME\" \"$TAB_WORKTREE_BRANCH\" \"$TAB_WORKTREE_ID\" \"$PWD\" > hook-env"],"teardown":["printf project > \"$TAB_PROJECT_PATH/removed\""]}"#)
-        let target = root.appendingPathComponent("hook-tree")
-        let data = try cli(["worktree", "new", parent.id.description, "Friendly", "--branch", "feature", "--base", "main",
-                            "--directory", target.path, "--hooks", "--json"])
+        try write("home/.config/tab/settings.json", #"{"defaultBranch":{"name":"main"},"worktrees":{"open":["printf user > order"],"close":["printf user >> \"$TAB_PROJECT_PATH/removed\""]}}"#)
+        try write("repo/.config/tab/settings.json", #"{"worktrees":{"location":"../{base-dir}.{branch}","open":["printf project >> order","printf '%s\\n' \"$TAB_PROJECT_PATH\" \"$TAB_BRANCH_PATH\" \"$TAB_WORKTREE_NAME\" \"$TAB_BRANCH\" \"$TAB_WORKTREE_ID\" \"$PWD\" > open-env"],"close":["printf project > \"$TAB_PROJECT_PATH/removed\""]}}"#)
+        let target = repository.deletingLastPathComponent().appendingPathComponent(repository.lastPathComponent + ".feature")
+        let data = try cli(["worktree", "new", parent.id.description, "Friendly", "--branch", "feature", "--json"])
         let object = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
         let id = try XCTUnwrap(object["id"] as? String)
-        XCTAssertEqual(try String(contentsOf: target.appendingPathComponent("order"), encoding: .utf8), "userproject")
-        let values = try String(contentsOf: target.appendingPathComponent("hook-env"), encoding: .utf8)
-            .split(separator: "\n").map(String.init)
         XCTAssertEqual(object["directory"] as? String, target.path)
+        XCTAssertEqual(try String(contentsOf: target.appendingPathComponent("order"), encoding: .utf8), "userproject")
+        let values = try String(contentsOf: target.appendingPathComponent("open-env"), encoding: .utf8)
+            .split(separator: "\n").map(String.init)
         XCTAssertEqual(values, [repository.path, target.path, "Friendly", "feature", id, target.path])
-        _ = try cli(["worktree", "remove", id, "--force", "--hooks", "--yes"])
+        _ = try cli(["worktree", "remove", id, "--force", "--yes"])
         XCTAssertFalse(FileManager.default.fileExists(atPath: target.path))
         XCTAssertEqual(try String(contentsOf: repository.appendingPathComponent("removed"), encoding: .utf8), "projectuser")
     }

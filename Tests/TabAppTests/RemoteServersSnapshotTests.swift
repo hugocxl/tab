@@ -50,7 +50,7 @@ final class RemoteServersSnapshotTests: XCTestCase {
         search.stringValue = ""
         search.onChange?(search.stringValue)
 
-        let store = SettingsStore(dirs: TabDirs(root: root), host: nil)
+        let store = SettingsStore(dirs: TabDirs(root: root), configFile: root.appendingPathComponent("user-settings.json"), host: nil)
         let settings = SettingsWindowController(store: store, remoteController: controller)
         let settingsWindow = try XCTUnwrap(settings.window)
         settingsWindow.setFrameOrigin(NSPoint(x: -20000, y: -20000))

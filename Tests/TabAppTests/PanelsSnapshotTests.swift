@@ -32,7 +32,7 @@ final class PanelsSnapshotTests: XCTestCase {
     func testRenderSettingsPages() async throws {
         let host = PreviewSettingsHost()
         host.remoteAccess = RemoteAccessState(revision: 1, settings: RemoteAccessSettings(enabled: true), status: .listening)
-        let store = SettingsStore(dirs: TabDirs(root: root), host: host, theme: theme)
+        let store = SettingsStore(dirs: TabDirs(root: root), configFile: root.appendingPathComponent("user-settings.json"), host: host, theme: theme)
         let controller = SettingsWindowController(store: store)
         let window = try XCTUnwrap(controller.window)
         window.setContentSize(SettingsWindowController.defaultSize)

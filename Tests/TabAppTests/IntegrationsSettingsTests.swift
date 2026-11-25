@@ -31,7 +31,7 @@ final class IntegrationsSettingsTests: XCTestCase {
     func testPerProviderIntegrationInstallsAndRemovesOnProviderPage() async throws {
         let claude = AgentProviderConfig(id: "claude-work", kind: .claude, name: "Work", home: "~/.claude-work")
         host.providers = AgentProvidersState(settings: AgentProviderSettings(providers: [claude]))
-        let store = SettingsStore(dirs: dirs, host: host, theme: AppTheme(catalog: ThemeCatalog(entries: []), systemIsDark: true))
+        let store = SettingsStore(dirs: dirs, configFile: dirs.root.appendingPathComponent("user-settings.json"), host: host, theme: AppTheme(catalog: ThemeCatalog(entries: []), systemIsDark: true))
         let page = SettingsModel(store: store)
         page.select(.agents)
         try await Task.sleep(nanoseconds: 50_000_000)
@@ -60,7 +60,7 @@ final class IntegrationsSettingsTests: XCTestCase {
     }
 
     func testMigratingOpensAnAgentWithAPromptForThatTerminal() throws {
-        let store = SettingsStore(dirs: dirs, host: host, theme: AppTheme(catalog: ThemeCatalog(entries: []), systemIsDark: true))
+        let store = SettingsStore(dirs: dirs, configFile: dirs.root.appendingPathComponent("user-settings.json"), host: host, theme: AppTheme(catalog: ThemeCatalog(entries: []), systemIsDark: true))
         let page = SettingsModel(store: store)
         page.select(.agents)
         let row = try XCTUnwrap(page.lastBuild?.rows.first { $0.id == "terminal-migration" })

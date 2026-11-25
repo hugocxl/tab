@@ -76,6 +76,10 @@ public protocol GitServiceProtocol: AnyObject, Sendable {
     func handle(_ request: GitRequest, client: ClientId) async throws -> GitReply
     /// Stops watches held by a client that disconnected.
     func clientDisconnected(_ client: ClientId)
+    /// Runs a project's default-branch `open` commands from `settings.json`
+    /// in the background after it is added, or its `close` commands after it
+    /// is removed, broadcasting `branchCommandsFailed` when one fails.
+    func runDefaultBranchCommands(_ project: ProjectDescriptor, closing: Bool)
 }
 
 /// File operations and search for a project.

@@ -37,7 +37,7 @@ final class MessageTests: XCTestCase {
 
     func testEveryEventRoundTrips() throws {
         for body in Samples.events { roundTrip(Message.event(body)) }
-        XCTAssertEqual(try types(Samples.events).count, 9, "add a sample for every EventBody case")
+        XCTAssertEqual(try types(Samples.events).count, 10, "add a sample for every EventBody case")
     }
 
     func testEverySessionMessageRoundTrips() throws {
@@ -50,8 +50,8 @@ final class MessageTests: XCTestCase {
             roundTrip(Message.request(RequestId(1), .git(GitRequest(project: Samples.project, action: action))))
         }
         for reply in Samples.gitReplies { roundTrip(Message.reply(RequestId(1), .git(reply))) }
-        XCTAssertEqual(try types(Samples.gitActions).count, 41, "add a sample for every GitAction case")
-        XCTAssertEqual(try types(Samples.gitReplies).count, 22, "add a sample for every GitReply case")
+        XCTAssertEqual(try types(Samples.gitActions).count, 42, "add a sample for every GitAction case")
+        XCTAssertEqual(try types(Samples.gitReplies).count, 24, "add a sample for every GitReply case")
     }
 
     func testEveryFilesActionAndReplyRoundTrips() throws {

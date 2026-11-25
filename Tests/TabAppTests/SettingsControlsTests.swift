@@ -49,6 +49,7 @@ final class SettingsControlsTests: XCTestCase {
     private struct Snapshot {
         var settings: Any?
         var terminal: Any?
+        var config: Any?
         var server: ServerSettingsDoc
         var remote: RemoteAccessSettings
         var agents: AgentProviderSettings
@@ -57,6 +58,7 @@ final class SettingsControlsTests: XCTestCase {
 
     private func snapshot() -> Snapshot {
         Snapshot(settings: document(dirs.settings), terminal: document(dirs.terminalSettings),
+                 config: document(dirs.root.appendingPathComponent("user-settings.json")),
                  server: host.serverSettings, remote: host.remoteAccess.settings, agents: host.providers.settings,
                  integrations: host.providerIntegrations)
     }
@@ -65,6 +67,7 @@ final class SettingsControlsTests: XCTestCase {
         let after = snapshot()
         var paths = changedPaths(before.settings, after.settings).map { "settings.json:\($0)" }
         paths += changedPaths(before.terminal, after.terminal).map { "terminal.json:\($0)" }
+        paths += changedPaths(before.config, after.config).map { "config:\($0)" }
         if before.server != after.server { paths.append("server") }
         if before.remote != after.remote { paths.append("remote") }
         if before.agents != after.agents { paths.append("agents") }
@@ -105,7 +108,7 @@ final class SettingsControlsTests: XCTestCase {
             let numeric = Double(field.value) != nil || Double(field.placeholder) != nil
             var text = numeric ? "1000" : (field.value.isEmpty ? "qa-value" : field.value + "-qa")
             if rowId.contains("folder") || rowId.contains("template") { text = "~/qa-worktrees" }
-            if rowId == "worktree-template" { text = "../{base-dir}.{branch}" }
+            if rowId == "worktree-location" { text = "../{base-dir}.{branch}" }
             if rowId == "startup-command" { text = "/bin/bash -l" }
             if rowId == "mobile-port" { text = "7420" }
             if rowId == "browser-home-page" { text = "https://example.com" }
@@ -118,7 +121,9 @@ final class SettingsControlsTests: XCTestCase {
     }
 
     func testEveryControlWritesItsSetting() async throws {
-        let store = SettingsStore(dirs: dirs, host: host, theme: AppTheme(catalog: ThemeCatalog.load(customDirectory: nil), systemIsDark: true))
+        // An existing file, so a saved key shows as its own path.
+        try Data("{}".utf8).write(to: dirs.root.appendingPathComponent("user-settings.json"))
+        let store = SettingsStore(dirs: dirs, configFile: dirs.root.appendingPathComponent("user-settings.json"), host: host, theme: AppTheme(catalog: ThemeCatalog.load(customDirectory: nil), systemIsDark: true))
         store.loadServerSettings()
         store.loadRemoteAccess()
         store.loadAgentProviders()
@@ -167,6 +172,7 @@ final class SettingsControlsTests: XCTestCase {
         let expected: [String: String] = [
             "close-behavior": "settings.json:window.closeBehavior",
             "confirm-process": "settings.json:window.confirmRunningProcess",
+            "worktree-location": "config:worktrees",
             "ligatures": "terminal.json:ligatures",
             "character-spacing#1": "terminal.json:characterSpacing",
             "cursor-blink": "terminal.json:cursorBlink",

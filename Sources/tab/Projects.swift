@@ -140,18 +140,25 @@ enum Projects {
             guard case .worktrees(let worktrees) = try await client.git(GitRequest(project: root.id, action: .worktrees))
             else { throw CLIError("unexpected worktree list reply") }
             Output.list(worktrees.map(worktreeRecord), columns: ["projectId", "branch", "directory"], json: json)
-        case .new(let project, let name, let branch, let base, let directory, let hooks):
+        case .new(let project, let name, let branch, let base, let directory):
             let root = try await root(project, client: client, target: target)
-            let folder = try await worktreeDirectory(directory, root: root, name: name, client: client, target: target)
-            try await create(.create(project: ProjectId(), directory: ServerPath(folder), branch: branch, base: base),
-                             root: root, name: name, hooks: hooks, client: client, json: json)
-        case .pullRequest(let project, let number, let name, let directory, let hooks):
+            let settings = try await branchSettings(root, client: client)
+            let folder = try await worktreeDirectory(directory, root: root, branch: branch, settings: settings,
+                                                     client: client, target: target)
+            let start: String? = switch base {
+            case .defaultBranch: settings.defaultBranch ?? "HEAD"
+            case .ref(let ref): ref
+            case .existing: nil
+            }
+            try await create(.create(project: ProjectId(), directory: ServerPath(folder), branch: branch, base: start),
+                             root: root, name: name, client: client, json: json)
+        case .pullRequest(let project, let number, let name, let directory):
             let root = try await root(project, client: client, target: target)
-            let fallback = name ?? "pr-\(number)"
-            let folder = try await worktreeDirectory(directory, root: root, name: fallback, client: client,
-                                                     target: target)
+            let settings = try await branchSettings(root, client: client)
+            let folder = try await worktreeDirectory(directory, root: root, branch: name ?? "pr-\(number)",
+                                                     settings: settings, client: client, target: target)
             try await create(.checkoutPullRequest(project: ProjectId(), directory: ServerPath(folder), number: number),
-                             root: root, name: name, hooks: hooks, client: client, json: json)
+                             root: root, name: name, client: client, json: json)
         case .register(let project, let directory):
             let root = try await root(project, client: client, target: target)
             let action = WorktreeAction.register(project: ProjectId(), directory: ServerPath(try target.directory(directory)))
@@ -159,7 +166,7 @@ enum Projects {
                 GitRequest(project: root.id, action: .worktree(WorktreeIntent(action: action))))
             else { throw CLIError("unexpected worktree registration reply") }
             Output.record(record(registered), columns: ["id", "name", "directory"], json: json)
-        case .remove(let selector, let force, let hooks):
+        case .remove(let selector, let force):
             let project = try await resolve(selector, client: client, target: target)
             guard project.parentId != nil else { throw CLIError("project is not a worktree") }
             guard case .removal(let expected) = try await client.git(GitRequest(project: project.id,
@@ -168,14 +175,16 @@ enum Projects {
             if expected.dirty && !force {
                 throw CLIError("worktree has uncommitted changes; use --force to discard them")
             }
-            let options = WorktreeOptions(hooks: hooks ? try await approve(project.id, teardown: true, client: client) : nil)
-            _ = try await client.git(GitRequest(project: project.id, action: .worktree(
-                WorktreeIntent(action: .remove(expected: expected), options: options))))
+            let reply = try await client.git(GitRequest(project: project.id, action: .worktree(
+                WorktreeIntent(action: .remove(expected: expected), options: WorktreeOptions(runCommands: true)))))
             Output.ok(json: json)
+            if case .commandsFailed(let message) = reply {
+                throw CLIError("worktree removed, but its close commands failed: \(message)")
+            }
         }
     }
 
-    /// The project a worktree belongs to: `selector`'s parent if it is a worktree.
+    /// The project at `selector`, or its parent when it is a worktree.
     static func root(_ selector: String, client: ServerClient, target: Target) async throws -> ProjectDescriptor {
         let projects = try await client.catalog().projects
         let project = try select(projects, selector, local: !target.isRemote)
@@ -186,15 +195,23 @@ enum Projects {
         return root
     }
 
-    static func worktreeDirectory(_ directory: String?, root: ProjectDescriptor, name: String, client: ServerClient,
-                                  target: Target) async throws -> String {
-        if let directory { return try target.directory(directory) }
-        return try await defaultDirectory(root: root, name: name, client: client, target: target)
+    /// `root`'s settings; none from a server too old to read them.
+    static func branchSettings(_ root: ProjectDescriptor, client: ServerClient) async throws -> BranchSettings {
+        do {
+            guard case .branchSettings(let settings) = try await client.git(GitRequest(project: root.id,
+                                                                                    action: .branchSettings))
+            else { throw CLIError("unexpected settings reply") }
+            return settings
+        } catch ClientError.server(let reply) where reply.code == .unsupported {
+            return BranchSettings()
+        }
     }
 
-    /// `~/.tab/worktrees/<project>/<name>` in the server's home folder.
-    static func defaultDirectory(root: ProjectDescriptor, name: String, client: ServerClient,
-                                 target: Target) async throws -> String {
+    /// `directory`, else where the settings put a worktree on `branch`, in
+    /// the server's home folder.
+    static func worktreeDirectory(_ directory: String?, root: ProjectDescriptor, branch: String, settings: BranchSettings,
+                                  client: ServerClient, target: Target) async throws -> String {
+        if let directory { return try target.directory(directory) }
         let home: String
         if target.isRemote {
             let projects = try await client.catalog().projects
@@ -205,41 +222,46 @@ enum Projects {
         } else {
             home = ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory()
         }
-        let base = TabDirs.expandHome(TabDirs.defaultWorktreeFolder, home: home)
-        let folder = name.replacingOccurrences(of: "/", with: "-")
-        return ((base as NSString).appendingPathComponent(root.name) as NSString).appendingPathComponent(folder)
+        do {
+            return try TabConfig.worktreeDirectory(location: settings.worktreeLocation, projectName: root.name,
+                                                   projectDirectory: root.directory.rawValue, branch: branch, home: home)
+        } catch let error as SettingsError {
+            throw CLIError("invalid \(error.description)")
+        }
     }
 
-    static func create(_ action: WorktreeAction, root: ProjectDescriptor, name: String?, hooks: Bool,
+    static func create(_ action: WorktreeAction, root: ProjectDescriptor, name: String?,
                        client: ServerClient, json: Bool) async throws {
-        let (project, failure) = try await makeWorktree(action, root: root, name: name, hooks: hooks, client: client)
+        let (project, failure) = try await makeWorktree(action, root: root, name: name, client: client)
         Output.record(record(project), columns: ["id", "name", "directory"], json: json)
-        if let failure { throw CLIError("worktree created, but setup failed: \(failure)") }
+        if let failure { throw CLIError("worktree created, but its open commands failed: \(failure)") }
     }
 
-    /// A new worktree of `root` on the branch `name`, from its HEAD, in the default
-    /// folder, without setup hooks: where `pane new agent --worktree` starts an agent.
+    /// A new worktree of `root` on the branch `name`, from its HEAD, where the
+    /// settings put worktrees, running their open commands: where `pane new agent
+    /// --worktree` starts an agent.
     static func newWorktree(_ name: String, of project: ProjectDescriptor, client: ServerClient,
                             target: Target) async throws -> ProjectDescriptor {
         let root = try await root(project.id.description, client: client, target: target)
-        let folder = try await defaultDirectory(root: root, name: name, client: client, target: target)
+        let settings = try await branchSettings(root, client: client)
+        let folder = try await worktreeDirectory(nil, root: root, branch: name, settings: settings, client: client,
+                                                 target: target)
         let (created, failure) = try await makeWorktree(
             .create(project: ProjectId(), directory: ServerPath(folder), branch: name, base: "HEAD"),
-            root: root, name: name, hooks: false, client: client)
-        if let failure { throw CLIError("worktree \(created.name) created, but setup failed: \(failure)") }
+            root: root, name: name, client: client)
+        if let failure { throw CLIError("worktree \(created.name) created, but its open commands failed: \(failure)") }
         return created
     }
 
-    /// Creates the worktree `action` describes, returning its project and, when the
-    /// worktree exists but its setup failed, why.
-    static func makeWorktree(_ action: WorktreeAction, root: ProjectDescriptor, name: String?, hooks: Bool,
+    /// Creates the worktree `action` describes, running its open commands, and
+    /// returns its project and, when the worktree exists but a command failed, why.
+    static func makeWorktree(_ action: WorktreeAction, root: ProjectDescriptor, name: String?,
                              client: ServerClient) async throws -> (ProjectDescriptor, String?) {
         // A pull request's worktree starts under the branch name the server
         // prepares, since the server checks out that name; it is renamed once
         // it exists.
         let requested: String? = if case .checkoutPullRequest = action { nil } else { name }
-        let options = WorktreeOptions(name: requested,
-                                      hooks: hooks ? try await approve(root.id, teardown: false, client: client) : nil)
+        let options = WorktreeOptions(name: requested, runCommands: true)
         var project: ProjectDescriptor
         var failure: String?
         switch try await client.git(GitRequest(project: root.id, action: .worktree(WorktreeIntent(action: action,
@@ -255,16 +277,6 @@ enum Projects {
             project.name = name
         }
         return (project, failure)
-    }
-
-    /// The setup or teardown commands configured for `project`, printed as
-    /// they are approved.
-    static func approve(_ project: ProjectId, teardown: Bool, client: ServerClient) async throws -> [WorktreeHook] {
-        guard case .worktreeHooks(let hooks) = try await client.git(GitRequest(project: project,
-                                                                              action: .worktreeHooks(teardown: teardown)))
-        else { throw CLIError("unexpected worktree hooks reply") }
-        for hook in hooks { Output.error("\(teardown ? "teardown" : "setup"): \(hook.command)") }
-        return hooks
     }
 
     static func worktreeRecord(_ worktree: GitWorktree) -> JSONValue {

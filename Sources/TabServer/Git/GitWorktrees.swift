@@ -33,14 +33,11 @@ extension GitService {
             return try operations.reserve(reserved, removal: removing ? canonical(subject.directory.rawValue) : nil) {
                 _ = try catalog.project(repositoryProject.id)
                 _ = try catalog.project(owner)
-                let approved = intent.options?.hooks
-                if let approved {
-                    try hooks.verify(repository: repository, teardown: removing, approved: approved)
-                }
+                let run = try commandsToRun(intent, repository: repository, removing: removing)
                 switch intent.action {
                 case .create(let project, let directory, let branch, let base):
                     return try create(parent: subject, project: project, directory: directory, branch: branch,
-                                      base: base, name: intent.options?.name, hooks: approved, start: fetchedStart)
+                                      base: base, name: intent.options?.name, commands: run, start: fetchedStart)
                 case .checkoutPullRequest(let project, let directory, let number):
                     try validateParent(subject, project: project, directory: directory)
                     if FileManager.default.fileExists(atPath: directory.rawValue) {
@@ -48,21 +45,34 @@ extension GitService {
                     }
                     let branch = try github.prepareWorktree(GitRepository(path: repository, git: git), number: number)
                     return try create(parent: subject, project: project, directory: directory, branch: branch,
-                                      base: nil, name: nil, hooks: approved, validated: true)
+                                      base: nil, name: nil, commands: run, validated: true)
                 case .register(let project, let directory):
                     return try register(parent: subject, project: project, directory: directory,
                                         name: intent.options?.name)
                 case .remove(let expected):
-                    return try remove(subject, repository: repository, expected: expected, hooks: approved)
+                    return try remove(subject, repository: repository, expected: expected, commands: run,
+                                      reportFailure: intent.options?.runCommands == true)
                 }
             }
         }
     }
 
+    /// The commands a worktree action runs: the worktree's `open` or `close`
+    /// commands from `settings.json` when the client asks for them, else
+    /// those an older client sent.
+    private func commandsToRun(_ intent: WorktreeIntent, repository: String, removing: Bool) throws -> [BranchCommand] {
+        if case .register = intent.action { return [] }
+        if intent.options?.runCommands == true {
+            let settings = try commands.settings(projectDirectory: repository).worktreeCommands
+            return removing ? settings.close : settings.open
+        }
+        return (intent.options?.hooks ?? []).map { BranchCommand(command: $0.command, name: $0.name, project: $0.project) }
+    }
+
     // MARK: - Create and register
 
     private func create(parent: ProjectDescriptor, project: ProjectId, directory: ServerPath, branch: String,
-                        base: String?, name: String?, hooks approved: [WorktreeHook]?, start fetched: String? = nil,
+                        base: String?, name: String?, commands open: [BranchCommand], start fetched: String? = nil,
                         validated: Bool = false) throws -> GitReply {
         let repository = GitRepository(path: parent.directory.rawValue, git: git)
         var start = base
@@ -89,10 +99,11 @@ extension GitService {
         let descriptor = ProjectDescriptor(id: project, directory: ServerPath(target), name: name ?? branch,
                                            kind: .worktree, parentId: parent.id)
         var setupFailure: String?
-        if let approved, !approved.isEmpty {
+        if !open.isEmpty {
             do {
-                let checkedOut = try GitRepository(path: target, git: git).summary().branch ?? ""
-                try hooks.run(approved, repository: parent.directory.rawValue, worktree: descriptor, branch: checkedOut)
+                let checkedOut = try GitRepository(path: target, git: git).summary().branch ?? branch
+                try commands.run(open, in: target, variables: BranchCommandRunner.variables(
+                    project: parent.directory.rawValue, directory: target, branch: checkedOut, worktree: descriptor))
             } catch let error as ServiceError {
                 setupFailure = error.message
             }
@@ -236,8 +247,11 @@ extension GitService {
         return Array(entries.filter { $0.hasPrefix("!! ") }.map { String($0.dropFirst(3)) }.prefix(50))
     }
 
+    /// Removes the worktree, running its `close` commands first. They
+    /// can't keep it: when one fails the worktree still goes, and with
+    /// `reportFailure` the reply says what failed.
     private func remove(_ project: ProjectDescriptor, repository: String, expected: WorktreeRemoval,
-                        hooks approved: [WorktreeHook]?) throws -> GitReply {
+                        commands close: [BranchCommand], reportFailure: Bool) throws -> GitReply {
         if try !matches(inspectRemoval(project, ignored: false), expected) {
             throw gitError("Worktree changed; inspect and confirm removal again")
         }
@@ -247,13 +261,20 @@ extension GitService {
         if try !matches(inspectRemoval(project, ignored: false), expected) {
             throw gitError("Worktree changed while stopping sessions; inspect removal again")
         }
-        if let approved, !approved.isEmpty {
-            try hooks.run(approved, repository: repository, worktree: project, branch: expected.branch ?? "")
+        var closeFailure: String?
+        if !close.isEmpty {
+            do {
+                try commands.run(close, in: target, variables: BranchCommandRunner.variables(
+                    project: repository, directory: target, branch: expected.branch ?? "", worktree: project))
+            } catch let error as ServiceError {
+                ServerLog.error("worktree \(project.name): close commands failed: \(error.message)")
+                closeFailure = error.message
+            }
         }
         let current = try inspectRemoval(project, ignored: false)
         if current.device != expected.device || current.inode != expected.inode || current.head != expected.head
             || current.branch != expected.branch {
-            throw gitError("Worktree identity changed during teardown; files were preserved")
+            throw gitError("Worktree identity changed while its close commands ran; files were preserved")
         }
         let discarded = try Self.moveContentsAside(target)
         do {
@@ -264,6 +285,7 @@ extension GitService {
         }
         Self.deleteInBackground(discarded)
         try catalog.removeWorktreeProject(project.id)
+        if reportFailure, let closeFailure { return .commandsFailed(message: closeFailure) }
         return .done
     }
 

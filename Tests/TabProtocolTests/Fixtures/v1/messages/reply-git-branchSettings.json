@@ -1,0 +1,1 @@
+{"body":{"reply":{"settings":{"defaultBranch":"main","defaultBranchCommands":{"close":[],"open":[{"command":"npm ci","project":true}]},"worktreeCommands":{"close":[{"command":"docker compose down","project":true}],"open":[{"command":"make","name":"Build","project":false}]},"worktreeLocation":"../{base-dir}.{branch}"},"type":"branchSettings"},"type":"git"},"id":1,"type":"reply"}

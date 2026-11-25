@@ -68,7 +68,20 @@ final class GitTestEvents: ServiceEvents, @unchecked Sendable {
     private(set) var sent: [(EventBody, ClientId)] = []
     var onSend: ((EventBody, ClientId) -> Void)?
 
-    func broadcast(_ event: EventBody) {}
+    private var broadcastEvents: [EventBody] = []
+
+    /// What was broadcast to every client, in order.
+    var broadcasts: [EventBody] {
+        lock.lock()
+        defer { lock.unlock() }
+        return broadcastEvents
+    }
+
+    func broadcast(_ event: EventBody) {
+        lock.lock()
+        broadcastEvents.append(event)
+        lock.unlock()
+    }
 
     func send(_ event: EventBody, to client: ClientId) {
         lock.lock()
@@ -96,7 +109,7 @@ final class GitTestRepo {
         path = canonical(base.path)
         self.catalog = catalog
         service = GitService(projects: catalog, events: events, lookup: lookup,
-                             hooks: WorktreeHooks(userConfig: URL(fileURLWithPath: path + "/machine-worktree.json")))
+                             commands: BranchCommandRunner(userFile: URL(fileURLWithPath: path + "/user-settings.json")))
         project = ProjectId()
         catalog.add(ProjectDescriptor(id: project, directory: ServerPath(path), name: "Test"))
         try Self.initialize(path)

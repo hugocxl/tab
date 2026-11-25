@@ -378,6 +378,8 @@ extension AppModel {
             gitChanged(project)
         case .filesChanged(let project, let changes):
             filesChanged(project, changes)
+        case .branchCommandsFailed(_, let message):
+            report(message)
         case .serverRestarting, .disconnected:
             break
         }
