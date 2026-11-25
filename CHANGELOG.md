@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.137.6 - 2026-11-25
+
+### Changed
+
+- Round every agent composer button fully and make Send stand out in the accent color.
+
 ## 0.137.5 - 2026-11-25
 
 ### Changed

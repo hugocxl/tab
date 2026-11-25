@@ -12,7 +12,6 @@ final class AgentContextIndicator: AgentComposerButton {
         super.init(frame: frameRect)
         title = "Context window"
         isBordered = false
-        cornerRadius = AgentComposerMetrics.controlRadius
         setButtonType(.momentaryPushIn)
         target = self
         action = #selector(showDetails)

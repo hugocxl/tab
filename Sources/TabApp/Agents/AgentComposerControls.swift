@@ -234,21 +234,18 @@ class AgentTextPopUp: NSPopUpButton {
     }
 }
 
-/// The composer's bottom row: every control has one height, one font and a rounded fill
-/// that always shows, its corners concentric with the composer card's.
+/// The composer's bottom row: every control has one height, one font and a full-rounded
+/// pill or circle fill that always shows.
 enum AgentComposerMetrics {
     static let controlHeight: CGFloat = 32
     /// Between the composer card's edge and its controls.
     static let padding: CGFloat = 10
-    static let controlRadius = GlassView.Style.agentComposer.cornerRadius - padding
     static var font: NSFont { AppFont.body }
 }
 
 /// Keeps native button keyboard activation, focus masks and mouse tracking around custom artwork.
 @MainActor
 class AgentComposerButton: NSButton {
-    /// A rounded rectangle for the composer row's controls; nil draws a capsule.
-    var cornerRadius: CGFloat?
     var onFocusChange: ((Bool) -> Void)?
     override func becomeFirstResponder() -> Bool {
         let accepted = super.becomeFirstResponder()
@@ -273,7 +270,7 @@ class AgentComposerButton: NSButton {
 
     override var focusRingMaskBounds: NSRect { bounds }
     override func drawFocusRingMask() {
-        let radius = cornerRadius ?? bounds.height / 2
+        let radius = bounds.height / 2
         NSBezierPath(roundedRect: bounds, xRadius: radius, yRadius: radius).fill()
     }
 
@@ -295,7 +292,7 @@ class AgentComposerButton: NSButton {
         let rest: CGFloat = tint == nil ? 0.06 : 0.14
         let alpha = rest + (interactive ? (isHighlighted ? 0.08 : 0.04) : 0)
         (tint ?? theme.fg).withAlphaComponent(alpha).setFill()
-        let radius = cornerRadius ?? bounds.height / 2
+        let radius = bounds.height / 2
         NSBezierPath(roundedRect: bounds, xRadius: radius, yRadius: radius).fill()
     }
 }
@@ -322,7 +319,6 @@ final class AgentRoundButton: AgentComposerButton {
         setAccessibilityLabel(title)
         setButtonType(.momentaryPushIn)
         isBordered = false
-        cornerRadius = AgentComposerMetrics.controlRadius
         target = self
         action = #selector(pressed)
     }
@@ -332,12 +328,20 @@ final class AgentRoundButton: AgentComposerButton {
 
     override var isEnabled: Bool { didSet { needsDisplay = true } }
 
-    /// Send reads brightest; an idle Dictate is quieter.
+    /// An idle Dictate is quieter than Stop and active controls.
     private var quiet: Bool { kind == .dictate && !active }
 
     override func draw(_ dirtyRect: NSRect) {
-        drawControlFill(chatTheme, tint: active ? chatTheme.accent : nil)
-        let ink = !isEnabled ? chatTheme.fgDim : active ? chatTheme.accent : quiet ? chatTheme.fgMuted : chatTheme.fg
+        let ink: NSColor
+        if kind == .send && isEnabled {
+            let alpha: CGFloat = isHighlighted ? 0.80 : (hovered ? 0.90 : 1)
+            chatTheme.accent.withAlphaComponent(alpha).setFill()
+            NSBezierPath(ovalIn: bounds).fill()
+            ink = chatTheme.accentForeground
+        } else {
+            drawControlFill(chatTheme, tint: active ? chatTheme.accent : nil)
+            ink = !isEnabled ? chatTheme.fgDim : active ? chatTheme.accent : quiet ? chatTheme.fgMuted : chatTheme.fg
+        }
         let icon: AppIcon
         let size: CGFloat
         switch kind {
@@ -371,7 +375,6 @@ final class AgentModelPicker: AgentComposerButton {
         title = "Model and reasoning effort"
         setAccessibilityLabel(title)
         isBordered = false
-        cornerRadius = AgentComposerMetrics.controlRadius
         setButtonType(.momentaryPushIn)
         target = self
         action = #selector(showMenu)
@@ -544,10 +547,9 @@ final class AgentIconButton: AgentComposerButton {
     var onPress: (() -> Void)?
     var chatTheme: AppTheme = .shared { didSet { needsDisplay = true } }
     var icon: AppIcon { didSet { needsDisplay = true } }
-    /// A composer-row control: a rounded rectangle whose fill always shows.
+    /// A composer-row control: a circle whose fill always shows.
     var filled = false {
         didSet {
-            cornerRadius = filled ? AgentComposerMetrics.controlRadius : nil
             needsDisplay = true
         }
     }
@@ -605,7 +607,6 @@ final class AgentPlanButton: AgentComposerButton {
         super.init(frame: frame)
         title = "Plan"
         isBordered = false
-        cornerRadius = AgentComposerMetrics.controlRadius
         setButtonType(.momentaryPushIn)
         target = self
         action = #selector(pressed)
