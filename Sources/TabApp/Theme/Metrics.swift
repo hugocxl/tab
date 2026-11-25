@@ -8,6 +8,9 @@ public enum Metrics {
     /// Window inset, gaps between cards, sidebar and panel padding.
     public static let gutter: CGFloat = 8
     public static let cardRadius: CGFloat = 10
+    /// Glass cards in the sidebars: the selected tab card, the footer card
+    /// and the usage panel's provider cards.
+    public static let glassCardRadius: CGFloat = 10
     public static let border: CGFloat = 1
     public static let headerHeight: CGFloat = 36
     public static let controlGap: CGFloat = 8

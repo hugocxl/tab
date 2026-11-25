@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.137.2 - 2026-11-25
+
+### Changed
+
+- Give every sidebar glass card the same slightly rounder corners.
+
 ## 0.137.1 - 2026-11-25
 
 ### Changed

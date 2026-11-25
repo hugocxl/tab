@@ -183,7 +183,7 @@ final class SidebarCardView: HoverView {
         glass = data.selected ? GlassView(style: .card) : nil
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.cornerRadius = 8
+        layer?.cornerRadius = GlassView.Style.card.cornerRadius
         layer?.cornerCurve = .continuous
         layer?.borderWidth = 1
         if let glass { addSubview(glass) }
@@ -959,7 +959,7 @@ final class CreatingRow: HoverView {
         detailLabel = makeLabel(entry.detail, font: AppFont.small)
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.cornerRadius = 8
+        layer?.cornerRadius = GlassView.Style.card.cornerRadius
         layer?.cornerCurve = .continuous
         layer?.borderWidth = 1
         if let glass { addSubview(glass) }

@@ -625,7 +625,7 @@ final class SidebarRootView: ThemedView {
 /// like the selected tab card.
 private final class SidebarFloatingCardHost: ThemedView {
     private let clip = NSView()
-    private let glass = GlassView(style: .sidebarCard)
+    private let glass = GlassView(style: .card)
     private let content: NSView
 
     init(content: NSView, theme: AppTheme) {
@@ -634,7 +634,7 @@ private final class SidebarFloatingCardHost: ThemedView {
         self.theme = theme
 
         clip.wantsLayer = true
-        clip.layer?.cornerRadius = GlassView.Style.sidebarCard.cornerRadius
+        clip.layer?.cornerRadius = GlassView.Style.card.cornerRadius
         clip.layer?.cornerCurve = .continuous
         clip.layer?.masksToBounds = true
         clip.layer?.borderWidth = Metrics.border

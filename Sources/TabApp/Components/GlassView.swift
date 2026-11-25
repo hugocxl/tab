@@ -38,8 +38,9 @@ public final class GlassView: NSView {
         public static let window = Style(cornerRadius: 0, fallbackMaterial: .hudWindow, usesLiquidGlass: false)
         /// A pane's continuous glass surface, underneath its header and content.
         public static let pane = Style(cornerRadius: Metrics.cardRadius, regular: true)
-        /// The selected sidebar card's glass surface.
-        public static let card = Style(cornerRadius: 8, opacity: 0.4)
+        /// A glass card in the sidebars: the selected tab card, the footer card
+        /// and the usage panel's provider cards.
+        public static let card = Style(cornerRadius: Metrics.glassCardRadius, opacity: 0.4)
 
         /// Always-on, diffused material for the command palette.
         public static let commandPalette = Style(cornerRadius: PaletteLayout.radius, fallbackMaterial: .popover, regular: true)
@@ -59,8 +60,6 @@ public final class GlassView: NSView {
         /// Messages stacked above the agent composer: notices, questions, the prompt queue,
         /// running agents, task progress and what the agent waits for.
         public static let agentPanel = Style(cornerRadius: 16, fallbackMaterial: .popover, regular: true)
-        /// A translucent card anchored at the bottom of the left sidebar, like the selected tab card.
-        public static let sidebarCard = Style(cornerRadius: 8, opacity: 0.4)
     }
 
     private let material: NSView
