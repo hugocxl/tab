@@ -158,9 +158,12 @@ final class GitHub: @unchecked Sendable {
 
     /// The repository's default branch: the remote's, else GitHub's, cached
     /// while the remotes stay the same.
-    func defaultBranch(_ repository: GitRepository) -> String? {
+    /// `common` is the repository's shared `.git` folder, when known, so its
+    /// worktrees share one answer.
+    func defaultBranch(_ repository: GitRepository, common: String? = nil) -> String? {
         let remotes = repository.git.optionalText(repository.path, ["config", "--get-regexp", "^remote\\..*\\.url$"]) ?? ""
-        return defaultBranches.resolve(canonical(repository.path), remotes: remotes) {
+        let key = common ?? (try? repository.commonDirectory()) ?? canonical(repository.path)
+        return defaultBranches.resolve(key, remotes: remotes) {
             if let branch = repository.remoteDefaultBranch() { return branch }
             guard let value = try? self.json(repository, ["repo", "view", "--json", "defaultBranchRef"]) as? [String: Any],
                   let reference = value["defaultBranchRef"] as? [String: Any],
@@ -433,36 +436,72 @@ final class GitHub: @unchecked Sendable {
     }
 }
 
-/// Default branches per repository, kept five minutes while its remotes
-/// stay the same, so status reads don't ask the remote every time.
+/// Default branches per repository, shared by its worktrees while its
+/// remotes stay the same, so status reads don't ask the remote every time.
+/// Only the first read waits for the remote: after five minutes a read gets
+/// the known branch at once while the remote is asked again in the
+/// background, and a lookup that found nothing is remembered too.
 final class DefaultBranchCache: @unchecked Sendable {
     private struct Entry {
         var remotes: String
-        var branch: String
+        var branch: String?
         var stored: Date
     }
 
-    private static let lifetime: TimeInterval = 300
+    static let lifetime: TimeInterval = 300
     private static let capacity = 128
     private var entries: [String: Entry] = [:]
+    private var refreshing: Set<String> = []
     private let lock = NSLock()
+    /// One cold lookup per repository at a time; reads behind it take its answer.
+    private let lookups = LockTable<String, NSLock> { NSLock() }
+    private let background: (@escaping @Sendable () -> Void) -> Void
 
-    func resolve(_ repository: String, remotes: String, resolve: () -> String?) -> String? {
-        lock.lock()
-        let now = Date()
-        entries = entries.filter { now.timeIntervalSince($0.value.stored) < Self.lifetime }
-        if let entry = entries[repository], entry.remotes == remotes {
-            lock.unlock()
-            return entry.branch
-        }
-        lock.unlock()
-        guard let branch = resolve() else { return nil }
+    init(background: @escaping (@escaping @Sendable () -> Void) -> Void = { DispatchQueue.global(qos: .utility).async(execute: $0) }) {
+        self.background = background
+    }
+
+    func resolve(_ repository: String, remotes: String, now: Date = Date(),
+                 resolve: @escaping @Sendable () -> String?) -> String? {
+        if let branch = cached(repository, remotes: remotes, now: now, resolve: resolve) { return branch }
+        let lookup = lookups.lock(for: repository)
+        lookup.lock()
+        defer { lookup.unlock() }
+        if let branch = cached(repository, remotes: remotes, now: now, resolve: resolve) { return branch }
+        let branch = resolve()
+        store(repository, remotes: remotes, branch: branch)
+        return branch
+    }
+
+    /// The known answer, `.some(nil)` when the last lookup found nothing,
+    /// and `nil` when the remote has to be asked; a stale answer starts a
+    /// refresh in the background.
+    private func cached(_ repository: String, remotes: String, now: Date,
+                        resolve: @escaping @Sendable () -> String?) -> String?? {
         lock.lock()
         defer { lock.unlock() }
-        if entries.count >= Self.capacity, let oldest = entries.min(by: { $0.value.stored < $1.value.stored })?.key {
+        guard let entry = entries[repository], entry.remotes == remotes else { return nil }
+        if now.timeIntervalSince(entry.stored) >= Self.lifetime, refreshing.insert(repository).inserted {
+            background { [self] in
+                let branch = resolve()
+                lock.lock()
+                refreshing.remove(repository)
+                lock.unlock()
+                // Offline, the branch known before beats none.
+                store(repository, remotes: remotes, branch: branch, keepKnown: true)
+            }
+        }
+        return .some(entry.branch)
+    }
+
+    private func store(_ repository: String, remotes: String, branch: String?, keepKnown: Bool = false) {
+        lock.lock()
+        defer { lock.unlock() }
+        let known = entries[repository].flatMap { $0.remotes == remotes ? $0.branch : nil }
+        if entries[repository] == nil, entries.count >= Self.capacity,
+           let oldest = entries.min(by: { $0.value.stored < $1.value.stored })?.key {
             entries.removeValue(forKey: oldest)
         }
-        entries[repository] = Entry(remotes: remotes, branch: branch, stored: Date())
-        return branch
+        entries[repository] = Entry(remotes: remotes, branch: keepKnown ? branch ?? known : branch, stored: Date())
     }
 }

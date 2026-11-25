@@ -20,6 +20,8 @@ public final class GitGraphController: NSViewController, NSTableViewDataSource, 
     public weak var host: GitGraphHost?
     public private(set) var model = GitGraphModel()
     private var stale = true
+    private var refreshing = false
+    private var refreshAgain = false
     private var loadingMore = false
     private var isBusy = false
     /// Increases with every reset, so a late page of the old history is dropped.
@@ -111,7 +113,7 @@ public final class GitGraphController: NSViewController, NSTableViewDataSource, 
 
     public override func viewDidAppear() {
         super.viewDidAppear()
-        if stale { refresh() }
+        if stale { refreshForShowing() }
     }
 
     public override func viewDidLayout() {
@@ -123,7 +125,7 @@ public final class GitGraphController: NSViewController, NSTableViewDataSource, 
     /// repository and reads its history.
     public func didShow() {
         host?.watchRepository()
-        refresh()
+        refreshForShowing()
     }
 
     public func focus() {
@@ -148,7 +150,9 @@ public final class GitGraphController: NSViewController, NSTableViewDataSource, 
             stale = true
             return
         }
-        didShow()
+        // A read in flight went to the old connection: read again after it.
+        host?.watchRepository()
+        refresh()
     }
 
     func themeDidChange() {
@@ -166,26 +170,49 @@ public final class GitGraphController: NSViewController, NSTableViewDataSource, 
     }
 
     /// Reads the summary and the first pages again, keeping the rows when
-    /// nothing moved.
+    /// nothing moved. One read runs at a time: a change during it reads
+    /// once more after it.
     public func refresh() {
         stale = false
+        guard !refreshing else {
+            refreshAgain = true
+            return
+        }
         guard let host, let transport = host.nativeTransport else { return }
         let project = host.nativeProject.id
         let count = min(max(model.commits.count, Self.pageSize), Self.refreshLimit)
         let action = graphAction(UInt32(count), 0)
+        refreshing = true
         setLoading(true)
         Task { [weak self] in
+            var loaded: (GitSummary?, [GitCommit])?
+            var failure: Error?
             do {
                 async let summaryReply = transport.git(GitRequest(project: project, action: .summary))
                 async let logReply = transport.git(GitRequest(project: project, action: action))
                 let (summary, log) = try await (summaryReply, logReply)
-                guard case .summary(let summaryValue) = summary else { return }
-                guard case .log(let commits) = log else { return }
-                self?.received(summary: summaryValue, commits: commits, requested: count)
+                if case .summary(let summaryValue) = summary, case .log(let commits) = log {
+                    loaded = (summaryValue, commits)
+                }
             } catch {
-                self?.showError(NativeErrors.describe(error))
+                failure = error
+            }
+            guard let self else { return }
+            self.refreshing = false
+            if let loaded { self.received(summary: loaded.0, commits: loaded.1, requested: count) }
+            if let failure { self.showError(NativeErrors.describe(failure)) }
+            if self.refreshAgain {
+                self.refreshAgain = false
+                self.refresh()
+            } else if loaded == nil, failure == nil {
+                self.setLoading(false)
             }
         }
+    }
+
+    /// Showing the panel reads the history, unless a read just started.
+    private func refreshForShowing() {
+        if refreshing { stale = false } else { refresh() }
     }
 
     func received(summary: GitSummary?, commits: [GitCommit], requested: Int) {

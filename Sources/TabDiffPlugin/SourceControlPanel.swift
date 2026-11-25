@@ -12,6 +12,8 @@ public final class SourceControlController: NSViewController, NSTableViewDataSou
     public private(set) var isBusy = false
     private var error: String?
     private var stale = true
+    private var refreshing = false
+    private var refreshAgain = false
     private var amend = false
 
     private let card = NativePanelCard()
@@ -122,7 +124,7 @@ public final class SourceControlController: NSViewController, NSTableViewDataSou
 
     public override func viewDidAppear() {
         super.viewDidAppear()
-        if stale || model.status == nil { refresh() }
+        if stale || model.status == nil { refreshForShowing() }
     }
 
     /// The panel is on screen again, or for the first time: watches the
@@ -131,7 +133,7 @@ public final class SourceControlController: NSViewController, NSTableViewDataSou
         let mode: SourceControlModel.ViewMode = host?.sourceControlTree == true ? .tree : .list
         if mode != model.viewMode { setViewMode(mode, persist: false) }
         host?.watchRepository()
-        refresh()
+        refreshForShowing()
     }
 
     // MARK: Events from the app
@@ -152,7 +154,9 @@ public final class SourceControlController: NSViewController, NSTableViewDataSou
             stale = true
             return
         }
-        didShow()
+        // A read in flight went to the old connection: read again after it.
+        host?.watchRepository()
+        refresh()
     }
 
     /// Puts the caret in the commit message.
@@ -170,18 +174,38 @@ public final class SourceControlController: NSViewController, NSTableViewDataSou
     // MARK: Requests
 
     /// Reads the working tree status again.
+    /// One read runs at a time: a change during it reads once more after it.
     public func refresh() {
         stale = false
+        guard !refreshing else {
+            refreshAgain = true
+            return
+        }
         guard let host, let transport = host.nativeTransport else { return }
         let request = GitRequest(project: host.nativeProject.id, action: .status(local: true))
+        refreshing = true
         Task { [weak self] in
+            var reply: GitReply?
+            var failure: Error?
             do {
-                let reply = try await transport.git(request)
-                self?.received(reply)
+                reply = try await transport.git(request)
             } catch {
-                self?.showError(NativeErrors.describe(error))
+                failure = error
+            }
+            guard let self else { return }
+            self.refreshing = false
+            if let reply { self.received(reply) }
+            if let failure { self.showError(NativeErrors.describe(failure)) }
+            if self.refreshAgain {
+                self.refreshAgain = false
+                self.refresh()
             }
         }
+    }
+
+    /// Showing the panel reads the status, unless a read just started.
+    private func refreshForShowing() {
+        if refreshing { stale = false } else { refresh() }
     }
 
     func received(_ reply: GitReply) {

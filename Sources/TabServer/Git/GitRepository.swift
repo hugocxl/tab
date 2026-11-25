@@ -22,6 +22,20 @@ struct GitRepository: Sendable {
         }
     }
 
+    /// The working tree's top folder and the canonical shared `.git` folder
+    /// from one `rev-parse`, or `nil` outside a working tree.
+    func locate() throws -> (topLevel: String, common: String)? {
+        if let output = git.optionalText(path, [
+            "rev-parse", "--is-inside-work-tree", "--show-toplevel", "--path-format=absolute", "--git-common-dir",
+        ]) {
+            let lines = output.split(separator: "\n", omittingEmptySubsequences: false)
+            if lines.count == 3, lines[0] == "true" { return (String(lines[1]), canonical(String(lines[2]))) }
+        }
+        // Outside a repository, or paths with line breaks: probe one at a time.
+        guard try isRepository() else { return nil }
+        return (try topLevel(), try commonDirectory())
+    }
+
     /// The working tree's top folder.
     func topLevel() throws -> String {
         try git.text(path, ["rev-parse", "--show-toplevel"])
@@ -70,7 +84,10 @@ struct GitRepository: Sendable {
     }
 
     func summary() throws -> GitSummary {
-        let status = try status()
+        try summary(of: try status())
+    }
+
+    func summary(of status: GitParsing.Status) throws -> GitSummary {
         var summary = GitSummary(branch: status.branch.head, head: status.branch.oid,
                                  upstream: status.branch.tracked ? status.branch.upstream : nil)
         if status.branch.tracked {
@@ -142,12 +159,12 @@ struct GitRepository: Sendable {
 
     /// Changed files with added and removed line counts.
     func changes() throws -> [GitFile] {
-        try changes(staged: try lineStats(staged: true), unstaged: try lineStats(staged: false))
+        changes(try files(), staged: try lineStats(staged: true), unstaged: try lineStats(staged: false))
     }
 
-    private func changes(staged: [String: (UInt64?, UInt64?)], unstaged: [String: (UInt64?, UInt64?)]) throws
-        -> [GitFile] {
-        var files = try files()
+    private func changes(_ files: [GitFile], staged: [String: (UInt64?, UInt64?)],
+                         unstaged: [String: (UInt64?, UInt64?)]) -> [GitFile] {
+        var files = files
         for index in files.indices {
             let key = files[index].path.rawValue
             if files[index].isUntracked {
@@ -166,13 +183,18 @@ struct GitRepository: Sendable {
     }
 
     func fileStatus() throws -> [GitFileStatus] {
+        try fileStatus(of: try files())
+    }
+
+    /// Staged and unstaged line counts for `files` from a status already read.
+    func fileStatus(of files: [GitFile]) throws -> [GitFileStatus] {
         let staged = try lineStats(staged: true)
         let unstaged = try lineStats(staged: false)
         func stat(_ value: (UInt64?, UInt64?)?) -> GitLineStat {
             let (additions, deletions) = value ?? (0, 0)
             return GitLineStat(additions: additions, deletions: deletions, binary: additions == nil && deletions == nil)
         }
-        return try changes(staged: staged, unstaged: unstaged).map { file in
+        return changes(files, staged: staged, unstaged: unstaged).map { file in
             let unstagedStat = file.isUntracked
                 ? GitLineStat(additions: file.added, deletions: file.removed,
                               binary: Self.untrackedBinary(absolute(of: file.path)))
@@ -271,10 +293,12 @@ struct GitRepository: Sendable {
     /// branch, remote branch and tag in date order, children first.
     func log(maxCount: UInt32, skip: UInt32, everyBranch: Bool = false) throws -> [GitCommit] {
         if maxCount == 0 { return [] }
-        let summary = try summary()
-        if summary.head == nil, summary.branch != nil, !everyBranch { return [] }
+        // Only HEAD's commit is needed, not a whole `git status`; it is
+        // missing on an unborn branch.
+        let head = git.optionalText(path, ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"])
+        if head == nil, !everyBranch { return [] }
         let revisions = everyBranch
-            ? ["--date-order", "--branches", "--remotes", "--tags"] + (summary.head == nil ? [] : ["HEAD"])
+            ? ["--date-order", "--branches", "--remotes", "--tags"] + (head == nil ? [] : ["HEAD"])
             : []
         let output = try git.run(path, [
             "log", "--no-show-signature", "--no-notes", "-z", "--format=%H%x00%h%x00%s%x00%an%x00%aI%x00%P",
@@ -308,7 +332,7 @@ struct GitRepository: Sendable {
             let hash = String(parts[1].isEmpty ? parts[0] : parts[1])
             refs[hash, default: []].append(GitRef(name: String(name), kind: kind))
         }
-        if let head = summary.head {
+        if let head {
             refs[head, default: []].append(GitRef(name: "HEAD", kind: .head))
         }
         return stride(from: 0, to: fields.count, by: 6).map { start in

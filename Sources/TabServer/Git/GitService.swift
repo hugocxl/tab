@@ -82,14 +82,14 @@ public final class GitService: GitServiceProtocol, @unchecked Sendable {
         let repository = GitRepository(path: directory, git: git)
         if request.action == .initRepository {
             if project.kind == .worktree { throw gitError("Cannot initialize a registered worktree") }
-            let key = try repository.isRepository() ? try repository.commonDirectory() : canonical(directory) + "/.git"
+            let key = try repository.locate()?.common ?? canonical(directory) + "/.git"
             return try repositoryLocks.lock(for: key).writing {
                 _ = try catalog.project(request.project)
                 try git.run(directory, ["init"])
                 return .done
             }
         }
-        guard try repository.isRepository() else {
+        guard let location = try repository.locate() else {
             if request.action == .summary, project.kind != .worktree { return .summary(nil) }
             throw gitError("Git worktree is missing")
         }
@@ -98,12 +98,12 @@ public final class GitService: GitServiceProtocol, @unchecked Sendable {
             let parent = try catalog.project(parentId)
             _ = try validateMember(repository: parent.directory.rawValue, directory: directory)
         }
-        let root = GitRepository(path: try repository.topLevel(), git: git)
-        let lock = repositoryLocks.lock(for: try root.commonDirectory())
+        let root = GitRepository(path: location.topLevel, git: git)
+        let lock = repositoryLocks.lock(for: location.common)
         let body = {
             // The project may have been deleted while waiting for another operation.
             _ = try self.catalog.project(request.project)
-            return try self.dispatch(request.action, project: project, repository: root)
+            return try self.dispatch(request.action, project: project, repository: root, common: location.common)
         }
         return Self.isRead(request.action) ? try lock.reading(body) : try lock.writing(body)
     }
@@ -123,7 +123,8 @@ public final class GitService: GitServiceProtocol, @unchecked Sendable {
         }
     }
 
-    private func dispatch(_ action: GitAction, project: ProjectDescriptor, repository: GitRepository) throws -> GitReply {
+    private func dispatch(_ action: GitAction, project: ProjectDescriptor, repository: GitRepository,
+                          common: String) throws -> GitReply {
         switch action {
         case .summary: return .summary(try repository.summary())
         case .branches: return .branches(try repository.branches())
@@ -133,8 +134,11 @@ public final class GitService: GitServiceProtocol, @unchecked Sendable {
                 if case .pullRequest(let info)? = try? github.apply(.info, in: repository) { return info }
                 return nil
             }()
-            return .status(GitStatus(summary: try repository.summary(), defaultBranch: github.defaultBranch(repository),
-                                     branches: try repository.branches(), files: try repository.fileStatus(),
+            // One `git status` serves both the summary and the files.
+            let status = try repository.status()
+            return .status(GitStatus(summary: try repository.summary(of: status),
+                                     defaultBranch: github.defaultBranch(repository, common: common),
+                                     branches: try repository.branches(), files: try repository.fileStatus(of: status.files),
                                      pullRequest: pullRequest))
         case .repoInfo: return .repoInfo(try repository.repoInfo())
         case .remoteBranches: return .remoteBranches(try repository.remoteBranches())

@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.137.5 - 2026-11-25
+
+### Changed
+
+- Open the Source Control and Git Graph panels much faster when switching tabs.
+
 ## 0.137.4 - 2026-11-25
 
 ### Fixed

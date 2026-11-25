@@ -49,4 +49,43 @@ final class GitRemoteTests: XCTestCase {
         }
         XCTAssertEqual(try repo.read(".git/remote-calls"), "x")
     }
+
+    func testDefaultBranchCacheAnswersStaleAtOnceAndRefreshesInTheBackground() {
+        final class Calls: @unchecked Sendable {
+            var count = 0
+            var answer: String? = "main"
+        }
+        let calls = Calls()
+        var queued: [@Sendable () -> Void] = []
+        let cache = DefaultBranchCache { queued.append($0) }
+        let lookup: @Sendable () -> String? = { calls.count += 1; return calls.answer }
+        let start = Date()
+        XCTAssertEqual(cache.resolve("repo", remotes: "origin", now: start, resolve: lookup), "main")
+        XCTAssertEqual(calls.count, 1)
+
+        // Expired: the known branch at once, one refresh however many reads.
+        let later = start.addingTimeInterval(DefaultBranchCache.lifetime + 1)
+        calls.answer = "develop"
+        XCTAssertEqual(cache.resolve("repo", remotes: "origin", now: later, resolve: lookup), "main")
+        XCTAssertEqual(cache.resolve("repo", remotes: "origin", now: later, resolve: lookup), "main")
+        XCTAssertEqual(calls.count, 1)
+        XCTAssertEqual(queued.count, 1)
+        queued.removeFirst()()
+        XCTAssertEqual(cache.resolve("repo", remotes: "origin", resolve: lookup), "develop")
+
+        // Offline, a refresh keeps the branch known before.
+        calls.answer = nil
+        _ = cache.resolve("repo", remotes: "origin", now: Date().addingTimeInterval(DefaultBranchCache.lifetime + 1),
+                          resolve: lookup)
+        queued.removeFirst()()
+        XCTAssertEqual(cache.resolve("repo", remotes: "origin", resolve: lookup), "develop")
+
+        // A lookup that found nothing is remembered; other remotes ask again.
+        let before = calls.count
+        XCTAssertNil(cache.resolve("bare", remotes: "", resolve: lookup))
+        XCTAssertNil(cache.resolve("bare", remotes: "", resolve: lookup))
+        XCTAssertEqual(calls.count, before + 1)
+        calls.answer = "trunk"
+        XCTAssertEqual(cache.resolve("bare", remotes: "origin", resolve: lookup), "trunk")
+    }
 }
