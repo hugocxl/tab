@@ -582,7 +582,7 @@ enum AgentProviderLaunch {
         if let executable { words[0] = executable }
         var line = Executable.commandLine(words)
         if let variable = provider.homeVariable, let home = effectiveHome(provider) {
-            line = Executable.commandLine(["\(variable)=\(home)"]) + " " + line
+            line = "\(variable)=\(Executable.commandLine([home])) " + line
         }
         return line
     }

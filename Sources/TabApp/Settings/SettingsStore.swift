@@ -59,6 +59,8 @@ public final class SettingsStore {
     /// Providers whose model list couldn't be read.
     public private(set) var agentModelsUnavailable: Set<String> = []
     public private(set) var checkingAgentProviders = false
+    /// Runs another check when the current one finishes, so providers added or copied mid-check are checked too.
+    private var recheckAgentProviders = false
     private var agentProviderWrite: Task<Void, Never>?
     private var maintenanceFollower: Task<Void, Never>?
     /// Counts edits, so a read that started before one doesn't replace it.
@@ -272,6 +274,7 @@ public final class SettingsStore {
         agentModelsUnavailable = []
         providerIntegrations = [:]
         checkingAgentProviders = false
+        recheckAgentProviders = false
         maintenanceFollower?.cancel()
         maintenanceFollower = nil
         agentProviderEdits += 1
@@ -336,8 +339,13 @@ public final class SettingsStore {
 
     /// Checks every enabled provider's CLI version and sign-in.
     public func checkAgentProviders() {
-        guard let host, !checkingAgentProviders else { return }
+        guard let host else { return }
+        if checkingAgentProviders {
+            recheckAgentProviders = true
+            return
+        }
         checkingAgentProviders = true
+        recheckAgentProviders = false
         changed()
         let edits = agentProviderEdits
         let server = agentComputer
@@ -351,8 +359,12 @@ public final class SettingsStore {
                 guard self?.agentComputer == server else { return }
                 self?.errors["agent-providers"] = self?.agentProvidersMessage(error)
             }
-            self?.checkingAgentProviders = false
-            self?.changed()
+            guard let self, agentComputer == server else { return }
+            checkingAgentProviders = false
+            let recheck = recheckAgentProviders
+            recheckAgentProviders = false
+            changed()
+            if recheck { checkAgentProviders() }
         }
     }
 
@@ -500,12 +512,13 @@ public final class SettingsStore {
         changed()
         let previous = agentProviderWrite
         let server = agentComputer
+        let snapshot = next
         agentProviderWrite = Task { [weak self] in
             await previous?.value
-            guard let self, agentComputer == server, let current = agentProviders?.settings else { return }
+            guard let self else { return }
             do {
-                let saved = try await host.writeAgentProviders(current, on: server)
-                if agentComputer == server, agentProviders?.settings == current {
+                let saved = try await host.writeAgentProviders(snapshot, on: server)
+                if agentComputer == server, agentProviders?.settings == snapshot {
                     agentProviders?.health = saved.health
                     agentProviders?.maintenance = saved.maintenance
                 }
@@ -514,7 +527,7 @@ public final class SettingsStore {
                 errors[row] = agentProvidersMessage(error)
                 if let state = try? await host.agentProviders(on: server), agentComputer == server { agentProviders = state }
             }
-            changed()
+            if agentComputer == server { changed() }
         }
     }
 
@@ -541,14 +554,22 @@ public final class SettingsStore {
         }
     }
 
-    /// `provider` with paths under this Mac's home written from `~`.
+    /// `provider` prepared for another computer: paths under this Mac's home written from `~`,
+    /// and a standard CLI path (such as `/opt/homebrew/bin/agy`) dropped so the other computer
+    /// finds the CLI on its own `PATH` (for example `~/.local/bin/agy`).
     static func portable(_ provider: AgentProviderConfig, home: String = NSHomeDirectory()) -> AgentProviderConfig {
         func portable(_ path: String?) -> String? {
             guard let path else { return nil }
             return TabDirs.abbreviateHome(path, home: home) ?? path
         }
         var copy = provider
-        copy.executable = portable(provider.executable)
+        if let exec = provider.executable?.trimmingCharacters(in: .whitespacesAndNewlines),
+           let defaultName = provider.kind.spec.executable, !defaultName.isEmpty,
+           (exec as NSString).lastPathComponent == defaultName {
+            copy.executable = nil
+        } else {
+            copy.executable = portable(provider.executable)
+        }
         copy.home = portable(provider.home)
         copy.shadowHome = portable(provider.shadowHome)
         return copy

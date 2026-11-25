@@ -252,4 +252,72 @@ final class AddProviderTests: XCTestCase {
         }
         XCTAssertEqual(host.changedProviders, [.local])
     }
+
+    func testPortableCopyDropsMachineSpecificStandardCLIPathsAndKeepsCustomOnes() {
+        let agy = AgentProviderConfig(id: "antigravity", kind: .antigravity, executable: "/opt/homebrew/bin/agy")
+        XCTAssertNil(SettingsStore.portable(agy, home: "/Users/hugo").executable,
+                     "a standard CLI path is cleared so the remote computer resolves it from its own PATH")
+
+        let claudePersonal = AgentProviderConfig(id: "claude-personal", kind: .claude, name: "Personal",
+                                                 executable: "/Users/hugo/.local/bin/claude",
+                                                 home: "/Users/hugo/.claude-personal")
+        let portableClaude = SettingsStore.portable(claudePersonal, home: "/Users/hugo")
+        XCTAssertNil(portableClaude.executable)
+        XCTAssertEqual(portableClaude.home, "~/.claude-personal")
+
+        let customClaude = AgentProviderConfig(id: "claude-beta", kind: .claude, executable: "/Users/hugo/bin/claude-beta")
+        XCTAssertEqual(SettingsStore.portable(customClaude, home: "/Users/hugo").executable, "~/bin/claude-beta",
+                       "a custom binary name stays portable with ~")
+
+        let acp = AgentProviderConfig(id: "acp-qwen", kind: .acp, executable: "/Users/hugo/.local/bin/qwen")
+        XCTAssertEqual(SettingsStore.portable(acp, home: "/Users/hugo").executable, "~/.local/bin/qwen",
+                       "custom ACP agents have no default executable to fall back to")
+    }
+
+    func testNewIDDoesNotDuplicateTheProviderKindPrefix() {
+        let withEnterprise = AgentProviderSettings(providers: [
+            AgentProviderConfig(id: "claude-enterprise", kind: .claude, name: "Enterprise"),
+        ])
+        XCTAssertEqual(withEnterprise.newID(.claude, label: "Claude Personal"), "claude-personal")
+        XCTAssertEqual(withEnterprise.newID(.claude, label: "Claude Code Personal"), "claude-personal")
+        XCTAssertEqual(withEnterprise.newID(.claude, label: "Claude"), "claude")
+
+        var draft = AddProviderSheet.Draft(kind: .claude, settings: withEnterprise)
+        draft.setLabel("Claude Personal", settings: withEnterprise)
+        XCTAssertEqual(draft.id, "claude-personal")
+        XCTAssertEqual(draft.home, "~/.claude-personal", "folder does not double the claude prefix")
+    }
+
+    func testCopyStillWritesWhenSwitchingComputersAndRechecksAfterInFlightCheck() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("tab-providers-copy-race-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let host = PreviewSettingsHost()
+        let mini = ServerId()
+        host.remoteComputers = [AgentComputer(id: mini, name: "Mac Mini M2 Pro", connected: true)]
+        host.providers = AgentProvidersState(settings: AgentProviderSettings(providers: [
+            AgentProviderConfig(id: "codex", kind: .codex, executable: "/opt/homebrew/bin/codex"),
+            AgentProviderConfig(id: "antigravity", kind: .antigravity, executable: "/opt/homebrew/bin/agy"),
+        ]))
+        host.remoteProviders[mini] = AgentProvidersState(settings: AgentProviderSettings())
+        let store = SettingsStore(dirs: TabDirs(root: root), host: host,
+                                  theme: AppTheme(catalog: ThemeCatalog(entries: []), systemIsDark: true))
+        let page = SettingsModel(store: store)
+        page.select(.agents)
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        page.showAgents(on: mini)
+        for _ in 0..<50 where store.copyableAgentProviders.count != 2 {
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        store.copyAgentProviders(["codex", "antigravity"])
+        // Immediately switch back to This Mac before the async write completes.
+        page.showAgents(on: .local)
+        for _ in 0..<50 where host.remoteProviders[mini]?.settings.providers.count != 2 {
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        let remoteProviders = try XCTUnwrap(host.remoteProviders[mini]?.settings.providers)
+        XCTAssertEqual(remoteProviders.map(\.id), ["codex", "antigravity"])
+        XCTAssertEqual(remoteProviders.map(\.executable), [nil, nil], "copied providers resolve CLIs on the remote PATH")
+    }
 }

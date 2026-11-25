@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.137.4 - 2026-11-25
+
+### Fixed
+
+- Copy agent providers to remote Macs using their own PATH, finish saves and checks, and avoid duplicate account IDs.
+
 ## 0.137.3 - 2026-11-25
 
 ### Changed

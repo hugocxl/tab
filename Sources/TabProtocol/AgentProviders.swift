@@ -297,13 +297,22 @@ public struct AgentProviderSettings: Hashable, Codable, Sendable {
         return "\(kind.rawValue)-\(number)"
     }
 
-    /// A new provider's ID from its label, such as `claude-work` for “Work”, unused by any
-    /// other; `newID` when the label has no letters or digits.
+    /// A new provider's ID from its label, such as `claude-work` for “Work” or “Claude Work”,
+    /// unused by any other; `newID` when the label has no letters or digits.
     public func newID(_ kind: AgentChatProvider, label: String) -> String {
-        let words = label.lowercased().folding(options: .diacriticInsensitive, locale: nil)
-            .split { !($0.isASCII && ($0.isLetter || $0.isNumber)) }
-        let kindName = kind.name.lowercased()
-        guard !words.isEmpty, words.joined(separator: " ") != kindName else {
+        func tokens(_ text: String) -> [String] {
+            text.lowercased().folding(options: .diacriticInsensitive, locale: nil)
+                .split { !($0.isASCII && ($0.isLetter || $0.isNumber)) }.map(String.init)
+        }
+        var words = tokens(label)
+        let nameWords = tokens(kind.name)
+        let idWords = tokens(kind.rawValue)
+        if !nameWords.isEmpty, words.starts(with: nameWords) {
+            words.removeFirst(nameWords.count)
+        } else if !idWords.isEmpty, words.starts(with: idWords) {
+            words.removeFirst(idWords.count)
+        }
+        guard !words.isEmpty else {
             return provider(kind.rawValue) == nil ? kind.rawValue : newID(kind)
         }
         let base = String((kind.rawValue + "-" + words.joined(separator: "-")).prefix(60))

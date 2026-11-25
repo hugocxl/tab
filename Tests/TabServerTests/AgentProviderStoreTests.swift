@@ -192,6 +192,11 @@ final class AgentProviderStoreTests: XCTestCase {
         XCTAssertEqual(environment["PATH"], "/custom/bin", "the user's own variables win")
         XCTAssertEqual(environment["HOME"], "/Users/me", "HOME stays, so Keychain sign-ins keep working")
         XCTAssertNil(AgentProviderLaunch.environment(.builtIn(.codex), base: [:])["CODEX_HOME"])
+
+        let spaced = AgentProviderConfig(id: "claude-personal", kind: .claude, home: "/Users/me/Claude Personal")
+        XCTAssertEqual(AgentProviderLaunch.signInCommand(spaced, executable: nil),
+                       "CLAUDE_CONFIG_DIR='/Users/me/Claude Personal' claude auth login",
+                       "the variable name stays unquoted so shells treat it as an env assignment")
     }
 
     func testModelMenusUseEachProvidersHomeAndPreferences() async throws {
