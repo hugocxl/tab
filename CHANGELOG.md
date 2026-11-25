@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.138.2 - 2026-11-25
+
+### Fixed
+
+- Show browser address suggestions under the address bar when opening a new browser pane.
+
 ## 0.138.1 - 2026-11-25
 
 ### Changed

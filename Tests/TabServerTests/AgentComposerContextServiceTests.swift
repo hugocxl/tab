@@ -21,7 +21,7 @@ final class AgentComposerContextServiceTests: XCTestCase {
         for rootPath in [shortPath, "/private" + shortPath] {
             let root = URL(fileURLWithPath: rootPath)
             let project = root.appendingPathComponent("project")
-            let service = AgentComposerContextService(home: root.appendingPathComponent("home")) { _ in project }
+            let service = AgentComposerContextService(home: root.appendingPathComponent("home"), environment: [:]) { _ in project }
             let reply = try await service.handle(.init(project: ProjectId(), provider: .claude))
             XCTAssertEqual(reply.skills.map(\.name), ["alias"])
             XCTAssertEqual(reply.skills.first?.instructions, "Alias instructions")
@@ -110,7 +110,7 @@ final class AgentComposerContextServiceTests: XCTestCase {
     func testUnknownProjectDoesNotFallBackToGlobalCatalog() async throws {
         let fixture = try ComposerSkillsFixture()
         defer { fixture.remove() }
-        let service = AgentComposerContextService(home: fixture.root.appendingPathComponent("home")) { _ in
+        let service = AgentComposerContextService(home: fixture.root.appendingPathComponent("home"), environment: [:]) { _ in
             throw ServiceError(.badRequest, "Unknown project")
         }
         do {
@@ -155,7 +155,7 @@ private struct ComposerSkillsFixture {
 
     func service() -> AgentComposerContextService {
         let project = root.appendingPathComponent("project")
-        return AgentComposerContextService(home: root.appendingPathComponent("home")) { _ in project }
+        return AgentComposerContextService(home: root.appendingPathComponent("home"), environment: [:]) { _ in project }
     }
 
     func remove() { try? FileManager.default.removeItem(at: root) }

@@ -576,6 +576,27 @@ final class BrowserSuggestionsPanel: NSPanel {
             dismiss()
             return
         }
+        // A new pane focuses its address field before its first layout, when
+        // the field still has a zero frame; lay out first, and if the field
+        // is still unsized, place the panel once the split has settled.
+        parent.contentView?.layoutSubtreeIfNeeded()
+        generation &+= 1
+        guard anchor.bounds.width > 0 else {
+            let pending = generation
+            DispatchQueue.main.async { [weak self, weak anchor] in
+                guard let self, let anchor, pending == generation, anchor.window === parent, anchor.bounds.width > 0 else { return }
+                place(under: anchor, in: parent)
+            }
+            return
+        }
+        place(under: anchor, in: parent)
+    }
+
+    /// Bumped by every show and dismiss so a deferred placement never
+    /// reopens a panel that was dismissed or re-shown meanwhile.
+    private var generation = 0
+
+    private func place(under anchor: NSView, in parent: NSWindow) {
         let frameInWindow = anchor.convert(anchor.bounds, to: nil)
         let onScreen = parent.convertToScreen(frameInWindow)
         let height = CGFloat(entries.count) * List.rowHeight + 8
@@ -585,6 +606,7 @@ final class BrowserSuggestionsPanel: NSPanel {
     }
 
     func dismiss() {
+        generation &+= 1
         parent?.removeChildWindow(self)
         orderOut(nil)
     }
