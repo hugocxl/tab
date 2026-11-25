@@ -10,6 +10,37 @@ final class FuzzyTests: XCTestCase {
         XCTAssertTrue(Fuzzy.rank(files, key: { $0 }, query: "xyz", limit: 100).isEmpty)
     }
 
+    func testExactFileNameOutranksLongerNamesContainingIt() {
+        let files = [
+            "backend/api-access/src/lib/key-permissions.ts",
+            "backend/api-access/src/lib/key-permissions.test.ts",
+            "packages/core/src/shared/infra/database/seeds/legacy-permissions.ts",
+            "frontend/teams/libs/permissions-profile.ts",
+            "packages/ui-core/src/ports/permissions/permissions.ts",
+            "packages/core/src/modules/organizations/domain/permissions.ts",
+        ]
+        let ranked = Fuzzy.rank(files, key: { $0 }, query: "permissions.ts", limit: 100).map(\.item)
+        XCTAssertEqual(Set(ranked.prefix(2)), ["packages/ui-core/src/ports/permissions/permissions.ts",
+                                               "packages/core/src/modules/organizations/domain/permissions.ts"])
+        XCTAssertEqual(Fuzzy.rank(files, key: { $0 }, query: "permissions", limit: 100).prefix(3).map(\.item).last,
+                       "frontend/teams/libs/permissions-profile.ts")
+        XCTAssertEqual(Fuzzy.rank(files, key: { $0 }, query: "kp", limit: 1).first?.item, "backend/api-access/src/lib/key-permissions.ts")
+    }
+
+    func testWordsMatchInAnyOrderAndFolderWordsNarrowFiles() {
+        let files = ["packages/ui-core/src/ports/permissions/permissions.ts", "packages/core/src/modules/organizations/domain/permissions.ts"]
+        XCTAssertEqual(Fuzzy.rank(files, key: { $0 }, query: "permissions ui-core", limit: 100).map(\.item), [files[0]])
+        XCTAssertEqual(Fuzzy.rank(files, key: { $0 }, query: "orgs perm", limit: 100).map(\.item), [files[1]])
+        XCTAssertNil(Fuzzy.match("Open Settings", Fuzzy.normalize("settings close")))
+        XCTAssertEqual(Fuzzy.match("Open Settings", Fuzzy.normalize("set  op"))?.ranges, [0..<1, 1..<2, 5..<6, 6..<7, 7..<8])
+    }
+
+    func testBestAlignmentWinsOverTheFirstOne() {
+        // Greedy matching would take the first `c` and `o`; the run in the name is better.
+        XCTAssertEqual(Fuzzy.match("src/cool/config.swift", Fuzzy.normalize("config"))?.ranges.first, 9..<10)
+        XCTAssertEqual(Fuzzy.match("Café Crème", Fuzzy.normalize("creme"))?.ranges.first, 5..<6)
+    }
+
     func testRangesAreUTF16OffsetsOfWholeCharacters() {
         XCTAssertEqual(Fuzzy.match("src/Éclair.rs", Fuzzy.normalize("ÉC"))?.ranges, [4..<5, 5..<6])
         XCTAssertEqual(Fuzzy.match("a😀b", Fuzzy.normalize("b"))?.ranges, [3..<4])

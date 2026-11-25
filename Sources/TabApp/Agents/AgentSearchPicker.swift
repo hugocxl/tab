@@ -1,4 +1,5 @@
 import AppKit
+import TabCore
 
 /// A searchable native list shared by conversation history, prompt navigation and review comments.
 @MainActor
@@ -123,11 +124,17 @@ final class AgentSearchPicker: NSWindowController, NSWindowDelegate, NSTableView
         table.setAccessibilityValue(filtered.isEmpty ? "No results" : "\(filtered.count) results")
     }
 
+    /// Entries every query word fuzzily matches, best first; equal scores
+    /// keep the list's own order.
     static func matches(_ entries: [Entry], query: String) -> [Entry] {
-        let words = query.split(whereSeparator: \.isWhitespace)
-        return entries.filter { entry in
-            words.allSatisfy { (entry.title + " " + entry.detail).range(of: String($0), options: [.caseInsensitive, .diacriticInsensitive]) != nil }
+        let needle = Fuzzy.normalize(query)
+        guard needle.contains(where: { !$0.properties.isWhitespace }) else { return entries }
+        return entries.enumerated().compactMap { offset, entry -> (Int, Int, Entry)? in
+            guard let match = Fuzzy.match(entry.title + "  " + entry.detail, needle) else { return nil }
+            return (match.score, offset, entry)
         }
+        .sorted { $0.0 != $1.0 ? $0.0 > $1.0 : $0.1 < $1.1 }
+        .map(\.2)
     }
 
     func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {

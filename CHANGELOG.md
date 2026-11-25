@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.140.3 - 2026-11-25
+
+### Changed
+
+- Rank search results by best match so exact file names come first.
+
 ## 0.140.2 - 2026-11-25
 
 ### Changed

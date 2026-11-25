@@ -79,14 +79,16 @@ enum AgentConversationFileActions {
         return entries
     }
 
-    /// Project files whose path contains `query`, case-insensitively.
+    /// Project files fuzzily matching `query`, best first; all of them, in
+    /// the server's order, without one.
     static func searchProjectEntries(_ query: String, limit: Int, scope: Scope, read: Read) async throws -> Entries {
         try Task.checkCancellation()
         guard query.utf16.count <= 256, (1...1_000).contains(limit) else { throw ModelError("Invalid project file search request.") }
         guard case .fileList(let list) = try await read(FilesRequest(project: scope.project, action: .searchFiles(limit: 50_000))) else {
             throw ModelError("The project server returned an invalid file list.")
         }
-        let matches = list.paths.filter { query.isEmpty || $0.localizedCaseInsensitiveContains(query) }
+        let matches = query.trimmingCharacters(in: .whitespaces).isEmpty ? Array(list.paths.prefix(limit + 1))
+            : Fuzzy.rank(list.paths, key: { $0 }, query: query, limit: limit + 1).map(\.item)
         return Entries(paths: Array(matches.prefix(limit)), truncated: list.truncated || matches.count > limit)
     }
 
