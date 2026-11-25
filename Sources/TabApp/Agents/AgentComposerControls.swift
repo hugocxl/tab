@@ -428,6 +428,7 @@ final class AgentModelPicker: AgentComposerButton {
                 guard let copy = item.copy() as? NSMenuItem else { continue }
                 if let provider = model.menuLogos[index] {
                     copy.image = AgentLogo.menuImage(for: provider, lightBackground: chatTheme.palette.isLight)
+                    showImage(copy)
                 }
                 // Top-level pop-up items act through the pop-up's own action.
                 if copy.action == nil, copy.submenu == nil, !copy.isSeparatorItem {
@@ -446,6 +447,7 @@ final class AgentModelPicker: AgentComposerButton {
             menu.addItem(.separator())
             let heading = NSMenuItem(title: "Effort", action: nil, keyEquivalent: "")
             heading.image = AppIcon.brain.image(size: 16, color: chatTheme.fgMuted)
+            showImage(heading)
             heading.badge = effort.selectedItem.map { NSMenuItemBadge(string: $0.title) }
             heading.isEnabled = effort.isEnabled
             let submenu = NSMenu(title: "Effort")
@@ -478,6 +480,12 @@ final class AgentModelPicker: AgentComposerButton {
             if item.title == effort.defaultValueTitle { choice.badge = NSMenuItemBadge(string: "Default") }
             return choice
         }
+    }
+
+    /// macOS 27 hides menu item images unless asked; the provider logo and its accent dot
+    /// tell accounts apart, so they always show.
+    private func showImage(_ item: NSMenuItem) {
+        if #available(macOS 27.0, *) { item.preferredImageVisibility = .visible }
     }
 
     private func disable(_ item: NSMenuItem) {

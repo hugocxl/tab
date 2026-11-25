@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.140.1 - 2026-11-25
+
+### Fixed
+
+- Show each provider's logo and color dot in the agent model menu on macOS 27.
+
 ## 0.140.0 - 2026-11-25
 
 ### Changed
