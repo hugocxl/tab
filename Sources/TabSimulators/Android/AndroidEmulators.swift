@@ -171,7 +171,7 @@ public enum AndroidEmulators {
         _ = try await adb(emulator, ["shell", "cmd", "uimode", "night", dark ? "yes" : "no"])
     }
 
-    private static func adb(_ emulator: RunningEmulator, _ arguments: [String]) async throws -> String {
+    static func adb(_ emulator: RunningEmulator, _ arguments: [String]) async throws -> String {
         guard let adb = sdk?.appendingPathComponent("platform-tools/adb"),
               FileManager.default.isExecutableFile(atPath: adb.path) else { throw AndroidError.noSDK }
         return try await Task.detached(priority: .userInitiated) {

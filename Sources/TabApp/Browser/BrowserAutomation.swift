@@ -52,22 +52,210 @@ public final class BrowserAutomation {
             try page(args, host: host).goForward()
             return .null
         case .screenshot:
-            let png = try await page(args, host: host).screenshot()
-            return .object(["png": .string(png.base64EncodedString())])
-        case .wait, .waitFor:
+            return try await screenshot(try page(args, host: host), args: args)
+        case .wait:
             let condition = try BrowserScripts.condition(command, args: args)
             return .bool(try await waitUntil(condition, pane: try page(args, host: host),
+                                             timeout: BrowserScripts.timeout(args, default: BrowserCommand.defaultWait)))
+        case .waitFor:
+            let selector = BrowserScripts.literal(try BrowserScripts.string(args, "selector"))
+            return .bool(try await waitUntil(agent: "return A.find(\(selector)) !== null;", pane: try page(args, host: host),
                                              timeout: BrowserScripts.timeout(args, default: BrowserCommand.defaultWait)))
         case .waitForNavigation:
             return try await waitForNavigation(try page(args, host: host),
                                                timeout: BrowserScripts.timeout(args, default: BrowserCommand.defaultNavigationWait))
         case .cookiesGet, .cookiesSet, .cookiesDelete, .cookiesClear:
             return try await cookies(command, pane: try page(args, host: host), args: args)
+        case .click, .hover, .fill, .type, .press, .select, .setChecked:
+            return try await BrowserActions(pane: try page(args, host: host), args: args).run(command)
+        case .snapshot:
+            return try await snapshot(try page(args, host: host), args: args)
+        case .dialog:
+            return try dialog(try page(args, host: host), args: args)
+        case .console, .errors, .network:
+            return logs(command, pane: try page(args, host: host), args: args)
+        case .setViewport, .setDevice, .setMedia:
+            return try await emulate(command, pane: try page(args, host: host), args: args)
         default:
+            let pane = try page(args, host: host)
+            if let script = try BrowserScripts.agentScript(command, args: args) {
+                return try await pane.agentValue(script, timeout: BrowserCommand.maxWait)
+            }
             guard let script = try BrowserScripts.script(command, args: args) else {
                 throw BrowserScripts.Failure("unknown command browser.\(command.rawValue)")
             }
-            return try await page(args, host: host).run(script, timeout: BrowserCommand.maxWait)
+            if let dialog = pane.agent.dialog { throw BrowserPaneController.dialogOpen(dialog) }
+            return try await pane.run(script, timeout: BrowserCommand.maxWait)
+        }
+    }
+
+    // MARK: Snapshots
+
+    private func snapshot(_ pane: BrowserPaneController, args: JSONValue) async throws -> JSONValue {
+        guard let script = try BrowserScripts.agentScript(.snapshot, args: args) else { return .null }
+        let shot = try await pane.agentValue(script, timeout: BrowserCommand.maxWait)
+        guard BrowserScripts.flag(args, "refs"), case .array(let items)? = shot["lines"] else { return shot }
+        let lines = items.compactMap(\.string)
+        var text = lines.joined(separator: "\n")
+        if BrowserScripts.flag(args, "delta") {
+            text = pane.agent.lastSnapshot.map { BrowserSnapshotDiff.diff(from: $0, to: lines) } ?? text
+        }
+        pane.agent.lastSnapshot = lines
+        if shot["truncated"] == .bool(true) {
+            text += "\n… more elements left out; narrow it with -s SELECTOR, -d DEPTH or -i"
+        }
+        return .object(["text": .string(text), "nodes": shot["nodes"] ?? .array([]),
+                        "truncated": shot["truncated"] ?? .bool(false)])
+    }
+
+    // MARK: Screenshots
+
+    private func screenshot(_ pane: BrowserPaneController, args: JSONValue) async throws -> JSONValue {
+        var options = BrowserPaneController.ScreenshotOptions()
+        if let format = BrowserScripts.optionalString(args, "format") {
+            guard let value = BrowserImage.Format(rawValue: format == "jpg" ? "jpeg" : format) else {
+                throw BrowserScripts.Failure("unknown format '\(format)'; use png or jpeg")
+            }
+            options.format = value
+        }
+        if case .int(let quality) = args["quality"] { options.quality = Int(min(max(quality, 1), 100)) }
+        if case .int(let width) = args["maxWidth"], width > 0 { options.maxWidth = Int(min(width, 100_000)) }
+        options.full = BrowserScripts.flag(args, "full")
+        let annotate = BrowserScripts.flag(args, "annotate")
+        var labeled: JSONValue?
+        if pane.agent.dialog == nil {
+            if let selector = BrowserScripts.optionalString(args, "selector") {
+                let box = try await pane.agentValue("""
+                const el = A.find(\(BrowserScripts.literal(selector)));
+                if (!el) return null;
+                el.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+                return A.boxOf(el);
+                """)
+                guard let x = box["x"]?.number, let y = box["y"]?.number, let width = box["width"]?.number,
+                      let height = box["height"]?.number
+                else { throw BrowserScripts.Failure("no element matches \(selector)") }
+                options.element = CGRect(x: x, y: y, width: width, height: height)
+            }
+            if annotate { labeled = try await pane.agentValue("return A.annotate();") }
+        }
+        let image: Data
+        do {
+            image = try await pane.screenshot(options)
+        } catch {
+            if annotate { _ = try? await pane.agentValue("A.clearAnnotations(); return null;") }
+            throw error
+        }
+        if annotate { _ = try? await pane.agentValue("A.clearAnnotations(); return null;") }
+        var reply: [String: JSONValue] = options.format == .png && BrowserScripts.optionalString(args, "format") == nil
+            ? ["png": .string(image.base64EncodedString())]
+            : ["image": .string(image.base64EncodedString()), "format": .string(options.format.rawValue)]
+        if let labeled { reply["refs"] = labeled }
+        return .object(reply)
+    }
+
+    // MARK: Dialogs and logs
+
+    private func dialog(_ pane: BrowserPaneController, args: JSONValue) throws -> JSONValue {
+        let action = BrowserScripts.optionalString(args, "action") ?? "status"
+        guard let dialog = pane.agent.dialog else {
+            if action == "status" { return .null }
+            throw BrowserScripts.Failure("the page shows no dialog")
+        }
+        switch action {
+        case "status":
+            return dialog.json
+        case "accept", "dismiss":
+            let summary = dialog.json
+            dialog.answer(accept: action == "accept", text: BrowserScripts.optionalString(args, "text"))
+            pane.agent.closed(dialog)
+            return summary
+        default:
+            throw BrowserScripts.Failure("unknown dialog action '\(action)'; use status, accept or dismiss")
+        }
+    }
+
+    private func logs(_ command: BrowserCommand, pane: BrowserPaneController, args: JSONValue) -> JSONValue {
+        let agent = pane.agent
+        let clear = BrowserScripts.flag(args, "clear")
+        func time(_ seconds: TimeInterval) -> JSONValue { .double((seconds * 1000).rounded() / 1000) }
+        switch command {
+        case .console:
+            defer { if clear { agent.clearConsole() } }
+            return .array(agent.console.map {
+                .object(["level": .string($0.level), "text": .string($0.text), "url": .string($0.url), "time": time($0.time)])
+            })
+        case .errors:
+            defer { if clear { agent.clearErrors() } }
+            return .array(agent.errors.map {
+                .object(["text": .string($0.text), "source": .string($0.source), "line": .int(Int64($0.line)),
+                         "column": .int(Int64($0.column)), "stack": .string($0.stack), "time": time($0.time)])
+            })
+        default:
+            defer { if clear { agent.clearRequests() } }
+            let filter = BrowserScripts.optionalString(args, "filter")?.lowercased()
+            return .array(agent.requests.filter { filter == nil || $0.url.lowercased().contains(filter!) }.map { request in
+                var object: [String: JSONValue] = [
+                    "method": .string(request.method), "url": .string(request.url), "type": .string(request.type),
+                    "pending": .bool(request.pending), "time": time(request.time),
+                ]
+                if let status = request.status { object["status"] = .int(Int64(status)) }
+                if let error = request.error { object["error"] = .string(error) }
+                if let milliseconds = request.milliseconds { object["ms"] = .int(Int64(milliseconds)) }
+                return .object(object)
+            })
+        }
+    }
+
+    // MARK: Emulation
+
+    /// Phone and tablet sizes and user agents for `set device`.
+    static let devices: [String: (width: Double, height: Double, userAgent: String?)] = [
+        "iphone": (393, 852, "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"),
+        "ipad": (820, 1180, "Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"),
+        "pixel": (412, 915, "Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"),
+    ]
+
+    private func emulate(_ command: BrowserCommand, pane: BrowserPaneController, args: JSONValue) async throws -> JSONValue {
+        guard let webView = pane.ensureWebView() else { throw BrowserScripts.Failure("the built-in browser is disabled") }
+        switch command {
+        case .setViewport:
+            if BrowserScripts.flag(args, "reset") {
+                pane.setViewport(nil)
+                return .null
+            }
+            guard let width = args["width"]?.number, let height = args["height"]?.number,
+                  (100 ... 10_000).contains(width), (100 ... 10_000).contains(height)
+            else { throw BrowserScripts.Failure("the viewport must be 100 to 10000 pixels wide and high") }
+            pane.setViewport(CGSize(width: width, height: height))
+            return .null
+        case .setDevice:
+            let name = (try BrowserScripts.string(args, "device")).lowercased()
+            let userAgent: String?
+            if name == "desktop" || name == "reset" {
+                pane.setViewport(nil)
+                userAgent = nil
+            } else {
+                guard let device = Self.devices[name] else {
+                    throw BrowserScripts.Failure("unknown device '\(name)'; use iphone, ipad, pixel or desktop")
+                }
+                pane.setViewport(CGSize(width: device.width, height: device.height))
+                userAgent = device.userAgent
+            }
+            let current = webView.customUserAgent.flatMap { $0.isEmpty ? nil : $0 }
+            let reload = current != userAgent && !BrowserAddress.isBlank(pane.page.url)
+            webView.customUserAgent = userAgent
+            if reload { pane.reload() }
+            return .object(["width": .double(Double(webView.bounds.width / max(pane.zoom, 0.01)).rounded()),
+                            "height": .double(Double(webView.bounds.height / max(pane.zoom, 0.01)).rounded()),
+                            "reloaded": .bool(reload)])
+        default:
+            switch try BrowserScripts.string(args, "media") {
+            case "dark": webView.appearance = NSAppearance(named: .darkAqua)
+            case "light": webView.appearance = NSAppearance(named: .aqua)
+            case "auto", "reset": webView.appearance = nil
+            case let other: throw BrowserScripts.Failure("unknown media '\(other)'; use dark, light or auto")
+            }
+            return .null
         }
     }
 
@@ -107,6 +295,7 @@ public final class BrowserAutomation {
             newTab: BrowserScripts.flag(args, "tab"),
             edge: BrowserScripts.optionalString(args, "edge").flatMap(Direction.init(rawValue:)),
             anchor: BrowserScripts.optionalString(args, "anchor"))
+        if pane.ensureWebView() != nil { pane.beginAgentControl() }
         return pane.tabId
     }
 
@@ -137,6 +326,7 @@ public final class BrowserAutomation {
         }
         guard let pane = host.browserProfiles.panes.pane(id) ?? host.browserPane(tabId: id) else { throw notFound(id) }
         guard pane.ensureWebView() != nil else { throw BrowserScripts.Failure("the built-in browser is disabled") }
+        pane.beginAgentControl()
         return pane
     }
 
@@ -153,6 +343,19 @@ public final class BrowserAutomation {
 
     /// Waits for the page to settle. A load that doesn't start soon counts as
     /// none, so a click that navigates can be followed by this.
+    /// Waits for a ref runtime check; errors, such as a ref not yet seen, count as not yet.
+    private func waitUntil(agent condition: String, pane: BrowserPaneController, timeout: TimeInterval) async throws -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while true {
+            try requireOpen(pane)
+            if let dialog = pane.agent.dialog { throw BrowserPaneController.dialogOpen(dialog) }
+            let remaining = max(deadline.timeIntervalSinceNow, BrowserScripts.pollInterval)
+            if (try? await pane.agentValue(condition, timeout: remaining)) == .bool(true) { return true }
+            if Date() >= deadline { return false }
+            try await Task.sleep(nanoseconds: UInt64(BrowserScripts.pollInterval * 1_000_000_000))
+        }
+    }
+
     private func waitForNavigation(_ pane: BrowserPaneController, timeout: TimeInterval) async throws -> JSONValue {
         let started = Date()
         let deadline = started.addingTimeInterval(timeout)

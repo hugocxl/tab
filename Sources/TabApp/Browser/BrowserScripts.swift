@@ -45,48 +45,46 @@ public enum BrowserScripts {
 
     // MARK: Scripts
 
-    /// The script for a command that runs in the page, or `nil` when the app
-    /// carries out `command` itself.
+    /// The script for a command that runs in the page's own world, or `nil`
+    /// when the app or the ref runtime carries out `command`.
     public static func script(_ command: BrowserCommand, args: JSONValue) throws -> String? {
-        func element(_ body: String) throws -> String {
-            "\(helpers)const el = document.querySelector(\(literal(try string(args, "selector"))));\nif (!el) return false;\n\(body)\nreturn true;"
-        }
-        func value(_ body: String) throws -> String {
-            "const el = document.querySelector(\(literal(try string(args, "selector"))));\nreturn el ? \(body) : null;"
-        }
         switch command {
         case .evaluate:
             return functionBody(try string(args, "script"))
         case .read:
             return "return { title: document.title, url: location.href, text: (document.body ? document.body.innerText : '').slice(0, 1000000) };"
-        case .click:
-            return try element("el.click();")
-        case .fill:
-            return try element("el.focus();\nsetValue(el, \(literal(try string(args, "text"))));")
-        case .type:
-            return try element("el.focus();\nsetValue(el, \(literal(try string(args, "text"))));\nif (\(flag(args, "submit"))) submit(el);")
-        case .select:
-            return try element("setValue(el, \(literal(try string(args, "value"))));")
-        case .hover:
-            return try element("for (const type of ['mouseover', 'mouseenter', 'mousemove']) el.dispatchEvent(new MouseEvent(type, { bubbles: type !== 'mouseenter', cancelable: true, view: window }));")
+        case .storageGet:
+            return "return \(try storage(args)).getItem(\(literal(try string(args, "key"))));"
+        case .storageSet:
+            return "\(try storage(args)).setItem(\(literal(try string(args, "key"))), \(literal(try string(args, "value"))));\nreturn null;"
+        case .storageClear:
+            return "\(try storage(args)).clear();\nreturn null;"
+        default:
+            return nil
+        }
+    }
+
+    /// The body of a ref runtime call (the runtime is `A`) for an element
+    /// command that only reads, or `nil` for other commands. Element commands
+    /// take a CSS selector or a ref such as `@e3`.
+    public static func agentScript(_ command: BrowserCommand, args: JSONValue) throws -> String? {
+        func value(_ body: String) throws -> String {
+            "const el = A.find(\(literal(try string(args, "selector"))));\nreturn el ? \(body) : null;"
+        }
+        switch command {
         case .scrollIntoView:
-            return try element("el.scrollIntoView({ block: 'center', inline: 'center' });")
-        case .setChecked:
-            return try element("if (el.checked !== \(flag(args, "checked"))) el.click();")
-        case .press:
-            let target = optionalString(args, "selector").map { "document.querySelector(\(literal($0)))" }
-                ?? "document.activeElement || document.body"
-            return "\(helpers)const el = \(target);\nif (!el) return false;\npressKey(el, \(literal(try string(args, "key"))));\nreturn true;"
+            return "const el = A.find(\(literal(try string(args, "selector"))));\nif (!el) return false;\n"
+                + "el.scrollIntoView({ block: 'center', inline: 'center' });\nreturn true;"
         case .is:
             let check: String
             switch try string(args, "property") {
-            case "checked": check = "return Boolean(el.checked);"
-            case "enabled": check = "return !el.disabled;"
-            case "disabled": check = "return Boolean(el.disabled);"
-            case "hidden": check = "return !visible(el);"
-            default: check = "return visible(el);"
+            case "checked": check = "return Boolean(el.checked) || el.getAttribute('aria-checked') === 'true';"
+            case "enabled": check = "return !A.isDisabled(el);"
+            case "disabled": check = "return A.isDisabled(el);"
+            case "hidden": check = "return !A.isVisible(el);"
+            default: check = "return A.isVisible(el);"
             }
-            return "\(helpers)const el = document.querySelector(\(literal(try string(args, "selector"))));\nif (!el) return false;\n\(check)"
+            return "const el = A.find(\(literal(try string(args, "selector"))));\nif (!el) return false;\n\(check)"
         case .getText:
             return try value("el.innerText")
         case .getValue:
@@ -97,19 +95,19 @@ public enum BrowserScripts {
             if optionalString(args, "selector") != nil { return try value("el.outerHTML.slice(0, 5000000)") }
             return "return document.documentElement.outerHTML.slice(0, 5000000);"
         case .getCount:
-            return "return document.querySelectorAll(\(literal(try string(args, "selector")))).length;"
+            let selector = try string(args, "selector")
+            if BrowserAgentScripts.refId(selector) != nil { return "return A.find(\(literal(selector))) ? 1 : 0;" }
+            return "return document.querySelectorAll(\(literal(selector))).length;"
         case .find:
-            return "\(helpers)return find(\(literal(optionalString(args, "kind") ?? "text")), \(literal(try string(args, "value"))));"
+            return "return A.legacyFind(\(literal(optionalString(args, "kind") ?? "text")), \(literal(try string(args, "value"))));"
         case .snapshot:
-            return "\(helpers)return snapshot(\(optionalString(args, "selector").map(literal) ?? "null"));"
-        case .storageGet:
-            return "return \(try storage(args)).getItem(\(literal(try string(args, "key"))));"
-        case .storageSet:
-            return "\(try storage(args)).setItem(\(literal(try string(args, "key"))), \(literal(try string(args, "value"))));\nreturn null;"
-        case .storageClear:
-            return "\(try storage(args)).clear();\nreturn null;"
-        case .open, .list, .navigate, .close, .reload, .back, .forward, .screenshot, .wait, .waitFor,
-             .waitForNavigation, .cookiesGet, .cookiesSet, .cookiesDelete, .cookiesClear:
+            let selector = optionalString(args, "selector").map(literal) ?? "null"
+            guard flag(args, "refs") else { return "return A.legacySnapshot(\(selector));" }
+            var depth = "null"
+            if case .int(let value) = args["depth"], value >= 0 { depth = String(value) }
+            return "return A.snapshot({ interactive: \(flag(args, "interactive")), compact: \(flag(args, "compact")), "
+                + "depth: \(depth), selector: \(selector), urls: \(flag(args, "urls")) });"
+        default:
             return nil
         }
     }
@@ -224,52 +222,6 @@ public enum BrowserScripts {
     }
 
     static let helpers = #"""
-    const setValue = (el, value) => {
-      const prototype = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype
-        : el instanceof HTMLSelectElement ? HTMLSelectElement.prototype
-        : el instanceof HTMLInputElement ? HTMLInputElement.prototype : null;
-      const setter = prototype && Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
-      if (setter) setter.call(el, value);
-      else if (el.isContentEditable) el.textContent = value;
-      else el.value = value;
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-      el.dispatchEvent(new Event('change', { bubbles: true }));
-    };
-    const pressKey = (el, key) => {
-      for (const type of ['keydown', 'keypress', 'keyup']) {
-        el.dispatchEvent(new KeyboardEvent(type, { key, bubbles: true, cancelable: true }));
-      }
-    };
-    const submit = el => {
-      const form = el.form || el.closest('form');
-      if (!form) pressKey(el, 'Enter');
-      else if (form.requestSubmit) form.requestSubmit();
-      else form.submit();
-    };
-    const visible = el => {
-      const box = el.getBoundingClientRect();
-      const style = getComputedStyle(el);
-      return box.width > 0 && box.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
-    };
-    const label = el => (el.innerText || el.value || el.getAttribute('aria-label') || el.getAttribute('placeholder') || '').trim().slice(0, 120);
-    const roleOf = el => {
-      const explicit = el.getAttribute('role');
-      if (explicit) return explicit;
-      const tag = el.tagName.toLowerCase();
-      if (tag === 'a' && el.hasAttribute('href')) return 'link';
-      if (tag === 'button' || tag === 'summary') return 'button';
-      if (tag === 'select') return 'combobox';
-      if (tag === 'textarea') return 'textbox';
-      if (/^h[1-6]$/.test(tag)) return 'heading';
-      if (tag === 'img') return 'img';
-      if (tag === 'input') {
-        const type = (el.getAttribute('type') || 'text').toLowerCase();
-        if (['button', 'submit', 'reset', 'image'].includes(type)) return 'button';
-        if (['checkbox', 'radio', 'range'].includes(type)) return type === 'range' ? 'slider' : type;
-        return type === 'search' ? 'searchbox' : 'textbox';
-      }
-      return null;
-    };
     const selectorOf = el => {
       if (el.id && document.querySelectorAll('#' + CSS.escape(el.id)).length === 1) return '#' + CSS.escape(el.id);
       const testid = el.getAttribute('data-testid');
@@ -284,32 +236,6 @@ public enum BrowserScripts {
         parts.unshift(siblings.length > 1 ? tag + ':nth-of-type(' + (siblings.indexOf(node) + 1) + ')' : tag);
       }
       return parts.join(' > ');
-    };
-    const find = (kind, value) => {
-      const needle = value.toLowerCase();
-      const includes = text => (text || '').toLowerCase().includes(needle);
-      const matches = {
-        role: el => roleOf(el) === value,
-        testid: el => el.getAttribute('data-testid') === value,
-        label: el => includes(el.getAttribute('aria-label')) || Array.from(el.labels || []).some(item => includes(item.innerText)),
-        placeholder: el => includes(el.getAttribute('placeholder')),
-        text: el => includes(el.innerText),
-      }[kind];
-      if (!matches) throw new Error('unknown find kind ' + kind + '; use role, text, label, placeholder or testid');
-      const found = Array.from(document.body ? document.body.querySelectorAll('*') : []).filter(matches);
-      return found
-        .filter(el => !found.some(other => other !== el && el.contains(other)))
-        .slice(0, 20)
-        .map(el => ({ tag: el.tagName.toLowerCase(), text: label(el), role: roleOf(el), id: el.id || null, testid: el.getAttribute('data-testid'), selector: selectorOf(el) }));
-    };
-    const snapshot = selector => {
-      const root = selector ? document.querySelector(selector) : document.body;
-      if (!root) return [];
-      const interactive = 'a, button, input, textarea, select, summary, [role=button], [role=link], [role=tab], [role=checkbox], [role=menuitem], [onclick], [contenteditable=true]';
-      return Array.from(root.querySelectorAll(interactive))
-        .filter(visible)
-        .slice(0, 200)
-        .map(el => ({ tag: el.tagName.toLowerCase(), role: roleOf(el) || el.type || null, name: label(el), id: el.id || null, testid: el.getAttribute('data-testid'), selector: selectorOf(el), visible: true }));
     };
 
     """#

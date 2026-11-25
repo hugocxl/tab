@@ -79,6 +79,12 @@ final class BrowserWebViewTests: XCTestCase {
         XCTAssertEqual(value, expected, file: file, line: line)
     }
 
+    /// An action that worked: `true`, or an object saying how.
+    private func expectDone(_ value: JSONValue, file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertTrue(value == .bool(true) || value["ok"] == .bool(true), "\(value)", file: file, line: line)
+        XCTAssertNil(value["warning"], "\(value)", file: file, line: line)
+    }
+
     private func fixture(_ name: String, _ html: String, profile: String? = nil) async throws -> BrowserPaneController {
         let file = folder.appendingPathComponent(name + ".html")
         try html.write(to: file, atomically: true, encoding: .utf8)
@@ -131,22 +137,22 @@ final class BrowserWebViewTests: XCTestCase {
         let read = try await command("read", id)
         XCTAssertEqual(read["title"], .string("Form Fixture"))
         XCTAssertTrue(read["text"]?.string?.contains("Welcome") == true)
-        try await expect(command("fill", id, ["selector": .string("#query"), "text": .string("a'\"b\n😀")]), .bool(true))
+        try await expectDone(command("fill", id, ["selector": .string("#query"), "text": .string("a'\"b\n😀")]))
         try await expect(command("getValue", id, ["selector": .string("#query")]), .string("a'\"b😀"))
-        try await expect(command("type", id, ["selector": .string("#query"), "text": .string("New"), "submit": .bool(true)]), .bool(true))
+        try await expectDone(command("type", id, ["selector": .string("#query"), "text": .string("New"), "submit": .bool(true)]))
         try await expect(command("getText", id, ["selector": .string("#out")]), .string("Submitted"))
-        try await expect(command("fill", id, ["selector": .string("#notes"), "text": .string("Two\nlines")]), .bool(true))
+        try await expectDone(command("fill", id, ["selector": .string("#notes"), "text": .string("Two\nlines")]))
         try await expect(command("getValue", id, ["selector": .string("#notes")]), .string("Two\nlines"))
-        try await expect(command("fill", id, ["selector": .string("#editable"), "text": .string("Edited")]), .bool(true))
+        try await expectDone(command("fill", id, ["selector": .string("#editable"), "text": .string("Edited")]))
         try await expect(command("getText", id, ["selector": .string("#editable")]), .string("Edited"))
-        try await expect(command("select", id, ["selector": .string("#choice"), "value": .string("b")]), .bool(true))
+        try await expectDone(command("select", id, ["selector": .string("#choice"), "value": .string("b")]))
         try await expect(command("getValue", id, ["selector": .string("#choice")]), .string("b"))
-        try await expect(command("setChecked", id, ["selector": .string("#check"), "checked": .bool(true)]), .bool(true))
+        try await expectDone(command("setChecked", id, ["selector": .string("#check"), "checked": .bool(true)]))
         for (property, selector) in [("checked", "#check"), ("disabled", "#disabled"), ("hidden", "#hidden"), ("enabled", "#query"), ("visible", "#query")] {
             try await expect(command("is", id, ["selector": .string(selector), "property": .string(property)]), .bool(true))
         }
-        try await expect(command("press", id, ["selector": .string("#query"), "key": .string("Enter")]), .bool(true))
-        try await expect(command("hover", id, ["selector": .string("#hover")]), .bool(true))
+        try await expectDone(command("press", id, ["selector": .string("#query"), "key": .string("Enter")]))
+        try await expectDone(command("hover", id, ["selector": .string("#hover")]))
         try await expect(command("getText", id, ["selector": .string("#hover")]), .string("Hovered"))
         try await expect(command("scrollIntoView", id, ["selector": .string("#go")]), .bool(true))
         try await expect(command("getAttribute", id, ["selector": .string("#query"), "attribute": .string("placeholder")]), .string("Search"))
@@ -213,7 +219,7 @@ final class BrowserWebViewTests: XCTestCase {
         }
         try await expect(command("wait", id, ["function": .string("throw new Error('ignored')"), "timeoutMs": .int(100)]), .bool(false))
         try await expect(command("waitForNavigation", id, ["timeoutMs": .int(0)]), .null)
-        try await expect(command("click", id, ["selector": .string("#go")]), .bool(true))
+        try await expectDone(command("click", id, ["selector": .string("#go")]))
         try await expect(command("waitForNavigation", id, ["timeoutMs": .int(5000)]), .string(destination.absoluteString))
         try await loaded(pane, at: destination.absoluteString)
         try await expect(command("back", id), .null)
@@ -314,7 +320,7 @@ final class BrowserWebViewTests: XCTestCase {
     func testPopupShortcutsHomePageAndDisabledState() async throws {
         host.browserSettings.homePage = "about:blank"
         let pane = try await fixture("popup", "<html><body>Popup <button id='popup' onclick=\"window.open('https://popup.example.test/path', '_blank')\">Open</button></body></html>")
-        try await expect(command("click", pane.tabId, ["selector": .string("#popup")]), .bool(true))
+        try await expectDone(command("click", pane.tabId, ["selector": .string("#popup")]))
         let deadline = Date().addingTimeInterval(3)
         while host.opened.isEmpty, Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
         XCTAssertEqual(host.opened, ["https://popup.example.test/path"])
@@ -354,5 +360,235 @@ final class BrowserWebViewTests: XCTestCase {
                 XCTFail("disabled browser accepted \(command)")
             } catch { XCTAssertEqual(error.localizedDescription, "the built-in browser is disabled") }
         }
+    }
+
+    // MARK: Agents
+
+    private func failure(_ name: String, _ id: String, _ args: [String: JSONValue],
+                         file: StaticString = #filePath, line: UInt = #line) async -> String {
+        do {
+            let value = try await command(name, id, args)
+            XCTFail("\(name) succeeded with \(value)", file: file, line: line)
+            return ""
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    private func refs(_ snapshot: JSONValue) -> [String: String] {
+        guard case .array(let nodes)? = snapshot["nodes"] else { return [:] }
+        var refs: [String: String] = [:]
+        for node in nodes {
+            guard let name = node["name"]?.string, let ref = node["ref"]?.string, refs[name] == nil else { continue }
+            refs[name] = "@" + ref
+        }
+        return refs
+    }
+
+    func testRefSnapshotsReachFramesAndShadowRootsAndRefsGoStale() async throws {
+        let pane = try await fixture("refs", """
+        <html><head><title>Refs</title></head><body>
+        <h1>Shop</h1><nav><a href="#cart">Cart</a></nav>
+        <label for="q">Query</label><input id="q" value="old">
+        <button id="send" onclick="document.querySelector('#out').textContent = 'Sent'">Send</button>
+        <button id="off" disabled>Off</button>
+        <div style="position: relative"><button id="under">Under</button>
+        <div id="cover" style="position: absolute; inset: 0; background: white"></div></div>
+        <input type="checkbox" id="agree" aria-label="Agree" checked>
+        <div id="host"></div><p id="out">Idle</p><p style="display: none"><button>Hidden</button></p>
+        <iframe id="frame" srcdoc="<button onclick='parent.document.querySelector(&quot;#out&quot;).textContent = &quot;Inner&quot;'>Inner</button>"></iframe>
+        <script>document.querySelector('#host').attachShadow({ mode: 'open' }).innerHTML = '<button>Shadow</button>';</script>
+        </body></html>
+        """)
+        let id = pane.tabId
+        try await Task.sleep(for: .milliseconds(200))
+        let full = try await command("snapshot", id, ["refs": .bool(true)])
+        let text = try XCTUnwrap(full["text"]?.string)
+        for line in [#"[heading] "Shop" [level=1]"#, #"[link] "Cart""#, #"[textbox] "Query" value="old""#,
+                     #"[button] "Off" [disabled]"#, #"[checkbox] "Agree" [checked]"#, #"[button] "Shadow""#,
+                     #"[button] "Inner""#, #"text "Idle""#] {
+            XCTAssertTrue(text.contains(line), "\(line) missing from\n\(text)")
+        }
+        XCTAssertFalse(text.contains("Hidden"), text)
+        XCTAssertTrue(text.contains("\n  @"), "the full snapshot is indented:\n\(text)")
+        let interactive = try await command("snapshot", id, ["refs": .bool(true), "interactive": .bool(true)])
+        let interactiveText = try XCTUnwrap(interactive["text"]?.string)
+        XCTAssertFalse(interactiveText.contains("[heading]"))
+        XCTAssertFalse(interactiveText.contains("text "))
+        XCTAssertFalse(interactiveText.contains("\n "))
+        let scoped = try await command("snapshot", id, ["refs": .bool(true), "selector": .string("nav")])
+        XCTAssertEqual(scoped["text"]?.string?.split(separator: "\n").count, 2, "\(scoped)")
+        let urls = try await command("snapshot", id, ["refs": .bool(true), "selector": .string("nav"), "urls": .bool(true)])
+        XCTAssertTrue(urls["text"]?.string?.contains("href=") == true)
+        let names = refs(full)
+        XCTAssertEqual(refs(interactive)["Send"], names["Send"], "refs stay with their element")
+        let send = try XCTUnwrap(names["Send"])
+
+        expectDone(try await command("click", id, ["selector": .string(send)]))
+        try await expect(command("getText", id, ["selector": .string("#out")]), .string("Sent"))
+        expectDone(try await command("click", id, ["selector": .string(try XCTUnwrap(names["Inner"]))]))
+        try await expect(command("getText", id, ["selector": .string("#out")]), .string("Inner"))
+        expectDone(try await command("click", id, ["selector": .string(try XCTUnwrap(names["Shadow"]))]))
+        expectDone(try await command("fill", id, ["selector": .string(try XCTUnwrap(names["Query"])), "text": .string("new")]))
+        try await expect(command("getValue", id, ["selector": .string(try XCTUnwrap(names["Query"]))]), .string("new"))
+        expectDone(try await command("type", id, ["selector": .string("#q"), "text": .string(" text")]))
+        try await expect(command("getValue", id, ["selector": .string("#q")]), .string("new text"))
+        try await expect(command("getCount", id, ["selector": .string(send)]), .int(1))
+        try await expect(command("is", id, ["selector": .string(send), "property": .string("visible")]), .bool(true))
+
+        let covered = await failure("click", id, ["selector": .string("#under")])
+        XCTAssertEqual(covered, "can't click #under: covered by <div#cover>")
+        let disabled = await failure("click", id, ["selector": .string(try XCTUnwrap(names["Off"]))])
+        XCTAssertTrue(disabled.hasSuffix("disabled <button#off>"), disabled)
+        let notEditable = await failure("fill", id, ["selector": .string(send), "text": .string("x")])
+        XCTAssertTrue(notEditable.contains("not_editable"), notEditable)
+        try await expect(command("click", id, ["selector": .string("#missing")]), .bool(false))
+
+        _ = try await command("eval", id, ["script": .string("document.querySelector('#send').remove()")])
+        let stale = await failure("click", id, ["selector": .string(send)])
+        XCTAssertTrue(stale.hasPrefix("stale ref \(send)"), stale)
+        let url = pane.page.url
+        _ = try await command("reload", id)
+        try await loaded(pane, at: url)
+        let unknown = await failure("click", id, ["selector": .string(try XCTUnwrap(names["Cart"]))])
+        XCTAssertTrue(unknown.hasPrefix("unknown ref"), unknown)
+        let fresh = refs(try await command("snapshot", id, ["refs": .bool(true)]))
+        XCTAssertNotEqual(fresh["Cart"], names["Cart"], "a new page never reuses a ref")
+    }
+
+    func testSettleDiffsDialogsAndLogs() async throws {
+        let pane = try await fixture("settle", """
+        <html><body>
+        <button id="add" onclick="console.log('adding', {n: 1}); fetch('data:text/plain,hi').then(() => setTimeout(() => {
+          const b = document.createElement('button'); b.textContent = 'Added'; document.body.appendChild(b); }, 150))">Add</button>
+        <button id="ask" onclick="document.querySelector('#answer').textContent = String(confirm('Sure?'))">Ask</button>
+        <button id="name" onclick="document.querySelector('#answer').textContent = prompt('Name?', 'Bo')">Name</button>
+        <button id="boom" onclick="Promise.reject(new Error('boom'))">Boom</button>
+        <p id="answer">none</p>
+        </body></html>
+        """)
+        let id = pane.tabId
+        let settled = try await command("click", id, ["selector": .string("#add"), "settle": .bool(true)])
+        let diff = try XCTUnwrap(settled["diff"]?.string, "\(settled)")
+        XCTAssertTrue(diff.contains(#"+ @"#) && diff.contains(#"[button] "Added""#), diff)
+        XCTAssertTrue(diff.contains("unchanged"), diff)
+        let delta = try await command("snapshot", id, ["refs": .bool(true), "delta": .bool(true)])
+        XCTAssertTrue(delta["text"]?.string?.hasPrefix("= no change") == true || delta["text"]?.string?.contains("text ") == true,
+                      "\(delta)")
+
+        guard case .array(let console) = try await command("console", id) else { return XCTFail("console is not an array") }
+        XCTAssertEqual(console.last?["text"], .string(#"adding {"n":1}"#))
+        XCTAssertEqual(console.last?["level"], .string("log"))
+        guard case .array(let requests) = try await command("network", id, ["filter": .string("data:")]) else {
+            return XCTFail("network is not an array")
+        }
+        XCTAssertEqual(requests.first?["method"], .string("GET"))
+        XCTAssertEqual(requests.first?["status"], .int(200))
+        XCTAssertEqual(requests.first?["pending"], .bool(false))
+        expectDone(try await command("click", id, ["selector": .string("#boom")]))
+        var errors: [JSONValue] = []
+        let deadline = Date().addingTimeInterval(3)
+        while errors.isEmpty, Date() < deadline {
+            if case .array(let list) = try await command("errors", id) { errors = list }
+            try await Task.sleep(for: .milliseconds(30))
+        }
+        XCTAssertTrue(errors.first?["text"]?.string?.contains("boom") == true, "\(errors)")
+        _ = try await command("console", id, ["clear": .bool(true)])
+        try await expect(command("console", id), .array([]))
+
+        let asked = try await command("click", id, ["selector": .string("#ask")])
+        XCTAssertEqual(asked["dialog"]?["type"], .string("confirm"), "\(asked)")
+        try await expect(command("dialog", id), .object(["type": .string("confirm"), "message": .string("Sure?"), "origin": .string("")]))
+        let blocked = await failure("getText", id, ["selector": .string("#answer")])
+        XCTAssertTrue(blocked.hasPrefix("the page shows a dialog: confirm \"Sure?\""), blocked)
+        _ = try await command("dialog", id, ["action": .string("accept")])
+        try await expect(command("dialog", id), .null)
+        try await expect(command("getText", id, ["selector": .string("#answer")]), .string("true"))
+        _ = try await command("click", id, ["selector": .string("#name")])
+        try await expect(command("dialog", id)["defaultText"] ?? .null, .string("Bo"))
+        _ = try await command("dialog", id, ["action": .string("accept"), "text": .string("Al")])
+        try await expect(command("getText", id, ["selector": .string("#answer")]), .string("Al"))
+        _ = try await command("click", id, ["selector": .string("#ask")])
+        _ = try await command("dialog", id, ["action": .string("dismiss")])
+        try await expect(command("getText", id, ["selector": .string("#answer")]), .string("false"))
+        let none = await failure("dialog", id, ["action": .string("accept")])
+        XCTAssertEqual(none, "the page shows no dialog")
+    }
+
+    func testNativeInputInAWindowIsTrusted() async throws {
+        let pane = try await fixture("native", """
+        <html><body>
+        <button id="go" style="width: 120px; height: 40px">Go</button>
+        <input id="field" style="width: 200px">
+        <p id="log"></p>
+        <script>
+        const log = text => document.querySelector('#log').textContent += text + ';';
+        document.querySelector('#go').addEventListener('click', event => log('click:' + event.isTrusted));
+        document.querySelector('#field').addEventListener('keydown', event => log('key:' + event.key + ':' + event.isTrusted));
+        </script>
+        </body></html>
+        """)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 600), styleMask: [.titled],
+                              backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        window.contentView = pane.view
+        pane.view.layoutSubtreeIfNeeded()
+        XCTAssertTrue(pane.takesNativeInput)
+        let id = pane.tabId
+        try await expect(command("click", id, ["selector": .string("#go")]), .bool(true))
+        try await expect(command("type", id, ["selector": .string("#field"), "text": .string("Hi!")]), .bool(true))
+        try await expect(command("getValue", id, ["selector": .string("#field")]), .string("Hi!"))
+        try await expect(command("press", id, ["selector": .string("#field"), "key": .string("Backspace")]), .bool(true))
+        let deadline = Date().addingTimeInterval(3)
+        var log = ""
+        while !log.contains("key:Backspace"), Date() < deadline {
+            log = try await command("getText", id, ["selector": .string("#log")]).string ?? ""
+            try await Task.sleep(for: .milliseconds(30))
+        }
+        XCTAssertTrue(log.hasPrefix("click:true;key:H:true;key:i:true;key:!:true;key:Backspace:true"), log)
+        try await expect(command("getValue", id, ["selector": .string("#field")]), .string("Hi"))
+    }
+
+    func testScreenshotFormatsSizesAndEmulation() async throws {
+        let pane = try await fixture("shots", """
+        <html><body style="margin: 0">
+        <div id="box" style="width: 200px; height: 100px; background: red"></div>
+        <button style="margin-top: 1200px">Bottom</button>
+        </body></html>
+        """)
+        let id = pane.tabId
+        func image(_ args: [String: JSONValue]) async throws -> NSBitmapImageRep {
+            let reply = try await command("screenshot", id, args)
+            let data = try XCTUnwrap((reply["png"] ?? reply["image"])?.string.flatMap { Data(base64Encoded: $0) })
+            return try XCTUnwrap(NSBitmapImageRep(data: data))
+        }
+        let viewport = try await image([:])
+        XCTAssertEqual(viewport.pixelsWide, 800)
+        let small = try await image(["format": .string("jpeg"), "quality": .int(50), "maxWidth": .int(400)])
+        XCTAssertEqual(small.pixelsWide, 400)
+        let jpeg = try await command("screenshot", id, ["format": .string("jpeg")])
+        XCTAssertEqual(jpeg["format"], .string("jpeg"))
+        XCTAssertNil(jpeg["png"])
+        let element = try await image(["selector": .string("#box")])
+        XCTAssertEqual(element.pixelsWide, 200)
+        XCTAssertEqual(element.pixelsHigh, 100)
+        let full = try await image(["full": .bool(true)])
+        XCTAssertGreaterThan(full.pixelsHigh, 1200)
+        let annotated = try await command("screenshot", id, ["annotate": .bool(true)])
+        guard case .array(let labeled)? = annotated["refs"] else { return XCTFail("annotated screenshot names no refs") }
+        XCTAssertTrue(labeled.isEmpty, "the only control is below the fold: \(labeled)")
+        try await expect(command("eval", id, ["script": .string("document.getElementById('__tab-agent-annotations')")]), .null)
+
+        _ = try await command("set.viewport", id, ["width": .int(500), "height": .int(400)])
+        try await expect(command("eval", id, ["script": .string("innerWidth")]), .int(500))
+        let device = try await command("set.device", id, ["device": .string("iphone")])
+        XCTAssertEqual(device["width"]?.number, 393)
+        XCTAssertEqual(pane.webView?.customUserAgent?.contains("iPhone"), true)
+        _ = try await command("set.device", id, ["device": .string("desktop")])
+        XCTAssertEqual(pane.webView?.customUserAgent ?? "", "")
+        XCTAssertNil(pane.viewport)
+        _ = try await command("set.media", id, ["media": .string("dark")])
+        try await expect(command("eval", id, ["script": .string("matchMedia('(prefers-color-scheme: dark)').matches")]), .bool(true))
     }
 }

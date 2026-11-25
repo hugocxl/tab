@@ -18,6 +18,8 @@ public final class IOSSimulatorSession {
 
     public private(set) var isBooted = false
     public private(set) var surface: IOSurface?
+    /// Pixels per point, once read.
+    var screenScale: Double?
 
     private let bridge = IOSSimulatorBridge.shared
     private var simulator: AnyObject?

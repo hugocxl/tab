@@ -78,6 +78,18 @@ public enum BrowserOutput: Hashable, Sendable {
     case page
     /// The PNG as base64, ready to decode.
     case screenshot
+    /// The image written to this absolute path, which is printed.
+    case screenshotFile(String)
+    /// The snapshot's lines.
+    case snapshot
+    /// `true`/`false`, or an action's diff, with notes and warnings on stderr.
+    case action
+    /// One line per entry.
+    case console
+    case errors
+    case network
+    /// The dialog, or `none`.
+    case dialog
 }
 
 extension CLICommands {
@@ -98,45 +110,128 @@ extension CLICommands {
             page("back", .back, ["BROWSER"], "Go back") { request, _ in request.output(.ok) },
             page("forward", .forward, ["BROWSER"], "Go forward") { request, _ in request.output(.ok) },
             page("close", .close, ["BROWSER"], "Close the browser's pane") { request, _ in request.output(.ok) },
-            page("screenshot", .screenshot, ["BROWSER"], "Print the page as a base64 PNG") { request, _ in
-                var invocation = request.output(.screenshot)
+            page("screenshot", .screenshot,
+                 ["BROWSER [SELECTOR] [--output FILE] [--format png|jpeg] [--quality 1-100] [--max-width PIXELS] [--full] [--annotate]"],
+                 "Save a picture of the page, or print it as base64",
+                 words: 1 ... 2, values: ["--output", "--format", "--quality", "--max-width"],
+                 flags: ["--full", "--annotate"]) { request, a in
+                if let word = a.optional(1), [".png", ".jpg", ".jpeg"].contains(where: { word.lowercased().hasSuffix($0) }) {
+                    throw CLIError("to save the screenshot, pass --output \(word)")
+                }
+                var invocation = request.optional("selector", a.optional(1))
+                if let format = a.value("--format") {
+                    guard ["png", "jpeg", "jpg"].contains(format) else { throw a.usage }
+                    invocation = invocation.arg("format", format == "jpg" ? "jpeg" : format)
+                }
+                if a.value("--quality") != nil {
+                    invocation = invocation.arg("quality", .int(Int64(try a.number("--quality", default: 80, 1 ... 100) as Int)))
+                }
+                if a.value("--max-width") != nil {
+                    invocation = invocation.arg("maxWidth", .int(Int64(try a.number("--max-width", default: 0, 16 ... 20_000) as Int)))
+                }
+                if a.flag("--full") { invocation = invocation.arg("full", true) }
+                if a.flag("--annotate") { invocation = invocation.arg("annotate", true) }
+                if let output = a.value("--output") {
+                    let path = URL(fileURLWithPath: (output as NSString).expandingTildeInPath).standardizedFileURL.path
+                    invocation = invocation.output(.screenshotFile(path))
+                } else {
+                    invocation = invocation.output(.screenshot)
+                }
                 invocation.extraTime = BrowserCommand.screenshotTime
                 return invocation
             },
             page("eval", .evaluate, ["BROWSER JAVASCRIPT"], "Run JavaScript and print its result", words: 2 ... 2) { request, a in
                 request.arg("script", a.word(1))
             },
-            page("snapshot", .snapshot, ["BROWSER [SELECTOR]"], "Print the interactive elements, each with a selector",
-                 words: 1 ... 2) { request, a in
-                request.optional("selector", a.optional(1))
+            page("snapshot", .snapshot,
+                 ["BROWSER [-i] [-c] [-d DEPTH] [-s SELECTOR] [-u] [--delta] [--json]"],
+                 "Print the page's elements, each with a ref such as @e1",
+                 words: 1 ... 2, values: ["-d", "--depth", "-s", "--selector"],
+                 flags: ["-i", "--interactive", "-c", "--compact", "-u", "--urls", "--delta"], json: true) { request, a in
+                var invocation = request.arg("refs", true)
+                    .optional("selector", try a.either("-s", "--selector") ?? a.optional(1))
+                if a.flag("-i") || a.flag("--interactive") { invocation = invocation.arg("interactive", true) }
+                if a.flag("-c") || a.flag("--compact") { invocation = invocation.arg("compact", true) }
+                if a.flag("-u") || a.flag("--urls") { invocation = invocation.arg("urls", true) }
+                if a.flag("--delta") { invocation = invocation.arg("delta", true) }
+                if let depth = try a.either("-d", "--depth") {
+                    guard let value = Int(depth), (0 ... 1000).contains(value) else {
+                        throw CLIError("--depth must be a whole number from 0 to 1000")
+                    }
+                    invocation = invocation.arg("depth", .int(Int64(value)))
+                }
+                return invocation.output(a.json ? .json : .snapshot)
             },
             page("find", .find, ["BROWSER role|text|label|placeholder|testid VALUE"], "Print the elements that match",
                  words: 3 ... 3) { request, a in
                 request.arg("kind", try a.choice(1, ["role", "text", "label", "placeholder", "testid"]))
                     .arg("value", a.word(2))
             },
-            element("click", .click, "Click the element"),
-            element("hover", .hover, "Move the pointer over the element"),
+            action("click", .click, ["BROWSER TARGET"], "Click the element", words: 2 ... 2) { request, a in
+                request.arg("selector", a.word(1))
+            },
+            action("hover", .hover, ["BROWSER TARGET"], "Move the pointer over the element", words: 2 ... 2) { request, a in
+                request.arg("selector", a.word(1))
+            },
             element("scroll-into-view", .scrollIntoView, "Scroll the element into view"),
-            page("check", .setChecked, ["BROWSER SELECTOR"], "Check a checkbox", words: 2 ... 2) { request, a in
+            action("check", .setChecked, ["BROWSER TARGET"], "Check a checkbox", words: 2 ... 2) { request, a in
                 request.arg("selector", a.word(1)).arg("checked", true)
             },
-            page("uncheck", .setChecked, ["BROWSER SELECTOR"], "Uncheck a checkbox", words: 2 ... 2) { request, a in
+            action("uncheck", .setChecked, ["BROWSER TARGET"], "Uncheck a checkbox", words: 2 ... 2) { request, a in
                 request.arg("selector", a.word(1)).arg("checked", false)
             },
-            page("fill", .fill, ["BROWSER SELECTOR TEXT"], "Replace the field's text", words: 3 ... 3) { request, a in
+            action("fill", .fill, ["BROWSER TARGET TEXT"], "Replace the field's text", words: 3 ... 3) { request, a in
                 request.arg("selector", a.word(1)).arg("text", a.word(2))
             },
-            page("type", .type, ["BROWSER SELECTOR TEXT [--submit]"], "Type into the field; --submit presses Return",
-                 words: 3 ... 3, flags: ["--submit"]) { request, a in
+            action("type", .type, ["BROWSER TARGET TEXT [--submit]"], "Type at the end of the field; --submit presses Return",
+                   words: 3 ... 3, flags: ["--submit"]) { request, a in
                 request.arg("selector", a.word(1)).arg("text", a.word(2)).arg("submit", a.flag("--submit"))
             },
-            page("press", .press, ["BROWSER KEY [SELECTOR]"], "Press a key, in the element if given",
-                 words: 2 ... 3) { request, a in
+            action("press", .press, ["BROWSER KEY [TARGET]"], "Press a key such as Enter or Meta+a, in the element if given",
+                   words: 2 ... 3) { request, a in
                 request.arg("key", a.word(1)).optional("selector", a.optional(2))
             },
-            page("select", .select, ["BROWSER SELECTOR VALUE"], "Choose an option of a menu", words: 3 ... 3) { request, a in
+            action("select", .select, ["BROWSER TARGET VALUE"], "Choose an option of a menu by value or label",
+                   words: 3 ... 3) { request, a in
                 request.arg("selector", a.word(1)).arg("value", a.word(2))
+            },
+            page("dialog", .dialog, ["BROWSER [status|accept|dismiss] [TEXT]"],
+                 "Print the page's open dialog, or answer it; TEXT answers a prompt", words: 1 ... 3, json: true) { request, a in
+                let action = a.optional(1) == nil ? "status" : try a.choice(1, ["status", "accept", "dismiss"])
+                guard a.optional(2) == nil || action == "accept" else { throw a.usage }
+                return request.arg("action", action).optional("text", a.optional(2)).output(a.json ? .json : .dialog)
+            },
+            page("console", .console, ["BROWSER [--clear]"], "Print the page's console messages", flags: ["--clear"],
+                 json: true) { request, a in
+                (a.flag("--clear") ? request.arg("clear", true) : request).output(a.json ? .json : .console)
+            },
+            page("errors", .errors, ["BROWSER [--clear]"], "Print the page's uncaught errors", flags: ["--clear"],
+                 json: true) { request, a in
+                (a.flag("--clear") ? request.arg("clear", true) : request).output(a.json ? .json : .errors)
+            },
+            page("network", .network, ["BROWSER [--filter TEXT] [--clear]"], "Print the page's fetch and XHR requests",
+                 values: ["--filter"], flags: ["--clear"], json: true) { request, a in
+                (a.flag("--clear") ? request.arg("clear", true) : request).optional("filter", a.value("--filter"))
+                    .output(a.json ? .json : .network)
+            },
+            page("set viewport", .setViewport, ["BROWSER WIDTH HEIGHT", "BROWSER reset"],
+                 "Give the page a fixed size in CSS pixels", words: 2 ... 3) { request, a in
+                if a.words.count == 2 {
+                    guard a.word(1) == "reset" else { throw a.usage }
+                    return request.arg("reset", true).output(.ok)
+                }
+                guard let width = Int(a.word(1)), let height = Int(a.word(2)),
+                      (100 ... 10_000).contains(width), (100 ... 10_000).contains(height)
+                else { throw CLIError("the viewport must be 100 to 10000 pixels wide and high") }
+                return request.arg("width", .int(Int64(width))).arg("height", .int(Int64(height))).output(.ok)
+            },
+            page("set device", .setDevice, ["BROWSER iphone|ipad|pixel|desktop"],
+                 "Size the page and set the user agent of a device", words: 2 ... 2) { request, a in
+                request.arg("device", try a.choice(1, ["iphone", "ipad", "pixel", "desktop"]))
+            },
+            page("set media", .setMedia, ["BROWSER dark|light|auto"], "Set the color scheme the page sees",
+                 words: 2 ... 2) { request, a in
+                request.arg("media", try a.choice(1, ["dark", "light", "auto"])).output(.ok)
             },
             page("is", .is, ["BROWSER visible|hidden|enabled|disabled|checked SELECTOR"], "Print true or false",
                  words: 3 ... 3) { request, a in
@@ -203,12 +298,42 @@ extension CLICommands {
         notes: """
         BROWSER is the ID that tab pane new browser, tab tab new browser and list
         print. Browsers live in the app on this Mac, which must be running.
-        Element commands take a CSS selector, such as one snapshot prints, and print
-        their result as JSON: false when nothing matches. Waits give up after
-        --timeout seconds: 5 by default, 10 for wait-for-navigation, at most 60.
-        TAB_CLI_TIMEOUT sets how many seconds the app has to answer (default 10).
+        TARGET and SELECTOR take a ref that snapshot printed, such as @e3, or a CSS
+        selector. Refs last until their element leaves the page; a ref from an
+        earlier page fails. Commands print their result as JSON: false when no
+        element matches a CSS selector.
+        snapshot -i lists only interactive elements, -c leaves out empty
+        structure, -d stops at a depth, -s starts at the elements a selector
+        matches, -u adds link URLs, and --delta prints only what changed since
+        the last snapshot (- gone, + new).
+        click, hover, type and press send real mouse and key events when the
+        browser is in a window, and script events otherwise (the note on stderr
+        says so). Actions fail, saying why, when the element is covered,
+        disabled or not editable. --settle waits for the page to settle and
+        prints what changed.
+        A page's alert, confirm or prompt waits for dialog accept or dismiss.
+        console, errors and network show what the page logged and fetched since an
+        agent first drove the browser; reload to see a page load's own.
+        Waits give up after --timeout seconds: 5 by default, 10 for
+        wait-for-navigation, at most 60. TAB_CLI_TIMEOUT sets how many seconds the
+        app has to answer (default 10).
         list prints the columns id, title, url, profile and active.
         """)
+
+    /// An action, which can wait for the page to settle with `--settle`.
+    private static func action(_ name: String, _ command: BrowserCommand, _ usage: [String], _ summary: String,
+                               words: ClosedRange<Int>, flags: [String] = [],
+                               build: @escaping @Sendable (BrowserInvocation, CLIArguments) throws -> BrowserInvocation)
+        -> CLICommandSpec {
+        page(name, command, usage.map { $0 + " [--settle]" }, summary, words: words, flags: flags + ["--settle"]) { request, a in
+            var invocation = try build(request, a).output(.action)
+            if a.flag("--settle") {
+                invocation = invocation.arg("settle", true)
+                invocation.extraTime += BrowserCommand.settleTime
+            }
+            return invocation
+        }
+    }
 
     /// A browser command; every one but `list` names the browser first.
     private static func page(_ name: String, _ command: BrowserCommand, _ usage: [String], _ summary: String,
@@ -240,4 +365,16 @@ extension CLICommands {
 extension BrowserCommand {
     /// How long a screenshot may take.
     static let screenshotTime: TimeInterval = 20
+    /// How long an action may wait for the page to settle, and type.
+    static let settleTime: TimeInterval = 8
+}
+
+extension CLIArguments {
+    /// The value of an option that has a short and a long name.
+    func either(_ short: String, _ long: String) throws -> String? {
+        if value(short) != nil, value(long) != nil {
+            throw CLIError("\(short) and \(long) are the same option; give it once")
+        }
+        return value(short) ?? value(long)
+    }
 }

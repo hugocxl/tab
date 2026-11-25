@@ -18,43 +18,41 @@ enum Simulators {
             let simulator = try await resolve(name, client: client)
             _ = try await client.simulatorAction(.shutDown, on: simulator.simulator)
             Output.ok(json: json)
-        case .screenshot(let name, let output):
+        case .action(let name, let action):
             let simulator = try await resolve(name, client: client)
-            let png = try await client.simulatorScreenshot(simulator.simulator)
-            if let output {
-                let url = URL(fileURLWithPath: (output as NSString).expandingTildeInPath)
+            _ = try await client.simulatorAction(action, on: simulator.simulator)
+            Output.ok(json: json)
+        case .drive(let name, let drive, let output):
+            let simulator = try await resolve(name, client: client)
+            let result = try await client.simulatorDrive(drive, on: simulator.simulator)
+            try print(result, output: output, flat: drive.snapshot?.interactiveOnly ?? false, json: json)
+        }
+    }
+
+    private static func print(_ result: SimulatorDriveResult, output: CLISimulatorOutput, flat: Bool, json: Bool) throws {
+        if let image = result.image {
+            if let file = output.file {
+                let url = URL(fileURLWithPath: (file as NSString).expandingTildeInPath)
                 do {
-                    try png.write(to: url)
+                    try image.write(to: url)
                 } catch {
-                    throw CLIError("can't write \(output): \(error.localizedDescription)")
+                    throw CLIError("can't write \(file): \(error.localizedDescription)")
                 }
-                Output.ok(json: json)
+                if let screen = result.screen {
+                    let n = SimulatorTarget.number
+                    Output.line("\(url.path) \(n(screen.width))x\(n(screen.height)) points")
+                } else {
+                    Output.ok(json: json)
+                }
             } else {
-                FileHandle.standardOutput.write(png)
+                FileHandle.standardOutput.write(image)
             }
-        case .tap(let name, let x, let y):
-            let simulator = try await resolve(name, client: client)
-            // Taps are fractions of the screen; the screenshot says its size.
-            let size = try pngSize(try await client.simulatorScreenshot(simulator.simulator))
-            guard x < size.width, y < size.height else {
-                throw CLIError("the screen is \(Int(size.width))×\(Int(size.height)) pixels")
-            }
-            let point = (x: x / size.width, y: y / size.height)
-            _ = try await client.simulatorAction(.input([.touch(x: point.x, y: point.y, down: true),
-                                                         .touch(x: point.x, y: point.y, down: false)]), on: simulator.simulator)
-            Output.ok(json: json)
-        case .type(let name, let text):
-            let simulator = try await resolve(name, client: client)
-            _ = try await client.simulatorAction(.type(text), on: simulator.simulator)
-            Output.ok(json: json)
-        case .press(let name, let button):
-            let simulator = try await resolve(name, client: client)
-            _ = try await client.simulatorAction(.input([.button(button)]), on: simulator.simulator)
-            Output.ok(json: json)
-        case .open(let name, let url):
-            let simulator = try await resolve(name, client: client)
-            _ = try await client.simulatorAction(.openURL(url), on: simulator.simulator)
-            Output.ok(json: json)
+            return
+        }
+        if json {
+            try Output.wire(result)
+        } else {
+            Output.line(SimulatorOutput.text(result, frames: output.frames, flat: flat))
         }
     }
 
@@ -88,16 +86,6 @@ enum Simulators {
         }
         guard let simulator = named.first else { throw CLIError("no simulator named \(name); see tab simulator list") }
         return simulator
-    }
-
-    /// The width and height in a PNG's header.
-    static func pngSize(_ png: Data) throws -> (width: Double, height: Double) {
-        let bytes = [UInt8](png.prefix(24))
-        guard bytes.count == 24, bytes[0 ..< 8] == [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A] else {
-            throw CLIError("the server's screenshot isn't a PNG")
-        }
-        func number(_ at: Int) -> Double { Double(bytes[at ..< at + 4].reduce(UInt32(0)) { $0 << 8 | UInt32($1) }) }
-        return (number(16), number(20))
     }
 
     // MARK: Forwarding

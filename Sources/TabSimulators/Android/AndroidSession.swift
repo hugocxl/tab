@@ -23,7 +23,9 @@ public final class AndroidSession: SimulatorSession {
     public let buttons: [SimulatorButton] = [.back, .home, .recents, .lock]
 
     private let queue = DispatchQueue(label: "com.hugocorta.tab.android")
-    private var emulator: RunningEmulator?
+    private(set) var emulator: RunningEmulator?
+    /// Pixels per density-independent pixel, once read.
+    var density: Double?
     private var client: GRPCClient?
     private var screenStream: UInt32?
     private var streaming = false
@@ -232,7 +234,7 @@ public final class AndroidSession: SimulatorSession {
 
     // MARK: Controls
 
-    private func running() throws -> RunningEmulator {
+    func running() throws -> RunningEmulator {
         guard let emulator else { throw AndroidError.failed("The emulator isn't running") }
         return emulator
     }

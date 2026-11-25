@@ -187,16 +187,37 @@ final class BrowserImportTests: XCTestCase {
 
 final class BrowserScriptTests: XCTestCase {
     func testArgumentsAreEmbeddedAsLiterals() throws {
-        let script = try XCTUnwrap(BrowserScripts.script(.type, args: .object([
-            "selector": .string("input[name=\"q\"]"), "text": .string("a'b\"c\u{2028}"), "submit": .bool(true),
+        let script = try XCTUnwrap(BrowserScripts.agentScript(.getAttribute, args: .object([
+            "selector": .string("input[name=\"q\"]"), "attribute": .string("a'b\"c\u{2028}"),
         ])))
-        XCTAssertTrue(script.contains(#"document.querySelector("input[name=\"q\"]")"#))
-        XCTAssertTrue(script.contains(#"setValue(el, "a'b\"c\u2028");"#))
-        XCTAssertTrue(script.contains("if (true) submit(el);"))
+        XCTAssertTrue(script.contains(#"A.find("input[name=\"q\"]")"#))
+        XCTAssertTrue(script.contains(#"el.getAttribute("a'b\"c\u2028")"#))
+        let snapshot = try XCTUnwrap(BrowserScripts.agentScript(.snapshot, args: .object([
+            "refs": .bool(true), "interactive": .bool(true), "depth": .int(3), "selector": .string("main"),
+        ])))
+        XCTAssertTrue(snapshot.contains(#"interactive: true, compact: false, depth: 3, selector: "main", urls: false"#))
+        XCTAssertTrue(try XCTUnwrap(BrowserScripts.agentScript(.snapshot, args: .object([:]))).contains("legacySnapshot(null)"),
+                      "an old CLI's snapshot keeps its array of selectors")
+    }
+
+    func testCountingARefDoesNotUseItAsASelector() throws {
+        let ref = try XCTUnwrap(BrowserScripts.agentScript(.getCount, args: .object(["selector": .string("@e12")])))
+        XCTAssertFalse(ref.contains("querySelectorAll"))
+        let css = try XCTUnwrap(BrowserScripts.agentScript(.getCount, args: .object(["selector": .string("li")])))
+        XCTAssertTrue(css.contains("querySelectorAll"))
+    }
+
+    func testRefsAreRecognizedOnlyInTheirSpellings() {
+        for (text, id) in [("@e3", "e3"), ("ref=e3", "e3"), ("e12", "e12"), (" @e7 ", "e7")] {
+            XCTAssertEqual(BrowserAgentScripts.refId(text), id, text)
+        }
+        for text in ["#e3", "e", "@e", "e3a", "@E3", "button", "@e-1", "e\u{0661}"] {
+            XCTAssertNil(BrowserAgentScripts.refId(text), text)
+        }
     }
 
     func testMissingArgumentsAreReported() {
-        XCTAssertThrowsError(try BrowserScripts.script(.click, args: .object([:]))) {
+        XCTAssertThrowsError(try BrowserScripts.agentScript(.getText, args: .object([:]))) {
             XCTAssertEqual(($0 as? BrowserScripts.Failure)?.message, "missing argument 'selector'")
         }
         XCTAssertThrowsError(try BrowserScripts.script(.storageGet, args: .object(["key": .string("a"), "kind": .string("disk")]))) {
@@ -205,9 +226,45 @@ final class BrowserScriptTests: XCTestCase {
     }
 
     func testAppCommandsHaveNoPageScript() throws {
-        for command in [BrowserCommand.open, .navigate, .screenshot, .cookiesGet, .reload] {
+        for command in [BrowserCommand.open, .navigate, .screenshot, .cookiesGet, .reload, .click, .type, .dialog, .console] {
             XCTAssertNil(try BrowserScripts.script(command, args: .object([:])), command.rawValue)
+            XCTAssertNil(try BrowserScripts.agentScript(command, args: .object([:])), command.rawValue)
         }
+    }
+
+    func testKeysBecomeWhatAUSKeyboardSends() throws {
+        let enter = try XCTUnwrap(BrowserKey.parse("Enter"))
+        XCTAssertEqual(enter.keyCode, 36)
+        XCTAssertEqual(enter.characters, "\r")
+        let shiftTab = try XCTUnwrap(BrowserKey.parse("Shift+Tab"))
+        XCTAssertEqual(shiftTab.keyCode, 48)
+        XCTAssertTrue(shiftTab.modifiers.contains(.shift))
+        let selectAll = try XCTUnwrap(BrowserKey.parse("Meta+a"))
+        XCTAssertEqual(selectAll.keyCode, 0)
+        XCTAssertEqual(selectAll.characters, "a")
+        XCTAssertEqual(selectAll.modifiers, .command)
+        let control = try XCTUnwrap(BrowserKey.parse("Control+c"))
+        XCTAssertEqual(control.characters, "\u{3}")
+        XCTAssertEqual(control.charactersIgnoringModifiers, "c")
+        let left = try XCTUnwrap(BrowserKey.parse("ArrowLeft"))
+        XCTAssertEqual(left.keyCode, 123)
+        XCTAssertTrue(left.modifiers.contains(.function))
+        XCTAssertEqual(BrowserKey.parse("Cmd++")?.characters, "+")
+        let bang = try XCTUnwrap(BrowserKey.character("!"))
+        XCTAssertEqual(bang.keyCode, 18)
+        XCTAssertTrue(bang.modifiers.contains(.shift))
+        for name in ["", "Hyper+a", "Shift+", "Bogus", "\u{e9}"] {
+            XCTAssertNil(BrowserKey.parse(name), name)
+        }
+        XCTAssertNil(BrowserKey.character("\u{e9}"), "typing it needs inserted text")
+    }
+
+    func testSnapshotDiffsIgnoreIndentationAndOrder() {
+        let old = ["@e1 [button] \"Send\"", "  text \"Idle\"", "@e2 [link] \"Cart\""]
+        let new = ["  @e2 [link] \"Cart\"", "@e1 [button] \"Send\"", "text \"Sent\"", "text \"Sent\""]
+        XCTAssertEqual(BrowserSnapshotDiff.diff(from: old, to: new),
+                       "- text \"Idle\"\n+ text \"Sent\"\n+ text \"Sent\"\n= 2 unchanged")
+        XCTAssertEqual(BrowserSnapshotDiff.diff(from: old, to: old), "= no change (3 lines)")
     }
 
     func testWaitConditionsFollowTheirPriorityAndSwallowErrors() throws {
@@ -374,7 +431,8 @@ final class BrowserAutomationTests: XCTestCase {
 
         try await expect(call(.getCount, tab.merging(["selector": .string("li")]) { $1 }), .int(3))
         try await expect(call(.getText, tab.merging(["selector": .string("h1")]) { $1 }), .string("Welcome"))
-        try await expect(call(.click, tab.merging(["selector": .string("#go")]) { $1 }), .bool(true))
+        let clicked = try await call(.click, tab.merging(["selector": .string("#go")]) { $1 })
+        XCTAssertEqual(clicked["ok"], .bool(true), "a hidden pane clicks with script events and says so")
         try await expect(call(.getText, tab.merging(["selector": .string("#out")]) { $1 }), .string("clicked"))
         try await expect(call(.click, tab.merging(["selector": .string("#nothing")]) { $1 }), .bool(false))
         try await expect(call(.fill, tab.merging(["selector": .string("input[name=q]"), "text": .string("tab")]) { $1 }), .bool(true))

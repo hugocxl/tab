@@ -90,13 +90,24 @@ public enum CLISimulator: Hashable, Sendable {
     case list
     case boot(simulator: String)
     case shutDown(simulator: String?)
-    /// Saves a PNG to `output`, or writes it to stdout.
-    case screenshot(simulator: String?, output: String?)
-    /// A tap at a point of the screenshot, in its pixels.
-    case tap(simulator: String?, x: Double, y: Double)
-    case type(simulator: String?, text: String)
-    case press(simulator: String?, button: SimulatorButton)
-    case open(simulator: String?, url: String)
+    /// Changes a setting, such as its appearance or which way it is held.
+    case action(simulator: String?, action: SimulatorAction)
+    /// Runs steps and prints what it reads back: a snapshot, what changed,
+    /// a screenshot, apps or logs.
+    case drive(simulator: String?, drive: SimulatorDrive, output: CLISimulatorOutput)
+}
+
+/// How `tab simulator` prints what a drive read back.
+public struct CLISimulatorOutput: Hashable, Sendable {
+    /// Where a screenshot goes; stdout when `nil`.
+    public var file: String?
+    /// Adds each element's frame to snapshot lines.
+    public var frames: Bool
+
+    public init(file: String? = nil, frames: Bool = false) {
+        self.file = file
+        self.frames = frames
+    }
 }
 
 public enum CLIServer: Hashable, Sendable {

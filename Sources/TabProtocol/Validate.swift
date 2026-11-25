@@ -235,6 +235,9 @@ extension RequestBody {
             try action.validate()
         case .simulatorScreenshot(let simulator):
             try simulator.validate()
+        case .simulatorDrive(let simulator, let drive):
+            try simulator.validate()
+            try drive.validate()
         case .attachSimulator(let request):
             try request.simulator.validate()
             if request.maxPixels == 0 || request.codecs.isEmpty || request.codecs.count > 8 { throw .badRequest }
@@ -427,7 +430,7 @@ extension ReplyBody {
              .creationCancelled, .screenCleared, .terminalColorsSet, .sessionReferencesSynced, .clientIdentified,
              .inputWritten, .agentStateReported, .projectMutated, .tabsMutated, .serverSettingsWritten, .infrastructureDescribed, .serverStopping, .serverBusy,
              .serverRestarting, .git, .execCancelled, .activityAcknowledged, .authenticated, .tunnelFailed, .tunnelClosed,
-             .simulatorSettings, .simulatorDetached, .simulatorScreenshot, .unknown:
+             .simulatorSettings, .simulatorDetached, .simulatorScreenshot, .simulatorDriven, .unknown:
             break
         }
     }

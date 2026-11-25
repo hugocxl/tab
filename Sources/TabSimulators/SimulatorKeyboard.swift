@@ -35,6 +35,55 @@ public enum SimulatorKeyboard {
         }
     }
 
+    /// Whether every character of `text` is on a US keyboard.
+    public static func canType(_ text: String) -> Bool {
+        strokes(for: text).count == text.unicodeScalars.count
+    }
+
+    /// The presses of a key or chord such as `return`, `backspace`,
+    /// `cmd+a` or `shift+tab`: modifiers down in order, the key, then
+    /// modifiers up. `nil` for a name it doesn't know.
+    public static func chord(_ name: String) -> [SimulatorInput]? {
+        let parts = name.split(separator: "+", omittingEmptySubsequences: false).map(String.init)
+        guard let last = parts.last, !last.isEmpty else {
+            return name == "+" ? input(typing: "+") : nil
+        }
+        var modifiers: [UInt32] = []
+        for part in parts.dropLast() {
+            guard let modifier = Self.modifiers[part.lowercased()] else { return nil }
+            modifiers.append(modifier)
+        }
+        let key: UInt32
+        var shift = false
+        if let named = keys[last.lowercased()] {
+            key = named
+        } else if last.count == 1, let stroke = strokes(for: last).first {
+            key = stroke.usage
+            shift = stroke.shift
+        } else {
+            return nil
+        }
+        if shift, !modifiers.contains(leftShift) { modifiers.append(leftShift) }
+        return modifiers.map { .key(usage: $0, down: true) }
+            + [.key(usage: key, down: true), .key(usage: key, down: false)]
+            + modifiers.reversed().map { .key(usage: $0, down: false) }
+    }
+
+    private static let modifiers: [String: UInt32] = [
+        "ctrl": 0xE0, "control": 0xE0, "shift": 0xE1, "alt": 0xE2, "option": 0xE2, "opt": 0xE2,
+        "cmd": 0xE3, "command": 0xE3, "meta": 0xE3,
+    ]
+
+    private static let keys: [String: UInt32] = {
+        var keys: [String: UInt32] = [
+            "return": 0x28, "enter": 0x28, "escape": 0x29, "esc": 0x29, "backspace": 0x2A, "delete": 0x2A,
+            "tab": 0x2B, "space": 0x2C, "forward-delete": 0x4C, "right": 0x4F, "left": 0x50, "down": 0x51, "up": 0x52,
+            "home": 0x4A, "end": 0x4D, "pageup": 0x4B, "page-up": 0x4B, "pagedown": 0x4E, "page-down": 0x4E,
+        ]
+        for number in 1 ... 12 { keys["f\(number)"] = 0x3A + UInt32(number - 1) }
+        return keys
+    }()
+
     private static let letters: [(Character, UInt32)] = "abcdefghijklmnopqrstuvwxyz".enumerated().map {
         ($0.element, UInt32(0x04 + $0.offset))
     }

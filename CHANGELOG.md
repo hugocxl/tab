@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.138.1 - 2026-11-25
+
+### Changed
+
+- Let agents drive browser and simulator panes with element refs, real input and settle diffs.
+
 ## 0.138.0 - 2026-11-25
 
 ### Added

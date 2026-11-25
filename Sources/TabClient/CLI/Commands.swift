@@ -507,7 +507,7 @@ enum CLICommands {
         """)
 
     static let simulator = CLIGroup(
-        name: "simulator", summary: "The server's iOS simulators and Android emulators", section: .server,
+        name: "simulator", summary: "Drive the server's iOS simulators and Android emulators", section: .server,
         commands: [
             CLICommandSpec("simulator list", [""], "One line per simulator: its ID, platform, name, OS and state", json: true) { a in
                 manage(a, .simulator(.list))
@@ -518,39 +518,94 @@ enum CLICommands {
             CLICommandSpec("simulator shutdown", ["[--simulator SIMULATOR]"], "Shut a simulator down", values: ["--simulator"]) { a in
                 manage(a, .simulator(.shutDown(simulator: a.value("--simulator"))))
             },
-            CLICommandSpec("simulator screenshot", ["[--simulator SIMULATOR] [--output FILE]"],
-                           "Save the screen as a PNG, or write it to stdout", values: ["--simulator", "--output"]) { a in
-                manage(a, .simulator(.screenshot(simulator: a.value("--simulator"), output: a.value("--output"))))
+            CLICommandSpec("simulator snapshot", ["[-i] [--frames] [--simulator SIMULATOR]"],
+                           "Print the screen's elements with refs such as @e3; -i keeps only those to act on",
+                           values: ["--simulator"], flags: ["-i", "--frames"], json: true) { a in
+                a.drive(SimulatorDrive(snapshot: SimulatorSnapshotOptions(interactiveOnly: a.flag("-i"))),
+                        output: CLISimulatorOutput(frames: a.flag("--frames")))
             },
-            CLICommandSpec("simulator tap", ["[--simulator SIMULATOR] X Y"], "Tap a point, in the screenshot's pixels",
-                           words: 2 ... 2, values: ["--simulator"]) { a in
-                guard let x = Double(a.word(0)), let y = Double(a.word(1)), x >= 0, y >= 0 else {
-                    throw CLIError("X and Y are pixels of the screenshot, from its top left")
+            CLICommandSpec("simulator screenshot", ["[--output FILE] [--format png|jpeg] [--quality N] [--full] [--simulator SIMULATOR]"],
+                           "Save the upright screen, one pixel per point unless --full, or write it to stdout",
+                           values: ["--simulator", "--output", "--format", "--quality"], flags: ["--full"]) { a in
+                guard let format = SimulatorImageFormat(rawValue: a.value("--format") ?? "png") else {
+                    throw CLIError("--format is png or jpeg")
                 }
-                return manage(a, .simulator(.tap(simulator: a.value("--simulator"), x: x, y: y)))
+                let options = SimulatorScreenshotOptions(format: format, quality: try a.number("--quality", default: 80, 1 ... 100),
+                                                         fullResolution: a.flag("--full"))
+                return a.drive(SimulatorDrive(screenshot: options), output: CLISimulatorOutput(file: a.value("--output")))
             },
-            CLICommandSpec("simulator type", ["[--simulator SIMULATOR] TEXT"], "Type text on the simulator's keyboard",
-                           words: 1 ... 1, values: ["--simulator"]) { a in
-                manage(a, .simulator(.type(simulator: a.value("--simulator"), text: a.word(0))))
+            step("tap", ["@REF|X Y|--label TEXT|--id ID [--count N] [--hold SECONDS]"],
+                 "Tap an element or a point in points; --hold long-presses", words: 0 ... 2),
+            step("swipe", ["X1 Y1 X2 Y2 [--duration SECONDS]"], "Drag one finger between two points", words: 4 ... 4),
+            step("scroll", ["up|down|left|right [@REF|--label TEXT|--id ID] [--distance FRACTION]"],
+                 "Scroll the screen, or an element, to show what is that way", words: 1 ... 2),
+            step("type", ["TEXT"], "Type into the focused field", words: 1 ... 1),
+            step("fill", ["@REF|--label TEXT|--id ID TEXT"], "Tap a field, select what it holds and type over it", words: 1 ... 2),
+            step("key", ["NAME"], "Press a key or chord, such as return, backspace, tab, up or cmd+a", words: 1 ... 1),
+            step("press", ["home|back|recents|lock"], "Press a button", words: 1 ... 1),
+            step("wait-for", ["@REF|--label TEXT|--id ID [--gone] [--timeout SECONDS]"],
+                 "Wait for an element to appear, or with --gone to go", words: 0 ... 1),
+            step("open", ["URL"], "Open a URL, such as an app's deep link", words: 1 ... 1),
+            step("launch", ["APP"], "Start an app by bundle ID or package, restarting it if it runs", words: 1 ... 1),
+            step("terminate", ["APP"], "Stop an app", words: 1 ... 1),
+            step("location", ["LATITUDE LONGITUDE"], "Set the simulated location", words: 2 ... 2),
+            CLICommandSpec("simulator batch", ["STEP... [--settle] [--snapshot] [--simulator SIMULATOR]"],
+                           "Run several steps in one call, such as \"tap @e3\" \"type hi\" \"key return\"",
+                           words: 1 ... SimulatorDrive.maxSteps, values: ["--simulator"], flags: ["--settle", "--snapshot"], json: true) { a in
+                let steps = try a.words.map { try SimulatorSteps.parse($0) }
+                return a.drive(SimulatorDrive(steps: steps, settle: a.flag("--settle"),
+                                              snapshot: a.flag("--snapshot") ? SimulatorSnapshotOptions() : nil))
             },
-            CLICommandSpec("simulator press", ["[--simulator SIMULATOR] home|back|recents|lock"], "Press a button",
+            CLICommandSpec("simulator install", ["PATH [--simulator SIMULATOR]"], "Install an .app or .apk from the server's disk",
                            words: 1 ... 1, values: ["--simulator"]) { a in
-                guard let button = SimulatorButton(rawValue: a.word(0)) else {
-                    throw CLIError("buttons are home, back, recents and lock")
+                a.drive([.install(path: a.word(0))])
+            },
+            CLICommandSpec("simulator uninstall", ["APP [--simulator SIMULATOR]"], "Remove an app", words: 1 ... 1,
+                           values: ["--simulator"]) { a in
+                a.drive([.uninstall(app: a.word(0))])
+            },
+            CLICommandSpec("simulator apps", ["[--simulator SIMULATOR]"], "List the installed apps, yours first",
+                           values: ["--simulator"], json: true) { a in
+                a.drive(SimulatorDrive(apps: true))
+            },
+            CLICommandSpec("simulator logs", ["[--app APP] [--since SECONDS] [--lines N] [--simulator SIMULATOR]"],
+                           "Print recent log lines, of one app with --app", values: ["--simulator", "--app", "--since", "--lines"]) { a in
+                guard let since = Double(a.value("--since") ?? "60"), since > 0, since <= 86_400 else {
+                    throw CLIError("--since is seconds, up to a day")
                 }
-                return manage(a, .simulator(.press(simulator: a.value("--simulator"), button: button)))
+                return a.drive(SimulatorDrive(logs: SimulatorLogOptions(app: a.value("--app"), seconds: since,
+                                                                        lines: try a.number("--lines", default: 200, 1 ... 10_000))))
             },
-            CLICommandSpec("simulator open", ["[--simulator SIMULATOR] URL"], "Open a URL, such as an app's deep link",
+            CLICommandSpec("simulator appearance", ["dark|light [--simulator SIMULATOR]"], "Switch dark or light mode",
                            words: 1 ... 1, values: ["--simulator"]) { a in
-                manage(a, .simulator(.open(simulator: a.value("--simulator"), url: a.word(0))))
+                manage(a, .simulator(.action(simulator: a.simulator, action: .setDark(try a.choice(0, ["dark", "light"]) == "dark"))))
+            },
+            CLICommandSpec("simulator rotate", ["left|right [--simulator SIMULATOR]"], "Turn the simulator a quarter",
+                           words: 1 ... 1, values: ["--simulator"]) { a in
+                manage(a, .simulator(.action(simulator: a.simulator, action: .rotate(turns: try a.choice(0, ["left", "right"]) == "left" ? 1 : -1))))
             },
         ],
         notes: """
         Simulators belong to the server, so an agent in a terminal of another computer
         sees that computer's simulators. SIMULATOR is an ID or a name from list; without
-        --simulator, commands use the only running simulator. iOS simulators have the
-        home and lock buttons; Android emulators also have back and recents.
+        --simulator, commands use the only running simulator.
+
+        snapshot prints one line per element, such as @e3 [button] "General", from the
+        screen's accessibility tree. Act on refs: tap @e3, fill @e5 "Ada". A ref stays
+        while its element is on screen. --settle on a step waits for the screen to stop
+        changing, then prints what changed: + new, - gone, ~ changed. Points (X Y) are
+        the screen's points from its top left, as in snapshot --frames and screenshots.
+        iOS simulators have the home and lock buttons; Android emulators also have back
+        and recents. APP is a bundle ID or an Android package.
         """)
+
+    /// A command that runs one step, with `--settle` and `--simulator`.
+    private static func step(_ verb: String, _ usage: [String], _ summary: String, words: ClosedRange<Int>) -> CLICommandSpec {
+        CLICommandSpec("simulator \(verb)", usage.map { "\($0) [--settle] [--simulator SIMULATOR]" }, summary, words: words,
+                       values: ["--simulator"] + SimulatorSteps.values, flags: ["--settle"] + SimulatorSteps.flags, json: true) { a in
+            a.drive([try SimulatorSteps.step(verb, a.stepInput)])
+        }
+    }
 
     static let forward = CLIGroup(
         name: "forward", summary: "Reach a server's port from this computer", section: .server,

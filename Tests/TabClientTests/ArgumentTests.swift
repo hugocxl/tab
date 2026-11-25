@@ -503,12 +503,31 @@ final class ArgumentTests: XCTestCase {
         ("get-attribute T a href", .getAttribute, ##"{"tabId":"T","selector":"a","attribute":"href"}"##),
         ("get-count T li", .getCount, ##"{"tabId":"T","selector":"li"}"##),
         ("find T role button", .find, ##"{"tabId":"T","kind":"role","value":"button"}"##),
-        ("snapshot T", .snapshot, ##"{"tabId":"T"}"##),
-        ("snapshot T form", .snapshot, ##"{"tabId":"T","selector":"form"}"##),
+        ("snapshot T", .snapshot, ##"{"tabId":"T","refs":true}"##),
+        ("snapshot T form", .snapshot, ##"{"tabId":"T","refs":true,"selector":"form"}"##),
+        ("snapshot T -i -c -d 2 -s main -u --delta", .snapshot,
+         ##"{"tabId":"T","refs":true,"interactive":true,"compact":true,"depth":2,"selector":"main","urls":true,"delta":true}"##),
+        ("snapshot T --interactive --depth 0 --selector nav", .snapshot,
+         ##"{"tabId":"T","refs":true,"interactive":true,"depth":0,"selector":"nav"}"##),
+        ("click T @e3 --settle", .click, ##"{"tabId":"T","selector":"@e3","settle":true}"##),
+        ("type T @e7 Ada --submit --settle", .type, ##"{"tabId":"T","selector":"@e7","text":"Ada","submit":true,"settle":true}"##),
         ("reload T", .reload, ##"{"tabId":"T"}"##),
         ("back T", .back, ##"{"tabId":"T"}"##),
         ("forward T", .forward, ##"{"tabId":"T"}"##),
         ("screenshot T", .screenshot, ##"{"tabId":"T"}"##),
+        ("screenshot T @e2 --format jpg --quality 60 --max-width 800 --full --annotate", .screenshot,
+         ##"{"tabId":"T","selector":"@e2","format":"jpeg","quality":60,"maxWidth":800,"full":true,"annotate":true}"##),
+        ("dialog T", .dialog, ##"{"tabId":"T","action":"status"}"##),
+        ("dialog T accept Ada", .dialog, ##"{"tabId":"T","action":"accept","text":"Ada"}"##),
+        ("dialog T dismiss", .dialog, ##"{"tabId":"T","action":"dismiss"}"##),
+        ("console T", .console, ##"{"tabId":"T"}"##),
+        ("console T --clear", .console, ##"{"tabId":"T","clear":true}"##),
+        ("errors T --clear --json", .errors, ##"{"tabId":"T","clear":true}"##),
+        ("network T --filter /api", .network, ##"{"tabId":"T","filter":"/api"}"##),
+        ("set viewport T 390 844", .setViewport, ##"{"tabId":"T","width":390,"height":844}"##),
+        ("set viewport T reset", .setViewport, ##"{"tabId":"T","reset":true}"##),
+        ("set device T pixel", .setDevice, ##"{"tabId":"T","device":"pixel"}"##),
+        ("set media T dark", .setMedia, ##"{"tabId":"T","media":"dark"}"##),
         ("storage get T k", .storageGet, ##"{"tabId":"T","key":"k","kind":"local"}"##),
         ("storage set T k v session", .storageSet, ##"{"tabId":"T","key":"k","value":"v","kind":"session"}"##),
         ("storage clear T", .storageClear, ##"{"tabId":"T","kind":"local"}"##),
@@ -551,10 +570,16 @@ final class ArgumentTests: XCTestCase {
         for (words, output) in [(["list"], BrowserOutput.list), (["list", "--json"], .json), (["read", "T"], .page),
                                 (["read", "T", "--json"], .json), (["navigate", "T", "a"], .ok), (["close", "T"], .ok),
                                 (["reload", "T"], .ok), (["cookies", "clear", "T"], .ok), (["eval", "T", "1"], .json),
-                                (["screenshot", "T"], .screenshot)] {
+                                (["screenshot", "T"], .screenshot), (["snapshot", "T"], .snapshot),
+                                (["snapshot", "T", "--json"], .json), (["click", "T", "#a"], .action),
+                                (["console", "T"], .console), (["network", "T", "--json"], .json),
+                                (["dialog", "T"], .dialog), (["set", "media", "T", "auto"], .ok)] {
             XCTAssertEqual(try browser(words).output, output, "\(words)")
         }
-        for (words, time) in [(["click", "T", "#a"], 0.0), (["screenshot", "T"], 20), (["wait", "T"], 5),
+        let file = try browser(["screenshot", "T", "--output", "shot.png"])
+        XCTAssertEqual(file.output, .screenshotFile(FileManager.default.currentDirectoryPath + "/shot.png"))
+        XCTAssertNil(file.args["output"], "the CLI writes the file, so the app never sees its path")
+        for (words, time) in [(["click", "T", "#a", "--settle"], 8.0), (["click", "T", "#a"], 0.0), (["screenshot", "T"], 20), (["wait", "T"], 5),
                               (["wait", "T", "--timeout", "0.1"], 0.1), (["wait-for", "T", "#a"], 5),
                               (["wait-for", "T", "#a", "--timeout", "60"], 60), (["wait-for-navigation", "T"], 10)] {
             XCTAssertEqual(try browser(words).extraTime, time, accuracy: 0.0001, "\(words)")
@@ -586,7 +611,7 @@ final class ArgumentTests: XCTestCase {
 
     func testWrongBrowserArgumentsNameTheUsage() {
         XCTAssertThrowsError(try command(["browser", "click", "T"])) { error in
-            XCTAssertEqual((error as? CLIError)?.message, "usage: tab browser click BROWSER SELECTOR")
+            XCTAssertEqual((error as? CLIError)?.message, "usage: tab browser click BROWSER TARGET [--settle]")
         }
         for words in [
             ["frobnicate", "T"], ["cookies", "eat", "T"], ["open", "a.test"], ["evaluate", "T", "1"], ["navigate", "T"],
@@ -595,6 +620,11 @@ final class ArgumentTests: XCTestCase {
             ["wait", "T", "--timeout", "61"], ["wait", "T", "--text", "a", "--text", "b"],
             ["wait-for-navigation", "T", "100"], ["type", "T", "#q", "a", "--submit", "--submit"],
             ["cookies", "set", "T", "id", "1"], ["cookies", "set", "T", "id", "1", "a.test", "--expires", "soon"],
+            ["snapshot", "T", "-d", "deep"], ["snapshot", "T", "-s", "a", "--selector", "b"], ["snapshot", "T", "-x"],
+            ["screenshot", "T", "--format", "gif"], ["screenshot", "T", "--quality", "0"], ["screenshot", "T", "--max-width", "8"],
+            ["dialog", "T", "dismiss", "text"], ["dialog", "T", "close"], ["set", "viewport", "T", "390"],
+            ["set", "viewport", "T", "50", "50"], ["set", "device", "T", "nokia"], ["set", "media", "T", "sepia"],
+            ["navigate", "T", "a.test", "--settle"],
         ] {
             assertRefused(["browser"] + words)
         }

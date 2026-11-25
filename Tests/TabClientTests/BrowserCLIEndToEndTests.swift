@@ -138,8 +138,8 @@ final class BrowserCLIEndToEndTests: XCTestCase {
         ("get-attribute T a href", "browser.getAttribute", ##"{"tabId":"T","selector":"a","attribute":"href"}"##),
         ("get-count T li", "browser.getCount", ##"{"tabId":"T","selector":"li"}"##),
         ("find T role button", "browser.find", ##"{"tabId":"T","kind":"role","value":"button"}"##),
-        ("snapshot T", "browser.snapshot", ##"{"tabId":"T"}"##),
-        ("snapshot T form", "browser.snapshot", ##"{"tabId":"T","selector":"form"}"##),
+        ("snapshot T --json", "browser.snapshot", ##"{"tabId":"T","refs":true}"##),
+        ("snapshot T form --json", "browser.snapshot", ##"{"tabId":"T","refs":true,"selector":"form"}"##),
         ("reload T", "browser.reload", ##"{"tabId":"T"}"##),
         ("back T", "browser.back", ##"{"tabId":"T"}"##),
         ("forward T", "browser.forward", ##"{"tabId":"T"}"##),
@@ -217,6 +217,37 @@ final class BrowserCLIEndToEndTests: XCTestCase {
         }
     }
 
+    /// What new replies print, and how replies from an older app still print.
+    func testAgentRepliesPrintForReadingAndOlderAppsStillWork() throws {
+        let image = root.appendingPathComponent("shot.jpg")
+        for (words, reply, stdout, stderr) in [
+            (["snapshot", "T"], ##"{"text":"@e1 [button] \"Go\"","nodes":[],"truncated":false}"##, "@e1 [button] \"Go\"\n", ""),
+            (["snapshot", "T"], ##"[{"selector":"#go"}]"##, ##"[{"selector":"#go"}]"## + "\n", ""),
+            (["click", "T", "@e1"], "true", "true\n", ""),
+            (["click", "T", "@e1"], ##"{"ok":true,"note":"script events"}"##, "true\n", "tab: script events\n"),
+            (["click", "T", "@e1", "--settle"], ##"{"ok":true,"diff":"+ @e2 [button] \"Next\"\n= 3 unchanged","dialog":{"type":"alert","message":"Hi"}}"##,
+             "+ @e2 [button] \"Next\"\n= 3 unchanged\n",
+             "tab: the page opened a dialog: alert \"Hi\"; answer it with tab browser dialog\n"),
+            (["fill", "T", "#q", "x"], ##"{"ok":true,"warning":"the field reads \"\""}"##, "true\n",
+             "tab: warning: the field reads \"\"\n"),
+            (["console", "T"], ##"[{"level":"warn","text":"careful","url":"","time":1}]"##, "[warn] careful\n", ""),
+            (["errors", "T"], ##"[{"text":"boom","source":"app.js","line":3,"column":1,"stack":"","time":1}]"##, "boom (app.js:3)\n", ""),
+            (["network", "T"], ##"[{"method":"POST","url":"https://a.test/api","status":201,"ms":12,"pending":false},{"method":"GET","url":"https://a.test/slow","pending":true}]"##,
+             "POST 201 12ms https://a.test/api\nGET pending https://a.test/slow\n", ""),
+            (["dialog", "T"], "null", "none\n", ""),
+            (["dialog", "T"], ##"{"type":"prompt","message":"Name?","origin":"a.test","defaultText":"Bo"}"##,
+             "prompt \"Name?\" default \"Bo\"\n", ""),
+            (["screenshot", "T", "--output", image.path], ##"{"image":"/9j/4AA=","format":"jpeg","refs":["e1","e12"]}"##,
+             image.path + "\nlabels: [1] @e1 [12] @e12\n", ""),
+        ] {
+            let (_, output) = try exchange(["browser"] + words, reply: "{\"ok\":true,\"value\":\(reply)}")
+            XCTAssertEqual(output.status, 0, "\(words) \(output.stderr)")
+            XCTAssertEqual(output.stdout, stdout, "\(words)")
+            XCTAssertEqual(output.stderr, stderr, "\(words)")
+        }
+        XCTAssertEqual(try Data(contentsOf: image), Data(base64Encoded: "/9j/4AA="))
+    }
+
     func testNewBrowserPanesAndTabsOpenThroughTheApp() throws {
         for (words, arguments, expected) in [
             (["pane", "new", "browser", "a.test", "--project", "App"], ##"{"url":"a.test","project":"App","tab":false}"##,
@@ -264,12 +295,12 @@ final class BrowserCLIEndToEndTests: XCTestCase {
         XCTAssertEqual(rootHelp.status, 0)
         XCTAssertEqual(rootHelp.stdout, CLIHelp.root + "\n")
         for (arguments, message) in [
-            (["click", "T"], "usage: tab browser click BROWSER SELECTOR"),
+            (["click", "T"], "usage: tab browser click BROWSER TARGET [--settle]"),
             (["list", "--project"], "missing value for --project"),
             (["wait", "T", "--timeout", "-5"], "--timeout must be a number of seconds, more than 0 and at most 60"),
             (["wait", "T", "--text", "a", "--text", "b"], "--text given twice"),
             (["type", "T", "#q", "x", "--submit", "--submit"], "--submit given twice"),
-            (["screenshot", "T", "page.png"], "usage: tab browser screenshot BROWSER"),
+            (["screenshot", "T", "page.png"], "to save the screenshot, pass --output page.png"),
             (["nope"], "unknown command tab browser nope; run tab browser --help"),
         ] {
             let result = try run(["browser"] + arguments)

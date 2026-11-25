@@ -120,7 +120,7 @@ extension ClientConnection {
         case .closeTunnel(let channel):
             tunnels.close(channel)
             reply(id, .tunnelClosed)
-        case .listSimulators, .simulatorAction, .attachSimulator, .detachSimulator, .simulatorScreenshot:
+        case .listSimulators, .simulatorAction, .attachSimulator, .detachSimulator, .simulatorScreenshot, .simulatorDrive:
             guard let simulators = server.simulators else { return unavailable(id, "Simulators") }
             simulator(id, body, simulators)
         default:
@@ -157,6 +157,8 @@ extension ClientConnection {
                     return .simulatorSettings(try await simulators.perform(action, on: simulator))
                 case .simulatorScreenshot(let simulator):
                     return .simulatorScreenshot(png: try await simulators.screenshot(simulator))
+                case .simulatorDrive(let simulator, let drive):
+                    return .simulatorDriven(try await simulators.drive(drive, on: simulator))
                 case .detachSimulator(let channel):
                     simulators.detach(channel, connection: self)
                     return .simulatorDetached
@@ -340,7 +342,7 @@ extension ClientConnection {
 
         case .hello, .ping, .unknown, .authenticate, .pair, .git, .files, .exec, .cancelExec, .agentChat, .agentConversation, .agentCheckpoint, .agentAttachment,
              .agentComposerContext, .agentModelCatalog, .agentUsageLimits, .checkAgentProviders, .probeAgentProvider, .agentHistory, .importAgentHistory, .openTunnel, .closeTunnel, .listSimulators, .simulatorAction, .attachSimulator,
-             .detachSimulator, .simulatorScreenshot:
+             .detachSimulator, .simulatorScreenshot, .simulatorDrive:
             throw ServiceError(.badRequest, "Unexpected request")
         }
     }

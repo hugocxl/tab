@@ -347,6 +347,8 @@ public enum RequestBody: Hashable, Codable, Sendable {
     case detachSimulator(ChannelId)
     /// The simulator's screen as a PNG.
     case simulatorScreenshot(SimulatorRef)
+    /// Runs steps on a simulator and reads it back, for agents.
+    case simulatorDrive(simulator: SimulatorRef, drive: SimulatorDrive)
 
     /// A request from a newer build; answer with an `unsupported` error.
     case unknown(String)
@@ -430,6 +432,7 @@ public enum RequestBody: Hashable, Codable, Sendable {
         case "attachSimulator": self = .attachSimulator(try c("request"))
         case "detachSimulator": self = .detachSimulator(try c("channel"))
         case "simulatorScreenshot": self = .simulatorScreenshot(try c("simulator"))
+        case "simulatorDrive": self = .simulatorDrive(simulator: try c("simulator"), drive: try c("drive"))
         default: self = .unknown(c.type)
         }
     }
@@ -639,6 +642,10 @@ public enum RequestBody: Hashable, Codable, Sendable {
         case .simulatorScreenshot(let simulator):
             var c = try TaggedEncoding(encoder, "simulatorScreenshot")
             try c(simulator, "simulator")
+        case .simulatorDrive(let simulator, let drive):
+            var c = try TaggedEncoding(encoder, "simulatorDrive")
+            try c(simulator, "simulator")
+            try c(drive, "drive")
         case .unknown(let type): try TaggedEncoding(encoder, type)
         }
     }
@@ -732,6 +739,7 @@ public enum ReplyBody: Hashable, Codable, Sendable {
     case simulatorAttached(SimulatorStream)
     case simulatorDetached
     case simulatorScreenshot(png: Data)
+    case simulatorDriven(SimulatorDriveResult)
 
     /// A reply from a newer build.
     case unknown(String)
@@ -802,6 +810,7 @@ public enum ReplyBody: Hashable, Codable, Sendable {
         case "simulatorAttached": self = .simulatorAttached(try c("stream"))
         case "simulatorDetached": self = .simulatorDetached
         case "simulatorScreenshot": self = .simulatorScreenshot(png: try c("png"))
+        case "simulatorDriven": self = .simulatorDriven(try c("result"))
         default: self = .unknown(c.type)
         }
     }
@@ -956,6 +965,9 @@ public enum ReplyBody: Hashable, Codable, Sendable {
         case .simulatorScreenshot(let png):
             var c = try TaggedEncoding(encoder, "simulatorScreenshot")
             try c(png, "png")
+        case .simulatorDriven(let result):
+            var c = try TaggedEncoding(encoder, "simulatorDriven")
+            try c(result, "result")
         case .unknown(let type): try TaggedEncoding(encoder, type)
         }
     }

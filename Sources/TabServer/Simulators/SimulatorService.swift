@@ -19,11 +19,13 @@ public final class SimulatorService: @unchecked Sendable {
     private lazy var catalog = SimulatorCatalog { [weak self] in self?.simulatorsChanged() }
 
     /// Main actor only.
-    private var sources: [SimulatorRef: Source] = [:]
+    var sources: [SimulatorRef: Source] = [:]
+    /// What agents driving each simulator last saw. Main actor only.
+    var drivers: [SimulatorRef: SimulatorDriver] = [:]
     /// Streams by connection and channel. Behind `lock`.
     private var streams: [StreamKey: Streamer] = [:]
 
-    private struct StreamKey: Hashable {
+    struct StreamKey: Hashable {
         let connection: Int
         let channel: ChannelId
     }
@@ -57,6 +59,10 @@ public final class SimulatorService: @unchecked Sendable {
             try await control(simulator) { try await $0.setDark(dark) }
         case .rotate(let turns):
             _ = try await control(simulator) { try await $0.rotate(by: turns) }
+            await MainActor.run {
+                drivers[simulator]?.orientation = nil
+                drivers[simulator]?.interfaceIsLandscape = nil
+            }
         case .setHardwareKeyboard(let connected):
             try await control(simulator) { try await $0.setHardwareKeyboard(connected) }
         case .input(let input):
@@ -74,7 +80,10 @@ public final class SimulatorService: @unchecked Sendable {
     }
 
     func screenshot(_ simulator: SimulatorRef) async throws -> Data {
-        let surface = try await withScreen(simulator) { _, surface in surface }
+        let surface = try await withScreen(simulator) { source, surface in
+            linger(source)
+            return surface
+        }
         guard let png = LocalSimulators.png(surface) else { throw ServiceError(.badRequest, "The screen couldn't be read") }
         return png
     }
@@ -137,13 +146,18 @@ public final class SimulatorService: @unchecked Sendable {
 
     /// One simulator's live session, shared by its streams.
     @MainActor
-    private final class Source {
+    final class Source {
         let simulator: SimulatorRef
         let session: SimulatorSession
         var streamers: [ObjectIdentifier: Streamer] = [:]
         /// Holds the screen for a request without a stream, such as a screenshot.
         var holds = 0
         var connecting: Task<Void, Error>?
+        /// When the screen last drew, while it streams.
+        var lastFrame = ContinuousClock.now
+        /// Keeps the screen running a while after an agent's command, so
+        /// the next one doesn't wait for it to start again.
+        var lingering: Task<Void, Never>?
 
         init(simulator: SimulatorRef) {
             self.simulator = simulator
@@ -154,7 +168,7 @@ public final class SimulatorService: @unchecked Sendable {
     }
 
     @MainActor
-    private func source(_ simulator: SimulatorRef) async throws -> Source {
+    func source(_ simulator: SimulatorRef) async throws -> Source {
         if let existing = sources[simulator], let connecting = existing.connecting {
             try await connecting.value
             return existing
@@ -167,10 +181,12 @@ public final class SimulatorService: @unchecked Sendable {
         }
         source.session.onFrame = { [weak source] in
             guard let source else { return }
+            source.lastFrame = .now
             for streamer in source.streamers.values { streamer.drew() }
         }
         source.session.onStateChange = { [weak self, weak source] booted in
             guard let self, let source, !booted else { return }
+            drivers[source.simulator] = nil
             stopped(source)
         }
         source.session.onInputError = { error in ServerLog.error("simulator input failed: \(error)") }
@@ -189,8 +205,8 @@ public final class SimulatorService: @unchecked Sendable {
     /// Runs `body` with the simulator's current surface, starting its screen
     /// for the call when nothing streams it. `keep` joins the source's streams.
     @MainActor
-    private func withScreen<T>(_ simulator: SimulatorRef, keep streamer: Streamer? = nil,
-                               _ body: (Source, IOSurface) async throws -> T) async throws -> T {
+    func withScreen<T>(_ simulator: SimulatorRef, keep streamer: Streamer? = nil,
+                               _ body: @MainActor (Source, IOSurface) async throws -> T) async throws -> T {
         let source = try await source(simulator)
         guard source.session.isBooted else {
             if source.isIdle { close(source) }
@@ -232,8 +248,22 @@ public final class SimulatorService: @unchecked Sendable {
     private func send(_ input: [SimulatorInput], to simulator: SimulatorRef) async throws {
         try await withScreen(simulator) { source, _ in
             source.session.send(input)
-            // Input goes out on the simulator's queue; let it leave before the screen stops.
-            try await Task.sleep(nanoseconds: 100_000_000)
+            // Input goes out on the simulator's queue; the screen stays on a while after.
+            linger(source)
+        }
+    }
+
+    /// Keeps `source`'s screen running for a while, restarting the wait.
+    @MainActor
+    func linger(_ source: Source, seconds: Double = 20) {
+        if source.lingering == nil { source.holds += 1 }
+        source.lingering?.cancel()
+        source.lingering = Task { @MainActor [weak self, weak source] in
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            guard !Task.isCancelled, let self, let source else { return }
+            source.lingering = nil
+            source.holds -= 1
+            if source.isIdle { close(source) }
         }
     }
 
@@ -275,8 +305,10 @@ public final class SimulatorService: @unchecked Sendable {
     }
 
     @MainActor
-    private func close(_ source: Source) {
+    func close(_ source: Source) {
         guard sources[source.simulator] === source else { return }
+        source.lingering?.cancel()
+        source.lingering = nil
         sources[source.simulator] = nil
         source.session.close()
     }
@@ -284,7 +316,7 @@ public final class SimulatorService: @unchecked Sendable {
     // MARK: Streams
 
     /// One channel's stream of a simulator's screen.
-    private final class Streamer: @unchecked Sendable {
+    final class Streamer: @unchecked Sendable {
         let channel: ChannelId
         weak var connection: ClientConnection?
         let key: StreamKey

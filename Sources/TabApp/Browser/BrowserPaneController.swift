@@ -40,6 +40,11 @@ public final class BrowserPaneController: NSViewController {
     public private(set) var webView: WKWebView?
     /// Whether the user is choosing an element to copy.
     public private(set) var selectingElement = false
+    /// What agents driving the pane keep on it.
+    let agent = BrowserAgentState()
+    /// The page's size when an agent set one, else it fills the pane.
+    var viewport: CGSize?
+    var webViewConstraints: [NSLayoutConstraint] = []
 
     private let profiles: BrowserProfiles
     private let toolbar = BrowserToolbar()
@@ -178,6 +183,9 @@ public final class BrowserPaneController: NSViewController {
     private func makeWebView(loading url: String?) {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = profiles.dataStore(for: profile, server: network.server)
+        configuration.userContentController.add(BrowserLogHandler(pane: self), contentWorld: .page,
+                                                name: BrowserAgentScripts.logHandler)
+        if agent.driven { configuration.userContentController.addUserScript(Self.logCaptureScript) }
         configuration.preferences.isElementFullscreenEnabled = true
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = true
         let webView = BrowserWebView(frame: content.bounds, configuration: configuration)
@@ -190,8 +198,8 @@ public final class BrowserPaneController: NSViewController {
         webView.uiDelegate = self
         webView.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(webView, positioned: .below, relativeTo: placeholder)
-        webView.pinEdges(to: content)
         self.webView = webView
+        layOutWebView()
         observe(webView)
         toolbar.profile.name = profile.name
         if case .remote(_, let name) = network { toolbar.via = name }
@@ -210,7 +218,9 @@ public final class BrowserPaneController: NSViewController {
         webView.stopLoading()
         webView.navigationDelegate = nil
         webView.uiDelegate = nil
+        webView.configuration.userContentController.removeAllScriptMessageHandlers()
         webView.removeFromSuperview()
+        webViewConstraints = []
         initialURL = page.url.isEmpty ? initialURL : page.url
         self.webView = nil
     }
@@ -759,6 +769,7 @@ extension BrowserPaneController: WKNavigationDelegate, WKUIDelegate, WKDownloadD
 
     public func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation?) {
         if selectingElement { cancelElementPicker() }
+        agent.navigationStarted()
         page.loads += 1
         page.loading = true
         page.error = nil
@@ -866,29 +877,58 @@ extension BrowserPaneController: WKNavigationDelegate, WKUIDelegate, WKDownloadD
 
     public func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String,
                         initiatedByFrame frame: WKFrameInfo) async {
-        let alert = dialog(message, frame: frame)
-        alert.addButton(withTitle: "OK")
-        _ = await present(alert)
+        _ = await runDialog(.alert, message: message, defaultText: nil, frame: frame)
     }
 
     public func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String,
                         initiatedByFrame frame: WKFrameInfo) async -> Bool {
-        let alert = dialog(message, frame: frame)
-        alert.addButton(withTitle: "OK")
-        alert.addButton(withTitle: "Cancel")
-        return await present(alert) == .alertFirstButtonReturn
+        await runDialog(.confirm, message: message, defaultText: nil, frame: frame).accepted
     }
 
     public func webView(_ webView: WKWebView, runJavaScriptTextInputPanelWithPrompt prompt: String,
                         defaultText: String?, initiatedByFrame frame: WKFrameInfo) async -> String? {
-        let alert = dialog(prompt, frame: frame)
-        let field = NSTextField(string: defaultText ?? "")
-        field.frame = NSRect(x: 0, y: 0, width: 280, height: 24)
-        alert.accessoryView = field
+        let answer = await runDialog(.prompt, message: prompt, defaultText: defaultText, frame: frame)
+        return answer.accepted ? answer.text ?? "" : nil
+    }
+
+    /// Shows a page's dialog on the pane's sheet. While an agent drives the
+    /// pane, `tab browser dialog` can answer it too, and with no window to
+    /// show it on it waits for that answer instead of stopping the app.
+    private func runDialog(_ kind: PendingDialog.Kind, message: String, defaultText: String?,
+                           frame: WKFrameInfo) async -> (accepted: Bool, text: String?) {
+        let alert = dialog(message, frame: frame)
+        var field: NSTextField?
+        if kind == .prompt {
+            let input = NSTextField(string: defaultText ?? "")
+            input.frame = NSRect(x: 0, y: 0, width: 280, height: 24)
+            alert.accessoryView = input
+            alert.window.initialFirstResponder = input
+            field = input
+        }
         alert.addButton(withTitle: "OK")
-        alert.addButton(withTitle: "Cancel")
-        alert.window.initialFirstResponder = field
-        return await present(alert) == .alertFirstButtonReturn ? field.stringValue : nil
+        if kind != .alert { alert.addButton(withTitle: "Cancel") }
+        guard agent.driven else {
+            let response = await present(alert)
+            return (response == .alertFirstButtonReturn, field?.stringValue)
+        }
+        let origin = frame.securityOrigin.host
+        return await withCheckedContinuation { continuation in
+            let pending = PendingDialog(kind: kind, message: message, defaultText: defaultText, origin: origin) { accepted, text in
+                continuation.resume(returning: (accepted, text))
+            }
+            pending.field = field
+            agent.open(pending)
+            if let window = view.window {
+                pending.alert = alert
+                alert.beginSheetModal(for: window) { [weak self] response in
+                    MainActor.assumeIsolated {
+                        let accepted = response == .alertFirstButtonReturn
+                        self?.agent.closed(pending)
+                        pending.resolve(accept: accepted, text: accepted ? field?.stringValue : nil)
+                    }
+                }
+            }
+        }
     }
 
     public func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters,

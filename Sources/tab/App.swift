@@ -112,8 +112,67 @@ enum BrowserCommandRunner {
         case .page:
             Output.line([reply["title"], reply["url"], reply["text"]].map { $0?.string ?? "" }.joined(separator: "\n"))
         case .screenshot:
-            guard let png = reply["png"]?.string else { throw CLIError("invalid reply from Tab") }
-            Output.line(png)
+            guard let image = reply["png"]?.string ?? reply["image"]?.string else { throw CLIError("invalid reply from Tab") }
+            Output.line(image)
+        case .screenshotFile(let path):
+            guard let text = reply["png"]?.string ?? reply["image"]?.string, let image = Data(base64Encoded: text) else {
+                throw CLIError("invalid reply from Tab")
+            }
+            do {
+                try image.write(to: URL(fileURLWithPath: path), options: .atomic)
+            } catch {
+                throw CLIError("can't write \(path): \(error.localizedDescription)")
+            }
+            Output.line(path)
+            if case .array(let refs)? = reply["refs"], !refs.isEmpty {
+                Output.line("labels: " + refs.compactMap(\.string).map { "[\($0.dropFirst())] @\($0)" }.joined(separator: " "))
+            }
+        case .snapshot:
+            guard let text = reply["text"]?.string else { return Output.json(reply) }
+            Output.line(text.isEmpty ? "(no elements)" : text)
+        case .action:
+            printAction(reply)
+        case .console:
+            for entry in entries(reply) {
+                Output.line("[\(entry["level"]?.string ?? "log")] \(entry["text"]?.string ?? "")")
+            }
+        case .errors:
+            for entry in entries(reply) {
+                var line = entry["text"]?.string ?? ""
+                if let source = entry["source"]?.string, !source.isEmpty {
+                    line += " (\(source):\(entry["line"]?.description ?? "0"))"
+                }
+                Output.line(line)
+            }
+        case .network:
+            for entry in entries(reply) {
+                let outcome = entry["status"]?.description ?? entry["error"]?.string ?? "pending"
+                let time = entry["ms"].map { " \($0.description)ms" } ?? ""
+                Output.line("\(entry["method"]?.string ?? "GET") \(outcome)\(time) \(entry["url"]?.string ?? "")")
+            }
+        case .dialog:
+            guard let type = reply["type"]?.string else { return Output.line("none") }
+            var line = "\(type) \(JSONValue.string(reply["message"]?.string ?? "").description)"
+            if let text = reply["defaultText"]?.string { line += " default \(JSONValue.string(text).description)" }
+            Output.line(line)
         }
+    }
+
+    private static func entries(_ reply: JSONValue) -> [JSONValue] {
+        if case .array(let entries) = reply { return entries }
+        return []
+    }
+
+    /// An action prints `true`/`false` as before, or the diff `--settle`
+    /// asked for; notes, warnings and dialogs go to stderr.
+    private static func printAction(_ reply: JSONValue) {
+        guard case .object = reply, reply["ok"] != nil else { return Output.json(reply) }
+        if let note = reply["note"]?.string { FileHandle.standardError.write(Data("tab: \(note)\n".utf8)) }
+        if let warning = reply["warning"]?.string { FileHandle.standardError.write(Data("tab: warning: \(warning)\n".utf8)) }
+        if let dialog = reply["dialog"], let type = dialog["type"]?.string {
+            let message = JSONValue.string(dialog["message"]?.string ?? "").description
+            FileHandle.standardError.write(Data("tab: the page opened a dialog: \(type) \(message); answer it with tab browser dialog\n".utf8))
+        }
+        if let diff = reply["diff"]?.string { Output.line(diff) } else { Output.json(.bool(reply["ok"] == .bool(true))) }
     }
 }

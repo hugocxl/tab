@@ -82,6 +82,51 @@ final class PaneTrafficTests: XCTestCase {
         XCTAssertEqual(request, .request(RequestId(2), .openTunnel(host: "localhost", port: 8081)))
     }
 
+    func testSimulatorDriveRoundTripsAndOlderBuildsSkipNewerSteps() throws {
+        let drive = SimulatorDrive(steps: [
+            .tap(.ref("e3"), count: 2, hold: 0), .tap(.point(x: 10.5, y: 20), count: 1, hold: 1),
+            .swipe(from: .point(x: 1, y: 2), to: .label("Done"), duration: 0.3), .scroll(.down, distance: 0.5, within: nil),
+            .scroll(.left, distance: 0.8, within: .identifier("carousel")), .type("héllo"), .fill(.ref("e5"), text: "Ada"),
+            .key("cmd+a"), .button(.home), .wait(seconds: 0.5), .waitFor(.label("Saved"), gone: true, timeout: 3),
+            .launch(app: "com.example"), .terminate(app: "com.example"), .install(path: "/tmp/A.app"),
+            .uninstall(app: "com.example"), .openURL("myapp://x"), .location(latitude: 41.4, longitude: 2.17),
+        ], settle: true, snapshot: SimulatorSnapshotOptions(interactiveOnly: true),
+           screenshot: SimulatorScreenshotOptions(format: .jpeg, quality: 60), apps: true,
+           logs: SimulatorLogOptions(app: "com.example", seconds: 30, lines: 50))
+        roundTrip(Message.request(RequestId(1), .simulatorDrive(simulator: .iOS("A1B2"), drive: drive)))
+        let element = SimulatorElement(ref: "e3", role: "button", label: "General", identifier: "general", value: nil,
+                                       x: 16, y: 380, width: 370, height: 52, enabled: true, interactive: true, depth: 2)
+        roundTrip(Message.reply(RequestId(1), .simulatorDriven(SimulatorDriveResult(
+            screen: SimulatorScreen(width: 402, height: 874, scale: 3), elements: [element], added: [element], removed: [],
+            changed: [], unchanged: 4, image: Data([1, 2]), imageFormat: .png, apps: [SimulatorApp(id: "com.example", name: "Example")],
+            logs: "line", notes: ["a note"]))))
+
+        // A newer client's step, target or field reaches an older server as unknown, not as a failure.
+        let newer = try WireJSON.decode(SimulatorDrive.self, from: Data(#"""
+        {"steps":[{"type":"pinch","scale":2},{"type":"tap","target":{"type":"text","text":"OK"},"force":1}],"video":true}
+        """#.utf8))
+        XCTAssertEqual(newer.steps, [.unknown("pinch"), .tap(.unknown("text"), count: 1, hold: 0)])
+        XCTAssertFalse(newer.settle)
+        let sparse = try WireJSON.decode(SimulatorElement.self, from: Data(#"{"ref":"e1","role":"cell","x":1,"y":2}"#.utf8))
+        XCTAssertEqual(sparse.width, 0)
+        XCTAssertTrue(sparse.enabled, "a missing enabled reads as enabled")
+    }
+
+    func testSimulatorDriveValidationBoundsAgentInput() {
+        func drive(_ steps: [SimulatorStep]) -> RequestBody { .simulatorDrive(simulator: .iOS("X"), drive: SimulatorDrive(steps: steps)) }
+        XCTAssertNoThrow(try drive([.tap(.ref("e1"), count: 1, hold: 0)]).validate())
+        XCTAssertThrowsError(try drive([.tap(.ref("e1"), count: 0, hold: 0)]).validate())
+        XCTAssertThrowsError(try drive([.tap(.point(x: .nan, y: 1), count: 1, hold: 0)]).validate())
+        XCTAssertThrowsError(try drive([.wait(seconds: -1)]).validate())
+        XCTAssertThrowsError(try drive([.wait(seconds: 3600)]).validate())
+        XCTAssertThrowsError(try drive([.scroll(.down, distance: 2, within: nil)]).validate())
+        XCTAssertThrowsError(try drive([.location(latitude: 91, longitude: 0)]).validate())
+        XCTAssertThrowsError(try drive([.type("a\u{0}b")]).validate())
+        XCTAssertThrowsError(try drive(Array(repeating: .wait(seconds: 0), count: SimulatorDrive.maxSteps + 1)).validate())
+        XCTAssertThrowsError(try RequestBody.simulatorDrive(simulator: .iOS("X"), drive: SimulatorDrive(
+            screenshot: SimulatorScreenshotOptions(quality: 0))).validate())
+    }
+
     func testValidationRefusesOutOfRangeTraffic() {
         XCTAssertThrowsError(try RequestBody.openTunnel(host: "", port: 80).validate())
         XCTAssertThrowsError(try RequestBody.openTunnel(host: "localhost", port: 0).validate())

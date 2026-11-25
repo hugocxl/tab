@@ -364,49 +364,74 @@ public enum AgentSkill {
     ```bash
     PAGE=$(tab pane new browser http://localhost:3000)
     tab browser wait-for-navigation "$PAGE"
-    tab browser snapshot "$PAGE"                       # interactive elements, each with a selector
-    tab browser fill "$PAGE" "#email" "me@example.com"
-    tab browser click "$PAGE" "button[type=submit]"
-    tab browser wait "$PAGE" --text "Welcome" --timeout 10
-    tab browser read "$PAGE"                           # title, URL and page text
+    tab browser snapshot "$PAGE" -i                    # @e1 [textbox] "Email"  @e2 [button] "Sign in"
+    tab browser fill "$PAGE" @e1 "me@example.com"
+    tab browser click "$PAGE" @e2 --settle             # prints what changed: - gone, + new
+    tab browser screenshot "$PAGE" --output /tmp/page.jpg --format jpeg --max-width 800
+    tab browser console "$PAGE"                        # also errors, network
     ```
 
     - Capture the ID that `pane new browser` prints, or find it with
       `tab browser list`; never guess one.
-    - Wait after anything that loads a page (opening, `navigate`, a submitting
-      `click`, `back`): `wait-for-navigation`, `wait-for <selector>`, or `wait`.
-    - `snapshot` lists the interactive elements, each with a `selector` you can
-      pass to `click`, `fill`, `type`, and the other element commands. They print
-      `false` when nothing matches. `find` looks elements up by role, text, label,
-      placeholder or test ID.
+    - Work from refs: `snapshot` prints the page's elements as
+      `@eN [role] "name"` lines (`-i` interactive only, `-c` compact, `-d N`
+      depth, `-s SELECTOR` part of the page, `--delta` only changes). Pass a
+      ref, or a CSS selector, to `click`, `fill`, `type`, `press`, `select`,
+      `check`, `hover`, `get-text` and the rest. A ref lasts while its element
+      is on the page; after a navigation, snapshot again.
+    - Add `--settle` to an action to wait for the page and print the snapshot
+      changes, instead of a new snapshot. Otherwise wait after anything that
+      loads a page: `wait-for-navigation`, `wait-for TARGET` or `wait`.
+    - Clicks and keys are real input when the browser is on screen. An action
+      fails, saying why, when its element is covered, disabled or not editable;
+      read the message instead of retrying blindly.
+    - A page's `alert`, `confirm` or `prompt` blocks it until you answer:
+      `tab browser dialog "$PAGE" accept|dismiss [TEXT]`.
+    - `console`, `errors` and `network` show the page's logs, uncaught errors
+      and fetch/XHR requests.
+    - Screenshots: prefer `snapshot` text; when you need pixels, use
+      `--output FILE` with `--format jpeg --max-width 800` to save tokens, a
+      ref or selector for one element, `--annotate` to label refs.
+    - `set viewport W H`, `set device iphone|ipad|pixel|desktop` and
+      `set media dark|light|auto` emulate other screens.
     - A browser's profile has its own logins and cookies. For pages the user is
       signed in to, open the browser with their profile:
       `tab pane new browser https://example.com --profile Work`.
     - `eval` runs JavaScript in the page and prints the result as JSON.
-    - Screenshots work on background browsers:
-      `tab browser screenshot "$PAGE" | base64 -D > page.png`.
     - Close only browsers you opened.
 
     ## Simulators and emulators
 
     `tab simulator` drives the iOS simulators and Android emulators of the server
     your terminal runs on, so you can check UI work where the app builds. Show
-    one to the user with `pane new simulator`.
+    one to the user with `pane new simulator`. Read the screen as text and act on
+    refs; take a screenshot only when you need to see pixels.
 
     ```bash
     tab simulator list                                 # id, platform, name, runtime, state
     tab simulator boot "iPhone 17"
-    tab simulator screenshot --output screen.png       # look at it before tapping
-    tab simulator tap 200 640                          # pixels of that screenshot
-    tab simulator type "hello"
-    tab simulator press home
-    tab simulator open "myapp://settings"
+    tab simulator launch com.example.app               # or: open "myapp://settings"
+    tab simulator snapshot -i                          # @e3 [button] "Sign in" #login ...
+    tab simulator tap @e3 --settle                     # prints what changed: + new, - gone, ~ changed
+    tab simulator fill @e5 "ada@example.com" --settle  # tap, select all, type over
+    tab simulator tap --label "Continue"               # or --id ID, or X Y in points
+    tab simulator scroll down --settle                 # or: scroll up @e9
+    tab simulator key return                           # backspace, tab, up, cmd+a ...
+    tab simulator wait-for --label "Welcome" --timeout 10
+    tab simulator batch "tap @e3" "type hi" "key return" --settle
+    tab simulator screenshot --output screen.png       # upright, one pixel per point
+    tab simulator logs --app com.example.app --since 30
     ```
 
     - Without `--simulator`, commands use the only running simulator.
-    - iOS simulators have the `home` and `lock` buttons; Android emulators also
-      have `back` and `recents`.
-    - Take a new screenshot after each action to see its effect.
+    - A ref stays valid while its element is on screen, even after a scroll; a
+      stale ref fails, so take a new `snapshot`. `--settle` waits for the screen
+      to stop changing and prints the diff, or the new screen's snapshot.
+    - Points are the screen's points from its top left, as in `snapshot --frames`
+      and screenshots; `swipe X1 Y1 X2 Y2` drags between two.
+    - Also: `press home|lock|back|recents`, `terminate`, `install PATH`,
+      `uninstall`, `apps`, `location LAT LON`, `appearance dark|light`,
+      `rotate left|right`.
     - Shut down only simulators you started.
 
     ## Other computers

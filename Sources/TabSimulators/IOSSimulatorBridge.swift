@@ -169,6 +169,16 @@ final class IOSSimulatorBridge: @unchecked Sendable {
         return size.width > 0 && size.height > 0 ? size : nil
     }
 
+    /// The device type's pixels per point.
+    static func screenScale(_ simulator: AnyObject) -> Double? {
+        guard let type = call(simulator, "deviceType") else { return nil }
+        let selector = NSSelectorFromString("mainScreenScale")
+        guard type.responds(to: selector), let method = class_getMethodImplementation(Swift.type(of: type), selector) else { return nil }
+        typealias Function = @convention(c) (AnyObject, Selector) -> Float
+        let scale = Double(unsafeBitCast(method, to: Function.self)(type, selector))
+        return scale > 0 ? scale : nil
+    }
+
     // MARK: Input
 
     /// A HID client sending input to `simulator`.

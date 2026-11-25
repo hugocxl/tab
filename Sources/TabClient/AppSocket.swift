@@ -491,9 +491,14 @@ public final class AppSocketServer: @unchecked Sendable {
 
 /// The browser automation commands `tab browser` sends as
 /// `{"verb":"browser.<command>","args":{…}}` (`evaluate` uses `eval`). Every command but
-/// `open` and `list` names its tab with `"tabId"`. Element commands take a CSS
-/// `"selector"` and answer `false` when nothing matches. Waits take an
-/// optional `"timeoutMs"` (capped at 60000).
+/// `open` and `list` names its tab with `"tabId"`. Element commands take a
+/// `"selector"`: a CSS selector, or a ref a snapshot printed (`@e3`); they
+/// answer `false` when no element matches a CSS selector, and fail for a ref
+/// that no longer names one. Actions (click, hover, fill, type, press, select,
+/// setChecked) answer `true`, or an object with `"ok"` and any of `"note"`
+/// (how Tab had to do it), `"warning"`, `"dialog"` (one the action opened) and
+/// `"diff"` (with `"settle": true`, what changed once the page settled).
+/// Waits take an optional `"timeoutMs"` (capped at 60000).
 public enum BrowserCommand: String, Hashable, Sendable, CaseIterable {
     /// `url?`, `profile?`, `project?`, `beside?` (a terminal or agent's session),
     /// `tab` (a new tab in Home), `edge?` (left, right, up, down), `anchor?` (a
@@ -509,7 +514,9 @@ public enum BrowserCommand: String, Hashable, Sendable, CaseIterable {
     case reload
     case back
     case forward
-    /// → `{"png": base64}`.
+    /// `format?` (png, jpeg), `quality?` (1–100), `maxWidth?`, `full?`,
+    /// `selector?`, `annotate?` → `{"png": base64}` for PNGs, else `{"image": base64, "format"}`;
+    /// annotated ones add `"refs"`, the labeled refs.
     case screenshot
     /// `script` → the script's result.
     case evaluate
@@ -537,7 +544,11 @@ public enum BrowserCommand: String, Hashable, Sendable, CaseIterable {
     case getHTML
     /// `kind` (role, text, label, placeholder, testid), `value`.
     case find
-    /// `selector?` → interactive elements, each with a `selector`.
+    /// `selector?` → interactive elements, each with a `selector` and `ref`.
+    /// With `refs: true` → `{"text", "nodes", "truncated"}`: one line per
+    /// element (`@e1 [button] "Send"`), filtered by `interactive?`,
+    /// `compact?`, `depth?` and `urls?`; with `delta: true`, `text` is the
+    /// change since the last snapshot.
     case snapshot
     /// `selector?`, `text?`, `urlContains?`, `function?`, `timeoutMs?`.
     case wait
@@ -558,6 +569,21 @@ public enum BrowserCommand: String, Hashable, Sendable, CaseIterable {
     /// `name`, `domain?`.
     case cookiesDelete = "cookies.delete"
     case cookiesClear = "cookies.clear"
+    /// `action?` (status, accept, dismiss), `text?` → the open dialog
+    /// (`{"type","message","origin","defaultText"?}`) or `null`.
+    case dialog
+    /// `clear?` → `[{"level","text","url","time"}]`.
+    case console
+    /// `clear?` → `[{"text","source","line","column","stack","time"}]`.
+    case errors
+    /// `filter?`, `clear?` → `[{"method","url","type","status"?,"error"?,"ms"?,"pending","time"}]`.
+    case network
+    /// `width`, `height`, or `reset: true`.
+    case setViewport = "set.viewport"
+    /// `device` (iphone, ipad, pixel, desktop) → `{"width","height","reloaded"}`.
+    case setDevice = "set.device"
+    /// `media` (dark, light, auto).
+    case setMedia = "set.media"
 
     /// How long a wait may take by default, and at most.
     public static let defaultWait: TimeInterval = 5

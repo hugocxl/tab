@@ -83,6 +83,88 @@ public enum IOSSimulatorControl {
         return try parseOrientation(Data(output.utf8))
     }
 
+    // MARK: Apps
+
+    public static func launch(_ udid: String, _ app: String) async throws {
+        _ = try await simctl(["launch", "--terminate-running-process", udid, app])
+    }
+
+    public static func terminate(_ udid: String, _ app: String) async throws {
+        do {
+            _ = try await simctl(["terminate", udid, app])
+        } catch IOSSimulatorError.unavailable(let message) where message.contains("found nothing to terminate") {
+            return
+        }
+    }
+
+    public static func install(_ udid: String, _ path: String) async throws {
+        _ = try await simctl(["install", udid, (path as NSString).expandingTildeInPath])
+    }
+
+    public static func uninstall(_ udid: String, _ app: String) async throws {
+        _ = try await simctl(["uninstall", udid, app])
+    }
+
+    /// The installed apps, user apps first.
+    public static func apps(_ udid: String) async throws -> [SimulatorApp] {
+        let output = try await simctl(["listapps", udid])
+        return parseApps(Data(output.utf8))
+    }
+
+    static func parseApps(_ data: Data) -> [SimulatorApp] {
+        guard let list = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] else { return [] }
+        let apps = list.map { id, value -> (SimulatorApp, Bool) in
+            let info = value as? [String: Any] ?? [:]
+            let name = info["CFBundleDisplayName"] as? String ?? info["CFBundleName"] as? String
+            return (SimulatorApp(id: id, name: name), info["ApplicationType"] as? String == "User")
+        }
+        return apps.sorted { a, b in
+            if a.1 != b.1 { return a.1 }
+            return a.0.id < b.0.id
+        }.map(\.0)
+    }
+
+    /// Recent log lines, of one app when `options.app` names its bundle.
+    public static func logs(_ udid: String, _ options: SimulatorLogOptions) async throws -> String {
+        var arguments = ["spawn", udid, "log", "show", "--style", "compact", "--last", "\(max(1, Int(options.seconds.rounded(.up))))s"]
+        if let app = options.app {
+            var predicate = "subsystem == \"\(app.predicateEscaped)\""
+            if let executable = try? await executable(udid, app) {
+                predicate += " OR process == \"\(executable.predicateEscaped)\""
+            }
+            arguments += ["--predicate", predicate]
+        }
+        let output = try await simctl(arguments)
+        return lastLines(output, options.lines)
+    }
+
+    /// The executable an app's bundle runs.
+    private static func executable(_ udid: String, _ app: String) async throws -> String? {
+        let path = try await simctl(["get_app_container", udid, app, "app"]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let info = NSDictionary(contentsOfFile: path + "/Info.plist")
+        return info?["CFBundleExecutable"] as? String
+    }
+
+    static func lastLines(_ text: String, _ count: Int) -> String {
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        let kept = lines.suffix(count + (lines.last?.isEmpty == true ? 1 : 0))
+        return kept.joined(separator: "\n")
+    }
+
+    public static func setLocation(_ udid: String, latitude: Double, longitude: Double) async throws {
+        _ = try await simctl(["location", udid, "set", "\(latitude),\(longitude)"])
+    }
+
+    public static func setPasteboard(_ udid: String, _ text: String) async throws {
+        try await Task.detached(priority: .userInitiated) {
+            _ = try developerDirectory()
+            // pbcopy reads stdin in the user's text encoding, which isn't always UTF-8.
+            _ = try runSync("/usr/bin/xcrun", ["simctl", "pbcopy", udid], input: Data(text.utf8),
+                            environment: ["__CF_USER_TEXT_ENCODING": "0x\(String(getuid(), radix: 16)):0x8000100:0x8000100",
+                                          "LANG": "en_US.UTF-8", "LC_ALL": "en_US.UTF-8"])
+        }.value
+    }
+
     // MARK: Parsing
 
     private struct OrientationResult: Decodable {
@@ -161,19 +243,28 @@ public enum IOSSimulatorControl {
 
     /// Runs a tool to completion, returning its output or throwing its error
     /// output. Call off the main thread.
-    private static func runSync(_ tool: String, _ arguments: [String]) throws -> String {
+    private static func runSync(_ tool: String, _ arguments: [String], input: Data? = nil,
+                                environment: [String: String] = [:]) throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: tool)
         process.arguments = arguments
+        if !environment.isEmpty {
+            process.environment = ProcessInfo.processInfo.environment.merging(environment) { $1 }
+        }
         let output = Pipe()
         let errors = Pipe()
+        let inputPipe = input.map { _ in Pipe() }
         process.standardOutput = output
         process.standardError = errors
-        process.standardInput = FileHandle.nullDevice
+        process.standardInput = inputPipe ?? FileHandle.nullDevice
         do {
             try process.run()
         } catch {
             throw IOSSimulatorError.unavailable("\(tool) could not run: \(error.localizedDescription)")
+        }
+        if let input, let inputPipe {
+            try? inputPipe.fileHandleForWriting.write(contentsOf: input)
+            try? inputPipe.fileHandleForWriting.close()
         }
         var errorData = Data()
         let errorReader = DispatchWorkItem { errorData = errors.fileHandleForReading.readDataToEndOfFile() }
@@ -187,5 +278,12 @@ public enum IOSSimulatorControl {
             throw IOSSimulatorError.unavailable(message.isEmpty ? "\(tool) exited with \(process.terminationStatus)" : message)
         }
         return String(decoding: data, as: UTF8.self)
+    }
+}
+
+extension String {
+    /// Quoted for a string in an `NSPredicate`.
+    var predicateEscaped: String {
+        replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
     }
 }

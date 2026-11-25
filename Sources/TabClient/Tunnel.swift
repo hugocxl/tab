@@ -198,6 +198,23 @@ extension ServerClient {
         return png
     }
 
+    /// Runs steps on a simulator and reads back what `drive` asks for.
+    public func simulatorDrive(_ drive: SimulatorDrive, on simulator: SimulatorRef) async throws -> SimulatorDriveResult {
+        let waits = drive.steps.reduce(0.0) { total, step in
+            switch step {
+            case .wait(let seconds): total + seconds
+            case .waitFor(_, _, let timeout): total + timeout
+            case .tap(_, let count, let hold): total + Double(count) * hold
+            case .install: total + 120
+            default: total + 2
+            }
+        }
+        let reply = try await request(.simulatorDrive(simulator: simulator, drive: drive),
+                                      timeout: max(defaultTimeout, 60 + waits))
+        guard case .simulatorDriven(let result) = reply else { throw unexpected(reply) }
+        return result
+    }
+
     public func attachSimulator(_ request: AttachSimulator) async throws -> SimulatorAttachment {
         let reply = try await self.request(.attachSimulator(request), timeout: max(defaultTimeout, 30))
         guard case .simulatorAttached(let stream) = reply, let events = claimSimulatorChannel(stream.channel) else {
