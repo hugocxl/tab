@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.141.4 - 2026-11-26
+
+### Changed
+
+- Line up sidebar card rows with type icons on the left and status on the right, and widen background task rows.
+
 ## 0.141.3 - 2026-11-26
 
 ### Fixed

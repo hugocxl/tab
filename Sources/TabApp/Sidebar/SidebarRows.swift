@@ -390,8 +390,9 @@ final class SidebarCardView: HoverView {
             hintBadge.frame = CGRect(x: x, y: center - 9, width: 18, height: 18)
             x += 18 + 6
         }
-        closeButton.frame = CGRect(x: right - 18, y: center - 9, width: 18, height: 18)
-        let titleRight = closeButton.isHidden ? right : right - 18 - 6
+        // Centered on the status column, like the title's status it replaces.
+        closeButton.frame = CGRect(x: right - Self.iconSide / 2 - 9, y: center - 9, width: 18, height: 18)
+        let titleRight = closeButton.isHidden ? right : closeButton.frame.minX - 6
         let titleHeight = CGFloat(lines) * Self.titleLineHeight
         titleLabel.frame = CGRect(x: x, y: (center - Self.titleLineHeight / 2).rounded(), width: max(titleRight - x, 0), height: titleHeight)
         titleRow?.hidesStatus = !closeButton.isHidden
@@ -537,7 +538,9 @@ final class PaneRowView: ThemedView {
     }
 
     private var leadingInset: CGFloat { icon.isHidden ? 0 : SidebarCardView.textInset }
-    private var statusInset: CGFloat { isTitle || row.status != .idle || status.showsIdle ? iconSide + 6 : 0 }
+    /// The status column is as wide as the list's icons on every row, so
+    /// running times line up; a title's larger status reaches into the gap.
+    private var statusInset: CGFloat { isTitle || row.status != .idle || status.showsIdle ? SidebarCardView.iconSide + 6 : 0 }
     /// Space unavailable to the title, also used to measure wrapped card titles.
     var textInsets: CGFloat {
         leadingInset + statusInset + (elapsedLabel.isHidden ? 0 : elapsedLabel.textWidth + 6)
@@ -550,7 +553,8 @@ final class PaneRowView: ThemedView {
         // Centered on the list's icon column, so a larger title icon reaches
         // into the card's padding and the text still lines up.
         let iconBox = CGRect(x: (SidebarCardView.iconSide - iconSide) / 2, y: (center - iconSide / 2).rounded(), width: iconSide, height: iconSide)
-        status.frame = CGRect(x: bounds.width - iconSide, y: iconBox.minY, width: iconSide, height: iconSide)
+        // Centered on the list's status column, mirroring the icon column.
+        status.frame = CGRect(x: bounds.width - (SidebarCardView.iconSide + iconSide) / 2, y: iconBox.minY, width: iconSide, height: iconSide)
         icon.frame = iconBox
         var trailing = bounds.width - statusInset
         let height = isTitle ? SidebarCardView.titleLineHeight : titleLabel.intrinsicContentSize.height
@@ -583,8 +587,8 @@ final class PaneRowView: ThemedView {
 }
 
 /// An agent or shell a pane's agent runs in the background, below the pane:
-/// a dim spinner under the pane's icon column's text, its task and how long it
-/// has run, lined up with the panes' running times. A last row counts the rest.
+/// its kind's icon under the pane's title, its task, then how long it has run
+/// and a dim spinner in the panes' status column. A last row counts the rest.
 final class SubtaskRowView: ThemedView {
     /// Each pane lists this many before counting the rest.
     static let maxShown = 3
@@ -599,10 +603,12 @@ final class SubtaskRowView: ThemedView {
         }
     }
 
+    private let kind: AppIcon
+    private let icon = NSImageView()
     private let spinner: ActivityGlyph?
     private let titleLabel: NSTextField
     private let elapsedLabel = makeLabel("", font: .monospacedDigitSystemFont(ofSize: 11, weight: .regular))
-    /// A rounded fill from just before the spinner to just past the running time.
+    /// A rounded fill from just before the icon to just past the spinner.
     private let fill = CALayer()
     /// The rounded elbow from the pane's icon column into the row, which
     /// carries on down to the next row when the pane lists another.
@@ -614,15 +620,19 @@ final class SubtaskRowView: ThemedView {
         let tasks = pane.subtasks
         // A count row only when it saves a line.
         let shown = tasks.count > maxShown + 1 ? Array(tasks.prefix(maxShown)) : tasks
-        var rows = shown.map { SubtaskRowView(pane: pane.id, title: $0.title, since: $0.since, spins: true) }
+        var rows = shown.map {
+            SubtaskRowView(pane: pane.id, kind: $0.shell ? PaneKind.terminal.glyph : PaneKind.agent.glyph,
+                           title: $0.title, since: $0.since, spins: true)
+        }
         let rest = tasks.count - shown.count
-        if rest > 0 { rows.append(SubtaskRowView(pane: pane.id, title: "\(rest) more running", since: nil, spins: false)) }
+        if rest > 0 { rows.append(SubtaskRowView(pane: pane.id, kind: .ellipsis, title: "\(rest) more running", since: nil, spins: false)) }
         rows.dropLast().forEach { $0.continues = true }
         return rows
     }
 
-    private init(pane: PaneId, title: String, since: Date?, spins: Bool) {
+    private init(pane: PaneId, kind: AppIcon, title: String, since: Date?, spins: Bool) {
         self.pane = pane
+        self.kind = kind
         self.since = since
         titleLabel = makeLabel(title, font: AppFont.system(11))
         titleLabel.lineBreakMode = .byTruncatingTail
@@ -637,7 +647,8 @@ final class SubtaskRowView: ThemedView {
         elbow.lineCap = .round
         elbow.actions = ["path": NSNull(), "strokeColor": NSNull()]
         layer?.addSublayer(elbow)
-        for view in [spinner, titleLabel, elapsedLabel].compactMap({ $0 }) as [NSView] {
+        icon.imageScaling = .scaleProportionallyUpOrDown
+        for view in [icon, spinner, titleLabel, elapsedLabel].compactMap({ $0 }) as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = true
             addSubview(view)
         }
@@ -653,6 +664,7 @@ final class SubtaskRowView: ThemedView {
         titleLabel.textColor = theme.fgDim
         elapsedLabel.textColor = theme.fgDim
         spinner?.style = .ticks(theme.fgDim)
+        icon.image = kind.image(size: SidebarCardView.iconSide - 2, color: theme.fgDim)
         fill.backgroundColor = theme.fg(alpha: 0.05).cgColor
         elbow.strokeColor = theme.fg(alpha: 0.18).cgColor
     }
@@ -663,7 +675,8 @@ final class SubtaskRowView: ThemedView {
         let side = SidebarCardView.iconSide
         // Under the pane's title, so the list reads as the pane's children.
         let x = SidebarCardView.textInset
-        fill.frame = CGRect(x: x - 4, y: 0, width: max(bounds.width - side - x + 4, 0), height: bounds.height)
+        // As far past the status column as it starts before the icon column.
+        fill.frame = CGRect(x: x - 4, y: 0, width: max(bounds.width - x + 8, 0), height: bounds.height)
         // Down the pane icon's center line, turning into the fill's leading edge.
         let lineX = (side / 2).rounded() + 0.5
         let radius: CGFloat = 5
@@ -678,7 +691,9 @@ final class SubtaskRowView: ThemedView {
             path.addLine(to: CGPoint(x: lineX, y: bounds.height + SidebarCardView.subtaskGap))
         }
         elbow.path = path
-        spinner?.frame = SidebarCardView.iconBox(x: x, centerY: center).insetBy(dx: 2, dy: 2)
+        icon.frame = SidebarCardView.iconBox(x: x, centerY: center).insetBy(dx: 1, dy: 1)
+        // The same size and column as the panes' spinners.
+        spinner?.frame = SidebarCardView.iconBox(x: bounds.width - side, centerY: center).insetBy(dx: 1, dy: 1)
         let textX = x + side + 6
         // Running times line up with the panes', left of their status column.
         var trailing = bounds.width - side - 6
