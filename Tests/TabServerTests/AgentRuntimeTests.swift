@@ -658,7 +658,12 @@ final class AgentRuntimeTests: XCTestCase {
         let environment = AgentProcess.environment()
         XCTAssertTrue(environment["PATH"]?.contains("/.local/bin") == true)
         if let inherited = ProcessInfo.processInfo.environment["PATH"], !inherited.isEmpty {
-            XCTAssertTrue(environment["PATH"]?.hasPrefix(inherited) == true)
+            let paths = (environment["PATH"] ?? "").split(separator: ":").map(String.init)
+            let entries = inherited.split(separator: ":").map(String.init)
+            XCTAssertTrue(Set(entries).isSubset(of: Set(paths)))
+            var seen = Set<String>()
+            let userEntries = entries.filter { !AgentProcess.systemPaths.contains($0) && seen.insert($0).inserted }
+            XCTAssertEqual(Array(paths.prefix(userEntries.count)), userEntries)
         }
     }
 

@@ -21,11 +21,22 @@ internal final class AgentProcess: @unchecked Sendable {
 
     static func environment() -> [String: String] {
         var environment = ProcessInfo.processInfo.environment
-        let home = NSHomeDirectory()
-        var paths = [environment["PATH"] ?? "", "\(home)/.local/bin", "\(home)/.npm-global/bin",
-                     "\(home)/.cargo/bin", "\(home)/.volta/bin", "\(home)/.bun/bin",
-                     "\(home)/.asdf/shims", "\(home)/.local/share/mise/shims", "\(home)/.yarn/bin",
-                     "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"]
+        environment["PATH"] = path(inherited: environment["PATH"] ?? "", home: NSHomeDirectory())
+        return environment
+    }
+
+    /// macOS's own tool directories, which hold stale tools such as Python 3.9.
+    static let systemPaths: Set<String> = ["/usr/bin", "/bin", "/usr/sbin", "/sbin"]
+
+    /// Builds the agent PATH. System directories go last so Homebrew and version-manager tools
+    /// win over macOS's own (`python3` must not resolve to `/usr/bin/python3` in git hooks).
+    static func path(inherited: String, home: String) -> String {
+        let entries = inherited.split(separator: ":").map(String.init)
+        var paths = entries.filter { !systemPaths.contains($0) }
+        paths += ["\(home)/.local/bin", "\(home)/.npm-global/bin",
+                  "\(home)/.cargo/bin", "\(home)/.volta/bin", "\(home)/.bun/bin",
+                  "\(home)/.asdf/shims", "\(home)/.local/share/mise/shims", "\(home)/.yarn/bin",
+                  "/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin"]
         // GUI-launched servers often lack the Node version manager's shell PATH.
         for (root, suffix) in [("\(home)/.nvm/versions/node", "bin"),
                                ("\(home)/.local/share/fnm/node-versions", "installation/bin")] {
@@ -33,8 +44,9 @@ internal final class AgentProcess: @unchecked Sendable {
             paths += versions.sorted { $0.compare($1, options: .numeric) == .orderedDescending }
                 .map { "\(root)/\($0)/\(suffix)" }
         }
-        environment["PATH"] = paths.filter { !$0.isEmpty }.joined(separator: ":")
-        return environment
+        paths += entries.filter { systemPaths.contains($0) } + ["/usr/bin", "/bin", "/usr/sbin", "/sbin"]
+        var seen = Set<String>()
+        return paths.filter { !$0.isEmpty && seen.insert($0).inserted }.joined(separator: ":")
     }
 
     static func resolve(_ name: String, environment: [String: String]) throws -> URL {

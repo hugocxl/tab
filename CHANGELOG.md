@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.141.3 - 2026-11-26
+
+### Fixed
+
+- Find Homebrew and version-manager tools before macOS's built-in ones in agents, so git hooks run the right Python.
+
 ## 0.141.2 - 2026-11-26
 
 ### Fixed
