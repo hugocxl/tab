@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.140.5 - 2026-11-26
+
+### Fixed
+
+- Show Claude models with their version and real model ID in Settings and the model menu.
+
 ## 0.140.4 - 2026-11-26
 
 ### Fixed

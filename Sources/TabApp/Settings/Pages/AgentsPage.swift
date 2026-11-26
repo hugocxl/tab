@@ -304,7 +304,7 @@ extension SettingsModel {
                     }
                 }]))
             }
-            let detail = custom.contains(model.id) ? "\(model.id) · Added by you" : model.title == model.id ? nil : model.id
+            let detail = custom.contains(model.id) ? "\(model.id) · Added by you" : Self.modelDetail(model)
             b.item("agent-provider-models", key: model.id, label: model.title, description: detail, .row(controls))
         }
 
@@ -337,6 +337,20 @@ extension SettingsModel {
         var ids = ids
         ids.swapAt(from, to)
         return ids
+    }
+
+    /// The real model ID under each row: aliases like "opus" say nothing, and a
+    /// "[1m]" suffix means the 1M-token context variant.
+    static func modelDetail(_ model: AgentModelDescriptor) -> String? {
+        var id = model.id
+        var notes: [String] = []
+        if id.hasSuffix("[1m]") {
+            id.removeLast(4)
+            notes.append("1M context")
+        }
+        if let resolved = model.resolvedModel, !resolved.isEmpty { id = resolved }
+        let detail = ([id] + notes).joined(separator: " · ")
+        return detail == model.title ? nil : detail
     }
 
     // MARK: Status

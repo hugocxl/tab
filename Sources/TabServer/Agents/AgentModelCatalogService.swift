@@ -240,7 +240,8 @@ actor AgentModelCatalogService {
                     if (try? effort.validate()) != nil, !efforts.contains(effort) { efforts.append(effort) }
                 }
             }
-            let model = AgentModelDescriptor(id: id, title: row["displayName"] as? String ?? id,
+            let model = AgentModelDescriptor(id: id,
+                title: claudeTitle(row["displayName"] as? String ?? id, resolvedModel: row["resolvedModel"] as? String),
                 reasoningEfforts: efforts,
                 defaultReasoningEffort: (row["defaultEffort"] as? String).map(AgentReasoningEffort.init(rawValue:)),
                 resolvedModel: row["resolvedModel"] as? String,
@@ -252,6 +253,17 @@ actor AgentModelCatalogService {
             if result.count == AgentModelCatalogReply.maxModels { break }
         }
         return result
+    }
+
+    /// Claude Code names aliases by family only ("Opus"); add the version from the
+    /// resolved ID ("claude-opus-5-5" → "Opus 5.5") so the menu says which model it is.
+    static func claudeTitle(_ title: String, resolvedModel: String?) -> String {
+        guard let resolvedModel else { return title }
+        let parts = resolvedModel.split(separator: "-")
+        guard parts.count >= 4, parts[0] == "claude", parts[1].lowercased() == title.lowercased(),
+              parts[2].allSatisfy(\.isNumber), parts[3].allSatisfy(\.isNumber),
+              parts[3].count <= 2 else { return title }
+        return "\(title) \(parts[2]).\(parts[3])"
     }
 }
 
