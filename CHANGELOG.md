@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.140.7 - 2026-11-26
+
+### Fixed
+
+- Keep the exact quotes agents fill into browser fields when macOS smart quotes are on.
+
 ## 0.140.6 - 2026-11-26
 
 ### Fixed

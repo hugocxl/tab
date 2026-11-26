@@ -479,11 +479,17 @@ public enum BrowserAgentScripts {
       try {
         done = text === '' ? doc.execCommand('delete', false) : doc.execCommand('insertText', false, text);
       } catch (error) { done = false; }
-      if (!done || (replaceAll && fieldValue(el) !== text && tagOf(el) !== 'input' && !el.isContentEditable)) {
-        setValue(el, replaceAll ? text : before + text);
+      const expected = replaceAll ? text : before + text;
+      const after = fieldValue(el);
+      if (!done || (replaceAll && after !== text && tagOf(el) !== 'input' && !el.isContentEditable)) {
+        setValue(el, expected);
+      } else if (after !== expected && straightQuotes(after) === straightQuotes(expected)) {
+        // macOS smart quotes curl typed quotes; agents mean the exact text.
+        setValue(el, expected);
       }
       return fieldValue(el);
     };
+    const straightQuotes = value => value.replace(/[\u2018\u2019\u201A\u201B]/g, "'").replace(/[\u201C\u201D\u201E\u201F]/g, '"');
     const pressKey = (el, key) => {
       for (const type of ['keydown', 'keypress', 'keyup']) {
         el.dispatchEvent(new KeyboardEvent(type, { key, bubbles: true, cancelable: true, composed: true }));
