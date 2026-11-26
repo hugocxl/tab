@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.140.8 - 2026-11-26
+
+### Changed
+
+- Show thicker usage bars and each provider's session limit beside its weekly limit in the sidebar usage summary.
+
 ## 0.140.7 - 2026-11-26
 
 ### Fixed

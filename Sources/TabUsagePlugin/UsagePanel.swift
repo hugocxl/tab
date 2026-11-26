@@ -514,8 +514,7 @@ final class UsageLimitRow: NSView {
         let color = Self.color(tone, theme: theme)
         // Even spending leaves as much of the bar as there is time left in the window.
         let marker = UsageMath.paceRemainingPercent(window, now: now).map { Double(figure == .left ? $0 : 100 - $0) / 100 }
-        bar = UsageBarView(fraction: Double(UsageMath.figure(window, figure)) / 100, color: color, height: 4, marker: marker,
-                           theme: theme)
+        bar = UsageBarView(fraction: Double(UsageMath.figure(window, figure)) / 100, color: color, marker: marker, theme: theme)
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
 

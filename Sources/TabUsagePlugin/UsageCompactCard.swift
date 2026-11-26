@@ -336,14 +336,18 @@ final class UsageCompactCardController: NSViewController {
 }
 
 /// One compressed account row in the left-sidebar floating card:
-/// provider logo, account name, headline figure & reset countdown, and a 4pt status bar.
+/// provider logo, account name, headline figure & reset countdown, and a status bar.
+/// An account with a session limit shows it beside its longest-lasting limit, in two columns.
 @MainActor
 final class UsageCompactRow: UsageClickable {
     let limits: AgentUsageLimits
     let headline: AgentUsageWindow?
     let tone: UsageTone?
+    /// The headline's bar.
     let bar: UsageBarView?
-    let compactHeight: CGFloat
+    /// The session and other limit shown side by side, when the account has both.
+    let columns: [AgentUsageWindow]
+    private(set) var compactHeight: CGFloat = 0
 
     init(
         limits: AgentUsageLimits,
@@ -357,17 +361,24 @@ final class UsageCompactRow: UsageClickable {
         self.headline = headline
         let tone = headline.map { UsageMath.tone($0, lowThreshold: lowThreshold) }
         self.tone = tone
-        if let headline, let tone {
-            bar = UsageBarView(
-                fraction: Double(UsageMath.figure(headline, figure)) / 100,
-                color: UsageLimitRow.color(tone, theme: theme),
-                height: 4,
+        if let session = UsageMath.headline(limits.windows.filter { $0.kind == .session }),
+           let other = UsageMath.headline(limits.windows.filter { $0.kind != .session }) {
+            columns = [session, other]
+        } else {
+            columns = []
+        }
+        func makeBar(_ window: AgentUsageWindow) -> UsageBarView {
+            UsageBarView(
+                fraction: Double(UsageMath.figure(window, figure)) / 100,
+                color: UsageLimitRow.color(UsageMath.tone(window, lowThreshold: lowThreshold), theme: theme),
                 theme: theme
             )
-            compactHeight = 32
+        }
+        let columnBars = columns.map(makeBar)
+        if !columns.isEmpty, let headline {
+            bar = columns.firstIndex(of: headline).map { columnBars[$0] } ?? columnBars.first
         } else {
-            bar = nil
-            compactHeight = limits.failure == nil ? 20 : 34
+            bar = headline.map(makeBar)
         }
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
@@ -385,28 +396,53 @@ final class UsageCompactRow: UsageClickable {
         nameLabel.lineBreakMode = .byTruncatingTail
         nameLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        var topViews: [NSView] = [logo, nameLabel]
-        if let headline, let tone {
-            let valueColor = tone == .fine ? theme.fg : UsageLimitRow.color(tone, theme: theme)
-            let value = NSMutableAttributedString(
-                string: "\(UsageMath.figure(headline, figure))%\(figure == .left ? " left" : "")",
+        /// `68% · 2h 38m`, led by `Session` or `Weekly` in a column.
+        func metric(_ window: AgentUsageWindow, title: String?) -> NSTextField {
+            let tone = UsageMath.tone(window, lowThreshold: lowThreshold)
+            let muted: [NSAttributedString.Key: Any] = [.font: AppFont.footnote, .foregroundColor: theme.fgMuted]
+            let value = NSMutableAttributedString()
+            if let title { value.append(NSAttributedString(string: "\(title) ", attributes: muted)) }
+            value.append(NSAttributedString(
+                string: "\(UsageMath.figure(window, figure))%\(figure == .left ? " left" : "")",
                 attributes: [
                     .font: NSFont.monospacedDigitSystemFont(ofSize: 11.5, weight: .semibold),
-                    .foregroundColor: valueColor,
+                    .foregroundColor: tone == .fine ? theme.fg : UsageLimitRow.color(tone, theme: theme),
                 ]
-            )
-            if let resetsIn = UsageMath.resetsIn(headline, now: now) {
-                value.append(NSAttributedString(
-                    string: " · \(resetsIn)",
-                    attributes: [.font: AppFont.footnote, .foregroundColor: theme.fgMuted]
-                ))
+            ))
+            if let resetsIn = UsageMath.resetsIn(window, now: now) {
+                value.append(NSAttributedString(string: " · \(resetsIn)", attributes: muted))
             }
-            let metric = NSTextField(labelWithAttributedString: value)
-            metric.lineBreakMode = .byClipping
-            metric.maximumNumberOfLines = 1
-            metric.setContentHuggingPriority(.required, for: .horizontal)
-            metric.setContentCompressionResistancePriority(.required, for: .horizontal)
-            topViews.append(metric)
+            let label = NSTextField(labelWithAttributedString: value)
+            label.maximumNumberOfLines = 1
+            return label
+        }
+
+        var topViews: [NSView] = [logo, nameLabel]
+        var columnsRow: NSStackView?
+        if !columns.isEmpty {
+            let views = zip(columns, columnBars).map { window, bar -> NSView in
+                let label = metric(window, title: Self.columnTitle(window))
+                label.lineBreakMode = .byTruncatingTail
+                label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+                let column = NSStackView(views: [label, bar])
+                column.orientation = .vertical
+                column.alignment = .leading
+                column.spacing = 4
+                label.widthAnchor.constraint(lessThanOrEqualTo: column.widthAnchor).isActive = true
+                bar.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true
+                return column
+            }
+            let row = NSStackView(views: views)
+            row.orientation = .horizontal
+            row.distribution = .fillEqually
+            row.spacing = 12
+            columnsRow = row
+        } else if let headline {
+            let label = metric(headline, title: nil)
+            label.lineBreakMode = .byClipping
+            label.setContentHuggingPriority(.required, for: .horizontal)
+            label.setContentCompressionResistancePriority(.required, for: .horizontal)
+            topViews.append(label)
         } else if limits.failure != nil {
             let badge = makeLabel("Unavailable", font: AppFont.footnote, color: theme.warning)
             badge.setContentHuggingPriority(.required, for: .horizontal)
@@ -422,7 +458,9 @@ final class UsageCompactRow: UsageClickable {
         nameLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
         var body: [NSView] = [topRow]
-        if let bar {
+        if let columnsRow {
+            body.append(columnsRow)
+        } else if let bar {
             body.append(bar)
         } else if let failure = limits.failure {
             let detail = makeLabel(failure, font: AppFont.footnote, color: theme.warning)
@@ -449,20 +487,37 @@ final class UsageCompactRow: UsageClickable {
             subview.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true
         }
 
+        let shown = columns.isEmpty ? headline.map { [$0] } ?? [] : columns
         var tipParts = [limits.plan.map { "\(name) · \($0)" } ?? name]
         if let account = limits.account { tipParts.append(account) }
-        if let headline { tipParts.append(UsageMath.summary(headline, now: now)) }
+        for window in shown {
+            tipParts.append(columns.isEmpty ? UsageMath.summary(window, now: now)
+                : "\(window.label): \(UsageMath.summary(window, now: now))")
+        }
         if let failure = limits.failure { tipParts.append(failure) }
         toolTip = tipParts.joined(separator: "\n")
 
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
         var spoken = [limits.plan.map { "\(name), \($0)" } ?? name]
-        if let headline { spoken.append(UsageLimitRow.spoken(headline, figure: figure, lowThreshold: lowThreshold, now: now)) }
+        for window in shown {
+            spoken.append(UsageLimitRow.spoken(window, figure: figure, lowThreshold: lowThreshold, now: now))
+        }
         if let failure = limits.failure { spoken.append(failure) }
         setAccessibilityLabel(spoken.joined(separator: ". "))
         setAccessibilityHelp("Opens the AI Usage panel")
+        compactHeight = ceil(fittingSize.height)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// `Session`, `Weekly` or `Monthly`, short enough for half a row.
+    private static func columnTitle(_ window: AgentUsageWindow) -> String {
+        switch window.kind {
+        case .session: return "Session"
+        case .weekly: return "Weekly"
+        case .monthly: return "Monthly"
+        case .unknown: return window.label
+        }
+    }
 }

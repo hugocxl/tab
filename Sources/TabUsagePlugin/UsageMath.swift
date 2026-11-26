@@ -63,7 +63,11 @@ enum UsageMath {
     /// The window an account's card leads with: the one closest to its limit, the
     /// longer one when two are as close, since it takes longer to come back.
     static func headline(_ limits: AgentUsageLimits) -> AgentUsageWindow? {
-        limits.windows.max { a, b in
+        headline(limits.windows)
+    }
+
+    static func headline(_ windows: [AgentUsageWindow]) -> AgentUsageWindow? {
+        windows.max { a, b in
             a.usedPercent != b.usedPercent ? a.usedPercent < b.usedPercent
                 : (a.windowDurationMinutes ?? 0) < (b.windowDurationMinutes ?? 0)
         }

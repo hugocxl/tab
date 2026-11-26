@@ -100,6 +100,8 @@ final class UsagePluginTests: XCTestCase {
         XCTAssertEqual(card.rows.first?.tone, .low)
         XCTAssertEqual(card.rows.first?.bar?.fraction, 0.86)
         XCTAssertNil(card.rows.last?.bar)
+        // Accounts with a session limit show it beside their other limit.
+        XCTAssertEqual(card.rows.map { $0.columns.map(\.kind) }, [[.session, .weekly], [], [.session, .weekly], []])
         XCTAssertGreaterThan(card.preferredHeight(forWidth: 250), 120)
 
         card.apply(UsageConfig(order: .provider, figure: .left))
