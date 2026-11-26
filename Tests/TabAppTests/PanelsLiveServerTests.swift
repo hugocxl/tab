@@ -302,6 +302,17 @@ final class PanelsLiveServerTests: LiveServerTestCase {
         await settle { binary.messageText != nil }
         XCTAssertNotNil(binary.messageText, "binary files are refused")
         XCTAssertTrue(binary.text.isEmpty)
+
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 3, pixelsHigh: 2, bitsPerSample: 8,
+                                                    samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                                    colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+        try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: repo.appendingPathComponent("shot.png"))
+        let picture = EditorPaneController(host: host, path: "shot.png")
+        show(picture, size: NSSize(width: 400, height: 300))
+        picture.viewDidAppear()
+        await settle { picture.image != nil || picture.messageText != nil }
+        XCTAssertNil(picture.messageText, "image files are shown, not refused as binary")
+        XCTAssertEqual(picture.image?.representations.first?.pixelsWide, 3)
     }
 
     func testGoToFileAndFindInFilesThroughThePanelsTransport() async throws {

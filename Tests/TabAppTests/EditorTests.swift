@@ -18,6 +18,16 @@ final class EditorModelTests: XCTestCase {
         XCTAssertEqual(EditorModel.loadFailure("big.log is larger than 5 MiB and can't be opened"), EditorModel.tooLargeMessage)
         XCTAssertEqual(EditorModel.loadFailure("badPath: No such file or directory"), "File not found")
         XCTAssertEqual(EditorModel.loaded(.content(FileContent(path: "a", content: "hi", size: 2))), .text("hi"))
+        XCTAssertEqual(EditorModel.loadFailure("a.bin is a binary file and can't be opened as text"), EditorModel.binaryMessage)
+    }
+
+    func testImagesOpenAsPicturesButSVGStaysEditable() {
+        for path in ["build/shot.png", "a.JPG", "b.jpeg", "c.gif", "d.webp", "e.heic", "f.tiff"] {
+            XCTAssertTrue(EditorModel.isImage(path: path), path)
+        }
+        for path in ["logo.svg", "notes.txt", "Makefile", "image.swift"] {
+            XCTAssertFalse(EditorModel.isImage(path: path), path)
+        }
     }
 
     func testIndentationFollowsTheFile() {

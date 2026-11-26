@@ -1,5 +1,6 @@
 import Foundation
 import TabProtocol
+import UniformTypeIdentifiers
 
 /// The editor's decisions without views: what a file read means, what to do
 /// when the file changes on disk, indentation and line positions.
@@ -12,6 +13,7 @@ public enum EditorModel {
     }
 
     public static let binaryMessage = "This file is binary, so it can't be shown here."
+    public static let unreadableImageMessage = "This image can't be shown here."
     public static let tooLargeMessage = "This file is larger than 5 MB, so it can't be opened here."
 
     /// The editor's content for a read's reply.
@@ -21,9 +23,17 @@ public enum EditorModel {
         return .text(file.content)
     }
 
+    /// Whether the editor shows `path` as a picture instead of text. SVG
+    /// stays text so it can be edited.
+    public static func isImage(path: String) -> Bool {
+        let ext = (path as NSString).pathExtension
+        guard !ext.isEmpty, let type = UTType(filenameExtension: ext) else { return false }
+        return type.conforms(to: .image) && !type.conforms(to: .svg)
+    }
+
     /// The editor's message for a read that failed.
     public static func loadFailure(_ error: String) -> String {
-        if error.contains("UTF-8") { return binaryMessage }
+        if error.contains("UTF-8") || error.contains("binary file") { return binaryMessage }
         if error.contains("5 MiB") || error.contains("5 MB") { return tooLargeMessage }
         return NativeErrors.friendly(error, folder: false)
     }

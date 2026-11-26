@@ -32,6 +32,8 @@ public final class EditorPaneController: NSViewController, NSTextViewDelegate, N
     private enum State {
         case loading
         case ready
+        /// An image file, shown as a picture.
+        case image
         case message(String)
     }
 
@@ -48,6 +50,7 @@ public final class EditorPaneController: NSViewController, NSTextViewDelegate, N
     let banner = DiskChangeBanner()
     private let message = NativeMessageView("Loading…")
     private let scroll = NSScrollView()
+    private let imageView = NSImageView()
     let textView = EditorTextView()
     private var ruler: LineNumberRuler?
 
@@ -77,6 +80,12 @@ public final class EditorPaneController: NSViewController, NSTextViewDelegate, N
 
     /// The editor's text.
     public var text: String { textView.string }
+
+    /// The picture shown for an image file.
+    var image: NSImage? {
+        guard case .image = state else { return nil }
+        return imageView.image
+    }
 
     /// Why the file isn't shown, such as a binary or too large file.
     var messageText: String? {
@@ -131,7 +140,16 @@ public final class EditorPaneController: NSViewController, NSTextViewDelegate, N
         self.ruler = ruler
         applyWrapping()
 
-        let stack = NSStackView(views: [banner, message, scroll])
+        imageView.imageScaling = .scaleProportionallyDown
+        imageView.imageAlignment = .alignCenter
+        imageView.animates = true
+        imageView.setAccessibilityLabel(NativePath.basename(path))
+        imageView.setContentHuggingPriority(.defaultLow, for: .vertical)
+        imageView.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        imageView.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+        imageView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        let stack = NSStackView(views: [banner, message, scroll, imageView])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 0
@@ -145,6 +163,7 @@ public final class EditorPaneController: NSViewController, NSTextViewDelegate, N
             banner.widthAnchor.constraint(equalTo: stack.widthAnchor),
             message.widthAnchor.constraint(equalTo: stack.widthAnchor),
             scroll.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            imageView.widthAnchor.constraint(equalTo: stack.widthAnchor),
         ])
         message.setContentHuggingPriority(.defaultLow, for: .vertical)
         themeDidChange()
@@ -226,6 +245,10 @@ public final class EditorPaneController: NSViewController, NSTextViewDelegate, N
     private func load() {
         guard let host, let transport = host.nativeTransport else { return }
         requested = true
+        if EditorModel.isImage(path: path) {
+            loadImage()
+            return
+        }
         let request = FilesRequest(project: host.nativeProject.id, action: .read(ServerPath(path)))
         Task { [weak self] in
             do {
@@ -260,6 +283,36 @@ public final class EditorPaneController: NSViewController, NSTextViewDelegate, N
         case nil:
             break
         }
+    }
+
+    /// Reads an image file's bytes from the project's server, which may be
+    /// another computer, and shows them as a picture.
+    private func loadImage() {
+        guard let host, let transport = host.nativeTransport else { return }
+        requested = true
+        let request = FilesRequest(project: host.nativeProject.id, action: .readBytes(ServerPath(path)))
+        Task { [weak self] in
+            do {
+                let reply = try await transport.files(request)
+                self?.loadedImage(reply)
+            } catch {
+                self?.loadFailed(NativeErrors.describe(error))
+            }
+        }
+    }
+
+    private func loadedImage(_ reply: FilesReply) {
+        requested = false
+        guard case .bytes(let file) = reply else { return }
+        guard let image = NSImage(data: file.bytes), image.isValid else {
+            if case .image = state { return }
+            state = .message(EditorModel.unreadableImageMessage)
+            render()
+            return
+        }
+        imageView.image = image
+        state = .image
+        render()
     }
 
     private func loadFailed(_ error: String) {
@@ -301,6 +354,10 @@ public final class EditorPaneController: NSViewController, NSTextViewDelegate, N
     /// Reads the file again after it changed on disk: takes it when there
     /// are no unsaved changes, else offers it.
     private func checkDisk() {
+        if case .image = state {
+            if !requested { loadImage() }
+            return
+        }
         guard case .ready = state else {
             if case .loading = state, !requested { load() }
             return
@@ -489,13 +546,20 @@ public final class EditorPaneController: NSViewController, NSTextViewDelegate, N
             message.set("Loading…")
             message.isHidden = false
             scroll.isHidden = true
+            imageView.isHidden = true
         case .message(let text):
             message.set(text)
             message.isHidden = false
             scroll.isHidden = true
+            imageView.isHidden = true
         case .ready:
             message.isHidden = true
             scroll.isHidden = false
+            imageView.isHidden = true
+        case .image:
+            message.isHidden = true
+            scroll.isHidden = true
+            imageView.isHidden = false
         }
         banner.isHidden = diskText == nil
     }

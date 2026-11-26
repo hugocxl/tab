@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.140.6 - 2026-11-26
+
+### Fixed
+
+- Show image files as pictures when opened in an editor pane, including files on another computer.
+
 ## 0.140.5 - 2026-11-26
 
 ### Fixed
