@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.141.5 - 2026-11-26
+
+### Fixed
+
+- Show Claude usage when Claude Code is slow to answer, and keep the last reading instead of an error.
+
 ## 0.141.4 - 2026-11-26
 
 ### Changed

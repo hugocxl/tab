@@ -11,7 +11,8 @@ extension ServerClient {
     }
 
     public func agentUsageLimits(_ request: AgentUsageLimitsRequest) async throws -> AgentUsageLimitsReply {
-        let reply = try await self.request(.agentUsageLimits(request))
+        // The server waits for every CLI, and a slow one takes up to its 45-second probe timeout.
+        let reply = try await self.request(.agentUsageLimits(request), timeout: max(defaultTimeout, 60))
         guard case .agentUsageLimits(let limits) = reply else { throw unexpected(reply) }
         return limits
     }

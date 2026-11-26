@@ -19,6 +19,8 @@ actor AgentUsageLimitsService {
     private let now: @Sendable () -> Date
     private var cached: (Date, AgentUsageLimitsReply)?
     private var pending: Task<AgentUsageLimitsReply, Never>?
+    /// Each account's last successful reading, shown again when a later read times out.
+    private var lastRead: [String: AgentUsageLimits] = [:]
 
     init(providers: @escaping @Sendable () -> [AgentProviderConfig],
          now: @escaping @Sendable () -> Date = { Date() },
@@ -31,6 +33,7 @@ actor AgentUsageLimitsService {
     /// Forgets the cached reading, as after configured providers change.
     func invalidate() {
         cached = nil
+        lastRead = [:]
     }
 
     func handle(_ request: AgentUsageLimitsRequest) async -> AgentUsageLimitsReply {
@@ -61,9 +64,24 @@ actor AgentUsageLimitsService {
             }
         }
         pending = task
-        let reply = await task.value
+        let reply = keepingLastRead(await task.value)
         pending = nil
         cached = (now(), reply)
+        return reply
+    }
+
+    /// A CLI that is only slow to answer keeps its last reading instead of showing an error.
+    private func keepingLastRead(_ reply: AgentUsageLimitsReply) -> AgentUsageLimitsReply {
+        var reply = reply
+        reply.providers = reply.providers.map { limits in
+            let key = limits.providerId ?? limits.provider.rawValue
+            if limits.failure == nil {
+                lastRead[key] = limits
+                return limits
+            }
+            if limits.failure == AgentUsageLimitsProbe.timeoutFailure(limits.provider), let last = lastRead[key] { return last }
+            return limits
+        }
         return reply
     }
 
@@ -309,7 +327,8 @@ actor AgentUsageLimitsService {
 /// One bounded, short-lived CLI that answers a single limits request. All mutable
 /// state lives on its queue.
 final class AgentUsageLimitsProbe: @unchecked Sendable {
-    static let timeout: TimeInterval = 20
+    /// Claude Code can take more than 20 seconds to send a usage reply it already has.
+    static let timeout: TimeInterval = 45
     private static let maxBytes = 4 * 1024 * 1024
 
     private let queue = DispatchQueue(label: "tab.agent-usage-limits")
@@ -394,10 +413,14 @@ final class AgentUsageLimitsProbe: @unchecked Sendable {
         }
     }
 
+    static func timeoutFailure(_ provider: AgentChatProvider) -> String {
+        "\(provider.name) did not answer the usage request."
+    }
+
     private func start(_ launch: AgentProcess.Launch, continuation: CheckedContinuation<AgentUsageLimits?, Never>) {
         self.continuation = continuation
         queue.asyncAfter(deadline: .now() + Self.timeout) { [self] in
-            fail("\(provider.name) did not answer the usage request.")
+            fail(Self.timeoutFailure(provider))
         }
         do {
             process = try AgentProcess(launch: launch, directory: NSHomeDirectory(), onLine: { [self] data in
