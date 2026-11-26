@@ -206,7 +206,6 @@ public enum SettingsCatalog {
         SettingItem("agent-provider-custom-model", "Add model", "A model the CLI accepts but doesn't list, by its ID.", .agents, "Models", subpage: .agentProvider),
         SettingItem("agent-provider-integration", "Tab integration", "Installs Tab's skill and session hooks into this provider's config folder so it works smoothly in Tab.", .agents, "Integration", subpage: .agentProvider),
         SettingItem("agent-provider-remove", "Remove provider", "Its conversations stay in their panes but can't continue.", .agents, "Removal", subpage: .agentProvider),
-        SettingItem("terminal-migration", "Migrate from another terminal", "An agent reads that terminal's configuration and brings its shortcuts, font, cursor and colors into Tab.", .agents, "Migration"),
         // Plugins
         SettingItem("plugins", "Plugins", "Install, uninstall and configure optional plugins such as Explorer, Diff View and QuickShot.", .plugins, "Plugins"),
         // Notifications

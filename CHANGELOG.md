@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.141.0 - 2026-11-26
+
+### Removed
+
+- Remove the Migrate from another terminal option from Settings › Agents.
+
 ## 0.140.8 - 2026-11-26
 
 ### Changed

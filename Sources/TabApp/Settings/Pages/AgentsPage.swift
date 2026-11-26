@@ -45,7 +45,6 @@ extension SettingsModel {
         if let error = store.errors["agent-providers"] { b.note("agent-providers", error, error: true) }
         b.row("agent-add-provider", b.button("Add Provider…", enabled: state != nil) { [weak self] in self?.showAddProvider() })
         buildCopyProviders(b)
-        if !remote { buildTerminalMigration(b) }
 
         if b.subpage == .agentProvider && !b.isSearching { buildProvider(b, state: state) }
     }

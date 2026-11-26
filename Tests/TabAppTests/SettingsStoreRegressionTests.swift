@@ -277,7 +277,6 @@ private final class SettingsWriteHost: SettingsHost {
     func setAgentProviderIntegration(_ provider: AgentProviderConfig, enabled: Bool) async throws -> AgentIntegrationStatus? {
         try await base.setAgentProviderIntegration(provider, enabled: enabled)
     }
-    func migrationSources() -> [TerminalMigration.Source] { base.migrationSources() }
     var agentComputers: [AgentComputer] { base.agentComputers }
     func agentProviders(on server: ServerId) async throws -> AgentProvidersState { try await base.agentProviders(on: server) }
     func writeAgentProviders(_ settings: AgentProviderSettings, on server: ServerId) async throws -> AgentProvidersState {
@@ -295,7 +294,6 @@ private final class SettingsWriteHost: SettingsHost {
     func agentModels(_ provider: AgentProviderConfig, refresh: Bool, on server: ServerId) async throws -> [AgentModelDescriptor] {
         try await base.agentModels(provider, refresh: refresh, on: server)
     }
-    func openAgent(prompt: String) throws { try base.openAgent(prompt: prompt) }
     func openTerminal(command: String, on server: ServerId) { base.openTerminal(command: command, on: server) }
     func backupState() throws -> Data { try base.backupState() }
 }

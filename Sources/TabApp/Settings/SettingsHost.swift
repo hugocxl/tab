@@ -139,10 +139,6 @@ public protocol SettingsHost: AnyObject {
     func agentProviderIntegration(_ provider: AgentProviderConfig) async throws -> AgentIntegrationStatus?
     /// Installs or removes Tab's skill and hooks in `provider`'s config folder.
     func setAgentProviderIntegration(_ provider: AgentProviderConfig, enabled: Bool) async throws -> AgentIntegrationStatus?
-    /// The terminals whose settings an agent can bring into Tab.
-    func migrationSources() -> [TerminalMigration.Source]
-    /// Opens an agent tab in Home with `prompt` in its composer, not yet sent.
-    func openAgent(prompt: String) throws
     /// Opens a terminal tab in `server`'s Home running `command`, such as an agent's sign-in.
     func openTerminal(command: String, on server: ServerId)
 
@@ -206,10 +202,8 @@ public final class PreviewSettingsHost: SettingsHost {
     public private(set) var serverActions: [String] = []
     public var state: Data?
     public var importSources: [BrowserImportSource] = []
-    public private(set) var agentPrompts: [String] = []
     public private(set) var terminalCommands: [String] = []
     public var providerIntegrations: [String: AgentIntegrationStatus] = [:]
-    public var migrations = Array(TerminalMigration.sources.prefix(2))
     public var providers = AgentProvidersState(settings: AgentProviderSettings())
     public var reportedModels: [AgentChatProvider: [AgentModelDescriptor]] = [:]
 
@@ -303,8 +297,6 @@ public final class PreviewSettingsHost: SettingsHost {
     public func agentModels(_ provider: AgentProviderConfig, refresh: Bool, on server: ServerId) async throws -> [AgentModelDescriptor] {
         provider.models.arrange(reportedModels[provider.kind] ?? [])
     }
-    public func migrationSources() -> [TerminalMigration.Source] { migrations }
-    public func openAgent(prompt: String) throws { agentPrompts.append(prompt) }
     public func openTerminal(command: String, on server: ServerId) { terminalCommands.append(command) }
 
     public var installedPlugins: Set<PluginId> = []

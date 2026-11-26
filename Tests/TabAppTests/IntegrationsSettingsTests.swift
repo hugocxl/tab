@@ -58,36 +58,4 @@ final class IntegrationsSettingsTests: XCTestCase {
         XCTAssertFalse(try toggle(page).isOn)
         XCTAssertEqual(host.providerIntegrations[claude.id]?.isIntegrated, false)
     }
-
-    func testMigratingOpensAnAgentWithAPromptForThatTerminal() throws {
-        let store = SettingsStore(dirs: dirs, configFile: dirs.root.appendingPathComponent("user-settings.json"), host: host, theme: AppTheme(catalog: ThemeCatalog(entries: []), systemIsDark: true))
-        let page = SettingsModel(store: store)
-        page.select(.agents)
-        let row = try XCTUnwrap(page.lastBuild?.rows.first { $0.id == "terminal-migration" })
-        let buttons = try XCTUnwrap(row.control).leaves.compactMap { control -> ButtonSpec? in
-            if case .button(let spec) = control { return spec }
-            return nil
-        }
-        XCTAssertEqual(buttons.map(\.title), host.migrations.map(\.name))
-
-        buttons[0].action()
-
-        let prompt = try XCTUnwrap(host.agentPrompts.first)
-        XCTAssertTrue(prompt.contains("Migrate my \(host.migrations[0].name) setup"))
-        XCTAssertTrue(prompt.contains(dirs.settings.path))
-        XCTAssertTrue(prompt.contains(dirs.terminalSettings.path))
-    }
-
-    func testThePromptNamesOnlyActionsTheKeymapAccepts() throws {
-        let source = try XCTUnwrap(TerminalMigration.sources.first)
-        let prompt = TerminalMigration.prompt(for: source, home: root, dirs: dirs)
-        let ids = prompt.split(separator: "\n").compactMap { line -> String? in
-            guard line.hasPrefix("- `"), let end = line.dropFirst(3).firstIndex(of: "`") else { return nil }
-            return String(line.dropFirst(3)[..<end])
-        }
-        XCTAssertFalse(ids.isEmpty)
-        for id in ids where !id.hasPrefix("/") {
-            XCTAssertNoThrow(try Keymap().withBinding(id, nil), "\(id) isn't a keymap action")
-        }
-    }
 }

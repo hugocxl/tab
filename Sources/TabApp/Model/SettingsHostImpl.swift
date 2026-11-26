@@ -171,15 +171,6 @@ public final class SettingsHostImpl: SettingsHost {
         }.value
     }
 
-    public func migrationSources() -> [TerminalMigration.Source] {
-        TerminalMigration.available(home: URL(fileURLWithPath: ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory()))
-    }
-
-    public func openAgent(prompt: String) throws {
-        guard let pane = model.newTab(.agent) else { throw ModelError("Tab couldn't open an agent tab.") }
-        model.draftAgentPrompt(prompt, in: pane)
-    }
-
     public func openTerminal(command: String, on server: ServerId) {
         // Never on this Mac in place of another computer, whose CLI the command signs in.
         guard let home = server.isLocal ? model.state.home : model.state.serverHome(server) else { return }
