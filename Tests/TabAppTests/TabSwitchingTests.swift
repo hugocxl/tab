@@ -44,13 +44,16 @@ final class TabSwitchingTests: XCTestCase {
         }
         let model = ModelFixtures.model(try ModelFixtures.profile(), server: server)
         model.start()
-        XCTAssertTrue(spin { model.state.serverIdentity(.local) != nil })
+        // The server's first tabs arrive before the test opens its own, and
+        // the server keeps them, so no later read of its tabs drops them.
+        XCTAssertTrue(spin { model.state.serverIdentity(.local) != nil && model.state.tabsRevision(.local) != nil })
         let homeId = try XCTUnwrap(model.state.serverHome(.local)?.id)
         var tabs: [TabId] = []
         model.edit { state in
             for _ in 0..<count { tabs.append(try state.openTerminalTab(homeId)) }
             for pane in state.project(homeId)?.tabs.flatMap(\.panes) ?? [] { try state.setPaneSession(pane.id, SessionId()) }
         }
+        server.keepTabs(of: model.state)
         let workspace = WorkspaceView(model: model, sidebar: SidebarViewController(model: model))
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800), styleMask: [.borderless],
                               backing: .buffered, defer: false)

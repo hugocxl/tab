@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.141.2 - 2026-11-26
+
+### Fixed
+
+- Publish releases again by steadying the tab switching tests that failed at random.
+
 ## 0.141.0 - 2026-11-26
 
 ### Removed
