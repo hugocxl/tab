@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.140.4 - 2026-11-26
+
+### Fixed
+
+- Refresh stale cached agent model menus automatically and honor Refresh models while another provider is loading.
+
 ## 0.140.3 - 2026-11-25
 
 ### Changed

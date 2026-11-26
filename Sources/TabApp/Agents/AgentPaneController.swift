@@ -135,7 +135,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     private var attachmentPreview: NSPopover?
     private lazy var composerCoordinator = AgentComposerCoordinator(surface: surface)
     /// A provider's models as its menu offers them: the user's order, hidden ones left out.
-    var loadModelCatalog: ((AgentProviderConfig, Bool) async throws -> [AgentModelDescriptor])?
+    var loadModelCatalog: ((AgentProviderConfig, Bool) async throws -> AgentModelCatalogReply)?
     /// The server's providers with their last checks; servers that predate provider settings throw, leaving the built-in ones.
     var loadProviders: (() async throws -> AgentProvidersState)?
     /// Runs a command, such as a provider's sign-in, in a new terminal beside the pane.
@@ -161,6 +161,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     /// Each provider's models, by provider ID.
     private var modelCatalogs: [String: [AgentModelDescriptor]] = [:]
     private var modelCatalogTask: Task<Void, Never>?
+    private var modelCatalogTaskID = UUID()
     private var modelCatalogLoadedAt = Date.distantPast
     private var unavailableModelCatalogs = Set<String>()
     private var modelMenuOpen = false
@@ -365,7 +366,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
                 throw AgentPaneError.offline
             }
             return try await client.agentModelCatalog(.init(project: project, provider: provider.kind, forceRefresh: forceRefresh,
-                                                            providerID: provider.id)).models
+                                                            providerID: provider.id))
         }
         loadProviders = { [weak model] in
             guard let model, let project = model.state.paneProject(pane), let client = model.sideClient(for: project) else {
@@ -2306,13 +2307,24 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
     }
 
     private func refreshModelCatalog(force: Bool = false) {
-        guard modelCatalogTask == nil, force || Date().timeIntervalSince(modelCatalogLoadedAt) > 60,
-              let loadModelCatalog else { return }
+        if force {
+            modelCatalogTask?.cancel()
+            modelCatalogTask = nil
+        } else {
+            guard modelCatalogTask == nil, Date().timeIntervalSince(modelCatalogLoadedAt) > 60 else { return }
+        }
+        guard loadModelCatalog != nil else { return }
         modelCatalogLoadedAt = Date()
         let generation = connectionGeneration
+        let taskID = UUID()
+        modelCatalogTaskID = taskID
         modelCatalogTask = Task { [weak self] in
             guard let self else { return }
-            defer { if generation == self.connectionGeneration { self.modelCatalogTask = nil } }
+            defer {
+                if generation == self.connectionGeneration, self.modelCatalogTaskID == taskID {
+                    self.modelCatalogTask = nil
+                }
+            }
             if let state = try? await self.loadProviders?() {
                 guard !Task.isCancelled, !self.disposed, generation == self.connectionGeneration else { return }
                 self.providersLoaded = true
@@ -2328,21 +2340,41 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
                 self.updateControls()
                 self.warnIfUnavailable()
             }
-            for provider in self.menuProviders {
-                do {
-                    let models = try await loadModelCatalog(provider, force)
-                    guard !Task.isCancelled, !self.disposed, generation == self.connectionGeneration else { return }
-                    self.modelCatalogs[provider.id] = models
-                    self.unavailableModelCatalogs.remove(provider.id)
-                    self.menuState = nil
-                    self.updateControls()
-                } catch {
-                    guard !Task.isCancelled, !self.disposed, generation == self.connectionGeneration else { return }
-                    self.unavailableModelCatalogs.insert(provider.id)
-                    self.menuState = nil
-                    self.updateControls()
+            let providers = self.menuProviders
+            await withTaskGroup(of: Void.self) { group in
+                for provider in providers {
+                    group.addTask { @MainActor [weak self] in
+                        await self?.fetchModelCatalog(provider: provider, force: force, generation: generation)
+                    }
                 }
             }
+        }
+    }
+
+    private func fetchModelCatalog(provider: AgentProviderConfig, force: Bool, generation: UInt64) async {
+        guard let loadModelCatalog else { return }
+        do {
+            let reply = try await loadModelCatalog(provider, force)
+            guard !Task.isCancelled, !disposed, generation == connectionGeneration else { return }
+            modelCatalogs[provider.id] = reply.models
+            unavailableModelCatalogs.remove(provider.id)
+            menuState = nil
+            updateControls()
+            // A persisted ("saved") reply was returned immediately while the server refreshes in
+            // the background; join that live refresh so stale models are replaced once it finishes.
+            if !force, reply.source == "saved", let live = try? await loadModelCatalog(provider, true) {
+                guard !Task.isCancelled, !disposed, generation == connectionGeneration else { return }
+                if !live.models.isEmpty {
+                    modelCatalogs[provider.id] = live.models
+                    menuState = nil
+                    updateControls()
+                }
+            }
+        } catch {
+            guard !Task.isCancelled, !disposed, generation == connectionGeneration else { return }
+            unavailableModelCatalogs.insert(provider.id)
+            menuState = nil
+            updateControls()
         }
     }
 

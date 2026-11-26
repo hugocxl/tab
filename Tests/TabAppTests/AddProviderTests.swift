@@ -151,7 +151,7 @@ final class AddProviderTests: XCTestCase {
         }
         defer { pane.dispose() }
         pane.loadProviders = { AgentProvidersState(settings: AgentProviderSettings()) }
-        pane.loadModelCatalog = { _, _ in [] }
+        pane.loadModelCatalog = { _, _ in .init(models: []) }
         pane.openAgentSettings = { openedSettings = true }
         pane.refresh()
         for _ in 0..<50 where pane.surface.providerGap == nil {

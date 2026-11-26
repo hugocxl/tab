@@ -187,8 +187,8 @@ final class AgentPaneTests: XCTestCase {
                 let options: [(String, String)] = provider.kind == .claude
                     ? [("claude-sonnet-5-5", "Claude Sonnet 5.5"), ("claude-opus-5-5", "Claude Opus 5.5")]
                     : [("gpt-6.1-sol", "GPT-6.1 Sol"), ("gpt-6-astra", "GPT-6 Astra")]
-                return options.map { .init(id: $0.0, title: $0.1, reasoningEfforts: [.low, .medium, .high, .max],
-                                           defaultReasoningEffort: .medium) }
+                return .init(models: options.map { .init(id: $0.0, title: $0.1, reasoningEfforts: [.low, .medium, .high, .max],
+                                                         defaultReasoningEffort: .medium) }, source: "live")
             }
             return pane
         }
@@ -674,9 +674,10 @@ final class AgentPaneTests: XCTestCase {
         let pane = backend.controller()
         defer { pane.dispose() }
         pane.loadModelCatalog = { provider, _ in
-            guard provider.kind == .codex else { return [] }
-            return [.init(id: "future-codex-model", title: "Future Codex Model",
-                          reasoningEfforts: [.low, .high, .init(rawValue: "next-generation")], defaultReasoningEffort: .low)]
+            guard provider.kind == .codex else { return .init(models: []) }
+            return .init(models: [.init(id: "future-codex-model", title: "Future Codex Model",
+                                        reasoningEfforts: [.low, .high, .init(rawValue: "next-generation")], defaultReasoningEffort: .low)],
+                         source: "live")
         }
         pane.refresh()
         try await wait { pane.snapshot != nil && modelItems(pane).map(\.title).contains("Future Codex Model") }
@@ -702,10 +703,10 @@ final class AgentPaneTests: XCTestCase {
         defer { pane.dispose() }
         var refreshes: [Bool] = []
         pane.loadModelCatalog = { provider, force in
-            guard provider.kind == .codex else { return [] }
+            guard provider.kind == .codex else { return .init(models: []) }
             refreshes.append(force)
-            return [.init(id: force ? "new-release" : "existing", title: force ? "New release" : "Existing",
-                          reasoningEfforts: [.high])]
+            return .init(models: [.init(id: force ? "new-release" : "existing", title: force ? "New release" : "Existing",
+                                        reasoningEfforts: [.high])], source: "live")
         }
         pane.refresh()
         try await wait { pane.snapshot != nil && modelItems(pane).map(\.title).contains("Existing") }
@@ -715,6 +716,52 @@ final class AgentPaneTests: XCTestCase {
         XCTAssertEqual(refreshes, [false, true])
         XCTAssertFalse(modelItems(pane).map(\.title).contains("Existing"))
         XCTAssertFalse(backend.requests.contains { if case .send = $0 { return true }; return false })
+    }
+
+    func testSavedModelCatalogFollowsUpWithLiveRefresh() async throws {
+        let backend = Backend()
+        let pane = backend.controller()
+        defer { pane.dispose() }
+        var refreshes: [Bool] = []
+        pane.loadModelCatalog = { provider, force in
+            guard provider.kind == .claude else { return .init(models: []) }
+            refreshes.append(force)
+            if !force {
+                return .init(models: [.init(id: "opus", title: "Opus", reasoningEfforts: [.high], isDefault: true)],
+                             source: "saved")
+            }
+            return .init(models: [.init(id: "opus", title: "Opus 5.5", reasoningEfforts: [.high], isDefault: true),
+                                  .init(id: "sonnet", title: "Sonnet 5.5", reasoningEfforts: [.high])],
+                         source: "live")
+        }
+        pane.refresh()
+        try await wait { pane.snapshot != nil && modelItems(pane).map(\.title).contains("Opus 5.5") }
+        XCTAssertEqual(refreshes, [false, true])
+        XCTAssertTrue(modelItems(pane).map(\.title).contains("Sonnet 5.5"))
+        XCTAssertFalse(modelItems(pane).map(\.title).contains("Opus"))
+    }
+
+    func testForcedModelRefreshCancelsInFlightRefresh() async throws {
+        let backend = Backend()
+        let pane = backend.controller()
+        defer { pane.dispose() }
+        var codexStarted = false
+        pane.loadModelCatalog = { provider, force in
+            if provider.kind == .codex && !force {
+                codexStarted = true
+                try await Task.sleep(for: .seconds(10))
+                return .init(models: [], source: "live")
+            }
+            guard provider.kind == .claude else { return .init(models: [], source: "live") }
+            return .init(models: [.init(id: force ? "fresh" : "stale", title: force ? "Fresh" : "Stale",
+                                        reasoningEfforts: [.high])], source: "live")
+        }
+        pane.refresh()
+        try await wait { pane.snapshot != nil && codexStarted && modelItems(pane).map(\.title).contains("Stale") }
+        pane.surface.model.selectItem(withTitle: "Refresh models…")
+        _ = (pane.surface.model.target as? NSObject)?.perform(try XCTUnwrap(pane.surface.model.action), with: pane.surface.model)
+        try await wait { modelItems(pane).map(\.title).contains("Fresh") }
+        XCTAssertFalse(modelItems(pane).map(\.title).contains("Stale"))
     }
 
     func testRefreshCoalescesAndFiltersOtherSessionsAndOldRevisions() async throws {
