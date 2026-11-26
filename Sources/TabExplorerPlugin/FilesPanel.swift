@@ -622,9 +622,9 @@ final class FilesTableView: NSTableView {
 /// One tree row, drawn directly: chevron, folder or file glyph and name,
 /// with hover and selection fills.
 class FilesCellView: HoverView {
-    /// The Explorer draws filled SF Symbols; the rest of the app, Source
-    /// Control's tree included, draws outline ones.
-    class var artwork: AppIcon.Artwork { .filled }
+    /// The Explorer keeps @hugocxl/icons' two-tone file artwork; file icons
+    /// elsewhere, Source Control's tree included, use its stroke set.
+    class var artwork: AppIcon.Artwork { .duotone }
     private var node = FilesTree.Node(path: "", name: "", isDirectory: false, dimmed: false)
     private var depth = 0
     private var expanded = false
@@ -654,7 +654,7 @@ class FilesCellView: HoverView {
         fileIcon = FileIcon.image(for: node.path, isDirectory: node.isDirectory, isExpanded: expanded, theme: theme,
                                   artwork: artwork)
         chevron = node.isDirectory
-            ? (expanded ? AppIcon.chevronDown : AppIcon.chevronRight).image(size: 11, artwork: artwork)?.tinted(theme.fgDim)
+            ? (expanded ? AppIcon.chevronDown : AppIcon.chevronRight).image(size: 11)?.tinted(theme.fgDim)
             : nil
         needsDisplay = true
     }

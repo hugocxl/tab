@@ -635,7 +635,7 @@ extension TextGlyphButton {
     }
 }
 
-/// A collapsible Git folder using outline symbols.
+/// A collapsible Git folder: an @hugocxl/icons folder beside an SF Symbol chevron.
 final class ChangeFolderCell: HoverView {
     static let indent: CGFloat = 12
     static let rowHeight: CGFloat = 24
@@ -667,8 +667,8 @@ final class ChangeFolderCell: HoverView {
     }
 
     override func themeDidChange() {
-        folderIcon = FileIcon.image(for: path, isDirectory: true, isExpanded: expanded, theme: theme, artwork: .stroke)
-        chevron = (expanded ? AppIcon.chevronDown : AppIcon.chevronRight).image(size: 11, artwork: .stroke)?.tinted(theme.fgDim)
+        folderIcon = FileIcon.image(for: path, isDirectory: true, isExpanded: expanded, theme: theme, artwork: .mark)
+        chevron = (expanded ? AppIcon.chevronDown : AppIcon.chevronRight).image(size: 11)?.tinted(theme.fgDim)
         needsDisplay = true
     }
 

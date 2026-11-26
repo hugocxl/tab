@@ -225,7 +225,7 @@ final class UsagePanelController: NSViewController {
             let item = Self.item("\(UsageAccountCard.providerTitle(kind))  \(count)", checked: filter == kind) { [weak self] in
                 self?.setFilter(kind)
             }
-            item.image = AgentLogo.mark(kind.activityProvider).image(size: 14, theme: theme)
+            item.image = AgentLogo.image(for: kind.activityProvider, size: 14, theme: theme)
             menu.addItem(item)
         }
         menu.addItem(.separator())
@@ -417,7 +417,7 @@ final class UsageAccountCard: NSView {
         addSubview(glass)
 
         let name = limits.providerName ?? Self.providerTitle(limits.provider)
-        let logo = NSImageView(image: AgentLogo.mark(limits.provider.activityProvider).image(size: 16, theme: theme) ?? NSImage())
+        let logo = NSImageView(image: AgentLogo.image(for: limits.provider.activityProvider, size: 16, theme: theme) ?? NSImage())
         logo.translatesAutoresizingMaskIntoConstraints = false
         let title = NSTextField(labelWithAttributedString: Self.title(name, plan: limits.plan, theme: theme))
         title.lineBreakMode = .byTruncatingTail

@@ -48,9 +48,9 @@ final class FileIconTests: XCTestCase {
         let folder = try XCTUnwrap(FileIcon.image(for: "/remote/package.swift", isDirectory: true, theme: dark))
         XCTAssertTrue(folder === FileIcon.image(for: "/remote/src", isDirectory: true, theme: dark))
         XCTAssertFalse(folder === swift)
-        XCTAssertTrue(folder === AppIcon.folder.image(size: 14, hue: .gray, theme: dark))
+        XCTAssertTrue(folder === AppIcon.folder.image(size: 14, hue: .gray, theme: dark, artwork: .mark))
         let openFolder = try XCTUnwrap(FileIcon.image(for: "/remote/package.swift", isDirectory: true, isExpanded: true, theme: dark))
-        XCTAssertTrue(openFolder === AppIcon.folderOpen.image(size: 14, hue: .gray, theme: dark))
+        XCTAssertTrue(openFolder === AppIcon.folderOpen.image(size: 14, hue: .gray, theme: dark, artwork: .mark))
         XCTAssertFalse(openFolder === folder)
         XCTAssertTrue(swift === FileIcon.image(for: "main.swift", dark: true))
     }

@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.142.0 - 2026-11-26
+
+### Changed
+
+- Use @hugocxl/icons for AI provider logos and file type icons, keeping SF Symbols for everything else.
+
 ## 0.141.5 - 2026-11-26
 
 ### Fixed

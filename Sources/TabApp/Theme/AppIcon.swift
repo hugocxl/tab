@@ -2,8 +2,10 @@ import AppKit
 import SwiftUI
 import TabCore
 import TabProtocol
+import Icons
 
-/// Tab's icons, all SF Symbols: signature marks carry their theme hue; UI templates inherit the caller's tint.
+/// Tab's icons: SF Symbols for the UI, @hugocxl/icons for provider logos and
+/// file-type icons. Signature marks carry their theme hue; UI templates inherit the caller's tint.
 public enum AppIcon: String, CaseIterable, Sendable {
     case trash
     case microphone
@@ -343,12 +345,15 @@ public enum AppIcon: String, CaseIterable, Sendable {
     /// matching the visible size of the SF Symbols they replaced on the same canvas.
     public static let inlineScale: CGFloat = 0.78
 
-    /// Which SF Symbols variant an image uses.
+    /// Where an image's artwork comes from.
     public enum Artwork: String, Sendable {
-        /// Outlines, used everywhere but the Explorer.
+        /// SF Symbol outlines, for every UI glyph.
         case stroke
-        /// Filled variants where SF Symbols has one, kept for the Explorer's file tree.
-        case filled
+        /// @hugocxl/icons' stroke set, or its default set for brand and language
+        /// marks that have no stroke version: provider logos and file-type icons.
+        case mark
+        /// @hugocxl/icons' default two-tone set, for the Explorer's file tree.
+        case duotone
     }
 
     /// Draws signature marks in their theme hue; UI glyphs remain templates.
@@ -368,7 +373,8 @@ public enum AppIcon: String, CaseIterable, Sendable {
 
     /// The SF Symbol drawn for this icon. Brands and languages have no SF
     /// Symbol of their own, so each takes a fitting generic symbol and keeps
-    /// its signature hue to tell it apart.
+    /// its signature hue to tell it apart. Provider logos and file-type icons
+    /// draw from @hugocxl/icons instead, through `.mark` or `.duotone` artwork.
     var symbolName: String {
         switch self {
         case .trash: return "trash"
@@ -590,9 +596,29 @@ public enum AppIcon: String, CaseIterable, Sendable {
         }
     }
 
-    /// The SF Symbol in the chosen variant, sized for `pointSize`.
+    /// @hugocxl/icons' default-set name for icons whose stroke name differs.
+    private var duotoneName: String {
+        switch self {
+        case .bell: return "bell-unread"
+        case .circleUser: return "circle-user"
+        case .cpu: return "cpu"
+        case .dot: return "dot"
+        case .simulator: return "simulator"
+        case .slides: return "slides"
+        case .sparkles: return "sparkles"
+        case .themes: return "themes"
+        case .video: return "video"
+        default: return rawValue
+        }
+    }
+
+    /// The glyph from the chosen source, sized for `pointSize` when it is an SF Symbol.
     private func source(_ artwork: Artwork, pointSize: CGFloat) -> NSImage? {
-        SFSymbol.image(symbolName, filled: artwork == .filled, pointSize: pointSize)
+        switch artwork {
+        case .stroke: return SFSymbol.image(symbolName, pointSize: pointSize)
+        case .mark: return StrokeIcon(rawValue: rawValue)?.nsImage ?? Icon(rawValue: duotoneName)?.nsImage
+        case .duotone: return Icon(rawValue: duotoneName)?.nsImage
+        }
     }
 
     /// A template image on a square canvas `size` points on a side, with the
@@ -699,13 +725,19 @@ extension NSImage {
     }
 }
 
-/// Provider marks as SF Symbols, colored in the provider's theme hue.
+/// Provider logos from @hugocxl/icons, colored in the provider's theme hue.
 public enum AgentLogo {
     /// The provider's mark on a 64-point square canvas, including a generic
     /// agent mark for unknown providers.
     @MainActor
     public static func image(for provider: AgentProvider, lightBackground: Bool) -> NSImage? {
-        mark(provider).image(size: 64, theme: AppTheme.shared)
+        image(for: provider, size: 64, theme: AppTheme.shared)
+    }
+
+    /// The provider's logo at `size` in `theme`.
+    @MainActor
+    public static func image(for provider: AgentProvider, size: CGFloat, theme: AppTheme) -> NSImage? {
+        mark(provider).image(size: size, theme: theme, artwork: .mark)
     }
 
     /// A configured provider's mark, with a dot of its accent color in the corner when it has one,
@@ -733,7 +765,7 @@ public enum AgentLogo {
         return image
     }
 
-    /// The provider's mark.
+    /// The provider's mark; draw it with `.mark` artwork.
     public static func mark(_ provider: AgentProvider) -> AppIcon {
         switch provider {
         case .claude: return .claude

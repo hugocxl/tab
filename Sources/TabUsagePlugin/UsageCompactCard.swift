@@ -383,7 +383,7 @@ final class UsageCompactRow: UsageClickable {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
 
-        let logo = NSImageView(image: AgentLogo.mark(limits.provider.activityProvider).image(size: 14, theme: theme) ?? NSImage())
+        let logo = NSImageView(image: AgentLogo.image(for: limits.provider.activityProvider, size: 14, theme: theme) ?? NSImage())
         logo.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
             logo.widthAnchor.constraint(equalToConstant: 14),

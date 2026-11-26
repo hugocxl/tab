@@ -1,6 +1,7 @@
 import AppKit
 
-/// File-type rules resolve remote paths without consulting the local filesystem.
+/// File-type icons from @hugocxl/icons. The rules resolve remote paths without
+/// consulting the local filesystem.
 @MainActor
 public enum FileIcon {
     typealias Resolution = (icon: AppIcon, hue: AppTheme.IconHue)
@@ -51,7 +52,7 @@ public enum FileIcon {
     /// Resolves and draws file or folder glyphs in the supplied theme.
     public static func image(for path: String, isDirectory: Bool = false, isExpanded: Bool = false,
                       mimeType: String? = nil, theme: AppTheme, size: CGFloat = 14,
-                      artwork: AppIcon.Artwork = .stroke) -> NSImage? {
+                      artwork: AppIcon.Artwork = .mark) -> NSImage? {
         let resolved: Resolution = isDirectory ? style(for: isExpanded ? .folderOpen : .folder)
             : resolve(path, mimeType: mimeType)
         return resolved.icon.image(size: size, theme: theme, artwork: artwork)
