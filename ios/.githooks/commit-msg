@@ -1,0 +1,11 @@
+#!/bin/bash
+# Lint commit message and deterministically prepend a CHANGELOG.md entry.
+set -euo pipefail
+ROOT="$(git rev-parse --show-toplevel)"
+if [ ! -f "$ROOT/scripts/commit-lint.py" ]; then exit 0; fi
+
+if [ -f "$ROOT/CHANGELOG.md" ] && [ "${NO_AUTO_CHANGELOG:-0}" != 1 ]; then
+    python3 "$ROOT/scripts/commit-lint.py" --update-changelog "$1" > /dev/null
+else
+    python3 "$ROOT/scripts/commit-lint.py" "$1"
+fi

@@ -1,0 +1,653 @@
+import TabMobileKit
+import TabProtocol
+import UIKit
+
+/// The home screen: the desktop sidebar's Open Tabs layout. Every open tab of
+/// every paired Mac, oldest first, each card saying what runs there, where,
+/// and in which project. With more than one Mac, each gets a heading. Grouped
+/// by project, it is the sidebar's Projects layout: Home's tabs, then each
+/// project's under its header.
+final class TabListViewController: UICollectionViewController {
+    private let app: AppModel
+    private let preferences = Preferences.shared
+    /// A Mac's Home tabs, or with grouping one project's.
+    private struct Section: Hashable {
+        var server: ServerId
+        var project: ProjectId?
+    }
+    private var dataSource: UICollectionViewDiffableDataSource<Section, TabId>!
+    private var groupedProjects: [ProjectId: ProjectDescriptor] = [:]
+    /// Projects whose tabs are hidden under their header, with how many.
+    private var collapsedCounts: [ProjectId: Int] = [:]
+    private var grouped = false
+    private var cards: [TabId: (server: ServerModel, card: TabCard)] = [:]
+    /// Project icons decoded once, with the bytes they came from.
+    private var icons: [ProjectId: (data: Data, image: UIImage)] = [:]
+    private var filter = ""
+    private let statusView = UIContentUnavailableView(configuration: .empty())
+    private let settingsButton = UIBarButtonItem()
+    private let filterButton = UIBarButtonItem()
+    private lazy var newTabButton = makeNewTabButton()
+    /// Which tabs the filter button lets through.
+    private enum Shown: CaseIterable {
+        case all, agents, terminals, attention
+
+        var title: String {
+            switch self {
+            case .all: "All Tabs"
+            case .agents: "Agents"
+            case .terminals: "Terminals"
+            case .attention: "Needs Attention"
+            }
+        }
+
+        /// What the list says when nothing is left.
+        var emptyTitle: String {
+            switch self {
+            case .all: "No Open Tabs"
+            case .agents: "No Agents"
+            case .terminals: "No Terminals"
+            case .attention: "Nothing Needs Attention"
+            }
+        }
+
+        var image: String {
+            switch self {
+            case .all: "rectangle.stack"
+            case .agents: "sparkles"
+            case .terminals: "apple.terminal"
+            case .attention: "exclamationmark.bubble"
+            }
+        }
+
+        func admits(_ card: TabCard) -> Bool {
+            switch self {
+            case .all: true
+            case .agents: card.panes.contains { if case .agent = $0.kind { true } else { false } }
+            case .terminals: card.panes.contains { $0.kind == .terminal }
+            case .attention: card.status == .attention || card.status == .error
+            }
+        }
+    }
+    private var shown = Shown.all
+    /// The one Mac whose tabs show; nil for all of them.
+    private var shownServer: ServerId?
+    /// Shows a tab in the detail column.
+    var onOpen: ((ServerModel, TabCard) -> Void)?
+    var onSettings: (() -> Void)?
+    var onPair: (() -> Void)?
+    private(set) var selected: TabId?
+    /// The tab shown last time, reopened on an iPad once its Mac reports it.
+    private var restoring = LastTab.load()
+
+    private struct LastTab: Codable {
+        var server: UUID
+        var tab: UUID
+
+        static let key = "lastTab"
+
+        static func load() -> LastTab? {
+            guard UIDevice.current.userInterfaceIdiom == .pad, let data = UserDefaults.standard.data(forKey: key) else {
+                return nil
+            }
+            return try? JSONDecoder().decode(LastTab.self, from: data)
+        }
+
+        func save() {
+            guard let data = try? JSONEncoder().encode(self) else { return }
+            UserDefaults.standard.set(data, forKey: Self.key)
+        }
+    }
+
+    init(app: AppModel) {
+        self.app = app
+        super.init(collectionViewLayout: UICollectionViewLayout())
+        let layout = UICollectionViewCompositionalLayout { [weak self] index, environment in
+            var configuration = UICollectionLayoutListConfiguration(appearance: .plain)
+            configuration.backgroundColor = .clear
+            configuration.headerMode = self?.showsHeader(section: index) ?? false ? .supplementary : .none
+            configuration.trailingSwipeActionsConfigurationProvider = { path in self?.swipeActions(path) }
+            // A hairline between cards, as wide as a card's fill, except beside
+            // the selected one and after the last.
+            configuration.itemSeparatorHandler = { path, separators in
+                guard let self else { return separators }
+                var separators = separators
+                let next = IndexPath(item: path.item + 1, section: path.section)
+                let selected = Set(self.collectionView.indexPathsForSelectedItems ?? [])
+                let isLast = path.item + 1 >= self.collectionView.numberOfItems(inSection: path.section)
+                if isLast || selected.contains(path) || selected.contains(next) { separators.bottomSeparatorVisibility = .hidden }
+                separators.topSeparatorVisibility = .hidden
+                let inset = TabCardCell.cardInset
+                separators.bottomSeparatorInsets = NSDirectionalEdgeInsets(top: 0, leading: inset, bottom: 0, trailing: inset)
+                return separators
+            }
+            return .list(using: configuration, layoutEnvironment: environment)
+        }
+        collectionView.collectionViewLayout = layout
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        navigationController?.navigationBar.prefersLargeTitles = false
+        navigationController?.setToolbarHidden(!isPhone, animated: animated)
+        if splitViewController?.isCollapsed ?? true, let selection = collectionView.indexPathsForSelectedItems {
+            selection.forEach { collectionView.deselectItem(at: $0, animated: animated) }
+        }
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        // A phone's tab is pushed over the list; the bottom bar stays with the list.
+        if isPhone { navigationController?.setToolbarHidden(true, animated: animated) }
+    }
+
+    private var isPhone: Bool { traitCollection.userInterfaceIdiom == .phone }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        navigationItem.largeTitleDisplayMode = .never
+        // Clear, so an iPad's sidebar shows its own material.
+        collectionView.backgroundColor = isPhone ? .systemBackground : .clear
+        // Cards fade under the bar instead of meeting a hairline.
+        collectionView.topEdgeEffect.style = .soft
+        configureDataSource()
+        let search = UISearchController()
+        search.searchResultsUpdater = self
+        search.obscuresBackgroundDuringPresentation = false
+        search.searchBar.placeholder = "Search"
+        navigationItem.searchController = search
+        // A phone searches from a field in the bottom bar, beside New Tab; an
+        // iPad's sidebar keeps its bar buttons free.
+        navigationItem.preferredSearchBarPlacement = isPhone ? .integrated : .stacked
+
+        settingsButton.primaryAction = UIAction(image: UIImage(systemName: "gearshape")) { [weak self] _ in
+            self?.onSettings?()
+        }
+        settingsButton.accessibilityLabel = "Settings"
+        filterButton.accessibilityLabel = "Filter"
+        navigationItem.rightBarButtonItems = [settingsButton, filterButton]
+
+        statusView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(statusView)
+        NSLayoutConstraint.activate([
+            statusView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            statusView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            statusView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            statusView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
+        ])
+    }
+
+    override func updateProperties() {
+        super.updateProperties()
+        let servers = visibleServers
+        if servers.count == 1, let server = servers.first {
+            title = server.server.name
+            navigationItem.subtitle = Self.describe(server.status)
+        } else {
+            title = "Tabs"
+            navigationItem.subtitle = nil
+        }
+        let filtering = shown != .all || shownServer != nil
+        filterButton.image = UIImage(systemName: filtering ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease")
+        filterButton.menu = filterMenu()
+        if isPhone {
+            toolbarItems = [navigationItem.searchBarPlacementBarButtonItem, .flexibleSpace(), newTabButton]
+        } else {
+            navigationItem.rightBarButtonItems = [newTabButton, .fixedSpace(0), settingsButton, filterButton]
+        }
+        newTabButton.isEnabled = app.servers.contains { $0.board != nil }
+        for server in app.servers {
+            server.isImage = { UIImage(data: $0) != nil }
+        }
+        apply(servers)
+        updateHeaders()
+    }
+
+    /// A project's section always has its header; Home's names its Mac when
+    /// more than one shows.
+    private func showsHeader(section index: Int) -> Bool {
+        guard let dataSource, let section = dataSource.sectionIdentifier(for: index) else { return false }
+        return section.project != nil || visibleServers.count > 1
+    }
+
+    /// Headers aren't items, so a snapshot never reconfigures them; their Mac's
+    /// status is read here, where a change brings the next update.
+    private func updateHeaders() {
+        let kind = UICollectionView.elementKindSectionHeader
+        for path in collectionView.indexPathsForVisibleSupplementaryElements(ofKind: kind) {
+            guard let header = collectionView.supplementaryView(forElementKind: kind, at: path) as? TabSectionHeader,
+                  let section = dataSource.sectionIdentifier(for: path.section) else { continue }
+            configure(header, for: section)
+        }
+        // Also for headers scrolled out of view, so they're right when they return.
+        for server in app.servers { _ = server.status }
+    }
+
+    private func configure(_ header: TabSectionHeader, for section: Section) {
+        guard let server = app.server(section.server) else { return }
+        var content = UIListContentConfiguration.header()
+        content.prefersSideBySideTextAndSecondaryText = true
+        guard let id = section.project, let project = groupedProjects[id] else {
+            content.text = server.server.name
+            content.secondaryText = Self.describe(server.status)
+            header.contentConfiguration = content
+            header.showMac()
+            return
+        }
+        let hidden = collapsedCounts[id]
+        content.text = project.name
+        // With several Macs, which one the project is on; collapsed, how many tabs it hides.
+        let mac = visibleServers.count > 1 ? server.server.name : nil
+        let count = hidden.map { $0 == 1 ? "1 tab" : "\($0) tabs" }
+        content.secondaryText = [mac, count].compactMap { $0 }.joined(separator: " · ")
+        let icon = self.icon(id, on: server)
+        content.image = icon ?? TabIcon.folder.template
+        content.imageProperties.tintColor = icon == nil ? TabIcon.folder.color() : nil
+        content.imageProperties.maximumSize = CGSize(width: 18, height: 18)
+        content.imageProperties.cornerRadius = 4
+        header.contentConfiguration = content
+        header.showProject(project.name, collapsed: hidden != nil, menu: projectMenu(project, on: server)) { [weak self] in
+            guard let self else { return }
+            // While searching every group is open, so collapsing waits for the search to end.
+            guard filter.isEmpty else { return }
+            if preferences.collapsedProjects.remove(id) == nil { preferences.collapsedProjects.insert(id) }
+        }
+    }
+
+    /// A project header's menu: new panes and worktrees in the project, as
+    /// the desktop header's menu and New Worktree button offer.
+    private func projectMenu(_ project: ProjectDescriptor, on server: ServerModel) -> UIMenu {
+        var children: [UIMenuElement] = [
+            UIMenu(title: "New Pane", image: UIImage(systemName: "plus.square.on.square"), children: [
+                UIAction(title: "Terminal", image: UIImage(systemName: "apple.terminal")) { [weak self] _ in
+                    self?.newPane(.terminal, in: project.id, on: server)
+                },
+                UIAction(title: "Agent", image: UIImage(systemName: "sparkles")) { [weak self] _ in
+                    self?.newPane(.agent(.claude), in: project.id, on: server)
+                },
+            ]),
+        ]
+        if (server.gitSummaries[project.id] ?? nil) != nil {
+            children.append(UIAction(title: "New Worktree…", image: TabIcon.gitBranch.template) { [weak self] _ in
+                self?.showNewTab(kind: nil, on: server, location: project.id, checkout: .worktree)
+            })
+        }
+        children.append(UIMenu(options: .displayInline, children: [
+            UIAction(title: "Copy Path", image: UIImage(systemName: "doc.on.doc")) { _ in
+                UIPasteboard.general.string = project.directory.rawValue
+            },
+        ]))
+        return UIMenu(title: project.name, children: children)
+    }
+
+    static func describe(_ status: ServerModel.Status) -> String {
+        switch status {
+        case .connected: "Connected"
+        case .connecting: "Connecting…"
+        case .offline: "Offline · retrying"
+        case .needsPairing: "Not paired"
+        }
+    }
+
+    /// The paired Macs the list shows: the chosen one, else all of them.
+    private var visibleServers: [ServerModel] {
+        let servers = app.servers
+        guard let shownServer, let server = servers.first(where: { $0.id == shownServer }) else { return servers }
+        return [server]
+    }
+
+    private func show(server: ServerId?) {
+        shownServer = server
+        // Headings come and go with the number of Macs shown.
+        collectionView.collectionViewLayout.invalidateLayout()
+        setNeedsUpdateProperties()
+    }
+
+    /// Which tabs show: by what runs in them and, with more than one, by Mac.
+    private func filterMenu() -> UIMenu {
+        let kinds = Shown.allCases.map { kind in
+            UIAction(title: kind.title, image: UIImage(systemName: kind.image), state: shown == kind ? .on : .off) { [weak self] _ in
+                self?.shown = kind
+                self?.setNeedsUpdateProperties()
+            }
+        }
+        let grouping = UIAction(title: "Group by Project", image: UIImage(systemName: "folder"),
+                                state: preferences.groupsByProject ? .on : .off) { [weak self] _ in
+            self?.preferences.groupsByProject.toggle()
+        }
+        var children: [UIMenuElement] = [UIMenu(options: .displayInline, children: kinds),
+                                          UIMenu(options: .displayInline, children: [grouping])]
+        let servers = app.servers
+        if servers.count > 1 {
+            let all = UIAction(title: "All Macs", image: UIImage(systemName: "laptopcomputer.and.iphone"),
+                               state: shownServer == nil ? .on : .off) { [weak self] _ in
+                self?.show(server: nil)
+            }
+            let macs = servers.map { model in
+                UIAction(title: model.server.name, subtitle: Self.describe(model.status),
+                         image: UIImage(systemName: "laptopcomputer"),
+                         state: shownServer == model.id ? .on : .off) { [weak self] _ in
+                    self?.show(server: model.id)
+                    model.retryNow()
+                }
+            }
+            children.append(UIMenu(options: .displayInline, children: [all] + macs))
+        }
+        return UIMenu(title: "Show", children: children)
+    }
+
+    // MARK: New tabs
+
+    /// Opens the New Tab sheet: the desktop's New in Project page as a form.
+    private func makeNewTabButton() -> UIBarButtonItem {
+        let item = UIBarButtonItem(image: UIImage(systemName: "square.and.pencil"))
+        item.primaryAction = UIAction(image: UIImage(systemName: "square.and.pencil")) { [weak self, weak item] _ in
+            self?.showNewTab(kind: nil, source: item)
+        }
+        item.accessibilityLabel = "New Tab"
+        return item
+    }
+
+    /// The New Tab sheet, on the chosen tab's Mac and in its project, else
+    /// the first connected Mac's Home. `kind` nil opens the kind used last.
+    func showNewTab(kind: MobilePaneKind?, source: UIBarButtonItem? = nil) {
+        let current = selected.flatMap { cards[$0] }
+        guard let server = current?.server ?? app.servers.first(where: { $0.board != nil }) else { return }
+        showNewTab(kind: kind, on: server, location: current?.card.project.id, source: source)
+    }
+
+    private func showNewTab(kind: MobilePaneKind?, on server: ServerModel, location: ProjectId?,
+                            checkout: NewTabForm.Checkout? = nil, source: UIBarButtonItem? = nil) {
+        let presenter = splitViewController ?? self
+        guard presenter.presentedViewController == nil else { return }
+        NewTabViewController.present(over: presenter, app: app, server: server, kind: kind, location: location,
+                                     checkout: checkout, source: source) { [weak self] server, tab in
+            guard let card = server.cards.first(where: { $0.id == tab }) else { return }
+            self?.open(card, on: server)
+        }
+    }
+
+    /// A terminal or agent tab in Home at once, for ⌘T and ⌥⌘A.
+    func newTab(_ kind: MobilePaneKind) {
+        let current = selected.flatMap { cards[$0]?.server }
+        guard let server = current ?? app.servers.first(where: { $0.board != nil }),
+              let tab = try? server.newTab(kind, size: Size(cols: 80, rows: 24)),
+              let card = server.cards.first(where: { $0.id == tab }) else { return }
+        open(card, on: server)
+    }
+
+    /// A terminal or agent pane in `project` at once, from its header: the
+    /// project's one tab gains it on the right, or it starts that tab.
+    private func newPane(_ kind: MobilePaneKind, in project: ProjectId, on server: ServerModel) {
+        preferences.collapsedProjects.remove(project)
+        guard let tab = try? server.newTab(kind, in: project, size: Size(cols: 80, rows: 24)),
+              let card = server.cards.first(where: { $0.id == tab }) ?? server.cards.first(where: { $0.project.id == project })
+        else { return }
+        open(card, on: server)
+    }
+
+    // MARK: Keyboard navigation
+
+    private var listedCards: [(server: ServerModel, card: TabCard)] {
+        dataSource.snapshot().itemIdentifiers.compactMap { cards[$0] }
+    }
+
+    func selectTab(number: Int) {
+        let listed = listedCards
+        guard listed.indices.contains(number - 1) else { return }
+        open(listed[number - 1].card, on: listed[number - 1].server)
+    }
+
+    func selectAdjacentTab(_ offset: Int) {
+        let listed = listedCards
+        guard !listed.isEmpty else { return }
+        let current = listed.firstIndex { $0.card.id == selected }
+        let next = current.map { ($0 + offset + listed.count) % listed.count } ?? (offset > 0 ? 0 : listed.count - 1)
+        open(listed[next].card, on: listed[next].server)
+    }
+
+    func focusFilter() {
+        guard let search = navigationItem.searchController else { return }
+        search.isActive = true
+        search.searchBar.becomeFirstResponder()
+    }
+
+    // MARK: Cards
+
+    private func configureDataSource() {
+        let cell = UICollectionView.CellRegistration<TabCardCell, TabId> { [weak self] cell, _, id in
+            guard let self, let entry = cards[id] else { return }
+            cell.configure(entry.card, icon: icon(entry.card.iconProject, on: entry.server), showsProject: !grouped)
+        }
+        let header = UICollectionView.SupplementaryRegistration<TabSectionHeader>(
+            elementKind: UICollectionView.elementKindSectionHeader) { [weak self] header, _, path in
+            guard let self, let section = dataSource.sectionIdentifier(for: path.section) else { return }
+            configure(header, for: section)
+        }
+        dataSource = UICollectionViewDiffableDataSource(collectionView: collectionView) { view, path, id in
+            view.dequeueConfiguredReusableCell(using: cell, for: path, item: id)
+        }
+        dataSource.supplementaryViewProvider = { view, _, path in
+            view.dequeueConfiguredReusableSupplementary(using: header, for: path)
+        }
+    }
+
+    /// The project's icon, decoded once per icon the server finds; starts
+    /// the search on first use.
+    private func icon(_ project: ProjectId?, on server: ServerModel) -> UIImage? {
+        guard let project, let data = server.icon(project) else { return nil }
+        if let icon = icons[project], icon.data == data { return icon.image }
+        guard let image = UIImage(data: data) else { return nil }
+        let rendered = UIGraphicsImageRenderer(size: CGSize(width: 32, height: 32)).image { _ in
+            image.draw(in: CGRect(x: 0, y: 0, width: 32, height: 32))
+        }
+        icons[project] = (data, rendered)
+        return rendered
+    }
+
+    private func apply(_ servers: [ServerModel]) {
+        var snapshot = NSDiffableDataSourceSnapshot<Section, TabId>()
+        var next: [TabId: (ServerModel, TabCard)] = [:]
+        var projects: [ProjectId: ProjectDescriptor] = [:]
+        var collapsed: [ProjectId: Int] = [:]
+        let grouping = preferences.groupsByProject
+        let query = filter.lowercased()
+        // A search shows what it found in every project.
+        let collapsedProjects = query.isEmpty ? preferences.collapsedProjects : []
+        for server in servers {
+            let cards = server.cards.filter { card in
+                guard shown.admits(card) else { return false }
+                guard !query.isEmpty else { return true }
+                let fields = [card.title, card.location, card.branch, card.projectName, server.server.name] + card.rows.map(\.title)
+                return fields.compactMap { $0 }.contains { $0.lowercased().contains(query) }
+            }
+            // Icons that arrived since: touching them registers the dependency.
+            _ = server.projectIcons.count
+            guard !cards.isEmpty || servers.count > 1 else { continue }
+            for card in cards { next[card.id] = (server, card) }
+            let groups = grouping ? server.groups(cards) : [TabGroup(project: nil, cards: cards)]
+            // With several Macs, each keeps its Home section for its heading.
+            if servers.count > 1, groups.first.map({ $0.project != nil }) ?? true {
+                snapshot.appendSections([Section(server: server.id)])
+            }
+            for group in groups {
+                let section = Section(server: server.id, project: group.project?.id)
+                snapshot.appendSections([section])
+                if let project = group.project {
+                    projects[project.id] = project
+                    if collapsedProjects.contains(project.id) {
+                        collapsed[project.id] = group.cards.count
+                        continue
+                    }
+                }
+                snapshot.appendItems(group.cards.map(\.id), toSection: section)
+            }
+        }
+        let listed = Set(snapshot.itemIdentifiers)
+        let changed = listed.filter { id in cards[id].map { $0.card != next[id]?.1 } ?? false }
+        let iconsArrived = servers.contains { server in server.projectIcons.contains { icons[$0.key]?.data != $0.value } }
+        let regrouped = grouping != grouped
+        cards = next.mapValues { (server: $0.0, card: $0.1) }
+        groupedProjects = projects
+        collapsedCounts = collapsed
+        grouped = grouping
+        snapshot.reconfigureItems(Array(iconsArrived || regrouped ? listed : changed))
+        dataSource.apply(snapshot, animatingDifferences: view.window != nil)
+        // Cards lose or regain their project row, and the headers change.
+        if regrouped { collectionView.collectionViewLayout.invalidateLayout() }
+        if let selected, let path = dataSource.indexPath(for: selected), splitViewController?.isCollapsed == false {
+            collectionView.selectItem(at: path, animated: false, scrollPosition: [])
+        }
+        showStatus(servers, empty: next.isEmpty)
+        restoreLastTab(servers)
+    }
+
+    private func restoreLastTab(_ servers: [ServerModel]) {
+        guard let last = restoring, selected == nil, let server = servers.first(where: { $0.id.uuid == last.server }),
+              server.board != nil else { return }
+        if let entry = cards[TabId(uuid: last.tab)] {
+            restoring = nil
+            DispatchQueue.main.async { [weak self] in self?.open(entry.card, on: entry.server) }
+        } else if !server.cards.isEmpty {
+            // The Mac reports its tabs and that one is gone.
+            restoring = nil
+        }
+    }
+
+    private func showStatus(_ servers: [ServerModel], empty: Bool) {
+        var configuration: UIContentUnavailableConfiguration?
+        let connected = servers.contains { $0.board != nil }
+        let server = servers.first
+        switch server?.status {
+        case .connecting? where !connected:
+            configuration = .loading()
+            configuration?.text = "Connecting to \(server?.server.name ?? "your Mac")…"
+        case .offline(let reason)? where !connected:
+            var value = UIContentUnavailableConfiguration.empty()
+            value.image = UIImage(systemName: "wifi.exclamationmark")
+            value.text = "Can't Reach \(server?.server.name ?? "Your Mac")"
+            value.secondaryText = reason
+            var button = UIButton.Configuration.glass()
+            button.title = "Try Again"
+            value.button = button
+            value.buttonProperties.primaryAction = UIAction { _ in servers.forEach { $0.retryNow() } }
+            configuration = value
+        case .needsPairing(let reason)? where servers.count == 1:
+            var value = UIContentUnavailableConfiguration.empty()
+            value.image = UIImage(systemName: "lock.slash")
+            value.text = "Pair Again"
+            value.secondaryText = reason
+            var button = UIButton.Configuration.prominentGlass()
+            button.title = "Scan Pairing Code"
+            value.button = button
+            value.buttonProperties.primaryAction = UIAction { [weak self] _ in self?.onPair?() }
+            configuration = value
+        default:
+            if empty && filter.isEmpty && shown != .all {
+                var value = UIContentUnavailableConfiguration.empty()
+                value.image = UIImage(systemName: shown.image)
+                value.text = shown.emptyTitle
+                var button = UIButton.Configuration.glass()
+                button.title = "Show All Tabs"
+                value.button = button
+                value.buttonProperties.primaryAction = UIAction { [weak self] _ in
+                    self?.shown = .all
+                    self?.setNeedsUpdateProperties()
+                }
+                configuration = value
+            } else if empty && filter.isEmpty {
+                var value = UIContentUnavailableConfiguration.empty()
+                value.image = UIImage(systemName: "rectangle.stack.badge.plus")
+                value.text = "No Open Tabs"
+                value.secondaryText = "Start a terminal or an agent with +, or open a project."
+                configuration = value
+            } else if empty {
+                configuration = .search()
+            }
+        }
+        statusView.configuration = configuration ?? .empty()
+        statusView.isHidden = configuration == nil
+    }
+
+    // MARK: Opening and closing
+
+    override func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        guard let id = dataSource.itemIdentifier(for: indexPath), let entry = cards[id] else { return }
+        open(entry.card, on: entry.server)
+    }
+
+    /// Forgets the shown tab, which closed.
+    func clearSelection() {
+        selected = nil
+        for path in collectionView.indexPathsForSelectedItems ?? [] {
+            collectionView.deselectItem(at: path, animated: true)
+        }
+    }
+
+    func open(_ card: TabCard, on server: ServerModel) {
+        selected = card.id
+        restoring = nil
+        LastTab(server: server.id.uuid, tab: card.id.uuid).save()
+        server.markRead(sessions: Set(card.tab.panes.compactMap(\.content.activitySession)))
+        if let path = dataSource.indexPath(for: card.id), splitViewController?.isCollapsed == false {
+            collectionView.selectItem(at: path, animated: false, scrollPosition: [])
+            collectionView.collectionViewLayout.invalidateLayout()
+        }
+        onOpen?(server, card)
+    }
+
+    private func swipeActions(_ path: IndexPath) -> UISwipeActionsConfiguration? {
+        guard let id = dataSource.itemIdentifier(for: path), let entry = cards[id] else { return nil }
+        let close = UIContextualAction(style: .destructive, title: "Close Tab") { [weak self] _, _, done in
+            guard let self else { return done(false) }
+            WorktreeClosingAlert.closeTab(id, on: entry.server, from: self)
+            done(true)
+        }
+        close.image = UIImage(systemName: "checkmark")
+        close.backgroundColor = .tintColor
+        return UISwipeActionsConfiguration(actions: [close])
+    }
+
+    override func collectionView(_ collectionView: UICollectionView, contextMenuConfigurationForItemsAt indexPaths: [IndexPath],
+                                 point: CGPoint) -> UIContextMenuConfiguration? {
+        guard let path = indexPaths.first, let id = dataSource.itemIdentifier(for: path), let entry = cards[id] else {
+            return nil
+        }
+        let server = entry.server
+        let card = entry.card
+        return UIContextMenuConfiguration(actionProvider: { [weak self] _ in
+            let anchor = card.tab.panes.last?.id
+            let size = Size(cols: 80, rows: 24)
+            let newPane = UIMenu(title: "New Pane", image: UIImage(systemName: "plus.square.on.square"), children: [
+                UIAction(title: "Terminal", image: UIImage(systemName: "apple.terminal")) { _ in
+                    _ = try? server.newPane(.terminal, project: card.project.id, beside: anchor, size: size)
+                },
+                UIAction(title: "Agent", image: UIImage(systemName: "sparkles")) { _ in
+                    _ = try? server.newPane(.agent(.claude), project: card.project.id, beside: anchor, size: size)
+                },
+            ])
+            var children: [UIMenuElement] = [newPane]
+            if !card.project.home {
+                children.append(UIAction(title: "Copy Path", image: UIImage(systemName: "doc.on.doc")) { _ in
+                    UIPasteboard.general.string = card.project.directory.rawValue
+                })
+            }
+            children.append(UIMenu(options: .displayInline, children: [
+                UIAction(title: "Close Tab", image: UIImage(systemName: "xmark"), attributes: .destructive) { [weak self] _ in
+                    guard let self else { return }
+                    WorktreeClosingAlert.closeTab(id, on: server, from: self)
+                },
+            ]))
+            return UIMenu(children: children)
+        })
+    }
+}
+
+extension TabListViewController: UISearchResultsUpdating {
+    func updateSearchResults(for searchController: UISearchController) {
+        filter = searchController.searchBar.text ?? ""
+        setNeedsUpdateProperties()
+    }
+}

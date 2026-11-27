@@ -1,0 +1,493 @@
+import TabMobileKit
+import TabProtocol
+import UIKit
+
+/// One tab's panes. With room (iPad), the tab's split layout as on the Mac,
+/// panes as rounded cards; on a phone, one pane at a time, switched with a
+/// segmented control under the navigation bar.
+final class TabViewController: UIViewController {
+    let server: ServerModel
+    let tabId: TabId
+    private var panes: [PaneId: UIViewController] = [:]
+    private var focused: PaneId?
+    private var shownLayout: [(PaneId, UnitRect)] = []
+    private let paneGap: CGFloat = 8
+    private let emptyView = UIContentUnavailableView(configuration: .empty())
+    private let paneSwitcher = UISegmentedControl()
+    /// Glass under the switcher, so content scrolling beneath stays out of its way.
+    private let switcherGlass = UIVisualEffectView(effect: UIGlassEffect())
+    /// Extends the focused pane's top edge effect under the switcher, so it
+    /// reads as part of the navigation bar.
+    private let switcherEdge = UIScrollEdgeElementContainerInteraction()
+    /// The panes the switcher shows, in order, with their labels.
+    private var switcherPanes: [(id: PaneId, label: String)] = []
+    /// Called once when the tab closes, here, on the Mac or on another
+    /// device, so whoever shows it can leave it.
+    var onClosed: (() -> Void)?
+
+    init(server: ServerModel, tab: TabId, focus: PaneId? = nil) {
+        self.server = server
+        tabId = tab
+        focused = focus
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .systemGroupedBackground
+        navigationItem.largeTitleDisplayMode = .never
+        navigationItem.style = .editor
+        emptyView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(emptyView)
+        NSLayoutConstraint.activate([
+            emptyView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            emptyView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            emptyView.topAnchor.constraint(equalTo: view.topAnchor),
+            emptyView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
+        switcherGlass.isHidden = true
+        switcherGlass.cornerConfiguration = .capsule()
+        switcherGlass.translatesAutoresizingMaskIntoConstraints = false
+        paneSwitcher.translatesAutoresizingMaskIntoConstraints = false
+        paneSwitcher.addAction(UIAction { [weak self] _ in self?.switcherChanged() }, for: .valueChanged)
+        switcherGlass.contentView.addSubview(paneSwitcher)
+        switcherEdge.edge = .top
+        switcherGlass.addInteraction(switcherEdge)
+        view.addSubview(switcherGlass)
+        NSLayoutConstraint.activate([
+            // Above the panes' own safe area, so their content scrolls under it.
+            switcherGlass.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor,
+                                               constant: -Self.switcherSpace + 4),
+            // Full width, its panes sharing it equally.
+            switcherGlass.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 16),
+            switcherGlass.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16),
+            paneSwitcher.topAnchor.constraint(equalTo: switcherGlass.contentView.topAnchor, constant: 4),
+            paneSwitcher.bottomAnchor.constraint(equalTo: switcherGlass.contentView.bottomAnchor, constant: -4),
+            paneSwitcher.leadingAnchor.constraint(equalTo: switcherGlass.contentView.leadingAnchor, constant: 4),
+            paneSwitcher.trailingAnchor.constraint(equalTo: switcherGlass.contentView.trailingAnchor, constant: -4),
+            paneSwitcher.heightAnchor.constraint(equalToConstant: 34),
+        ])
+        registerForTraitChanges([UITraitHorizontalSizeClass.self]) { (self: Self, _) in
+            self.setNeedsUpdateProperties()
+        }
+    }
+
+    private var isCompact: Bool { traitCollection.horizontalSizeClass == .compact }
+
+    override func updateProperties() {
+        super.updateProperties()
+        guard let (project, tab) = server.tab(tabId) else {
+            showClosed()
+            let closed = onClosed
+            onClosed = nil
+            // Out of the update pass, which mustn't change the navigation stack.
+            if let closed { DispatchQueue.main.async(execute: closed) }
+            return
+        }
+        emptyView.isHidden = true
+        let layout = tab.layout.rects
+        if focused == nil || !tab.panes.contains(where: { $0.id == focused }) {
+            focused = tab.panes.first { $0.content.isTerminal || $0.content.agentSession != nil }?.id ?? tab.panes.first?.id
+        }
+        syncChildren(tab, project: project)
+        let visible: [(PaneId, UnitRect)] = isCompact
+            ? focused.map { [($0, UnitRect(x: 0, y: 0, width: 1, height: 1))] } ?? []
+            : layout
+        shownLayout = visible
+        for (id, controller) in panes {
+            let shown = visible.contains { $0.0 == id }
+            if shown, controller.view.superview == nil {
+                view.insertSubview(controller.view, belowSubview: switcherGlass)
+            } else if !shown, controller.view.superview != nil {
+                controller.view.removeFromSuperview()
+            }
+        }
+        view.setNeedsLayout()
+        updateNavigation(tab, project: project)
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        let compact = isCompact
+        let area = compact ? view.bounds : view.bounds.inset(by: view.safeAreaInsets).insetBy(dx: paneGap, dy: paneGap)
+        for (id, unit) in shownLayout {
+            guard let controller = panes[id] else { continue }
+            var frame = CGRect(x: area.minX + unit.x * area.width, y: area.minY + unit.y * area.height,
+                               width: unit.width * area.width, height: unit.height * area.height)
+            if !compact { frame = frame.insetBy(dx: paneGap / 2, dy: paneGap / 2) }
+            controller.view.frame = frame.integral
+            let card = !compact && shownLayout.count > 1
+            controller.view.layer.cornerRadius = card ? 16 : 0
+            controller.view.layer.cornerCurve = .continuous
+            controller.view.layer.masksToBounds = card
+            controller.view.layer.borderWidth = card && id == focused ? 2 : 0
+            controller.view.layer.borderColor = UIColor.tintColor.withAlphaComponent(0.6).cgColor
+        }
+        let edgeScrollView = switcherGlass.isHidden ? nil : focused.flatMap { panes[$0] }.flatMap(Self.topScrollView)
+        if switcherEdge.scrollView !== edgeScrollView { switcherEdge.scrollView = edgeScrollView }
+    }
+
+    /// The scroll view a pane shows its content in, such as an agent's
+    /// transcript: the largest one that isn't a text field.
+    private static func topScrollView(of pane: UIViewController) -> UIScrollView? {
+        if let declared = pane.contentScrollView(for: .top) { return declared }
+        var found: UIScrollView?
+        var queue: [UIView] = [pane.view]
+        while !queue.isEmpty {
+            let next = queue.removeFirst()
+            if let scrollView = next as? UIScrollView, !(scrollView is UITextView),
+               scrollView.bounds.height * scrollView.bounds.width > (found.map { $0.bounds.height * $0.bounds.width } ?? 0) {
+                found = scrollView
+            }
+            queue += next.subviews.filter { !$0.isHidden }
+        }
+        return found
+    }
+
+    // MARK: Panes
+
+    private func syncChildren(_ tab: Tab, project: ProjectId) {
+        let ids = Set(tab.panes.map(\.id))
+        for (id, controller) in panes where !ids.contains(id) {
+            controller.willMove(toParent: nil)
+            controller.view.removeFromSuperview()
+            controller.removeFromParent()
+            panes[id] = nil
+        }
+        for pane in tab.panes {
+            if let existing = panes[pane.id], matches(existing, pane) { continue }
+            if let stale = panes[pane.id] {
+                stale.willMove(toParent: nil)
+                stale.view.removeFromSuperview()
+                stale.removeFromParent()
+            }
+            let controller = makeController(pane, project: project)
+            addChild(controller)
+            controller.didMove(toParent: self)
+            let tap = UITapGestureRecognizer(target: self, action: #selector(paneTapped))
+            tap.cancelsTouchesInView = false
+            controller.view.addGestureRecognizer(tap)
+            controller.view.accessibilityIdentifier = pane.id.description
+            panes[pane.id] = controller
+        }
+        server.pruneControllers()
+    }
+
+    private func matches(_ controller: UIViewController, _ pane: Pane) -> Bool {
+        switch pane.content {
+        case .terminal(let session?): (controller as? TerminalPaneViewController)?.controller.session == session
+        case .terminal(nil): controller is StartingPaneViewController
+        case .agent(let session, _): (controller as? AgentPaneViewController)?.controller.session == session
+        case .simulator: (controller as? SimulatorPaneViewController)?.controller.pane == pane.id
+        default: controller is UnsupportedPaneViewController
+        }
+    }
+
+    private func makeController(_ pane: Pane, project: ProjectId) -> UIViewController {
+        switch pane.content {
+        case .terminal(let session?):
+            return TerminalPaneViewController(controller: server.terminal(session), server: server)
+        case .terminal(nil):
+            return StartingPaneViewController()
+        case .agent(let session, let provider):
+            return AgentPaneViewController(controller: server.agent(session, project: project, provider: provider))
+        case .simulator(let choice):
+            return SimulatorPaneViewController(controller: server.simulator(pane.id, choice: choice), server: server)
+        default:
+            return UnsupportedPaneViewController(title: pane.content.defaultTitle)
+        }
+    }
+
+    @objc private func paneTapped(_ gesture: UITapGestureRecognizer) {
+        guard let id = panes.first(where: { $0.value.view === gesture.view })?.key, id != focused else { return }
+        focused = id
+        view.setNeedsLayout()
+        setNeedsUpdateProperties()
+    }
+
+    private func focus(_ pane: PaneId) {
+        focused = pane
+        setNeedsUpdateProperties()
+        updatePropertiesIfNeeded()
+        (panes[pane] as? TerminalPaneViewController)?.focus()
+    }
+
+    // MARK: Navigation bar
+
+    private func updateNavigation(_ tab: Tab, project: ProjectId) {
+        let summaries = tab.panes.map { server.summary(of: $0) }
+        let current = summaries.first { $0.id == focused }
+        let projectName = server.project(project).map { $0.home ? nil : $0.name } ?? nil
+        title = tab.customTitle ?? current?.title ?? projectName ?? "Tab"
+        navigationItem.subtitle = summaries.count > 1 ? "\(summaries.count) panes" : projectName
+
+        updateSwitcher(isCompact && summaries.count > 1 ? summaries : [])
+
+        var kinds: [UIMenuElement] = [
+            UIAction(title: "Terminal", image: UIImage(systemName: "apple.terminal")) { [weak self] _ in
+                self?.addPane(.terminal, project: project)
+            },
+            UIAction(title: "Agent", image: UIImage(systemName: "sparkles")) { [weak self] _ in
+                self?.addPane(.agent(.claude), project: project)
+            },
+        ]
+        if server.sharesSimulators {
+            kinds.append(UIAction(title: "Simulator", image: UIImage(systemName: "iphone")) { [weak self] _ in
+                self?.addPane(.simulator, project: project)
+            })
+        }
+        let add = UIBarButtonItem(image: UIImage(systemName: "plus"), menu: UIMenu(title: "New Pane", children: kinds))
+        add.accessibilityLabel = "New Pane"
+        var more: [UIMenuElement] = []
+        if let focused, let agent = panes[focused] as? AgentPaneViewController {
+            // Built as it opens, so the conversation's updates leave the bar alone.
+            more.append(UIDeferredMenuElement.uncached { [weak self, weak agent] completion in
+                guard let agent else { return completion([]) }
+                completion([agent.paneMenu { [weak self] other in self?.openConversation(other, beside: focused) }])
+            })
+        }
+        if let focused, let position = positionMenu(focused, in: tab) { more.append(position) }
+        if let focused, tab.panes.count > 1 {
+            more.append(UIAction(title: "Close Pane", image: UIImage(systemName: "xmark.square")) { [weak self] _ in
+                self?.closePane(focused)
+            })
+        }
+        more.append(UIAction(title: "Close Tab", image: UIImage(systemName: "xmark"), attributes: .destructive) { [weak self] _ in
+            self?.confirmCloseTab()
+        })
+        let menu = UIBarButtonItem(image: UIImage(systemName: "ellipsis"), menu: UIMenu(children: more))
+        menu.accessibilityLabel = "More"
+        navigationItem.rightBarButtonItems = [menu, add]
+    }
+
+    /// Places the focused pane at an edge of the tab, as the desktop's
+    /// command palette does: offered by servers that can, with other panes.
+    private func positionMenu(_ pane: PaneId, in tab: Tab) -> UIMenu? {
+        let positions = server.panePositions(in: tab)
+        guard !positions.isEmpty else { return nil }
+        let edges = Dictionary(grouping: positions, by: \.edge)
+        let sections = [Direction.left, .right, .up, .down].compactMap { edge -> UIMenu? in
+            guard let choices = edges[edge] else { return nil }
+            let actions = choices.map { position in
+                UIAction(title: position.title, image: UIImage(systemName: Self.symbol(edge))) { [weak self] _ in
+                    guard let self else { return }
+                    try? server.positionPane(pane, at: position)
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                }
+            }
+            return UIMenu(title: PanePosition.name(edge), options: .displayInline, children: actions)
+        }
+        return UIMenu(title: "Position", image: UIImage(systemName: "rectangle.split.3x1"), children: sections)
+    }
+
+    private static func symbol(_ edge: Direction) -> String {
+        switch edge {
+        case .left: "rectangle.lefthalf.filled"
+        case .right: "rectangle.righthalf.filled"
+        case .up: "rectangle.tophalf.filled"
+        case .down: "rectangle.bottomhalf.filled"
+        }
+    }
+
+    // MARK: Pane switcher
+
+    /// Room the switcher takes above the panes' content.
+    private static let switcherSpace: CGFloat = 48
+
+    /// One segment per pane on a phone, rebuilt only when the panes or their
+    /// names change.
+    private func updateSwitcher(_ summaries: [PaneSummary]) {
+        let labels = PaneSummary.shortLabels(summaries)
+        let next = zip(summaries, labels).map { (id: $0.id, label: $1) }
+        if next.map(\.id) != switcherPanes.map(\.id) || next.map(\.label) != switcherPanes.map(\.label) {
+            switcherPanes = next
+            paneSwitcher.removeAllSegments()
+            for (index, label) in labels.enumerated() {
+                paneSwitcher.insertSegment(withTitle: label, at: index, animated: false)
+            }
+        }
+        paneSwitcher.selectedSegmentIndex = switcherPanes.firstIndex { $0.id == focused } ?? UISegmentedControl.noSegment
+        let shown = !switcherPanes.isEmpty
+        guard shown == switcherGlass.isHidden else { return }
+        switcherGlass.isHidden = !shown
+        // The panes' content starts under the switcher and scrolls beneath it.
+        additionalSafeAreaInsets.top = shown ? Self.switcherSpace : 0
+    }
+
+    private func switcherChanged() {
+        let index = paneSwitcher.selectedSegmentIndex
+        guard switcherPanes.indices.contains(index) else { return }
+        UISelectionFeedbackGenerator().selectionChanged()
+        focus(switcherPanes[index].id)
+    }
+
+    static func symbol(_ kind: PaneSummary.Kind) -> String {
+        switch kind {
+        case .terminal: "apple.terminal"
+        case .agent: "sparkles"
+        case .simulator: "iphone"
+        case .other: "macwindow"
+        }
+    }
+
+    private func addPane(_ kind: MobilePaneKind, project: ProjectId) {
+        let size = Size(cols: 80, rows: 24)
+        guard let id = try? server.newPane(kind, project: project, beside: focused, size: size) else { return }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        focus(id)
+    }
+
+    /// Shows a conversation continued from the agent's saved history beside `anchor`.
+    private func openConversation(_ snapshot: AgentChatSnapshot, beside anchor: PaneId) {
+        guard let id = try? server.openAgent(snapshot.session, provider: snapshot.provider, beside: anchor) else { return }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        focus(id)
+    }
+
+    /// Closes a pane; a working agent and the last pane of a worktree ask first.
+    private func closePane(_ pane: PaneId) {
+        WorktreeClosingAlert.closePane(pane, on: server, from: self)
+    }
+
+    private func confirmCloseTab() {
+        // A worktree's last tab asks about the worktree instead.
+        if server.worktreeClosed(byClosing: tabId) != nil {
+            WorktreeClosingAlert.closeTab(tabId, on: server, from: self)
+            return
+        }
+        let alert = UIAlertController(title: "Close this tab?", message: "Its terminals end and its agents stop, on every device.",
+                                      preferredStyle: .actionSheet)
+        alert.addAction(UIAlertAction(title: "Close Tab", style: .destructive) { [weak self] _ in
+            guard let self else { return }
+            WorktreeClosingAlert.closeTab(tabId, on: server, from: self, agentsConfirmed: true)
+        })
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.popoverPresentationController?.sourceItem = navigationItem.rightBarButtonItems?.first
+        present(alert, animated: true)
+    }
+
+    // MARK: Hardware keyboard
+
+    /// The desktop's pane shortcuts. In Home, new terminals and agents are
+    /// tabs, which the root handles when these leave ⌘T and ⌘⌥A alone.
+    override var keyCommands: [UIKeyCommand]? {
+        guard let (project, tab) = server.tab(tabId) else { return nil }
+        var commands = [
+            UIKeyCommand(title: tab.panes.count > 1 ? "Close Pane" : "Close Tab", action: #selector(closeCommand),
+                         input: "w", modifierFlags: .command),
+            UIKeyCommand(title: "Close Tab", action: #selector(closeTabCommand), input: "w", modifierFlags: [.command, .shift]),
+        ]
+        if server.project(project)?.home == false {
+            commands += [
+                UIKeyCommand(title: "New Terminal Pane", action: #selector(newTerminalPane), input: "t", modifierFlags: .command),
+                UIKeyCommand(title: "New Agent Pane", action: #selector(newAgentPane), input: "a",
+                             modifierFlags: [.command, .alternate]),
+            ]
+        }
+        if tab.panes.count > 1 {
+            commands += [
+                UIKeyCommand(title: "Next Pane", action: #selector(nextPane), input: "]", modifierFlags: [.command, .shift]),
+                UIKeyCommand(title: "Previous Pane", action: #selector(previousPane), input: "[", modifierFlags: [.command, .shift]),
+            ]
+        }
+        return commands
+    }
+
+    @objc private func closeCommand() {
+        guard let focused, let tab = server.tab(tabId)?.tab, tab.panes.count > 1 else {
+            confirmCloseTab()
+            return
+        }
+        closePane(focused)
+    }
+
+    @objc private func closeTabCommand() { confirmCloseTab() }
+
+    @objc private func newTerminalPane() {
+        guard let project = server.tab(tabId)?.project else { return }
+        addPane(.terminal, project: project)
+    }
+
+    @objc private func newAgentPane() {
+        guard let project = server.tab(tabId)?.project else { return }
+        addPane(.agent(.claude), project: project)
+    }
+
+    @objc private func nextPane() { focusAdjacentPane(1) }
+    @objc private func previousPane() { focusAdjacentPane(-1) }
+
+    private func focusAdjacentPane(_ offset: Int) {
+        guard let tab = server.tab(tabId)?.tab, !tab.panes.isEmpty else { return }
+        let ids = tab.panes.map(\.id)
+        let current = ids.firstIndex { $0 == focused } ?? 0
+        focus(ids[(current + offset + ids.count) % ids.count])
+    }
+
+    private func showClosed() {
+        for controller in panes.values {
+            controller.willMove(toParent: nil)
+            controller.view.removeFromSuperview()
+            controller.removeFromParent()
+        }
+        panes = [:]
+        shownLayout = []
+        updateSwitcher([])
+        title = nil
+        navigationItem.subtitle = nil
+        navigationItem.rightBarButtonItems = nil
+        var configuration = UIContentUnavailableConfiguration.empty()
+        configuration.image = UIImage(systemName: "rectangle.on.rectangle.slash")
+        configuration.text = "Tab Closed"
+        configuration.secondaryText = "This tab was closed. Choose another from the list."
+        emptyView.configuration = configuration
+        emptyView.isHidden = false
+        view.bringSubviewToFront(emptyView)
+    }
+}
+
+/// A terminal pane whose session the server is still starting.
+final class StartingPaneViewController: UIViewController {
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .systemBackground
+        let loading = UIContentUnavailableView(configuration: .loading())
+        loading.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(loading)
+        NSLayoutConstraint.activate([
+            loading.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            loading.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+        ])
+    }
+}
+
+/// Browser, editor and diff panes live on the Mac.
+final class UnsupportedPaneViewController: UIViewController {
+    private let paneTitle: String
+
+    init(title: String) {
+        paneTitle = title
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .secondarySystemBackground
+        var configuration = UIContentUnavailableConfiguration.empty()
+        configuration.image = UIImage(systemName: "macwindow")
+        configuration.text = paneTitle
+        configuration.secondaryText = "This pane opens on your Mac."
+        let content = UIContentUnavailableView(configuration: configuration)
+        content.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(content)
+        NSLayoutConstraint.activate([
+            content.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            content.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            content.topAnchor.constraint(equalTo: view.topAnchor),
+            content.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
+    }
+}

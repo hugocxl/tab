@@ -1,0 +1,483 @@
+import TabMobileKit
+import TabProtocol
+import UIKit
+
+/// The desktop sidebar card's metrics and fonts, scaled up by about a third
+/// for the phone: 13pt titles read 17, 12pt rows 15, and 20pt rows 26.
+enum CardStyle {
+    /// Every leading icon's box: the panes' kinds, the location's and the
+    /// project's icons, and the statuses at the trailing edge.
+    static let iconSide: CGFloat = 18
+    /// The title's icon box, as tall as the title's text.
+    static let titleIconSide: CGFloat = 23
+    /// Where text after a leading icon starts.
+    static let textInset: CGFloat = iconSide + 10
+    /// Between the title, the panes and the location.
+    static let sectionGap: CGFloat = 6
+    /// Above and below the card's rows.
+    static let padding: CGFloat = 11
+    /// From the card's edge to its icons and text.
+    static let inset: CGFloat = 13
+    /// A row's text sits this far inside the row, which makes a 15pt row 26
+    /// points tall.
+    static let rowPadding: CGFloat = 4
+    /// The title's, which makes its first line 26 points tall.
+    static let titlePadding: CGFloat = 2
+
+    /// The card's title: 13pt medium on the desktop.
+    static var title: UIFont { font(.body, size: 17, weight: .medium) }
+    /// Pane, location and project rows: 12pt on the desktop.
+    static var row: UIFont { font(.subheadline, size: 15) }
+    /// A pane's running time: 11pt monospaced digits on the desktop.
+    static var elapsed: UIFont {
+        UIFontMetrics(forTextStyle: .footnote).scaledFont(for: .monospacedDigitSystemFont(ofSize: 14, weight: .regular))
+    }
+
+    static func font(_ style: UIFont.TextStyle, size: CGFloat, weight: UIFont.Weight = .regular) -> UIFont {
+        UIFontMetrics(forTextStyle: style).scaledFont(for: .systemFont(ofSize: size, weight: weight))
+    }
+}
+
+/// A pane's status as the desktop draws it: a native spinner while working,
+/// muted while a command runs and dim while only background shells run, and
+/// Tab Icons for waiting, done, failed, paused and, with `showsIdle`, idle.
+final class PaneStatusView: UIImageView {
+    var status: CardPane.Status = .idle {
+        didSet { if status != oldValue { apply() } }
+    }
+    /// Draws an empty circle while idle.
+    var showsIdle = false {
+        didSet { if showsIdle != oldValue { apply() } }
+    }
+    /// Draws the spinner in muted gray rather than the accent.
+    var grayWorking = false {
+        didSet { if grayWorking != oldValue { apply() } }
+    }
+    var side = CardStyle.iconSide {
+        didSet { if side != oldValue { apply() } }
+    }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isAccessibilityElement = false
+        apply()
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        apply()
+    }
+
+    private func apply() {
+        removeAllSymbolEffects()
+        let (icon, color): (TabIcon?, UIColor) = switch status {
+        case .working, .progress: (nil, grayWorking ? .secondaryLabel : .tintColor)
+        case .background: (nil, .tertiaryLabel)
+        case .running: (nil, .secondaryLabel)
+        case .blocked: (.exclamationCircleFill, .tintColor)
+        case .done: (.circleCheckFill, .systemGreen)
+        case .error: (.circleXFill, .systemRed)
+        case .paused: (.pauseCircleFill, .systemOrange)
+        case .idle: (showsIdle ? .circle : nil, .tertiaryLabel)
+        }
+        tintColor = color
+        if let icon {
+            contentMode = .scaleAspectFit
+            preferredSymbolConfiguration = nil
+            image = icon.template
+            return
+        }
+        guard status != .idle else {
+            image = nil
+            return
+        }
+        // The system's spinner, as the desktop draws its own while working.
+        contentMode = .center
+        preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: side * 0.8, weight: .semibold)
+        image = UIImage(systemName: "progress.indicator")
+        guard window != nil, !UIAccessibility.isReduceMotionEnabled else { return }
+        addSymbolEffect(.variableColor.iterative.dimInactiveLayers, options: .repeating)
+    }
+}
+
+/// One pane in a card's list, as the desktop's `PaneRowView`: its icon, its
+/// title and folder, then how long it has worked and its status at the
+/// trailing edge. As a card's title its text and icon are larger, and the
+/// title wraps to two lines.
+final class PaneRowView: UIView {
+    private(set) var row: CardPane?
+    private let icon = UIImageView()
+    let titleLabel = UILabel()
+    private let detailLabel = UILabel()
+    private let elapsedLabel = UILabel()
+    private let status = PaneStatusView(frame: .zero)
+    private let trail = UIStackView()
+    private var titleLeading: NSLayoutConstraint?
+    private var lineCenter: NSLayoutConstraint?
+    private var titleTop: NSLayoutConstraint?
+    private var titleBottom: NSLayoutConstraint?
+    private var sizeConstraints: [NSLayoutConstraint] = []
+
+    /// The running time of the pane's turn, which the card keeps current.
+    var elapsed = "" {
+        didSet {
+            elapsedLabel.text = elapsed
+            if elapsedLabel.isHidden != elapsed.isEmpty { elapsedLabel.isHidden = elapsed.isEmpty }
+        }
+    }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        icon.contentMode = .scaleAspectFit
+        icon.layer.cornerCurve = .continuous
+        detailLabel.textColor = .tertiaryLabel
+        elapsedLabel.font = CardStyle.elapsed
+        elapsedLabel.textColor = .tertiaryLabel
+        elapsedLabel.isHidden = true
+        for label in [titleLabel, detailLabel, elapsedLabel] {
+            label.adjustsFontForContentSizeCategory = true
+        }
+        // The folder follows the title, which gives up space first while the
+        // folder keeps at least its share.
+        titleLabel.setContentCompressionResistancePriority(.defaultLow + 1, for: .horizontal)
+        titleLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+        detailLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        detailLabel.setContentHuggingPriority(.defaultLow + 3, for: .horizontal)
+        trail.axis = .horizontal
+        trail.alignment = .center
+        trail.spacing = 6
+        trail.addArrangedSubview(elapsedLabel)
+        trail.addArrangedSubview(status)
+        trail.setContentCompressionResistancePriority(.required, for: .horizontal)
+        trail.setContentHuggingPriority(.required, for: .horizontal)
+        for view in [icon, titleLabel, detailLabel, trail] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(view)
+        }
+        let detailShare = detailLabel.widthAnchor.constraint(greaterThanOrEqualTo: widthAnchor, multiplier: 0.4)
+        detailShare.priority = .defaultLow + 2
+        NSLayoutConstraint.activate([
+            // Centered on the list's icon column, so a larger title icon
+            // reaches into the card's padding and the text still lines up.
+            icon.centerXAnchor.constraint(equalTo: leadingAnchor, constant: CardStyle.iconSide / 2),
+            icon.centerYAnchor.constraint(equalTo: trail.centerYAnchor),
+            detailLabel.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: 5),
+            detailLabel.firstBaselineAnchor.constraint(equalTo: titleLabel.firstBaselineAnchor),
+            detailLabel.trailingAnchor.constraint(lessThanOrEqualTo: trail.leadingAnchor, constant: -6),
+            detailShare,
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: trail.leadingAnchor, constant: -6),
+            trail.trailingAnchor.constraint(equalTo: trailingAnchor),
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    /// Shows `row`; `title` replaces its text when the row is its card's
+    /// title. `showsIcon` is false for a title whose panes already list their
+    /// icons, and `idleCircle` shows an empty status circle while idle.
+    func configure(_ row: CardPane, title: String? = nil, showsIcon: Bool = true, idleCircle: Bool = false) {
+        self.row = row
+        let isTitle = title != nil
+        let font = isTitle ? CardStyle.title : CardStyle.row
+        titleLabel.text = title ?? row.title
+        titleLabel.font = font
+        titleLabel.textColor = isTitle ? .label : .secondaryLabel
+        detailLabel.text = row.detail
+        detailLabel.font = font
+        detailLabel.isHidden = row.detail == nil
+        // A folder after the title keeps it to one line.
+        titleLabel.numberOfLines = isTitle && detailLabel.isHidden ? 2 : 1
+        elapsed = ""
+
+        let side = isTitle ? CardStyle.titleIconSide : CardStyle.iconSide
+        icon.isHidden = !showsIcon
+        icon.image = row.icon.template
+        // Each mark carries its hue: a kind's, an agent's, a command's or a file's.
+        icon.tintColor = row.hue.color
+        icon.layer.cornerRadius = side * 3 / 14
+        status.side = side
+        status.showsIdle = idleCircle
+        // The list's spinners stay gray beside its colored icons.
+        status.grayWorking = !isTitle
+        status.status = row.status
+        // A title keeps its status's room; a listed pane shows one only when busy.
+        let showsStatus = isTitle || row.status != .idle || idleCircle
+        if status.isHidden == showsStatus { status.isHidden = !showsStatus }
+
+        let padding = isTitle ? CardStyle.titlePadding : CardStyle.rowPadding
+        NSLayoutConstraint.deactivate(sizeConstraints + [titleLeading, lineCenter, titleTop, titleBottom].compactMap { $0 })
+        sizeConstraints = [
+            icon.widthAnchor.constraint(equalToConstant: side),
+            icon.heightAnchor.constraint(equalToConstant: side),
+            status.widthAnchor.constraint(equalToConstant: side),
+            status.heightAnchor.constraint(equalToConstant: side),
+        ]
+        titleLeading = titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: showsIcon ? CardStyle.textInset : 0)
+        titleTop = titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: padding)
+        titleBottom = titleLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -padding)
+        // Everything lines up with the first line when a title wraps.
+        lineCenter = trail.centerYAnchor.constraint(equalTo: titleLabel.topAnchor, constant: (font.lineHeight / 2).rounded())
+        NSLayoutConstraint.activate(sizeConstraints + [titleLeading, lineCenter, titleTop, titleBottom].compactMap { $0 })
+    }
+}
+
+/// The project row on top of a card and the location row below it: an icon
+/// in the first column, its text in the second.
+final class CardIconRow: UIView {
+    let icon = UIImageView()
+    let label = UILabel()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        icon.contentMode = .scaleAspectFit
+        icon.layer.cornerRadius = 4
+        icon.layer.cornerCurve = .continuous
+        icon.clipsToBounds = true
+        label.font = CardStyle.row
+        label.adjustsFontForContentSizeCategory = true
+        label.lineBreakMode = .byTruncatingTail
+        for view in [icon, label] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(view)
+        }
+        NSLayoutConstraint.activate([
+            icon.leadingAnchor.constraint(equalTo: leadingAnchor),
+            icon.widthAnchor.constraint(equalToConstant: CardStyle.iconSide),
+            icon.heightAnchor.constraint(equalToConstant: CardStyle.iconSide),
+            icon.centerYAnchor.constraint(equalTo: label.centerYAnchor),
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: CardStyle.textInset),
+            label.trailingAnchor.constraint(equalTo: trailingAnchor),
+            label.topAnchor.constraint(equalTo: topAnchor, constant: CardStyle.rowPadding),
+            label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -CardStyle.rowPadding),
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
+}
+
+/// A tab card, as the desktop sidebar draws one in its Open Tabs layout:
+///
+///     [icon] project
+///     [lead] What the tab is about, on up to two lines        [status]
+///     [icon] each pane ~/folder                            3m [status]
+///     [git]  name · branch · ← base ↑3 · primary
+///
+/// The title row is led by the lead pane's icon, and a card's only pane is
+/// its title row instead of a list.
+final class TabCardCell: UICollectionViewListCell {
+    private let project = CardIconRow()
+    private let titleLabel = UILabel()
+    private let titleRow = PaneRowView()
+    private let paneStack = UIStackView()
+    private let location = CardIconRow()
+    private let stack = UIStackView()
+    private var elapsedTimer: Timer?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        build()
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    private func build() {
+        titleLabel.font = CardStyle.title
+        titleLabel.adjustsFontForContentSizeCategory = true
+        titleLabel.numberOfLines = 2
+        titleLabel.textColor = .label
+        // As tall as a title row.
+        titleLabel.setContentHuggingPriority(.defaultLow, for: .vertical)
+        paneStack.axis = .vertical
+        project.label.textColor = .label
+        for view in [project, titleLabel, titleRow, paneStack, location] {
+            stack.addArrangedSubview(view)
+        }
+        stack.axis = .vertical
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(stack)
+        let inset = Self.cardInset + CardStyle.inset
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: CardStyle.padding),
+            stack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -CardStyle.padding),
+            stack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: inset),
+            stack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -inset),
+            titleLabel.heightAnchor.constraint(greaterThanOrEqualToConstant: 26),
+        ])
+    }
+
+    /// Shows `card`. The list applies its snapshots animated, but a card's
+    /// rows change at once: a stack view's row hidden and shown again inside
+    /// an animation can stay collapsed.
+    /// Under a project's header, `showsProject` is false: the header names it.
+    func configure(_ card: TabCard, icon: UIImage?, showsProject: Bool = true) {
+        UIView.performWithoutAnimation { show(card, icon: icon, showsProject: showsProject) }
+    }
+
+    private func show(_ card: TabCard, icon: UIImage?, showsProject: Bool) {
+        project.setShown(showsProject && card.projectName != nil)
+        project.label.text = card.projectName
+        project.icon.image = icon ?? TabIcon.folder.template
+        project.icon.tintColor = TabIcon.folder.color()
+
+        let lead = card.lead
+        titleLabel.text = card.title
+        titleLabel.setShown(lead == nil)
+        titleRow.setShown(lead != nil)
+        // With several panes no one pane stands for the card while they
+        // idle, and the list shows their icons.
+        if let lead {
+            titleRow.configure(lead, title: card.title, showsIcon: card.rows.count == 1, idleCircle: card.rows.count > 1)
+        }
+
+        // A lone pane is what the title row already describes.
+        let rows = card.rows.count > 1 ? card.rows : []
+        while paneStack.arrangedSubviews.count > rows.count {
+            paneStack.arrangedSubviews.last?.removeFromSuperview()
+        }
+        while paneStack.arrangedSubviews.count < rows.count {
+            paneStack.addArrangedSubview(PaneRowView())
+        }
+        for (view, row) in zip(paneStack.arrangedSubviews.compactMap { $0 as? PaneRowView }, rows) {
+            view.configure(row)
+        }
+        paneStack.setShown(!rows.isEmpty)
+
+        // Skip a name the title or the project row already shows.
+        let name = card.location.flatMap { $0 == card.projectName || $0 == card.title ? nil : $0 }
+        let parts = locationParts(card, name: name)
+        location.setShown(parts.length > 0)
+        location.label.attributedText = parts
+        // A plain branch line, else the Home tab's folder.
+        let git = card.branch != nil || card.base != nil || card.primary
+        location.icon.image = (git ? TabIcon.gitBranch : .folder).template
+        location.icon.tintColor = git ? .tertiaryLabel : TabIcon.folder.color()
+
+        // The panes follow the title after a gap, and the location the panes;
+        // without panes the location follows the title directly.
+        let gap = rows.isEmpty ? 0 : CardStyle.sectionGap
+        stack.setCustomSpacing(gap, after: titleLabel)
+        stack.setCustomSpacing(gap, after: titleRow)
+        stack.setCustomSpacing(CardStyle.sectionGap, after: paneStack)
+
+        // A Mac that isn't connected dims its cards; opening one still works.
+        contentView.alpha = card.offline ? 0.5 : 1
+
+        updateElapsed()
+        let statuses = card.rows.map { "\($0.title) \(Self.describe($0.status))" }
+        accessibilityLabel = ([showsProject ? card.projectName : nil, card.title, name, card.branch, card.primary ? "primary" : nil] + statuses
+            + [card.offline ? "not connected" : nil])
+            .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", ")
+    }
+
+    /// `name · branch · ← base ↑3 · primary`, names muted and the rest dimmer.
+    private func locationParts(_ card: TabCard, name: String?) -> NSAttributedString {
+        var parts: [(String, UIColor)] = []
+        if let name { parts.append((name, .secondaryLabel)) }
+        if let branch = card.branch { parts.append((branch, .secondaryLabel)) }
+        if let base = card.base {
+            let ahead = card.baseAhead.flatMap { $0 > 0 ? " ↑\($0)" : nil } ?? ""
+            parts.append(("← \(base)\(ahead)", .tertiaryLabel))
+        }
+        if card.primary { parts.append(("primary", .tertiaryLabel)) }
+        let text = NSMutableAttributedString()
+        for (index, part) in parts.enumerated() {
+            if index > 0 { text.append(NSAttributedString(string: " · ", attributes: [.foregroundColor: UIColor.tertiaryLabel])) }
+            text.append(NSAttributedString(string: part.0, attributes: [.foregroundColor: part.1]))
+        }
+        return text
+    }
+
+    private static func describe(_ status: CardPane.Status) -> String {
+        switch status {
+        case .idle: ""
+        case .working, .progress: "working"
+        case .blocked: "needs attention"
+        case .done: "done"
+        case .error: "failed"
+        case .paused: "paused"
+        case .background: "running in the background"
+        case .running: "running"
+        }
+    }
+
+    private var rowViews: [PaneRowView] {
+        (titleRow.isHidden ? [] : [titleRow]) + paneStack.arrangedSubviews.compactMap { $0 as? PaneRowView }
+    }
+
+    /// Shows each working pane's running time, with one timer for when the
+    /// next text changes.
+    private func updateElapsed() {
+        elapsedTimer?.invalidate()
+        elapsedTimer = nil
+        guard window != nil else { return }
+        let now = Date()
+        var next: TimeInterval?
+        for view in rowViews {
+            guard let since = view.row?.workingSince else {
+                view.elapsed = ""
+                continue
+            }
+            let seconds = now.timeIntervalSince(since)
+            view.elapsed = ServerModel.elapsedText(seconds)
+            next = min(next ?? .infinity, ServerModel.secondsUntilElapsedChanges(seconds))
+        }
+        guard let next else { return }
+        let timer = Timer(timeInterval: next + 0.01, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.updateElapsed() }
+        }
+        timer.tolerance = 0.1
+        RunLoop.main.add(timer, forMode: .common)
+        elapsedTimer = timer
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        updateElapsed()
+    }
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        elapsedTimer?.invalidate()
+        elapsedTimer = nil
+    }
+
+    /// The selected card's surface: translucent glass, as on the desktop.
+    private lazy var selectionGlass: UIVisualEffectView = {
+        let glass = UIVisualEffectView(effect: UIGlassEffect(style: .regular))
+        glass.cornerConfiguration = .uniformCorners(radius: .fixed(Self.cornerRadius))
+        return glass
+    }()
+
+    private static let cornerRadius: CGFloat = 10
+
+    /// Cards sit flush with hairlines between them; the selected one sits on
+    /// glass, as on the desktop.
+    override func updateConfiguration(using state: UICellConfigurationState) {
+        var background = UIBackgroundConfiguration.clear()
+        background.cornerRadius = Self.cornerRadius
+        background.backgroundInsets = NSDirectionalEdgeInsets(top: 0, leading: Self.cardInset, bottom: 0, trailing: Self.cardInset)
+        if state.isSelected {
+            background.customView = selectionGlass
+            background.strokeColor = .separator
+            background.strokeWidth = 1 / max(traitCollection.displayScale, 1)
+        } else if state.isHighlighted {
+            background.backgroundColor = .tertiarySystemFill
+        }
+        backgroundConfiguration = background
+    }
+
+    /// The card's fill, and the hairlines between cards, keep this far from
+    /// the list's edges.
+    static let cardInset: CGFloat = 8
+}
+
+private extension UIView {
+    /// Changes `isHidden` only when it differs: a stack view counts every
+    /// change, so setting the same value again can leave an arranged view
+    /// collapsed.
+    func setShown(_ shown: Bool) {
+        if isHidden == shown { isHidden = !shown }
+    }
+}

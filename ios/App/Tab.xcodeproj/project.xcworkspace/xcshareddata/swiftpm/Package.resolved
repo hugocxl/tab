@@ -1,0 +1,15 @@
+{
+  "originHash" : "d654c68ed77cb53eb00f778a0602f705ef72c7031ceb713e8930133969eb97a2",
+  "pins" : [
+    {
+      "identity" : "stack",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/hugocxl/stack.git",
+      "state" : {
+        "revision" : "cc6c49b844a6d2d0d4deda65173302cb2bde73ff",
+        "version" : "0.1.4"
+      }
+    }
+  ],
+  "version" : 3
+}
