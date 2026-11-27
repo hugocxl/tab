@@ -1,13 +1,13 @@
 #!/bin/sh
-# Copies the code tabios shares with Tab from a Tab checkout into Vendor/, so
+# Copies the code the iOS app shares with the Mac app from ../macos into Vendor/, so
 # the app speaks exactly the protocol of the Tab version it was synced with.
 # Never edit Vendor/ by hand: change Tab, then run this again.
 #
-#   scripts/sync-tab.sh [path to a tab checkout, default ../tab]
+#   scripts/sync-tab.sh [path to the Mac app package, default ../macos]
 set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-TAB=$(cd "${1:-$ROOT/../tab}" && pwd)
-[ -d "$TAB/Sources/TabProtocol" ] || { echo "not a Tab checkout: $TAB" >&2; exit 1; }
+TAB=$(cd "${1:-$ROOT/../macos}" && pwd)
+[ -d "$TAB/Sources/TabProtocol" ] || { echo "not the Mac app package: $TAB" >&2; exit 1; }
 
 rm -rf "$ROOT/Vendor/TabProtocol" "$ROOT/Vendor/TabShared/Tab"
 mkdir -p "$ROOT/Vendor/TabShared/Tab/Resources"
@@ -26,6 +26,6 @@ done
 cp -R "$TAB/Sources/TabCore/Resources/Themes" "$ROOT/Vendor/TabShared/Tab/Resources/Themes"
 
 REVISION=$(git -C "$TAB" rev-parse HEAD)
-VERSION=$(sed -n 's/^## \([0-9][0-9.]*\) .*/\1/p' "$TAB/CHANGELOG.md" | head -1)
+VERSION=$(sed -n 's/^## \([0-9][0-9.]*\) .*/\1/p' "$TAB/../CHANGELOG.md" | head -1)
 printf '%s %s\n' "$VERSION" "$REVISION" > "$ROOT/Vendor/TAB_REVISION"
 echo "Synced Tab $VERSION ($REVISION)"

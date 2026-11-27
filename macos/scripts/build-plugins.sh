@@ -9,7 +9,7 @@ case "$CONFIG" in debug|release) ;; *) echo "Usage: $0 [debug|release]" >&2; exi
 source "$ROOT/scripts/swift-settings.sh"
 
 BUILD_NUMBER="$(git -C "$ROOT" rev-list --count HEAD 2>/dev/null || echo 0)"
-VERSION="${RELEASE_VERSION:-$("$ROOT/scripts/changelog.sh" version)}"
+VERSION="${RELEASE_VERSION:-$("$ROOT/../scripts/changelog.sh" version)}"
 SHORT_VERSION="${VERSION%%-*}"
 
 BIN="$(cd "$ROOT" && swift build "${SWIFT_FLAGS[@]}" -c "$CONFIG" --show-bin-path)"

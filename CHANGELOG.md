@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.144.0 - 2026-11-27
+
+### Changed
+
+- Tab for iPhone and iPad is now open source and lives beside the Mac app in this repository.
+
 ## 0.143.0 - 2026-11-27
 
 ### Added

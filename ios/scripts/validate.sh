@@ -3,16 +3,9 @@
 # and the app build, with warnings as errors.
 set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-git -C "$ROOT" config core.hooksPath .githooks 2>/dev/null || true
 . "$ROOT/scripts/simulator.sh"
 DEVICE=$(iphone_simulator)
 STRICT="GCC_TREAT_WARNINGS_AS_ERRORS=YES"
-
-echo "== Version"
-CHANGELOG=$(sed -n 's/^## \([0-9][0-9.]*\) .*/\1/p' "$ROOT/CHANGELOG.md" | head -1)
-for VERSION in $(sed -n 's/.*MARKETING_VERSION = \(.*\);/\1/p' "$ROOT/App/Tab.xcodeproj/project.pbxproj"); do
-    [ "$VERSION" = "$CHANGELOG" ] || { echo "MARKETING_VERSION $VERSION isn't the changelog's $CHANGELOG" >&2; exit 1; }
-done
 
 echo "== Tests"
 (cd "$ROOT" && xcodebuild test -scheme TabKit -destination "id=$DEVICE" -derivedDataPath "$ROOT/.build/xc" \
@@ -20,6 +13,6 @@ echo "== Tests"
 
 echo "== App"
 xcodebuild build -project "$ROOT/App/Tab.xcodeproj" -scheme Tab -destination "generic/platform=iOS" \
-    -derivedDataPath "$ROOT/.build/app" -quiet CODE_SIGNING_ALLOWED=NO $STRICT
+    -derivedDataPath "$ROOT/.build/app" -quiet CODE_SIGNING_ALLOWED=NO $STRICT $("$ROOT/scripts/version.sh")
 
 echo "Validated."

@@ -134,7 +134,7 @@ def update_changelog(root: Path, prefix: str, desc: str) -> str | None:
 
 
 def lint_range(root: Path, rev_range: str) -> int:
-    out = git("log", "--no-merges", "--format=%H%x09%s", rev_range, cwd=root)
+    out = git("log", "--no-merges", "--first-parent", "--format=%H%x09%s", rev_range, cwd=root)
     errors = []
     for line in out.splitlines():
         if not line.strip():

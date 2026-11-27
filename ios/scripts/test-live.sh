@@ -3,10 +3,10 @@
 # TAB_DIR, port 7431) from a Tab checkout, shows a pairing code, and passes the
 # link to the tests on an iOS simulator.
 #
-#   scripts/test-live.sh [path to a built tab checkout, default ../tab]
+#   scripts/test-live.sh [path to a built Mac app package, default ../macos]
 set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-TAB_CHECKOUT=$(cd "${1:-$ROOT/../tab}" && pwd)
+TAB_CHECKOUT=$(cd "${1:-$ROOT/../macos}" && pwd)
 TAB="$TAB_CHECKOUT/.build/debug/tab"
 [ -x "$TAB" ] || { echo "build tab first: (cd $TAB_CHECKOUT && swift build)" >&2; exit 1; }
 

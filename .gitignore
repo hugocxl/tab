@@ -1,11 +1,14 @@
+.DS_Store
 .build/
 build/
-vendor/GhosttyVT.xcframework/
-vendor/ghostty-vt/lib/
-vendor/ghostty-src/
-*.xcodeproj
-*.xcworkspace
-.DS_Store
 .swiftpm/
+xcuserdata/
 node_modules/
 _site/
+
+# macOS app: Ghostty build products and SwiftPM-generated Xcode projects
+/macos/vendor/GhosttyVT.xcframework/
+/macos/vendor/ghostty-vt/lib/
+/macos/vendor/ghostty-src/
+/macos/*.xcodeproj
+/macos/*.xcworkspace

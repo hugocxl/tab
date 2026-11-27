@@ -1,10 +1,12 @@
 #!/bin/sh
 # Archive the app and upload it to App Store Connect for TestFlight, signed
-# with the account Xcode is logged in to. The build number is the commit
-# count, so every commit uploads once.
+# with the account Xcode is logged in to. The version is CHANGELOG.md's (shared
+# with the Mac app) and the build number the commit count, so every commit
+# uploads once.
 set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 BUILD=$(git -C "$ROOT" rev-list --count HEAD)
+VERSION_SETTINGS=$("$ROOT/scripts/version.sh")
 ARCHIVE="$ROOT/.build/release/Tab.xcarchive"
 OPTIONS="$ROOT/.build/release/ExportOptions.plist"
 
@@ -14,7 +16,7 @@ mkdir -p "$ROOT/.build/release"
 echo "== Archive (build $BUILD)"
 xcodebuild archive -project "$ROOT/App/Tab.xcodeproj" -scheme Tab -configuration Release \
     -destination "generic/platform=iOS" -archivePath "$ARCHIVE" -derivedDataPath "$ROOT/.build/app-release" \
-    -allowProvisioningUpdates -quiet CURRENT_PROJECT_VERSION="$BUILD"
+    -allowProvisioningUpdates -quiet $VERSION_SETTINGS
 
 cat > "$OPTIONS" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>

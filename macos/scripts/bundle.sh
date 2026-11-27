@@ -12,7 +12,7 @@ CONFIG="${1:-debug}"
 case "$CONFIG" in debug|release) ;; *) echo "Usage: $0 [debug|release]" >&2; exit 1 ;; esac
 source "$ROOT/scripts/swift-settings.sh"
 BUILD_NUMBER="$(git -C "$ROOT" rev-list --count HEAD 2>/dev/null || echo 0)"
-VERSION="${RELEASE_VERSION:-$("$ROOT/scripts/changelog.sh" version)}"
+VERSION="${RELEASE_VERSION:-$("$ROOT/../scripts/changelog.sh" version)}"
 if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-beta\.([1-9][0-9]*))?$ ]]; then
     echo "Error: expected an X.Y.Z or X.Y.Z-beta.N release version, got $VERSION" >&2
     exit 1
@@ -66,8 +66,8 @@ for bundle in "$BIN"/*.bundle; do
 done
 cp "$ROOT/packaging/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 # Settings → Changelog reads the repository's changelog from the bundle.
-cp "$ROOT/CHANGELOG.md" "$APP/Contents/Resources/CHANGELOG.md"
-cp "$ROOT/THIRD_PARTY_NOTICES.md" "$APP/Contents/Resources/THIRD_PARTY_NOTICES.md"
+cp "$ROOT/../CHANGELOG.md" "$APP/Contents/Resources/CHANGELOG.md"
+cp "$ROOT/../THIRD_PARTY_NOTICES.md" "$APP/Contents/Resources/THIRD_PARTY_NOTICES.md"
 sed -e "s/__BUNDLE_ID__/$BUNDLE_ID/g" -e "s/__APP_NAME__/$APP_NAME/g" -e "s/__VERSION__/$VERSION/g" \
     -e "s/__SHORT_VERSION__/$SHORT_VERSION/g" \
     -e "s/__BUILD_NUMBER__/$BUILD_NUMBER/g" \

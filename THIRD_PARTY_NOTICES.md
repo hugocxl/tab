@@ -137,3 +137,18 @@ Source: https://github.com/vercel/geist-font
 The fonts are distributed under the SIL Open Font License 1.1. The full
 copyright and license text accompanies them in `system/fonts/Geist-LICENSE.txt`
 in that package and on the published site.
+
+## Tab for iPhone and iPad
+
+- Terminal themes in `ios/Vendor/TabShared/Tab/Resources/Themes` are the
+  Mac app's, whose sources are listed above.
+- Tab Icons (`TabIcons` in the asset catalog) is the Tab desktop app's own
+  icon set. It adapts and
+  extends `@pierre/icons` 0.9.0 (Apache 2.0,
+  https://github.com/pierrecomputer/icons) and Pierre's file icon library
+  (MIT, https://github.com/pierrecomputer/vscode-icons). Its brand marks for
+  agent providers, Git hosts, runtimes, languages and tools are simplified
+  adaptations from Simple Icons 16.37.0 (CC0 1.0), LobeHub Icons 1.102.0 (MIT)
+  and Devicon 2.18.0 (MIT); the marks remain the trademarks of their owners,
+  shown only to name what a pane runs, as the Tab desktop app does. All of
+  their license texts are bundled as `ios/App/Resources/TAB-ICONS-LICENSE.txt`.

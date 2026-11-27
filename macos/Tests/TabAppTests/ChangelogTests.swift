@@ -46,9 +46,10 @@ final class ChangelogTests: XCTestCase {
     /// The repository's changelog is what the app shows and where
     /// `scripts/changelog.sh` reads versions, so it must stay in this format.
     func testRepositoryChangelogListsEveryVersionNewestFirst() throws {
+        // macos/Tests/TabAppTests/ChangelogTests.swift → the repository root.
         let file = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("CHANGELOG.md")
+            .deletingLastPathComponent().appendingPathComponent("CHANGELOG.md")
         let changelog = Changelog(markdown: try String(contentsOf: file, encoding: .utf8))
         XCTAssertFalse(changelog.releases.isEmpty)
         var previous: [Int]?

@@ -28,7 +28,7 @@ check_pushed() {
     else
         range="$before..$after"
     fi
-    for commit in $(git rev-list --reverse --no-merges "$range"); do
+    for commit in $(git rev-list --reverse --first-parent --no-merges "$range"); do
         current="$(version_at "$commit")"
         [ -n "$current" ] || { echo "Error: $commit has no version in CHANGELOG.md" >&2; exit 1; }
         parent="$(git rev-parse --verify --quiet "$commit^" || true)"
