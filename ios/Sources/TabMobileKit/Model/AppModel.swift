@@ -1,7 +1,6 @@
 import Foundation
 import Observation
 import TabProtocol
-import TabShared
 
 /// Every paired Mac, and pairing new ones.
 @MainActor

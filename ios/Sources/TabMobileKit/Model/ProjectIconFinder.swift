@@ -1,6 +1,6 @@
 import Foundation
+import TabConnection
 import TabProtocol
-import TabShared
 
 /// Finds a project's icon among its files on the server, as the desktop
 /// sidebar does: an app's `.icns`, a `favicon.ico` or a `logo.png`, listing

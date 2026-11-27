@@ -4,6 +4,10 @@ import PackageDescription
 
 let swift5: [SwiftSetting] = [.swiftLanguageMode(.v5), .unsafeFlags(["-warnings-as-errors"])]
 
+let tabProtocol = Target.Dependency.product(name: "TabProtocol", package: "shared")
+let tabCommon = Target.Dependency.product(name: "TabCommon", package: "shared")
+let tabConnection = Target.Dependency.product(name: "TabConnection", package: "shared")
+
 let package = Package(
     name: "TabKit",
     platforms: [.iOS("27.0")],
@@ -11,22 +15,15 @@ let package = Package(
         .library(name: "TabMobileUI", targets: ["TabMobileUI"]),
     ],
     dependencies: [
+        // The protocol and client shared with the Mac app.
+        .package(path: "../shared"),
         .package(url: "https://github.com/hugocxl/stack.git", from: "0.1.4"),
     ],
     targets: [
-        // Synced from Tab by scripts/sync-tab.sh; never edited here.
-        .target(name: "TabProtocol", path: "Vendor/TabProtocol", swiftSettings: swift5),
-        .target(
-            name: "TabShared",
-            dependencies: ["TabProtocol"],
-            path: "Vendor/TabShared",
-            resources: [.copy("Tab/Resources/Themes")],
-            swiftSettings: swift5
-        ),
         // Connections, pairing, tabs, terminals and agent chats, without UIKit.
-        .target(name: "TabMobileKit", dependencies: ["TabProtocol", "TabShared"], swiftSettings: swift5),
+        .target(name: "TabMobileKit", dependencies: [tabProtocol, tabCommon, tabConnection], swiftSettings: swift5),
         // The UIKit app: tab list, terminal and agent panes, pairing.
-        .target(name: "TabMobileUI", dependencies: ["TabMobileKit", "TabProtocol", "TabShared",
+        .target(name: "TabMobileUI", dependencies: ["TabMobileKit", tabProtocol, tabCommon, tabConnection,
                                                      .product(name: "Icons", package: "stack")], swiftSettings: swift5),
         .testTarget(name: "TabMobileKitTests", dependencies: ["TabMobileKit"], swiftSettings: swift5),
         .testTarget(name: "TabMobileUITests", dependencies: ["TabMobileUI"], swiftSettings: swift5),

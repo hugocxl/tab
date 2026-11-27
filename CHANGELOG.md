@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.145.0 - 2026-11-27
+
+### Changed
+
+- The Mac and iOS apps now build on one shared package, so the iPhone and iPad app always speaks the current protocol.
+
 ## 0.144.0 - 2026-11-27
 
 ### Changed

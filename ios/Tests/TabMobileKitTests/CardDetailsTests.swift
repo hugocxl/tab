@@ -1,5 +1,5 @@
+import TabCommon
 import TabProtocol
-import TabShared
 import XCTest
 @testable import TabMobileKit
 

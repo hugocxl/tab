@@ -1,6 +1,6 @@
 import CoreText
+import TabCommon
 import TabProtocol
-import TabShared
 import UIKit
 
 /// Draws one terminal row into a context whose origin is the row's top-left.

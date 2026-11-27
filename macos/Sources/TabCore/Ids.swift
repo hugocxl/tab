@@ -2,28 +2,8 @@
 import Foundation
 
 // Shared ids (ProjectId, SessionId, ServerId, OperationId, ClientId, DeviceId,
-// PaneId, TabId) come from TabProtocol, re-exported here. The ids below exist only in apps.
-
-extension UUIDIdentifier {
-    /// Parses a UUID with or without hyphens, in any case, as hand-edited
-    /// settings and `uuidgen` output spell them.
-    public init?(_ text: String) {
-        guard let uuid = parseUUID(text) else { return nil }
-        self.init(uuid: uuid)
-    }
-
-    /// For `CodingKeyRepresentable`: ids are JSON object keys.
-    public var codingKey: CodingKey { IdentifierCodingKey(stringValue: description) }
-
-    public init?<T: CodingKey>(codingKey: T) { self.init(codingKey.stringValue) }
-}
-
-extension ProjectId: CodingKeyRepresentable {}
-extension SessionId: CodingKeyRepresentable {}
-extension ServerId: CodingKeyRepresentable {}
-extension OperationId: CodingKeyRepresentable {}
-extension PaneId: CodingKeyRepresentable {}
-extension TabId: CodingKeyRepresentable {}
+// PaneId, TabId) and their parsing come from TabProtocol, re-exported here. The
+// ids below exist only in apps.
 
 extension ServerId {
     /// This computer's server, as the app lists it.
@@ -33,22 +13,6 @@ extension ServerId {
     )))
 
     public var isLocal: Bool { self == .local }
-}
-
-private struct IdentifierCodingKey: CodingKey {
-    var stringValue: String
-    var intValue: Int? { nil }
-    init(stringValue: String) { self.stringValue = stringValue }
-    init?(intValue: Int) { nil }
-}
-
-func parseUUID(_ text: String) -> UUID? {
-    if let uuid = UUID(uuidString: text) { return uuid }
-    let hex = text.replacingOccurrences(of: "-", with: "")
-    guard hex.count == 32, hex.allSatisfy(\.isHexDigit) else { return nil }
-    let characters = Array(hex)
-    let groups = [0..<8, 8..<12, 12..<16, 16..<20, 20..<32].map { String(characters[$0]) }
-    return UUID(uuidString: groups.joined(separator: "-"))
 }
 
 /// A client-owned group of projects shown together in the sidebar.

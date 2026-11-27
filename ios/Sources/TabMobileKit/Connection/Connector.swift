@@ -1,6 +1,7 @@
 import Foundation
+import TabCommon
+import TabConnection
 import TabProtocol
-import TabShared
 
 /// Why pairing or connecting failed, in words for the person holding the phone.
 public enum ConnectError: Error, Equatable, LocalizedError {

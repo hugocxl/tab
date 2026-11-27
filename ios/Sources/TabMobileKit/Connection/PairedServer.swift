@@ -1,7 +1,6 @@
 import Foundation
 import Security
 import TabProtocol
-import TabShared
 
 /// A Mac this device paired with: where to find it and how to recognize it.
 /// The device's secret token lives in the Keychain, never in this record.

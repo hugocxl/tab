@@ -1,6 +1,5 @@
 import Foundation
 import TabProtocol
-import TabShared
 
 /// A place for a pane along a whole edge of its tab, as the desktop's command
 /// palette offers them: the left, right, top or bottom third, half or two

@@ -1,8 +1,8 @@
 import Foundation
 import Observation
 import os
+import TabConnection
 import TabProtocol
-import TabShared
 
 /// One agent pane's conversation. The server runs the agent and sends whole
 /// snapshots: this reads the newest one when the server says the chat

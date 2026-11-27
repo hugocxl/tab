@@ -1,6 +1,7 @@
+import TabCommon
+import TabConnection
 import TabMobileKit
 import TabProtocol
-import TabShared
 import UIKit
 
 /// Shows a terminal session and types into it.

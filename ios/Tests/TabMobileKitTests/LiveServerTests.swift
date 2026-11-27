@@ -1,6 +1,6 @@
 import Foundation
+import TabConnection
 import TabProtocol
-import TabShared
 import XCTest
 @testable import TabMobileKit
 

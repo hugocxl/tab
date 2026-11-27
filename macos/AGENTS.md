@@ -13,7 +13,7 @@ scripts/stop.sh                   # quit this checkout's dev app and stop its ta
 scripts/validate.sh               # warnings-as-errors build, tests, debug bundle
 ```
 
-A change is finished only when the root `scripts/validate.sh macos` passes (add `ios` when touching `TabProtocol` or code the iOS app syncs). If a task opened a dev app, run `scripts/stop.sh` before finishing so it and its `tabd` do not stay running.
+A change is finished only when the root `scripts/validate.sh macos` passes (`shared macos ios` when touching `../shared`). If a task opened a dev app, run `scripts/stop.sh` before finishing so it and its `tabd` do not stay running.
 
 ## Why & Invariants
 

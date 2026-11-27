@@ -1,6 +1,6 @@
 import Observation
+import TabCommon
 import TabProtocol
-import TabShared
 import UIKit
 
 /// The person's terminal settings, kept in user defaults.

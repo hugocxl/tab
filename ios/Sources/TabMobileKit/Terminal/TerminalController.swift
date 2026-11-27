@@ -1,7 +1,7 @@
 import Foundation
 import Observation
+import TabConnection
 import TabProtocol
-import TabShared
 
 /// Draws a terminal's grid. The controller calls `gridChanged` for each
 /// frame; the display calls `frameDrawn()` once it has drawn, which lets the

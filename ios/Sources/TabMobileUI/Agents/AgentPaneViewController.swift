@@ -1,8 +1,8 @@
 import ImageIO
 import PhotosUI
+import TabConnection
 import TabMobileKit
 import TabProtocol
-import TabShared
 import UIKit
 import UniformTypeIdentifiers
 

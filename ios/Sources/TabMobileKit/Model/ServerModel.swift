@@ -1,7 +1,8 @@
 import Foundation
 import Observation
+import TabCommon
+import TabConnection
 import TabProtocol
-import TabShared
 
 /// One paired Mac as this app sees it: the connection, its projects, its tabs
 /// with this app's unconfirmed changes on top, and what its agents and
@@ -252,7 +253,7 @@ public final class ServerModel: Identifiable {
             if active { scheduleRetry(error.description) }
         case .gitChanged(let project):
             refreshGit(force: [project])
-        case .filesChanged:
+        case .filesChanged, .branchCommandsFailed:
             break
         }
     }

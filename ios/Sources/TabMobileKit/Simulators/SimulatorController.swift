@@ -1,7 +1,7 @@
 import Foundation
 import Observation
+import TabConnection
 import TabProtocol
-import TabShared
 
 /// Shows a simulator's screen. The controller calls `show` for each frame;
 /// the display calls `frameShown()` once it took it, which lets the server

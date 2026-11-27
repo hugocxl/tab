@@ -1,6 +1,6 @@
 import CoreGraphics
+import TabCommon
 import TabProtocol
-import TabShared
 import UIKit
 
 /// A theme's colors as the renderer uses them: 256 indexed colors over the

@@ -2,8 +2,8 @@ import CryptoKit
 import Foundation
 import Network
 import Security
+import TabConnection
 import TabProtocol
-import TabShared
 
 /// A TLS connection to a Tab server as a blocking `ByteStream`. It trusts
 /// only the certificate whose SHA-256 the pairing link named: the server's

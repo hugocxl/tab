@@ -1,6 +1,5 @@
 import Foundation
 import TabProtocol
-import TabShared
 
 /// What a card's tab is doing, in the desktop sidebar's order of precedence.
 public enum CardStatus: Hashable, Sendable {

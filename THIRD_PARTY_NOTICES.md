@@ -140,7 +140,7 @@ in that package and on the published site.
 
 ## Tab for iPhone and iPad
 
-- Terminal themes in `ios/Vendor/TabShared/Tab/Resources/Themes` are the
+- Terminal themes in `shared/Sources/TabCommon/Resources/Themes` are the
   Mac app's, whose sources are listed above.
 - Tab Icons (`TabIcons` in the asset catalog) is the Tab desktop app's own
   icon set. It adapts and

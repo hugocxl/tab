@@ -350,7 +350,7 @@ public enum TabIcon: String, CaseIterable, Sendable {
         case .xal: .xal
         case .antigravity: .antigravity
         case .ohMyPi: .ohMyPi
-        case .unknown: .brain
+        case .gemini, .unknown: .brain
         }
     }
 
