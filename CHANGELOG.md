@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.143.0 - 2026-11-27
+
+### Added
+
+- Privacy settings show what macOS allows programs in Tab, with buttons to grant access and a Full Disk Access check.
+
 ## 0.142.0 - 2026-11-26
 
 ### Changed

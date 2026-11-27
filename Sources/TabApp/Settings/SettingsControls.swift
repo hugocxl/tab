@@ -16,6 +16,8 @@ indirect enum SettingControl {
     case color(ColorSpec)
     case shortcut(ShortcutSpec)
     case label(String, LabelStyle = .body)
+    /// A colored pill naming a state, such as a permission's "Allowed".
+    case status(String, StatusTone)
     case keys(KeyChord)
     case qrCode(QRCode)
     /// A picture, such as an agent's logo, `side` points square.
@@ -35,6 +37,10 @@ indirect enum SettingControl {
 
     enum LabelStyle {
         case body, secondary, note, error, monospaced, badge
+    }
+
+    enum StatusTone {
+        case success, warning, danger, neutral
     }
 
     /// Every control in the tree, depth first.

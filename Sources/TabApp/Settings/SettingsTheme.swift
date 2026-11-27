@@ -10,6 +10,8 @@ public struct SettingsTheme {
     public var secondaryText: SwiftUI.Color
     public var accent: SwiftUI.Color
     public var danger: SwiftUI.Color
+    public var success: SwiftUI.Color
+    public var warning: SwiftUI.Color
 
     @MainActor
     public init(_ theme: AppTheme) {
@@ -20,6 +22,8 @@ public struct SettingsTheme {
         secondaryText = SwiftUI.Color(nsColor: theme.fgMuted)
         accent = SwiftUI.Color(nsColor: theme.accent)
         danger = SwiftUI.Color(nsColor: theme.danger)
+        success = SwiftUI.Color(nsColor: theme.success)
+        warning = SwiftUI.Color(nsColor: theme.warning)
     }
 }
 

@@ -24,17 +24,17 @@
     <key>NSSupportsSuddenTermination</key><false/>
     <key>NSLocalNetworkUsageDescription</key><string>Commands in Tab can access devices on your local network, and paired phones can connect to this Mac's terminals.</string>
     <key>NSAppleEventsUsageDescription</key><string>A program running in a Tab terminal wants to control another app. Tab doesn't send these commands itself.</string>
-    <key>NSCameraUsageDescription</key><string>A program running in a Tab terminal wants to use the camera. Tab doesn't use the camera itself.</string>
+    <key>NSCameraUsageDescription</key><string>Programs you run in Tab's terminals use the camera as Tab. Tab doesn't use the camera itself.</string>
     <key>NSSpeechRecognitionUsageDescription</key><string>Tab transcribes dictated agent messages on this Mac so you can review them before sending.</string>
     <key>NSMicrophoneUsageDescription</key><string>Tab uses the microphone when you start dictating an agent message. Programs running in a terminal can also request microphone access.</string>
     <key>NSAudioCaptureUsageDescription</key><string>A program running in a Tab terminal wants to record this Mac's audio. Tab doesn't record audio itself.</string>
-    <key>NSContactsUsageDescription</key><string>A program running in a Tab terminal wants to read your contacts. Tab doesn't read them itself.</string>
-    <key>NSCalendarsUsageDescription</key><string>A program running in a Tab terminal wants to use your calendars. Tab doesn't read them itself.</string>
-    <key>NSCalendarsFullAccessUsageDescription</key><string>A program running in a Tab terminal wants to use your calendars. Tab doesn't read them itself.</string>
-    <key>NSRemindersFullAccessUsageDescription</key><string>A program running in a Tab terminal wants to use your reminders. Tab doesn't read them itself.</string>
-    <key>NSPhotoLibraryUsageDescription</key><string>A program running in a Tab terminal wants to use your photo library. Tab doesn't read your photos itself.</string>
-    <key>NSLocationUsageDescription</key><string>A program running in a Tab terminal wants to know this Mac's location. Tab doesn't track location itself.</string>
-    <key>NSBluetoothAlwaysUsageDescription</key><string>A program running in a Tab terminal wants to use Bluetooth. Tab doesn't use Bluetooth itself.</string>
+    <key>NSContactsUsageDescription</key><string>Programs you run in Tab's terminals read your contacts as Tab. Tab doesn't read them itself.</string>
+    <key>NSCalendarsUsageDescription</key><string>Programs you run in Tab's terminals use your calendars as Tab. Tab doesn't read them itself.</string>
+    <key>NSCalendarsFullAccessUsageDescription</key><string>Programs you run in Tab's terminals use your calendars as Tab. Tab doesn't read them itself.</string>
+    <key>NSRemindersFullAccessUsageDescription</key><string>Programs you run in Tab's terminals use your reminders as Tab. Tab doesn't read them itself.</string>
+    <key>NSPhotoLibraryUsageDescription</key><string>Programs you run in Tab's terminals use your photo library as Tab. Tab doesn't read your photos itself.</string>
+    <key>NSLocationUsageDescription</key><string>Programs you run in Tab's terminals find this Mac's location as Tab. Tab doesn't track location itself.</string>
+    <key>NSBluetoothAlwaysUsageDescription</key><string>Programs you run in Tab's terminals use Bluetooth as Tab. Tab doesn't use Bluetooth itself.</string>
     <key>NSAppTransportSecurity</key>
     <dict><key>NSAllowsArbitraryLoadsInWebContent</key><true/></dict>
     <key>CFBundleURLTypes</key>

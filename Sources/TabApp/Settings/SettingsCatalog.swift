@@ -222,15 +222,15 @@ public enum SettingsCatalog {
         statusItems(status)
     } + [
         // Privacy
-        SettingItem("privacy-camera", "Camera", "", .privacy, "Permissions"),
-        SettingItem("privacy-microphone", "Microphone", "", .privacy, "Permissions"),
-        SettingItem("privacy-contacts", "Contacts", "", .privacy, "Permissions"),
-        SettingItem("privacy-calendars", "Calendars", "", .privacy, "Permissions"),
-        SettingItem("privacy-reminders", "Reminders", "", .privacy, "Permissions"),
-        SettingItem("privacy-photos", "Photos", "", .privacy, "Permissions"),
-        SettingItem("privacy-location", "Location Services", "", .privacy, "Permissions"),
-        SettingItem("privacy-bluetooth", "Bluetooth", "", .privacy, "Permissions"),
-        SettingItem("privacy-automation", "Automation", "Lets programs control other apps, such as with osascript.", .privacy, "Terminal Programs"),
+        SettingItem("privacy-camera", "Camera", "Lets programs take photos and record video.", .privacy, "Permissions"),
+        SettingItem("privacy-microphone", "Microphone", "Lets programs record audio. Tab also uses it for dictation.", .privacy, "Permissions"),
+        SettingItem("privacy-contacts", "Contacts", "Lets programs read and change your contacts.", .privacy, "Permissions"),
+        SettingItem("privacy-calendars", "Calendars", "Lets programs read and add calendar events.", .privacy, "Permissions"),
+        SettingItem("privacy-reminders", "Reminders", "Lets programs read and add reminders.", .privacy, "Permissions"),
+        SettingItem("privacy-photos", "Photos", "Lets programs read and add to your photo library.", .privacy, "Permissions"),
+        SettingItem("privacy-location", "Location Services", "Lets programs find this Mac's location.", .privacy, "Permissions"),
+        SettingItem("privacy-bluetooth", "Bluetooth", "Lets programs find and connect to Bluetooth devices.", .privacy, "Permissions"),
+        SettingItem("privacy-automation", "Automation", "Lets programs control other apps, such as with osascript. macOS asks once for each app; review the answers in System Settings.", .privacy, "Terminal Programs"),
         SettingItem("privacy-files", "Full Disk Access", "Lets programs read protected folders, such as Mail and Safari data.", .privacy, "Terminal Programs"),
         SettingItem("agent-remote-images", "Load remote images", "Images an agent's answer names by a web address. Click to load shows the site first; Never shows only the link and loads no link icons. Project files always load.", .privacy, "Agent Conversations"),
         // Browser

@@ -50,6 +50,8 @@ final class SettingsModel: ObservableObject {
     private var addProviderWhenLoaded = false
     /// Lists the open provider's models once another computer's providers are read.
     private var loadProviderWhenLoaded = false
+    /// Permissions whose macOS prompt is waiting for an answer.
+    private(set) var privacyRequests: Set<PrivacyPermission> = []
 
     init(store: SettingsStore) {
         self.store = store
@@ -60,6 +62,13 @@ final class SettingsModel: ObservableObject {
                           store.theme.$interface.dropFirst().map { _ in () },
                           store.theme.$accessibility.dropFirst().map { _ in () })
             .sink { [weak self] _ in self?.scheduleReload() }
+            .store(in: &observations)
+        // Answers change in System Settings and prompts, which Tab returns from.
+        NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
+            .sink { [weak self] _ in
+                guard let self, category == .privacy || isSearching else { return }
+                scheduleReload()
+            }
             .store(in: &observations)
     }
 
@@ -172,6 +181,24 @@ final class SettingsModel: ObservableObject {
     /// Refreshes the currently open page (e.g. when reopening the Settings window).
     func refreshCurrentPage() {
         if category == .agents { refreshAgentsPage() }
+        if category == .privacy { reload() }
+    }
+
+    /// Shows macOS's prompt for `permission`. When macOS answers without
+    /// one, such as with Location Services off, opens System Settings.
+    func requestPrivacyAccess(_ permission: PrivacyPermission) {
+        guard let host = store.host, !privacyRequests.contains(permission) else { return }
+        privacyRequests.insert(permission)
+        reload()
+        Task { [weak self] in
+            let answered = await host.requestPrivacyAccess(permission)
+            guard let self else { return }
+            privacyRequests.remove(permission)
+            if answered && host.privacyAccess(permission) == .notAsked {
+                PrivacyPermission.openSettings(permission.settingsPane)
+            }
+            reload()
+        }
     }
 
     private func refreshAgentsPage() {

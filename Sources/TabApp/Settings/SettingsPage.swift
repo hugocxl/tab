@@ -284,6 +284,8 @@ struct SettingControlView: View {
                 .fixedSize()
         case .label(let text, let style):
             LabelView(text: text, style: style)
+        case .status(let text, let tone):
+            StatusPill(text: text, tone: tone)
         case .keys(let chord):
             Text(chord.display)
                 .font(.body.monospaced())
@@ -331,6 +333,39 @@ private struct LabelView: View {
             Text(text).font(.body.monospaced())
         case .badge:
             Text(text).font(.subheadline).foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// A state in a tinted capsule, with a check when it is a success.
+private struct StatusPill: View {
+    let text: String
+    let tone: SettingControl.StatusTone
+    @Environment(\.settingsTheme) private var theme
+
+    var body: some View {
+        HStack(spacing: 4) {
+            if tone == .success {
+                Image(.check, size: 11).accessibilityHidden(true)
+            }
+            Text(text)
+        }
+        .font(.subheadline.weight(.semibold))
+        .foregroundStyle(color)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 3)
+        .background(Capsule().fill(color.opacity(0.16)))
+        .overlay(Capsule().strokeBorder(color.opacity(0.28), lineWidth: 0.5))
+        .fixedSize()
+        .accessibilityElement(children: .combine)
+    }
+
+    private var color: SwiftUI.Color {
+        switch tone {
+        case .success: theme?.success ?? .green
+        case .warning: theme?.warning ?? .orange
+        case .danger: theme?.danger ?? .red
+        case .neutral: theme?.secondaryText ?? .secondary
         }
     }
 }

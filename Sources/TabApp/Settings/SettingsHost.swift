@@ -116,6 +116,11 @@ public protocol SettingsHost: AnyObject {
 
     /// What macOS answered Tab, and so programs in its terminals, for `permission`.
     func privacyAccess(_ permission: PrivacyPermission) -> PrivacyAccess
+    /// Asks macOS for `permission`, showing its prompt. Returns whether
+    /// macOS answered.
+    func requestPrivacyAccess(_ permission: PrivacyPermission) async -> Bool
+    /// Whether Tab has Full Disk Access; `nil` when it can't tell.
+    func fullDiskAccess() -> Bool?
 
     // MARK: Agents
 
@@ -253,6 +258,14 @@ public final class PreviewSettingsHost: SettingsHost {
 
     public var privacy: [PrivacyPermission: PrivacyAccess] = [.camera: .allowed, .microphone: .denied]
     public func privacyAccess(_ permission: PrivacyPermission) -> PrivacyAccess { privacy[permission] ?? .notAsked }
+    /// What a prompt answers, as `requestPrivacyAccess` records it.
+    public var privacyAnswer: PrivacyAccess = .allowed
+    public var hasFullDiskAccess: Bool? = false
+    public func requestPrivacyAccess(_ permission: PrivacyPermission) async -> Bool {
+        if privacyAccess(permission) == .notAsked { privacy[permission] = privacyAnswer }
+        return true
+    }
+    public func fullDiskAccess() -> Bool? { hasFullDiskAccess }
     public func agentProviderIntegration(_ provider: AgentProviderConfig) async throws -> AgentIntegrationStatus? {
         guard let agent = CodingAgent(provider: provider.kind) else { return nil }
         return providerIntegrations[provider.id]

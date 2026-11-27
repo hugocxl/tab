@@ -157,6 +157,8 @@ public final class SettingsHostImpl: SettingsHost {
     // MARK: Privacy
 
     public func privacyAccess(_ permission: PrivacyPermission) -> PrivacyAccess { PrivacyAccess.current(permission) }
+    public func requestPrivacyAccess(_ permission: PrivacyPermission) async -> Bool { await permission.request() }
+    public func fullDiskAccess() -> Bool? { PrivacyAccess.fullDiskAccess() }
 
     // MARK: Agents
 
