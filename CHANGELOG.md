@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.148.0 - 2026-11-28
+
+### Removed
+
+- The AI usage plugin no longer wraps its sidebar panel in a glass card container.
+
 ## 0.147.1 - 2026-11-28
 
 ### Changed

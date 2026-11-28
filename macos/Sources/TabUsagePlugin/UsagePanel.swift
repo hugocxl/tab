@@ -4,7 +4,7 @@ import TabClient
 import TabCore
 import TabProtocol
 
-/// The AI Usage panel: one glass card per signed-in agent account with its
+/// The AI Usage panel: one card per signed-in agent account with its
 /// plan and every limit, each with its bar, reset and pace. The footer's filter narrows by name, plan or account and
 /// its menu picks a provider, the order and the figure. Reads the current
 /// project's server, and again on the configured schedule while it shows.
@@ -385,7 +385,7 @@ class UsageClickable: NSView {
     }
 }
 
-/// One account on a glass card like the selected tab's: its logo, name and plan
+/// One account on a plain card: its logo, name and plan
 /// with the account on the right, then every limit the account reports.
 @MainActor
 final class UsageAccountCard: NSView {
@@ -396,7 +396,6 @@ final class UsageAccountCard: NSView {
     let limits: AgentUsageLimits
     /// The limit rows, in the order the provider reports them.
     private(set) var rows: [UsageLimitRow] = []
-    private let glass = GlassView(style: .card)
 
     /// The provider's short name: "Claude", "Codex", "Antigravity".
     static func providerTitle(_ provider: AgentChatProvider) -> String {
@@ -408,13 +407,9 @@ final class UsageAccountCard: NSView {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         wantsLayer = true
-        layer?.cornerRadius = GlassView.Style.card.cornerRadius
+        layer?.cornerRadius = Metrics.cardRadius
         layer?.cornerCurve = .continuous
-        layer?.borderWidth = Metrics.border
-        layer?.borderColor = theme.fg(alpha: 0.08).cgColor
-        layer?.backgroundColor = theme.surface.cgColor
-        glass.appearance = theme.nsAppearance
-        addSubview(glass)
+        layer?.backgroundColor = theme.rowFill.cgColor
 
         let name = limits.providerName ?? Self.providerTitle(limits.provider)
         let logo = NSImageView(image: AgentLogo.image(for: limits.provider.activityProvider, size: 16, theme: theme) ?? NSImage())
@@ -481,11 +476,6 @@ final class UsageAccountCard: NSView {
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    override func layout() {
-        super.layout()
-        glass.frame = bounds
-    }
 
     /// `Side project Pro`: the name in semibold, the plan regular and muted.
     private static func title(_ name: String, plan: String?, theme: AppTheme) -> NSAttributedString {

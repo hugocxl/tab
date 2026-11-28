@@ -621,11 +621,9 @@ final class SidebarRootView: ThemedView {
     }
 }
 
-/// Translucent glass card anchored above the left sidebar's footer, drawn
-/// like the selected tab card.
+/// Plain card anchored above the left sidebar's footer.
 private final class SidebarFloatingCardHost: ThemedView {
     private let clip = NSView()
-    private let glass = GlassView(style: .card)
     private let content: NSView
 
     init(content: NSView, theme: AppTheme) {
@@ -634,13 +632,11 @@ private final class SidebarFloatingCardHost: ThemedView {
         self.theme = theme
 
         clip.wantsLayer = true
-        clip.layer?.cornerRadius = GlassView.Style.card.cornerRadius
+        clip.layer?.cornerRadius = Metrics.cardRadius
         clip.layer?.cornerCurve = .continuous
         clip.layer?.masksToBounds = true
-        clip.layer?.borderWidth = Metrics.border
 
         content.translatesAutoresizingMaskIntoConstraints = true
-        clip.addSubview(glass)
         clip.addSubview(content)
         addSubview(clip)
         applySurface()
@@ -655,15 +651,12 @@ private final class SidebarFloatingCardHost: ThemedView {
     }
 
     private func applySurface() {
-        glass.appearance = theme.nsAppearance
-        clip.layer?.backgroundColor = theme.surface.cgColor
-        clip.layer?.borderColor = theme.fg(alpha: 0.08).cgColor
+        clip.layer?.backgroundColor = theme.rowFill.cgColor
     }
 
     override func layout() {
         super.layout()
         clip.frame = bounds
-        glass.frame = clip.bounds
         content.frame = clip.bounds
     }
 }
