@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.147.0 - 2026-11-28
+
+### Added
+
+- Agents can list your providers, accounts and their usage, and start agents on another provider or account.
+
 ## 0.146.3 - 2026-11-28
 
 ### Changed

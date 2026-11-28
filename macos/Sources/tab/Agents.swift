@@ -36,6 +36,78 @@ enum Agents {
             let agent = try await resolve(selector, client: client)
             _ = try await client.agentChat(.stop(session: agent, descendants: !only))
             Output.ok(json: json)
+        case .providers:
+            let summaries = try await providers(client: client)
+            let now = Date()
+            if json {
+                Output.json(.array(summaries.map { $0.record(now: now) }))
+            } else if summaries.isEmpty {
+                Output.error("no provider is added yet; the user adds them in Settings › Agents")
+            } else {
+                Output.list(summaries.map { $0.row(now: now) }, columns: AgentProviderSummary.columns, json: false)
+            }
+        }
+    }
+
+    /// The server's providers with their last checks, usage and models, read side by side.
+    /// Usage and models are left out where a server or CLI doesn't give them.
+    static func providers(client: ServerClient) async throws -> [AgentProviderSummary] {
+        let state = try await client.agentProviders()
+        let configs = state.settings.providers
+        guard !configs.isEmpty else { return [] }
+        async let usage = try? await client.agentUsageLimits(.init()).providers
+        let project = try? await Sessions.ownProject(client: client).id
+        let models = await withTaskGroup(of: (String, [AgentModelDescriptor]?).self) { group in
+            for config in configs where config.enabled && state.status(config) != .error {
+                guard let project else { break }
+                group.addTask {
+                    let reply = try? await client.agentModelCatalog(.init(project: project, provider: config.kind,
+                                                                          providerID: config.id))
+                    return (config.id, reply?.models)
+                }
+            }
+            var models: [String: [AgentModelDescriptor]] = [:]
+            for await (id, list) in group { models[id] = list }
+            return models
+        }
+        let limits = await usage ?? []
+        return configs.map { config in
+            AgentProviderSummary(config: config, health: state.health(config.id),
+                                 usage: AgentProviderSummary.usage(for: config, in: limits, providers: configs),
+                                 models: models[config.id])
+        }
+    }
+
+    /// How long a new agent waits on its provider's usage before starting without it.
+    static let usageWait: TimeInterval = 5
+
+    /// Refuses to start an agent on `config` when it is off, missing, signed out or out of
+    /// usage for `model`. A signed-out or missing provider is checked again first, as the
+    /// user may have just fixed it; usage that is slow to read doesn't hold the agent up.
+    static func checkCanStart(_ config: AgentProviderConfig, health: AgentProviderHealth?, model: String?,
+                              client: ServerClient) async throws {
+        var health = health
+        if AgentProviderSummary.refusal(config, health: health, usage: nil, model: model) != nil,
+           let checked = try? await client.checkAgentProviders() {
+            health = checked.health(config.id)
+        }
+        if let refusal = AgentProviderSummary.refusal(config, health: health, usage: nil, model: model) {
+            throw CLIError(refusal)
+        }
+        guard AgentUsageLimits.reportingKinds.contains(config.kind) else { return }
+        let limits = await withTaskGroup(of: [AgentUsageLimits]?.self) { group in
+            group.addTask { try? await client.agentUsageLimits(.init()).providers }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(usageWait * 1_000_000_000))
+                return nil
+            }
+            defer { group.cancelAll() }
+            return await group.next() ?? nil
+        }
+        let configs = (try? await client.agentProviders())?.settings.providers ?? [config]
+        let usage = limits.flatMap { AgentProviderSummary.usage(for: config, in: $0, providers: configs) }
+        if let refusal = AgentProviderSummary.refusal(config, health: health, usage: usage, model: model) {
+            throw CLIError(refusal)
         }
     }
 
@@ -43,7 +115,10 @@ enum Agents {
     /// whose first added provider it means, else the first one added. A server that predates
     /// provider settings runs `name`'s kind, Claude Code by default. With nothing added, the
     /// pane opens asking for a provider, unless a message has to be sent.
-    static func provider(_ name: String?, sending: Bool, client: ServerClient) async throws -> (AgentChatProvider, String?) {
+    /// With `sending`, refuses a provider that can't run the message; `model`, when given, is
+    /// checked against its usage, as some windows stop one model only.
+    static func provider(_ name: String?, sending: Bool, model: String? = nil,
+                         client: ServerClient) async throws -> (AgentChatProvider, String?) {
         guard let state = try? await client.agentProviders() else {
             guard let kind = AgentChatProvider(rawValue: name ?? AgentChatProvider.claude.rawValue), kind.hasBuiltIn else {
                 throw CLIError("--provider must be one of \(AgentChatProvider.builtIn.map(\.rawValue).joined(separator: ", ")) on this server")
@@ -52,8 +127,14 @@ enum Agents {
         }
         let added = state.settings.providers
         let choices = added.filter(\.enabled).map(\.id).joined(separator: ", ")
+        // Work sent to a provider that can't run it would only fail in its pane; one opened
+        // without a message waits for the user, who can sign it in there.
+        func checked(_ provider: AgentProviderConfig) async throws -> (AgentChatProvider, String?) {
+            if sending { try await checkCanStart(provider, health: state.health(provider.id), model: model, client: client) }
+            return (provider.kind, provider.id)
+        }
         guard let name else {
-            if let first = added.first(where: \.enabled) { return (first.kind, first.id) }
+            if let first = added.first(where: \.enabled) { return try await checked(first) }
             guard !sending else {
                 throw CLIError(added.isEmpty ? "no provider is added yet; add one in Settings › Agents"
                                              : "every provider is off; turn one on in Settings › Agents")
@@ -62,10 +143,10 @@ enum Agents {
         }
         if let provider = added.first(where: { $0.id == name }) {
             guard provider.enabled else { throw CLIError("\(provider.title) is off; turn it on in Settings › Agents") }
-            return (provider.kind, provider.id)
+            return try await checked(provider)
         }
         if let kind = AgentChatProvider(rawValue: name) {
-            if let provider = added.first(where: { $0.kind == kind && $0.enabled }) { return (kind, provider.id) }
+            if let provider = added.first(where: { $0.kind == kind && $0.enabled }) { return try await checked(provider) }
             throw CLIError("\(kind.name) isn't added; add it in Settings › Agents" + (choices.isEmpty ? "" : ", or use \(choices)"))
         }
         throw CLIError("no provider \(name)" + (choices.isEmpty ? "; add one in Settings › Agents" : "; use \(choices)"))

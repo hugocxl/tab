@@ -55,8 +55,10 @@ enum Panes {
             record = Sessions.record(session)
         case .agent(let name, let text):
             try checkStart(pane.start, client: client)
+            // Before the worktree, so a provider that can't start leaves none behind.
+            let (provider, id) = try await Agents.provider(name, sending: text != nil, model: pane.start.model,
+                                                           client: client)
             let project = try await agentProject(pane, client: client, target: target)
-            let (provider, id) = try await Agents.provider(name, sending: text != nil, client: client)
             providerID = id
             let snapshot = try await client.agentChat(.create(session: SessionId(), project: project, provider: provider,
                                                               options: pane.start.options))

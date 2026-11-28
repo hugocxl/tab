@@ -387,6 +387,11 @@ enum CLICommands {
                            words: 1 ... 1, flags: ["--only"]) { a in
                 manage(a, .agent(.stop(agent: a.word(0), only: a.flag("--only"))))
             },
+            CLICommandSpec("agent providers", [""],
+                           "The providers an agent can start on, with their sign-in, usage and models",
+                           json: true) { a in
+                manage(a, .agent(.providers))
+            },
         ],
         notes: """
         An agent is a conversation in one of Tab's agent panes, such as one that
@@ -412,6 +417,16 @@ enum CLICommands {
         agents started.
         list prints the columns id, name, state, parent, provider, project and
         title.
+
+        providers prints one line per provider the server has: id, kind, name,
+        status, account, usage and models. Pass its id to tab pane new agent
+        --provider and a model to --model, such as a second Claude account or
+        Antigravity. status is ready, off, signed out, not installed, needs
+        update, unchecked, error, or limit reached until the time its usage
+        resets; tab pane new agent with a message refuses a provider that is
+        off, signed out, missing or out of usage. usage lists each subscription
+        window as the percent used and when it resets. --json adds the signed-in
+        email, each window and every model with its reasoning efforts.
         """)
 
     static let activity = CLIGroup(

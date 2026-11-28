@@ -178,6 +178,8 @@ final class ArgumentTests: XCTestCase {
         // Stopping reaches the agents it started unless --only says otherwise.
         XCTAssertEqual(try action(["agent", "stop", "wispy-cedar"]), .agent(.stop(agent: "wispy-cedar", only: false)))
         XCTAssertEqual(try action(["agent", "stop", "abcd", "--only"]), .agent(.stop(agent: "abcd", only: true)))
+        XCTAssertEqual(try action(["agent", "providers", "--json"]), .agent(.providers))
+        assertRefused(["agent", "providers", "claude"])
     }
 
     func testNewAgentsChooseTheirModelEffortAccessAndWorktree() throws {

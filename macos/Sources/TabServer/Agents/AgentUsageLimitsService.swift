@@ -8,7 +8,7 @@ import TabProtocol
 /// and Grok's `x.ai/billing`. Nothing starts a conversation.
 actor AgentUsageLimitsService {
     /// The providers whose CLIs report limits.
-    static let providers: [AgentChatProvider] = [.claude, .codex, .antigravity, .openCode, .grok]
+    static let providers = AgentUsageLimits.reportingKinds
     /// How long a reading answers requests before the CLIs are asked again.
     static let freshness: TimeInterval = 60
 

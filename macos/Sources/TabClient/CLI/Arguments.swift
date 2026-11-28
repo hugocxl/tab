@@ -84,6 +84,8 @@ public enum CLIAgent: Hashable, Sendable {
     /// Stops the agent's turn and holds its queue, and unless `only`, those of every
     /// agent below it.
     case stop(agent: String, only: Bool)
+    /// The server's providers: sign-in, subscription usage and models, for `--provider`.
+    case providers
 }
 
 /// The server's simulators and emulators. A missing simulator means the only

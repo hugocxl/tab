@@ -481,6 +481,9 @@ final class SettingsTests: XCTestCase {
 
     func testAgentContextNamesComputersOnlyWhenThereAreSeveral() {
         XCTAssertFalse(AgentContext(place: .agentPane(agent: "a1")).text.contains("computers"))
+        // Agent panes learn where to find other providers; terminals' agents can't start Tab agents.
+        XCTAssertTrue(AgentContext(place: .agentPane(agent: "a1")).text.contains("tab agent providers"))
+        XCTAssertFalse(AgentContext(place: .terminal(session: "s1", name: nil)).text.contains("tab agent providers"))
         let alone = Infrastructure(computers: [.init(id: "seat", name: "MacBook Air", role: .seat)], receiver: "seat")
         XCTAssertFalse(AgentContext(place: .agentPane(agent: "a1"), infrastructure: alone).text.contains("computers"))
     }

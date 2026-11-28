@@ -212,6 +212,12 @@ public struct AgentContext: Hashable, Sendable {
         your turn instead of waiting on it. They get at most your access, and only the user approves their \
         requests. `tab agent list --children` lists them, and `tab agent stop <agent>` stops one and those it \
         started.
+
+        An agent can run on another provider or account than yours, such as Codex, Antigravity or a second \
+        Claude login. `tab agent providers` lists those the user added, with each one's sign-in, subscription \
+        usage and models; pass its id to `--provider` and a model to `--model`. Run it before choosing one, not \
+        on every start. Use the provider the user names and don't switch unasked. When the one they name is \
+        signed out or out of usage, say so and suggest one with room rather than picking it yourself.
         """
     }
 }

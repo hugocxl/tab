@@ -64,6 +64,9 @@ public struct AgentUsageWindow: Hashable, Codable, Sendable, Identifiable {
 
 /// One agent account's limits, or why they could not be read.
 public struct AgentUsageLimits: Hashable, Codable, Sendable {
+    /// The kinds whose CLIs report their subscription limits, in the order servers read them.
+    public static let reportingKinds: [AgentChatProvider] = [.claude, .codex, .antigravity, .openCode, .grok]
+
     public var provider: AgentChatProvider
     /// The provider configuration the limits belong to, such as `claude-work`, when the
     /// server has several of one kind. Nil from servers that read one per kind.
