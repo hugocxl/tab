@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.148.2 - 2026-11-28
+
+### Changed
+
+- Sidebar loading spinners are now gray, and subtask rows show colored agent, tool, and script icons.
+
 ## 0.148.1 - 2026-11-28
 
 ### Fixed

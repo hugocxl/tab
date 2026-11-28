@@ -322,7 +322,7 @@ final class SidebarListingTests: XCTestCase {
         func pane(_ count: Int) -> ActivityCardData.PaneRow {
             var row = ActivityCardData.PaneRow(id: PaneId(), icon: .agent(.claude), title: "Agent", detail: nil,
                                                status: .working, workingSince: nil, active: true, topic: nil)
-            row.subtasks = (0..<count).map { .init(id: "\($0)", title: "Task \($0)", shell: false, since: nil) }
+            row.subtasks = (0..<count).map { .init(id: "\($0)", icon: .agent(.claude), title: "Task \($0)", shell: false, since: nil) }
             return row
         }
         XCTAssertEqual(SubtaskRowView.rows(for: pane(4)).count, 4, "a count row only when it saves a line")

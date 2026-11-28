@@ -33,21 +33,25 @@ public struct AgentSubagent: Codable, Hashable, Sendable, Identifiable {
     /// of the kept window, which leave `steps` the same. Builds that predate it send nil;
     /// clients then follow `steps`.
     public var stepsRevision: UInt64?
+    /// The child conversation's provider, when a Tab agent started it; nil for
+    /// a provider's own subagents (which share their parent's provider).
+    public var provider: AgentProvider?
 
     public init(id: String, toolUseID: String? = nil, description: String, agentType: String? = nil,
                 background: Bool = false, status: Status = .running, activity: String? = nil,
                 toolUses: Int? = nil, tokens: Int? = nil, startedAt: Date? = nil, finishedAt: Date? = nil, steps: Int? = nil,
-                stepsRevision: UInt64? = nil) {
+                stepsRevision: UInt64? = nil, provider: AgentProvider? = nil) {
         self.id = id; self.toolUseID = toolUseID; self.description = description; self.agentType = agentType
         self.background = background; self.status = status; self.activity = activity
         self.toolUses = toolUses; self.tokens = tokens; self.startedAt = startedAt; self.finishedAt = finishedAt
         self.steps = steps
         self.stepsRevision = stepsRevision
+        self.provider = provider
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, toolUseID, description, agentType, background, status, activity, toolUses, tokens, startedAt, finishedAt, steps
-        case stepsRevision
+        case stepsRevision, provider
     }
 
     public init(from decoder: Decoder) throws {
@@ -66,6 +70,7 @@ public struct AgentSubagent: Codable, Hashable, Sendable, Identifiable {
         finishedAt = try c.decodeIfPresent(Date.self, forKey: .finishedAt)
         steps = try c.decodeIfPresent(Int.self, forKey: .steps)
         stepsRevision = try c.decodeIfPresent(UInt64.self, forKey: .stepsRevision)
+        provider = try c.decodeIfPresent(AgentProvider.self, forKey: .provider)
     }
 
     /// Wire bounds a snapshot's subagents stay within.

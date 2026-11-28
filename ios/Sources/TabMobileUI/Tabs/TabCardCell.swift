@@ -49,10 +49,6 @@ final class PaneStatusView: UIImageView {
     var showsIdle = false {
         didSet { if showsIdle != oldValue { apply() } }
     }
-    /// Draws the spinner in muted gray rather than the accent.
-    var grayWorking = false {
-        didSet { if grayWorking != oldValue { apply() } }
-    }
     var side = CardStyle.iconSide {
         didSet { if side != oldValue { apply() } }
     }
@@ -73,9 +69,8 @@ final class PaneStatusView: UIImageView {
     private func apply() {
         removeAllSymbolEffects()
         let (icon, color): (TabIcon?, UIColor) = switch status {
-        case .working, .progress: (nil, grayWorking ? .secondaryLabel : .tintColor)
+        case .working, .progress, .running: (nil, .secondaryLabel)
         case .background: (nil, .tertiaryLabel)
-        case .running: (nil, .secondaryLabel)
         case .blocked: (.exclamationCircleFill, .tintColor)
         case .done: (.circleCheckFill, .systemGreen)
         case .error: (.circleXFill, .systemRed)
@@ -199,8 +194,6 @@ final class PaneRowView: UIView {
         icon.layer.cornerRadius = side * 3 / 14
         status.side = side
         status.showsIdle = idleCircle
-        // The list's spinners stay gray beside its colored icons.
-        status.grayWorking = !isTitle
         status.status = row.status
         // A title keeps its status's room; a listed pane shows one only when busy.
         let showsStatus = isTitle || row.status != .idle || idleCircle

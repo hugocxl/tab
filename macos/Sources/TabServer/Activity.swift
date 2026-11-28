@@ -103,12 +103,36 @@ final class Activity: @unchecked Sendable {
     static func subtasks(_ snapshot: AgentChatSnapshot) -> [AgentSubtask]? {
         let running = (snapshot.subagents ?? []).filter { $0.status == .running }
         guard !running.isEmpty else { return nil }
+        let parentProvider = snapshot.provider.activityProvider
         return running.prefix(AgentSubtask.maxCount).map { subagent in
+            let shell = isShell(subagent)
             let title = subagent.description.trimmingCharacters(in: .whitespacesAndNewlines)
             return AgentSubtask(id: subagent.id, title: title.isEmpty ? subagent.agentType ?? "Agent" : title,
-                                shell: isShell(subagent),
-                                startedAt: subagent.startedAt.map { UInt64(max(0, $0.timeIntervalSince1970 * 1000)) })
+                                shell: shell,
+                                startedAt: subagent.startedAt.map { UInt64(max(0, $0.timeIntervalSince1970 * 1000)) },
+                                provider: shell ? nil : (subagent.provider ?? parentProvider),
+                                command: shell ? shellCommand(for: subagent, in: snapshot) : nil)
         }
+    }
+
+    /// The first line of a background shell's command, from its tool item's input.
+    private static func shellCommand(for subagent: AgentSubagent, in snapshot: AgentChatSnapshot) -> String? {
+        guard let toolUseID = subagent.toolUseID,
+              let input = snapshot.items.last(where: { $0.id == toolUseID })?.tool?.input,
+              !input.isEmpty else { return nil }
+        let raw: String
+        if let data = input.data(using: .utf8),
+           let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+           let command = (object["command"] ?? object["cmd"]) as? String {
+            raw = command
+        } else {
+            raw = input
+        }
+        let line = raw.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .first { !$0.isEmpty && !$0.hasPrefix("#") }
+        guard let line, !line.isEmpty else { return nil }
+        return String(line.prefix(240))
     }
 
     private func settle(_ session: SessionId, token: UUID) {

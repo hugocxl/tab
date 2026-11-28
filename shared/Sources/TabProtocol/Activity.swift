@@ -139,15 +139,23 @@ public struct AgentSubtask: Hashable, Codable, Sendable, Identifiable {
     public var shell: Bool
     /// Unix milliseconds when it started, when the provider says.
     public var startedAt: UInt64?
+    /// The agent's provider when this subtask is an agent. Older servers leave it out.
+    public var provider: AgentProvider?
+    /// The shell command line when this subtask is a shell, so the sidebar can
+    /// pick a matching command or script icon. Older servers leave it out.
+    public var command: String?
 
-    public init(id: String, title: String, shell: Bool = false, startedAt: UInt64? = nil) {
+    public init(id: String, title: String, shell: Bool = false, startedAt: UInt64? = nil,
+                provider: AgentProvider? = nil, command: String? = nil) {
         self.id = id
         self.title = title
         self.shell = shell
         self.startedAt = startedAt
+        self.provider = provider
+        self.command = command
     }
 
-    private enum CodingKeys: String, CodingKey { case id, title, shell, startedAt }
+    private enum CodingKeys: String, CodingKey { case id, title, shell, startedAt, provider, command }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -155,6 +163,8 @@ public struct AgentSubtask: Hashable, Codable, Sendable, Identifiable {
         title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
         shell = try c.decodeIfPresent(Bool.self, forKey: .shell) ?? false
         startedAt = try c.decodeIfPresent(UInt64.self, forKey: .startedAt)
+        provider = try c.decodeIfPresent(AgentProvider.self, forKey: .provider)
+        command = try c.decodeIfPresent(String.self, forKey: .command)
     }
 
     /// How many a chat's activity lists; the sidebar shows fewer.

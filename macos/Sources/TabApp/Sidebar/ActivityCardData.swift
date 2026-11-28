@@ -111,6 +111,7 @@ struct ActivityCardData: Equatable {
         /// An agent or shell the pane's agent started that still runs.
         struct Subtask: Equatable {
             var id: String
+            var icon: Icon
             var title: String
             var shell: Bool
             var since: Date?
@@ -324,9 +325,17 @@ struct ActivityCardData: Equatable {
         default: started = nil
         }
         let since = started.map { Date(timeIntervalSince1970: TimeInterval($0) / 1000) }
-        let subtasks = (agent?.subtasks ?? []).map { task in
-            PaneRow.Subtask(id: task.id, title: task.title, shell: task.shell,
-                            since: task.startedAt.map { Date(timeIntervalSince1970: TimeInterval($0) / 1000) })
+        let subtasks = (agent?.subtasks ?? []).map { task -> PaneRow.Subtask in
+            let subtaskIcon: PaneRow.Icon
+            if task.shell {
+                subtaskIcon = TerminalCommandIcon.subtaskIcon(command: task.command, title: task.title)
+            } else if let provider = task.provider ?? agent?.provider {
+                subtaskIcon = .agent(provider)
+            } else {
+                subtaskIcon = .kind(.agent)
+            }
+            return PaneRow.Subtask(id: task.id, icon: subtaskIcon, title: task.title, shell: task.shell,
+                                   since: task.startedAt.map { Date(timeIntervalSince1970: TimeInterval($0) / 1000) })
         }
         return PaneRow(id: pane.id, icon: icon, title: text, detail: detail, status: status, workingSince: since, active: active,
                        topic: topic, subtasks: notifications.showsInTabs(.working) ? subtasks : [])

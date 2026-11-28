@@ -188,7 +188,8 @@ extension AgentSessions {
                                  description: task ?? SessionName.of(child.snapshot.session), agentType: Self.tabAgentType,
                                  background: true, status: status,
                                  activity: child.snapshot.status == .waiting ? "Waiting for the user" : nil,
-                                 startedAt: started, finishedAt: status == .running ? nil : child.snapshot.turns?.last?.completedAt)
+                                 startedAt: started, finishedAt: status == .running ? nil : child.snapshot.turns?.last?.completedAt,
+                                 provider: child.snapshot.provider.activityProvider)
         }.sorted { ($0.startedAt ?? .distantPast) < ($1.startedAt ?? .distantPast) }
         let own = snapshot.subagents ?? []
         snapshot.subagents = own + listed.prefix(max(0, AgentSubagent.maxCount - own.count))

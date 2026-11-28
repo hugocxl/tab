@@ -487,8 +487,6 @@ final class PaneRowView: ThemedView {
         icon.imageScaling = .scaleProportionallyUpOrDown
         status.side = iconSide
         status.showsIdle = idleCircle
-        // The list's spinners stay gray beside its colored icons.
-        status.grayWorking = !isTitle
         status.status = row.status
         icon.isHidden = !showsIcon
         for view in [status, icon, titleLabel, detailLabel, elapsedLabel] as [NSView] {
@@ -513,18 +511,7 @@ final class PaneRowView: ThemedView {
         titleLabel.textColor = isTitle ? theme.fg : theme.fgMuted
         detailLabel.textColor = theme.fgDim
         elapsedLabel.textColor = theme.fgDim
-        let image: NSImage?
-        switch row.icon {
-        case .agent(let provider): image = AgentLogo.image(for: provider, lightBackground: theme.isLight)
-        // Command brands share their file-type hue; UI tools keep the terminal tint.
-        case .command(let command): image = command.image(size: iconSide, hue: command.signatureHue ?? .green, theme: theme)
-        case .file(let name): image = FileIcon.image(for: name, theme: theme, size: iconSide)
-        case .image(let favicon): image = favicon
-        // Each kind's mark carries its own hue: terminal green, agent indigo,
-        // browser blue, simulator purple.
-        case .kind(let kind): image = kind.glyph.image(size: iconSide, theme: theme)
-        }
-        icon.image = image
+        icon.image = row.icon.image(size: iconSide, theme: theme)
         // Template glyphs take the tint.
         icon.contentTintColor = theme.fgMuted
         status.refresh()
@@ -603,7 +590,7 @@ final class SubtaskRowView: ThemedView {
         }
     }
 
-    private let kind: AppIcon
+    private let iconKind: ActivityCardData.PaneRow.Icon?
     private let icon = NSImageView()
     private let spinner: ActivityGlyph?
     private let titleLabel: NSTextField
@@ -621,18 +608,17 @@ final class SubtaskRowView: ThemedView {
         // A count row only when it saves a line.
         let shown = tasks.count > maxShown + 1 ? Array(tasks.prefix(maxShown)) : tasks
         var rows = shown.map {
-            SubtaskRowView(pane: pane.id, kind: $0.shell ? PaneKind.terminal.glyph : PaneKind.agent.glyph,
-                           title: $0.title, since: $0.since, spins: true)
+            SubtaskRowView(pane: pane.id, iconKind: $0.icon, title: $0.title, since: $0.since, spins: true)
         }
         let rest = tasks.count - shown.count
-        if rest > 0 { rows.append(SubtaskRowView(pane: pane.id, kind: .ellipsis, title: "\(rest) more running", since: nil, spins: false)) }
+        if rest > 0 { rows.append(SubtaskRowView(pane: pane.id, iconKind: nil, title: "\(rest) more running", since: nil, spins: false)) }
         rows.dropLast().forEach { $0.continues = true }
         return rows
     }
 
-    private init(pane: PaneId, kind: AppIcon, title: String, since: Date?, spins: Bool) {
+    private init(pane: PaneId, iconKind: ActivityCardData.PaneRow.Icon?, title: String, since: Date?, spins: Bool) {
         self.pane = pane
-        self.kind = kind
+        self.iconKind = iconKind
         self.since = since
         titleLabel = makeLabel(title, font: AppFont.system(11))
         titleLabel.lineBreakMode = .byTruncatingTail
@@ -648,6 +634,13 @@ final class SubtaskRowView: ThemedView {
         elbow.actions = ["path": NSNull(), "strokeColor": NSNull()]
         layer?.addSublayer(elbow)
         icon.imageScaling = .scaleProportionallyUpOrDown
+        if case .image = iconKind {
+            let side = SidebarCardView.iconSide - 2
+            icon.wantsLayer = true
+            icon.layer?.cornerRadius = side * 3 / 14
+            icon.layer?.cornerCurve = .continuous
+            icon.layer?.masksToBounds = true
+        }
         for view in [icon, spinner, titleLabel, elapsedLabel].compactMap({ $0 }) as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = true
             addSubview(view)
@@ -664,7 +657,13 @@ final class SubtaskRowView: ThemedView {
         titleLabel.textColor = theme.fgDim
         elapsedLabel.textColor = theme.fgDim
         spinner?.style = .ticks(theme.fgDim)
-        icon.image = kind.image(size: SidebarCardView.iconSide - 2, color: theme.fgDim)
+        let side = SidebarCardView.iconSide - 2
+        if let iconKind {
+            icon.image = iconKind.image(size: side, theme: theme)
+            icon.contentTintColor = theme.fgMuted
+        } else {
+            icon.image = AppIcon.ellipsis.image(size: side, color: theme.fgDim)
+        }
         fill.backgroundColor = theme.fg(alpha: 0.05).cgColor
         elbow.strokeColor = theme.fg(alpha: 0.18).cgColor
     }
@@ -737,9 +736,9 @@ final class CardDivider: ThemedView {
     }
 }
 
-/// Tab Icons for waiting, done, failed, paused and idle states, a native
-/// spinner while working, a muted one while a command runs, and a dim one
-/// while only background shells run.
+/// Tab Icons for waiting, done, failed, paused and idle states, a muted gray
+/// spinner while working or running a command, and a dim one while only
+/// background shells run.
 /// The idle circle appears only with `showsIdle`.
 final class PaneStatusView: NSView {
     var status: ActivityCardData.PaneRow.Status = .idle {
@@ -747,10 +746,6 @@ final class PaneStatusView: NSView {
     }
     var showsIdle = false {
         didSet { if showsIdle != oldValue { refresh() } }
-    }
-    /// Draws the spinner in muted gray rather than the accent.
-    var grayWorking = false {
-        didSet { if grayWorking != oldValue { refresh() } }
     }
     var side = SidebarCardView.iconSide {
         didSet { if side != oldValue { refresh() } }
@@ -786,9 +781,8 @@ final class PaneStatusView: NSView {
         default: spins = false
         }
         switch status {
-        case .working, .progress: (icon, color) = (nil, grayWorking ? theme.fgMuted : theme.accent)
+        case .working, .progress, .running: (icon, color) = (nil, theme.fgMuted)
         case .background: (icon, color) = (nil, theme.fgDim)
-        case .running: (icon, color) = (nil, theme.fgMuted)
         case .blocked: (icon, color) = (.circleAlert, theme.accent)
         case .done: (icon, color) = (.circleCheck, theme.success)
         case .error: (icon, color) = (.circleX, theme.danger)
@@ -1019,7 +1013,7 @@ final class CreatingRow: HoverView {
         }
         if headerIcon?.image?.isTemplate ?? false { headerIcon?.contentTintColor = theme.fgDim }
         titleLabel.textColor = theme.fg
-        spinner.style = .ticks(theme.accent)
+        spinner.style = .ticks(theme.fgMuted)
         detailIcon.image = AppIcon.gitBranch.image(size: SidebarCardView.iconSide, color: theme.fgDim)
         detailLabel.textColor = theme.fgMuted
         needsDisplay = true
@@ -1068,6 +1062,22 @@ final class CreatingRow: HoverView {
 
     override func mouseDown(with event: NSEvent) {
         onClick?()
+    }
+}
+
+private extension ActivityCardData.PaneRow.Icon {
+    @MainActor
+    func image(size: CGFloat, theme: AppTheme) -> NSImage? {
+        switch self {
+        case .agent(let provider): AgentLogo.image(for: provider, lightBackground: theme.isLight)
+        // Command brands share their file-type hue; UI tools keep the terminal tint.
+        case .command(let command): command.image(size: size, hue: command.signatureHue ?? .green, theme: theme)
+        case .file(let name): FileIcon.image(for: name, theme: theme, size: size)
+        case .image(let favicon): favicon
+        // Each kind's mark carries its own hue: terminal green, agent indigo,
+        // browser blue, simulator purple.
+        case .kind(let kind): kind.glyph.image(size: size, theme: theme)
+        }
     }
 }
 

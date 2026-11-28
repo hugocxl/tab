@@ -176,6 +176,33 @@ final class NativeAgentActivityTests: XCTestCase {
         XCTAssertNil(activity.snapshot().agents.first?.subtasks)
     }
 
+    func testSubtasksCarryProviderAndShellCommand() throws {
+        let activity = Activity()
+        var chat = claudeChat(status: .working)
+        let bashTool = AgentChatItem(id: "tool-1", kind: .tool, text: "Bash",
+                                     tool: AgentToolActivity(name: "Bash", category: .command,
+                                                             input: #"{"command":"cd website && scripts/validate.sh","description":"Validate"}"#,
+                                                             presentation: .command))
+        chat.items.append(bashTool)
+        chat.subagents = [
+            AgentSubagent(id: "s", toolUseID: "tool-1", description: "Validate", agentType: "Shell", background: true),
+            agent("own"),
+            AgentSubagent(id: "child", description: "Audit iOS", agentType: "Tab agent", background: true, provider: .codex),
+        ]
+        activity.updateChat(chat)
+        let subtasks = try XCTUnwrap(activity.snapshot().agents.first?.subtasks)
+        XCTAssertEqual(subtasks.count, 3)
+        XCTAssertEqual(subtasks[0].shell, true)
+        XCTAssertNil(subtasks[0].provider)
+        XCTAssertEqual(subtasks[0].command, "cd website && scripts/validate.sh")
+        XCTAssertEqual(subtasks[1].shell, false)
+        XCTAssertEqual(subtasks[1].provider, .claude)
+        XCTAssertNil(subtasks[1].command)
+        XCTAssertEqual(subtasks[2].shell, false)
+        XCTAssertEqual(subtasks[2].provider, .codex)
+        XCTAssertNil(subtasks[2].command)
+    }
+
     func testActivityFromAnOlderServerDecodesWithoutSubtasks() throws {
         let current = AgentActivity(session: SessionId(), project: ProjectId(), provider: .claude, state: .working,
                                     subtasks: [AgentSubtask(id: "x", title: "Build")])

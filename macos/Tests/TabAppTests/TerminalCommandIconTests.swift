@@ -47,6 +47,36 @@ final class TerminalCommandIconTests: XCTestCase {
         }
     }
 
+    @MainActor
+    func testSubtaskCommandLineIcons() {
+        // Direct tools and runtimes
+        XCTAssertEqual(TerminalCommandIcon.subtaskIcon(command: "swift test --filter TabCoreTests", title: "Run tests"), .command(.swift))
+        XCTAssertEqual(TerminalCommandIcon.subtaskIcon(command: "npm run dev", title: "Dev server"), .command(.npm))
+        XCTAssertEqual(TerminalCommandIcon.subtaskIcon(command: "python3 train.py", title: "Train"), .command(.python))
+        XCTAssertEqual(TerminalCommandIcon.subtaskIcon(command: "cargo build --release", title: "Build"), .command(.rust))
+        XCTAssertEqual(TerminalCommandIcon.subtaskIcon(command: "docker compose up", title: "Services"), .command(.docker))
+
+        // Scripts by file extension
+        XCTAssertEqual(TerminalCommandIcon.subtaskIcon(command: "scripts/validate.sh", title: "Run full validation"), .file("validate.sh"))
+        XCTAssertEqual(TerminalCommandIcon.subtaskIcon(command: "./deploy.py --dry-run", title: "Deploy"), .file("deploy.py"))
+        XCTAssertEqual(TerminalCommandIcon.subtaskIcon(command: "./tools/check.ts", title: "Check"), .file("check.ts"))
+
+        // Chained commands, env assignments, wrappers, and `sh -c`
+        XCTAssertEqual(TerminalCommandIcon.subtaskIcon(command: "cd website && npm run build:site", title: "Build site"), .command(.npm))
+        XCTAssertEqual(TerminalCommandIcon.subtaskIcon(command: "NODE_ENV=production node server.js", title: "Server"), .command(.node))
+        XCTAssertEqual(TerminalCommandIcon.subtaskIcon(command: "nohup env FOO=1 swift test &", title: "Tests"), .command(.swift))
+        XCTAssertEqual(TerminalCommandIcon.subtaskIcon(command: #"bash -c "cd macos && scripts/validate.sh""#, title: "Validate"), .file("validate.sh"))
+
+        // Agent CLIs invoked in a shell
+        XCTAssertEqual(TerminalCommandIcon.subtaskIcon(command: "claude -p 'audit'", title: "Audit"), .agent(.claude))
+        XCTAssertEqual(TerminalCommandIcon.subtaskIcon(command: "codex exec 'fix'", title: "Fix"), .agent(.codex))
+
+        // Fallback to title when server omits command, else generic green terminal
+        XCTAssertEqual(TerminalCommandIcon.subtaskIcon(command: nil, title: "npm run dev"), .command(.npm))
+        XCTAssertEqual(TerminalCommandIcon.subtaskIcon(command: nil, title: "Run full validation for shared"), .kind(.terminal))
+        XCTAssertEqual(TerminalCommandIcon.subtaskIcon(command: "./custom-binary --flag", title: "Run binary"), .kind(.terminal))
+    }
+
     private func icon(_ name: String) -> AppIcon {
         TerminalCommandIcon.icon(for: ForegroundProcess(name: name, isShell: false))
     }
