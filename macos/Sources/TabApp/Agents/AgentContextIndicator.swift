@@ -49,7 +49,8 @@ final class AgentContextIndicator: AgentComposerButton {
 
     override func draw(_ dirtyRect: NSRect) {
         drawControlFill(chatTheme)
-        let center = NSPoint(x: bounds.midX, y: bounds.midY)
+        // In a split capsule the ring sits off the rounded end, centered in the circle it bounds.
+        let center = NSPoint(x: segment == .trailing ? bounds.maxX - bounds.height / 2 : bounds.midX, y: bounds.midY)
         let radius: CGFloat = 8
         guard let fractionUsed else {
             // Capacity unknown: a dashed ring instead of an empty meter.

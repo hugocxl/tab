@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.146.1 - 2026-11-28
+
+### Changed
+
+- The agent model picker shows the provider's logo and joins the context meter in one split capsule.
+
 ## 0.146.0 - 2026-11-28
 
 ### Changed

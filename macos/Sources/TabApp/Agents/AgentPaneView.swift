@@ -523,12 +523,15 @@ final class AgentPaneView: ThemedView {
         let action = NSRect(x: width - padding - size, y: top, width: size, height: size)
         for button in [send, stop, microphone] { button.frame = action }
         var right = action.minX - gap
-        // Usage stays out of the way until the context window is half full.
+        // Usage stays out of the way until the context window is half full, then joins
+        // the model picker as the trailing side of one split capsule.
         contextIndicator.isHidden = (contextIndicator.fractionUsed ?? 0) < 0.5
+        modelPicker.segment = contextIndicator.isHidden ? .whole : .leading
+        contextIndicator.segment = .trailing
         if !contextIndicator.isHidden {
-            right -= size
-            contextIndicator.frame = NSRect(x: right, y: top, width: size, height: size)
-            right -= gap
+            let usageWidth = size + 4
+            right -= usageWidth
+            contextIndicator.frame = NSRect(x: right, y: top, width: usageWidth, height: size)
         }
         var x = padding
         attach.frame = NSRect(x: x, y: top, width: size, height: size)

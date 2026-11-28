@@ -268,10 +268,33 @@ class AgentComposerButton: NSButton {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    /// Which part of a capsule the control draws: the whole of it, or one side of a
+    /// capsule split between two adjacent controls that read as one.
+    enum Segment { case whole, leading, trailing }
+    var segment: Segment = .whole { didSet { if segment != oldValue { needsDisplay = true } } }
+
     override var focusRingMaskBounds: NSRect { bounds }
-    override func drawFocusRingMask() {
+    override func drawFocusRingMask() { controlShape().fill() }
+
+    /// The control's capsule, or its side of a split capsule.
+    func controlShape() -> NSBezierPath {
         let radius = bounds.height / 2
-        NSBezierPath(roundedRect: bounds, xRadius: radius, yRadius: radius).fill()
+        guard segment != .whole else { return NSBezierPath(roundedRect: bounds, xRadius: radius, yRadius: radius) }
+        let path = NSBezierPath()
+        let (minX, maxX, minY, maxY) = (bounds.minX, bounds.maxX, bounds.minY, bounds.maxY)
+        if segment == .leading {
+            path.move(to: NSPoint(x: maxX, y: minY))
+            path.line(to: NSPoint(x: maxX, y: maxY))
+            path.line(to: NSPoint(x: minX + radius, y: maxY))
+            path.appendArc(withCenter: NSPoint(x: minX + radius, y: bounds.midY), radius: radius, startAngle: 90, endAngle: 270)
+        } else {
+            path.move(to: NSPoint(x: minX, y: minY))
+            path.line(to: NSPoint(x: maxX - radius, y: minY))
+            path.appendArc(withCenter: NSPoint(x: maxX - radius, y: bounds.midY), radius: radius, startAngle: 270, endAngle: 90)
+            path.line(to: NSPoint(x: minX, y: maxY))
+        }
+        path.close()
+        return path
     }
 
     override func updateTrackingAreas() {
@@ -292,8 +315,12 @@ class AgentComposerButton: NSButton {
         let rest: CGFloat = tint == nil ? 0.06 : 0.14
         let alpha = rest + (interactive ? (isHighlighted ? 0.08 : 0.04) : 0)
         (tint ?? theme.fg).withAlphaComponent(alpha).setFill()
-        let radius = bounds.height / 2
-        NSBezierPath(roundedRect: bounds, xRadius: radius, yRadius: radius).fill()
+        controlShape().fill()
+        // A hairline divides a split capsule's leading side from its trailing one.
+        guard segment == .leading else { return }
+        theme.fg.withAlphaComponent(0.14).setFill()
+        let scale = window?.backingScaleFactor ?? 2
+        NSRect(x: bounds.maxX - 1 / scale, y: bounds.midY - 8, width: 1 / scale, height: 16).fill()
     }
 }
 
@@ -385,8 +412,36 @@ final class AgentModelPicker: AgentComposerButton {
     override var isEnabled: Bool { didSet { needsDisplay = true } }
 
     var labelText: String {
-        let effortTitle = effort.labelText
-        return effort.isEnabled && effortTitle != "Off" ? "\(model.labelText) · \(effortTitle)" : model.labelText
+        guard let effortTitle = effortText else { return model.labelText }
+        return "\(model.labelText) · \(effortTitle)"
+    }
+
+    /// The effort shown after the model, lowercased and quieter, such as "Opus 5.5 medium".
+    private var effortText: String? {
+        let title = effort.labelText
+        return effort.isEnabled && title != "Off" ? title : nil
+    }
+
+    private static let logoSide: CGFloat = 16
+    private static var modelFont: NSFont { AppFont.system(AgentComposerMetrics.font.pointSize, weight: .medium) }
+
+    /// The selected provider's mark, before the model name.
+    private var logo: NSImage? {
+        model.providerLogo.flatMap { AgentLogo.image(for: $0, size: Self.logoSide, theme: chatTheme) }
+    }
+
+    private var textStart: CGFloat { model.providerLogo == nil ? 12 : 10 + Self.logoSide + 6 }
+
+    private func label(color: NSColor) -> NSAttributedString {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byTruncatingTail
+        let text = NSMutableAttributedString(string: model.labelText, attributes: [
+            .font: Self.modelFont, .foregroundColor: color, .paragraphStyle: paragraph])
+        if let effortText {
+            text.append(NSAttributedString(string: "  " + effortText.lowercased(), attributes: [
+                .font: AgentComposerMetrics.font, .foregroundColor: chatTheme.fgDim, .paragraphStyle: paragraph]))
+        }
+        return text
     }
 
     /// Call when either pop-up's title or enabled state changes.
@@ -399,21 +454,24 @@ final class AgentModelPicker: AgentComposerButton {
     }
 
     override var intrinsicContentSize: NSSize {
-        let width = (labelText as NSString).size(withAttributes: [.font: AgentComposerMetrics.font]).width
-        return NSSize(width: ceil(width) + 34, height: AgentComposerMetrics.controlHeight)
+        let width = label(color: chatTheme.fgMuted).size().width
+        return NSSize(width: textStart + ceil(width) + 26, height: AgentComposerMetrics.controlHeight)
     }
 
     override func draw(_ dirtyRect: NSRect) {
         drawControlFill(chatTheme)
         let color = isEnabled ? chatTheme.fgMuted : chatTheme.fgDim
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.lineBreakMode = .byTruncatingTail
-        let attributes: [NSAttributedString.Key: Any] = [.font: AgentComposerMetrics.font, .foregroundColor: color, .paragraphStyle: paragraph]
-        let textHeight = ceil((labelText as NSString).size(withAttributes: attributes).height)
-        (labelText as NSString).draw(in: NSRect(x: 12, y: floor((bounds.height - textHeight) / 2), width: max(0, bounds.width - 34), height: textHeight),
-                                     withAttributes: attributes)
-        AppIcon.chevronDown.image(size: 9, color: color)?.draw(
-            in: NSRect(x: bounds.width - 20, y: floor(bounds.midY - 4.5), width: 9, height: 9),
+        if let logo {
+            logo.draw(in: NSRect(x: 10, y: floor((bounds.height - Self.logoSide) / 2), width: Self.logoSide, height: Self.logoSide),
+                      from: .zero, operation: .sourceOver, fraction: isEnabled ? 1 : 0.5,
+                      respectFlipped: true, hints: [.interpolation: NSImageInterpolation.high])
+        }
+        let text = label(color: color)
+        let textHeight = ceil(text.size().height)
+        text.draw(in: NSRect(x: textStart, y: floor((bounds.height - textHeight) / 2),
+                             width: max(0, bounds.width - textStart - 26), height: textHeight))
+        AppIcon.chevronDown.image(size: 9, color: chatTheme.fgDim)?.draw(
+            in: NSRect(x: bounds.width - 21, y: floor(bounds.midY - 4.5), width: 9, height: 9),
             from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
     }
 

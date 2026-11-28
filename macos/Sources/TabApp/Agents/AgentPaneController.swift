@@ -2691,6 +2691,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         surface.effort.icon = .brain
         surface.effort.defaultValueTitle = selectedModelDescriptor?.defaultReasoningEffort?.title
         surface.effort.toolTip = "Reasoning effort for the next message"
+        surface.modelPicker.refresh()
     }
 
     func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
