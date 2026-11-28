@@ -148,6 +148,8 @@ class AgentTextPopUp: NSPopUpButton {
     var icon: AppIcon = .cpu { didSet { needsDisplay = true } }
     var providerLogo: AgentProvider? { didSet { refreshLogos(); needsDisplay = true } }
     var menuLogos: [Int: AgentProviderConfig] = [:] { didSet { refreshLogos() } }
+    /// The selected account, whose accent color marks its logo in the model picker.
+    var providerConfig: AgentProviderConfig?
     private var brandImage: NSImage?
 
     private func refreshLogos() {
@@ -425,9 +427,14 @@ final class AgentModelPicker: AgentComposerButton {
     private static let logoSide: CGFloat = 16
     private static var modelFont: NSFont { AppFont.system(AgentComposerMetrics.font.pointSize, weight: .medium) }
 
-    /// The selected provider's mark, before the model name.
+    /// The selected provider's mark before the model name, with its account's accent
+    /// dot when it has one, as in the menu, so the account in use is clear.
     private var logo: NSImage? {
-        model.providerLogo.flatMap { AgentLogo.image(for: $0, size: Self.logoSide, theme: chatTheme) }
+        guard let provider = model.providerLogo else { return nil }
+        if let config = model.providerConfig, config.kind.activityProvider == provider, config.accentColor != nil {
+            return AgentLogo.image(for: config, lightBackground: chatTheme.palette.isLight)
+        }
+        return AgentLogo.image(for: provider, size: Self.logoSide, theme: chatTheme)
     }
 
     private var textStart: CGFloat { model.providerLogo == nil ? 12 : 10 + Self.logoSide + 6 }

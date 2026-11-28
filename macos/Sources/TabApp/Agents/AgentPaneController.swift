@@ -2669,6 +2669,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         surface.model.menu = menu
         surface.model.menuLogos = menuLogos
         surface.model.providerLogo = (menuProviders.isEmpty && providersLoaded) ? nil : selection.provider.activityProvider
+        surface.model.providerConfig = providerConfig(selection.providerKey, kind: selection.provider)
         surface.model.select(nil)
         surface.model.displayedTitle = (menuProviders.isEmpty && providersLoaded) ? "No Provider" : modelTitle(displayedSelection)
         surface.model.icon = selection.provider == .claude ? .sparkles : .cpu

@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.146.2 - 2026-11-28
+
+### Changed
+
+- The agent model picker marks the provider's logo with its account color.
+
 ## 0.146.1 - 2026-11-28
 
 ### Changed
