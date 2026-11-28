@@ -15,9 +15,9 @@ public enum PaletteLayout {
     public static let rowRadius: CGFloat = 10
     public static let tile: CGFloat = 20
     public static let tileRadius: CGFloat = 5
-    /// The strip the floating footer capsule sits in; rows scroll under it.
+    /// The strip the floating footer chips sit in; rows scroll under it.
     public static let footer: CGFloat = 52
-    public static let capsule: CGFloat = 36
+    public static let capsule: CGFloat = 28
     public static let status: CGFloat = 96
     public static let listInset: CGFloat = 6
     public static let searchFont: CGFloat = 18

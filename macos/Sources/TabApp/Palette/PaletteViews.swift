@@ -289,7 +289,7 @@ final class PaletteSectionView: NSView {
 
 /// A footer button: a label and its keycaps.
 final class FooterButton: HoverView {
-    let label = makeLabel("", font: AppFont.system(13, weight: .medium))
+    let label = makeLabel("", font: AppFont.system(12, weight: .medium))
     let caps = KeycapsView()
     var action: (() -> Void)?
     var isEnabled = true { didSet { themeDidChange() } }
@@ -306,7 +306,7 @@ final class FooterButton: HoverView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     override var intrinsicContentSize: NSSize {
-        NSSize(width: 12 + label.textWidth + 8 + caps.intrinsicContentSize.width + 6, height: 28)
+        NSSize(width: 10 + label.textWidth + 8 + caps.intrinsicContentSize.width + 6, height: PaletteLayout.capsule)
     }
 
     override func themeDidChange() {
@@ -316,7 +316,7 @@ final class FooterButton: HoverView {
 
     override func draw(_ dirtyRect: NSRect) {
         guard isEnabled, isHovered else { return }
-        theme.fg(alpha: 0.07).setFill()
+        theme.fg(alpha: 0.05).setFill()
         NSBezierPath(roundedRect: bounds, xRadius: bounds.height / 2, yRadius: bounds.height / 2).fill()
     }
 
@@ -324,9 +324,9 @@ final class FooterButton: HoverView {
         super.layout()
         let width = label.textWidth
         let height = label.intrinsicContentSize.height
-        label.frame = NSRect(x: 12, y: ((bounds.height - height) / 2).rounded(), width: width, height: height)
+        label.frame = NSRect(x: 10, y: ((bounds.height - height) / 2).rounded(), width: width, height: height)
         let capsSize = caps.intrinsicContentSize
-        caps.frame = NSRect(x: 12 + width + 8, y: (bounds.height - capsSize.height) / 2, width: capsSize.width, height: capsSize.height)
+        caps.frame = NSRect(x: 10 + width + 8, y: (bounds.height - capsSize.height) / 2, width: capsSize.width, height: capsSize.height)
     }
 
     override func mouseDown(with event: NSEvent) {}
@@ -338,39 +338,64 @@ final class FooterButton: HoverView {
 
 /// The back chip on pushed pages: ‹ and the page's name.
 final class BackChip: HoverView {
-    var title = "" { didSet { label.stringValue = title; invalidateIntrinsicContentSize(); needsLayout = true } }
+    var title = "" {
+        didSet {
+            label.stringValue = title
+            setAccessibilityLabel(title)
+            invalidateIntrinsicContentSize()
+            needsLayout = true
+        }
+    }
     var action: (() -> Void)?
+    private let glass = GlassView(style: .paletteChip)
     private let label = makeLabel("", font: AppFont.system(12, weight: .medium))
     private let chevron = NSImageView()
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.cornerRadius = PaletteLayout.capsule / 2
+        layer?.cornerCurve = .continuous
+        layer?.borderWidth = Metrics.border
         chevron.image = AppIcon.chevronLeft.image(size: 12)
-        label.translatesAutoresizingMaskIntoConstraints = true
-        addSubview(chevron)
-        addSubview(label)
+        for view in [glass, chevron, label] as [NSView] {
+            view.translatesAutoresizingMaskIntoConstraints = true
+            addSubview(view)
+        }
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    override var intrinsicContentSize: NSSize { NSSize(width: 8 + 12 + 4 + label.textWidth + 8, height: 26) }
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: 10 + 12 + 4 + label.textWidth + 12, height: PaletteLayout.capsule)
+    }
+
+    override var mouseDownCanMoveWindow: Bool { false }
+    override var wantsUpdateLayer: Bool { true }
+
+    override func updateLayer() {
+        layer?.backgroundColor = theme.fg(alpha: isHovered ? 0.08 : 0.03).cgColor
+        layer?.borderColor = theme.fg(alpha: 0.08).cgColor
+    }
+
+    override func hoverDidChange() { needsDisplay = true }
 
     override func themeDidChange() {
-        label.textColor = theme.fgMuted
+        glass.appearance = theme.nsAppearance
+        label.textColor = theme.fg
         chevron.contentTintColor = theme.fgMuted
         needsDisplay = true
     }
 
-    override func draw(_ dirtyRect: NSRect) {
-        theme.fg(alpha: isHovered ? 0.12 : 0.08).setFill()
-        NSBezierPath(roundedRect: bounds, xRadius: Metrics.radiusMedium, yRadius: Metrics.radiusMedium).fill()
-    }
-
     override func layout() {
         super.layout()
-        chevron.frame = NSRect(x: 8, y: (bounds.height - 12) / 2, width: 12, height: 12)
+        glass.frame = bounds
+        let middle = bounds.height / 2
+        chevron.frame = NSRect(x: 10, y: middle - 6, width: 12, height: 12)
         let height = label.intrinsicContentSize.height
-        label.frame = NSRect(x: 24, y: ((bounds.height - height) / 2).rounded(), width: label.textWidth, height: height)
+        label.frame = NSRect(x: 26, y: (middle - height / 2).rounded(), width: label.textWidth, height: height)
     }
 
     override func mouseDown(with event: NSEvent) {}
@@ -385,6 +410,7 @@ final class AccessoryPill: HoverView {
     let id: String
     var active: Bool { didSet { needsDisplay = true; themeDidChange() } }
     var action: (() -> Void)?
+    private let glass = GlassView(style: .paletteChip)
     private let label: NSTextField
 
     init(id: String, title: String, active: Bool) {
@@ -392,39 +418,49 @@ final class AccessoryPill: HoverView {
         self.active = active
         label = makeLabel(title, font: AppFont.system(12, weight: .medium))
         super.init(frame: .zero)
-        label.translatesAutoresizingMaskIntoConstraints = true
-        addSubview(label)
+        wantsLayer = true
+        layer?.cornerRadius = PaletteLayout.capsule / 2
+        layer?.cornerCurve = .continuous
+        layer?.borderWidth = Metrics.border
+        for view in [glass, label] as [NSView] {
+            view.translatesAutoresizingMaskIntoConstraints = true
+            addSubview(view)
+        }
         toolTip = title
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    override var intrinsicContentSize: NSSize { NSSize(width: label.textWidth + 16, height: 24) }
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: max(PaletteLayout.capsule, label.textWidth + 20), height: PaletteLayout.capsule)
+    }
+
+    override var mouseDownCanMoveWindow: Bool { false }
+    override var wantsUpdateLayer: Bool { true }
+
+    override func updateLayer() {
+        if active {
+            layer?.backgroundColor = theme.accentSoft.cgColor
+            layer?.borderColor = theme.accent.withAlphaComponent(0.35).cgColor
+        } else {
+            layer?.backgroundColor = theme.fg(alpha: isHovered ? 0.08 : 0.03).cgColor
+            layer?.borderColor = theme.fg(alpha: 0.08).cgColor
+        }
+    }
+
+    override func hoverDidChange() { needsDisplay = true }
 
     override func themeDidChange() {
+        glass.appearance = theme.nsAppearance
         label.textColor = active ? theme.accent : theme.fgMuted
         needsDisplay = true
     }
 
-    override func draw(_ dirtyRect: NSRect) {
-        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: bounds.height / 2, yRadius: bounds.height / 2)
-        if active {
-            theme.accentSoft.setFill()
-            path.fill()
-        } else {
-            if isHovered {
-                theme.hover.setFill()
-                path.fill()
-            }
-            theme.border.setStroke()
-            path.stroke()
-        }
-    }
-
     override func layout() {
         super.layout()
+        glass.frame = bounds
         let height = label.intrinsicContentSize.height
-        label.frame = NSRect(x: 8, y: ((bounds.height - height) / 2).rounded(), width: bounds.width - 16, height: height)
+        label.frame = NSRect(x: (bounds.width - label.textWidth) / 2, y: ((bounds.height - height) / 2).rounded(), width: label.textWidth, height: height)
     }
 
     override func mouseDown(with event: NSEvent) {}
@@ -434,10 +470,10 @@ final class AccessoryPill: HoverView {
     }
 }
 
-/// A glass capsule beside the search field naming one of the page's
-/// choices, with the keycap that changes it.
+/// A glass capsule naming one of the page's choices, with the keycap that
+/// changes it.
 final class ModeChip: HoverView {
-    static let height: CGFloat = 28
+    static let height: CGFloat = PaletteLayout.capsule
     var action: (() -> Void)?
     private let glass = GlassView(style: .paletteChip)
     private let glyph = NSImageView()

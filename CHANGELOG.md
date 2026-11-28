@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.147.1 - 2026-11-28
+
+### Changed
+
+- Command palette chips now share a consistent glass capsule style across modes, breadcrumbs, toggles, and actions.
+
 ## 0.147.0 - 2026-11-28
 
 ### Added

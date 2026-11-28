@@ -262,16 +262,15 @@ final class PaletteFooterView: ThemedView {
 
     override func layout() {
         super.layout()
-        let inset = (PaletteLayout.capsule - 28) / 2
-        var x = inset
+        var x: CGFloat = 0
         if !primary.isHidden {
             let size = primary.intrinsicContentSize
-            primary.frame = NSRect(x: x, y: inset, width: size.width, height: 28)
+            primary.frame = NSRect(x: x, y: 0, width: size.width, height: PaletteLayout.capsule)
             x += size.width + 2
         }
         let size = actions.intrinsicContentSize
-        actions.frame = NSRect(x: x, y: inset, width: size.width, height: 28)
-        let width = x + size.width + inset
+        actions.frame = NSRect(x: x, y: 0, width: size.width, height: PaletteLayout.capsule)
+        let width = x + size.width
         let margin = (bounds.height - PaletteLayout.capsule) / 2
         capsule.frame = NSRect(x: bounds.width - margin - width, y: margin, width: width, height: PaletteLayout.capsule)
         var left = margin
@@ -311,58 +310,40 @@ final class PaletteFadeView: ThemedView {
     }
 }
 
-/// A floating capsule of Liquid Glass on macOS 26 and later, the rows
-/// beneath refracting through a whitened clear glass inside a hairline edge;
-/// before, frosted glass with a shadow.
+/// A floating glass capsule matching the palette's mode chips.
 final class GlassCapsuleView: ThemedView {
     let content = ThemedView()
-    private let glass: NSView
+    private let glass = GlassView(style: .paletteChip)
 
     override init(frame frameRect: NSRect) {
-        if #available(macOS 26, *) {
-            let glass = NSGlassEffectView()
-            glass.style = .clear
-            glass.contentView = content
-            self.glass = glass
-        } else {
-            let material = NSVisualEffectView()
-            material.material = .popover
-            material.blendingMode = .withinWindow
-            material.state = .active
-            material.wantsLayer = true
-            material.layer?.masksToBounds = true
-            material.layer?.cornerCurve = .continuous
-            material.addSubview(content)
-            self.glass = material
-        }
         super.init(frame: frameRect)
-        if glass is NSVisualEffectView { shadow = PalettePanelView.shadow(alpha: 0.10, blur: 12, y: 3) }
-        addSubview(glass)
+        wantsLayer = true
+        layer?.cornerRadius = PaletteLayout.capsule / 2
         layer?.cornerCurve = .continuous
-        layer?.borderWidth = 1
+        layer?.borderWidth = Metrics.border
+        addSubview(glass)
+        addSubview(content)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    override var wantsUpdateLayer: Bool { true }
+
+    override func updateLayer() {
+        layer?.backgroundColor = theme.fg(alpha: 0.03).cgColor
+        layer?.borderColor = theme.fg(alpha: 0.08).cgColor
+    }
+
     override func themeDidChange() {
-        glass.appearance = NSAppearance(named: theme.isLight ? .aqua : .darkAqua)
-        layer?.borderColor = theme.fg(alpha: 0.10).cgColor
-        if #available(macOS 26, *), let glass = glass as? NSGlassEffectView {
-            glass.tintColor = theme.isLight ? NSColor.white.withAlphaComponent(0.25) : theme.floating.withAlphaComponent(0.35)
-        }
+        glass.appearance = theme.nsAppearance
+        needsDisplay = true
     }
 
     override func layout() {
         super.layout()
-        let radius = bounds.height / 2
+        layer?.cornerRadius = bounds.height / 2
         glass.frame = bounds
         content.frame = bounds
-        layer?.cornerRadius = radius
-        if #available(macOS 26, *), let glass = glass as? NSGlassEffectView {
-            glass.cornerRadius = radius
-        } else {
-            glass.layer?.cornerRadius = radius
-        }
     }
 }
 
