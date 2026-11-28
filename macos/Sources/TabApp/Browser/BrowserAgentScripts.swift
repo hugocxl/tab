@@ -11,6 +11,8 @@ public enum BrowserAgentScripts {
     @MainActor static let world = WKContentWorld.world(name: "TabAgent")
     /// The message handler log capture posts to.
     static let logHandler = "tabAgentLog"
+    /// The message handler frames answer `linkFrames` on, in the runtime's world.
+    static let frameHandler = "tabAgentFrame"
 
     /// A runtime call: `body` sees the runtime as `A` and returns a value.
     /// Without a runtime the page answers `{"missing": true}`; a thrown
@@ -31,25 +33,57 @@ public enum BrowserAgentScripts {
     }
 
     /// Installs the runtime, numbering new refs from `start` so a ref from an
-    /// earlier page never names an element of this one.
-    static func install(start: Int) -> String {
-        runtime.replacingOccurrences(of: "__TAB_START__", with: String(max(start, 1))) + "\nreturn true;"
+    /// earlier page never names an element of this one. A frame's runtime
+    /// puts its frame in front of its refs: `f2e5`.
+    static func install(start: Int, frame: Int? = nil) -> String {
+        runtime.replacingOccurrences(of: "__TAB_START__", with: String(max(start, 1)))
+            .replacingOccurrences(of: "__TAB_PREFIX__", with: frame.map { "'f\($0)'" } ?? "''") + "\nreturn true;"
     }
 
-    /// `ref` as the runtime names it: `@e3`, `ref=e3` and `e3` all name `e3`.
+    /// `ref` as the runtime names it: `@e3`, `ref=e3` and `e3` all name `e3`,
+    /// and `@f2e5` names `e5` of frame 2.
     public static func refId(_ target: String) -> String? {
         var text = target.trimmingCharacters(in: .whitespaces)
         if text.hasPrefix("@") { text.removeFirst() } else if text.hasPrefix("ref=") { text.removeFirst(4) }
-        guard text.count > 1, text.first == "e", text.dropFirst().allSatisfy({ $0.isASCII && $0.isNumber }) else {
+        var rest = Substring(text)
+        if rest.first == "f" {
+            rest = rest.dropFirst()
+            let digits = rest.prefix { $0.isASCII && $0.isNumber }
+            guard !digits.isEmpty else { return nil }
+            rest = rest.dropFirst(digits.count)
+        }
+        guard rest.count > 1, rest.first == "e", rest.dropFirst().allSatisfy({ $0.isASCII && $0.isNumber }) else {
             return nil
         }
         return text
     }
 
+    /// The frame a ref belongs to: 2 for `@f2e5`, `nil` for the page's own refs.
+    public static func refFrame(_ target: String) -> Int? {
+        guard let id = refId(target), id.first == "f" else { return nil }
+        return Int(id.dropFirst().prefix { $0.isNumber })
+    }
+
+    /// Listens, in every frame but the top one, for the token a parent's
+    /// `linkFrames` sends, and hands it to the app with the frame, so the
+    /// app can reach a cross-origin frame's elements.
+    static let frameListener = #"""
+    (() => {
+    if (window === window.top) return;
+    addEventListener('message', event => {
+      const data = event.data;
+      if (!data || typeof data.__tabAgentFrame !== 'string') return;
+      try { window.webkit.messageHandlers.tabAgentFrame.postMessage({ token: data.__tabAgentFrame, url: location.href }); }
+      catch (error) {}
+    }, true);
+    })();
+    """#
+
     static let runtime = #"""
     (() => {
     if (globalThis.__tabAgent) return;
     let counter = __TAB_START__;
+    const PREFIX = __TAB_PREFIX__;
     const refs = new Map();
     const ids = new WeakMap();
     const INTERACTIVE = new Set(['button', 'link', 'textbox', 'searchbox', 'combobox', 'listbox', 'checkbox', 'radio',
@@ -73,7 +107,7 @@ public enum BrowserAgentScripts {
     const refOf = el => {
       let id = ids.get(el);
       if (!id) {
-        id = 'e' + counter++;
+        id = PREFIX + 'e' + counter++;
         ids.set(el, id);
         refs.set(id, new WeakRef(el));
         if (refs.size > 20000) for (const [key, ref] of refs) if (!ref.deref()) refs.delete(key);
@@ -81,7 +115,7 @@ public enum BrowserAgentScripts {
       return id;
     };
     const refName = target => {
-      const match = /^(?:@|ref=)?(e\d+)$/.exec(String(target).trim());
+      const match = /^(?:@|ref=)?((?:f\d+)?e\d+)$/.exec(String(target).trim());
       return match ? match[1] : null;
     };
     const find = target => {
@@ -92,8 +126,42 @@ public enum BrowserAgentScripts {
         if (!el.isConnected) throw new Error('stale ref @' + id + ': the element is gone from the page; run snapshot again');
         return el;
       }
-      try { return document.querySelector(target); }
-      catch (error) { throw new Error('invalid selector ' + quote(String(target))); }
+      return queryAll(target, true)[0] || null;
+    };
+    // The documents and open shadow roots of the page, its same-origin frames included.
+    const scopes = () => {
+      const out = [];
+      const visit = root => {
+        out.push(root);
+        for (const el of root.querySelectorAll('*')) {
+          if (el.shadowRoot) visit(el.shadowRoot);
+          const tag = el.localName;
+          if (tag === 'iframe' || tag === 'frame') {
+            let doc = null;
+            try { doc = el.contentDocument; } catch (error) { doc = null; }
+            if (doc && doc.documentElement) visit(doc);
+          }
+        }
+      };
+      visit(document);
+      return out;
+    };
+    // The elements a CSS selector matches: in the page first, then in its
+    // shadow roots and same-origin frames; `first` stops at the first match.
+    const queryAll = (selector, first) => {
+      let found;
+      try { found = first ? [document.querySelector(selector)].filter(Boolean) : Array.from(document.querySelectorAll(selector)); }
+      catch (error) { throw new Error('invalid selector ' + quote(String(selector))); }
+      if (first && found.length) return found;
+      for (const scope of scopes().slice(1)) {
+        if (first) {
+          const el = scope.querySelector(selector);
+          if (el) return [el];
+        } else {
+          found.push(...scope.querySelectorAll(selector));
+        }
+      }
+      return found;
     };
 
     const tagOf = el => el.localName || '';
@@ -274,6 +342,7 @@ public enum BrowserAgentScripts {
     const snapshot = options => {
       const lines = [];
       const nodes = [];
+      const frames = [];
       let truncated = false;
       const emit = (depth, line, node) => {
         if (lines.length >= LINE_LIMIT) { truncated = true; return; }
@@ -329,8 +398,12 @@ public enum BrowserAgentScripts {
               line += ' href=' + quote(String(el.href));
               node.href = String(el.href);
             }
-            if (crossOrigin(el)) { line += ' (cross-origin, not shown)'; node.crossOrigin = true; }
+            if (crossOrigin(el)) node.crossOrigin = true;
             emit(depth, line, node);
+          }
+          if (crossOrigin(el) && lines.length < LINE_LIMIT) {
+            frames.push({ at: lines.length, line: show ? lines.length - 1 : -1, token: linkToken(el),
+                          depth: show && !options.interactive ? depth + 1 : depth });
           }
           render(item.children, show && !options.interactive ? depth + 1 : depth);
         }
@@ -346,10 +419,7 @@ public enum BrowserAgentScripts {
         let matches;
         const id = refName(options.selector);
         if (id) matches = [find(options.selector)];
-        else {
-          try { matches = Array.from(document.querySelectorAll(options.selector)); }
-          catch (error) { throw new Error('invalid selector ' + quote(options.selector)); }
-        }
+        else matches = queryAll(options.selector, false);
         roots = matches.filter(Boolean);
       } else {
         roots = document.body ? [document.body] : [];
@@ -359,7 +429,44 @@ public enum BrowserAgentScripts {
         if (options.compact) tree = prune(tree);
         render(tree, 0);
       }
-      return { lines, nodes, truncated };
+      return { lines, nodes, frames, truncated };
+    };
+
+    // Cross-origin frames: each gets a token the app learns the frame by
+    // once the frame's listener hands it back.
+    const frameTokens = new WeakMap();
+    const tokenFrames = new Map();
+    const linkToken = el => {
+      let token = frameTokens.get(el);
+      if (!token) {
+        token = Math.random().toString(36).slice(2) + Date.now().toString(36);
+        frameTokens.set(el, token);
+        tokenFrames.set(token, new WeakRef(el));
+      }
+      return token;
+    };
+    const linkFrames = () => {
+      const tokens = [];
+      for (const scope of scopes()) {
+        for (const el of scope.querySelectorAll('iframe, frame')) {
+          if (!crossOrigin(el) || !isVisible(el)) continue;
+          const token = linkToken(el);
+          try { el.contentWindow.postMessage({ __tabAgentFrame: token }, '*'); } catch (error) { continue; }
+          tokens.push(token);
+        }
+      }
+      return tokens;
+    };
+    // Where a linked frame's content starts in this frame's viewport.
+    const frameBox = token => {
+      const el = tokenFrames.get(token)?.deref();
+      if (!el || !el.isConnected) throw new Error('stale frame: the frame is gone from the page; run snapshot again');
+      el.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+      const box = boxOf(el);
+      const style = styleOf(el);
+      return { x: box.x + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft),
+               y: box.y + parseFloat(style.borderTopWidth) + parseFloat(style.paddingTop),
+               width: box.width, height: box.height, viewport: window.innerWidth };
     };
 
     // The element's box in the top page's viewport, in CSS pixels.
@@ -501,16 +608,22 @@ public enum BrowserAgentScripts {
       else if (form.requestSubmit) form.requestSubmit();
       else form.submit();
     };
-    const scriptClick = el => {
+    const scriptClick = (el, count = 1, button = 0) => {
       const view = el.ownerDocument.defaultView;
       const box = el.getBoundingClientRect();
-      const init = { bubbles: true, cancelable: true, composed: true, view, clientX: box.left + box.width / 2, clientY: box.top + box.height / 2, button: 0 };
-      el.dispatchEvent(new view.PointerEvent('pointerdown', { ...init, pointerType: 'mouse', isPrimary: true }));
-      el.dispatchEvent(new view.MouseEvent('mousedown', init));
-      if (el.focus) el.focus();
-      el.dispatchEvent(new view.PointerEvent('pointerup', { ...init, pointerType: 'mouse', isPrimary: true }));
-      el.dispatchEvent(new view.MouseEvent('mouseup', init));
-      el.click();
+      const init = { bubbles: true, cancelable: true, composed: true, view, clientX: box.left + box.width / 2,
+                     clientY: box.top + box.height / 2, button, buttons: button === 2 ? 2 : 1 };
+      for (let detail = 1; detail <= count; detail++) {
+        el.dispatchEvent(new view.PointerEvent('pointerdown', { ...init, detail, pointerType: 'mouse', isPrimary: true }));
+        el.dispatchEvent(new view.MouseEvent('mousedown', { ...init, detail }));
+        if (detail === 1 && el.focus) el.focus();
+        el.dispatchEvent(new view.PointerEvent('pointerup', { ...init, detail, pointerType: 'mouse', isPrimary: true }));
+        el.dispatchEvent(new view.MouseEvent('mouseup', { ...init, detail }));
+        if (button === 2) el.dispatchEvent(new view.MouseEvent('contextmenu', { ...init, detail }));
+        else if (detail === 1) el.click();
+        else el.dispatchEvent(new view.MouseEvent('click', { ...init, detail }));
+      }
+      if (count === 2 && button === 0) el.dispatchEvent(new view.MouseEvent('dblclick', { ...init, detail: 2 }));
     };
     const scriptHover = el => {
       const view = el.ownerDocument.defaultView;
@@ -518,6 +631,46 @@ public enum BrowserAgentScripts {
         const Kind = type.startsWith('pointer') ? view.PointerEvent : view.MouseEvent;
         el.dispatchEvent(new Kind(type, { bubbles: !type.endsWith('enter'), cancelable: true, composed: true, view }));
       }
+    };
+
+    // The file field an element stands for: itself, its label's control, or
+    // the one file field inside it.
+    const fileInput = el => {
+      const isFile = node => node && node.localName === 'input' && inputType(node) === 'file';
+      if (isFile(el)) return el;
+      if (tagOf(el) === 'label' && isFile(el.control)) return el.control;
+      const inner = el.querySelectorAll ? Array.from(el.querySelectorAll('input[type=file]')) : [];
+      return inner.length === 1 ? inner[0] : null;
+    };
+    // Gives a file field `files` ({name, type, data (base64), lastModified})
+    // as if the user had chosen them.
+    const setFiles = (el, files) => {
+      const input = fileInput(el);
+      if (!input) fail('not_file_input', describe(el));
+      if (input.disabled) fail('disabled', describe(input));
+      if (files.length > 1 && !input.multiple) fail('single_file', describe(input) + ' takes one file');
+      const transfer = new DataTransfer();
+      for (const file of files) {
+        const binary = atob(file.data);
+        const bytes = new Uint8Array(binary.length);
+        for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+        transfer.items.add(new File([bytes], file.name, { type: file.type, lastModified: file.lastModified }));
+      }
+      input.files = transfer.files;
+      input.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      return Array.from(input.files).map(file => file.name);
+    };
+    // Scrolls the page, or an element that scrolls, by (dx, dy) CSS pixels.
+    const scroll = (target, dx, dy) => {
+      if (target) {
+        const el = find(target);
+        if (!el) return null;
+        el.scrollBy({ left: dx, top: dy, behavior: 'instant' });
+        return { x: el.scrollLeft, y: el.scrollTop };
+      }
+      window.scrollBy({ left: dx, top: dy, behavior: 'instant' });
+      return { x: window.scrollX, y: window.scrollY };
     };
 
     // Resolves once the DOM has had no changes for `quiet` ms, or after `limit` ms.
@@ -572,7 +725,7 @@ public enum BrowserAgentScripts {
         text: el => includes(el.innerText),
       }[kind];
       if (!matches) throw new Error('unknown find kind ' + kind + '; use role, text, label, placeholder or testid');
-      const found = Array.from(document.body ? document.body.querySelectorAll('*') : []).filter(matches);
+      const found = scopes().flatMap(scope => Array.from(scope.querySelectorAll(scope.body ? 'body *' : '*'))).filter(matches);
       return found
         .filter(el => !found.some(other => other !== el && el.contains(other)))
         .slice(0, 20)
@@ -608,7 +761,7 @@ public enum BrowserAgentScripts {
     Object.defineProperty(globalThis, '__tabAgent', { value: Object.freeze({
       next: () => counter, find, snapshot, prepare, boxOf, isVisible, isDisabled, isEditable, focusField, fieldValue,
       setValue, insertText, pressKey, submit, scriptClick, scriptHover, quiet, annotate, clearAnnotations,
-      legacyFind, legacySnapshot, refOf, describe,
+      legacyFind, legacySnapshot, refOf, describe, queryAll, linkFrames, frameBox, fileInput, setFiles, scroll,
     }) });
     })();
     """#
@@ -650,9 +803,40 @@ public enum BrowserAgentScripts {
       send({ kind: 'error', text: ('Unhandled rejection: ' + format(reason && reason.message || reason)).slice(0, 4000),
              source: '', line: 0, column: 0, stack: String(reason && reason.stack || '').slice(0, 4000) });
     });
+    // A window the page opens becomes a browser pane; actions wait for the ones they cause.
+    const originalOpen = window.open;
+    if (typeof originalOpen === 'function') {
+      window.open = function() {
+        send({ kind: 'open' });
+        return originalOpen.apply(this, arguments);
+      };
+    }
     const prefix = Math.random().toString(36).slice(2, 8) + '-';
     let sequence = 0;
+    const BODY_LIMIT = 32768;
     const absolute = url => { try { return new URL(String(url), location.href).href; } catch (error) { return String(url); } };
+    const cut = text => text.length > BODY_LIMIT ? text.slice(0, BODY_LIMIT) + '… (' + text.length + ' characters)' : text;
+    const bodyText = body => {
+      if (body === undefined || body === null) return undefined;
+      if (typeof body === 'string') return cut(body);
+      if (body instanceof URLSearchParams) return cut(body.toString());
+      if (typeof FormData !== 'undefined' && body instanceof FormData) {
+        return cut(Array.from(body.entries()).map(([key, value]) => key + '=' + (typeof value === 'string' ? value : '<file ' + value.name + '>')).join('&'));
+      }
+      return '<' + (body.constructor && body.constructor.name || typeof body) + '>';
+    };
+    const headerObject = headers => {
+      const out = {};
+      try {
+        if (!headers) return out;
+        if (typeof headers.forEach === 'function' && !Array.isArray(headers)) headers.forEach((value, key) => { out[String(key).toLowerCase()] = String(value); });
+        else if (Array.isArray(headers)) for (const [key, value] of headers) out[String(key).toLowerCase()] = String(value);
+        else for (const key of Object.keys(headers)) out[key.toLowerCase()] = String(headers[key]);
+      } catch (error) {}
+      return out;
+    };
+    // Text bodies only, and not huge ones.
+    const readable = type => /^(text\/|application\/(json|xml|javascript|x-www-form-urlencoded|[a-z.+-]*\+(json|xml)))/i.test(type || '');
     const originalFetch = window.fetch;
     if (typeof originalFetch === 'function') {
       window.fetch = function(input, init) {
@@ -660,12 +844,20 @@ public enum BrowserAgentScripts {
         const method = String(init && init.method || input && input.method || 'GET').toUpperCase();
         const url = absolute(input && input.url || input);
         const started = performance.now();
-        send({ kind: 'request', phase: 'start', id, method, url, type: 'fetch' });
+        const headers = Object.assign(headerObject(input && input.headers), headerObject(init && init.headers));
+        send({ kind: 'request', phase: 'start', id, method, url, type: 'fetch', headers, body: bodyText(init && init.body) });
         let promise;
         try { promise = originalFetch.apply(this, arguments); }
         catch (error) { send({ kind: 'request', phase: 'end', id, error: String(error), ms: 0 }); throw error; }
         return promise.then(response => {
-          send({ kind: 'request', phase: 'end', id, status: response.status, ms: Math.round(performance.now() - started) });
+          const contentType = response.headers.get('content-type') || '';
+          send({ kind: 'request', phase: 'end', id, status: response.status, ms: Math.round(performance.now() - started),
+                 headers: headerObject(response.headers), contentType });
+          const length = Number(response.headers.get('content-length') || 0);
+          if (readable(contentType) && length <= 4 * BODY_LIMIT) {
+            try { response.clone().text().then(text => send({ kind: 'request', phase: 'body', id, body: cut(text) }), () => {}); }
+            catch (error) {}
+          }
           return response;
         }, error => {
           send({ kind: 'request', phase: 'end', id, error: String(error && error.message || error), ms: Math.round(performance.now() - started) });
@@ -675,21 +867,40 @@ public enum BrowserAgentScripts {
     }
     const XHR = window.XMLHttpRequest;
     if (XHR) {
-      const open = XHR.prototype.open, sendRequest = XHR.prototype.send;
+      const open = XHR.prototype.open, sendRequest = XHR.prototype.send, setHeader = XHR.prototype.setRequestHeader;
       XHR.prototype.open = function(method, url) {
-        this.__tabRequest = { method: String(method || 'GET').toUpperCase(), url: absolute(url) };
+        this.__tabRequest = { method: String(method || 'GET').toUpperCase(), url: absolute(url), headers: {} };
         return open.apply(this, arguments);
       };
-      XHR.prototype.send = function() {
+      XHR.prototype.setRequestHeader = function(name, value) {
+        if (this.__tabRequest) this.__tabRequest.headers[String(name).toLowerCase()] = String(value);
+        return setHeader.apply(this, arguments);
+      };
+      XHR.prototype.send = function(body) {
         const request = this.__tabRequest;
         if (request) {
           const id = prefix + (++sequence);
           const started = performance.now();
-          send({ kind: 'request', phase: 'start', id, method: request.method, url: request.url, type: 'xhr' });
+          send({ kind: 'request', phase: 'start', id, method: request.method, url: request.url, type: 'xhr',
+                 headers: request.headers, body: bodyText(body) });
           this.addEventListener('loadend', () => {
             const ms = Math.round(performance.now() - started);
-            if (this.status) send({ kind: 'request', phase: 'end', id, status: this.status, ms });
-            else send({ kind: 'request', phase: 'end', id, error: 'failed', ms });
+            if (!this.status) return send({ kind: 'request', phase: 'end', id, error: 'failed', ms });
+            const headers = {};
+            for (const line of String(this.getAllResponseHeaders() || '').trim().split(/[\r\n]+/)) {
+              const index = line.indexOf(':');
+              if (index > 0) headers[line.slice(0, index).trim().toLowerCase()] = line.slice(index + 1).trim();
+            }
+            const contentType = headers['content-type'] || '';
+            send({ kind: 'request', phase: 'end', id, status: this.status, ms, headers, contentType });
+            try {
+              let text;
+              if (this.responseType === '' || this.responseType === 'text') text = this.responseText;
+              else if (this.responseType === 'json') text = JSON.stringify(this.response);
+              if (typeof text === 'string' && (readable(contentType) || this.responseType === 'json')) {
+                send({ kind: 'request', phase: 'body', id, body: cut(text) });
+              }
+            } catch (error) {}
           });
         }
         return sendRequest.apply(this, arguments);

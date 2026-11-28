@@ -47,8 +47,9 @@ public protocol BrowserHost: AnyObject {
     // MARK: From a pane
 
     /// A page opened a window: show `url` in a new browser pane next to
-    /// `source`, with `profile` (a profile id).
-    func openBrowserPane(url: String, profile: String, from source: BrowserPaneController)
+    /// `source`, with `profile` (a profile id). Returns the new pane's ID.
+    @discardableResult
+    func openBrowserPane(url: String, profile: String, from source: BrowserPaneController) -> String?
     /// The pane's address or profile changed; save `state` as its `BrowserPane`.
     func browserPane(_ pane: BrowserPaneController, didChange state: BrowserPane)
     /// The pane's title (the page title, else its host; `nil` for the start
@@ -82,6 +83,9 @@ public protocol BrowserHost: AnyObject {
     func browserPane(tabId: String) -> BrowserPaneController?
     /// Closes the pane; `false` when there is no such browser pane.
     func closeBrowserPane(tabId: String) -> Bool
+    /// The browser panes in the tab of the pane showing the terminal or
+    /// agent `session`, the one it shows first.
+    func browserTabs(near session: SessionId) -> [String]
 }
 
 extension BrowserHost {
@@ -95,4 +99,5 @@ extension BrowserHost {
     public func rememberedFavicon(for url: String) -> NSImage? { nil }
     public func browserPane(_ pane: BrowserPaneController, didLoadFavicon favicon: NSImage, for url: String) {}
     public func browserServerConnected(_ server: ServerId) -> Bool { true }
+    public func browserTabs(near session: SessionId) -> [String] { [] }
 }

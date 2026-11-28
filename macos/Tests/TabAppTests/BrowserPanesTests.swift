@@ -124,6 +124,19 @@ final class BrowserPanesTests: XCTestCase {
                                                newTab: false)
         XCTAssertEqual(model.state.neighbor(of: agent, .right)?.description, beside.tabId)
         XCTAssertEqual(model.activePane?.description, beside.tabId)
+
+        // The browsers in the agent's tab are the ones its commands may mean.
+        XCTAssertEqual(model.browserTabs(near: session), [beside.tabId])
+        XCTAssertEqual(model.browserTabs(near: SessionId()), [])
+
+        // A page the agent drives opens its windows beside it, reported, without taking focus.
+        model.focusPane(agent)
+        beside.agent.acting += 1
+        let popup = try XCTUnwrap(model.openBrowserPane(url: "https://popup.example.test/", profile: "", from: beside))
+        beside.agent.acting -= 1
+        XCTAssertEqual(model.state.neighbor(of: try XCTUnwrap(PaneId(beside.tabId)), .right)?.description, popup)
+        XCTAssertEqual(model.activePane, agent)
+        XCTAssertEqual(Set(model.browserTabs(near: session)), [beside.tabId, popup])
     }
 
     func testCatalogMenuAndPaletteActionsReachTheBrowserController() async throws {

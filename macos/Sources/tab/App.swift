@@ -95,9 +95,37 @@ enum OpenFolder {
 
 /// `tab browser`: one request to the app per command.
 enum BrowserCommandRunner {
-    static func run(_ invocation: BrowserInvocation) throws {
+    /// The Tab terminal or agent this runs in, whose browser commands without
+    /// a browser drive.
+    static var caller: String? {
+        let environment = ProcessInfo.processInfo.environment
+        return (environment["TAB_AGENT_ID"] ?? environment["TAB_SESSION_ID"]).flatMap(SessionId.init(string:))?.description
+    }
+
+    /// Sends `invocation` and prints its reply; in a batch, bare `ok` and
+    /// `true` replies print nothing.
+    static func run(_ invocation: BrowserInvocation, quiet: Bool = false) throws {
+        var invocation = invocation
+        if let caller {
+            invocation = invocation.arg("caller", .string(caller))
+            if invocation.command == .open, invocation.args["beside"] == nil, invocation.args["project"] == nil,
+               invocation.args["tab"] != .bool(true) {
+                invocation = invocation.arg("beside", .string(caller))
+            }
+        }
+        if let path = invocation.stateFile {
+            let data: Data
+            do { data = try Data(contentsOf: URL(fileURLWithPath: path)) } catch {
+                throw CLIError("can't read \(path): \(error.localizedDescription)")
+            }
+            guard let state = try? JSONDecoder().decode(JSONValue.self, from: data) else {
+                throw CLIError("\(path) isn't a saved browser state; make one with tab browser state save FILE")
+            }
+            invocation = invocation.arg("state", state)
+        }
         let reply = try App.call(invocation.request, timeout: try App.replyTime() + invocation.extraTime,
                                  startApp: invocation.command == .open)
+        if quiet, reply == .bool(true) || invocation.output == .ok { return }
         switch invocation.output {
         case .ok:
             Output.line("ok")
@@ -148,14 +176,66 @@ enum BrowserCommandRunner {
             for entry in entries(reply) {
                 let outcome = entry["status"]?.description ?? entry["error"]?.string ?? "pending"
                 let time = entry["ms"].map { " \($0.description)ms" } ?? ""
-                Output.line("\(entry["method"]?.string ?? "GET") \(outcome)\(time) \(entry["url"]?.string ?? "")")
+                let number = entry["id"].map { "\($0.description) " } ?? ""
+                Output.line("\(number)\(entry["method"]?.string ?? "GET") \(outcome)\(time) \(entry["url"]?.string ?? "")")
             }
+        case .downloads:
+            for entry in entries(reply) {
+                let place = entry["path"]?.string ?? entry["url"]?.string ?? ""
+                let error = entry["error"]?.string.map { " (\($0))" } ?? ""
+                Output.line("\(entry["id"]?.description ?? "") \(entry["state"]?.string ?? "")\(error) \(place)")
+            }
+        case .request:
+            guard case .object = reply else { throw CLIError("no request with that number; network lists them") }
+            let outcome = reply["status"]?.description ?? reply["error"]?.string ?? "pending"
+            Output.line("\(reply["method"]?.string ?? "GET") \(reply["url"]?.string ?? "") → \(outcome)")
+            for (title, key, body) in [("request", "requestHeaders", "requestBody"), ("response", "responseHeaders", "responseBody")] {
+                Output.line("")
+                Output.line("\(title) headers:")
+                if case .object(let headers)? = reply[key] {
+                    for name in headers.keys.sorted() { Output.line("  \(name): \(headers[name]?.string ?? "")") }
+                }
+                if let text = reply[body]?.string, !text.isEmpty {
+                    Output.line("\(title) body:")
+                    Output.line(text)
+                }
+            }
+        case .stateFile(let path):
+            do {
+                let encoder = JSONEncoder()
+                encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+                try encoder.encode(reply).write(to: URL(fileURLWithPath: path), options: .atomic)
+                chmod(path, 0o600)
+            } catch {
+                throw CLIError("can't write \(path): \(error.localizedDescription)")
+            }
+            Output.line(path)
         case .dialog:
             guard let type = reply["type"]?.string else { return Output.line("none") }
             var line = "\(type) \(JSONValue.string(reply["message"]?.string ?? "").description)"
             if let text = reply["defaultText"]?.string { line += " default \(JSONValue.string(text).description)" }
             Output.line(line)
         }
+    }
+
+    /// Runs a batch's steps in turn, stopping at the first that fails.
+    static func run(_ batch: BrowserBatch) throws {
+        let quietBaseline = BrowserInvocation.settledSnapshot(browser: batch.browser, delta: false)
+        if batch.settle { _ = try sendQuietly(quietBaseline) }
+        for (index, step) in batch.steps.enumerated() {
+            do {
+                try run(step, quiet: true)
+            } catch {
+                throw CLIError("step \(index + 1) (\(batch.texts[index])) failed: \(CLI.message(error))")
+            }
+        }
+        if batch.settle { try run(BrowserInvocation.settledSnapshot(browser: batch.browser, delta: true)) }
+    }
+
+    private static func sendQuietly(_ invocation: BrowserInvocation) throws -> JSONValue {
+        var invocation = invocation
+        if let caller { invocation = invocation.arg("caller", .string(caller)) }
+        return try App.call(invocation.request, timeout: try App.replyTime() + invocation.extraTime, startApp: false)
     }
 
     private static func entries(_ reply: JSONValue) -> [JSONValue] {
@@ -172,6 +252,11 @@ enum BrowserCommandRunner {
         if let dialog = reply["dialog"], let type = dialog["type"]?.string {
             let message = JSONValue.string(dialog["message"]?.string ?? "").description
             FileHandle.standardError.write(Data("tab: the page opened a dialog: \(type) \(message); answer it with tab browser dialog\n".utf8))
+        }
+        if case .array(let opened)? = reply["opened"] {
+            for id in opened.compactMap(\.string) {
+                FileHandle.standardError.write(Data("tab: the page opened a new browser \(id); name it to drive it\n".utf8))
+            }
         }
         if let diff = reply["diff"]?.string { Output.line(diff) } else { Output.json(.bool(reply["ok"] == .bool(true))) }
     }

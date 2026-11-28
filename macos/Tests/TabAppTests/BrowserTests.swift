@@ -202,9 +202,9 @@ final class BrowserScriptTests: XCTestCase {
 
     func testCountingARefDoesNotUseItAsASelector() throws {
         let ref = try XCTUnwrap(BrowserScripts.agentScript(.getCount, args: .object(["selector": .string("@e12")])))
-        XCTAssertFalse(ref.contains("querySelectorAll"))
+        XCTAssertFalse(ref.contains("queryAll"))
         let css = try XCTUnwrap(BrowserScripts.agentScript(.getCount, args: .object(["selector": .string("li")])))
-        XCTAssertTrue(css.contains("querySelectorAll"))
+        XCTAssertTrue(css.contains("queryAll"))
     }
 
     func testRefsAreRecognizedOnlyInTheirSpellings() {
@@ -253,10 +253,15 @@ final class BrowserScriptTests: XCTestCase {
         let bang = try XCTUnwrap(BrowserKey.character("!"))
         XCTAssertEqual(bang.keyCode, 18)
         XCTAssertTrue(bang.modifiers.contains(.shift))
-        for name in ["", "Hyper+a", "Shift+", "Bogus", "\u{e9}"] {
+        for name in ["", "Hyper+a", "Shift+", "Bogus"] {
             XCTAssertNil(BrowserKey.parse(name), name)
         }
-        XCTAssertNil(BrowserKey.character("\u{e9}"), "typing it needs inserted text")
+        // A character a US keyboard has no key for is sent as a key that types it.
+        let accented = try XCTUnwrap(BrowserKey.character("\u{e9}"))
+        XCTAssertEqual(accented.characters, "\u{e9}")
+        XCTAssertEqual(accented.modifiers, [])
+        XCTAssertEqual(BrowserKey.character("\u{1F600}")?.characters, "\u{1F600}")
+        XCTAssertNil(BrowserKey.character("\u{7}"), "control characters have no key to type them")
     }
 
     func testSnapshotDiffsIgnoreIndentationAndOrder() {
@@ -315,10 +320,18 @@ final class TestBrowserHost: BrowserHost {
         })
     }
 
-    func openBrowserPane(url: String, profile: String, from source: BrowserPaneController) {
+    /// The browsers of each terminal or agent's tab, for `browserTabs(near:)`.
+    var near: [SessionId: [String]] = [:]
+
+    func openBrowserPane(url: String, profile: String, from source: BrowserPaneController) -> String? {
         opened.append(url)
         popupProfiles.append(profile)
+        let pane = BrowserPaneController(tabId: UUID().uuidString, state: BrowserPane(url: url, profile: profile), host: self)
+        panes[pane.tabId] = pane
+        return pane.tabId
     }
+
+    func browserTabs(near session: SessionId) -> [String] { near[session] ?? [] }
     func browserPane(_ pane: BrowserPaneController, didChange state: BrowserPane) { saved[pane.tabId] = state }
     func browserPane(_ pane: BrowserPaneController, didChangeTitle title: String?, favicon: NSImage?) {}
     func browserPaneRequestsClose(_ pane: BrowserPaneController) {}

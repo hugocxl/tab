@@ -97,19 +97,45 @@ public enum BrowserScripts {
         case .getCount:
             let selector = try string(args, "selector")
             if BrowserAgentScripts.refId(selector) != nil { return "return A.find(\(literal(selector))) ? 1 : 0;" }
-            return "return document.querySelectorAll(\(literal(selector))).length;"
+            return "return A.queryAll(\(literal(selector)), false).length;"
         case .find:
             return "return A.legacyFind(\(literal(optionalString(args, "kind") ?? "text")), \(literal(try string(args, "value"))));"
         case .snapshot:
             let selector = optionalString(args, "selector").map(literal) ?? "null"
             guard flag(args, "refs") else { return "return A.legacySnapshot(\(selector));" }
-            var depth = "null"
-            if case .int(let value) = args["depth"], value >= 0 { depth = String(value) }
-            return "return A.snapshot({ interactive: \(flag(args, "interactive")), compact: \(flag(args, "compact")), "
-                + "depth: \(depth), selector: \(selector), urls: \(flag(args, "urls")) });"
+            return "return A.snapshot(\(snapshotOptions(args)));"
+        case .getBox:
+            return try value("A.boxOf(el)")
         default:
             return nil
         }
+    }
+
+    /// The runtime's `snapshot` options for a command's arguments, as a JavaScript object.
+    static func snapshotOptions(_ args: JSONValue) -> String {
+        let selector = optionalString(args, "selector").map(literal) ?? "null"
+        var depth = "null"
+        if case .int(let value) = args["depth"], value >= 0 { depth = String(value) }
+        return "{ interactive: \(flag(args, "interactive")), compact: \(flag(args, "compact")), "
+            + "depth: \(depth), selector: \(selector), urls: \(flag(args, "urls")) }"
+    }
+
+    /// The checks `wait` makes, all of which must hold: one in the ref
+    /// runtime for `selector` (a ref or CSS selector), `text` and
+    /// `urlContains`, and one in the page's world for `function`, which sees
+    /// the page's own variables. Errors count as not yet.
+    public static func waitChecks(_ args: JSONValue) -> (agent: String?, page: String?) {
+        var checks: [String] = []
+        if let selector = optionalString(args, "selector") { checks.append("A.find(\(literal(selector))) !== null") }
+        if let text = optionalString(args, "text") {
+            checks.append("(document.body ? document.body.innerText : '').includes(\(literal(text)))")
+        }
+        if let fragment = optionalString(args, "urlContains") { checks.append("location.href.includes(\(literal(fragment)))") }
+        let agent = checks.isEmpty ? nil : "try {\nreturn \(checks.joined(separator: " && "));\n} catch (error) {\nreturn false;\n}"
+        let page = optionalString(args, "function").map {
+            "try {\nreturn Boolean(await (async () => { \(functionBody($0)) })());\n} catch (error) {\nreturn false;\n}"
+        }
+        return (agent, page)
     }
 
     /// A check for `wait` and `waitFor` that returns whether the condition

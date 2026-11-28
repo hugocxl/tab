@@ -71,21 +71,36 @@ extension AppModel: BrowserHost {
         }
     }
 
-    public func openBrowserPane(url: String, profile: String, from source: BrowserPaneController) {
+    @discardableResult
+    public func openBrowserPane(url: String, profile: String, from source: BrowserPaneController) -> String? {
         guard let pane = PaneId(source.tabId), let project = state.paneProject(pane) else {
             openBrowser(url: url, profile: profile.isEmpty ? BrowserProfiles.defaultName : profile)
-            return
+            return nil
         }
-        guard state.project(project) != nil else { return }
+        guard state.project(project) != nil else { return nil }
         let browser: BrowserPane
         do {
             browser = try newBrowserState(url: url, profile: profile)
         } catch {
             report(error)
-            return
+            return nil
         }
-        edit { _ = try $0.splitBrowser(pane, browser, focus: true) }
-        focusActiveContent()
+        // A window an agent's action opens doesn't take the user's focus.
+        let focus = source.agent.acting == 0
+        var opened: PaneId?
+        edit { opened = try $0.splitBrowser(pane, browser, focus: focus) }
+        if focus { focusActiveContent() }
+        return opened?.description
+    }
+
+    public func browserTabs(near session: SessionId) -> [String] {
+        guard let caller = state.paneShowing(session),
+              let tab = state.projects.lazy.flatMap(\.tabs).first(where: { $0.layout.contains(caller) }) else { return [] }
+        var browsers = tab.layout.leaves.filter { state.browser($0) != nil }
+        if let shown = state.shownPane(tab), let index = browsers.firstIndex(of: shown) {
+            browsers.insert(browsers.remove(at: index), at: 0)
+        }
+        return browsers.map(\.description)
     }
 
     public func browserPane(_ pane: BrowserPaneController, didChange saved: BrowserPane) {

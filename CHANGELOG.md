@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.146.3 - 2026-11-28
+
+### Changed
+
+- Let agents drive Tab's browser without naming it, including cross-origin frames, uploads, popups and batches.
+
 ## 0.146.2 - 2026-11-28
 
 ### Changed

@@ -28,6 +28,52 @@ final class BrowserAgentState {
     private var dialogWatchers: [Int: (PendingDialog) -> Void] = [:]
     private var watcherId = 0
     private let started = Date()
+    private var requestNumber = 0
+    /// Cross-origin frames the app has reached, by number (`@f2e5` is in frame 2).
+    private(set) var frames: [Int: AgentFrame] = [:]
+    private var frameNumbers: [String: Int] = [:]
+    /// The frame each linked token's iframe is in: `nil` for the page itself.
+    private var frameParents: [String: Int?] = [:]
+    /// Frames that answered before the app learned who linked their token.
+    private var earlyFrames: [String: (info: WKFrameInfo, url: String)] = [:]
+    /// How many agent actions are running, so windows they open don't take
+    /// the user's focus.
+    var acting = 0
+    /// Browsers the page opened since an action last reported them.
+    private(set) var opened: [String] = []
+    /// Windows the page asked for with `window.open`, and how many of those
+    /// requests the pane has handled, so an action can wait for its own.
+    private(set) var windowsRequested = 0
+    private(set) var windowsHandled = 0
+    private(set) var downloads: [DownloadEntry] = []
+    /// The download each `WKDownload` is, while it runs.
+    var downloadIds: [ObjectIdentifier: Int] = [:]
+    /// Files the next file chooser gets instead of asking anyone.
+    var pendingFiles: [URL]?
+    /// How many file choosers the page has opened, and whether the last went
+    /// unanswered because no one could see it.
+    private(set) var fileChoosers = 0
+    private(set) var unansweredFileChooser = false
+
+    /// A cross-origin frame: how to run scripts in it, and the frame its iframe is in.
+    struct AgentFrame {
+        var number: Int
+        var token: String
+        var info: WKFrameInfo
+        var parent: Int?
+        var url: String
+        /// The first ref number its next runtime hands out.
+        var nextRef = 1
+    }
+
+    struct DownloadEntry: Equatable {
+        var id: Int
+        var time: TimeInterval
+        var url: String
+        var path: String?
+        var state: String
+        var error: String?
+    }
 
     struct ConsoleEntry: Equatable {
         var time: TimeInterval
@@ -54,6 +100,13 @@ final class BrowserAgentState {
         var status: Int?
         var error: String?
         var milliseconds: Int?
+        /// Its number in `tab browser network`, for `network request N`.
+        var number = 0
+        var requestHeaders: [String: String] = [:]
+        var requestBody: String?
+        var responseHeaders: [String: String] = [:]
+        var responseBody: String?
+        var responseType: String?
         var pending: Bool { status == nil && error == nil }
     }
 
@@ -88,20 +141,37 @@ final class BrowserAgentState {
             append(&errors, ErrorEntry(time: now, text: text("text"), source: text("source"), line: number("line") ?? 0,
                                        column: number("column") ?? 0, stack: text("stack")),
                    limit: Self.errorLimit)
+        case "open":
+            windowsRequested += 1
         case "request":
             let id = text("id")
             if text("phase") == "start" {
-                append(&requests, RequestEntry(id: id, time: now, method: text("method"), url: text("url"), type: text("type")),
-                       limit: Self.requestLimit)
+                requestNumber += 1
+                var entry = RequestEntry(id: id, time: now, method: text("method"), url: text("url"), type: text("type"))
+                entry.number = requestNumber
+                entry.requestHeaders = Self.headers(message["headers"])
+                entry.requestBody = message["body"] as? String
+                append(&requests, entry, limit: Self.requestLimit)
                 requestIndex = Dictionary(requests.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { $1 })
             } else if let index = requestIndex[id], requests.indices.contains(index), requests[index].id == id {
+                if text("phase") == "body" {
+                    requests[index].responseBody = message["body"] as? String
+                    return
+                }
                 requests[index].status = number("status")
                 requests[index].error = message["error"] as? String
                 requests[index].milliseconds = number("ms")
+                requests[index].responseHeaders = Self.headers(message["headers"])
+                requests[index].responseType = message["contentType"] as? String
             }
         default:
             break
         }
+    }
+
+    private static func headers(_ value: Any?) -> [String: String] {
+        guard let pairs = value as? [String: Any] else { return [:] }
+        return pairs.compactMapValues { $0 as? String }
     }
 
     private func append<T>(_ list: inout [T], _ entry: T, limit: Int) {
@@ -114,6 +184,80 @@ final class BrowserAgentState {
     func clearRequests() {
         requests.removeAll { !$0.pending }
         requestIndex = Dictionary(requests.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { $1 })
+    }
+
+    // MARK: Frames
+
+    /// A parent frame (`nil` for the page) linked these tokens to its iframes.
+    func linked(_ tokens: [String], in parent: Int?) {
+        for token in tokens {
+            frameParents[token] = parent
+            if let early = earlyFrames.removeValue(forKey: token) { registerFrame(token: token, info: early.info, url: early.url) }
+        }
+    }
+
+    /// A frame answered its token: it gets a number, kept while its iframe stays.
+    func registerFrame(token: String, info: WKFrameInfo, url: String) {
+        guard let parent = frameParents[token] else {
+            // The answer can beat the reply to `linkFrames`; keep a few.
+            if earlyFrames.count < 64 { earlyFrames[token] = (info, url) }
+            return
+        }
+        if let number = frameNumbers[token], var frame = frames[number] {
+            frame.info = info
+            frame.url = url
+            frames[number] = frame
+            return
+        }
+        let number = (frames.keys.max() ?? 0) + 1
+        frameNumbers[token] = number
+        frames[number] = AgentFrame(number: number, token: token, info: info, parent: parent, url: url)
+    }
+
+    func frame(token: String) -> AgentFrame? { frameNumbers[token].flatMap { frames[$0] } }
+
+    func setNextRef(_ next: Int, frame number: Int) {
+        guard var frame = frames[number] else { return }
+        frame.nextRef = max(frame.nextRef, next)
+        frames[number] = frame
+    }
+
+    // MARK: Popups, downloads and file choosers
+
+    func pageOpened(_ tabId: String?) {
+        windowsHandled += 1
+        if let tabId { opened.append(tabId) }
+    }
+
+    /// The browsers opened since the last call.
+    func takeOpened() -> [String] {
+        defer { opened.removeAll() }
+        return opened
+    }
+
+    func downloadStarted(url: String) -> Int {
+        let id = (downloads.last?.id ?? 0) + 1
+        append(&downloads, DownloadEntry(id: id, time: Date().timeIntervalSince(started), url: url, state: "downloading"),
+               limit: 100)
+        return id
+    }
+
+    func download(_ id: Int, path: String? = nil, state: String? = nil, error: String? = nil) {
+        guard let index = downloads.firstIndex(where: { $0.id == id }) else { return }
+        if let path { downloads[index].path = path }
+        if let state { downloads[index].state = state }
+        if let error { downloads[index].error = error }
+    }
+
+    func clearDownloads() { downloads.removeAll { $0.state != "downloading" } }
+
+    /// The files a file chooser gets: the ones an upload armed, else none.
+    func fileChooserOpened(canAsk: Bool) -> [URL]? {
+        fileChoosers += 1
+        let files = pendingFiles
+        pendingFiles = nil
+        unansweredFileChooser = files == nil && !canAsk
+        return files
     }
 
     // MARK: Dialogs
@@ -205,6 +349,24 @@ final class BrowserLogHandler: NSObject, WKScriptMessageHandler {
     }
 }
 
+/// Receives the tokens cross-origin frames hand back, with the frame they
+/// came from.
+final class BrowserFrameHandler: NSObject, WKScriptMessageHandler {
+    weak var pane: BrowserPaneController?
+
+    init(pane: BrowserPaneController) {
+        self.pane = pane
+    }
+
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+        MainActor.assumeIsolated {
+            guard let body = message.body as? [String: Any], let token = body["token"] as? String,
+                  !message.frameInfo.isMainFrame else { return }
+            pane?.agent.registerFrame(token: token, info: message.frameInfo, url: body["url"] as? String ?? "")
+        }
+    }
+}
+
 // MARK: - Keys
 
 /// A key as `tab browser press` names it, such as `Enter`, `a` or
@@ -256,13 +418,19 @@ struct BrowserKey: Equatable {
         return table
     }()
 
-    /// The key for one typed character, or nil when a US keyboard has none.
+    /// The key for one typed character. One a US keyboard has no key for,
+    /// such as `é` or `ß`, is sent as a key that types it, as a keyboard
+    /// with that key would.
     static func character(_ character: Character) -> BrowserKey? {
         switch character {
         case "\n", "\r": return BrowserKey(keyCode: 36, characters: "\r", charactersIgnoringModifiers: "\r", modifiers: [])
         case "\t": return BrowserKey(keyCode: 48, characters: "\t", charactersIgnoringModifiers: "\t", modifiers: [])
         default:
-            guard let (code, shift) = layout[character] else { return nil }
+            guard let (code, shift) = layout[character] else {
+                guard !character.unicodeScalars.contains(where: { $0.value < 0x20 || $0.value == 0x7F }) else { return nil }
+                let text = String(character)
+                return BrowserKey(keyCode: 0xFFFF, characters: text, charactersIgnoringModifiers: text, modifiers: [])
+            }
             let text = String(character)
             return BrowserKey(keyCode: code, characters: text, charactersIgnoringModifiers: text,
                               modifiers: shift ? .shift : [])

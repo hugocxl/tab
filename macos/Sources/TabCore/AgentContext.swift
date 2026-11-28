@@ -106,9 +106,10 @@ public struct AgentContext: Hashable, Sendable {
         - "open <file> (at line N)": `tab pane new editor <file> --line N`; "show the diff of <file>": \
         `tab pane new diff <file>`.
         - "show the simulator", "the emulator": `tab pane new simulator [name]`.
-        - To check UI work yourself, read pages and screens as text and act on refs: `tab browser snapshot` and \
-        `tab simulator snapshot -i` print elements such as `@e3 [button] "Sign in"`; `tab browser click @e3` and \
-        `tab simulator tap @e3 --settle` act on them. Take screenshots only to see pixels. `tab browser --help` and \
+        - To check UI work yourself, read pages and screens as text and act on refs: `tab browser open <url>` \
+        loads a page in your browser pane, `tab browser snapshot -i` and `tab simulator snapshot -i` print elements \
+        such as `@e3 [button] "Sign in"`, and `tab browser click @e3 --settle` and `tab simulator tap @e3 --settle` \
+        act on them and print what changed. Take screenshots only to see pixels. `tab browser --help` and \
         `tab simulator --help` list the rest.
         - "another agent", "a new chat": `tab pane new agent -- "<task>"`; "branch" or "fork this \
         conversation": `tab pane new agent --fork -- "<what the branch does>"` once per branch.

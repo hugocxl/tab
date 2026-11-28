@@ -360,37 +360,52 @@ public enum AgentSkill {
     ## Browser
 
     `tab browser` drives the browser panes of the Tab app on this Mac: read a
-    page, click and type, take screenshots. Open one with `pane new browser` or
-    `tab tab new browser`, which print its ID.
+    page, click and type, upload files, take screenshots. Read pages as text
+    and act on refs; take a screenshot only when you need to see pixels.
 
     ```bash
-    PAGE=$(tab pane new browser http://localhost:3000)
-    tab browser wait-for-navigation "$PAGE"
-    tab browser snapshot "$PAGE" -i                    # @e1 [textbox] "Email"  @e2 [button] "Sign in"
-    tab browser fill "$PAGE" @e1 "me@example.com"
-    tab browser click "$PAGE" @e2 --settle             # prints what changed: - gone, + new
-    tab browser screenshot "$PAGE" --output /tmp/page.jpg --format jpeg --max-width 800
-    tab browser console "$PAGE"                        # also errors, network
+    tab browser open http://localhost:3000             # your browser, or a new one beside you; prints its ID
+    tab browser wait --load networkidle
+    tab browser snapshot -i                            # @e1 [textbox] "Email"  @e2 [button] "Sign in"
+    tab browser fill @e1 "me@example.com"
+    tab browser click @e2 --settle                     # prints what changed: - gone, + new
+    tab browser batch "fill @e1 a@b.co" "fill @e3 pw" "click @e2" --settle
+    tab browser upload @e7 ./avatar.png                # a file field, or a button that opens a chooser
+    tab browser screenshot --output /tmp/page.jpg --format jpeg --max-width 800
+    tab browser console                                # also errors, network, downloads
     ```
 
-    - Capture the ID that `pane new browser` prints, or find it with
-      `tab browser list`; never guess one.
+    - Commands drive your browser: the one you last opened or named, else the
+      only one in your tab. With several, name one by its ID first:
+      `tab browser click "$PAGE" @e2`. `tab browser list` prints them all;
+      never guess an ID. `open URL --new` opens another.
     - Work from refs: `snapshot` prints the page's elements as
       `@eN [role] "name"` lines (`-i` interactive only, `-c` compact, `-d N`
-      depth, `-s SELECTOR` part of the page, `--delta` only changes). Pass a
+      depth, `-s TARGET` part of the page, `--delta` only changes). Pass a
       ref, or a CSS selector, to `click`, `fill`, `type`, `press`, `select`,
-      `check`, `hover`, `get-text` and the rest. A ref lasts while its element
-      is on the page; after a navigation, snapshot again.
+      `check`, `hover`, `scroll`, `get-text` and the rest. A ref lasts while its
+      element is on the page; after a navigation, snapshot again.
+    - Snapshots include same-origin frames, shadow roots and cross-origin
+      frames such as payment or sign-in widgets, whose refs look like `@f2e5`
+      and work like any other.
     - Add `--settle` to an action to wait for the page and print the snapshot
       changes, instead of a new snapshot. Otherwise wait after anything that
-      loads a page: `wait-for-navigation`, `wait-for TARGET` or `wait`.
-    - Clicks and keys are real input when the browser is on screen. An action
-      fails, saying why, when its element is covered, disabled or not editable;
-      read the message instead of retrying blindly.
+      loads a page: `wait --load networkidle`, `wait-for TARGET`, or
+      `wait --text TEXT`; `wait` options must all hold.
+    - Clicks and keys are real input when the browser is on screen
+      (`click --double`, `click --right`). An action fails, saying why, when its
+      element is covered, disabled or not editable; read the message instead
+      of retrying blindly.
     - A page's `alert`, `confirm` or `prompt` blocks it until you answer:
-      `tab browser dialog "$PAGE" accept|dismiss [TEXT]`.
+      `tab browser dialog accept|dismiss [TEXT]`. A page that opens a window
+      opens a new browser; the action prints its ID on stderr.
+    - `upload TARGET FILE...` fills a file field without a file chooser. If an
+      action warns that the page opened a file chooser, upload to that target.
+      `downloads` lists downloads and where they were saved;
+      `wait-for-download` waits for one to finish.
     - `console`, `errors` and `network` show the page's logs, uncaught errors
-      and fetch/XHR requests.
+      and fetch/XHR requests (`network --status 4xx`, `--method POST`);
+      `network request N` prints one with its headers and bodies.
     - Screenshots: prefer `snapshot` text; when you need pixels, use
       `--output FILE` with `--format jpeg --max-width 800` to save tokens, a
       ref or selector for one element, `--annotate` to label refs.
@@ -398,7 +413,9 @@ public enum AgentSkill {
       `set media dark|light|auto` emulate other screens.
     - A browser's profile has its own logins and cookies. For pages the user is
       signed in to, open the browser with their profile:
-      `tab pane new browser https://example.com --profile Work`.
+      `tab browser open https://example.com --new --profile Work`.
+      `state save FILE` and `state load FILE` carry cookies and local storage
+      to another browser; the file holds tokens, so delete it when done.
     - `eval` runs JavaScript in the page and prints the result as JSON.
     - Close only browsers you opened.
 

@@ -186,6 +186,7 @@ public final class BrowserPaneController: NSViewController {
         configuration.userContentController.add(BrowserLogHandler(pane: self), contentWorld: .page,
                                                 name: BrowserAgentScripts.logHandler)
         if agent.driven { configuration.userContentController.addUserScript(Self.logCaptureScript) }
+        listenToFrames(configuration)
         configuration.preferences.isElementFullscreenEnabled = true
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = true
         let webView = BrowserWebView(frame: content.bounds, configuration: configuration)
@@ -757,7 +758,7 @@ extension BrowserPaneController: WKNavigationDelegate, WKUIDelegate, WKDownloadD
         }
         if navigationAction.shouldPerformDownload { return (.download, preferences) }
         if navigationAction.modifierFlags.contains(.command), navigationAction.navigationType == .linkActivated {
-            host?.openBrowserPane(url: url.absoluteString, profile: profile.id, from: self)
+            openPopup(url.absoluteString)
             return (.cancel, preferences)
         }
         return (.allow, preferences)
@@ -827,23 +828,34 @@ extension BrowserPaneController: WKNavigationDelegate, WKUIDelegate, WKDownloadD
     }
 
     public func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
-        download.delegate = self
+        track(download, url: navigationAction.request.url)
     }
 
     public func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) {
+        track(download, url: navigationResponse.response.url)
+    }
+
+    private func track(_ download: WKDownload, url: URL?) {
         download.delegate = self
+        agent.downloadIds[ObjectIdentifier(download)] = agent.downloadStarted(url: url.map { RemoteLoopback.unproxied($0.absoluteString) } ?? "")
     }
 
     public func download(_ download: WKDownload, decideDestinationUsing response: URLResponse, suggestedFilename: String) async -> URL? {
-        Self.downloadDestination(for: suggestedFilename)
+        let destination = Self.downloadDestination(for: suggestedFilename)
+        if let id = agent.downloadIds[ObjectIdentifier(download)] { agent.download(id, path: destination.path) }
+        return destination
     }
 
     public func downloadDidFinish(_ download: WKDownload) {
         let name = download.progress.fileURL?.lastPathComponent ?? "file"
+        if let id = agent.downloadIds.removeValue(forKey: ObjectIdentifier(download)) { agent.download(id, state: "done") }
         host?.showToast("Downloaded \(name)", isError: false)
     }
 
     public func download(_ download: WKDownload, didFailWithError error: any Error, resumeData: Data?) {
+        if let id = agent.downloadIds.removeValue(forKey: ObjectIdentifier(download)) {
+            agent.download(id, state: "failed", error: error.localizedDescription)
+        }
         host?.showToast("Download failed: \(error.localizedDescription)", isError: true)
     }
 
@@ -866,9 +878,18 @@ extension BrowserPaneController: WKNavigationDelegate, WKUIDelegate, WKDownloadD
 
     public func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
                         for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-        guard let url = navigationAction.request.url?.absoluteString, BrowserAddress.engineLoads(url) else { return nil }
-        host?.openBrowserPane(url: url, profile: profile.id, from: self)
+        let url = navigationAction.request.url?.absoluteString
+        openPopup(url.flatMap { BrowserAddress.engineLoads($0) ? $0 : nil })
         return nil
+    }
+
+    /// Opens a page this one opened in a new pane beside it. An agent driving
+    /// this pane drives the new one too, and its next action hears of it.
+    private func openPopup(_ url: String?) {
+        let opened = url.flatMap { host?.openBrowserPane(url: RemoteLoopback.unproxied($0), profile: profile.id, from: self) }
+        guard agent.driven else { return }
+        agent.pageOpened(opened)
+        if let opened { host?.browserPane(tabId: opened)?.beginAgentControl() }
     }
 
     public func webViewDidClose(_ webView: WKWebView) {
@@ -891,9 +912,10 @@ extension BrowserPaneController: WKNavigationDelegate, WKUIDelegate, WKDownloadD
         return answer.accepted ? answer.text ?? "" : nil
     }
 
-    /// Shows a page's dialog on the pane's sheet. While an agent drives the
-    /// pane, `tab browser dialog` can answer it too, and with no window to
-    /// show it on it waits for that answer instead of stopping the app.
+    /// Shows a page's dialog on the pane's sheet, or the app window's while
+    /// the pane is hidden; with no window it is dismissed. While an agent
+    /// drives the pane, `tab browser dialog` can answer it too, and with no
+    /// window to show it on it waits for that answer.
     private func runDialog(_ kind: PendingDialog.Kind, message: String, defaultText: String?,
                            frame: WKFrameInfo) async -> (accepted: Bool, text: String?) {
         let alert = dialog(message, frame: frame)
@@ -933,12 +955,23 @@ extension BrowserPaneController: WKNavigationDelegate, WKUIDelegate, WKDownloadD
 
     public func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters,
                         initiatedByFrame frame: WKFrameInfo) async -> [URL]? {
+        // An agent's upload answers it; with no window to ask on, nobody does.
+        let window = view.window ?? (agent.driven ? nil : Self.sheetWindow)
+        if let files = agent.fileChooserOpened(canAsk: window != nil) {
+            return parameters.allowsMultipleSelection ? files : Array(files.prefix(1))
+        }
+        guard let window else { return nil }
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = parameters.allowsMultipleSelection
         panel.canChooseDirectories = parameters.allowsDirectories
         panel.canChooseFiles = true
-        guard let window = view.window else { return panel.runModal() == .OK ? panel.urls : nil }
         return await panel.beginSheetModal(for: window) == .OK ? panel.urls : nil
+    }
+
+    /// The window a hidden pane asks the user on, instead of a modal panel
+    /// that would stop the app.
+    private static var sheetWindow: NSWindow? {
+        (NSApp.mainWindow ?? NSApp.keyWindow).flatMap { $0.attachedSheet == nil && $0.isVisible ? $0 : nil }
     }
 
     private func dialog(_ message: String, frame: WKFrameInfo) -> NSAlert {
@@ -950,7 +983,7 @@ extension BrowserPaneController: WKNavigationDelegate, WKUIDelegate, WKDownloadD
     }
 
     private func present(_ alert: NSAlert) async -> NSApplication.ModalResponse {
-        guard let window = view.window else { return alert.runModal() }
+        guard let window = view.window ?? Self.sheetWindow else { return .alertSecondButtonReturn }
         return await alert.beginSheetModal(for: window)
     }
 }
@@ -958,11 +991,12 @@ extension BrowserPaneController: WKNavigationDelegate, WKUIDelegate, WKDownloadD
 /// Runs scripts in a page and reads back their results as JSON.
 @MainActor
 enum BrowserPage {
-    static func run(_ body: String, in webView: WKWebView, timeout: TimeInterval, world: WKContentWorld? = nil) async throws -> JSONValue {
+    static func run(_ body: String, in webView: WKWebView, timeout: TimeInterval, world: WKContentWorld? = nil,
+                    frame: WKFrameInfo? = nil, arguments: [String: Any] = [:]) async throws -> JSONValue {
         let wrapped = BrowserScripts.jsonWrapped(body)
         let text: String = try await withCheckedThrowingContinuation { continuation in
             var finished = false
-            webView.callAsyncJavaScript(wrapped, arguments: [:], in: nil, in: world ?? .page) { result in
+            webView.callAsyncJavaScript(wrapped, arguments: arguments, in: frame, in: world ?? .page) { result in
                 MainActor.assumeIsolated {
                     guard !finished else { return }
                     finished = true

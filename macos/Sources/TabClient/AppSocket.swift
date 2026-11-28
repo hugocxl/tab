@@ -491,20 +491,26 @@ public final class AppSocketServer: @unchecked Sendable {
 
 /// The browser automation commands `tab browser` sends as
 /// `{"verb":"browser.<command>","args":{…}}` (`evaluate` uses `eval`). Every command but
-/// `open` and `list` names its tab with `"tabId"`. Element commands take a
-/// `"selector"`: a CSS selector, or a ref a snapshot printed (`@e3`); they
+/// `open` and `list` names its browser with `"tabId"`; without one the app
+/// picks the browser of `"caller"` (the terminal or agent's session): the
+/// one it last named or opened, else the only one in its tab, else the only
+/// one at all. Element commands take a `"selector"`: a CSS selector, or a ref
+/// a snapshot printed (`@e3`, or `@f2e5` in a cross-origin frame); they
 /// answer `false` when no element matches a CSS selector, and fail for a ref
 /// that no longer names one. Actions (click, hover, fill, type, press, select,
-/// setChecked) answer `true`, or an object with `"ok"` and any of `"note"`
-/// (how Tab had to do it), `"warning"`, `"dialog"` (one the action opened) and
-/// `"diff"` (with `"settle": true`, what changed once the page settled).
+/// setChecked, upload, scroll) answer `true`, or an object with `"ok"` and any
+/// of `"note"` (how Tab had to do it), `"warning"`, `"dialog"` (one the action
+/// opened), `"opened"` (browsers the page opened) and `"diff"` (with
+/// `"settle": true`, what changed once the page settled).
 /// Waits take an optional `"timeoutMs"` (capped at 60000).
 public enum BrowserCommand: String, Hashable, Sendable, CaseIterable {
     /// `url?`, `profile?`, `project?`, `beside?` (a terminal or agent's session),
     /// `tab` (a new tab in Home), `edge?` (left, right, up, down), `anchor?` (a
-    /// pane as `tab pane` names one) → the new browser's ID (string).
+    /// pane as `tab pane` names one) → the new browser's ID (string). With
+    /// `reuse: true`, the caller's browser loads `url` instead when it has one.
     case open
-    /// `project?`, `worktree?` → `[{"id","title","url","profile","active"}]`.
+    /// `project?`, `worktree?` → `[{"id","title","url","profile","active","current"}]`;
+    /// `current` marks the caller's browser.
     case list
     /// `url` → `true`.
     case navigate
@@ -533,6 +539,10 @@ public enum BrowserCommand: String, Hashable, Sendable, CaseIterable {
     case press
     /// `selector`, `value`.
     case select
+    /// `selector`, `files` (absolute paths).
+    case upload
+    /// `selector?`, `x`, `y` (CSS pixels) → `true`.
+    case scroll
     /// `property` (visible, hidden, enabled, disabled, checked), `selector` → Bool.
     case `is`
     case getText
@@ -542,6 +552,8 @@ public enum BrowserCommand: String, Hashable, Sendable, CaseIterable {
     case getAttribute
     /// `selector?`.
     case getHTML
+    /// `selector` → `{"x","y","width","height"}` in the page's viewport, CSS pixels.
+    case getBox
     /// `kind` (role, text, label, placeholder, testid), `value`.
     case find
     /// `selector?` → interactive elements, each with a `selector` and `ref`.
@@ -550,7 +562,8 @@ public enum BrowserCommand: String, Hashable, Sendable, CaseIterable {
     /// `compact?`, `depth?` and `urls?`; with `delta: true`, `text` is the
     /// change since the last snapshot.
     case snapshot
-    /// `selector?`, `text?`, `urlContains?`, `function?`, `timeoutMs?`.
+    /// `selector?`, `text?`, `urlContains?`, `function?`, `load?` (load,
+    /// networkidle), `timeoutMs?`: all that are given must hold.
     case wait
     /// `selector`, `timeoutMs?`.
     case waitFor
@@ -576,8 +589,19 @@ public enum BrowserCommand: String, Hashable, Sendable, CaseIterable {
     case console
     /// `clear?` → `[{"text","source","line","column","stack","time"}]`.
     case errors
-    /// `filter?`, `clear?` → `[{"method","url","type","status"?,"error"?,"ms"?,"pending","time"}]`.
+    /// `filter?`, `method?`, `status?` (`404`, `4xx`), `type?` (fetch, xhr),
+    /// `clear?` → `[{"id","method","url","type","status"?,"error"?,"ms"?,"pending","time"}]`;
+    /// with `id`, that request with its headers and bodies.
     case network
+    /// `clear?` → `[{"id","url","path"?,"state","error"?,"time"}]`; `state` is
+    /// downloading, done or failed.
+    case downloads
+    /// `timeoutMs?` → the next download once it finishes, or `null`.
+    case waitForDownload
+    /// → `{"version","url","cookies","origins":[{"origin","localStorage"}]}`.
+    case stateSave = "state.save"
+    /// `state` (what `state.save` gave) → `{"cookies","localStorage","skipped"}`.
+    case stateLoad = "state.load"
     /// `width`, `height`, or `reset: true`.
     case setViewport = "set.viewport"
     /// `device` (iphone, ipad, pixel, desktop) → `{"width","height","reloaded"}`.

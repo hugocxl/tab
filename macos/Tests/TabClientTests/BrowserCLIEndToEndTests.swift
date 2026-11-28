@@ -26,10 +26,17 @@ final class BrowserCLIEndToEndTests: XCTestCase {
         var stderr: String
     }
 
+    static let browserId = "3F2504E0-4F89-41D3-9A0C-0305E82C3301"
+
+    private func withBrowserId(_ text: String) -> String {
+        text.replacingOccurrences(of: "\"T\"", with: "\"\(Self.browserId)\"")
+    }
+
     private func run(_ arguments: [String], timeout: String? = nil) throws -> Output {
         let process = Process()
         process.executableURL = products.appendingPathComponent("tab")
-        process.arguments = arguments
+        // Tables write a browser's ID as T; a real one is a pane's UUID.
+        process.arguments = arguments.first == "browser" ? arguments.map { $0 == "T" ? Self.browserId : $0 } : arguments
         var environment = ProcessInfo.processInfo.environment
         environment["TAB_DIR"] = root.path
         environment["TAB_CLI_TIMEOUT"] = timeout
@@ -159,14 +166,14 @@ final class BrowserCLIEndToEndTests: XCTestCase {
 
     func testEveryBrowserVerbWireEncodingWithoutASocket() throws {
         for (line, verb, arguments) in actions {
-            let invocation = try CLIParser.parse(["browser"] + line.split(separator: " ").map(String.init))
+            let invocation = try CLIParser.parse(["browser"] + line.split(separator: " ").map { $0 == "T" ? Self.browserId : String($0) })
             guard case .browser(let browser) = invocation.command else {
                 XCTFail("expected a browser invocation: \(line)")
                 continue
             }
             let actual = try JSONDecoder().decode(JSONValue.self, from: AppSocket.encode(browser.request))
             XCTAssertEqual(actual, .object(["verb": .string(verb), "args":
-                try JSONDecoder().decode(JSONValue.self, from: Data(arguments.utf8))]), line)
+                try JSONDecoder().decode(JSONValue.self, from: Data(withBrowserId(arguments).utf8))]), line)
         }
     }
 
@@ -210,7 +217,7 @@ final class BrowserCLIEndToEndTests: XCTestCase {
             let (request, output) = try exchange(["browser"] + line.split(separator: " ").map(String.init),
                                                  reply: "{\"ok\":true,\"value\":\(value)}")
             XCTAssertEqual(request, .object(["verb": .string(verb), "args":
-                try JSONDecoder().decode(JSONValue.self, from: Data(arguments.utf8))]), line)
+                try JSONDecoder().decode(JSONValue.self, from: Data(withBrowserId(arguments).utf8))]), line)
             XCTAssertEqual(output.status, 0, line + output.stderr)
             XCTAssertEqual(output.stdout, expected, line)
             XCTAssertEqual(output.stderr, "", line)
@@ -234,6 +241,15 @@ final class BrowserCLIEndToEndTests: XCTestCase {
             (["errors", "T"], ##"[{"text":"boom","source":"app.js","line":3,"column":1,"stack":"","time":1}]"##, "boom (app.js:3)\n", ""),
             (["network", "T"], ##"[{"method":"POST","url":"https://a.test/api","status":201,"ms":12,"pending":false},{"method":"GET","url":"https://a.test/slow","pending":true}]"##,
              "POST 201 12ms https://a.test/api\nGET pending https://a.test/slow\n", ""),
+            (["network", "T"], ##"[{"id":4,"method":"GET","url":"https://a.test/a","status":404,"pending":false}]"##,
+             "4 GET 404 https://a.test/a\n", ""),
+            (["network", "request", "T", "4"],
+             ##"{"id":4,"method":"POST","url":"https://a.test/a","status":201,"requestHeaders":{"content-type":"application/json"},"requestBody":"{}","responseHeaders":{},"responseBody":"ok","pending":false}"##,
+             "POST https://a.test/a → 201\n\nrequest headers:\n  content-type: application/json\nrequest body:\n{}\n\nresponse headers:\nresponse body:\nok\n", ""),
+            (["downloads", "T"], ##"[{"id":1,"url":"https://a.test/f.zip","path":"/tmp/f.zip","state":"done","time":1}]"##,
+             "1 done /tmp/f.zip\n", ""),
+            (["click", "T", "@e1"], ##"{"ok":true,"opened":["B2"]}"##, "true\n",
+             "tab: the page opened a new browser B2; name it to drive it\n"),
             (["dialog", "T"], "null", "none\n", ""),
             (["dialog", "T"], ##"{"type":"prompt","message":"Name?","origin":"a.test","defaultText":"Bo"}"##,
              "prompt \"Name?\" default \"Bo\"\n", ""),
@@ -295,7 +311,7 @@ final class BrowserCLIEndToEndTests: XCTestCase {
         XCTAssertEqual(rootHelp.status, 0)
         XCTAssertEqual(rootHelp.stdout, CLIHelp.root + "\n")
         for (arguments, message) in [
-            (["click", "T"], "usage: tab browser click BROWSER TARGET [--settle]"),
+            (["click", "T", "#a", "extra"], "usage: tab browser click [BROWSER] TARGET [--double] [--right] [--settle]"),
             (["list", "--project"], "missing value for --project"),
             (["wait", "T", "--timeout", "-5"], "--timeout must be a number of seconds, more than 0 and at most 60"),
             (["wait", "T", "--text", "a", "--text", "b"], "--text given twice"),

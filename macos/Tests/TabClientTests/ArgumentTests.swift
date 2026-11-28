@@ -470,8 +470,38 @@ final class ArgumentTests: XCTestCase {
 
     // MARK: Browser
 
+    /// The browser ID tables write as `T`: a real one is a pane's UUID.
+    static let browserId = "3F2504E0-4F89-41D3-9A0C-0305E82C3301"
+
+    /// `T` in a table, as the UUID a browser's ID is.
+    private func withBrowserId(_ text: String) -> String {
+        text.replacingOccurrences(of: "\"T\"", with: "\"\(Self.browserId)\"")
+    }
+
     /// Every action as a command line split at spaces, with the request it sends.
     private let browserActions: [(String, BrowserCommand, String)] = [
+        ("open", .open, ##"{"reuse":true}"##),
+        ("open a.test", .open, ##"{"url":"a.test","reuse":true}"##),
+        ("open T a.test", .open, ##"{"tabId":"T","url":"a.test","reuse":true}"##),
+        ("open a.test --new --profile Work", .open, ##"{"url":"a.test","profile":"Work"}"##),
+        ("click @e3", .click, ##"{"selector":"@e3"}"##),
+        ("click T #go --double --right", .click, ##"{"tabId":"T","selector":"#go","double":true,"right":true}"##),
+        ("snapshot -i", .snapshot, ##"{"refs":true,"interactive":true}"##),
+        ("snapshot form", .snapshot, ##"{"refs":true,"selector":"form"}"##),
+        ("snapshot T --settle", .snapshot, ##"{"tabId":"T","refs":true,"settle":true}"##),
+        ("upload T @e1 /tmp/a.png /tmp/b.png", .upload, ##"{"tabId":"T","selector":"@e1","files":["/tmp/a.png","/tmp/b.png"]}"##),
+        ("upload #file /tmp/a.png", .upload, ##"{"selector":"#file","files":["/tmp/a.png"]}"##),
+        ("scroll down", .scroll, ##"{"x":0,"y":500}"##),
+        ("scroll T left 40 --selector #list", .scroll, ##"{"tabId":"T","x":-40,"y":0,"selector":"#list"}"##),
+        ("get-box T h1", .getBox, ##"{"tabId":"T","selector":"h1"}"##),
+        ("downloads --clear", .downloads, ##"{"clear":true}"##),
+        ("wait-for-download T --timeout 3", .waitForDownload, ##"{"tabId":"T","timeoutMs":3000}"##),
+        ("state save T /tmp/state.json", .stateSave, ##"{"tabId":"T"}"##),
+        ("state load /tmp/state.json", .stateLoad, "{}"),
+        ("network request 3", .network, ##"{"id":3}"##),
+        ("network T --method POST --status 4xx --type fetch", .network,
+         ##"{"tabId":"T","method":"POST","status":"4xx","type":"fetch"}"##),
+        ("wait --load networkidle --selector @e3", .wait, ##"{"load":"networkidle","selector":"@e3"}"##),
         ("navigate T a.test", .navigate, ##"{"tabId":"T","url":"a.test"}"##),
         ("list", .list, "{}"),
         ("list --project App --json", .list, ##"{"project":"App"}"##),
@@ -543,7 +573,7 @@ final class ArgumentTests: XCTestCase {
     ]
 
     private func browser(_ words: [String]) throws -> BrowserInvocation {
-        guard case .browser(let invocation) = try command(["browser"] + words) else {
+        guard case .browser(let invocation) = try command(["browser"] + words.map { $0 == "T" ? Self.browserId : $0 }) else {
             throw CLIError("\(words) is not a browser request")
         }
         return invocation
@@ -553,11 +583,11 @@ final class ArgumentTests: XCTestCase {
         for (line, expected, json) in browserActions {
             let invocation = try browser(line.split(separator: " ").map(String.init))
             XCTAssertEqual(invocation.command, expected, line)
-            let args = try JSONDecoder().decode([String: JSONValue].self, from: Data(json.utf8))
+            let args = try JSONDecoder().decode([String: JSONValue].self, from: Data(withBrowserId(json).utf8))
             XCTAssertEqual(invocation.args, args, line)
             XCTAssertEqual(invocation.request, .browser(command: expected.rawValue, args: args), line)
         }
-        XCTAssertEqual(Set(browserActions.map(\.1)).union([.open]), Set(BrowserCommand.allCases), "every command is reachable")
+        XCTAssertEqual(Set(browserActions.map(\.1)), Set(BrowserCommand.allCases), "every command is reachable")
         let beside = SessionId()
         XCTAssertEqual(BrowserInvocation.open(url: "a.test", profile: "Work", project: "App", beside: beside,
                                               placement: .pane).args,
@@ -592,13 +622,46 @@ final class ArgumentTests: XCTestCase {
                        try browser(["wait", "T", "--selector", "#a", "--timeout", "1"]))
         XCTAssertEqual(try browser(["type", "--submit", "T", "#q", "rust"]),
                        try browser(["type", "T", "#q", "rust", "--submit"]))
-        XCTAssertEqual(try browser(["eval", "T", "-1"]).args, ["tabId": .string("T"), "script": .string("-1")])
+        XCTAssertEqual(try browser(["eval", "T", "-1"]).args, ["tabId": .string(Self.browserId), "script": .string("-1")])
         XCTAssertEqual(try browser(["eval", "T", "--", "--help"]).args,
-                       ["tabId": .string("T"), "script": .string("--help")])
+                       ["tabId": .string(Self.browserId), "script": .string("--help")])
         XCTAssertEqual(try browser(["wait", "T", "--text", "--selector"]).args,
-                       ["tabId": .string("T"), "text": .string("--selector")])
+                       ["tabId": .string(Self.browserId), "text": .string("--selector")])
         XCTAssertEqual(try command(["browser"]), .help(CLIHelp.group(CLICommands.browser)))
         XCTAssertEqual(try command(["browser", "storage"]), .help(CLIHelp.group(CLICommands.browser)))
+    }
+
+    func testABrowserIsNamedByItsIDOrLeftToTheCaller() throws {
+        // A word that could be a target is the browser only when it is an ID, or every word is given.
+        XCTAssertEqual(try browser(["snapshot", Self.browserId]).browser, Self.browserId)
+        XCTAssertNil(try browser(["snapshot", "main"]).browser)
+        XCTAssertEqual(try browser(["snapshot", "main"]).args["selector"], .string("main"))
+        XCTAssertEqual(try browser(["get-html", "custom", "main"]).browser, "custom")
+        XCTAssertNil(try browser(["press", "Enter"]).browser)
+        XCTAssertEqual(try browser(["press", "Enter", "#q"]).args, ["key": .string("Enter"), "selector": .string("#q")])
+        XCTAssertEqual(try browser(["press", "T", "Enter"]).args, ["tabId": .string(Self.browserId), "key": .string("Enter")])
+        XCTAssertNil(try browser(["dialog", "accept", "Ada"]).browser)
+        XCTAssertEqual(try browser(["dialog", "accept", "Ada"]).args["text"], .string("Ada"))
+        XCTAssertEqual(try browser(["open", "--new"]).args, [:])
+    }
+
+    func testBatchStepsAreBrowserCommandsForOneBrowser() throws {
+        guard case .browserBatch(let batch) = try command(["browser", "batch", Self.browserId, "click @e1",
+                                                           "fill @e2 'Ada Lovelace'", "press Enter", "--settle"]) else {
+            return XCTFail("not a batch")
+        }
+        XCTAssertEqual(batch.browser, Self.browserId)
+        XCTAssertTrue(batch.settle)
+        XCTAssertEqual(batch.texts, ["click @e1", "fill @e2 'Ada Lovelace'", "press Enter"])
+        XCTAssertEqual(batch.steps.map(\.command), [.click, .fill, .press])
+        XCTAssertEqual(batch.steps[1].args, ["tabId": .string(Self.browserId), "selector": .string("@e2"),
+                                             "text": .string("Ada Lovelace")])
+        guard case .browserBatch(let mine) = try command(["browser", "batch", "click @e1"]) else { return XCTFail("not a batch") }
+        XCTAssertNil(mine.browser)
+        XCTAssertEqual(mine.steps.first?.args, ["selector": .string("@e1")])
+        XCTAssertThrowsError(try command(["browser", "batch", "fill @e2"])) { error in
+            XCTAssertTrue((error as? CLIError)?.message.hasPrefix("in step \"fill @e2\": usage:") == true, "\(error)")
+        }
     }
 
     func testBrowserUnsignedNumbersKeepTheirExactWireValue() throws {
@@ -611,16 +674,21 @@ final class ArgumentTests: XCTestCase {
     }
 
     func testWrongBrowserArgumentsNameTheUsage() {
-        XCTAssertThrowsError(try command(["browser", "click", "T"])) { error in
-            XCTAssertEqual((error as? CLIError)?.message, "usage: tab browser click BROWSER TARGET [--settle]")
+        XCTAssertThrowsError(try command(["browser", "click", "T", "#a", "extra"])) { error in
+            XCTAssertEqual((error as? CLIError)?.message,
+                           "usage: tab browser click [BROWSER] TARGET [--double] [--right] [--settle]")
         }
         for words in [
-            ["frobnicate", "T"], ["cookies", "eat", "T"], ["open", "a.test"], ["evaluate", "T", "1"], ["navigate", "T"],
+            ["frobnicate", "T"], ["cookies", "eat", "T"], ["evaluate", "T", "1"], ["navigate", "T", "a.test", "b.test"],
+            ["open", Self.browserId, "a.test", "--profile", "Work"], ["scroll", "sideways"], ["scroll", "down", "-5"],
+            ["upload", "@e1"], ["network", "request", "first"], ["network", "--status", "bad"], ["network", "--type", "ws"],
+            ["wait", "--load", "idle"], ["batch", "frobnicate @e1"], ["batch", "click"], ["batch", "list"],
+            ["state", "save", "T", "a.json", "b.json"],
             ["list", "T"], ["navigate", "T", "a.test", "--json"], ["is", "T", "shiny", "#a"], ["find", "T", "css", "#a"],
             ["storage", "get", "T", "k", "disk"], ["wait-for", "T", "#a", "800"], ["wait", "T", "--timeout", "-5"],
             ["wait", "T", "--timeout", "61"], ["wait", "T", "--text", "a", "--text", "b"],
             ["wait-for-navigation", "T", "100"], ["type", "T", "#q", "a", "--submit", "--submit"],
-            ["cookies", "set", "T", "id", "1"], ["cookies", "set", "T", "id", "1", "a.test", "--expires", "soon"],
+            ["cookies", "set", "T", "id"], ["cookies", "set", "T", "id", "1", "a.test", "--expires", "soon"],
             ["snapshot", "T", "-d", "deep"], ["snapshot", "T", "-s", "a", "--selector", "b"], ["snapshot", "T", "-x"],
             ["screenshot", "T", "--format", "gif"], ["screenshot", "T", "--quality", "0"], ["screenshot", "T", "--max-width", "8"],
             ["dialog", "T", "dismiss", "text"], ["dialog", "T", "close"], ["set", "viewport", "T", "390"],

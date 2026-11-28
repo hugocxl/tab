@@ -23,6 +23,8 @@ enum CLI {
             try PaneControl.run(control, json: json)
         case .browser(let browser):
             try BrowserCommandRunner.run(browser)
+        case .browserBatch(let batch):
+            try BrowserCommandRunner.run(batch)
         case .integrations(let action, let json):
             try await Integrations.run(action, json: json)
         case .stdio(let start):

@@ -34,6 +34,8 @@ public enum CLICommand: Hashable, Sendable {
     /// Lists, focuses, closes, zooms, moves or resizes panes in the app on this computer.
     case paneControl(AppPaneControl, json: Bool)
     case browser(BrowserInvocation)
+    /// `tab browser batch`.
+    case browserBatch(BrowserBatch)
     /// The skill and hooks of the coding agents on this computer.
     case integrations(CLIIntegrations, json: Bool)
     /// Joins stdin and stdout to the server, for clients on other computers.
