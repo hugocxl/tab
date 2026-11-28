@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.146.0 - 2026-11-28
+
+### Changed
+
+- The new worktree screen shows a gray system loading spinner.
+
 ## 0.145.0 - 2026-11-27
 
 ### Changed
