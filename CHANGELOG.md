@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.148.3 - 2026-11-28
+
+### Changed
+
+- Redesigned the agent question form with clickable option cards, headers, Recommended badges, and progress footer.
+
 ## 0.148.2 - 2026-11-28
 
 ### Changed

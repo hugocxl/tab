@@ -53,10 +53,12 @@ public struct AgentQuestionnaire: Codable, Hashable, Sendable {
         public var multiple: Bool
         public var secret: Bool
         public var required: Bool
+        /// A short label the provider gives the question, such as "Auth method"; older builds omit it.
+        public var header: String?
         public init(id: String, title: String, options: [Option] = [], multiple: Bool = false,
-                    secret: Bool = false, required: Bool = true) {
+                    secret: Bool = false, required: Bool = true, header: String? = nil) {
             self.id = id; self.title = title; self.options = options; self.multiple = multiple
-            self.secret = secret; self.required = required
+            self.secret = secret; self.required = required; self.header = header
         }
     }
     public var questions: [Question]
@@ -66,6 +68,7 @@ public struct AgentQuestionnaire: Codable, Hashable, Sendable {
         for q in questions {
             try Validation.message(q.id, limit: 1024)
             try Validation.message(q.title, limit: 8192)
+            if let header = q.header { try Validation.message(header, limit: 256) }
             guard q.options.count <= 32, Set(q.options.map(\.label)).count == q.options.count else { throw .badRequest }
             for option in q.options {
                 try Validation.message(option.label, limit: 4096)
@@ -88,7 +91,7 @@ public struct AgentQuestionnaire: Codable, Hashable, Sendable {
 extension AgentQuestionnaire {
     public var transcriptByteCount: Int {
         questions.reduce(128) { bytes, question in
-            bytes + 128 + question.id.utf8.count + question.title.utf8.count
+            bytes + 128 + question.id.utf8.count + question.title.utf8.count + (question.header?.utf8.count ?? 0)
                 + question.options.reduce(0) { $0 + 64 + $1.label.utf8.count + ($1.description?.utf8.count ?? 0) }
         }
     }

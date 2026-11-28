@@ -15,9 +15,17 @@ enum AgentQuestionParser {
                 return .init(label: label, description: option["description"] as? String)
             }
             return .init(id: id, title: title, options: options, multiple: raw["multiSelect"] as? Bool ?? false,
-                         secret: raw["isSecret"] as? Bool ?? false, required: raw["required"] as? Bool ?? true)
+                         secret: raw["isSecret"] as? Bool ?? false, required: raw["required"] as? Bool ?? true,
+                         header: header(raw["header"]))
         })
         try form.validate()
         return form
+    }
+
+    /// A header is decoration: one the form can't show is dropped rather than failing the form.
+    private static func header(_ raw: Any?) -> String? {
+        guard let text = (raw as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty,
+              text.utf8.count <= 256, !text.contains("\0") else { return nil }
+        return text
     }
 }

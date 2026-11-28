@@ -2158,6 +2158,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         surface.subagents.update(snapshot?.subagents ?? [])
         surface.questions.update(snapshot?.items.first { $0.questionnaire != nil && !$0.isComplete }, enabled: interactionsEnabled)
         surface.questions.restore(questionDrafts)
+        surface.questions.submitKey = keyDisplay?(.submitAgentAnswers)
         // Plan mode is always reachable: the chip turns it on as well as off.
         let planning = snapshot?.planMode == true
         surface.plan.isHidden = snapshot == nil || snapshot?.status == .closed

@@ -73,7 +73,10 @@ final class AgentInteractionTests: XCTestCase {
         window.contentView = surface
         defer { window.contentView = nil; window.close() }
         let prompt = AgentPrompt(text: "Can you improve the subscribe button and preserve all of these attachments?", model: nil, effort: nil, provider: .codex, planMode: false)
-        let form = AgentQuestionnaire(questions: [.init(id: "design", title: "Which design should we use for the subscription button?", options: [.init(label: "Compact", description: "Keep the existing layout and reduce visual weight."), .init(label: "Prominent", description: "Make the action stand out.")])])
+        let form = AgentQuestionnaire(questions: [
+            .init(id: "design", title: "Which design should we use for the subscription button?", options: [.init(label: "Compact (Recommended)", description: "Keep the existing layout and reduce visual weight."), .init(label: "Prominent", description: "Make the action stand out.")], header: "Button"),
+            .init(id: "extras", title: "Which extras should ship with it?", options: [.init(label: "Price hint"), .init(label: "Trial badge")], multiple: true, required: false),
+        ])
         let item = AgentChatItem(id: "q", kind: .approval, text: "Questions for you", isComplete: false, questionnaire: form)
         var snapshot = AgentChatSnapshot(session: SessionId(), project: ProjectId(), provider: .codex)
         snapshot.items = [item]; snapshot.planMode = true; snapshot.status = .waiting
