@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.148.1 - 2026-11-28
+
+### Fixed
+
+- Agent model detection waits longer for slow CLIs, reuses recent catalogs in new projects, and retries promptly.
+
 ## 0.148.0 - 2026-11-28
 
 ### Removed

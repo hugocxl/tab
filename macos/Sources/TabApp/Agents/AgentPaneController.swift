@@ -2356,6 +2356,9 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
         do {
             let reply = try await loadModelCatalog(provider, force)
             guard !Task.isCancelled, !disposed, generation == connectionGeneration else { return }
+            // An empty reply is a discovery that failed, not a provider without models:
+            // the next refresh asks again instead of waiting out the minute.
+            if reply.models.isEmpty && provider.enabled { modelCatalogLoadedAt = .distantPast }
             modelCatalogs[provider.id] = reply.models
             unavailableModelCatalogs.remove(provider.id)
             menuState = nil
@@ -2372,6 +2375,7 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
             }
         } catch {
             guard !Task.isCancelled, !disposed, generation == connectionGeneration else { return }
+            modelCatalogLoadedAt = .distantPast
             unavailableModelCatalogs.insert(provider.id)
             menuState = nil
             updateControls()
@@ -2625,7 +2629,8 @@ final class AgentPaneController: NSObject, PaneContentController, NSTextViewDele
             if displayedSelection.providerKey == key && displayedSelection.model != nil && shownModel == nil {
                 choices.append(displayedSelection)
             }
-            if choices.isEmpty {
+            // Say why the list is short, also when it only holds the current model.
+            if modelCatalogs[key]?.isEmpty != false {
                 let title = !config.enabled ? "Turned off" : unavailableModelCatalogs.contains(key) ? "Models unavailable"
                     : modelCatalogs[key] == nil ? "Loading models…" : "No models reported"
                 let status = NSMenuItem(title: title, action: nil, keyEquivalent: "")

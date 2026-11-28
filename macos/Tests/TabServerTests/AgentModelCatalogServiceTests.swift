@@ -217,6 +217,33 @@ final class AgentModelCatalogServiceTests: XCTestCase {
         XCTAssertEqual(reply.source, "saved")
     }
 
+    func testNewProjectStartsFromAnotherProjectsSavedCatalogOfTheSameProvider() async throws {
+        let home = try root(), saved = home.appendingPathComponent("saved")
+        let fixture = try AgentRuntimeFixture("""
+        take
+        emit '{"type":"control_response","response":{"subtype":"success","request_id":"1","response":{"models":[{"value":"opus","displayName":"Opus"}]}}}'
+        hold
+        """)
+        defer { fixture.remove() }
+        let providers: @Sendable (String?, AgentChatProvider) -> AgentProviderConfig = { id, kind in
+            var config = AgentProviderConfig.builtIn(kind)
+            config.id = id ?? config.id
+            return config
+        }
+        let online = AgentModelCatalogService(home: home, environment: [:], launch: launch(fixture),
+            cacheDirectory: saved, providers: providers, projectDirectory: { _ in home })
+        let live = try await online.handle(.init(project: ProjectId(), provider: .claude, providerID: "claude-work"))
+        XCTAssertEqual(live.models.map(\.id), ["opus"])
+        let offline = AgentModelCatalogService(home: home, environment: ["PATH": ""],
+            cacheDirectory: saved, providers: providers, projectDirectory: { _ in home })
+        let worktree = try await offline.handle(.init(project: ProjectId(), provider: .claude, providerID: "claude-work"))
+        XCTAssertEqual(worktree.models, live.models)
+        XCTAssertEqual(worktree.source, "saved")
+        let other = try await offline.handle(.init(project: ProjectId(), provider: .claude, providerID: "claude-personal"))
+        XCTAssertEqual(other.models, [], "Another provider's catalog is never borrowed")
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: saved.path).count, 1)
+    }
+
     func testForcedRefreshPropagatesNewModelsAndBypassesFreshMemory() async throws {
         let home = try root()
         let fixture = try AgentRuntimeFixture("""

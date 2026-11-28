@@ -5,7 +5,8 @@ import TabProtocol
 /// answers with a reply that doesn't fit.
 extension ServerClient {
     public func agentModelCatalog(_ request: AgentModelCatalogRequest) async throws -> AgentModelCatalogReply {
-        let reply = try await self.request(.agentModelCatalog(request))
+        // A first discovery starts the provider's CLI; an ACP agent may take 25 seconds.
+        let reply = try await self.request(.agentModelCatalog(request), timeout: max(defaultTimeout, 40))
         guard case .agentModelCatalog(let catalog) = reply else { throw unexpected(reply) }
         return catalog
     }

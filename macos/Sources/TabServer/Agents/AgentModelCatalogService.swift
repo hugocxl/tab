@@ -27,7 +27,8 @@ actor AgentModelCatalogService {
     private var pending: [Key: Refresh] = [:]
 
     init(home: URL, environment: [String: String] = AgentProcess.environment(),
-         launch: AgentProcess.Launch? = nil, timeout: TimeInterval = 4, cacheDirectory: URL? = nil,
+         launch: AgentProcess.Launch? = nil, timeout: TimeInterval = AgentModelCatalogService.defaultTimeout,
+         cacheDirectory: URL? = nil,
          now: @escaping @Sendable () -> Date = { Date() },
          providers: @escaping @Sendable (String?, AgentChatProvider) -> AgentProviderConfig = { _, kind in .builtIn(kind) },
          projectDirectory: @escaping @Sendable (ProjectId) throws -> URL) {
@@ -79,7 +80,8 @@ actor AgentModelCatalogService {
             ?? readPersisted(key: key)
         if let disk, !disk.models.isEmpty {
             if memory?.models.isEmpty != false { cached[key] = (now(), disk) }
-            persist(disk, key: key)
+            // A saved catalog may be another project's, so only fresher sources are written back.
+            if disk.source != "saved" { persist(disk, key: key) }
             let modified = try? Self.cacheURL(home: home, environment: environment)
                 .resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
             if !request.forceRefresh, memory == nil, provider == .codex, disk.source == "cache", let modified,
@@ -146,9 +148,29 @@ actor AgentModelCatalogService {
         try? data.write(to: cacheDirectory.appendingPathComponent(key.filename), options: .atomic)
     }
 
+    /// The project's saved catalog or, for a project that has none yet (a new worktree), the
+    /// provider's most recent one from another project: the live refresh that follows
+    /// replaces it, so the menu never waits on a first discovery with nothing to show.
     private func readPersisted(key: Key) -> AgentModelCatalogReply? {
-        guard let cacheDirectory,
-              let data = Self.readBoundedFile(cacheDirectory.appendingPathComponent(key.filename)),
+        guard let cacheDirectory else { return nil }
+        if let reply = Self.readSaved(cacheDirectory.appendingPathComponent(key.filename)) { return reply }
+        let suffix = "-\(key.provider).json"
+        let files = (try? FileManager.default.contentsOfDirectory(at: cacheDirectory,
+            includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+        let others = files.filter {
+            let name = $0.lastPathComponent
+            return name.hasSuffix(suffix) && UUID(uuidString: String(name.dropLast(suffix.count))) != nil
+        }.sorted {
+            let a = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            let b = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            return a > b
+        }
+        for file in others.prefix(8) { if let reply = Self.readSaved(file) { return reply } }
+        return nil
+    }
+
+    private static func readSaved(_ url: URL) -> AgentModelCatalogReply? {
+        guard let data = readBoundedFile(url),
               var reply = try? WireJSON.decode(AgentModelCatalogReply.self, from: data),
               (try? reply.validate()) != nil, !reply.models.isEmpty else { return nil }
         reply.source = "saved"
@@ -156,6 +178,9 @@ actor AgentModelCatalogService {
     }
 
     static let maxCacheBytes = 4 * 1024 * 1024
+    /// How long Claude Code or Codex may take to answer. They usually do in under a second,
+    /// but not when many start at once, as when the app opens with several agent panes.
+    static let defaultTimeout: TimeInterval = 15
     /// How long an ACP agent may take to start and open the session its models come from.
     static let acpTimeout: TimeInterval = 25
 
