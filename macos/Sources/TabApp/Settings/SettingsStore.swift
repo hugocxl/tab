@@ -208,6 +208,16 @@ public final class SettingsStore {
         }
     }
 
+    public func setAutomaticServerRestart(_ enabled: Bool) {
+        attempt("update-auto-server-restart") {
+            var next = settings
+            next.updates.automaticServerRestart = enabled
+            try next.saveUpdates(to: dirs.settings)
+            settings = next
+            applySettings()
+        }
+    }
+
     public func performUpdaterAction(_ action: UpdaterSummary.Action) {
         host?.performUpdaterAction(action)
         if let summary = host?.updaterSummary { updateUpdaterSummary(summary) }

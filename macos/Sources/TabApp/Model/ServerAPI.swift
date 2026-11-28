@@ -57,6 +57,9 @@ public protocol ServerAPI: AnyObject, Sendable {
     func stopServer(force: Bool) async throws -> Bool
     func stopServerIfIdle() async throws -> Bool
     func restartServer() async throws
+    /// Restarts keeping every terminal in its pane; with `onlyWhenIdle`,
+    /// returns the work that keeps it running instead. See `ServerClient`.
+    func restartServerKeepingTerminals(onlyWhenIdle: Bool) async throws -> ServerWork?
     func remoteAccess() async throws -> RemoteAccessState
     func writeRemoteAccess(_ settings: RemoteAccessSettings) async throws -> RemoteAccessState
     func startPairing(hosts: [String]) async throws -> PairingOffer

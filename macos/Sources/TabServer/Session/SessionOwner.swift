@@ -92,14 +92,18 @@ final class SessionOwner: @unchecked Sendable {
     /// The agent conversation that asked for this terminal; what runs in it calls Tab as
     /// that conversation. See `AgentCallers`.
     let caller: SessionId?
+    /// The environment the terminal was created with beyond the shell's own,
+    /// such as a proxy; a server restart reopens the terminal with it.
+    let creationEnvironment: [String: String]
     /// The terminal's shell or program.
     var processID: pid_t { pty.pid }
 
     init(info: SessionInfo, request: SpawnRequest, historyBudgetBytes: UInt64, colors: TerminalColors?,
          archive: ArchiveStore, activity: Activity, detector: AgentDetector?,
-         delegate: SessionOwnerDelegate, caller: SessionId? = nil) throws {
+         delegate: SessionOwnerDelegate, caller: SessionId? = nil, environment: [String: String] = [:]) throws {
         self.info = info
         self.caller = caller
+        creationEnvironment = environment
         queue = DispatchQueue(label: "tab.session.\(info.id)", qos: .userInitiated)
         inputQueue = DispatchQueue(label: "tab.session.\(info.id).input", qos: .userInitiated)
         let budget = Int(clamping: historyBudgetBytes)
@@ -123,6 +127,58 @@ final class SessionOwner: @unchecked Sendable {
         self.activity = activity
         self.detector = detector
         self.delegate = delegate
+    }
+
+    /// Shows a previous terminal's screen and history before the program's
+    /// first output, then `note`, dimmed, on a line of its own below the last
+    /// line used, such as a full-screen program's. Call before `start()`.
+    /// Returns whether the output shows.
+    @discardableResult
+    func seed(_ saved: TerminalArchive, note: String?) -> Bool {
+        queue.sync {
+            do {
+                try terminal.restore(saved)
+            } catch {
+                ServerLog.error("session \(info.id) couldn't show the previous terminal's output: \(error)")
+                return false
+            }
+            let used = saved.rows.filter { row in row.runs.contains { !$0.text.allSatisfy(\.isWhitespace) } }.map(\.index).max()
+            let line = Int(max(saved.cursor.row, used ?? 0)) + 1
+            var text = "\u{1b}[\(line);1H\r\n"
+            if let note { text += "\u{1b}[2m\(note)\u{1b}[0m\r\n" }
+            terminal.feed(Array(text.utf8))
+            _ = terminal.takePtyOutput()
+            _ = terminal.takeEvents()
+            return true
+        }
+    }
+
+    /// The name of a job the shell runs in the background, such as a server
+    /// started with `&`, when it runs one; a restart would stop it.
+    func backgroundJob() -> String? {
+        let shell = pty.pid
+        var children = [pid_t](repeating: 0, count: 64)
+        let bytes = children.withUnsafeMutableBytes { proc_listchildpids(shell, $0.baseAddress, Int32($0.count)) }
+        guard bytes > 0 else { return nil }
+        let shellName = Self.processName(shell)
+        // The buffer starts zeroed, so the children are its nonzero entries.
+        for child in children where child > 0 {
+            guard let name = Self.processName(child), name != shellName, !Self.isShellHelper(name) else { continue }
+            return name
+        }
+        return nil
+    }
+
+    private static func processName(_ pid: pid_t) -> String? {
+        var name = [CChar](repeating: 0, count: 256)
+        guard proc_name(pid, &name, UInt32(name.count)) > 0 else { return nil }
+        return String(cString: name)
+    }
+
+    /// Processes a shell runs for its prompt rather than for the person,
+    /// such as the shell's own subshells and powerlevel10k's Git status daemon.
+    static func isShellHelper(_ name: String) -> Bool {
+        ForegroundProbe.shells.contains(name) || name.hasPrefix("gitstatusd")
     }
 
     /// Starts reading output and watching for the program's exit.

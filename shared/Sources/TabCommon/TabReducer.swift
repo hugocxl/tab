@@ -363,6 +363,21 @@ extension TabReducer {
         return true
     }
 
+    /// Shows the terminal `new` in every pane that showed `old`, such as a
+    /// terminal a server restart reopened. Returns whether a pane showed `old`.
+    public static func replaceSession(_ old: SessionId, with new: SessionId, in board: inout TabBoard) -> Bool {
+        let panes = board.allPanes.filter { $0.content.session == old }.map(\.id)
+        for pane in panes {
+            guard let (_, tabId) = board.locate(pane: pane) else { continue }
+            try? board.editTab(tabId) { tab in
+                guard let index = tab.panes.firstIndex(where: { $0.id == pane }) else { return }
+                tab.panes[index].content = .terminal(session: new)
+                tab.panes[index].launch = nil
+            }
+        }
+        return !panes.isEmpty
+    }
+
     /// Removes every pane showing the terminal `session`, which ended.
     public static func removePanes(showing session: SessionId, in board: inout TabBoard) -> Bool {
         let panes = board.allPanes.filter { $0.content.session == session }.map(\.id)

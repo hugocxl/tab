@@ -129,6 +129,8 @@ final class ArgumentTests: XCTestCase {
         XCTAssertEqual(try action(["server", "status"]), .server(.status))
         XCTAssertEqual(try action(["server", "stop"]), .server(.stop(force: false)))
         XCTAssertEqual(try action(["server", "stop", "--force", "--yes"]), .server(.stop(force: true)))
+        XCTAssertEqual(try action(["server", "restart"]), .server(.restart(force: false)))
+        XCTAssertEqual(try action(["server", "restart", "--force", "--yes"]), .server(.restart(force: true)))
         XCTAssertEqual(try action(["project", "new", ".", "--create", "--reuse"]),
                        .project(.new(directory: ".", name: nil, create: true, reuse: true)))
         XCTAssertEqual(try action(["project", "new", "/srv/app", "--name", " App "]),
@@ -148,7 +150,7 @@ final class ArgumentTests: XCTestCase {
                        .exec(project: "App", argv: ["ls", "-la"], timeoutMs: 500))
         XCTAssertEqual(try action(["exec", "App", "--", "true"]), .exec(project: "App", argv: ["true"], timeoutMs: 30000))
         for words in [
-            ["server", "restart"], ["server", "stop", "now"], ["project", "new", "a", "b"], ["project", "new", ".", "--name"],
+            ["server", "restart", "now"], ["server", "stop", "now"], ["project", "new", "a", "b"], ["project", "new", ".", "--name"],
             ["project", "rename", "App", " "], ["settings", "set", "x"], ["activity", "ack", "one"], ["git", "Home"],
             ["exec", "App", "ls"], ["exec", "App", "--"], ["exec", "App", "--timeout", "301", "--", "ls"],
         ] {

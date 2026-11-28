@@ -29,8 +29,7 @@ final class CoreServerTests: XCTestCase {
 
     func testOneServerPerProfile() throws {
         let server = try CoreTestServer()
-        let second = try Server(configuration: server.configuration)
-        XCTAssertThrowsError(try second.start()) { error in
+        XCTAssertThrowsError(try Server(configuration: server.configuration)) { error in
             guard case ServerStartError.alreadyRunning = error else { return XCTFail("\(error)") }
         }
         XCTAssertNoThrow(try server.connect(), "the first server keeps serving")

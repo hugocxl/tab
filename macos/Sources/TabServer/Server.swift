@@ -33,6 +33,9 @@ public final class Server: @unchecked Sendable {
     public let configuration: ServerConfiguration
     /// This running server, as clients see it in `HelloReply`.
     public let info: ServerInfo
+    /// The profile's lock, taken before reading any of its state, so a server
+    /// waiting for a restarting one never reads what that one still writes.
+    let profileLock: FileLock
 
     let settings: ServerSettingsStore
     let catalog: Catalog
@@ -77,18 +80,26 @@ public final class Server: @unchecked Sendable {
 
     /// Runs once a client asked the server to stop.
     var stopRequested: (@Sendable () -> Void)?
+    /// Terminals the previous server handed over, reopened once this one starts.
+    private let carriedTerminals: [TerminalCarryOver.Terminal]
 
     public init(configuration: ServerConfiguration) throws {
         self.configuration = configuration
         let dirs = configuration.dirs
+        profileLock = try ServerRunner.lock(configuration)
         settings = try ServerSettingsStore(url: configuration.settings)
         let archive = try ArchiveStore(root: dirs.sessions)
         self.archive = archive
         let catalog = try Catalog(directory: dirs.sessions, homeDirectory: configuration.homeDirectory,
                                   hasSavedScreen: { archive.contains($0) })
         self.catalog = catalog
+        // A restart that kept its terminals handed them over: their panes stay
+        // and show new terminals once this server starts.
+        let carried = TerminalCarryOver.read(TerminalCarryOver.url(dirs))?.terminals ?? []
+        carriedTerminals = carried
+        let carriedSessions = Set(carried.map(\.session))
         tabs = try TabStore(directory: dirs.sessions, home: catalog.homeId,
-                            isProject: { (try? catalog.project($0)) != nil }, isLive: { _ in false })
+                            isProject: { (try? catalog.project($0)) != nil }, isLive: { carriedSessions.contains($0) })
         agentComposerContext = AgentComposerContextService(home: URL(fileURLWithPath: configuration.homeDirectory),
             discoverProvider: { provider, directory in
                 await AgentCommandDiscovery.discover(provider: provider, directory: directory, environment: AgentProcess.environment())
@@ -218,7 +229,15 @@ public final class Server: @unchecked Sendable {
         sessionLock.withLock { !sessions.isEmpty || !starting.isEmpty }
     }
 
-    func createSession(_ request: CreateSession, requester: ClientConnection?) throws -> SessionInfo {
+    /// A previous terminal's output a new one shows before its shell starts.
+    struct SessionSeed {
+        var archive: TerminalArchive
+        var note: String?
+    }
+
+    /// - Parameter seeded: hears whether the seed's output shows in the terminal.
+    func createSession(_ request: CreateSession, requester: ClientConnection?, seed: SessionSeed? = nil,
+                       seeded: ((Bool) -> Void)? = nil) throws -> SessionInfo {
         operations.lock()
         defer { operations.unlock() }
         let directory = request.directory
@@ -262,8 +281,10 @@ public final class Server: @unchecked Sendable {
                 command: request.command, extra: request.environment, server: catalog.serverId, session: id)
             owner = try SessionOwner(info: info, request: spawn, historyBudgetBytes: settings.historyBudgetBytes,
                                      colors: requester?.colorsForNewSession, archive: archive, activity: activity,
-                                     detector: services.detector, delegate: self, caller: requester?.agent)
+                                     detector: services.detector, delegate: self, caller: requester?.agent,
+                                     environment: request.environment)
             started = owner
+            if let seed { seeded?(owner.seed(seed.archive, note: seed.note)) }
             try owner.start()
         } catch {
             if let started, let agent = started.caller { AgentCallers.shared.unregister(started.processID, agent: agent) }
@@ -603,6 +624,127 @@ public final class Server: @unchecked Sendable {
         broadcast(.serverRestarting)
         scheduleStop()
         return .serverRestarting
+    }
+
+    /// What a restart would cut short now: terminals running a program,
+    /// agents at work, commands and terminals starting. Terminals at their
+    /// shell's prompt aren't work; they reopen after a restart.
+    func pendingWork() -> ServerWork {
+        let (owners, starting) = sessionLock.withLock { (Array(sessions.values), self.starting.count) }
+        let programs = owners.compactMap { owner -> (UInt64, ServerWork.Program)? in
+            let metadata = owner.metadata
+            let name: String
+            if let process = metadata.process, !process.isShell {
+                name = process.name
+            } else if let job = owner.backgroundJob() {
+                // A shell at its prompt can still run jobs it put in the background.
+                name = job
+            } else {
+                return nil
+            }
+            return (metadata.processSince ?? 0, ServerWork.Program(session: owner.info.id, project: owner.info.project,
+                                                                   name: String(name.prefix(64))))
+        }.sorted { $0.0 < $1.0 }.map(\.1)
+        let commands = liveConnections().reduce(0) { $0 + $1.jobs.activeCount }
+        return ServerWork(programs: Array(programs.prefix(ServerWork.maxPrograms)),
+                          agents: Array(agents.pendingWork().prefix(ServerWork.maxPrograms)), jobs: starting + commands)
+    }
+
+    /// Restarts, handing every terminal shown in a pane to the next server,
+    /// which reopens it there. With `onlyWhenIdle` nothing happens while work
+    /// runs, and the reply says what runs.
+    func requestRestartKeepingTerminals(onlyWhenIdle: Bool) throws -> ReplyBody {
+        // Already going: its handoff stands, and the client reconnects either way.
+        if sessionLock.withLock({ stopping }) { return .serverRestarting }
+        if onlyWhenIdle {
+            // Creating, closing and discarding terminals hold this.
+            guard operations.try() else { return .serverWorking(ServerWork(jobs: 1)) }
+        } else {
+            operations.lock()
+        }
+        defer { operations.unlock() }
+        if onlyWhenIdle {
+            let work = pendingWork()
+            guard work.isIdle else { return .serverWorking(work) }
+            guard agents.tryRefuseIfNoWork() else { return .serverWorking(pendingWork()) }
+        }
+        let handoff = TerminalCarryOver(terminals: carryOver())
+        do {
+            try handoff.write(to: TerminalCarryOver.url(configuration.dirs))
+        } catch {
+            ServerLog.error("the terminals can't be kept through the restart: \(error)")
+            if onlyWhenIdle {
+                agents.allowNewRequests()
+                throw ServiceError(.persistenceFailed, "The server couldn't save its terminals for the restart")
+            }
+        }
+        ServerLog.info("restarting, keeping \(handoff.terminals.count) terminals")
+        refuseNewSessions()
+        broadcast(.serverRestarting)
+        scheduleStop()
+        return .serverRestarting
+    }
+
+    /// Every terminal shown in a pane, as the next server reopens it.
+    private func carryOver() -> [TerminalCarryOver.Terminal] {
+        let owners = sessionLock.withLock { Array(sessions.values) }
+        return owners.filter { tabs.shows($0.info.id) }.sorted { $0.info.id < $1.info.id }.map { owner in
+            let metadata = owner.metadata
+            let program = metadata.process.flatMap { $0.isShell ? nil : $0.name } ?? owner.backgroundJob()
+            return TerminalCarryOver.Terminal(session: owner.info.id, project: owner.info.project,
+                                              directory: metadata.directory, size: owner.currentSize,
+                                              environment: owner.creationEnvironment, stopped: program)
+        }
+    }
+
+    /// Reopens the terminals the previous server handed over, each in the
+    /// panes that showed it, in its folder, with its output above a new
+    /// shell. One that can't reopen loses its panes, as before.
+    func reopenCarriedTerminals() {
+        for terminal in carriedTerminals where tabs.shows(terminal.session) {
+            do {
+                let directory = try reopeningFolder(terminal)
+                let size = (try? Validation.size(terminal.size)) != nil ? terminal.size : Size(cols: 80, rows: 24)
+                let seed = (try? archive.terminalArchive(terminal.session, maxHistory: Self.carriedHistoryRows)).map {
+                    SessionSeed(archive: $0, note: TerminalCarryOver.note(stopped: terminal.stopped))
+                }
+                var shown = false
+                let info = try createSession(CreateSession(project: terminal.project, directory: directory, size: size,
+                                                           environment: terminal.environment),
+                                             requester: nil, seed: seed, seeded: { shown = $0 })
+                _ = try tabs.edit { TabReducer.replaceSession(terminal.session, with: info.id, in: &$0) }
+                ServerLog.info("terminal \(terminal.session) reopened as \(info.id)")
+                // Its output lives on in the new terminal; otherwise its saved copy stays.
+                if shown { discardQuietly(terminal.session) }
+            } catch {
+                ServerLog.error("terminal \(terminal.session) didn't reopen: \(error)")
+                _ = try? tabs.edit { TabReducer.removePanes(showing: terminal.session, in: &$0) }
+            }
+        }
+        // Only now: a server that stops before this point reopens them next time.
+        try? FileManager.default.removeItem(at: TerminalCarryOver.url(configuration.dirs))
+    }
+
+    /// The most history a reopened terminal shows again, so many large
+    /// terminals don't hold the restarted server up.
+    static let carriedHistoryRows = 20_000
+
+    /// The folder a carried terminal was in, or its project's when that is gone.
+    private func reopeningFolder(_ terminal: TerminalCarryOver.Terminal) throws -> ServerPath {
+        if (try? terminal.directory.validateAbsolute()) != nil, terminal.directory.isDirectory {
+            return terminal.directory
+        }
+        return try catalog.project(terminal.project).directory
+    }
+
+    private func discardQuietly(_ session: SessionId) {
+        do {
+            try catalog.beginDiscard(session)
+            try archive.discardNow(session)
+            try catalog.finishDiscard(session)
+        } catch {
+            ServerLog.error("the saved output of terminal \(session) wasn't removed: \(error)")
+        }
     }
 
     /// Once a stop is accepted, a session created before the server goes

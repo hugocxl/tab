@@ -142,12 +142,30 @@ public struct UpdateDownloader: Sendable {
 
     private static func isTransport(_ error: Error?) -> Bool {
         guard let error = error as? UpdateError else { return true }
-        if case .download = error { return true }
-        return false
+        switch error {
+        case .download, .rateLimited: return true
+        default: return false
+        }
+    }
+
+    /// Fails early when `directory`'s volume can't hold the download, the app
+    /// unpacked from it, and the app it replaces kept until its server exits.
+    public static func checkSpace(for manifest: UpdateManifest, in directories: [URL]) throws {
+        guard let size = manifest.size else { return }
+        let needed = size * 3
+        for directory in directories {
+            let values = try? directory.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+            guard let available = values?.volumeAvailableCapacityForImportantUsage, available > 0 else { continue }
+            if available < needed { throw UpdateError.notEnoughSpace(needed: needed) }
+        }
     }
 
     private static func checkStatus(_ response: URLResponse) throws {
         guard let http = response as? HTTPURLResponse else { return }
+        // GitHub answers 403 or 429 once an address made too many requests.
+        if http.statusCode == 429 || (http.statusCode == 403 && http.value(forHTTPHeaderField: "x-ratelimit-remaining") == "0") {
+            throw UpdateError.rateLimited
+        }
         guard (200..<300).contains(http.statusCode) else {
             throw UpdateError.download("the server answered \(http.statusCode)")
         }

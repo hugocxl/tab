@@ -33,6 +33,9 @@ final class ExecJobs: @unchecked Sendable {
         lock.withLock { active.values.forEach { $0.set() } }
     }
 
+    /// Commands running now.
+    var activeCount: Int { lock.withLock { active.count } }
+
     /// Starts `request` in `root`; `completion` gets its result on the job's thread.
     /// `agent` is the conversation that asked, if any; see `AgentCallers`.
     func start(_ request: ExecRequest, root: String, agent: SessionId? = nil, disconnected: @escaping @Sendable () -> Bool,

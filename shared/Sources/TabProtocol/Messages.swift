@@ -310,6 +310,12 @@ public enum RequestBody: Hashable, Codable, Sendable {
     case stopServer(force: Bool)
     case stopServerIfIdle
     case restartServer
+    /// Restarts the server, reopening every terminal in its pane on the next
+    /// server, in its folder with its output. With `onlyWhenIdle` it replies
+    /// `serverWorking` instead while programs or agents work; otherwise
+    /// running programs stop. Replies `serverRestarting`. Servers without
+    /// `Feature.restartKeepingTerminals` reply `unsupported`.
+    case restartServerKeepingTerminals(onlyWhenIdle: Bool)
 
     // Git, files, exec, uploads
     case git(GitRequest)
@@ -410,6 +416,7 @@ public enum RequestBody: Hashable, Codable, Sendable {
         case "stopServer": self = .stopServer(force: try c("force"))
         case "stopServerIfIdle": self = .stopServerIfIdle
         case "restartServer": self = .restartServer
+        case "restartServerKeepingTerminals": self = .restartServerKeepingTerminals(onlyWhenIdle: try c("onlyWhenIdle"))
         case "git": self = .git(try c("request"))
         case "files": self = .files(try c("request"))
         case "exec": self = .exec(try c("request"))
@@ -582,6 +589,9 @@ public enum RequestBody: Hashable, Codable, Sendable {
             try c(force, "force")
         case .stopServerIfIdle: try TaggedEncoding(encoder, "stopServerIfIdle")
         case .restartServer: try TaggedEncoding(encoder, "restartServer")
+        case .restartServerKeepingTerminals(let onlyWhenIdle):
+            var c = try TaggedEncoding(encoder, "restartServerKeepingTerminals")
+            try c(onlyWhenIdle, "onlyWhenIdle")
         case .git(let request):
             var c = try TaggedEncoding(encoder, "git")
             try c(request, "request")
@@ -707,6 +717,8 @@ public enum ReplyBody: Hashable, Codable, Sendable {
     /// Terminals are running, so the server didn't stop.
     case serverBusy
     case serverRestarting
+    /// The server didn't restart because of this work.
+    case serverWorking(ServerWork)
 
     // Git, files, exec, uploads
     case git(GitReply)
@@ -790,6 +802,7 @@ public enum ReplyBody: Hashable, Codable, Sendable {
         case "serverStopping": self = .serverStopping
         case "serverBusy": self = .serverBusy
         case "serverRestarting": self = .serverRestarting
+        case "serverWorking": self = .serverWorking(try c("work"))
         case "git": self = .git(try c("reply"))
         case "files": self = .files(try c("reply"))
         case "exec": self = .exec(try c("result"))
@@ -915,6 +928,9 @@ public enum ReplyBody: Hashable, Codable, Sendable {
         case .serverStopping: try TaggedEncoding(encoder, "serverStopping")
         case .serverBusy: try TaggedEncoding(encoder, "serverBusy")
         case .serverRestarting: try TaggedEncoding(encoder, "serverRestarting")
+        case .serverWorking(let work):
+            var c = try TaggedEncoding(encoder, "serverWorking")
+            try c(work, "work")
         case .git(let reply):
             var c = try TaggedEncoding(encoder, "git")
             try c(reply, "reply")

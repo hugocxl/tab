@@ -22,7 +22,7 @@
           <li>Drag Tab into Applications.</li>
           <li>Open Tab and open a project folder.</li>
         </ol>
-        <p>Tab keeps itself up to date. <span class="ds-muted">When a new version is ready, Update downloads it in the background and Restart installs it, asking first if that would end running terminals. Check for Updates looks right away.</span></p>
+        <p>Tab keeps itself up to date. <span class="ds-muted">New versions download in the background and install when Tab quits, or while you’re away or Tab is hidden, coming back just as it was. The server moves to the new version while nothing is working, and every terminal reopens where it was, with its output. Restart installs right away, asking first only if a running program would stop. Check for Updates looks right away, and Settings › General › Updates turns each step off.</span></p>
       </section>
       <section class="ds-section" id="requirements">
         <h2>Requirements</h2>
@@ -54,6 +54,7 @@
         <h2>Terminals that keep running</h2>
         <p>Tab’s background server, <code>tabd</code>, owns your terminals, agent conversations, projects, tabs and history. The app and the <code>tab</code> command start it when it isn’t running. <span class="ds-muted">Quit the app and your terminals keep going; open it again and it reconnects.</span></p>
         <p>The Mac running your workspace needs to stay awake. <span class="ds-muted">Closing a terminal pane ends that terminal.</span></p>
+        <p>Restarting the server keeps your layout. <span class="ds-muted">Each terminal reopens in its pane and folder with its output above a new shell, and agents that were working pick up where they left off. <code>tab server restart</code> waits until no program or agent is working; <code>--force</code> stops them.</span></p>
       </section>
       <figure class="ds-wide">
         <div class="ds-media">{{vector remote-builds}}</div>

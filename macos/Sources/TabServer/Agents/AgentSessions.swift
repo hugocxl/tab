@@ -2458,6 +2458,34 @@ final class AgentSessions: @unchecked Sendable {
 
     func refuseNewRequests() { queue.sync { stopping = true } }
 
+    /// Takes requests again after a restart that refused them didn't happen.
+    func allowNewRequests() { queue.sync { stopping = false } }
+
+    /// Conversations a restart would cut short: working, waiting for an
+    /// answer, sending, or running shells and subagents in the background.
+    /// Idle conversations carry on in the next server.
+    func pendingWork() -> [SessionId] {
+        queue.sync { entries.values.filter(Self.isWorking).map(\.snapshot.session).sorted() }
+    }
+
+    /// Atomically checks that no conversation works and refuses new requests
+    /// for a restart. A request either wins first and makes this fail, or
+    /// observes the refusal.
+    func tryRefuseIfNoWork() -> Bool {
+        queue.sync {
+            guard !stopping, !entries.values.contains(where: Self.isWorking) else { return false }
+            stopping = true
+            return true
+        }
+    }
+
+    private static func isWorking(_ entry: Entry) -> Bool {
+        if entry.snapshot.status == .closed { return false }
+        return entry.snapshot.status == .working || entry.snapshot.status == .waiting || entry.submitting
+            || entry.steering || entry.pendingSubmission != nil || !entry.approving.isEmpty
+            || entry.snapshot.subagents?.contains(where: { $0.status == .running }) == true
+    }
+
     /// Atomically checks ownership and reserves the store for an idle shutdown.
     /// A create either wins first and makes this fail, or observes the refusal.
     func tryRefuseIfIdle() -> Bool {

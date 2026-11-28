@@ -504,7 +504,7 @@ enum CLICommands {
         """)
 
     static let server = CLIGroup(
-        name: "server", summary: "Start, check or stop the server", section: .server,
+        name: "server", summary: "Start, check, restart or stop the server", section: .server,
         commands: [
             CLICommandSpec("server start", [""], "Start the server unless it runs, and print its version as JSON") { a in
                 manage(a, .server(.start))
@@ -517,10 +517,17 @@ enum CLICommands {
                 if a.flag("--force") { try a.confirm() }
                 return manage(a, .server(.stop(force: a.flag("--force"))))
             },
+            CLICommandSpec("server restart", ["[--force --yes]"],
+                           "Restart the server when no program or agent works, keeping terminals in their panes; --force stops running programs",
+                           flags: ["--force", "--yes"]) { a in
+                if a.flag("--force") { try a.confirm() }
+                return manage(a, .server(.restart(force: a.flag("--force"))))
+            },
         ],
         notes: """
         Every other command starts the server when it isn't running; status and stop
-        never do.
+        never do. A restart reopens every terminal in its pane, in its folder with its
+        output above a new shell, and working agents pick up where they left off.
         """)
 
     static let simulator = CLIGroup(

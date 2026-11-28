@@ -211,24 +211,43 @@ public struct PreparedUpdate: Equatable, Sendable {
         }
     }
 
+    /// How the app starts again once an update replaced it.
+    public enum Relaunch: Equatable, Sendable {
+        /// In front, as after the person clicked Restart.
+        case open
+        /// As it was before, without taking focus from another app.
+        case quietly(RelaunchPresentation)
+        /// Not at all: the app was quitting anyway.
+        case none
+    }
+
     /// Swaps the staged app in, keeping the old one in the staging folder
-    /// until its server exits, and starts the new app once this one quits.
-    /// When `quiet` is true, the relaunched app starts hidden in the background
-    /// without stealing focus. On failure the installed app is left as it was.
-    public func install(quiet: Bool = false, processIdentifier: pid_t = getpid()) throws {
+    /// until its server exits, and starts the new app once this one quits,
+    /// as `relaunch` says. On failure the installed app is left as it was.
+    public func install(relaunch: Relaunch = .open, processIdentifier: pid_t = getpid()) throws {
         let lock = try installation.replacementLock()
         defer { lock.unlock() }
         try validate()
         try BundleReplacement.replace(current: installation.bundle, next: candidate, backup: backup) {
-            try Self.relaunch(installation.bundle, after: processIdentifier, quiet: quiet)
+            try Self.relaunch(installation.bundle, after: processIdentifier, relaunch)
+        }
+    }
+
+    /// The `open` options that bring the app back as `relaunch` says.
+    static func openOptions(_ relaunch: Relaunch) -> [String]? {
+        switch relaunch {
+        case .open, .quietly(.active): return ["-n"]
+        case .quietly(.background): return ["-n", "-g"]
+        case .quietly(.hidden): return ["-n", "-g", "-j"]
+        case .none: return nil
         }
     }
 
     /// Starts `bundle` once the process `pid` has exited.
-    static func relaunch(_ bundle: URL, after pid: pid_t, quiet: Bool = false) throws {
-        let script = quiet
-            ? "while /bin/kill -0 \"$1\" 2>/dev/null; do /bin/sleep 0.1; done; /usr/bin/open -n -g -j -a \"$2\""
-            : "while /bin/kill -0 \"$1\" 2>/dev/null; do /bin/sleep 0.1; done; /usr/bin/open -n -a \"$2\""
+    static func relaunch(_ bundle: URL, after pid: pid_t, _ relaunch: Relaunch = .open) throws {
+        guard let options = openOptions(relaunch) else { return }
+        let script = "while /bin/kill -0 \"$1\" 2>/dev/null; do /bin/sleep 0.1; done; /usr/bin/open "
+            + options.joined(separator: " ") + " -a \"$2\""
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         process.arguments = [

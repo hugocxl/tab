@@ -1,5 +1,6 @@
 import Foundation
 import TabCore
+import TabProtocol
 
 /// A result or question the updater shows until it is answered, dismissed
 /// or replaced.
@@ -17,9 +18,15 @@ public enum UpdateNotice: Equatable, Sendable {
     case unsavedEditors
     /// Installing ends running terminals; waiting for the person to agree.
     case confirmUpdate
+    /// Installing restarts the server, which keeps its terminals but stops
+    /// this work; waiting for the person to agree.
+    case confirmUpdateStopping(ServerWork)
     /// Restarting the outdated server ends running terminals; waiting for
     /// the person to agree.
     case confirmServerRestart
+    /// Restarting the server keeps its terminals but stops this work;
+    /// waiting for the person to agree.
+    case confirmServerRestartStopping(ServerWork)
     case serverRestartFailed(String)
     /// The server was restarted on this app's build.
     case serverRestarted(version: String)
@@ -29,8 +36,9 @@ public enum UpdateNotice: Equatable, Sendable {
     /// How long the notice stays before it hides itself, if it does.
     public var lifetime: TimeInterval? {
         switch self {
-        case .upToDate, .serverRestarted: return 6
-        case .updated: return 30
+        case .serverRestarted: return 4
+        case .upToDate: return 6
+        case .updated: return 12
         default: return nil
         }
     }
@@ -41,7 +49,7 @@ public enum UpdateNotice: Equatable, Sendable {
 public struct UpdateChip: Equatable, Sendable {
     /// Shared by the update chip and Server settings.
     static func serverUpdateMessage(version: String) -> String {
-        "Existing sessions are using \(Release.appName) \(version). You can keep working, or restart the server to update it."
+        "Terminals still run on the server from \(Release.appName) \(version). Restart it to finish updating."
     }
 
     public typealias Tone = Notice.Tone
@@ -58,6 +66,10 @@ public struct UpdateChip: Equatable, Sendable {
         case restartServer
         /// Ends every terminal and restarts the server; already agreed.
         case endTerminalsAndRestartServer
+        /// Restarts the server keeping its terminals, stopping the work that runs, and installs; already agreed.
+        case updateStoppingWork
+        /// Restarts the server keeping its terminals, stopping the work that runs; already agreed.
+        case restartServerStoppingWork
         case checkAgain
         case showChangelog
     }
@@ -116,6 +128,10 @@ public struct UpdateChip: Equatable, Sendable {
     ///   - sessions: terminals on the local server.
     ///   - agents: open agent sessions on the local server.
     ///   - waitingForServer: a downloaded release waiting for the local connection to recover.
+    ///   - keepsTerminals: the local server keeps its terminals through a restart.
+    ///   - quiet: the ready release and the outdated server are taken care of
+    ///     in the background, so they go unmentioned; restarts started in the
+    ///     background too.
     public static func make(
         status: UpdaterStatus,
         notice: UpdateNotice?,
@@ -128,17 +144,19 @@ public struct UpdateChip: Equatable, Sendable {
         outdatedServer: String?,
         sessions: Int,
         agents: Int = 0,
-        waitingForServer: String? = nil
+        waitingForServer: String? = nil,
+        keepsTerminals: Bool = false,
+        quiet: Quiet = Quiet()
     ) -> UpdateChip? {
         let app = Release.appName
         switch status {
-        case .installing(let version):
+        case .installing(let version) where !quiet.install:
             return UpdateChip(tone: .info, icon: .spinner, message: "Installing \(app) \(version)…", dismissal: nil)
-        case .installed(let version):
+        case .installed(let version) where !quiet.install:
             return UpdateChip(tone: .info, icon: .icon(.refreshCircle),
                               message: "\(app) \(version) is installed. Restart to open it.",
                               button: Button(title: "Restart", action: .update), dismissal: nil)
-        case .restartingServer:
+        case .restartingServer where !quiet.serverRestart:
             return UpdateChip(tone: .neutral, icon: .spinner, message: "Restarting the server…", dismissal: nil)
         default:
             break
@@ -149,10 +167,18 @@ public struct UpdateChip: Equatable, Sendable {
             return UpdateChip(tone: .warning, icon: .icon(.circleAlert),
                               message: "Restart now? This ends \(endingWork(sessions)).",
                               button: Button(title: "Restart", action: .endTerminalsAndUpdate), dismissal: .notice)
+        case .confirmUpdateStopping(let work)? where ready != nil:
+            return UpdateChip(tone: .warning, icon: .icon(.circleAlert),
+                              message: "Restart now? \(consequence(of: work))",
+                              button: Button(title: "Restart", action: .updateStoppingWork), dismissal: .notice)
         case .confirmServerRestart? where outdatedServer != nil:
             return UpdateChip(tone: .warning, icon: .icon(.circleAlert),
                               message: "Restart the server? This ends \(endingWork(sessions)).",
                               button: Button(title: "Restart", action: .endTerminalsAndRestartServer), dismissal: .notice)
+        case .confirmServerRestartStopping(let work)?:
+            return UpdateChip(tone: .warning, icon: .icon(.circleAlert),
+                              message: "Restart the server? \(consequence(of: work))",
+                              button: Button(title: "Restart", action: .restartServerStoppingWork), dismissal: .notice)
         case .installFailed(let reason)?:
             return UpdateChip(tone: .danger, icon: .icon(.circleAlert),
                               message: "Couldn’t install the update. \(sentence(reason))",
@@ -223,20 +249,30 @@ public struct UpdateChip: Equatable, Sendable {
                               button: Button(title: buttonTitle, action: .download), dismissal: .available(available))
         }
 
-        if let ready {
+        if let ready, !quiet.ready {
             let message: String
             let buttonTitle: String
-            switch UpdateDecision.step(compatible: ready.compatible, sessions: sessions, agents: agents) {
+            switch UpdateDecision.step(compatible: ready.compatible, keepsTerminals: keepsTerminals, sessions: sessions, agents: agents) {
             case .install where relaunchWhenIdle:
                 message = sessions > 0 || agents > 0
-                    ? "\(app) \(ready.version) is ready. It will install when hidden; your terminals and agents keep running."
-                    : "\(app) \(ready.version) is ready. It will install when hidden."
+                    ? "\(app) \(ready.version) is ready. It installs while you’re away; terminals and agents keep running."
+                    : "\(app) \(ready.version) is ready. It installs while you’re away."
+                buttonTitle = "Restart Now"
+            case .installRestartingServer where relaunchWhenIdle:
+                message = sessions > 0
+                    ? "\(app) \(ready.version) is ready. It installs while you’re away; terminals reopen where they were."
+                    : "\(app) \(ready.version) is ready. It installs while you’re away."
                 buttonTitle = "Restart Now"
             case .install where sessions > 0 || agents > 0:
                 message = "\(app) \(ready.version) is ready. Restart to finish updating; your terminals and agents keep running."
                 buttonTitle = "Restart"
             case .install, .installStoppingIdleServer:
                 message = "\(app) \(ready.version) is ready. Restart to finish updating."
+                buttonTitle = "Restart"
+            case .installRestartingServer:
+                message = sessions > 0 || agents > 0
+                    ? "\(app) \(ready.version) is ready. Restart to finish updating; terminals reopen where they were."
+                    : "\(app) \(ready.version) is ready. Restart to finish updating."
                 buttonTitle = "Restart"
             case .confirmEndingTerminals:
                 message = "\(app) \(ready.version) is ready. It needs a new server, so restarting ends running terminals and agents."
@@ -246,14 +282,14 @@ public struct UpdateChip: Equatable, Sendable {
                               button: Button(title: buttonTitle, action: .update), dismissal: .ready(ready.version))
         }
 
-        if let version = waitingForServer {
+        if let version = waitingForServer, !quiet.ready {
             return UpdateChip(tone: .neutral, icon: .spinner,
                               message: "\(app) \(version) is ready. Waiting for the local server before restarting.",
                               dismissal: .ready(version))
         }
 
-        if let outdatedServer {
-            return UpdateChip(tone: .warning, icon: .icon(.circleAlert),
+        if let outdatedServer, !quiet.server {
+            return UpdateChip(tone: .info, icon: .icon(.refreshCircle),
                               message: serverUpdateMessage(version: outdatedServer),
                               button: Button(title: "Restart", action: .restartServer), dismissal: .server(outdatedServer))
         }
@@ -271,6 +307,9 @@ public struct UpdateChip: Equatable, Sendable {
 
         return nil
     }
+
+    private static let sampleWork = ServerWork(programs: [.init(session: SessionId(), project: ProjectId(), name: "npm")],
+                                               agents: [SessionId()])
 
     /// One chip of every state, in the order an update meets them, for previewing.
     static let previews: [UpdateChip] = {
@@ -292,11 +331,13 @@ public struct UpdateChip: Equatable, Sendable {
             (.ready(version: version), nil, false, nil, nil, compatible, true, nil, 2),
             (.ready(version: version), nil, false, nil, nil, incompatible, false, nil, 2),
             (.ready(version: version), .confirmUpdate, false, nil, nil, incompatible, false, nil, 2),
+            (.ready(version: version), .confirmUpdateStopping(sampleWork), false, nil, nil, incompatible, false, nil, 2),
             (.ready(version: version), .unsavedEditors, false, nil, nil, incompatible, false, nil, 2),
             (.installing(version: version), nil, false, nil, nil, incompatible, false, nil, 2),
             (.idle, .updated(version: version), false, nil, nil, nil, false, nil, 0),
             (.idle, nil, false, nil, nil, nil, false, "1.4.2", 2),
             (.idle, .confirmServerRestart, false, nil, nil, nil, false, "1.4.2", 2),
+            (.idle, .confirmServerRestartStopping(sampleWork), false, nil, nil, nil, false, "1.4.2", 2),
             (.restartingServer, nil, false, nil, nil, nil, false, "1.4.2", 2),
             (.idle, .serverRestarted(version: version), false, nil, nil, nil, false, nil, 0),
             (.idle, .checkFailed("You’re offline."), false, nil, nil, nil, false, nil, 0),
@@ -320,6 +361,68 @@ public struct UpdateChip: Equatable, Sendable {
         self.dismissal = dismissal
     }
 
+    /// What the background takes care of, so the chip doesn't mention it.
+    public struct Quiet: Equatable, Sendable {
+        /// The ready release installs by itself when the person is away.
+        public var ready = false
+        /// The outdated server restarts by itself once no work runs.
+        public var server = false
+        /// The server restart running now started in the background.
+        public var serverRestart = false
+        /// The install running now started in the background, such as when quitting.
+        public var install = false
+
+        public init(ready: Bool = false, server: Bool = false, serverRestart: Bool = false, install: Bool = false) {
+            self.ready = ready
+            self.server = server
+            self.serverRestart = serverRestart
+            self.install = install
+        }
+    }
+
+    /// What a restart that keeps terminals does to `work`, in sentences.
+    static func consequence(of work: ServerWork) -> String {
+        var sentences: [String] = []
+        if let stopped = stopping(work) { sentences.append("This stops \(stopped).") }
+        switch work.agents.count {
+        case 0: break
+        case 1: sentences.append("The working agent picks up where it left off.")
+        default: sentences.append("\(work.agents.count) working agents pick up where they left off.")
+        }
+        sentences.append("Terminals reopen where they were.")
+        return sentences.joined(separator: " ")
+    }
+
+    /// The programs and commands a restart stops, such as “npm and cargo”.
+    static func stopping(_ work: ServerWork) -> String? {
+        var names: [String] = []
+        for program in work.programs where !names.contains(program.name) { names.append(program.name) }
+        var parts: [String]
+        switch names.count {
+        case 0: parts = []
+        case 1, 2: parts = names
+        default: parts = [names[0], names[1], "\(names.count - 2) more programs"]
+        }
+        if work.jobs > 0 { parts.append(work.jobs == 1 ? "a running command" : "\(work.jobs) running commands") }
+        return list(parts)
+    }
+
+    /// What an automatic restart waits for, such as “npm and 1 agent”.
+    static func waiting(for work: ServerWork) -> String {
+        var parts: [String] = []
+        if let stopped = stopping(work) { parts.append(stopped) }
+        if !work.agents.isEmpty { parts.append(work.agents.count == 1 ? "1 agent" : "\(work.agents.count) agents") }
+        return list(parts) ?? "running work"
+    }
+
+    private static func list(_ parts: [String]) -> String? {
+        switch parts.count {
+        case 0: return nil
+        case 1: return parts[0]
+        default: return parts.dropLast().joined(separator: ", ") + " and " + parts[parts.count - 1]
+        }
+    }
+
     private static func endingWork(_ sessions: Int) -> String {
         sessions == 0 ? "any running agents" : "\(terminals(sessions)) and any running agents"
     }
@@ -335,12 +438,22 @@ public struct UpdateChip: Equatable, Sendable {
             case .notConnectedToInternet, .networkConnectionLost, .dataNotAllowed: return "You’re offline."
             case .timedOut: return "The connection timed out."
             case .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed: return "GitHub can’t be reached."
+            case .secureConnectionFailed, .serverCertificateUntrusted, .serverCertificateHasBadDate,
+                 .serverCertificateNotYetValid, .serverCertificateHasUnknownRoot, .clientCertificateRejected:
+                return "A secure connection to GitHub couldn’t be made. Check the Mac’s date and time, and the proxy."
+            case .cannotCreateFile, .cannotWriteToFile:
+                return "The update couldn’t be saved. Check the free disk space."
             default: return error.localizedDescription
             }
         }
         if let error = error as? UpdateError {
             if case .download(let reason) = error { return "The download failed: \(reason)" }
             return error.description
+        }
+        let nsError = error as NSError
+        if (nsError.domain == NSCocoaErrorDomain && nsError.code == NSFileWriteOutOfSpaceError)
+            || (nsError.domain == NSPOSIXErrorDomain && nsError.code == Int(ENOSPC)) {
+            return "There isn’t enough free disk space."
         }
         return error.localizedDescription
     }

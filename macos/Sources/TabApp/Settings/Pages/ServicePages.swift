@@ -127,7 +127,10 @@ extension SettingsModel {
             }
         })
         b.row("restart-server", b.button("Restart Server", enabled: !store.serverBusy && (store.host?.canRestartServer ?? false), help: store.host?.canRestartServer == false ? "Wait for the current update to finish." : nil) { [weak self] in
-            self?.confirm("Restart the server?", "Every terminal session on this Mac ends and the server starts again. Saved terminal records are kept.", "Restart Server") {
+            let keeps = self?.store.host?.serverKeepsTerminals == true
+            self?.confirm("Restart the server?", keeps
+                ? "Terminals reopen where they were, with their output. Programs running in them stop, and working agents pick up where they left off."
+                : "Every terminal session on this Mac ends and the server starts again. Saved terminal records are kept.", "Restart Server") {
                 self?.store.controlServer(restart: true)
             }
         })

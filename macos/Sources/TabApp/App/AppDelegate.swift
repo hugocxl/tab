@@ -32,6 +32,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         theme.followSystem()
         let model = AppModel(dirs: dirs, theme: theme)
         self.model = model
+        // Before anything reads the updater, which announces the update once the person is back.
+        let quietRelaunch = QuietRelaunchMarker.take(dirs.root.appendingPathComponent("quiet-relaunch"))
+        model.launchedQuietly = quietRelaunch != nil
         Task { await theme.loadCatalog(customDirectory: dirs.themes) }
         Task.detached(priority: .utility) {
             do {
@@ -52,11 +55,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             exit(1)
         }
         self.socket = socket
-        let quietRelaunch = QuietRelaunchMarker.take(dirs.root.appendingPathComponent("quiet-relaunch"))
         model.start()
-        if quietRelaunch, pendingFolders.isEmpty {
+        if let quietRelaunch, quietRelaunch != .active, pendingFolders.isEmpty {
+            // Back as it was before the update, without taking focus.
             controller.window?.orderBack(nil)
-            NSApp.hide(nil)
+            if quietRelaunch == .hidden { NSApp.hide(nil) }
         } else {
             controller.show()
             for folder in pendingFolders { model.addProject(folder) }
@@ -139,6 +142,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                     self.terminationPending = false
                     return
                 }
+                if let updater = self.model?.updater { await Self.installOnQuit(updater) }
                 self.finish()
                 NSApp.terminate(nil)
             } catch {
@@ -150,6 +154,23 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 alert.runModal()
             }
         }
+    }
+
+    /// Installs a ready update as Tab quits, so the next launch opens it.
+    /// Gives up waiting after a while, but never quits halfway through
+    /// replacing the app.
+    private static func installOnQuit(_ updater: UpdaterController) async {
+        final class Done { var value = false }
+        let done = Done()
+        let work = Task { @MainActor in
+            await updater.prepareForQuit()
+            done.value = true
+        }
+        let deadline = Date().addingTimeInterval(UpdaterController.quitInstallTimeout)
+        while !done.value, Date() < deadline { try? await Task.sleep(for: .milliseconds(50)) }
+        guard !done.value else { return }
+        work.cancel()
+        while updater.isInstalling { try? await Task.sleep(for: .milliseconds(50)) }
     }
 
     /// Quitting never ends terminals: the state is saved and the servers

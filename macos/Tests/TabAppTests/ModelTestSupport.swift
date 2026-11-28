@@ -210,6 +210,9 @@ final class ModelFakeServer: ServerAPI, TerminalBackend, @unchecked Sendable {
         locked { _idleStops += 1; return _live.isEmpty }
     }
     func restartServer() async throws {}
+    func restartServerKeepingTerminals(onlyWhenIdle: Bool) async throws -> ServerWork? {
+        throw ClientError.unsupported("This server can't restart while keeping its terminals.")
+    }
 
     func remoteAccess() async throws -> RemoteAccessState {
         RemoteAccessState(revision: 0, settings: RemoteAccessSettings(), status: .disabled)

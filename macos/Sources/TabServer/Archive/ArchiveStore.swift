@@ -124,6 +124,16 @@ final class ArchiveStore: @unchecked Sendable {
         try loaded(session).screen
     }
 
+    /// A session's saved screen and whole history, to show again in a new
+    /// terminal. Images aren't kept.
+    func terminalArchive(_ session: SessionId, maxHistory: Int = .max) throws -> TerminalArchive {
+        let screen = try loaded(session)
+        let reader = history(session, screen)
+        let history = try reader.map { try $0.rows(max($0.count - maxHistory, 0)..<$0.count) } ?? []
+        return TerminalArchive(size: screen.screen.size, rows: screen.screen.rows, cursor: screen.screen.cursor,
+                               history: history, graphics: Graphics(cell: CellSize(width: 0, height: 0)))
+    }
+
     private func loaded(_ session: SessionId) throws -> ArchiveFiles.Screen {
         do {
             return try ArchiveFiles.readScreen(root: root, session: session)

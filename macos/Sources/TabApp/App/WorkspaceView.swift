@@ -204,6 +204,18 @@ final class WorkspaceView: ThemedView {
     private func updateConnectionNotice() {
         let server = model.currentProject.serverId
         let notice: Notice
+        if let connection = model.connections[server], connection.isRestarting {
+            // A quick restart goes unmentioned, and the update chip speaks for
+            // a restart it started.
+            guard connection.isRestartingSlowly, !(server.isLocal && model.updater.mentionsServerRestart) else {
+                notices.remove(Self.connectionNotice)
+                return
+            }
+            let name = server.isLocal ? "This Mac’s server" : model.serverName(server) ?? "The server"
+            notices.show(Notice(tone: .neutral, icon: .spinner, message: "\(name) is restarting…", dismissible: false),
+                         id: Self.connectionNotice)
+            return
+        }
         switch model.connectionState(server) {
         case .reconnecting:
             let name = server.isLocal ? "This Mac’s server" : model.serverName(server) ?? "The server"

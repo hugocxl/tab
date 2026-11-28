@@ -118,6 +118,9 @@ public enum CLIServer: Hashable, Sendable {
     case start
     case status
     case stop(force: Bool)
+    /// Restarts on this `tab`'s build keeping terminals in their panes; only
+    /// when no program or agent works, unless `force`.
+    case restart(force: Bool)
 }
 
 public enum CLIProject: Hashable, Sendable {

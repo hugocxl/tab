@@ -178,8 +178,8 @@ extension ClientConnection {
     func permit(_ body: RequestBody) throws {
         guard case .mobile = origin else { return }
         switch body {
-        case .stopServer, .stopServerIfIdle, .restartServer, .writeServerSettings, .describeInfrastructure, .exec, .cancelExec,
-             .readRemoteAccess, .writeRemoteAccess, .startPairing, .cancelPairing, .revokeDevice:
+        case .stopServer, .stopServerIfIdle, .restartServer, .restartServerKeepingTerminals, .writeServerSettings,
+             .describeInfrastructure, .exec, .cancelExec, .readRemoteAccess, .writeRemoteAccess, .startPairing, .cancelPairing, .revokeDevice:
             throw ServiceError(.unauthorized, "Not available to paired devices")
         case .identifyClient(let kind) where kind != .mobile:
             throw ServiceError(.unauthorized, "Not available to paired devices")
@@ -306,6 +306,8 @@ extension ClientConnection {
             return server.requestStopIfIdle()
         case .restartServer:
             return server.requestRestart()
+        case .restartServerKeepingTerminals(let onlyWhenIdle):
+            return try server.requestRestartKeepingTerminals(onlyWhenIdle: onlyWhenIdle)
 
         // Uploads and activity
         case .upload(let chunk):

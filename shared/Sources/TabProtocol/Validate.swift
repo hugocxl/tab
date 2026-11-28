@@ -249,7 +249,7 @@ extension RequestBody {
             try provider.validate()
         case .ping, .listSimulators, .listSessions, .attachWithoutResize, .endSession, .closeSession, .discardSession,
              .readSavedScreen, .identifyClient, .cancelCreation, .readCatalog, .listProjectSessions, .readTabs,
-             .readServerSettings, .readAgentProviders, .checkAgentProviders, .stopServer, .stopServerIfIdle, .restartServer, .cancelExec, .readActivity,
+             .readServerSettings, .readAgentProviders, .checkAgentProviders, .stopServer, .stopServerIfIdle, .restartServer, .restartServerKeepingTerminals, .cancelExec, .readActivity,
              .readRemoteAccess, .cancelPairing, .revokeDevice, .reportAgentState, .unknown:
             break
         }
@@ -399,6 +399,8 @@ extension ReplyBody {
             guard state.health.count <= AgentProviderSettings.maxProviders else { throw .badRequest }
         case .agentProviderHealth(let health):
             if health.provider.utf8.count > 64 { throw .badRequest }
+        case .serverWorking(let work):
+            try work.validate()
         case .searchPage(let page):
             try page.validate()
         case .sessions(let sessions):

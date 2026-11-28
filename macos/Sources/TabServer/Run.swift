@@ -95,16 +95,13 @@ public final class ServerRunner: @unchecked Sendable {
     private var retention: DispatchSourceTimer?
     private var signalSources: [DispatchSourceSignal] = []
     static let retentionInterval: TimeInterval = 60 * 60
+    /// How long a new server waits for a stopping one to let go of the profile.
+    static let predecessorWait: TimeInterval = 15
 
     init(server: Server) throws {
         self.server = server
         let configuration = server.configuration
-        let lockFile: FileLock
-        do {
-            lockFile = try FileLock.tryLock(configuration.dirs.serverPid)
-        } catch FileLock.Failure.held {
-            throw ServerStartError.alreadyRunning(configuration.socket.path)
-        }
+        let lockFile = server.profileLock
         let descriptor = lockFile.fileDescriptor
         let pid = Data("\(getpid())\n".utf8)
         _ = ftruncate(descriptor, 0)
@@ -118,8 +115,31 @@ public final class ServerRunner: @unchecked Sendable {
         chmod(configuration.socket.path, 0o600)
     }
 
+    /// Takes the profile's lock. A server that restarts closes its socket
+    /// first and lets go of the lock once its terminals are saved, so while
+    /// nothing answers on the socket, the lock is waited for.
+    static func lock(_ configuration: ServerConfiguration) throws -> FileLock {
+        let deadline = Date().addingTimeInterval(predecessorWait)
+        while true {
+            do {
+                return try FileLock.tryLock(configuration.dirs.serverPid)
+            } catch FileLock.Failure.held {
+                let answering = (try? FileDescriptorStream.connect(unixSocket: configuration.socket.path)).map { stream in
+                    stream.close()
+                    return true
+                } ?? false
+                guard !answering, Date() < deadline else {
+                    throw ServerStartError.alreadyRunning(configuration.socket.path)
+                }
+                Thread.sleep(forTimeInterval: 0.05)
+            }
+        }
+    }
+
     fileprivate func begin() {
         server.stopRequested = { [weak self] in self?.stop() }
+        // Before any client reads the tabs, so they never show the old terminals.
+        server.reopenCarriedTerminals()
         let timer = DispatchSource.makeTimerSource(queue: server.lifecycle)
         timer.schedule(deadline: .now() + Self.retentionInterval, repeating: Self.retentionInterval)
         timer.setEventHandler { [weak server] in server?.pruneExpiredSessions() }

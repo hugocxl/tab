@@ -206,7 +206,7 @@ final class UpdaterTests: XCTestCase {
         XCTAssertEqual(chip(.ready(version: "1.1.0"), notice: .confirmUpdate, ready: compatible, sessions: 2)?.button?.title, "Restart")
 
         let server = try XCTUnwrap(chip(outdatedServer: "1.0.0", sessions: 1))
-        XCTAssertEqual(server.tone, .warning)
+        XCTAssertEqual(server.tone, .info)
         XCTAssertEqual(server.button?.action, .restartServer)
         XCTAssertEqual(chip(notice: .confirmServerRestart, outdatedServer: "1.0.0", sessions: 1)?.button?.action,
                        .endTerminalsAndRestartServer)
@@ -275,8 +275,8 @@ final class UpdaterTests: XCTestCase {
 
     /// Every sample in the debug preview still produces its chip.
     func testUpdateChipPreviewCoversEveryState() {
-        XCTAssertEqual(UpdateChip.previews.count, 24)
-        XCTAssertEqual(Set(UpdateChip.previews.map(\.message)).count, 24)
+        XCTAssertEqual(UpdateChip.previews.count, 26)
+        XCTAssertEqual(Set(UpdateChip.previews.map(\.message)).count, 26)
     }
 
     func testDownloadHoldAndRelaunchWhenIdleChipStates() throws {
@@ -296,7 +296,7 @@ final class UpdaterTests: XCTestCase {
         let idleReady = try XCTUnwrap(UpdateChip.make(
             status: .ready(version: "1.2.0"), notice: nil, checking: false, showsDownload: true,
             ready: .init(version: "1.2.0", compatible: true), relaunchWhenIdle: true, outdatedServer: nil, sessions: 2))
-        XCTAssertTrue(idleReady.message.contains("when hidden"))
+        XCTAssertTrue(idleReady.message.contains("while you’re away"))
         XCTAssertTrue(idleReady.message.contains("terminals and agents keep running"))
         XCTAssertEqual(idleReady.button?.title, "Restart Now")
         XCTAssertEqual(idleReady.button?.action, .update)
@@ -304,10 +304,12 @@ final class UpdaterTests: XCTestCase {
 
     func testQuietRelaunchMarkerIsConsumedOnce() {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("quiet-relaunch-\(UUID().uuidString)")
-        XCTAssertFalse(QuietRelaunchMarker.take(url))
-        QuietRelaunchMarker.save(to: url)
-        XCTAssertTrue(QuietRelaunchMarker.take(url))
-        XCTAssertFalse(QuietRelaunchMarker.take(url))
+        XCTAssertNil(QuietRelaunchMarker.take(url))
+        QuietRelaunchMarker.save(.background, to: url)
+        XCTAssertEqual(QuietRelaunchMarker.take(url), .background)
+        XCTAssertNil(QuietRelaunchMarker.take(url))
+        try? Data("1".utf8).write(to: url)
+        XCTAssertEqual(QuietRelaunchMarker.take(url), .hidden, "a marker from an older build means hidden")
     }
 
     func testAutomaticInstallObstacles() {
@@ -329,7 +331,8 @@ final class UpdaterTests: XCTestCase {
     func testUpdateSettingsDecodesMissingAndUnknownKeys() throws {
         let empty = try Settings.decode(Data("{}".utf8))
         XCTAssertTrue(empty.updates.automaticDownloads)
-        XCTAssertFalse(empty.updates.automaticInstall)
+        XCTAssertTrue(empty.updates.automaticInstall, "updates install by themselves unless turned off")
+        XCTAssertTrue(empty.updates.automaticServerRestart)
         let custom = try Settings.decode(Data(#"{"updates":{"automaticDownloads":false,"automaticInstall":true,"futureKey":1}}"#.utf8))
         XCTAssertFalse(custom.updates.automaticDownloads)
         XCTAssertTrue(custom.updates.automaticInstall)

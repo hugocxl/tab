@@ -27,6 +27,17 @@ final class NoticeTests: XCTestCase {
         XCTAssertNil(stack.notice("update"))
     }
 
+    func testARepeatedToastRestartsTheOneShownInsteadOfPilingUp() {
+        let stack = NoticeStack(frame: NSRect(x: 0, y: 0, width: 900, height: 600))
+        let first = stack.show(notice("Could not refresh projects"), lifetime: 4)
+        let other = stack.show(notice("Copied"), lifetime: 4)
+        let again = stack.show(notice("Could not refresh projects"), lifetime: 4)
+        XCTAssertEqual(again, first)
+        XCTAssertEqual(stack.ids, [first, other], "the repeated one comes to the front")
+        stack.show(notice("Could not refresh projects"), id: "pinned")
+        XCTAssertEqual(stack.ids.count, 3, "a notice with its own id is never merged")
+    }
+
     func testIconTransitionsPreserveTemplateTintAndHideProgressRings() throws {
         let view = NoticeIcon(frame: NSRect(x: 0, y: 0, width: 18, height: 18))
         view.color = .systemRed

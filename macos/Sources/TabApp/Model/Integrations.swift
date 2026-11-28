@@ -157,6 +157,11 @@ extension ServerAPI {
     var supportsSessionEnvironment: Bool {
         (self as? ServerClient)?.supports(.sessionEnvironment) ?? true
     }
+
+    /// Whether a restart can keep the server's terminals in their panes.
+    var keepsTerminalsThroughRestarts: Bool {
+        (self as? ServerClient)?.supports(.restartKeepingTerminals) ?? false
+    }
 }
 
 // MARK: Updates
@@ -170,6 +175,12 @@ extension AppModel: UpdaterHost {
 
     public var runningAgentCount: Int { connections[.local]?.activity.agents.count ?? 0 }
 
+    public var workingAgentCount: Int {
+        connections[.local]?.activity.agents.filter { $0.state == .working || $0.state == .blocked }.count ?? 0
+    }
+
+    public var localServerKeepsTerminals: Bool { connections[.local]?.main?.keepsTerminalsThroughRestarts ?? false }
+
     public func endAllSessions() async throws {
         guard let main = connections[.local]?.main else { throw ModelError("This Mac's server is not running.") }
         _ = try await main.stopServer(force: true)
@@ -178,6 +189,24 @@ extension AppModel: UpdaterHost {
     public func restartLocalServer() async throws {
         guard let main = connections[.local]?.main else { throw ModelError("This Mac's server is not running.") }
         try await main.restartServer()
+    }
+
+    public func restartLocalServerKeepingTerminals(onlyWhenIdle: Bool) async throws -> ServerWork? {
+        guard let connection = connections[.local], let main = connection.main else {
+            throw ModelError("This Mac's server is not running.")
+        }
+        let work = try await main.restartServerKeepingTerminals(onlyWhenIdle: onlyWhenIdle)
+        if work == nil { connection.expectRestart() }
+        return work
+    }
+
+    public func startLocalServer() {
+        guard let local = connector(.local, nil) as? LocalConnector else { return }
+        do {
+            try local.server.launch()
+        } catch {
+            Log.app.error("could not start the local server: \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     public func stopLocalServerIfIdle() async -> Bool {

@@ -38,6 +38,9 @@ extension SettingsModel {
         b.row("update-auto-install", b.toggle("update-auto-install", settings.updates.automaticInstall, enabled: settings.updates.automaticDownloads) { [store] in
             store.setAutomaticInstall($0)
         })
+        b.row("update-auto-server-restart", b.toggle("update-auto-server-restart", settings.updates.automaticServerRestart) { [store] in
+            store.setAutomaticServerRestart($0)
+        })
     }
 
     static let choosingApplication = "choose.application"

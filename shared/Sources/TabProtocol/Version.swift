@@ -67,10 +67,14 @@ public struct Feature: RawRepresentable, Hashable, Codable, Sendable {
     /// stop with their parent (`AgentChatRequest.stop`), and report back to it.
     public static let agentLineage = Feature(rawValue: "agentLineage")
 
+    /// `restartServerKeepingTerminals`: the server restarts only when no work runs, if asked,
+    /// and the next server reopens every terminal in its pane, in its folder with its output.
+    public static let restartKeepingTerminals = Feature(rawValue: "restartKeepingTerminals")
+
     /// Features this build's server supports.
     public static let all: [Feature] = [.terminalInput, .sessionEnvironment, .fileSearch, .fileByteRanges, .pullRequestPreview,
                                         .fileWriteParents, .agentStateReports, .tunnels, .simulators, .fileRoots,
-                                        .panePositioning, .gitGraph, .agentLineage]
+                                        .panePositioning, .gitGraph, .agentLineage, .restartKeepingTerminals]
 }
 
 /// What kind of program a client is.

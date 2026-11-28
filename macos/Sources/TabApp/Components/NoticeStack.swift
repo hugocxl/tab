@@ -63,6 +63,20 @@ final class NoticeStack: NSView {
     @discardableResult
     func show(_ notice: Notice, id: String? = nil, lifetime: TimeInterval? = nil,
               action: (() -> Void)? = nil, dismiss: (() -> Void)? = nil) -> String {
+        // The same message again, such as a failure repeating, restarts the
+        // one shown instead of piling up behind it.
+        if id == nil, lifetime != nil,
+           let index = entries.lastIndex(where: { $0.lifetime != nil && $0.view.notice == notice }) {
+            let existing = entries[index].id
+            wire(entries[index].view, id: existing, action: action, dismiss: dismiss)
+            entries[index].deadline = nil
+            if !expanded { schedule(existing) }
+            if index != entries.count - 1 {
+                entries.append(entries.remove(at: index))
+                arrange(animated: true)
+            }
+            return existing
+        }
         let id = id ?? nextId()
         if let index = entries.firstIndex(where: { $0.id == id }) {
             let view = entries[index].view

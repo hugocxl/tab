@@ -3,6 +3,12 @@
 Every version of Tab, newest first. The app shows this file in Settings →
 Changelog.
 
+## 0.148.4 - 2026-11-28
+
+### Changed
+
+- App updates now install automatically when idle and restart the server while keeping open terminals.
+
 ## 0.148.3 - 2026-11-28
 
 ### Changed

@@ -170,7 +170,12 @@ public final class AppModel {
     public private(set) lazy var proxyController = ProxyController(model: proxy, host: self)
     /// AI commit and pull request actions.
     /// Updates from GitHub Releases.
-    public private(set) lazy var updater = UpdaterController(host: self, dirs: dirs, settings: settings.updates, configuration: proxy.sessionConfiguration())
+    public private(set) lazy var updater = UpdaterController(host: self, dirs: dirs, settings: settings.updates,
+                                                             configuration: proxy.sessionConfiguration(),
+                                                             quietRelaunch: launchedQuietly)
+    /// This launch relaunched into an update the person didn't start; set
+    /// before anything reads `updater`.
+    public var launchedQuietly = false
     /// Icons of this computer's project folders, by path.
     public let iconCache = ProjectIconCache()
     /// Icons of other computers' projects, by project id.

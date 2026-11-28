@@ -142,8 +142,9 @@ public enum SettingsCatalog {
         SettingItem("file-opener", "Open files with", "Opens files you click in a terminal. Files open in the Tab editor or another application.", .general, "Files"),
         SettingItem("worktree-location", "Worktree location", "Where new worktrees go, such as ../{base-dir}.{branch}. Must include {branch}; also supports {project-name} and {base-dir}. Relative paths start in the project folder. Saved as worktrees.location in ~/.config/tab/settings.json; a project's .config/tab/settings.json overrides it.", .general, "Worktrees"),
         SettingItem("update-status", "Software updates", "Check for new versions of Tab.", .general, "Updates"),
-        SettingItem("update-auto-download", "Download new updates when available", "Download updates in the background, except on a Low Data Mode or hotspot network, and ask before restarting.", .general, "Updates"),
-        SettingItem("update-auto-install", "Install updates automatically", "Relaunch into the new version while Tab is not visible. Your terminals and agents keep running.", .general, "Updates"),
+        SettingItem("update-auto-download", "Download new updates when available", "Download updates in the background, except on a Low Data Mode or hotspot network.", .general, "Updates"),
+        SettingItem("update-auto-install", "Install updates automatically", "Install when Tab quits, and relaunch into the new version while you’re away or Tab is hidden, just as it was. Your terminals and agents keep running.", .general, "Updates"),
+        SettingItem("update-auto-server-restart", "Restart the server automatically", "Move the server to the new version while you’re away and no program or agent is working. Terminals reopen where they were, with their output.", .general, "Updates"),
         // Appearance
         SettingItem("light-theme", "Light theme", "Colors for the interface and terminals when macOS uses light appearance.", .appearance, "Themes"),
         SettingItem("dark-theme", "Dark theme", "Colors for the interface and terminals when macOS uses dark appearance.", .appearance, "Themes"),
@@ -243,7 +244,7 @@ public enum SettingsCatalog {
         // Server
         SettingItem("server", "Local server", "View the version and connection status of the local server that keeps your terminal sessions running.", .server, "Connection"),
         SettingItem("stop-server", "Stop Server", "End all sessions on this device and stop the server. A confirmation is required.", .server, "Server control"),
-        SettingItem("restart-server", "Restart Server", "End all sessions and start the server again. Saved terminal records are preserved.", .server, "Server control"),
+        SettingItem("restart-server", "Restart Server", "Start the server again. Terminals reopen where they were on servers that support it; otherwise every session ends. Saved terminal records are preserved.", .server, "Server control"),
         // Mobile
         SettingItem("mobile-access", "Allow mobile devices", "Let paired phones reach this device's server over the local network or a VPN. A paired phone gets full terminal access.", .mobile, "Access"),
         SettingItem("mobile-port", "Port", "Network port phones connect to, from 1024 to 65535.", .mobile, "Access"),

@@ -384,6 +384,22 @@ extension ServerClient {
         guard case .serverRestarting = reply else { throw unexpected(reply) }
     }
 
+    /// Restarts the server, reopening every terminal in its pane on the next
+    /// one. With `onlyWhenIdle` it returns the work that keeps it running
+    /// instead of restarting; `nil` means the server is restarting. Throws
+    /// `unsupported` when the server predates `Feature.restartKeepingTerminals`.
+    public func restartServerKeepingTerminals(onlyWhenIdle: Bool) async throws -> ServerWork? {
+        guard supports(.restartKeepingTerminals) else {
+            throw ClientError.unsupported("This server can't restart while keeping its terminals.")
+        }
+        let reply = try await request(.restartServerKeepingTerminals(onlyWhenIdle: onlyWhenIdle))
+        switch reply {
+        case .serverRestarting: return nil
+        case .serverWorking(let work): return work
+        default: throw unexpected(reply)
+        }
+    }
+
     // MARK: Git, files, exec, uploads
 
     public func git(_ request: GitRequest) async throws -> GitReply {

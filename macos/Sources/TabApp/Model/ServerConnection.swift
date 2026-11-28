@@ -84,6 +84,21 @@ public final class ServerConnection {
     public var lastError: String? { lastFailure?.description }
     /// Why the last attempt failed, while not connected.
     public private(set) var lastFailure: ClientError?
+    /// When a restart the server announced, or the app asked for, began.
+    /// Until the server is back, the connection retries at once and the
+    /// window says the server restarts rather than that it is offline.
+    public private(set) var restartingSince: Date?
+    public var isRestarting: Bool { restartingSince != nil }
+    /// Whether a planned restart has taken long enough to mention.
+    public var isRestartingSlowly: Bool {
+        restartingSince.map { Date().timeIntervalSince($0) >= Self.restartQuietPeriod } ?? false
+    }
+    /// A planned restart may take this long before the server counts as offline.
+    static let restartGrace: TimeInterval = 30
+    /// A planned restart this quick goes unmentioned.
+    static let restartQuietPeriod: TimeInterval = 2
+    /// The wait between attempts while a planned restart runs.
+    static let restartRetryDelay: TimeInterval = 0.25
 
     let sshTarget: SSHTarget?
     let connector: ServerConnector
@@ -127,6 +142,31 @@ public final class ServerConnection {
         attempt(wait: false)
     }
 
+    /// The server is about to restart, on its own word or because the app
+    /// asked: reconnect as soon as it is gone.
+    public func expectRestart() {
+        guard restartingSince == nil else { return }
+        let started = Date()
+        restartingSince = started
+        onStateChange?(self)
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.restartQuietPeriod) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.restartingSince == started else { return }
+                self.onStateChange?(self)
+            }
+        }
+    }
+
+    /// A planned restart that has run past its grace is treated as the server being offline.
+    private var restartWithinGrace: Bool {
+        guard let restartingSince else { return false }
+        guard Date().timeIntervalSince(restartingSince) < Self.restartGrace else {
+            self.restartingSince = nil
+            return false
+        }
+        return true
+    }
+
     /// Closes both connections and stops trying.
     public func disconnect() {
         generation += 1
@@ -148,7 +188,7 @@ public final class ServerConnection {
         let generation = generation
         setState(failures == 0 ? .connecting : .reconnecting(attempt: failures))
         let connector = connector
-        let delay = wait ? backoff(failures) : 0
+        let delay = wait ? (restartWithinGrace ? Self.restartRetryDelay : backoff(failures)) : 0
         task = Task { [weak self] in
             if delay > 0 {
                 do {
@@ -182,6 +222,7 @@ public final class ServerConnection {
         task = nil
         failures = 0
         lastFailure = nil
+        restartingSince = nil
         self.main = main
         tabsRevision = nil
         self.side = side
@@ -190,6 +231,7 @@ public final class ServerConnection {
             for await event in events {
                 guard let self else { return }
                 if generation != self.generation { return }
+                if case .serverRestarting = event { self.expectRestart() }
                 self.onEvent?(self, event)
                 if case .disconnected = event {
                     self.dropped(generation: generation)
@@ -222,6 +264,7 @@ public final class ServerConnection {
         failures += 1
         lastFailure = error
         guard error.recoverable else {
+            restartingSince = nil
             setState(.needsUser(error.description))
             return
         }

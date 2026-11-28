@@ -47,7 +47,39 @@ enum Manage {
             }
             defer { client.close() }
             try await stop(client, force: force, json: json)
+        case .restart(let force):
+            let client: ServerClient
+            do {
+                client = try await server.connect(kind: .cli, start: false)
+            } catch LocalServerError.notRunning {
+                throw CLIError("the server isn't running")
+            }
+            defer { client.close() }
+            try await restart(client, force: force)
+            let next = try await server.connect(kind: .cli)
+            defer { next.close() }
+            Output.json(serverRecord(next.hello))
         }
+    }
+
+    /// Asks `client`'s server to restart keeping its terminals, and waits for it to go.
+    static func restart(_ client: ServerClient, force: Bool) async throws {
+        guard client.supports(.restartKeepingTerminals) else {
+            throw CLIError("this server can't keep its terminals through a restart; update Tab on it, or use tab server stop")
+        }
+        if let work = try await client.restartServerKeepingTerminals(onlyWhenIdle: !force) {
+            throw CLIError("the server is working (\(describe(work))); use --force to stop it")
+        }
+        guard await client.waitUntilClosed(timeout: 20) else {
+            throw CLIError("the server is still stopping; try again in a moment")
+        }
+    }
+
+    static func describe(_ work: ServerWork) -> String {
+        var parts = work.programs.map(\.name)
+        if !work.agents.isEmpty { parts.append(work.agents.count == 1 ? "1 agent" : "\(work.agents.count) agents") }
+        if work.jobs > 0 { parts.append(work.jobs == 1 ? "1 command" : "\(work.jobs) commands") }
+        return parts.joined(separator: ", ")
     }
 
     static func stop(_ client: ServerClient, force: Bool, json: Bool) async throws {
@@ -75,6 +107,11 @@ enum Manage {
             switch command {
             case .start, .status: Output.json(serverRecord(client.hello))
             case .stop(let force): try await stop(client, force: force, json: json)
+            case .restart(let force):
+                try await restart(client, force: force)
+                let next = try await target.connect(start: true)
+                defer { next.close() }
+                Output.json(serverRecord(next.hello))
             }
         case .project(let command):
             try await Projects.run(command, client: client, target: target, json: json)

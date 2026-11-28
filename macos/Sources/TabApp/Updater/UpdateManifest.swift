@@ -227,6 +227,10 @@ public enum UpdateError: Error, Equatable, Sendable, CustomStringConvertible {
     case sizeMismatch
     case invalidBundle(String)
     case install(String)
+    /// GitHub turned the request away for now; checking later works.
+    case rateLimited
+    /// The update needs about `needed` bytes free next to the app.
+    case notEnoughSpace(needed: Int64)
 
     public var description: String {
         switch self {
@@ -242,6 +246,11 @@ public enum UpdateError: Error, Equatable, Sendable, CustomStringConvertible {
             return "The update download doesn't match its checksum."
         case .sizeMismatch:
             return "The update download is incomplete or has an unexpected size."
+        case .rateLimited:
+            return "GitHub is limiting requests for now. \(Release.appName) will try again later."
+        case .notEnoughSpace(let needed):
+            let size = ByteCountFormatter.string(fromByteCount: needed, countStyle: .file)
+            return "There isn't enough free disk space. The update needs about \(size)."
         }
     }
 }

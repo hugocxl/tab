@@ -67,7 +67,7 @@ struct ServerSettingsHeader: View {
 
     private var detail: String {
         if let version = store.serverVersion {
-            if outdated { return UpdateChip.serverUpdateMessage(version: version) }
+            if outdated { return store.host?.serverUpdateDetail ?? UpdateChip.serverUpdateMessage(version: version) }
             return "The server is running \(Release.appName) \(version)."
         }
         return "This server did not report its version."

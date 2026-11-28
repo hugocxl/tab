@@ -80,6 +80,10 @@ public protocol SettingsHost: AnyObject {
     var serverRestarting: Bool { get }
     var canRestartServer: Bool { get }
     var serverRestartFailure: String? { get }
+    /// Whether a restart keeps the server's terminals in their panes.
+    var serverKeepsTerminals: Bool { get }
+    /// What happens to an outdated server, such as when it restarts by itself.
+    var serverUpdateDetail: String? { get }
     /// Starts the local server or reconnects to it.
     func connectServer()
     func readServerSettings() async throws -> ServerSettingsDoc
@@ -181,6 +185,8 @@ public extension SettingsHost {
     var serverRestarting: Bool { false }
     var canRestartServer: Bool { true }
     var serverRestartFailure: String? { nil }
+    var serverKeepsTerminals: Bool { false }
+    var serverUpdateDetail: String? { nil }
     var updaterSummary: UpdaterSummary { UpdaterSummary(detail: "\(Release.appName) \(Release.version)") }
     func performUpdaterAction(_ action: UpdaterSummary.Action) {}
     func scheduleRelaunchWhenIdle() {}

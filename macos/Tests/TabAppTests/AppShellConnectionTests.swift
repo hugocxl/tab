@@ -56,4 +56,28 @@ final class AppShellConnectionTests: XCTestCase {
         XCTAssertNil(connection.main)
         XCTAssertNil(connection.side)
     }
+
+    /// A restart the server announced reconnects at once, without the
+    /// backoff of a dropped connection, and counts as restarting, not offline.
+    func testAnAnnouncedRestartReconnectsAtOnce() async throws {
+        let identity = ServerId()
+        let home = ProjectDescriptor.home(directory: ServerPath(NSHomeDirectory()))
+        let catalog = CatalogPage(server: identity, home: home.id, revision: 1, projects: [home])
+        let servers = (0..<4).map { _ in ModelFakeServer(identity: identity, catalog: catalog) }
+        let connection = ServerConnection(id: .local, connector: ShellConnectionPair(servers), backoff: { _ in 60 })
+        defer { connection.disconnect() }
+        connection.start()
+        let ready = await ModelFixtures.wait { connection.state.isReady }
+        XCTAssertTrue(ready)
+        XCTAssertFalse(connection.isRestarting)
+
+        servers[0].send(.serverRestarting)
+        let announced = await ModelFixtures.wait { connection.isRestarting }
+        XCTAssertTrue(announced)
+        XCTAssertFalse(connection.isRestartingSlowly, "a quick restart goes unmentioned")
+        servers[0].send(.disconnected(.disconnected))
+        let back = await ModelFixtures.wait { connection.state.isReady && connection.main === servers[2] }
+        XCTAssertTrue(back, "reconnected without the 60 second backoff; state=\(connection.state)")
+        XCTAssertFalse(connection.isRestarting)
+    }
 }

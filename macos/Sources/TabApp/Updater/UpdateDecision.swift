@@ -5,11 +5,15 @@ import TabProtocol
 /// How a downloaded release gets installed, given the running server.
 public enum UpdateStep: Equatable, Sendable {
     /// The new app speaks the server's protocol: install and relaunch, and
-    /// the running server keeps its terminals until it is idle.
+    /// the running server keeps its terminals until it restarts on its own.
     case install
     /// The new app needs a new server and no terminal runs: stop the idle
     /// server, then install.
     case installStoppingIdleServer
+    /// The new app needs a new server, and this one keeps its terminals
+    /// through a restart: restart it once no work runs, then install. Asks
+    /// first when work would stop.
+    case installRestartingServer
     /// The new app needs a new server and terminals run: installing ends
     /// them, so ask first.
     case confirmEndingTerminals
@@ -26,8 +30,11 @@ public enum UpdateDecision {
     }
 
     /// What installing does now. Nothing ends without asking.
-    public static func step(compatible: Bool, sessions: Int, agents: Int = 0) -> UpdateStep {
+    /// - Parameter keepsTerminals: the server can restart keeping its
+    ///   terminals in their panes.
+    public static func step(compatible: Bool, keepsTerminals: Bool = false, sessions: Int, agents: Int = 0) -> UpdateStep {
         if compatible { return .install }
+        if keepsTerminals { return .installRestartingServer }
         return sessions == 0 && agents == 0 ? .installStoppingIdleServer : .confirmEndingTerminals
     }
 
